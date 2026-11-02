@@ -94,31 +94,27 @@ public sealed class PostgresDumpTool
         => ApplyAsync(connectionString, dumpPath, probeSql, commit: false, ct);
 
     /// <summary>Tests only: a given restore script, wrapped and fed to psql as a dump's would be (no pg_restore), so
-    /// that a script a crafted dump could produce can be run against a real server.</summary>
-    internal async Task ApplyScriptAsync(string connectionString, string script, bool commit)
+    /// that a script a crafted dump could produce can be run against a real server, through the same pipe, time limit
+    /// and checks as a restore.</summary>
+    internal async Task ApplyScriptAsync(string connectionString, string script, bool commit, CancellationToken ct = default)
     {
-        using var psql = Start("psql", connectionString, ["--no-psqlrc", "--quiet", "--set", "ON_ERROR_STOP=1", "--file", "-"], stdin: true);
-        var output = psql.StandardOutput.ReadToEndAsync();
-        var errors = psql.StandardError.ReadToEndAsync();
-        using (var reader = new StreamReader(new MemoryStream(Utf8.GetBytes(script))))
-        {
-            try { await FeedAsync(reader, psql.StandardInput, null, commit, CancellationToken.None, null, _timeout); }
-            catch (IOException) { /* psql stopped: its error says why */ }
-        }
-        try { psql.StandardInput.Close(); } catch (IOException) { /* already gone */ }
-        await psql.WaitForExitAsync();
-        await output;
-        if (psql.ExitCode != 0)
-            throw new PostgresToolException($"psql failed (exit code {psql.ExitCode}): {Tail(await errors)}");
+        using var reader = new StreamReader(new MemoryStream(Utf8.GetBytes(script)));
+        await PipeAsync(connectionString, restore: null, reader, probeSql: null, commit, ct);
     }
 
     // pg_restore writes the script to stdout; it is checked and wrapped line by line on its way into psql's stdin:
     // BEGIN; replace the schema with the dump's; [probe;] COMMIT (or ROLLBACK for the dry run).
     private async Task ApplyAsync(string connectionString, string dumpPath, string? probeSql, bool commit, CancellationToken ct)
     {
+        using var restore = Start("pg_restore", null, ["--no-owner", "--no-acl", "--file", "-", dumpPath], stdin: false);
+        await PipeAsync(connectionString, restore, restore.StandardOutput, probeSql, commit, ct);
+    }
+
+    private async Task PipeAsync(string connectionString, Process? restore, StreamReader script, string? probeSql, bool commit,
+        CancellationToken ct)
+    {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(_timeout);
-        using var restore = Start("pg_restore", null, ["--no-owner", "--no-acl", "--file", "-", dumpPath], stdin: false);
         Process psql;
         try
         {
@@ -127,22 +123,30 @@ public sealed class PostgresDumpTool
         }
         catch
         {
-            Kill(restore);
+            KillSource();
             throw;
         }
         using (psql)
         {
-            var restoreErrors = restore.StandardError.ReadToEndAsync(timeout.Token);
-            var psqlOutput = psql.StandardOutput.ReadToEndAsync(timeout.Token);
-            var psqlErrors = psql.StandardError.ReadToEndAsync(timeout.Token);
+            // The time limit and a cancellation end both tools at once: a script that keeps psql busy (its own sleep,
+            // its own statement_timeout) stops reading, and a write into the full pipe would otherwise wait forever.
+            using var stop = timeout.Token.Register(() =>
+            {
+                Kill(psql);
+                KillSource();
+            });
+            // A script can make psql print without end (a large SELECT, a RAISE loop): bounded like every tool output.
+            var restoreErrors = restore is null ? Task.FromResult("") : ReadBoundedAsync(restore.StandardError, restore, timeout.Token);
+            var psqlOutput = ReadBoundedAsync(psql.StandardOutput, psql, timeout.Token);
+            var psqlErrors = ReadBoundedAsync(psql.StandardError, psql, timeout.Token);
             try
             {
                 try
                 {
                     // pg_restore must have ended cleanly before anything is committed: a dump cut off on the volume
                     // would otherwise end the script early and COMMIT half a schema.
-                    await FeedAsync(restore.StandardOutput, psql.StandardInput, probeSql, commit, timeout.Token,
-                        sourceFailure: async () =>
+                    await FeedAsync(script, psql.StandardInput, probeSql, commit, timeout.Token,
+                        sourceFailure: restore is null ? null : async () =>
                         {
                             await restore.WaitForExitAsync(timeout.Token);
                             return restore.ExitCode == 0
@@ -152,30 +156,37 @@ public sealed class PostgresDumpTool
                 }
                 catch (IOException)
                 {
-                    // psql stopped reading (ON_ERROR_STOP): its own error says why, below. Nobody reads pg_restore's
-                    // output any more — it would block on the full pipe until the timeout.
-                    Kill(restore);
+                    // psql stopped reading (ON_ERROR_STOP, or killed at the time limit): its own error says why, below.
+                    // Nobody reads pg_restore's output any more — it would block on the full pipe until the timeout.
+                    KillSource();
                 }
                 try { psql.StandardInput.Close(); } catch (IOException) { /* already gone */ }
                 await psql.WaitForExitAsync(timeout.Token);
-                if (psql.ExitCode != 0) Kill(restore);
-                await restore.WaitForExitAsync(timeout.Token);
+                if (psql.ExitCode != 0) KillSource();
+                if (restore is not null) await restore.WaitForExitAsync(timeout.Token);
+                // Killed at the time limit while the last write was still accepted: report the limit, not psql's exit.
+                if (psql.ExitCode != 0) timeout.Token.ThrowIfCancellationRequested();
             }
             catch (Exception ex)
             {
                 // A refused script, a timeout or a cancellation: psql is killed before it could see a COMMIT, the server
                 // rolls the open transaction back with the connection.
                 Kill(psql);
-                Kill(restore);
+                KillSource();
                 if (ex is OperationCanceledException && !ct.IsCancellationRequested)
-                    throw new PostgresToolException($"The restore did not finish within {_timeout.TotalMinutes:0} minutes.");
+                    throw new PostgresToolException($"The restore did not finish within {_timeout.TotalMinutes:0.#} minutes.");
                 throw;
             }
             await psqlOutput;
             if (psql.ExitCode != 0)
                 throw new PostgresToolException($"psql failed (exit code {psql.ExitCode}): {Tail(await psqlErrors)}");
-            if (restore.ExitCode != 0)
+            if (restore is not null && restore.ExitCode != 0)
                 throw new PostgresToolException($"pg_restore failed (exit code {restore.ExitCode}): {Tail(await restoreErrors)}");
+        }
+
+        void KillSource()
+        {
+            if (restore is not null) Kill(restore);
         }
     }
 
@@ -315,8 +326,8 @@ public sealed class PostgresDumpTool
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(_timeout);
         using var process = Start(tool, connectionString, arguments, stdin: false);
-        var stdout = ReadBoundedAsync(process, timeout.Token);
-        var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
+        var stdout = ReadBoundedAsync(process.StandardOutput, process, timeout.Token);
+        var stderr = ReadBoundedAsync(process.StandardError, process, timeout.Token);
         try { await process.WaitForExitAsync(timeout.Token); }
         catch (OperationCanceledException)
         {
@@ -331,11 +342,12 @@ public sealed class PostgresDumpTool
         return output;
     }
 
-    // The output of the tools run this way (a version line, a dump's table of contents) is small; a crafted archive with
-    // millions of entries must not fill the app's memory: more than 16 Mi characters stops the tool.
+    // The output of the tools (a version line, a dump's table of contents, error lines) is small; a crafted archive with
+    // millions of entries or a script that prints without end must not fill the app's memory: more than 16 Mi
+    // characters on one stream stops the tool.
     private const int MaxOutputChars = 16 << 20;
 
-    private static async Task<string> ReadBoundedAsync(Process process, CancellationToken ct)
+    private static async Task<string> ReadBoundedAsync(StreamReader reader, Process process, CancellationToken ct)
     {
         var output = new StringBuilder();
         var buffer = new char[81920];
@@ -353,7 +365,7 @@ public sealed class PostgresDumpTool
 
         async Task<int> ReadAsync()
         {
-            try { return await process.StandardOutput.ReadAsync(buffer.AsMemory(), ct); }
+            try { return await reader.ReadAsync(buffer.AsMemory(), ct); }
             catch (DecoderFallbackException)
             {
                 Kill(process);
@@ -488,7 +500,8 @@ public sealed class PostgresDumpTool
         if (rootCertificate is null && builder.SslMode == SslMode.VerifyFull) rootCertificate = "system";
         // Nothing else from the parent's libpq environment may point the tools elsewhere.
         foreach (var key in env.Keys.Where(k => k.StartsWith("PG", StringComparison.Ordinal)).ToList()) env.Remove(key);
-        Set("PGHOST", builder.Host);
+        // Without a host Npgsql connects to localhost over TCP; libpq would take its Unix socket instead.
+        Set("PGHOST", string.IsNullOrEmpty(builder.Host) ? "localhost" : builder.Host);
         Set("PGPORT", builder.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         Set("PGDATABASE", builder.Database);
         Set("PGUSER", string.IsNullOrEmpty(builder.Username) ? inheritedUser : builder.Username);

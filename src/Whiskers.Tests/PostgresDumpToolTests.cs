@@ -199,6 +199,14 @@ public class PostgresDumpToolTests
     }
 
     [Fact]
+    public void Without_a_host_the_tools_connect_to_localhost_like_the_app_not_to_a_unix_socket()
+    {
+        var start = new ProcessStartInfo("pg_dump");
+        PostgresDumpTool.Connect(start, "Database=w;Username=u;Password=p");
+        Assert.Equal("localhost", start.Environment["PGHOST"]);
+    }
+
+    [Fact]
     public void A_bare_ipv6_address_is_one_host()
     {
         var start = new ProcessStartInfo("pg_dump");

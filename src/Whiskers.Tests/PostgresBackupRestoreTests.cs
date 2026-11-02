@@ -234,6 +234,55 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
     }
 
     [SkippableFact]
+    public async Task The_round_trip_works_as_the_recommended_owner_role_without_superuser_rights()
+    {
+        await SkipUnlessReadyAsync();
+        // As the guide sets it up: a login role that owns the database (and, before PostgreSQL 15, the public schema,
+        // which there belongs to the bootstrap superuser), not a superuser.
+        var asAdmin = await CreateDatabaseAsync("owned");
+        await ExecuteAsync(_pg.GetConnectionString(), "CREATE ROLE whiskers_app LOGIN PASSWORD 'app-pw' NOSUPERUSER");
+        await ExecuteAsync(_pg.GetConnectionString(), "ALTER DATABASE owned OWNER TO whiskers_app");
+        await using (var admin = new NpgsqlConnection(asAdmin))
+        {
+            await admin.OpenAsync();
+            if (admin.PostgreSqlVersion.Major < 15)
+            {
+                await using var schema = new NpgsqlCommand("ALTER SCHEMA public OWNER TO whiskers_app", admin);
+                await schema.ExecuteNonQueryAsync();
+            }
+        }
+        var asApp = new NpgsqlConnectionStringBuilder(asAdmin) { Username = "whiskers_app", Password = "app-pw" }.ConnectionString;
+        using var live = await NewInstanceAsync(asApp);
+        await SeedAsync(live);
+        var info = await live.Service.CreateBackupAsync("manual");
+        await File.WriteAllTextAsync(live.Paths.RolesJson, "{\"version\":\"live\"}");
+
+        await live.Service.BeginRestoreAsync(live.Service.ResolveArchivePath(info.Id)!, "tester");
+        NpgsqlConnection.ClearAllPools();
+        RestoreBootHandler.ApplyPendingRestore(live.Paths, live.Configuration);
+
+        await AssertSeededStateAsync(live);
+    }
+
+    [SkippableFact]
+    public async Task A_script_that_stops_psql_from_reading_is_ended_at_the_time_limit()
+    {
+        await SkipUnlessReadyAsync();
+        // A crafted dump: its own statement timeout, a long sleep, then more script than a pipe holds. Without the time
+        // limit ending both ends, the write would wait for the sleep and the schema stay locked.
+        var target = await CreateDatabaseAsync("sleeper");
+        var filler = string.Concat(Enumerable.Repeat("SELECT 1;\n", 50_000));
+        var script = "\\restrict k6\nSET statement_timeout TO 0;\nSELECT pg_sleep(600);\n" + filler + "\\unrestrict k6\n";
+        var tools = new PostgresDumpTool(BinDir, TimeSpan.FromSeconds(5));
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var ex = await Assert.ThrowsAsync<PostgresToolException>(() => tools.ApplyScriptAsync(target, script, commit: true));
+
+        Assert.Contains("did not finish", ex.Message, StringComparison.Ordinal);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(60), $"took {watch.Elapsed}");
+    }
+
+    [SkippableFact]
     public async Task A_postgres_archive_without_the_database_is_refused()
     {
         await SkipUnlessReadyAsync();
@@ -307,6 +356,9 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
         var ex = await Assert.ThrowsAsync<BackupValidationException>(() =>
             live.Service.BeginRestoreAsync(live.Service.ResolveArchivePath(info.Id)!, "tester"));
         Assert.Contains("cannot be restored", ex.Message, StringComparison.Ordinal);
+        // Any refused dry run names the safety backup that holds the database from before it.
+        var safety = Assert.Single(await live.Service.ListBackupsAsync(), b => b.Label.StartsWith("pre-restore-", StringComparison.Ordinal));
+        Assert.Contains(safety.Id, ex.Message, StringComparison.Ordinal);
         Assert.False(File.Exists(live.Paths.RestorePendingMarker));
         await using var db = new MetricsDbContext(new DbContextOptionsBuilder<MetricsDbContext>().UseNpgsql(live.Connection).Options);
         Assert.Equal(["deploy"], await db.Webhooks.Select(w => w.Name).ToListAsync());   // the dry run changed nothing

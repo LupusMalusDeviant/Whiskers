@@ -17,12 +17,13 @@ All notable changes to Whiskers are documented here. The format follows
   database is either the backup's or unchanged, never half of each. Backups of PostgreSQL instances from before this
   version hold the files only: the backup list marks them **files only** and Whiskers does not restore them, because
   the files would no longer match the database. The image ships the PostgreSQL 18 client tools; outside the image, set
-  `WHISKERS_PG_BIN_DIR`. The new backup guide `docs/operations/backup-and-recovery.md` covers the recovery onto a new
-  host after the data volume is lost. Grants of other roles are not part of the dump. The dry run also checks that the
-  migration histories match the manifest and that the next start's migrations run on the dump. The restore script goes
-  from `pg_restore` straight to `psql` and never lands on disk, and it runs only with the meta-command protection of
-  client tools 17.6 or newer, so a crafted dump cannot run shell commands. The role Whiskers connects as must own the
-  database, or own the `public` schema and hold `CREATE` on the database, and should not be a superuser; the
+  `WHISKERS_PG_BIN_DIR`; `WHISKERS_PG_TIMEOUT_MINUTES` sets the time limit per tool run (default 30). The new backup
+  guide `docs/operations/backup-and-recovery.md` covers the recovery onto a new host after the data volume is lost.
+  Grants of other roles are not part of the dump. The dry run also checks that the migration histories match the
+  manifest and that the next start's migrations run on the dump. The restore script goes from `pg_restore` straight to
+  `psql` and never lands on disk, and it runs only with the meta-command protection of client tools 17.6 or newer, so
+  a crafted dump cannot run shell commands. The role Whiskers connects as must own the `public` schema (on PostgreSQL
+  15 and later the database owner does) and hold `CREATE` on the database, and should not be a superuser; the
   PostgreSQL overlay's role is one, and the guide shows how to change that. The dump is written in UTF-8. A backup
   whose dump does not hold Whiskers' tables (for example because a search path put them in another schema) fails
   instead of claiming the database. A restore commits only when the dump was read to its end without an error. On

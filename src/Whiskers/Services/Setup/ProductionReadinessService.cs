@@ -23,6 +23,8 @@ public interface IProductionReadinessService
 
 public sealed class ProductionReadinessService : IProductionReadinessService
 {
+    private static string? _pgDumpVersion;
+
     private readonly IConfiguration _config;
     private readonly IVaultService _vault;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -151,9 +153,14 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         // R1-33: on PostgreSQL a self-backup needs the client tools; without them every backup fails.
         if (Whiskers.Services.Persistence.DatabaseRegistration.Resolve(_config).Provider == Whiskers.Services.Backup.SelfBackupFormat.ProviderPostgres)
         {
-            string? version = null, problem = null;
-            try { version = await Whiskers.Services.Backup.PostgresDumpTool.FromEnvironment().VersionAsync(); }
-            catch (Whiskers.Services.Backup.PostgresToolException ex) { problem = ex.Message; }
+            // The tools do not change while the process runs: a found version is kept instead of starting pg_dump at
+            // every evaluation (a missing tool is looked for again, so installing it shows without a restart).
+            string? version = _pgDumpVersion, problem = null;
+            if (version is null)
+            {
+                try { version = _pgDumpVersion = await Whiskers.Services.Backup.PostgresDumpTool.FromEnvironment().VersionAsync(); }
+                catch (Whiskers.Services.Backup.PostgresToolException ex) { problem = ex.Message; }
+            }
             checks.Add(new ReadinessCheck(
                 "PostgreSQL-Client-Tools für das Self-Backup",
                 version is not null,

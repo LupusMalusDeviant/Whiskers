@@ -377,16 +377,17 @@ public sealed class BackupService : IBackupService
                 // run executes the archive's SQL against the live database, and whatever a crafted script might get
                 // past its rollback, the safety backup holds the state from before (a refused restore leaves one extra
                 // archive).
+                SelfBackupInfo safety;
                 try
                 {
-                    await CreateBackupAsync($"pre-restore-{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
+                    safety = await CreateBackupAsync($"pre-restore-{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
                 }
                 catch (Exception ex)
                 {
                     throw new InvalidOperationException(
                         $"Restore aborted: could not create a pre-restore safety backup ({ex.Message}). Nothing was changed.", ex);
                 }
-                if (postgres) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, ct);
+                if (postgres) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, safety.Id, ct);
 
                 // Commit point: write the marker atomically (.tmp + rename) AFTER staging is fully populated.
                 var marker = new RestoreMarker
@@ -687,7 +688,7 @@ public sealed class BackupService : IBackupService
     // the restore is committed, not at the start. Inside that transaction, as for SQLite (R1-32): the migration
     // histories must be the manifest's, the start's migrations must run on them, and every mapped table and column
     // must then be readable. The database is locked while the dry run holds the schema.
-    private async Task ProbePostgresRestoreAsync(string stagedDump, SelfBackupManifest manifest, CancellationToken ct)
+    private async Task ProbePostgresRestoreAsync(string stagedDump, SelfBackupManifest manifest, string safetyBackupId, CancellationToken ct)
     {
         string connection;
         var probe = new System.Text.StringBuilder();
@@ -704,19 +705,29 @@ public sealed class BackupService : IBackupService
         try
         {
             await _pgTools.CheckReadableAsync(stagedDump, ct);
+        }
+        catch (Exception ex) when (ex is PostgresToolException or InvalidDataException)
+        {
+            _logger.LogWarning("Restore refused: the database dump cannot be read ({Reason})", ex.Message);
+            throw new BackupValidationException($"Backup archive's database cannot be restored into this server: {ex.Message}");
+        }
+        try
+        {
             await _pgTools.DryRunAsync(connection, stagedDump, probe.ToString(), ct);
         }
         catch (Exception ex) when (ex is PostgresToolException or InvalidDataException)
         {
             _logger.LogWarning("Restore refused: the database dump cannot be restored into this server ({Reason})", ex.Message);
-            // A script that committed on its own may have changed the database before it was caught: the safety
-            // backup taken just before holds the state from before.
-            if (ex.Message.Contains("ended its transaction early", StringComparison.Ordinal))
-                throw new BackupValidationException(
-                    "Backup archive's database script ended the dry run's transaction on its own and may have changed the " +
-                    "database: recover from the pre-restore safety backup as the backup guide describes " +
-                    "(docs/operations/backup-and-recovery.md, \"After a restore refused for an early commit\").");
-            throw new BackupValidationException($"Backup archive's database cannot be restored into this server: {ex.Message}");
+            // The dry run ran the archive's SQL: a script that committed part of it on its own may have changed the
+            // database, whatever the error that ended it. The safety backup taken just before holds the state from before.
+            var early = ex.Message.Contains("ended its transaction early", StringComparison.Ordinal);
+            throw new BackupValidationException(
+                (early
+                    ? "Backup archive's database script ended the dry run's transaction on its own and may have changed the database. "
+                    : $"Backup archive's database cannot be restored into this server: {ex.Message}. ") +
+                $"The pre-restore safety backup {safetyBackupId} holds the database from before the dry run; if the database " +
+                "was changed, recover from it as the backup guide describes (docs/operations/backup-and-recovery.md, " +
+                "\"After a restore refused for an early commit\").");
         }
     }
 

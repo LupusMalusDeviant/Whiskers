@@ -162,12 +162,12 @@ changed role or database settings (`ALTER ROLE`/`ALTER DATABASE … SET`, which 
 another schema), is refused. At the next start the schema is dropped and recreated from the dump in one transaction,
 before the files are swapped; any error rolls it back and stops the start. The restore script is piped from
 `pg_restore` to `psql` and never written to disk; it runs only when it opens with `\restrict` (client tools 17.6 or
-newer), so a crafted dump cannot run psql meta-commands such as `\!`. The connecting role must own the database, or
-own the `public` schema and hold `CREATE` on the database. Use a dedicated role that is not a superuser, since a
-restore runs the archive's SQL with its rights (a superuser could be made to run `COPY … FROM PROGRAM` on the database
-host); the PostgreSQL overlay's `POSTGRES_USER` role is a superuser, and the guide shows how to switch to an owner
-role without superuser rights. The password reaches the tools through their environment, and only the error lines of
-their output are logged (lines that quote rows are left out).
+newer), so a crafted dump cannot run psql meta-commands such as `\!`. The connecting role must own the `public` schema
+(on PostgreSQL 15 and later the database owner does) and hold `CREATE` on the database. Use a dedicated role that is
+not a superuser, since a restore runs the archive's SQL with its rights (a superuser could be made to run `COPY … FROM
+PROGRAM` on the database host); the PostgreSQL overlay's `POSTGRES_USER` role is a superuser, and the guide shows how
+to switch to an owner role without superuser rights. The password reaches the tools through their environment, and
+only the error lines of their output are logged (lines that quote rows are left out).
 
 ## Hardening checklist for operators
 

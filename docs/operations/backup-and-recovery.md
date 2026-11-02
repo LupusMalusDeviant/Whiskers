@@ -28,7 +28,7 @@ Backups of a PostgreSQL instance made before R1-33 hold the files only. The back
 and Whiskers does not restore them, because their files would no longer match the current database.
 
 On PostgreSQL a restore replaces the `public` schema, so the role Whiskers connects as must be allowed to drop and
-recreate it: it must own the database, or own the schema and hold `CREATE` on the database. A role without that right still
+recreate it: it must own the `public` schema (on PostgreSQL 15 and later the database owner does) and hold `CREATE` on the database. A role without that right still
 takes backups, but the restore is refused at its dry run, before anything changes. Check it once after setting up
 the database, by restoring a backup.
 
@@ -110,9 +110,12 @@ Recover from the pre-restore safety backup taken just before the dry run, the sa
    `public` schema of the current one as its owner.
 3. Move the data directory aside and follow
    [Restore after the volume is lost](#restore-after-the-volume-is-lost-off-volume-recovery) with the copied archive.
-4. If the server allows prepared transactions (`max_prepared_transactions` above 0), check `pg_prepared_xacts`: a
+4. A crafted script may also have left its own session running (a long sleep under its own statement timeout)
+   after Whiskers stopped it: look for `application_name = 'whiskers-backup'` in `pg_stat_activity` and end it with
+   `pg_terminate_backend(pid)`.
+5. If the server allows prepared transactions (`max_prepared_transactions` above 0), check `pg_prepared_xacts`: a
    crafted script may have left one holding locks; end it with `ROLLBACK PREPARED '<gid>'`.
-5. Delete the archive that caused the refusal, and do not restore archives from a source you do not trust
+6. Delete the archive that caused the refusal, and do not restore archives from a source you do not trust
    (set `VAULT_KEY`, so that only archives sealed with it are accepted).
 
 ## Restore after the volume is lost (off-volume recovery)
@@ -126,7 +129,7 @@ You need:
 1. Deploy Whiskers as before, with the same image version or a newer one; an older build refuses an archive with a
    newer schema. Use the **same `VAULT_KEY`**. On PostgreSQL, point `WHISKERS_DB_CONNECTION` at the database to
    restore into; a new, empty database is fine. The connecting role must be allowed to drop and recreate the
-   `public` schema: it must own the database, or own that schema and hold `CREATE` on the database.
+   `public` schema: it must own the `public` schema (on PostgreSQL 15 and later the database owner does) and hold `CREATE` on the database.
 2. Start it once. Whiskers creates an empty data directory and migrates the new database. Complete the setup wizard
    with a throwaway admin account; the restore replaces all accounts.
 3. Sign in, open **Settings > Backup**, upload the archive and restore it. Whiskers validates it, restarts and
