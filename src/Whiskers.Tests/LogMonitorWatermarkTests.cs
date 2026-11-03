@@ -89,12 +89,12 @@ public sealed class LogMonitorWatermarkTests : IDisposable
         var monitor = Monitor(docker, new FakeNotifications(), metrics);
 
         await monitor.RunScanCycleAsync(CancellationToken.None);          // healthy: sets the watermark
+        await Task.Delay(20);                                             // the timeout lands visibly later
 
         docker.FetchException = () => new Whiskers.Services.Docker.Budget.BudgetSaturatedException(
             "local", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(3), new OperationCanceledException());
         await monitor.RunScanCycleAsync(CancellationToken.None);
         docker.FetchException = null;
-        await Task.Delay(20);
         await monitor.RunScanCycleAsync(CancellationToken.None);
 
         var calls = docker.CallsInOrder;

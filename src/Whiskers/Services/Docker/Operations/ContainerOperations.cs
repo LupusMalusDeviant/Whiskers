@@ -177,7 +177,7 @@ internal sealed class ContainerOperations
                         server.Name, ex.Waited.TotalSeconds);
                     return new ServerListing(server, new List<ContainerInfo>(),
                         new FleetServerFailure(server.Id, server.Name,
-                            $"Not asked: waited in Whiskers' own queue for {perServerTimeout.TotalSeconds:0}s", NotAsked: true));
+                            $"Not asked: waited in Whiskers' own queue for {ex.Waited.TotalSeconds:0.0}s", NotAsked: true));
                 }
                 // The server's deadline ran out — in the request, or still waiting for its client. Either way it is this
                 // server's timeout, never the caller's cancellation.
