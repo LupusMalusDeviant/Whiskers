@@ -94,6 +94,16 @@ public sealed class NotificationSmtpTests : IDisposable
     }
 
     [Fact]
+    public async Task An_invalid_recipient_is_a_configuration_error_not_a_failed_delivery()
+    {
+        await using var smtp = new FakeSmtp();
+        var email = Email(smtp, "ops@example.test, not an address");
+
+        Assert.False(await email.DeliverAsync(Failed(), CancellationToken.None));   // nothing to send, nothing kept
+        Assert.Empty(smtp.Conversations);
+    }
+
+    [Fact]
     public async Task A_stop_while_the_server_withholds_its_final_answer_ends_the_send()
     {
         await using var smtp = new FakeSmtp { StallFinalAnswer = true };

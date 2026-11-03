@@ -109,7 +109,7 @@ public class NotificationsModuleTests
         services.AddSingleton<IInAppNotificationStore, CountingInApp>();
         services.AddSingleton<IAiTriggerDispatcher, RecordingDispatcher>();
         services.AddSingleton<IContainerNotificationPrefsService, AllowAllPrefs>();
-        services.AddSingleton(new Whiskers.Configuration.DataPathOptions(Path.Combine(Path.GetTempPath(), "whiskers-notif-" + Guid.NewGuid().ToString("N"))));   // the outbox file (R1-40)
+        services.AddSingleton(new Whiskers.Configuration.DataPathOptions(Path.Combine(Path.GetTempPath(), "whiskers-notif-module-tests")));   // the outbox file (R1-40)
         // Registered BEFORE the module (like Program.cs registers it before the module loop).
         services.AddSingleton<INotificationService, NoopNotificationService>();
         return services;

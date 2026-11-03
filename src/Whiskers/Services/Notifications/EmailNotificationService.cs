@@ -19,7 +19,9 @@ public class EmailNotificationService : IEmailNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
-    /// <summary>R1-40: the longest one SMTP conversation (connect, TLS, auth, send, the server's final answer) may take.
+    /// <summary>R1-40: the longest one SMTP conversation (connect, TLS, auth, send, the server's final answer) may take
+    /// when nothing shorter applies (the test mail). A delivery is bounded by the composite's attempt deadline (20 s),
+    /// which is linked in and ends it first.
     /// Its end — or the caller's — aborts the connection itself (<c>SmtpClient</c> does not watch the token in every
     /// phase), and the send is awaited until it has really stopped; <c>SmtpClient.Timeout</c> is set to it as a last
     /// bound and can end the send first (an <c>SmtpException</c>).</summary>
@@ -38,8 +40,17 @@ public class EmailNotificationService : IEmailNotificationService
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.Host) || string.IsNullOrWhiteSpace(c.To)) return false;
         if (!evt.IsRedelivery && evt.DeliveredRecipients is null && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes))
             return false;
+        List<string> configured;
+        try { configured = Recipients(c.To); }
+        catch (FormatException)
+        {
+            // Retrying cannot fix a configuration: said once per event, nothing kept for redelivery.
+            _logger.LogError("E-mail notification {EventType} not sent: the recipient list (To) holds an invalid address",
+                evt.EventType);
+            return false;
+        }
         var reached = new HashSet<string>(evt.DeliveredRecipients ?? [], StringComparer.OrdinalIgnoreCase);
-        var recipients = Recipients(c.To).Where(r => !reached.Contains(r)).ToList();
+        var recipients = configured.Where(r => !reached.Contains(r)).ToList();
         if (recipients.Count > 0)
         {
             var (title, _) = NotificationFormatter.Describe(evt);

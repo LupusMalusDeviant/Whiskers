@@ -131,7 +131,8 @@ public sealed class NotificationDeliveryTests : IDisposable
         Assert.True(CompositeNotificationService.IsCritical(new NotificationEvent { EventType = "agent_approval" }));
         Assert.True(CompositeNotificationService.IsCritical(new NotificationEvent { EventType = "operations_interrupted" }));
         Assert.True(CompositeNotificationService.IsCritical(Stopped()));
-        Assert.False(CompositeNotificationService.IsCritical(new NotificationEvent { EventType = "server_recovered" }));
+        Assert.True(CompositeNotificationService.IsCritical(new NotificationEvent { EventType = "server_recovered" }));
+        Assert.False(CompositeNotificationService.IsCritical(new NotificationEvent { EventType = "image_update" }));
     }
 
     [Fact]
@@ -461,6 +462,7 @@ public sealed class NotificationDeliveryTests : IDisposable
 
         Assert.Equal(1, handler.Requests);                                         // "second" was not sent from its copy
         Assert.Equal(2, outbox.Status.Dropped);
+        Assert.False(await outbox.CompleteAsync("no-such-entry", delivered: true));
         Assert.Equal(0, outbox.Status.Redelivered);                                // "first" was dropped meanwhile
     }
 
@@ -521,6 +523,45 @@ public sealed class NotificationDeliveryTests : IDisposable
         }
         Assert.True(await outbox.FlushAsync());
         Assert.False(outbox.Status.Unsaved);
+    }
+
+    [Fact]
+    public async Task A_full_outbox_gives_up_an_alarm_before_an_approval_or_an_administrative_event()
+    {
+        var outbox = NotificationOutbox.InMemory(NullLogger<NotificationOutbox>.Instance);
+        var now = DateTime.UtcNow;
+        await outbox.AddAsync("Slack", new NotificationEvent { EventType = "agent_approval", ApprovalId = "a1" },
+            new HttpRequestException("503"), now.AddMinutes(-10));
+        await outbox.AddAsync("Slack", new NotificationEvent { EventType = "automation_suspended", ContainerName = "AutoUpdate" },
+            new HttpRequestException("503"), now.AddMinutes(-9));
+        for (var i = 0; i < NotificationOutbox.MaxEntries; i++)                    // a burst of alarms
+            await outbox.AddAsync("Slack", Stopped($"c{i}"), new HttpRequestException("503"), now.AddSeconds(i));
+
+        var kept = (await outbox.DueAsync(now.AddHours(1))).Select(e => e.Event.EventType).ToList();
+        Assert.Contains("agent_approval", kept);
+        Assert.Contains("automation_suspended", kept);
+        Assert.Equal(NotificationOutbox.MaxEntries, kept.Count);
+    }
+
+    [Fact]
+    public async Task What_came_in_while_the_file_cannot_be_read_is_still_redelivered()
+    {
+        var path = Path.Combine(_dir, "outbox.json");
+        await File.WriteAllTextAsync(path, "{\"Entries\":[]}");
+        var outbox = new NotificationOutbox(NotificationOutbox.Store(path), NullLogger<NotificationOutbox>.Instance);
+        var working = new ScriptedHandler();
+        var worker = new NotificationOutboxWorker([Slack(working)], outbox, NullLogger<NotificationOutboxWorker>.Instance,
+            TimeSpan.FromSeconds(5));
+        using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.False(await outbox.FlushAsync());
+            await outbox.AddAsync("Slack", Stopped("new"), new HttpRequestException("500"), DateTime.UtcNow);
+            await worker.RedeliverDueAsync(DateTime.UtcNow.AddMinutes(2), CancellationToken.None);
+            Assert.Equal(1, working.Requests);
+            Assert.Equal(0, outbox.Status.Pending);
+        }
+        Assert.True(await outbox.FlushAsync());
+        Assert.Empty(await outbox.DueAsync(DateTime.UtcNow.AddHours(1)));       // not sent twice once the file is read
     }
 
     private static async Task<List<string>> OnDiskAsync(string path) =>

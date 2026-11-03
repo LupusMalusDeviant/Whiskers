@@ -20,8 +20,8 @@ public class NotificationEvent
     /// <summary>R1-15: for agent-approval events, the approval to open (the in-app link goes to its card).</summary>
     public string? ApprovalId { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
-    /// <summary>R1-40: one identity per event and channel delivery, set before the first attempt and kept for every retry
-    /// and redelivery, so a channel with idempotent requests (Matrix transaction ids) does not post an event twice when an
+    /// <summary>R1-40: one identity per event (shared by its channels), set before the first attempt and kept for every
+    /// retry and redelivery, so a channel with idempotent requests (Matrix transaction ids) does not post an event twice when an
     /// accepted request's answer was lost.</summary>
     public string? DeliveryId { get; set; }
     /// <summary>R1-40: set by the outbox worker. The event already passed the channel's throttle when it was first sent;

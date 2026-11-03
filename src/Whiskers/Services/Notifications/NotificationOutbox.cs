@@ -38,7 +38,7 @@ public sealed record NotificationOutboxStatus(int Pending, long Redelivered, lon
 /// <see cref="NotificationOutboxWorker"/> — also after a restart — with growing waits, until it is delivered, its channel
 /// is switched off or removed, or it is exhausted (<see cref="NotificationOutbox.MaxAttempts"/> redeliveries or
 /// <see cref="NotificationOutbox.MaxAge"/>). At most <see cref="NotificationOutbox.MaxEntries"/> are kept; a full outbox
-/// drops its oldest entry. Giving up is logged and counted, never silent.
+/// drops its oldest entry that is no approval request and no administrative event. Giving up is logged and counted, never silent.
 ///
 /// <para>Every change is made in memory, at once and without I/O, so a producer is never held up by the disk; the worker
 /// writes it in <see cref="FlushAsync"/>. A change the file could not take stays pending and is written by the next
@@ -61,7 +61,8 @@ public interface INotificationOutbox
 
     /// <summary>The entry leaves the outbox: <paramref name="delivered"/> when it was sent, otherwise
     /// <paramref name="reason"/> says why it is dropped (its channel switched off or removed); a drop is counted.</summary>
-    Task CompleteAsync(string id, bool delivered, string? reason = null);
+    /// <returns>Whether the entry was still in the outbox (it may have been dropped meanwhile).</returns>
+    Task<bool> CompleteAsync(string id, bool delivered, string? reason = null);
 
     /// <summary>Another redelivery failed at <paramref name="now"/> (the next wait counts from it). <paramref name="progress"/>:
     /// the event as the channel left it (the recipients it did reach), kept for the next attempt. Returns <c>true</c>
@@ -94,6 +95,10 @@ public sealed class NotificationOutbox : INotificationOutbox
     // Null until the file was read: entries added before that wait in _incoming and are merged when it is.
     private List<NotificationOutboxEntry>? _entries;
     private readonly List<NotificationOutboxEntry> _incoming = [];
+    // What is redelivered and completed: the merged list once the file was read, before that what came in meanwhile —
+    // a file that stays unreadable does not hold back the entries this process added.
+    private List<NotificationOutboxEntry> Live => _entries ?? _incoming;
+    private int _readFailures;
     private bool _dirty, _writing, _unreadable;
     private long _redelivered, _exhausted, _dropped;
 
@@ -129,10 +134,8 @@ public sealed class NotificationOutbox : INotificationOutbox
     {
         lock (_sync)
         {
-            var target = _entries ?? _incoming;
-            while ((_entries?.Count ?? 0) + _incoming.Count >= MaxEntries)
-                Drop(_entries is { Count: > 0 } ? _entries : _incoming, 0, "the outbox is full");
-            target.Add(new NotificationOutboxEntry
+            while (Live.Count >= MaxEntries) Drop(Live, Victim(Live), "the outbox is full");
+            Live.Add(new NotificationOutboxEntry
             {
                 Channel = channel,
                 Event = evt.Copy(),
@@ -151,15 +154,14 @@ public sealed class NotificationOutbox : INotificationOutbox
     {
         lock (_sync)
         {
-            if (_entries is null) return Task.FromResult<IReadOnlyList<NotificationOutboxEntry>>([]);
             // Too old to be of use: given up on before it is sent (a stale approval request, an alert from yesterday).
-            foreach (var old in _entries.Where(e => now - e.FirstFailedAt >= MaxAge).ToList())
+            foreach (var old in Live.Where(e => now - e.FirstFailedAt >= MaxAge).ToList())
             {
-                _entries.Remove(old);
+                Live.Remove(old);
                 Exhausted(old, "it is older than " + MaxAge.TotalHours + " h");
             }
             return Task.FromResult<IReadOnlyList<NotificationOutboxEntry>>(
-                _entries.Where(e => e.NextAttemptAt <= now).Select(e => e.Clone()).ToList());
+                Live.Where(e => e.NextAttemptAt <= now).Select(e => e.Clone()).ToList());
         }
     }
 
@@ -167,37 +169,37 @@ public sealed class NotificationOutbox : INotificationOutbox
     {
         lock (_sync)
         {
-            var entry = _entries?.FirstOrDefault(e => e.Id == id);
+            var entry = Live.FirstOrDefault(e => e.Id == id);
             if (entry is null) return Task.FromResult<NotificationOutboxEntry?>(null);
             if (now - entry.FirstFailedAt < MaxAge) return Task.FromResult<NotificationOutboxEntry?>(entry.Clone());
-            _entries!.Remove(entry);
+            Live.Remove(entry);
             Exhausted(entry, "it is older than " + MaxAge.TotalHours + " h");
             return Task.FromResult<NotificationOutboxEntry?>(null);
         }
     }
 
-    public Task CompleteAsync(string id, bool delivered, string? reason = null)
+    public Task<bool> CompleteAsync(string id, bool delivered, string? reason = null)
     {
         lock (_sync)
         {
-            var index = _entries?.FindIndex(e => e.Id == id) ?? -1;
-            if (index < 0) return Task.CompletedTask;
+            var index = Live.FindIndex(e => e.Id == id);
+            if (index < 0) return Task.FromResult(false);
             if (delivered)
             {
-                _entries!.RemoveAt(index);
+                Live.RemoveAt(index);
                 Interlocked.Increment(ref _redelivered);
                 _dirty = true;
             }
-            else Drop(_entries!, index, reason ?? "it has nothing to deliver any more");
+            else Drop(Live, index, reason ?? "it has nothing to deliver any more");
         }
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task<bool> FailedAsync(string id, Exception failure, DateTime now, NotificationEvent? progress = null)
     {
         lock (_sync)
         {
-            var entry = _entries?.FirstOrDefault(e => e.Id == id);
+            var entry = Live.FirstOrDefault(e => e.Id == id);
             if (entry is null) return Task.FromResult(false);
             if (progress is not null)
             {
@@ -210,7 +212,7 @@ public sealed class NotificationOutbox : INotificationOutbox
             var exhausted = entry.Attempts >= MaxAttempts || now - entry.FirstFailedAt >= MaxAge;
             if (exhausted)
             {
-                _entries!.Remove(entry);
+                Live.Remove(entry);
                 Exhausted(entry, $"after {entry.Attempts} redeliveries");
             }
             else entry.NextAttemptAt = now + WaitAfter(entry.Attempts + 1);
@@ -281,24 +283,44 @@ public sealed class NotificationOutbox : INotificationOutbox
         }
         catch (Exception ex)
         {
-            lock (_sync) _unreadable = true;
-            _logger.LogWarning("The notification outbox cannot be read right now; it is read again on the next pass ({Error})",
-                Describe(ex));
+            int failures;
+            lock (_sync)
+            {
+                _unreadable = true;
+                failures = ++_readFailures;
+            }
+            // A moment away is a warning; a file that stays unreadable is an error — its backlog is not being sent.
+            _logger.Log(failures >= 3 ? LogLevel.Error : LogLevel.Warning,
+                "The notification outbox cannot be read ({Failures} times in a row); its stored entries wait, new ones are " +
+                "redelivered meanwhile. It is read again on the next pass ({Error})", failures, Describe(ex));
             return false;
         }
 
         lock (_sync)
         {
             _unreadable = false;
+            _readFailures = 0;
             var merged = loaded.Concat(_incoming).OrderBy(e => e.FirstFailedAt).ToList();
             _incoming.Clear();
             _entries = merged;
             // Bounded also when the file was larger (edited, or written by a later version with a higher bound).
-            while (_entries.Count > MaxEntries) Drop(_entries, 0, "the outbox is full");
+            while (_entries.Count > MaxEntries) Drop(_entries, Victim(_entries), "the outbox is full");
             _dirty = true;
         }
         return true;
     }
+
+    /// <summary>The entry a full outbox gives up first: the oldest that is no approval request and no administrative
+    /// event — those are what the outbox is for; a burst of alarms must not push them out. Only when every entry is one
+    /// of them, the oldest.</summary>
+    private static int Victim(List<NotificationOutboxEntry> entries)
+    {
+        var index = entries.FindIndex(e => !Protected(e.Event));
+        return index < 0 ? 0 : index;
+    }
+
+    private static bool Protected(NotificationEvent evt) =>
+        evt.EventType == "agent_approval" || CompositeNotificationService.AdministrativeEvents.Contains(evt.EventType);
 
     /// <summary>Removes and counts one entry that leaves undelivered; said, never silent. Under <see cref="_sync"/>.</summary>
     private void Drop(List<NotificationOutboxEntry> from, int index, string reason)

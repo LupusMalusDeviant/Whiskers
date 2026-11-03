@@ -134,6 +134,8 @@ public class CompositeNotificationService : INotificationService
     /// metrics collector's prune. Never let a history write break the actual notification.</summary>
     private async Task PersistHistoryAsync(NotificationEvent evt)
     {
+        // Bounded like a channel attempt: a stalled database must not hold the monitoring cycle that sends the event.
+        using var deadline = new CancellationTokenSource(_attemptTimeout);
         try
         {
             using var scope = _sp.CreateScope();
@@ -156,10 +158,10 @@ public class CompositeNotificationService : INotificationService
             {
                 await db.AlertHistory
                     .Where(a => a.ServerId == sid && a.AlertType == "server_unreachable" && !a.Resolved)
-                    .ExecuteUpdateAsync(u => u.SetProperty(a => a.Resolved, true));
+                    .ExecuteUpdateAsync(u => u.SetProperty(a => a.Resolved, true), deadline.Token);
             }
 
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(deadline.Token).WaitAsync(deadline.Token);
         }
         catch (Exception ex)
         {
@@ -172,6 +174,9 @@ public class CompositeNotificationService : INotificationService
     internal static bool IsCritical(NotificationEvent evt) =>
         AdministrativeEvents.Contains(evt.EventType)
         || evt.EventType == "agent_approval"
+        // The end of an outage goes where its start went: an "unreachable" redelivered without its recovery reads as
+        // an outage still going on.
+        || evt.EventType == "server_recovered"
         || NotificationFormatter.Describe(evt).Severity == "Error";
 
     /// <summary>One channel: <see cref="MaxAttempts"/> attempts, each within its deadline. A failure the retries could not

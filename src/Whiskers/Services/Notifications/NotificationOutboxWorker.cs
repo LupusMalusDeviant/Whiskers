@@ -3,7 +3,9 @@ namespace Whiskers.Services.Notifications;
 /// <summary>
 /// Redelivers what <see cref="INotificationOutbox"/> holds (R1-40) and owns its file: what changed is written
 /// (<see cref="INotificationOutbox.FlushAsync"/>) right after an addition, after every single redelivery and at the
-/// latest every <see cref="Tick"/> — so nothing waits for a whole backlog to be worked off. Each due entry is checked
+/// latest every <see cref="Tick"/> — so nothing waits for a whole backlog to be worked off. A write that fails does not
+/// stop the redeliveries (an alert delayed is worse than one sent twice): the outcomes stay in memory and are written by
+/// the next pass, and only a restart before that sends them again. Each due entry is checked
 /// again just before it is sent (still in the outbox, not too old by then) and given once more to its channel, within
 /// <see cref="CompositeNotificationService.AttemptTimeout"/>, as
 /// a redelivery (<see cref="Whiskers.Models.NotificationEvent.IsRedelivery"/>: not throttled again, the same
@@ -92,9 +94,10 @@ public sealed class NotificationOutboxWorker : FleetBackgroundService
             maxAttempts: 1, _attemptTimeout, TimeSpan.Zero, ct);
         if (ok)
         {
-            await _outbox.CompleteAsync(entry.Id, sent, sent ? null : "the channel is switched off or not configured");
+            var stillThere = await _outbox.CompleteAsync(entry.Id, sent, sent ? null : "the channel is switched off or not configured");
             if (sent)
-                _logger.LogInformation("Undelivered {EventType} redelivered to {Channel}", entry.Event.EventType, entry.Channel);
+                _logger.LogInformation("Undelivered {EventType} redelivered to {Channel}{Note}", entry.Event.EventType,
+                    entry.Channel, stillThere ? "" : " (its entry had been dropped from the full outbox meanwhile)");
             return;
         }
         // A stop is no failed attempt — unless the channel got part of the way (recipients reached), which is kept.
