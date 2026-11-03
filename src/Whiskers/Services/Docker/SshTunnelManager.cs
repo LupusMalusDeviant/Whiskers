@@ -119,6 +119,7 @@ public class SshTunnelManager : ISshTunnelManager
         };
         foreach (var arg in BuildTunnelArguments(server, keyPath, localPort))
             psi.ArgumentList.Add(arg);
+        Whiskers.Utils.SecretEnvironment.Scrub(psi);   // R1-43: no VPN key in a child's environment
 
         var process = new Process { StartInfo = psi };
         process.Start();

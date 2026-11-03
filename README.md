@@ -443,7 +443,7 @@ Whiskers is configured entirely through environment variables (`.env`); **everyt
 | Routing | `PATH_BASE` | Path prefix when reverse-proxied under a subpath |
 | AI chat | `AICHAT_ENABLED`, `AICHAT_API_KEY`, `AICHAT_API_URL`, `AICHAT_MODEL`, `AICHAT_PROVIDER` | Read-only advisor chat |
 | Agent | `AGENT_ENABLED`, `AGENT_PROVIDER`, `AGENT_MODEL`, `AGENT_API_KEY`, ... | Acting agent (see above) |
-| Mesh VPN | `VPN_PROVIDER`, `TAILSCALE_AUTHKEY`, `NETBIRD_SETUP_KEY`, ... | Pluggable VPN bring-up (`none`/`tailscale`/`netbird`); empty = legacy in-container Tailscale |
+| Mesh VPN | `VPN_PROVIDER`, `TAILSCALE_AUTHKEY_FILE` (preferred) / `TAILSCALE_AUTHKEY`, `NETBIRD_SETUP_KEY_FILE` / `NETBIRD_SETUP_KEY`, `VPN_FAIL_STARTUP_ON_ERROR`, ... | Pluggable VPN bring-up (`none`/`tailscale`/`netbird`); empty = legacy in-container Tailscale. The in-app bring-up runs only after an admin takes "VPN bring-up" over in Settings → Automation owners |
 | Image search | `HARBOR_URL`, `HARBOR_USERNAME`, `HARBOR_PASSWORD` | Add a self-hosted Harbor marketplace (Docker Hub + GHCR are on by default) |
 | Host binding | `HOST_BIND`, `HOST_PORT` | The container always listens on `8080` internally |
 | Data directory | `WHISKERS_DATA_DIR` | Root for SQLite, JSON stores, keys & certificates (default `/app/data`); repoint at any volume / host path |

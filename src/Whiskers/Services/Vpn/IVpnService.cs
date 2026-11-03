@@ -27,7 +27,8 @@ public class VpnService : IVpnService
 
         var wanted = settings.Value.Provider?.Trim();
         Active = Providers.FirstOrDefault(p => string.Equals(p.Id, wanted, StringComparison.OrdinalIgnoreCase))
-                 ?? Providers.FirstOrDefault(p => p is NoopVpnProvider)
+                 // By id, not by type: the mutation scope guard hands out a proxy around each provider (R1-43).
+                 ?? Providers.FirstOrDefault(p => p.Id == NoopVpnProvider.ProviderId)
                  ?? Providers.First();
 
         if (!string.IsNullOrWhiteSpace(wanted) && !string.Equals(Active.Id, wanted, StringComparison.OrdinalIgnoreCase))

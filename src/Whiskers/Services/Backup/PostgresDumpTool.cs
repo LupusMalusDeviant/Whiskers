@@ -511,6 +511,7 @@ public sealed class PostgresDumpTool
         };
         if (stdin) start.StandardInputEncoding = Utf8;
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        Whiskers.Utils.SecretEnvironment.Scrub(start);   // R1-43: no VPN key in a child's environment
         if (connectionString is not null) Connect(start, connectionString);
         try { return Process.Start(start) ?? throw new PostgresToolException($"{tool} did not start."); }
         catch (System.ComponentModel.Win32Exception ex)
