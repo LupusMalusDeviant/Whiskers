@@ -283,11 +283,17 @@ public sealed class NotificationDeliveryTests : IDisposable
         Assert.True(await outbox.FlushAsync());
         var entry = Assert.Single(await outbox.DueAsync(DateTime.UtcNow.AddHours(1)));
 
-        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))         // the write fails
+        // The write fails (on every platform: a share lock does not stop a rename on Linux).
+        Whiskers.Services.Persistence.DurableFile.FailingWrites[Path.GetFullPath(path)] = 0;
+        try
         {
             await outbox.CompleteAsync(entry.Id, delivered: true);
             Assert.False(await outbox.FlushAsync());
             Assert.True(outbox.Status.Unsaved);
+        }
+        finally
+        {
+            Whiskers.Services.Persistence.DurableFile.FailingWrites.TryRemove(Path.GetFullPath(path), out _);
         }
         Assert.True(await outbox.FlushAsync());
 
