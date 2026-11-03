@@ -237,11 +237,14 @@ public class DockerConnectionManager : IDockerConnectionManager
                 _circuit.RecordSuccess(id);
                 return retried;
             }
-            catch (Exception retryFailure) when (!callerToken.IsCancellationRequested)
+            catch (Exception retryFailure) when (retryFailure is not Budget.DuplicateRequestException
+                                                 and not Budget.BudgetSaturatedException
+                                                 && !callerToken.IsCancellationRequested)
             {
-                // Only the failure AFTER a fresh tunnel counts towards the circuit. The first one is exactly
-                // the transient the retry exists for; counting both would open the circuit twice as fast as
-                // configured and pause a server that is merely reconnecting.
+                // Only the failure AFTER a fresh tunnel counts towards the circuit — and, as for the first attempt, not
+                // a discarded duplicate or a retry that ran out of time in Whiskers' own queue (R1-41 follow-up). The
+                // first one is exactly the transient the retry exists for; counting both would open the circuit twice
+                // as fast as configured and pause a server that is merely reconnecting.
                 _circuit.RecordFailure(id, retryFailure);
                 throw;
             }

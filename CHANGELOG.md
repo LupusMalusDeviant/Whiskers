@@ -6,6 +6,13 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-41/R1-54 follow-up: **a stop at the wrong moment no longer rewrites what happened.** An e-mail the SMTP server
+  already took stays delivered (or partially refused, with who was reached) when Whiskers stops while saying goodbye —
+  before, the stop turned it into a cancellation and the retry mailed the reached recipients again. An auto-update whose
+  container was replaced and verified is recorded as done when Whiskers stops during the health check that follows,
+  not as a failure. A retry that ran out of time in Whiskers' own queue no longer counts against the server's circuit.
+  The CVE monitor's start log shows the effective interval and no longer reads raw options outside its recovering loop,
+  and the background-loop ratchet now also flags work that runs in a loop outside the catch that recovers a cycle.
 - R1-54: **Notifications no longer reach into Whiskers' own network unless an Admin allows it.** Every notification
   channel (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, the outgoing webhook) and the e-mail channel's SMTP host
   now go through one outbound guard: it resolves the name once, refuses it when any answer is a loopback, link-local

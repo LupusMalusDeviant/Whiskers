@@ -943,7 +943,7 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   listing names scheme, host and port only, never the path or query (Slack and Discord carry their secret in the URL
   path; R1-25 applies to this new sink too). The anonymous `/readyz` stays status-only
   (`Startup/WhiskersPipelineExtensions.cs`), so nothing internal leaks there. A guard refusal is final for that
-  delivery: `CompositeNotificationService.SafeSend` does not retry it.
+  delivery: `CompositeNotificationService.DeliverAsync` does not retry it.
 - [x] Exceptions are narrow: an Admin-only list of entries, each either an IP literal plus port, or a name plus port
   plus the address(es) it may resolve to. The guard compares the **connected address** with the entry, so an excepted
   name that rebinds to another address (for example `169.254.169.254`) is refused — tested. Ranges or wildcards are

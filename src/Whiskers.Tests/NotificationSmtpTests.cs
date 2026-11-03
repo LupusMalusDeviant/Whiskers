@@ -106,6 +106,41 @@ public sealed class NotificationSmtpTests : IDisposable
     }
 
     [Fact]
+    public async Task A_stop_during_quit_keeps_a_partial_refusal_and_who_was_reached()
+    {
+        // R1-54 follow-up: the server took a and refused b; the stop lands while the client says goodbye. Before, the
+        // stop turned the result into a cancellation, the refusal was lost and a got the message again on the retry.
+        await using var smtp = new FakeSmtp { Refuse = r => r == "b@example.test", StallQuit = true };
+        var email = Email(smtp, "a@example.test, b@example.test", deadline: TimeSpan.FromSeconds(60));
+        var evt = Failed();
+        using var stop = new CancellationTokenSource();
+
+        var send = email.DeliverAsync(evt, stop.Token);
+        await smtp.QuitAwaited.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await stop.CancelAsync();
+
+        var refused = await Assert.ThrowsAsync<EmailRecipientsRefusedException>(() => send.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(["b@example.test"], refused.Refused);
+        Assert.Equal(["a@example.test"], evt.DeliveredRecipients!);
+        Assert.Equal(1, smtp.Received("a@example.test"));
+    }
+
+    [Fact]
+    public async Task A_stop_during_quit_after_a_full_delivery_is_still_a_delivery()
+    {
+        await using var smtp = new FakeSmtp { StallQuit = true };
+        var email = Email(smtp, "a@example.test", deadline: TimeSpan.FromSeconds(60));
+        using var stop = new CancellationTokenSource();
+
+        var send = email.DeliverAsync(Failed(), stop.Token);
+        await smtp.QuitAwaited.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await stop.CancelAsync();
+
+        Assert.True(await send.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(1, smtp.Received("a@example.test"));
+    }
+
+    [Fact]
     public async Task A_stop_while_the_server_withholds_its_final_answer_ends_the_send()
     {
         await using var smtp = new FakeSmtp { StallFinalAnswer = true };
