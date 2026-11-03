@@ -147,6 +147,30 @@ public sealed class KubeconfigExecutionTests : IDisposable
         Assert.NotNull(cache.GetClient(serverId));
     }
 
+    [Theory]
+    [InlineData("    client-certificate-data: dGVzdA==\n    client-key-data: dGVzdA==")]
+    [InlineData("    username: admin\n    password: placeholder")]
+    [InlineData("    token: placeholder")]
+    public void Every_inline_credential_form_is_admitted(string userBlock)
+    {
+        // Parsed for real (unreadable YAML would also show no violations) and admitted.
+        var config = KubeconfigPolicy.ParseAndAdmit(Kubeconfig(userBlock));
+        Assert.Single(config.Users!);
+    }
+
+    [Fact]
+    public void A_user_without_credentials_and_an_empty_user_list_are_admitted()
+    {
+        Assert.Single(KubeconfigPolicy.ParseAndAdmit(Kubeconfig("    {}")).Users!);
+        Assert.Empty(KubeconfigPolicy.ParseAndAdmit("""
+            apiVersion: v1
+            kind: Config
+            clusters: []
+            contexts: []
+            users: []
+            """).Users ?? []);
+    }
+
     [Fact]
     public void Unreadable_yaml_is_not_refused_by_the_page_check_but_never_becomes_a_client()
     {

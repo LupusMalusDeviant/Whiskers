@@ -1712,7 +1712,9 @@ else
         string[] cmd, TimeSpan timeout, string? command = null, string? query = null, string? database = null,
         Func<string, string?>? failedWhen = null)
     {
-        var dockerCmd = "docker exec " + Whiskers.Utils.ShellUtils.Quote(ContainerId) + " " +
+        // R1-42 (INV-41): the container reference comes from the route; it is checked and follows `--`.
+        var dockerCmd = "docker exec -- " +
+                        Whiskers.Utils.ShellUtils.Quote(Whiskers.Utils.CommandOperands.RequireContainerRef(ContainerId)) + " " +
                         string.Join(' ', cmd.Select(Whiskers.Utils.ShellUtils.Quote));
         var sid = _resolvedServerId ?? "local";
         if (capability is null)

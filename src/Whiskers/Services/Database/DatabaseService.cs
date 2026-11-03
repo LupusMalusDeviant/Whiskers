@@ -204,7 +204,7 @@ public class DatabaseService : IDatabaseService
 
         await _hostExec.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(_hostBackupDir)}", TimeSpan.FromSeconds(5));
         var cp = await _hostExec.ExecuteAsync(sid,
-            $"docker cp {ShellUtils.Quote(containerId + ":" + containerFile)} {ShellUtils.Quote(hostPath)} 2>&1",
+            $"docker cp -- {ShellUtils.Quote(CommandOperands.RequireContainerRef(containerId) + ":" + containerFile)} {ShellUtils.Quote(hostPath)} 2>&1",
             TimeSpan.FromMinutes(5));
         // Best-effort cleanup of the in-container temp file regardless of cp outcome.
         await ExecInContainer(containerId, new[] { "rm", "-f", containerFile }, serverId);

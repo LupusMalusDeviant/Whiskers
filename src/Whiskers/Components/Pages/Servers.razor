@@ -603,6 +603,13 @@
             if (!Whiskers.Utils.CommandOperands.IsValidPort(_form.SshPort))
                 throw new InvalidOperationException(L["Servers_Error_SshPortInvalid"].Value);
         }
+        // Tailscale SSH uses the TCP host as the ssh host (terminal): the same rule, said on save.
+        if (_form.TailscaleSsh && !string.IsNullOrWhiteSpace(_form.TcpHost))
+        {
+            _form.TcpHost = _form.TcpHost.Trim();
+            if (!Whiskers.Utils.CommandOperands.IsSafeHost(_form.TcpHost))
+                throw new InvalidOperationException(L["Servers_Error_SshHostInvalid"].Value);
+        }
 
         // Kubernetes cluster (Track B.2): the kubeconfig goes into the VAULT (encrypted, never on
         // disk); servers.json only carries the selectors. Vault is a hard requirement here.

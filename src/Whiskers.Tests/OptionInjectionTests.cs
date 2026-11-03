@@ -101,6 +101,19 @@ public class OptionInjectionTests
     public void An_unsafe_container_reference_is_refused(string name)
         => Assert.False(CommandOperands.IsSafeContainerRef(name));
 
+    [Theory]
+    [InlineData("--upload-pack=touch /tmp/pwned")]
+    [InlineData("-c")]
+    [InlineData("-b")]
+    [InlineData("main;id")]
+    [InlineData("a..b")]
+    public void An_option_leading_branch_is_refused_where_the_git_command_is_built(string branch)
+    {
+        Assert.False(CommandOperands.IsSafeGitRef(branch));
+        Assert.Throws<UnsafeOperandException>(() =>
+            Whiskers.Services.GitDeploy.GitDeployCommands.CloneOrUpdateCommand("app1", "https://example.test/r.git", branch, withToken: false));
+    }
+
     [Fact]
     public void The_refusal_names_the_field_and_is_an_argument_exception()
     {

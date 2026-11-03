@@ -24,7 +24,9 @@ All notable changes to Whiskers are documented here. The format follows
   `deploy/k8s/whiskers-agent-rbac.yaml`). A Git deployment app saved with a branch outside the rule fails its next
   deployment before anything runs on the server — save it with the branch's plain name. An SSH server whose stored
   host or user breaks the rule stops answering with an "Invalid SSH host/user" error until it is corrected on the
-  Servers page. Existing checkouts update with `git fetch` of the branch's full ref and `git checkout -B`; nothing to
+  Servers page. The rules are strict on purpose: a host name with `_`, an IPv6 address with a zone id (`%eth0`), an
+  SSH user with `@` or `\` (domain logins) and a branch name with `@` or non-ASCII letters are refused too. A
+  container's database page and the database backup copy now check the container reference as well. Existing checkouts update with `git fetch` of the branch's full ref and `git checkout -B`; nothing to
   do on the servers.
 
 - R1-40: **A notification that fails is retried, and an important one is not lost.** Notification channels used to
