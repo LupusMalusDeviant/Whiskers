@@ -321,10 +321,107 @@ public sealed class OutboundTargetGuardTests : IAsyncDisposable
         Assert.Equal(25_000, client.Timeout);
     }
 
-    private EmailNotificationService Email(string host, int port) =>
+    [Fact]
+    public async Task With_tls_on_a_server_that_offers_no_starttls_is_refused_not_used_in_plain()
+    {
+        // Review round 2: TLS on means STARTTLS is required. A relay (or a man in the middle) that does not offer it must
+        // not get the message in plain text.
+        await using var smtp = new NotificationSmtpTests.FakeSmtp();
+        _connector.Port = smtp.Port;
+        _exceptions.Set(new OutboundExceptionEntry { Host = "127.0.0.1", Port = 587 });
+        var email = Email("127.0.0.1", 587, useSsl: true);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => email.DeliverAsync(Failed(), CancellationToken.None));
+
+        Assert.Equal(0, smtp.Received("ops@example.com"));
+        Assert.All(smtp.Conversations, c => Assert.Empty(c));   // no recipient was ever named in plain text
+    }
+
+    [Fact]
+    public async Task Implicit_tls_on_465_refuses_a_certificate_that_does_not_validate()
+    {
+        // Review round 2: the certificate is validated (chain and name) on the guarded socket. A self-signed one —
+        // what an interceptor would present — ends the conversation before anything is sent.
+        await using var tls = new SelfSignedTlsServer("smtp.example.com");
+        _connector.Port = tls.Port;
+        _exceptions.Set(new OutboundExceptionEntry { Host = "127.0.0.1", Port = 465 });
+        var email = Email("127.0.0.1", 465, useSsl: true);
+
+        var error = await Assert.ThrowsAnyAsync<Exception>(() => email.DeliverAsync(Failed(), CancellationToken.None));
+
+        Assert.Contains(Chain(error), e => e is MailKit.Security.SslHandshakeException
+                                           || e is System.Security.Authentication.AuthenticationException);
+        Assert.True(await tls.HandshakeAttempted.Task.WaitAsync(TimeSpan.FromSeconds(10)), "the client spoke TLS first");
+        Assert.False(tls.ReceivedApplicationData);
+    }
+
+    private static IEnumerable<Exception> Chain(Exception e)
+    {
+        for (Exception? x = e; x is not null; x = x.InnerException)
+        {
+            yield return x;
+            if (x is AggregateException a) foreach (var i in a.InnerExceptions.SelectMany(Chain)) yield return i;
+        }
+    }
+
+    /// <summary>A TLS listener with a self-signed certificate: the server side of implicit TLS, untrusted by design.</summary>
+    private sealed class SelfSignedTlsServer : IAsyncDisposable
+    {
+        private readonly System.Net.Sockets.TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly System.Security.Cryptography.X509Certificates.X509Certificate2 _certificate;
+        private readonly Task _loop;
+        public int Port { get; }
+        public TaskCompletionSource<bool> HandshakeAttempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool ReceivedApplicationData { get; private set; }
+
+        public SelfSignedTlsServer(string name)
+        {
+            using var key = System.Security.Cryptography.RSA.Create(2048);
+            var request = new System.Security.Cryptography.X509Certificates.CertificateRequest($"CN={name}", key,
+                System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+            var san = new System.Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder();
+            san.AddDnsName(name);
+            san.AddIpAddress(IPAddress.Loopback);
+            request.CertificateExtensions.Add(san.Build());
+            using var created = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+            _certificate = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(
+                created.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pkcs12), null);
+            _listener.Start();
+            Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            _loop = ServeAsync();
+        }
+
+        private async Task ServeAsync()
+        {
+            try
+            {
+                using var client = await _listener.AcceptTcpClientAsync();
+                await using var ssl = new System.Net.Security.SslStream(client.GetStream());
+                HandshakeAttempted.TrySetResult(true);
+                try
+                {
+                    await ssl.AuthenticateAsServerAsync(_certificate);
+                    await ssl.WriteAsync("220 fake ESMTP\r\n"u8.ToArray());
+                    var buffer = new byte[256];
+                    if (await ssl.ReadAsync(buffer) > 0) ReceivedApplicationData = true;
+                }
+                catch { /* the client refused the certificate */ }
+            }
+            catch { /* listener stopped */ }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            _listener.Stop();
+            try { await _loop; } catch { }
+            _certificate.Dispose();
+        }
+    }
+
+    private EmailNotificationService Email(string host, int port, bool useSsl = false) =>
         new(new StaticOptionsMonitor<EmailSettings>(new EmailSettings
         {
-            Enabled = true, Host = host, Port = port, UseSsl = false, From = "whiskers@example.com", To = "ops@example.com",
+            Enabled = true, Host = host, Port = port, UseSsl = useSsl, From = "whiskers@example.com", To = "ops@example.com",
             ThrottleMinutes = 0,
         }), _guard, NullLogger<EmailNotificationService>.Instance) { SmtpDeadline = TimeSpan.FromSeconds(10) };
 

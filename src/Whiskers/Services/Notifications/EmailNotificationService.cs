@@ -158,8 +158,6 @@ public class EmailNotificationService : IEmailNotificationService
         catch (Exception) { /* the send ends with its own error */ }
     }
 
-    /// <summary>Records each recipient the server refuses instead of giving up on the first, so the message still goes
-    /// to the ones it took (as <c>System.Net.Mail</c> did); none taken is an <see cref="EmailRecipientsRefusedException"/>.</summary>
     /// <summary>The SMTP client as every send uses it. The certificate chain and the configured host name are checked as
     /// before; certificate revocation is not, as <c>System.Net.Mail</c> did not check it either: MailKit's default
     /// (on) would refuse a LAN or tailnet relay whose private CA publishes no CRL or OCSP responder, and silence its
@@ -170,6 +168,8 @@ public class EmailNotificationService : IEmailNotificationService
         CheckCertificateRevocation = false,
     };
 
+    /// <summary>Records each recipient the server refuses instead of giving up on the first, so the message still goes
+    /// to the ones it took (as <c>System.Net.Mail</c> did); none taken is an <see cref="EmailRecipientsRefusedException"/>.</summary>
     internal sealed class RecipientTrackingSmtpClient : SmtpClient
     {
         public HashSet<string> Refused { get; } = new(StringComparer.OrdinalIgnoreCase);

@@ -140,7 +140,7 @@ public sealed class OutboundTargetGuard : IOutboundTargetGuard
     private static OutboundTargetRefusedException Refusal(string host, int port, OutboundVerdict verdict) =>
         new(
             $"Refused by the outbound guard: {Target(host, port)} resolves to {verdict.RefusedAddress} ({verdict.Range}). " +
-            "Notification targets inside the network need an exact exception (Settings → Outbound targets).");
+            "Notification targets inside the network need an exact exception (Settings → Notification targets).");
 
     internal static string Target(string host, int port) =>
         $"{OutboundException.Bracketed(host.Trim().Trim('[', ']'))}:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
