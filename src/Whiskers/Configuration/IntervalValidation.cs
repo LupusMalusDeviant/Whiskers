@@ -26,14 +26,36 @@ public static class IntervalValidation
 
     /// <summary>Checks one interval of <typeparamref name="T"/> when the host starts (before any hosted service runs);
     /// out of range, the start fails with an <see cref="OptionsValidationException"/> naming <paramref name="key"/>.</summary>
+    /// <para>It also registers the one <see cref="EffectiveInterval{T}"/> of that interval (in <paramref name="unit"/>s), the
+    /// value every consumer uses while the options can be reloaded: the loop that waits it, the exposition that reports
+    /// against it, the staleness thresholds derived from it.</para>
     public static OptionsBuilder<T> ValidateInterval<T>(this OptionsBuilder<T> options, Func<T, int> interval, string key,
-        int min, int max) where T : class
+        int min, int max, TimeSpan unit) where T : class
     {
         options.Services.AddSingleton<IIntervalCheck>(sp =>
             new IntervalCheck<T>(sp.GetRequiredService<IOptions<T>>(), interval, key, min, max));
         options.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, IntervalStartupCheck>());
+        options.Services.TryAddSingleton(sp => new EffectiveInterval<T>(sp.GetRequiredService<IOptionsMonitor<T>>(), interval,
+            key, min, max, unit, sp.GetService<ILoggerFactory>()?.CreateLogger<EffectiveInterval<T>>()
+                                 ?? (ILogger)Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance));
         return options;
     }
+
+    /// <summary>The CVE check interval as the CVE loop uses it — for a consumer outside DI or with the module's
+    /// registration missing (then a value out of range is clamped, never converted as it is).</summary>
+    public static TimeSpan CveCheckInterval(IServiceProvider? services, CveMonitorSettings current) =>
+        services?.GetService<EffectiveInterval<CveMonitorSettings>>()?.Interval
+        ?? TimeSpan.FromHours(Math.Clamp(current.CheckIntervalHours, MinCheckHours, MaxCheckHours));
+
+    /// <summary>A fresh <see cref="EffectiveInterval{T}"/> of the CVE check, for a monitor built without DI (tests).</summary>
+    public static EffectiveInterval<CveMonitorSettings> CveCheck(IOptionsMonitor<CveMonitorSettings> options, ILogger logger) =>
+        new(options, s => s.CheckIntervalHours, "CveMonitor:CheckIntervalHours", MinCheckHours, MaxCheckHours,
+            TimeSpan.FromHours(1), logger);
+
+    /// <summary>A fresh <see cref="EffectiveInterval{T}"/> of the metric collection, for a collector built without DI (tests).</summary>
+    public static EffectiveInterval<MetricsSettings> MetricsCollection(IOptionsMonitor<MetricsSettings> options, ILogger logger) =>
+        new(options, s => s.CollectionIntervalSeconds, "Metrics:CollectionIntervalSeconds", MinMetricsSeconds,
+            MaxMetricsSeconds, TimeSpan.FromSeconds(1), logger);
 
     /// <summary>The message for a value out of range; null when it is in range.</summary>
     internal static string? Problem(string key, int value, int min, int max) =>
@@ -113,4 +135,42 @@ public sealed class IntervalGuard(string key, int min, int max, ILogger logger)
         }
         return used;
     }
+}
+
+/// <summary>
+/// R1-41: the one effective interval of a loop whose options can be reloaded — the <see cref="IntervalGuard"/> value,
+/// shared. The loop waits it, <c>/metrics</c> and the MCP summary judge staleness by it, and the self-metrics report it,
+/// so a reloaded value out of range (say <c>2147483647</c> hours) neither overflows a <see cref="TimeSpan"/> anywhere nor
+/// makes a threshold disagree with the cadence the loop actually keeps. Registered once per options type by
+/// <see cref="IntervalValidation.ValidateInterval{T}"/>.
+/// </summary>
+public sealed class EffectiveInterval<T> where T : class
+{
+    private readonly IOptionsMonitor<T> _options;
+    private readonly Func<T, int> _read;
+    private readonly IntervalGuard _guard;
+    private readonly TimeSpan _unit;
+    private readonly Lock _lock = new();
+
+    public EffectiveInterval(IOptionsMonitor<T> options, Func<T, int> read, string key, int min, int max, TimeSpan unit,
+        ILogger logger)
+    {
+        _options = options;
+        _read = read;
+        _unit = unit;
+        _guard = new IntervalGuard(key, min, max, logger);
+    }
+
+    /// <summary>The interval in its unit: the configured value while it is in range, otherwise the last valid one.</summary>
+    public int Value
+    {
+        get
+        {
+            var configured = _read(_options.CurrentValue);
+            lock (_lock) return _guard.Get(configured);
+        }
+    }
+
+    /// <summary><see cref="Value"/> as a <see cref="TimeSpan"/>; always within the validated range.</summary>
+    public TimeSpan Interval => _unit * Value;
 }

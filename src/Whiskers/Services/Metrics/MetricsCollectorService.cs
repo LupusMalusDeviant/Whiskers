@@ -15,10 +15,10 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     private readonly IOptionsMonitor<MetricAlertSettings> _alertSettings;
     private readonly IOptionsMonitor<MetricsSettings> _metricsSettings;
     private readonly ILogger<MetricsCollectorService> _logger;
-    private IntervalGuard? _interval;
-    // R1-41: a reload with an out-of-range interval keeps the last valid one instead of throwing in the loop.
-    private int IntervalSeconds(MetricsSettings cfg) => (_interval ??= new IntervalGuard("Metrics:CollectionIntervalSeconds",
-        IntervalValidation.MinMetricsSeconds, IntervalValidation.MaxMetricsSeconds, _logger)).Get(cfg.CollectionIntervalSeconds);
+    // R1-41: a reload with an out-of-range interval keeps the last valid one instead of throwing in the loop — the shared
+    // EffectiveInterval, so the cadence and what the self-metrics report against it are one value.
+    private readonly EffectiveInterval<MetricsSettings> _interval;
+    private int IntervalSeconds() => _interval.Value;
     private readonly Whiskers.Services.Observability.SelfMetrics.ISelfMetrics _selfMetrics;
     private readonly ConcurrentDictionary<string, AlertState> _alert = new();
 
@@ -41,8 +41,10 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         Whiskers.Services.Metrics.HostLoad.RollingBaseline baseline,
         IOptionsMonitor<MetricsSettings> metricsSettings,
         ILogger<MetricsCollectorService> logger,
-        Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics)
+        Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
+        EffectiveInterval<MetricsSettings>? interval = null)
     {
+        _interval = interval ?? IntervalValidation.MetricsCollection(metricsSettings, logger);
         _services = services;
         _alertSettings = alertSettings;
         _hostLoad = hostLoad;
@@ -88,11 +90,11 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                     _selfMetrics.RecordCycle(
                         Whiskers.Services.Observability.SelfMetrics.SelfMetricsFleetExtensions.Loops.Metrics,
                         server, DateTime.UtcNow - cycleStart, cycleOk,
-                        interval: TimeSpan.FromSeconds(IntervalSeconds(cfg)));
+                        interval: _interval.Interval);
             }
 
             // Never a hot loop, never a delay past what Task.Delay takes (R1-41).
-            var intervalSeconds = IntervalSeconds(cfg);
+            var intervalSeconds = IntervalSeconds();
             await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), ct);
         }
     }

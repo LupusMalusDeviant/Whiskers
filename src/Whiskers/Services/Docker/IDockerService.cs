@@ -16,6 +16,14 @@ public interface IDockerService
     /// cycles need that distinction — an unreachable host and an empty host look identical in the plain
     /// list. See <see cref="FleetContainerListing"/>.</summary>
     Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all = true);
+
+    /// <summary>R1-41: <see cref="ListAllContainersDetailedAsync(bool)"/> for a loop that is stopped by the host: the
+    /// cancellation reaches every per-server request and the waits for a client and a budget slot, a cancelled caller gets
+    /// an <see cref="OperationCanceledException"/> (never a listing in which the stop looks like silent servers), and its
+    /// cancellation is not held against a server. The default implementation only stops waiting; <c>DockerService</c>
+    /// cancels the work itself.</summary>
+    Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all, CancellationToken ct)
+        => ListAllContainersDetailedAsync(all).WaitAsync(ct);
     Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null);
     Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null);
     [MutatingOperation("container.start")]
@@ -32,13 +40,29 @@ public interface IDockerService
     [MutatingOperation("image.pull")]
     Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null);
     Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null);
+
+    /// <summary>R1-41: <see cref="InspectContainerStateAsync(string, string?)"/> whose cancellation reaches the inspect
+    /// and the wait for a budget slot and is not held against the server (the default only stops waiting).</summary>
+    Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId, CancellationToken ct)
+        => InspectContainerStateAsync(containerId, serverId).WaitAsync(ct);
     Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default);
     Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync();
     Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null);
 
+    /// <summary>R1-41: <see cref="GetImageDigestAsync(string, string?)"/> whose cancellation reaches the inspect and the
+    /// wait for a budget slot; a cancelled caller gets the cancellation, not a null that reads as "no digest" (the default
+    /// only stops waiting).</summary>
+    Task<string?> GetImageDigestAsync(string imageRef, string? serverId, CancellationToken ct)
+        => GetImageDigestAsync(imageRef, serverId).WaitAsync(ct);
+
     /// <summary>The image reference a container was created from (its <c>Config.Image</c>), or null when it
     /// cannot be inspected. Needed because a listing shows a bare image ID once the tag has moved on.</summary>
     Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null);
+
+    /// <summary>R1-41: <see cref="GetConfiguredImageAsync(string, string?)"/> whose cancellation reaches the inspect; a
+    /// cancelled caller gets the cancellation, not a null (the default only stops waiting).</summary>
+    Task<string?> GetConfiguredImageAsync(string containerId, string? serverId, CancellationToken ct)
+        => GetConfiguredImageAsync(containerId, serverId).WaitAsync(ct);
 
     /// <summary>What an image declares about how it runs — for measuring update risk before recreating
     /// anything (GAP-6). Null when the image cannot be inspected.</summary>

@@ -692,6 +692,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] `MetricsLabelEscapingTests` covers quotes, backslashes and newlines.
 - [x] Loop death/stall remains observable; do not simply hide failures globally.
 - [x] Carried over from R1-38: the Docker reads in the AutoPatch planning (`ListAllContainersAsync`, `GetImageContractAsync` in `AutoPatchService`) and in the advisor chat's context (`AiChatService.BuildContextAsync`) take the caller's token (new `IDockerService` overloads), so the preview deadline, host stop and closing the chat reach them too.
+- [x] Review round 2: loops own their cycles (no whole-cycle `WaitAsync`): the stop reaches the fleet listing, inspects, digest reads, the registry and the notification delivery with its retries, and nothing happens after it (`LoopShutdownTests`); the fleet listing's per-server timeout also bounds the waits for the client and a budget slot, classified as the server's timeout and never as caller cancellation; one shared `EffectiveInterval` for loop, `/metrics` and staleness thresholds (invalid reload + scrape tested on the real endpoint); the ratchet reads the syntax tree and refuses reversed filters, comment/string matches and catches that end the loop.
 
 **Out of scope:** Full tracing infrastructure.
 

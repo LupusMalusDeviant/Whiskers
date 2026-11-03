@@ -65,8 +65,14 @@ public interface IServerBudget
     /// already in flight (Plan-0001 WP3.2), throwing <see cref="DuplicateRequestException"/> rather than
     /// queueing it. Interactive callers ignore the key: for a background loop a discarded request costs one
     /// skipped cycle, but for a person it would be an error message where an answer belongs — and the load it
-    /// would save is already capped by the budget itself.</para></summary>
-    Task<T> RunAsync<T>(string serverId, Func<Task<T>> operation, CancellationToken ct = default, string? singleFlightKey = null);
+    /// would save is already capped by the budget itself.</para>
+    ///
+    /// <para><paramref name="deadline"/> (R1-41) is a deadline about the call rather than the caller giving up: it also ends
+    /// the wait for a slot, and running out while still queued is <see cref="BudgetSaturatedException"/> — the queue ran
+    /// out the clock, not the server. <paramref name="ct"/> stays the caller's own cancellation and is never reported as
+    /// saturation.</para></summary>
+    Task<T> RunAsync<T>(string serverId, Func<Task<T>> operation, CancellationToken ct = default, string? singleFlightKey = null,
+        CancellationToken deadline = default);
 
     /// <summary>Marks everything inside as background work for the current async flow. Nested scopes are
     /// harmless; the flag is restored on dispose.</summary>

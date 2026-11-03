@@ -6,7 +6,7 @@ Background **container health watching**. Continuously tracks container health s
 
 | File | Purpose |
 |---|---|
-| `ContainerHealthMonitor.cs` | The background service: polls container health, detects state transitions and restart loops, and fires notifications (the per-container mute/prefs are applied centrally in the composite notification service). |
+| `ContainerHealthMonitor.cs` | The background service: polls container health, detects state transitions and restart loops, and fires notifications (the per-container mute/prefs are applied centrally in the composite notification service). R1-41: a failed cycle is logged and the next one runs; only the host's stop ends the loop. The cycle is owned to its end (no `WaitAsync` abandoning it): the stop reaches the fleet listing, every state inspect and every notification, and the cycle checks it before each effect, so a listing that answers after the stop records no cycle metric, no health record, no notification and no broadcast. The interval is read once at start (`IOptions`) and checked there (5–86400 s). |
 | `ServerReachabilityTracker.cs` | Turns the per-cycle "which servers answered" signal into `server_unreachable` / `server_recovered` events, with a consecutive-failure threshold (`HealthMonitor:ServerUnreachableCycles`, default 2) so a single slow cycle is not an outage, and a longer cold-start grace (`ServerUnreachableColdStartCycles`, default 10) for servers that have not answered once since startup. |
 | `IHealthStore.cs` / `InMemoryHealthStore.cs` | Stores recent health state/history per container for reports and the dashboard. |
 

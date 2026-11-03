@@ -15,7 +15,7 @@ next loop free to repeat it — so the limit lives at the one point every Docker
 
 | File | Purpose |
 |---|---|
-| `IServerBudget.cs` | The seam: `RunAsync` (waits for a slot, then runs), `BackgroundScope` (marks the current async flow as background work), `Snapshot`/`SnapshotAll` (what is running — the raw material for the self-metrics in SP-3). |
+| `IServerBudget.cs` | The seam: `RunAsync` (waits for a slot, then runs), `BackgroundScope` (marks the current async flow as background work), `Snapshot`/`SnapshotAll` (what is running — the raw material for the self-metrics in SP-3). R1-41: `RunAsync(…, ct, singleFlightKey, deadline)` — `ct` is the caller's own cancellation and is never reported as saturation; `deadline` is a deadline about the call that also ends the wait for a slot, and running out while still queued is a `BudgetSaturatedException` (counted in `SaturationFailures`, never held against the server by the circuit). |
 | `ServerBudget.cs` | Two `SemaphoreSlim` lanes per server, created on first sight of that server. Counts starts, wait time and peak wait — the numbers that say whether the limit is right. |
 | `IServerCircuitBreaker.cs` / `ServerCircuitBreaker.cs` | Stops calling a server that has stopped answering: Closed → Open after a run of transport failures → HalfOpen after a cooldown, one probe → Closed on success. Only transport failures and our own timeouts count; "no such container" says nothing about the host. |
 

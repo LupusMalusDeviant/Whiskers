@@ -40,7 +40,8 @@ public sealed class CveModule : IWhiskersModule
         // loop runs after them), so the real services win here by last-registration.
         services.Configure<CveMonitorSettings>(config.GetSection(CveMonitorSettings.SectionName));
         services.AddOptions<CveMonitorSettings>().ValidateInterval(s => s.CheckIntervalHours,
-            "CveMonitor:CheckIntervalHours", IntervalValidation.MinCheckHours, IntervalValidation.MaxCheckHours);   // R1-41
+            "CveMonitor:CheckIntervalHours", IntervalValidation.MinCheckHours, IntervalValidation.MaxCheckHours,
+            TimeSpan.FromHours(1));   // R1-41: also the shared EffectiveInterval<CveMonitorSettings>
         services.AddSingleton<ICveFindingsStore, CveFindingsStore>();
         services.AddSingleton<ICveAgeStore, CveAgeStore>();
         services.AddSingleton<IOsCveScanner, OsCveScanner>();

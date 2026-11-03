@@ -44,19 +44,21 @@ internal sealed class ContainerOperations
         => await _connectionManager.GetClientAsync(serverId);
 
     public Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default)
-        => ListContainersAsync(all, serverId, ct, callerToken: default);
+        => ListContainersAsync(all, serverId, ct, callerToken: default, deadline: default);
 
-    /// <summary><paramref name="ct"/> bounds the request (a server deadline); <paramref name="callerToken"/> is the
-    /// caller's own cancellation, which is not held against the server (R1-41).</summary>
+    /// <summary><paramref name="ct"/> bounds the request; <paramref name="callerToken"/> is the caller's own cancellation,
+    /// which is not held against the server; <paramref name="deadline"/> is the server's deadline and also bounds the waits
+    /// for the client and for a budget slot (R1-41).</summary>
     private async Task<IList<ContainerInfo>> ListContainersAsync(bool all, string? serverId, CancellationToken ct,
-        CancellationToken callerToken)
+        CancellationToken callerToken, CancellationToken deadline)
     {
         var server = serverId != null
             ? _serverConfigService.GetServer(serverId)
             : _serverConfigService.GetDefaultServer();
 
         var containers = await _connectionManager.ExecuteAsync(serverId, c =>
-            c.Containers.ListContainersAsync(new ContainersListParameters { All = all }, ct), callerToken: callerToken);
+            c.Containers.ListContainersAsync(new ContainersListParameters { All = all }, ct), callerToken: callerToken,
+            deadline: deadline);
 
         return containers.Select(c => ToContainerInfo(c, server?.Id ?? "local", server?.Name ?? "Local")).ToList();
     }
@@ -119,7 +121,15 @@ internal sealed class ContainerOperations
     public Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all = true)
         => ListAllContainersDetailedAsync(all, CancellationToken.None);
 
-    private async Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all, CancellationToken ct)
+    /// <summary>How long one server of a fleet listing may take, from asking for its client to its answer. Tests only
+    /// shorten it.</summary>
+    internal TimeSpan PerServerTimeout { get; init; } = TimeSpan.FromSeconds(8);
+
+    /// <summary>The fleet listing. <paramref name="ct"/> is the caller's (a loop's stop, a chat closed): it ends the whole
+    /// listing with an <see cref="OperationCanceledException"/> and is held against no server. Each server additionally
+    /// has <see cref="PerServerTimeout"/> — for the wait for its client and for a budget slot as well as for the request —
+    /// and running out of it is that server's timeout: it is reported as a failed server, not as a cancelled caller.</summary>
+    public async Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all, CancellationToken ct)
     {
         // Kubernetes servers are not Docker hosts — their workloads come from the workload seam
         // (Services/Workloads), not from this Docker-only aggregation.
@@ -128,8 +138,9 @@ internal sealed class ContainerOperations
         // Bound each server with a short timeout so ONE unreachable host can't blank the whole
         // dashboard: a slow/dead server is skipped after 8s (returns empty) while the reachable ones
         // render immediately. WHICH servers failed is reported alongside the list, so callers that keep
-        // per-server state can tell "empty host" from "silent host".
-        var perServerTimeout = TimeSpan.FromSeconds(8);
+        // per-server state can tell "empty host" from "silent host". R1-41: the timeout covers the wait for the
+        // client and for a budget slot too — before, a server whose slots were all taken queued without end.
+        var perServerTimeout = PerServerTimeout;
         var tasks = servers.Select(async server =>
         {
             try
@@ -147,11 +158,15 @@ internal sealed class ContainerOperations
                     // site: 20 of the 24 sites do not pass through a shared path at all, so a probe placed
                     // there would measure whatever happened to be instrumented rather than the host.
                     var started = System.Diagnostics.Stopwatch.GetTimestamp();
-                    var listing = new ServerListing(server, await ListContainersAsync(all, server.Id, timeout.Token, ct), null);
+                    var listing = new ServerListing(server,
+                        await ListContainersAsync(all, server.Id, timeout.Token, callerToken: ct, deadline: timeout.Token), null);
                     _selfMetrics.RecordApiCall(server.Id, System.Diagnostics.Stopwatch.GetElapsedTime(started));
                     return listing;
                 }
-                catch (OperationCanceledException) when (timeout.IsCancellationRequested && !ct.IsCancellationRequested)
+                // The server's deadline ran out — in the request, or still waiting for its client or a budget slot (then
+                // the budget reports saturation, which the circuit does not count). Either way it is this server's
+                // timeout, never the caller's cancellation.
+                catch (Exception) when (timeout.IsCancellationRequested && !ct.IsCancellationRequested)
                 {
                     _logger.LogWarning("Listing containers for server {ServerName} aborted after {Timeout}s — skipping (degraded view).",
                         server.Name, perServerTimeout.TotalSeconds);
@@ -362,13 +377,19 @@ internal sealed class ContainerOperations
         return sb.Length > 0 ? sb.ToString() : "(no logs available)";
     }
 
-    public async Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null)
+    public Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null)
+        => InspectContainerStateAsync(containerId, serverId, CancellationToken.None);
+
+    /// <summary>R1-41: <paramref name="ct"/> (a loop's stop) reaches the inspect and the wait for a slot and is not held
+    /// against the server.</summary>
+    public async Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId,
+        CancellationToken ct)
     {
         // Plan-0001 WP6.3: under the budget. Both callers are background loops — the health monitor and the
         // auto-updater — so this is steady traffic, not something a person is waiting for.
         var inspect = await _connectionManager.ExecuteGuardedAsync(
-            serverId, c => c.Containers.InspectContainerAsync(containerId),
-            singleFlightKey: $"inspectstate:{containerId}");
+            serverId, c => c.Containers.InspectContainerAsync(containerId, ct),
+            singleFlightKey: $"inspectstate:{containerId}", callerToken: ct);
         return (
             inspect.State.Status,
             (int)inspect.State.ExitCode,
@@ -379,16 +400,20 @@ internal sealed class ContainerOperations
     /// <summary>The image reference the container was created from (<c>Config.Image</c>), or null when it cannot
     /// be inspected. A listing only shows the name while the tag still points at the running image — after a
     /// newer pull it shows the bare image ID, and only the inspect still knows which name to check.</summary>
-    public async Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null)
+    public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null)
+        => GetConfiguredImageAsync(containerId, serverId, CancellationToken.None);
+
+    /// <summary>R1-41: a cancelled caller gets the cancellation, not a null that reads as "could not inspect".</summary>
+    public async Task<string?> GetConfiguredImageAsync(string containerId, string? serverId, CancellationToken ct)
     {
         try
         {
             var inspect = await _connectionManager.ExecuteGuardedAsync(
-                serverId, c => c.Containers.InspectContainerAsync(containerId),
-                singleFlightKey: $"configuredimage:{containerId}");
+                serverId, c => c.Containers.InspectContainerAsync(containerId, ct),
+                singleFlightKey: $"configuredimage:{containerId}", callerToken: ct);
             return string.IsNullOrWhiteSpace(inspect.Config?.Image) ? null : inspect.Config.Image;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogDebug(ex, "Could not inspect container {Container} for its image", containerId);
             return null;

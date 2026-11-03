@@ -1,7 +1,11 @@
-using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
 using Whiskers.Models;
@@ -64,14 +68,41 @@ public class BackgroundServiceFailureTests
     public void A_reloaded_interval_out_of_range_keeps_the_last_valid_one()
     {
         var guard = new IntervalGuard("Metrics:CollectionIntervalSeconds", IntervalValidation.MinMetricsSeconds,
-            IntervalValidation.MaxMetricsSeconds, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+            IntervalValidation.MaxMetricsSeconds, NullLogger.Instance);
 
         Assert.Equal(30, guard.Get(30));
         Assert.Equal(30, guard.Get(0));                          // reloaded invalid: the last valid one, no exception
         Assert.Equal(30, guard.Get(int.MaxValue));
         Assert.Equal(60, guard.Get(60));                         // fixed again: used
-        var fresh = new IntervalGuard("x", 5, 86_400, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        var fresh = new IntervalGuard("x", 5, 86_400, NullLogger.Instance);
         Assert.Equal(5, fresh.Get(0));                           // nothing valid yet: clamped
+    }
+
+    [Fact]
+    public void The_effective_interval_is_one_value_for_every_consumer()
+    {
+        // R1-41: the loop, /metrics and the MCP summary resolve the same EffectiveInterval, so a reload that is out of
+        // range changes none of them — and a TimeSpan is never built from the raw value.
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["CveMonitor:CheckIntervalHours"] = "12" }).Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        new CveModule().ConfigureServices(services, config);
+        using var sp = services.BuildServiceProvider();
+        var shared = sp.GetRequiredService<EffectiveInterval<CveMonitorSettings>>();
+        Assert.Same(shared, sp.GetRequiredService<EffectiveInterval<CveMonitorSettings>>());
+        Assert.Equal(TimeSpan.FromHours(12), shared.Interval);
+
+        config["CveMonitor:CheckIntervalHours"] = "2147483647";
+        config.Reload();
+        Assert.Equal(int.MaxValue, sp.GetRequiredService<IOptionsMonitor<CveMonitorSettings>>().CurrentValue.CheckIntervalHours);
+        Assert.Equal(TimeSpan.FromHours(12), shared.Interval);
+        Assert.Equal(TimeSpan.FromHours(12),
+            IntervalValidation.CveCheckInterval(sp, sp.GetRequiredService<IOptionsMonitor<CveMonitorSettings>>().CurrentValue));
+
+        // Without the shared one (a module registration missing) the raw value is clamped, never converted as it is.
+        Assert.Equal(TimeSpan.FromHours(IntervalValidation.MaxCheckHours),
+            IntervalValidation.CveCheckInterval(null, new CveMonitorSettings { CheckIntervalHours = int.MaxValue }));
     }
 
     [Fact]
@@ -121,46 +152,64 @@ public class BackgroundServiceFailureTests
     }
 
     [Fact]
-    public async Task A_stop_during_an_image_check_leaves_no_effect_behind()
+    public async Task A_server_deadline_that_runs_out_in_the_queue_is_saturation_not_the_server_and_not_the_caller()
     {
-        var digest = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var reading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var docker = new FakeDocker(new ContainerInfo { Id = "c1", Name = "web", Image = "nginx:1", ServerId = "badwolf", State = "running" })
-        {
-            Digest = _ => { reading.TrySetResult(); return digest.Task; },
-        };
-        var notifications = new FakeNotifications();
-        var services = new ServiceCollection();
-        services.AddSingleton<Whiskers.Services.Docker.IDockerService>(docker);
-        services.AddSingleton<Whiskers.Services.Notifications.INotificationService>(notifications);
-        services.AddSingleton(ComponentTests.ServersKubeconfigSaveTests.NullProxy<
-            Microsoft.AspNetCore.SignalR.IHubContext<Whiskers.Hubs.ContainerHub>>.Create());
-        services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(Badwolf));
-        using var sp = services.BuildServiceProvider();
-        var dir = Path.Combine(Path.GetTempPath(), $"sw-r141-{Guid.NewGuid():N}");
-        var store = new Whiskers.Services.ImageUpdate.ImageUpdateStore(dataPaths: new DataPathOptions(dir));
-        var registry = new StaticRegistry("sha256:remote");
-        var checker = new Whiskers.Services.ImageUpdate.ImageUpdateChecker(sp, store, registry,
-            Options.Create(new ImageUpdateSettings { NotifyOnUpdate = true }),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<Whiskers.Services.ImageUpdate.ImageUpdateChecker>.Instance,
-            new Whiskers.Services.Observability.SelfMetrics.SelfMetrics());
-        try
-        {
-            using var stopping = new CancellationTokenSource();
-            var cycle = checker.CheckAllImagesAsync(stopping.Token);
-            await reading.Task.WaitAsync(TimeSpan.FromSeconds(10));   // the cycle waits for the image read
+        var (docker, circuit, budget) = Connection();
+        var release = new TaskCompletionSource();
+        var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
+            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
 
-            stopping.Cancel();                                       // the host stops
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cycle.WaitAsync(TimeSpan.FromSeconds(10)));
-            digest.SetResult("sha256:local");                        // the read answers after the stop
-            await Task.Delay(100);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAsync<BudgetSaturatedException>(() => docker.ExecuteAsync("badwolf", _ => Task.FromResult(1),
+            deadline: deadline.Token).WaitAsync(TimeSpan.FromSeconds(10)));
 
-            Assert.Empty(store.GetAllPendingUpdates());
-            Assert.Null(store.LastCheckAt);
-            Assert.Empty(notifications.Events);
-            Assert.False(store.IsChecking);
-        }
-        finally { try { Directory.Delete(dir, recursive: true); } catch { /* temp dir */ } }
+        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
+        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        release.SetResult();
+        await Task.WhenAll(busy);
+    }
+
+    [Fact]
+    public async Task A_fleet_listing_does_not_queue_past_the_server_deadline_for_a_slot()
+    {
+        // Review round 2: the 8 s per-server timeout reached only the Docker request. With every slot of a server taken,
+        // the listing waited for one without end when its caller had no deadline of its own.
+        var (docker, circuit, budget) = Connection();
+        var release = new TaskCompletionSource();
+        var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
+            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+        var ops = Operations(docker, TimeSpan.FromMilliseconds(200));
+
+        var listing = await ops.ListAllContainersDetailedAsync(true, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The server's timeout: reported as a silent server, not held against it, counted as the queue's doing.
+        var failure = Assert.Single(listing.FailedServers);
+        Assert.Equal("badwolf", failure.ServerId);
+        Assert.StartsWith("Timed out", failure.Error);
+        Assert.Empty(listing.RespondedServerIds);
+        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
+        release.SetResult();
+        await Task.WhenAll(busy);
+    }
+
+    [Fact]
+    public async Task A_caller_cancelling_a_fleet_listing_queued_for_a_slot_stays_a_cancellation()
+    {
+        var (docker, circuit, budget) = Connection();
+        var release = new TaskCompletionSource();
+        var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
+            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+        var ops = Operations(docker, TimeSpan.FromMinutes(5));
+
+        using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => ops.ListAllContainersDetailedAsync(true, caller.Token).WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal(0, budget.Snapshot("badwolf").SaturationFailures);   // not the queue's doing
+        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures); // not the server's
+        release.SetResult();
+        await Task.WhenAll(busy);
     }
 
     private static readonly ServerConfig Badwolf = new()
@@ -168,46 +217,54 @@ public class BackgroundServiceFailureTests
         Id = "badwolf", Name = "Badwolf", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local,
     };
 
+    private static Whiskers.Services.Docker.Operations.ContainerOperations Operations(
+        Whiskers.Services.Docker.DockerConnectionManager docker, TimeSpan perServer) =>
+        new(docker, new FakeServerConfig(Badwolf), NullLogger<Whiskers.Services.Docker.DockerService>.Instance,
+            new MemoryCache(new MemoryCacheOptions()), new Whiskers.Services.Observability.SelfMetrics.SelfMetrics())
+        {
+            PerServerTimeout = perServer,
+        };
+
     private static (Whiskers.Services.Docker.DockerConnectionManager Docker, ServerCircuitBreaker Circuit, ServerBudget Budget) Connection()
     {
         var servers = new FakeServerConfig(Badwolf);
         var settings = new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings());
-        var budget = new ServerBudget(settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<ServerBudget>.Instance);
+        var budget = new ServerBudget(settings, NullLogger<ServerBudget>.Instance);
         var circuit = new ServerCircuitBreaker(settings, new ServiceCollection().BuildServiceProvider(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<ServerCircuitBreaker>.Instance);
+            NullLogger<ServerCircuitBreaker>.Instance);
         var suspension = new Whiskers.Services.Observability.LoopSuspensionService(new FakeNotifications(), servers,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<Whiskers.Services.Observability.LoopSuspensionService>.Instance,
-            new NoOutcomes());
+            NullLogger<Whiskers.Services.Observability.LoopSuspensionService>.Instance, new NoOutcomes());
         var docker = new Whiskers.Services.Docker.DockerConnectionManager(servers, sshTunnelManager: null!, budget, circuit,
-            suspension, Microsoft.Extensions.Logging.Abstractions.NullLogger<Whiskers.Services.Docker.DockerConnectionManager>.Instance)
+            suspension, NullLogger<Whiskers.Services.Docker.DockerConnectionManager>.Instance)
         {
             ClientSourceForTests = _ => Task.FromResult<Docker.DotNet.DockerClient>(null!),
         };
         return (docker, circuit, budget);
     }
 
-    private sealed class StaticRegistry(string digest) : Whiskers.Services.ImageUpdate.IRegistryClient
-    {
-        public Task<string?> GetRemoteDigestAsync(string imageRef) => Task.FromResult<string?>(digest);
-    }
-
     [Fact]
     public void Every_loop_recovers_from_a_failed_cycle_and_ends_only_on_the_host_stop()
     {
-        // The ratchet, over every FleetBackgroundService in the assembly — not over what a text search happens to find:
-        // a loop whose RunAsync cannot be read (an expression body, a renamed parameter) fails, as does one without a
-        // recovering catch or with one that lets a dependency's cancellation end it.
-        var sources = LoopSourceFiles().Select(File.ReadAllText).ToList();
+        // The ratchet, over every FleetBackgroundService in the assembly — not over what a text search happens to find.
+        // It reads the syntax tree: the catch clauses, their types and filters, where they sit and whether their body
+        // keeps the loop going. Comments and strings do not count.
+        var classes = LoopSourceFiles()
+            .Select(f => CSharpSyntaxTree.ParseText(File.ReadAllText(f), path: f).GetRoot())
+            .SelectMany(r => r.DescendantNodes().OfType<ClassDeclarationSyntax>())
+            .ToList();
         var offenders = new List<string>();
         foreach (var loop in FleetLoops())
         {
-            var source = sources.FirstOrDefault(s => Regex.IsMatch(s, $@"\bclass {loop.Name}\b[^{{]*FleetBackgroundService"));
-            var verdict = source is null ? "source not found" : Verdict(RunAsyncBody(source));
-            if (verdict is not null) offenders.Add($"{loop.Name}: {verdict}");
+            var declarations = classes.Where(c => c.Identifier.ValueText == loop.Name).ToList();
+            if (declarations.Count == 0) { offenders.Add($"{loop.Name}: source not found"); continue; }
+            var run = declarations.SelectMany(c => c.Members.OfType<MethodDeclarationSyntax>())
+                .SingleOrDefault(m => m.Identifier.ValueText == "RunAsync" && m.Modifiers.Any(SyntaxKind.OverrideKeyword));
+            if (Verdict(run) is { } verdict) offenders.Add($"{loop.Name}: {verdict}");
         }
         Assert.True(offenders.Count == 0, "Loops that do not recover from a failed cycle the R1-41 way " +
-            "(`catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))`, or a cancellation caught only when the stopping " +
-            "token is cancelled followed by a catch of everything else): " + string.Join("; ", offenders));
+            "(`catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))` inside the loop with a body that carries on, " +
+            "or a cancellation caught only when the stopping token is cancelled followed by a catch of everything else): " +
+            string.Join("; ", offenders));
     }
 
     [Fact]
@@ -215,13 +272,32 @@ public class BackgroundServiceFailureTests
     {
         Assert.True(FleetLoops().Count >= 15, $"expected the fleet loops, found {FleetLoops().Count}");
 
-        // Mutation cases: what the ratchet must refuse.
-        Assert.Null(Verdict("while (!ct.IsCancellationRequested) { try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); } }"));
-        Assert.Null(Verdict("while (!ct.IsCancellationRequested) { try { await Run(ct); }\ncatch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }\ncatch (Exception ex) { Log(ex); } }"));
-        Assert.NotNull(Verdict(null));                                                                // expression body
-        Assert.NotNull(Verdict("while (!ct.IsCancellationRequested) { await Run(ct); await Task.Delay(1, ct); }"));   // no recovery
-        Assert.NotNull(Verdict("try { await Run(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { }"));
-        Assert.NotNull(Verdict("try { await Run(ct); }\ncatch (OperationCanceledException) { break; }\ncatch (Exception ex) { }"));
+        const string loop = "while (!ct.IsCancellationRequested) {{ {0} try {{ await Task.Delay(1, ct); }} catch (OperationCanceledException) {{ break; }} }}";
+        string InLoop(string cycle) => string.Format(loop, cycle);
+
+        // What it accepts: the two R1-41 shapes, a pause guarded by its own catch, a break that leaves only an inner loop.
+        Assert.Null(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.Null(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }\ncatch (Exception ex) { Log(ex); }")));
+        Assert.Null(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { foreach (var x in Xs) { if (x) break; } continue; }")));
+        Assert.Null(VerdictOf("try { await Once(ct); } catch (OperationCanceledException) when (ct.IsCancellationRequested) { } catch (Exception ex) { Log(ex); }"));   // a one-shot service
+
+        // What it refuses.
+        Assert.NotNull(Verdict(null));                                                                      // expression body
+        Assert.NotNull(VerdictOf(InLoop("await Run(ct);")));                                                // no recovery
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (IsHostStopping(ex, ct)) { Log(ex); }")));   // reversed filter
+        Assert.NotNull(VerdictOf(InLoop("// catch (Exception ex) when (!IsHostStopping(ex, ct)) { }\nawait Run(ct);")));               // a comment
+        Assert.NotNull(VerdictOf(InLoop("await Run(ct); Log(\"catch (Exception ex) when (!IsHostStopping(ex, ct))\");")));            // a string
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); break; }")));
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { return; }")));
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); throw; }")));
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { throw new InvalidOperationException(\"x\", ex); }")));
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }\ncatch (Exception ex) { Log(ex); return; }")));
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, other)) { Log(ex); }")));   // another token
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(e2, ct)) { Log(ex); }")));     // another exception
+        Assert.NotNull(VerdictOf("try { " + InLoop("await Run(ct);") + " } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }"));   // outside the loop
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { }")));
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) { break; }\ncatch (Exception ex) { }")));
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) when (!ct.IsCancellationRequested) { break; }\ncatch (Exception ex) { }")));
     }
 
     [Theory]
@@ -233,7 +309,7 @@ public class BackgroundServiceFailureTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddOptions<HealthMonitorSettings>().Configure(s => s.CheckIntervalSeconds = seconds)
             .ValidateInterval(s => s.CheckIntervalSeconds, "HealthMonitor:CheckIntervalSeconds",
-                IntervalValidation.MinHealthSeconds, IntervalValidation.MaxHealthSeconds);
+                IntervalValidation.MinHealthSeconds, IntervalValidation.MaxHealthSeconds, TimeSpan.FromSeconds(1));
         using var host = builder.Build();
 
         var ex = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
@@ -318,44 +394,146 @@ public class BackgroundServiceFailureTests
             .Where(f => File.ReadAllText(f).Contains("FleetBackgroundService", StringComparison.Ordinal));
     }
 
-    /// <summary>Null when the body recovers from a failed cycle and ends only on the host's stop; otherwise why not.</summary>
-    internal static string? Verdict(string? body)
+    /// <summary>The verdict on a <c>RunAsync</c> body given as text (the mutation cases), with <c>ct</c> as its token.</summary>
+    internal static string? VerdictOf(string body)
     {
-        if (body is null) return "RunAsync is not a block body the ratchet can read";
-        if (body.Contains("is not OperationCanceledException", StringComparison.Ordinal))
-            return "`is not OperationCanceledException` lets a dependency's cancellation end the loop";
-        if (HasBareCancellationCatch(body)) return "a cancellation is caught without asking the stopping token";
-        var recovers = body.Contains("IsHostStopping(", StringComparison.Ordinal)
-                       || (Regex.IsMatch(body, @"catch\s*\(\s*OperationCanceledException\s*\)\s*when\s*\(\s*\w+\.IsCancellationRequested\s*\)")
-                           && Regex.IsMatch(body, @"catch\s*\(\s*Exception(\s+\w+)?\s*\)\s*(\{|$)", RegexOptions.Multiline));
-        return recovers ? null : "no catch that recovers from a failed cycle";
+        var root = CSharpSyntaxTree.ParseText(
+            "class Loop : FleetBackgroundService { protected override async Task RunAsync(CancellationToken ct) {\n" + body + "\n} }").GetRoot();
+        return Verdict(root.DescendantNodes().OfType<MethodDeclarationSyntax>().Single());
     }
 
-    /// <summary>A cancellation caught without asking the stopping token — except right after the loop's own pause,
-    /// <c>try { await Task.Delay(…, token); }</c>, where only the stopping token can cancel.</summary>
-    private static bool HasBareCancellationCatch(string body)
+    /// <summary>Null when <c>RunAsync</c> recovers from a failed cycle and ends only on the host's stop; otherwise why not.</summary>
+    internal static string? Verdict(MethodDeclarationSyntax? run)
     {
-        var lines = body.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToArray();
-        for (var i = 0; i < lines.Length; i++)
+        if (run?.Body is null || run.ParameterList.Parameters.Count != 1)
+            return "RunAsync is not a block body with one token parameter the ratchet can read";
+        var token = run.ParameterList.Parameters[0].Identifier.ValueText;
+        var body = run.Body;
+
+        foreach (var c in Outside<CatchClauseSyntax>(body))
+            if (Problem(c, token) is { } problem) return problem;
+
+        // The recovering catch must sit inside the loop: one outside it lets the first failure end the loop.
+        var loops = Outside<StatementSyntax>(body).Where(IsLoop).ToList();
+        var candidates = loops.Count > 0
+            ? loops.SelectMany(l => Outside<TryStatementSyntax>(LoopBody(l)))
+            : body.Statements.OfType<TryStatementSyntax>();
+        return candidates.Any(t => Recovers(t, token))
+            ? null
+            : "no catch inside the loop that recovers from a failed cycle and lets the loop go on";
+    }
+
+    /// <summary>A catch that ends the loop on something other than the host's stop.</summary>
+    private static string? Problem(CatchClauseSyntax c, string token)
+    {
+        var filter = c.Filter?.FilterExpression;
+        if (filter is not null && filter.DescendantNodesAndSelf().OfType<IsPatternExpressionSyntax>().Any(p =>
+                p.Pattern is UnaryPatternSyntax { Pattern: TypePatternSyntax or ConstantPatternSyntax } u
+                && u.OperatorToken.IsKind(SyntaxKind.NotKeyword) && Code(u.Pattern).EndsWith("CanceledException", StringComparison.Ordinal)))
+            return "`is not OperationCanceledException` lets a dependency's cancellation end the loop";
+        if (!IsCancellationType(c)) return null;
+        if (filter is not null && AsksTheStoppingToken(filter, token, c)) return null;
+        if (IsThePause(c, token)) return null;
+        return "a cancellation is caught without asking the stopping token";
+    }
+
+    /// <summary>Recovers: <c>catch (Exception ex) when (!IsHostStopping(ex, token))</c>, or a cancellation caught only while
+    /// the token is cancelled followed by an unfiltered <c>catch (Exception)</c> — and in either case the recovering body
+    /// carries on (no <c>break</c> out of the loop, <c>return</c>, <c>throw</c> or <c>goto</c>).</summary>
+    private static bool Recovers(TryStatementSyntax t, string token)
+    {
+        for (var i = 0; i < t.Catches.Count; i++)
         {
-            if (!Regex.IsMatch(lines[i], @"^catch\s*\(\s*(Task|Operation)CanceledException(\s+\w+)?\s*\)\s*(\{|$)")) continue;
-            if (i > 0 && Regex.IsMatch(lines[i - 1], @"^try\s*\{\s*await Task\.Delay\([^;]*\);\s*\}$")) continue;
-            return true;
+            var c = t.Catches[i];
+            if (TypeName(c) != "Exception" || Terminates(c.Block)) continue;
+            var name = c.Declaration?.Identifier.ValueText;
+            if (c.Filter?.FilterExpression is PrefixUnaryExpressionSyntax { RawKind: (int)SyntaxKind.LogicalNotExpression } not
+                && Unparenthesized(not.Operand) is InvocationExpressionSyntax call && IsHostStoppingCall(call, name, token))
+                return true;
+            if (c.Filter is null && t.Catches.Take(i).Any(o => IsCancellationType(o) && o.Filter is not null
+                                                           && AsksTheStoppingToken(o.Filter.FilterExpression, token, o)))
+                return true;
         }
         return false;
     }
 
-    /// <summary>The body of <c>RunAsync</c>, by brace matching from its signature.</summary>
-    private static string? RunAsyncBody(string source)
+    private static bool IsHostStoppingCall(InvocationExpressionSyntax call, string? exceptionName, string token) =>
+        call.Expression switch
+        {
+            IdentifierNameSyntax id => id.Identifier.ValueText == "IsHostStopping",
+            MemberAccessExpressionSyntax m => m.Name.Identifier.ValueText == "IsHostStopping",
+            _ => false,
+        }
+        && call.ArgumentList.Arguments.Count == 2
+        && exceptionName is not null
+        && call.ArgumentList.Arguments[0].Expression is IdentifierNameSyntax e && e.Identifier.ValueText == exceptionName
+        && call.ArgumentList.Arguments[1].Expression is IdentifierNameSyntax k && k.Identifier.ValueText == token;
+
+    /// <summary>The filter is <c>token.IsCancellationRequested</c> (or <c>IsHostStopping(ex, token)</c>) itself — not negated.</summary>
+    private static bool AsksTheStoppingToken(ExpressionSyntax filter, string token, CatchClauseSyntax c) =>
+        Unparenthesized(filter) switch
+        {
+            MemberAccessExpressionSyntax m => m.Name.Identifier.ValueText == "IsCancellationRequested"
+                                              && m.Expression is IdentifierNameSyntax id && id.Identifier.ValueText == token,
+            InvocationExpressionSyntax call => IsHostStoppingCall(call, c.Declaration?.Identifier.ValueText, token),
+            _ => false,
+        };
+
+    /// <summary><c>try { await Task.Delay(…, token); } catch (OperationCanceledException) { … }</c>: the loop's own pause,
+    /// which only the stopping token can cancel.</summary>
+    private static bool IsThePause(CatchClauseSyntax c, string token) =>
+        c.Parent is TryStatementSyntax { Block.Statements: [ExpressionStatementSyntax { Expression: AwaitExpressionSyntax
+        {
+            Expression: InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Delay" } d } call
+        } }] } && Code(d.Expression) == "Task"
+        && call.ArgumentList.Arguments.LastOrDefault()?.Expression is IdentifierNameSyntax last && last.Identifier.ValueText == token;
+
+    /// <summary>Whether the block can leave the loop: <c>return</c>, <c>throw</c>, <c>goto</c>, <c>yield break</c>, or a
+    /// <c>break</c> not inside a loop or switch of its own.</summary>
+    private static bool Terminates(BlockSyntax block) =>
+        Outside<SyntaxNode>(block).Any(n => n switch
+        {
+            ReturnStatementSyntax or ThrowStatementSyntax or ThrowExpressionSyntax or GotoStatementSyntax => true,
+            YieldStatementSyntax y => y.IsKind(SyntaxKind.YieldBreakStatement),
+            BreakStatementSyntax b => !b.Ancestors().TakeWhile(a => a != block)
+                .Any(a => a is SwitchStatementSyntax || (a is StatementSyntax s && IsLoop(s))),
+            _ => false,
+        });
+
+    private static bool IsLoop(StatementSyntax s) =>
+        s is WhileStatementSyntax or DoStatementSyntax or ForStatementSyntax or ForEachStatementSyntax;
+
+    private static StatementSyntax LoopBody(StatementSyntax loop) => loop switch
     {
-        var m = Regex.Match(source, @"protected override async Task RunAsync\(CancellationToken \w+\)\s*\{");
-        if (!m.Success) return null;
-        var depth = 1;
-        var i = m.Index + m.Length;
-        for (; i < source.Length && depth > 0; i++)
-            depth += source[i] switch { '{' => 1, '}' => -1, _ => 0 };
-        return source[(m.Index + m.Length)..i];
-    }
+        WhileStatementSyntax w => w.Statement,
+        DoStatementSyntax d => d.Statement,
+        ForStatementSyntax f => f.Statement,
+        ForEachStatementSyntax e => e.Statement,
+        _ => loop,
+    };
+
+    private static bool IsCancellationType(CatchClauseSyntax c) =>
+        TypeName(c) is "OperationCanceledException" or "TaskCanceledException";
+
+    private static string? TypeName(CatchClauseSyntax c) => c.Declaration?.Type switch
+    {
+        QualifiedNameSyntax q => q.Right.Identifier.ValueText,
+        IdentifierNameSyntax i => i.Identifier.ValueText,
+        _ => c.Declaration is null ? "Exception" : null,   // a bare `catch` catches everything
+    };
+
+    private static ExpressionSyntax Unparenthesized(ExpressionSyntax e) =>
+        e is ParenthesizedExpressionSyntax p ? Unparenthesized(p.Expression) : e;
+
+    /// <summary>The code of a node without trivia — no comments, no whitespace.</summary>
+    private static string Code(SyntaxNode node) => string.Concat(node.DescendantTokens().Select(t => t.Text));
+
+    /// <summary>The descendants of <paramref name="root"/> that run as part of it — not inside a lambda or a local
+    /// function, whose catches belong to other code paths.</summary>
+    private static IEnumerable<T> Outside<T>(SyntaxNode root) where T : SyntaxNode =>
+        root.DescendantNodesAndSelf(n => n == root || n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax))
+            .OfType<T>()
+            .Where(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax));
 
     private static string SourceRoot()
     {

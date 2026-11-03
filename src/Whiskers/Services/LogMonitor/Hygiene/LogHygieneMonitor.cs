@@ -60,7 +60,8 @@ public sealed class LogHygieneMonitor : Whiskers.Services.FleetBackgroundService
         {
             try
             {
-                await RunOnceAsync(stoppingToken).WaitAsync(stoppingToken);
+                // R1-41: owned, not abandoned with WaitAsync — the stop reaches the listing, the survey and the alerts.
+                await RunOnceAsync(stoppingToken);
             }
             catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
@@ -79,7 +80,7 @@ public sealed class LogHygieneMonitor : Whiskers.Services.FleetBackgroundService
 
         foreach (var server in _servers.GetEnabledServers())
         {
-            if (ct.IsCancellationRequested) break;
+            ct.ThrowIfCancellationRequested();
             if (server.ConnectionType == ConnectionType.Kubernetes)
             {
                 // Pod logs are the cluster's business, not a file on a Docker host. Recorded as a skip rather
@@ -95,9 +96,11 @@ public sealed class LogHygieneMonitor : Whiskers.Services.FleetBackgroundService
             {
                 var containers = (await _docker.ListContainersAsync(all: true, server.Id, ct)).ToList();
                 var entries = await _inventory.SurveyAsync(server, containers, ct);
-                await ReportAsync(server, containers, entries);
+                ct.ThrowIfCancellationRequested();
+                await ReportAsync(server, containers, entries, ct);
             }
-            catch (Exception ex)
+            // The stop is not a failed survey: nothing is recorded for a server whose survey it ended.
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
                 success = false;
                 _logger.LogWarning(ex, "Log hygiene survey failed for {Server}", server.Name);
@@ -108,7 +111,7 @@ public sealed class LogHygieneMonitor : Whiskers.Services.FleetBackgroundService
     }
 
     private async Task ReportAsync(
-        Models.ServerConfig server, IReadOnlyList<ContainerInfo> containers, IReadOnlyList<LogInventoryEntry> entries)
+        Models.ServerConfig server, IReadOnlyList<ContainerInfo> containers, IReadOnlyList<LogInventoryEntry> entries, CancellationToken ct)
     {
         foreach (var entry in entries)
         {
@@ -141,7 +144,7 @@ public sealed class LogHygieneMonitor : Whiskers.Services.FleetBackgroundService
                 ContainerName = entry.ContainerName,
                 ImageInfo = detail,
                 Timestamp = DateTime.UtcNow
-            });
+            }, ct);
         }
     }
 }

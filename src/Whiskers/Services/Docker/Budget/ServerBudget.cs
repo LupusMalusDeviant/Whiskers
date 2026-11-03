@@ -68,7 +68,8 @@ public sealed class ServerBudget : IServerBudget
         public void Dispose() => IsBackground.Value = _previous;
     }
 
-    public async Task<T> RunAsync<T>(string serverId, Func<Task<T>> operation, CancellationToken ct = default, string? singleFlightKey = null)
+    public async Task<T> RunAsync<T>(string serverId, Func<Task<T>> operation, CancellationToken ct = default, string? singleFlightKey = null,
+        CancellationToken deadline = default)
     {
         var lanes = LanesFor(serverId);
         var background = IsBackground.Value;
@@ -86,7 +87,16 @@ public sealed class ServerBudget : IServerBudget
         var waited = Stopwatch.GetTimestamp();
         // The token covers the WAIT, not just the operation: a caller that timed out while queued has to
         // leave the queue, otherwise the backlog outlives the callers and the next slot goes to a ghost.
-        try { await gate.WaitAsync(ct); }
+        // R1-41: a deadline about the call ends the wait too. Running out here is the queue's doing — never the server's,
+        // and never mistaken for the caller giving up.
+        using var waitLimit = deadline.CanBeCanceled ? CancellationTokenSource.CreateLinkedTokenSource(ct, deadline) : null;
+        try { await gate.WaitAsync(waitLimit?.Token ?? ct); }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested && deadline.IsCancellationRequested)
+        {
+            if (dedupe is not null) lanes.InFlightKeys.TryRemove(dedupe, out _);
+            Interlocked.Increment(ref lanes.SaturationFailures);
+            throw new BudgetSaturatedException(serverId, Stopwatch.GetElapsedTime(waited), TimeSpan.Zero, ex);
+        }
         catch { if (dedupe is not null) lanes.InFlightKeys.TryRemove(dedupe, out _); throw; }
         var waitMs = (long)Stopwatch.GetElapsedTime(waited).TotalMilliseconds;
 

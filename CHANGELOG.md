@@ -24,7 +24,19 @@ All notable changes to Whiskers are documented here. The format follows
   advisor chat's context pass their cancellation to the Docker fleet listing and the image inspect (new
   `IDockerService` overloads), so the preview deadline, a stop and closing the chat reach them — also while they wait for a connection or a free slot —
   and a cancelled caller is never counted against the server (the circuit breaker stays closed). The image-update check
-  stops with the host instead of finishing in the background, and changes nothing after the stop.
+  stops with the host instead of finishing in the background, and changes nothing after the stop. **A stopped loop no
+  longer goes on in the background:** the health, log-alert, log-hygiene, image-update and auto-update loops used to
+  stop *waiting* for a running cycle on shutdown and leave it running, so a listing that answered afterwards could
+  still record metrics, send alerts or change state. Now the stop reaches every call such a cycle waits on — the
+  container listing, inspects and digest reads, the registry, the notification delivery and its retries — the loop
+  waits for them to end, and nothing happens after the stop. A notification that a stop interrupts is not reported as
+  failed; an important one is kept for redelivery. An update whose container was already replaced is finished and
+  recorded instead of being left unobserved. The fleet listing's 8-second limit per server now also covers the wait
+  for a connection and for a free slot (before, a server whose slots were all taken could hold the listing
+  indefinitely); running out counts as that server timing out, never against the server's circuit breaker. A CVE or
+  metrics interval reloaded out of range (for example `2147483647` hours) no longer breaks `/metrics`: the loop,
+  `/metrics` and the MCP CVE summary share the interval actually in use, so the staleness series also stays consistent
+  with it.
 
 - R1-40: **A notification that fails is retried, and an important one is not lost.** Notification channels used to
   swallow their own errors, so the retry never saw a failure. Now a failed Slack, Discord, Mattermost, Matrix,

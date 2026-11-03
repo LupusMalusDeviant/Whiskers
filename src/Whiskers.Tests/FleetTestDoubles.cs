@@ -13,8 +13,27 @@ internal sealed record LogCall(string ContainerId, string? ServerId, DateTime? S
 internal sealed class FakeNotifications : INotificationService
 {
     public List<NotificationEvent> Events { get; } = new();
-    public Task SendAsync(NotificationEvent evt) { Events.Add(evt); return Task.CompletedTask; }
+    public Task SendAsync(NotificationEvent evt) { lock (Events) Events.Add(evt); return Task.CompletedTask; }
     public Task SendTestAsync() => Task.CompletedTask;
+
+    /// <summary>R1-41: when set, a delivery waits for it — ignoring the stop, the worst case for its producer, which must
+    /// still await it. <see cref="Delivering"/> fires when one starts, <see cref="SawStop"/> when its token is cancelled.</summary>
+    public TaskCompletionSource? Gate { get; set; }
+    public TaskCompletionSource Delivering { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource SawStop { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task SendAsync(NotificationEvent evt, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (Gate is { } gate)
+        {
+            using var _ = ct.Register(() => SawStop.TrySetResult());
+            Delivering.TrySetResult();
+            await gate.Task;
+            ct.ThrowIfCancellationRequested();   // a real delivery cut off by the stop ends with the cancellation
+        }
+        await SendAsync(evt);
+    }
 }
 
 /// <summary>Builds a REAL <see cref="Whiskers.Services.Docker.Budget.ServerBudget"/> for tests. Deliberately
@@ -127,6 +146,20 @@ internal sealed class FakeDocker : IDockerService
                 .Select(id => new FleetServerFailure(id, serverNames.GetValueOrDefault(id, id), "Connection failed"))
                 .ToList()
         });
+    }
+
+    /// <summary>When set, the detailed fleet listing with a token waits for it, ignoring the token — a dependency that
+    /// answers only after the stop, the worst case for a loop that must not act on that answer (R1-41).</summary>
+    public TaskCompletionSource? DetailedListingGate { get; set; }
+    public TaskCompletionSource DetailedListingStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource DetailedListingSawStop { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all, CancellationToken ct)
+    {
+        using var _ = ct.Register(() => DetailedListingSawStop.TrySetResult());
+        DetailedListingStarted.TrySetResult();
+        if (DetailedListingGate is { } gate) await gate.Task;
+        return await ListAllContainersDetailedAsync(all);
     }
 
     /// <summary>When set, the fleet listing waits for it: a host that does not answer (R1-41).</summary>
@@ -249,6 +282,12 @@ internal sealed class FakeDocker : IDockerService
 
     public Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null)
         => Digest?.Invoke(imageRef) ?? throw new NotSupportedException();
+
+    /// <summary>The digest read with the caller's token (R1-41); falls back to <see cref="Digest"/>.</summary>
+    public Func<string, CancellationToken, Task<string?>>? DigestWithToken { get; set; }
+
+    public Task<string?> GetImageDigestAsync(string imageRef, string? serverId, CancellationToken ct)
+        => DigestWithToken?.Invoke(imageRef, ct) ?? GetImageDigestAsync(imageRef, serverId);
     public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null) =>
         Act("recreate", containerId, serverId, Task.FromResult("recreated-" + containerId));

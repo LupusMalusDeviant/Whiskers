@@ -50,8 +50,9 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
         {
             try
             {
-                // R1-41: the cycle is owned to its end — every wait inside it observes the stop, and after a stop it
-                // changes no state and sends nothing, so nothing of it runs on after the host stopped.
+                // R1-41: the cycle is owned to its end — not abandoned with WaitAsync. The stop reaches every dependency
+                // (the listing, the digest reads, the registry, the notification delivery and its retries), the cycle
+                // awaits their real end, and after a stop it changes no state and sends nothing.
                 await CheckAllImagesAsync(ct);
             }
             catch (Exception ex) when (!IsHostStopping(ex, ct))
@@ -86,6 +87,8 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 allServers);
 
             var containers = await docker.ListAllContainersAsync(false, ct);
+            // A listing that answered after the stop changes nothing: no cycle is recorded, no image is checked.
+            ct.ThrowIfCancellationRequested();
 
             foreach (var server in allServers.Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes))
                 _selfMetrics.RecordCycle(
@@ -139,9 +142,10 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                             EventType = "image_update",
                             ImageName = update.Image,
                             ImageInfo = $"Local: {Truncate(update.LocalDigest)} → Remote: {Truncate(update.RemoteDigest)}"
-                        });
+                        }, ct);
                     }
-                    catch (Exception ex)
+                    // A stop ends the delivery (its retries included) and the cycle; any other failure costs one notice.
+                    catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
                     {
                         _logger.LogWarning(ex, "Failed to send update notification for {Container}", update.ContainerName);
                     }
@@ -228,7 +232,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
         try
         {
             var configured = LooksLikeImageId(container.Image)
-                ? await docker.GetConfiguredImageAsync(container.Id, container.ServerId).WaitAsync(ct)
+                ? await docker.GetConfiguredImageAsync(container.Id, container.ServerId, ct)
                 : null;
             var (image, localRef) = ResolveCheckRefs(container.Image, configured, container.ImageId);
 
@@ -238,10 +242,10 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 return null;
 
             // Local digest of the image the container RUNS, not of whatever the tag points at now.
-            var localDigest = await docker.GetImageDigestAsync(localRef, container.ServerId).WaitAsync(ct);
+            var localDigest = await docker.GetImageDigestAsync(localRef, container.ServerId, ct);
 
             // Get remote digest
-            var remoteDigest = await _registry.GetRemoteDigestAsync(image).WaitAsync(ct);
+            var remoteDigest = await _registry.GetRemoteDigestAsync(image, ct);
 
             if (localDigest == null || remoteDigest == null)
             {

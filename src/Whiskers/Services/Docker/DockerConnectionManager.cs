@@ -48,6 +48,16 @@ public class DockerConnectionManager : IDockerConnectionManager
     private Task<DockerClient> AcquireClientAsync(string? serverId) =>
         ClientSourceForTests?.Invoke(serverId) ?? GetClientAsync(serverId);
 
+    /// <summary>R1-41: the wait for a client ends on the caller's cancellation and on the server's deadline. Building the
+    /// client is shared with every other caller of that server and is not cancelled — only this call stops waiting.</summary>
+    private static async Task<DockerClient> AwaitClientAsync(Task<DockerClient> acquiring, CancellationToken callerToken,
+        CancellationToken deadline)
+    {
+        if (!deadline.CanBeCanceled) return await acquiring.WaitAsync(callerToken);
+        using var either = CancellationTokenSource.CreateLinkedTokenSource(callerToken, deadline);
+        return await acquiring.WaitAsync(either.Token);
+    }
+
     /// <summary>
     /// Get or create a DockerClient for the given server.
     /// If serverId is null, returns the default server's client.
@@ -123,16 +133,16 @@ public class DockerConnectionManager : IDockerConnectionManager
 
     /// <inheritdoc />
     public async Task<T> ExecuteGuardedAsync<T>(string? serverId, Func<DockerClient, Task<T>> operation, string? singleFlightKey = null,
-        CancellationToken callerToken = default)
+        CancellationToken callerToken = default, CancellationToken deadline = default)
     {
         var budgetKey = serverId ?? _serverConfig.GetDefaultServer()?.Id ?? "local";
         _circuit.ThrowIfOpen(budgetKey);
         try
         {
-            var client = await AcquireClientAsync(serverId).WaitAsync(callerToken);
+            var client = await AwaitClientAsync(AcquireClientAsync(serverId), callerToken, deadline);
             try
             {
-                var result = await _budget.RunAsync(budgetKey, () => operation(client), callerToken, singleFlightKey);
+                var result = await _budget.RunAsync(budgetKey, () => operation(client), callerToken, singleFlightKey, deadline);
                 _circuit.RecordSuccess(budgetKey);
                 return result;
             }
@@ -166,7 +176,7 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// the call behind the 2026-08-26 incident, was moved onto <see cref="ExecuteGuardedAsync{T}"/> first.</para>
     /// </summary>
     public async Task<T> ExecuteAsync<T>(string? serverId, Func<DockerClient, Task<T>> operation, string? singleFlightKey = null,
-        CancellationToken callerToken = default)
+        CancellationToken callerToken = default, CancellationToken deadline = default)
     {
         var budgetKey = serverId ?? _serverConfig.GetDefaultServer()?.Id ?? "local";
 
@@ -175,7 +185,7 @@ public class DockerConnectionManager : IDockerConnectionManager
         _circuit.ThrowIfOpen(budgetKey);
         try
         {
-            return await ExecuteWithRetryAsync(serverId, budgetKey, operation, singleFlightKey, callerToken);
+            return await ExecuteWithRetryAsync(serverId, budgetKey, operation, singleFlightKey, callerToken, deadline);
         }
         finally
         {
@@ -187,12 +197,12 @@ public class DockerConnectionManager : IDockerConnectionManager
 
     private async Task<T> ExecuteWithRetryAsync<T>(
         string? serverId, string budgetKey, Func<DockerClient, Task<T>> operation, string? singleFlightKey,
-        CancellationToken callerToken)
+        CancellationToken callerToken, CancellationToken deadline)
     {
-        var client = await AcquireClientAsync(serverId).WaitAsync(callerToken);
+        var client = await AwaitClientAsync(AcquireClientAsync(serverId), callerToken, deadline);
         try
         {
-            var result = await _budget.RunAsync(budgetKey, () => operation(client), callerToken, singleFlightKey);
+            var result = await _budget.RunAsync(budgetKey, () => operation(client), callerToken, singleFlightKey, deadline);
             _circuit.RecordSuccess(budgetKey);
             return result;
         }
@@ -212,11 +222,11 @@ public class DockerConnectionManager : IDockerConnectionManager
             // Invalidate only the exact client instance this call used — a parallel caller may have
             // already rebuilt a fresh client for this server, and we must not tear that healthy one down.
             InvalidateClient(id, ifCurrent: client);
-            client = await AcquireClientAsync(serverId).WaitAsync(callerToken);
+            client = await AwaitClientAsync(AcquireClientAsync(serverId), callerToken, deadline);
             try
             {
                 // The retry takes a slot of its own: it is a second request the server has to serve.
-                var retried = await _budget.RunAsync(id, () => operation(client), callerToken, singleFlightKey);
+                var retried = await _budget.RunAsync(id, () => operation(client), callerToken, singleFlightKey, deadline);
                 _circuit.RecordSuccess(id);
                 return retried;
             }

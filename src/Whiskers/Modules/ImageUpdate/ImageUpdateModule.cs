@@ -39,7 +39,8 @@ public sealed class ImageUpdateModule : IWhiskersModule
         // stays the shared-cache singleton, forwarded to the typed client.
         services.Configure<ImageUpdateSettings>(config.GetSection("ImageUpdate"));
         services.AddOptions<ImageUpdateSettings>().ValidateInterval(s => s.CheckIntervalHours,
-            "ImageUpdate:CheckIntervalHours", IntervalValidation.MinCheckHours, IntervalValidation.MaxCheckHours);   // R1-41
+            "ImageUpdate:CheckIntervalHours", IntervalValidation.MinCheckHours, IntervalValidation.MaxCheckHours,
+            TimeSpan.FromHours(1));   // R1-41
         services.AddSingleton<Whiskers.Services.ImageUpdate.IUpdateRiskService,
                               Whiskers.Services.ImageUpdate.UpdateRiskService>();
         services.AddHttpClient<RegistryClient>()

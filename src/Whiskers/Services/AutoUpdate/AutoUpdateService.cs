@@ -69,9 +69,12 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
             try
             {
                 // R1-39: on stop the shutdown drain first waits (bounded) for the update in progress — no new one starts —
-                // and only then is stoppingToken cancelled. What still runs then (a recreate has no cancellation token)
-                // is cut off here: a forced stop, reported as interrupted at the next start, never repeated blindly.
-                await CheckAndUpdateAsync(stoppingToken).WaitAsync(stoppingToken);
+                // and only then is stoppingToken cancelled. R1-41: the cycle is owned, not abandoned with WaitAsync: the
+                // stop reaches the listing, the database and the notice before an update, and an update that already
+                // replaced a container (a recreate has no cancellation token) is finished and recorded rather than left
+                // running unobserved. The host's shutdown timeout still bounds the wait; a process killed past it is
+                // reported as interrupted at the next start, never repeated blindly.
+                await CheckAndUpdateAsync(stoppingToken);
             }
             catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
@@ -96,7 +99,8 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         var policies = await db.UpdatePolicies.Where(p => p.AutoUpdate).ToListAsync(ct);
         if (!policies.Any()) return;
 
-        var containers = await _docker.ListAllContainersAsync(all: false);
+        var containers = await _docker.ListAllContainersAsync(all: false, ct);
+        ct.ThrowIfCancellationRequested();
 
         foreach (var policy in policies)
         {
@@ -159,9 +163,10 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                         ContainerName = container.Name,
                         Image = container.Image,
                         EventType = "auto_update_start"
-                    });
+                    }, ct);
                 }
-                catch (Exception nex) { _logger.LogWarning(nex, "Auto-update start notification failed for {Container}", container.Name); }
+                // A stop during the notice ends the cycle before the update starts.
+                catch (Exception nex) when (!(nex is OperationCanceledException && ct.IsCancellationRequested)) { _logger.LogWarning(nex, "Auto-update start notification failed for {Container}", container.Name); }
             }
 
             // Perform update

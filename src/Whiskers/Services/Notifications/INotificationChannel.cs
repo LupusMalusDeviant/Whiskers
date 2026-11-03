@@ -23,4 +23,7 @@ public interface INotificationChannel : INotificationService
     /// <summary>One delivery without a deadline of the caller's; it throws on failure like <see cref="DeliverAsync"/>.
     /// The composite never uses it.</summary>
     Task INotificationService.SendAsync(NotificationEvent evt) => DeliverAsync(evt, CancellationToken.None);
+
+    /// <summary>One delivery whose cancellation reaches the network call (R1-41).</summary>
+    Task INotificationService.SendAsync(NotificationEvent evt, CancellationToken ct) => DeliverAsync(evt, ct);
 }

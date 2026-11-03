@@ -8,7 +8,7 @@ Why the log-alert scan steps over certain containers, and how that decision is m
 | `LogScanExclusions.cs` | Access-path detection plus the `WHISKERS_SELF_CONTAINERS` override (legacy `SERVERWATCH_SELF_CONTAINERS` still read). |
 | `ILogInventory.cs` / `LogInventory.cs` | The daily reading: rotation limit, log file size, growth per day, free disk. |
 | `LogHygieneAdvice.cs` | Turns a reading into a severity, a description with a deadline, and a runnable command. |
-| `LogHygieneMonitor.cs` | Runs the survey once a day and raises `log_rotation_missing` when a finding crosses the threshold. |
+| `LogHygieneMonitor.cs` | Runs the survey once a day and raises `log_rotation_missing` when a finding crosses the threshold. R1-41: the survey is owned to its end (no `WaitAsync`); the stop reaches the listing, the inventory and the alerts, and a server whose survey the stop ended is not recorded as a failed cycle. |
 
 ## The feedback loop this ends
 
