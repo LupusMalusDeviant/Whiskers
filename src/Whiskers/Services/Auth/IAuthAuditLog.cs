@@ -32,4 +32,6 @@ public static class AuthAuditReasons
     public const string LockedOut = "locked_out";
     public const string NotWhitelisted = "not_whitelisted";
     public const string ProviderFailure = "provider_failure";
+    /// <summary>The account had no security stamp and none could be stored, so no session could be tied to it (R1-26).</summary>
+    public const string NoSecurityStamp = "no_security_stamp";
 }

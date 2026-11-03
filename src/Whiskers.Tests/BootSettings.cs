@@ -86,9 +86,42 @@ internal sealed class BootSettings : IDisposable
         }
         AssertAuthenticationSetup(services,
             disabled: given.TryGetValue("Auth:Disabled", out var auth) && auth is not null && bool.Parse(auth));
+        AssertSessionRevocationWiring(services, registry.IsEnabled("agent"));
         // R1-25: every logger of the booted app writes through the redaction.
         Assert.IsType<Whiskers.Utils.RedactingLoggerFactory>(
             services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>());
+    }
+
+    /// <summary>R1-26: the real app wires every revalidation — each class falls back to its pre-R1-26 behaviour without
+    /// it, so a dropped registration would otherwise go unnoticed. The circuit's authentication state is the
+    /// revalidating provider (also as the host's provider the circuit sets the user on), the current-user resolver has
+    /// the validator, the ContainerHub filter resolves, and with the agent module on, sessions re-read their principal.</summary>
+    public static void AssertSessionRevocationWiring(IServiceProvider services, bool agentEnabled)
+    {
+        Assert.IsType<Whiskers.Services.Auth.SessionValidator>(
+            services.GetRequiredService<Whiskers.Services.Auth.ISessionValidator>());
+        Assert.NotNull(services.GetRequiredService<Whiskers.Hubs.SessionHubFilter>());
+        using (var scope = services.CreateScope())
+        {
+            var state = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider>();
+            Assert.IsType<Whiskers.Services.Auth.SessionRevalidatingAuthenticationStateProvider>(state);
+            Assert.IsAssignableFrom<Microsoft.AspNetCore.Components.Authorization.IHostEnvironmentAuthenticationStateProvider>(state);
+            var user = Assert.IsType<Whiskers.Services.Auth.CurrentUserService>(
+                scope.ServiceProvider.GetRequiredService<Whiskers.Services.Auth.ICurrentUserService>());
+            Assert.True(user.RevalidatesSessions, "The current-user resolver was built without the session validator.");
+        }
+        var hubOptions = services.GetRequiredService<IOptions<Microsoft.AspNetCore.SignalR.HubOptions<Whiskers.Hubs.ContainerHub>>>().Value;
+        // HubOptions keeps its filters internal; the ContainerHub must have one (the session filter is its only one).
+        var filters = typeof(Microsoft.AspNetCore.SignalR.HubOptions).GetProperty("HubFilters",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(hubOptions)
+            as System.Collections.ICollection;
+        Assert.True(filters is { Count: > 0 }, "The ContainerHub has no hub filter: open connections are never re-checked.");
+        if (agentEnabled)
+        {
+            var agent = Assert.IsType<Whiskers.Services.Agent.AgentService>(
+                services.GetRequiredService<Whiskers.Services.Agent.IAgentService>());
+            Assert.True(agent.RevalidatesAuthority, "Agent sessions were built without IAgentAuthority.");
+        }
     }
 
     /// <summary>Asserts which authentication setup the booted app registered. The two branches of

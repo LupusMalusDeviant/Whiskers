@@ -20,14 +20,25 @@ public class CurrentUserService : ICurrentUserService
     private readonly AuthenticationStateProvider _authProvider;
     private readonly IRoleService _roles;
     private readonly ISessionValidator? _sessions;
+    private readonly TimeProvider _time;
+    // The last check, for page rendering only (GetRoleAsync): a mutation always checks afresh (CheckSessionAsync).
+    private (ClaimsPrincipal User, SessionCheck Check, DateTimeOffset At)? _recent;
+
+    /// <summary>How long <see cref="GetRoleAsync"/> may reuse a check for the same principal — a page rendering several
+    /// role-gated parts does not hit the account store for each. Never used to authorize a mutation.</summary>
+    public static readonly TimeSpan RoleReuse = TimeSpan.FromSeconds(5);
 
     public CurrentUserService(AuthenticationStateProvider authProvider, IRoleService roles,
-        ISessionValidator? sessions = null)
+        ISessionValidator? sessions = null, TimeProvider? time = null)
     {
         _authProvider = authProvider;
         _roles = roles;
         _sessions = sessions;
+        _time = time ?? TimeProvider.System;
     }
+
+    /// <summary>True when the validator is wired (R1-26); the boot tests assert it for the real app.</summary>
+    internal bool RevalidatesSessions => _sessions is not null;
 
     public async Task<string?> GetEmailAsync()
     {
@@ -37,14 +48,23 @@ public class CurrentUserService : ICurrentUserService
 
     public async Task<AppRole> GetRoleAsync()
     {
-        var check = await CheckSessionAsync();
+        var state = await _authProvider.GetAuthenticationStateAsync();
+        var check = _recent is { } recent && ReferenceEquals(recent.User, state.User)
+                    && _time.GetUtcNow() - recent.At < RoleReuse
+            ? recent.Check
+            : await CheckSessionAsync();
         return check.Valid ? check.Role : AppRole.Viewer;
     }
 
     public async Task<SessionCheck> CheckSessionAsync()
     {
         var state = await _authProvider.GetAuthenticationStateAsync();
-        if (_sessions is not null) return await _sessions.CheckAsync(state.User);
+        if (_sessions is not null)
+        {
+            var check = await _sessions.CheckAsync(state.User);
+            _recent = (state.User, check, _time.GetUtcNow());
+            return check;
+        }
 
         // Without a validator (a container built for one module): the role alone, as before R1-26.
         // Auth-disabled = trusted-LAN full-access mode: the synthetic local user (authenticationType

@@ -203,6 +203,9 @@ Three areas carry most of the risk. Changes there get a dedicated review and tes
 - the authentication middleware and its order (forwarded headers first, fail-closed authorization, cookie
   validation, the whitelist re-check); only the request-correlation middleware runs ahead of the forwarded headers —
   it reads nothing but `X-Request-Id` and the current activity and decides nothing (user-approved 2026-11-03, R1-53);
+  cookie validation re-checks the whole session on every request and fails closed (`SessionCookieValidation` →
+  `ISessionValidator`: local account, security stamp, whitelist), and `/login-local` ties the cookie to the account's
+  security stamp — the order and the whitelist logic are unchanged (user-approved 2026-11-03, R1-26);
 - the mTLS / WireGuard network layer (certificates, allowed client CN, mesh binding) and the
   docker-socket-proxy verb whitelist.
 

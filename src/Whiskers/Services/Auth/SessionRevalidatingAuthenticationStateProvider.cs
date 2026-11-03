@@ -9,7 +9,8 @@ namespace Whiskers.Services.Auth;
 /// The circuit's authentication state, re-checked (R1-26, INV-09). A Blazor circuit keeps the principal it connected
 /// with, and its pages cache the role they loaded; so the circuit checks its session once when the state is set (the
 /// role it starts with) and then every <see cref="RevalidationInterval"/> through <see cref="ISessionValidator"/>. A
-/// session that is no longer valid, or whose role fell below the role the circuit started with, turns the circuit
+/// session that is no longer valid, or whose role fell below the highest role the circuit has held (a page may have
+/// cached it after a promotion), turns the circuit
 /// anonymous: the router shows the sign-in page and no page keeps acting on its cached role. A raised role keeps the
 /// circuit. The timer comes from the injected <see cref="TimeProvider"/>.
 /// </summary>
@@ -25,7 +26,7 @@ public sealed class SessionRevalidatingAuthenticationStateProvider : ServerAuthe
     private readonly object _gate = new();
     private ITimer? _timer;
     private ClaimsPrincipal? _watched;
-    private AppRole? _startRole;
+    private AppRole? _highestRole;
     private bool _disposed;
 
     public SessionRevalidatingAuthenticationStateProvider(ISessionValidator sessions, TimeProvider? time = null,
@@ -42,6 +43,9 @@ public sealed class SessionRevalidatingAuthenticationStateProvider : ServerAuthe
 
     private async Task WatchAsync(Task<AuthenticationState> stateTask)
     {
+        // Out of the notification that called us: a check that completes synchronously must not set (and announce) the
+        // anonymous state while later subscribers still receive the authenticated one.
+        await Task.Yield();
         AuthenticationState state;
         try { state = await stateTask; }
         catch (Exception ex) when (ex is not OperationCanceledException) { return; }
@@ -51,7 +55,7 @@ public sealed class SessionRevalidatingAuthenticationStateProvider : ServerAuthe
             _timer?.Dispose();
             _timer = null;
             _watched = null;
-            _startRole = null;
+            _highestRole = null;
             if (_disposed || state.User.Identity?.IsAuthenticated != true) return;
             _watched = state.User;
         }
@@ -88,16 +92,16 @@ public sealed class SessionRevalidatingAuthenticationStateProvider : ServerAuthe
         {
             // Another state was set meanwhile: this answer is about a principal the circuit no longer has.
             if (!ReferenceEquals(_watched, user)) return true;
-            if (check.Valid && (_startRole is not { } start || check.Role >= start))
+            if (check.Valid && (_highestRole is not { } start || check.Role >= start))
             {
-                _startRole ??= check.Role;
+                _highestRole = check.Role;   // never lower than before: the highest role this circuit has held
                 return true;
             }
             reason = check.Valid ? SessionRevocationReasons.RoleLowered : check.Reason ?? SessionRevocationReasons.NotSignedIn;
             _timer?.Dispose();
             _timer = null;
             _watched = null;
-            _startRole = null;
+            _highestRole = null;
         }
 
         _logger?.LogInformation("A circuit's session was ended ({Reason})", reason);

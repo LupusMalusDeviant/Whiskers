@@ -272,14 +272,21 @@ public static class WhiskersPipelineExtensions
                 // Build the principal MANUALLY so it carries ClaimTypes.Email — the default claims factory does
                 // not, and every role consumer keys on the email claim. authenticationType is non-empty (so
                 // IsAuthenticated is true) and deliberately NOT "AuthDisabled"/"AgentSynthetic".
+                // R1-26: an account without a security stamp gets one first — a session without a stamp is refused on
+                // its next request, which would otherwise sign the user out right after every sign-in.
+                if (string.IsNullOrEmpty(user.SecurityStamp) && !(await users.UpdateSecurityStampAsync(user)).Succeeded)
+                {
+                    await authAudit.SignInRefusedAsync(ctx, "local", user.Email, Whiskers.Services.Auth.AuthAuditReasons.NoSecurityStamp);
+                    return Results.Redirect(configuredPathBase + "/login?error=invalid");
+                }
                 var identity = new ClaimsIdentity(new[]
                 {
                     new Claim(ClaimTypes.Email, user.Email!),
                     new Claim(ClaimTypes.Name, user.Email!),
                     new Claim(ClaimTypes.NameIdentifier, user.Id),
                     // R1-26: the stamp the session is tied to; the cookie check ends it once the stamp changes.
-                    new Claim(Whiskers.Services.Auth.AuthConstants.SecurityStampClaim, user.SecurityStamp ?? ""),
-                }, authenticationType: "LocalPassword");
+                    new Claim(Whiskers.Services.Auth.AuthConstants.SecurityStampClaim, user.SecurityStamp!),
+                }, authenticationType: Whiskers.Services.Auth.AuthConstants.LocalPasswordScheme);
                 await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
                     new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = true });
                 await authAudit.SignedInAsync(ctx, "local", user.Email!);

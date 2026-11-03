@@ -61,6 +61,22 @@ public sealed class SessionRevocationTests
                 Assert.Equal(HttpStatusCode.NotFound, (await AdminProbeAsync(clients[email])).StatusCode);
             }
 
+            // An account without a stamp gets one at sign-in and stays signed in (no sign-out loop).
+            const string unstamped = "unstamped@local.test";
+            await CreateLocalUserAsync(factory, unstamped);
+            await roles.SetRoleAsync(unstamped, AppRole.Admin);
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
+                var row = await db.Users.SingleAsync(u => u.Email == unstamped);
+                row.SecurityStamp = null;
+                await db.SaveChangesAsync();
+            }
+            var unstampedClient = newClient();
+            await SignInAsync(unstampedClient, unstamped);
+            Assert.Equal(HttpStatusCode.NotFound, (await AdminProbeAsync(unstampedClient)).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await AdminProbeAsync(unstampedClient)).StatusCode);
+
             // Local deletion.
             using (var scope = factory.Services.CreateScope())
             {
@@ -139,6 +155,117 @@ public sealed class SessionRevocationTests
         await world.Roles.SetRoleAsync(World.Ops, AppRole.Admin);
         Assert.True(await provider.RevalidateAsync());
         Assert.True((await provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
+    }
+
+    [Fact]
+    public async Task A_raised_then_lowered_role_ends_the_circuit()
+    {
+        // A page opened after the promotion cached Admin; lowering the role again must end the circuit, even though
+        // the new role is still at least the one the circuit started with.
+        await using var world = await World.CreateAsync();
+        await world.Roles.SetRoleAsync(World.Ops, AppRole.Viewer);
+        var clock = new ManualClock(DateTimeOffset.UnixEpoch);
+        using var provider = new SessionRevalidatingAuthenticationStateProvider(world.Validator, clock);
+        provider.SetAuthenticationState(Task.FromResult(new AuthenticationState(world.OpsCookiePrincipal())));
+        await WaitUntilAsync(() => clock.Periods.Count == 1);
+
+        await world.Roles.SetRoleAsync(World.Ops, AppRole.Admin);
+        Assert.True(await provider.RevalidateAsync());               // promoted: kept
+        await world.Roles.SetRoleAsync(World.Ops, AppRole.Operator);
+        Assert.False(await provider.RevalidateAsync());              // below the highest role it held: ended
+        Assert.False((await provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
+    }
+
+    // ------------------------------------------------------------------------------------------------ hub calls
+
+    [Theory]
+    [InlineData(Change.LocalDeletion)]
+    [InlineData(Change.WhitelistRemoval)]
+    public async Task An_open_hub_connection_is_refused_and_closed_on_its_next_call(Change change)
+    {
+        await using var world = await World.CreateAsync();
+        var filter = new Whiskers.Hubs.SessionHubFilter(world.Validator);
+        var connection = new HubConnection(world.OpsCookiePrincipal());
+        var calls = 0;
+        ValueTask<object?> Next(Microsoft.AspNetCore.SignalR.HubInvocationContext _) { calls++; return ValueTask.FromResult<object?>(null); }
+        var invocation = new Microsoft.AspNetCore.SignalR.HubInvocationContext(connection, world.Scopes.CreateScope().ServiceProvider,
+            new NoHub(), typeof(NoHub).GetMethod(nameof(NoHub.Ping))!, []);
+
+        await filter.InvokeMethodAsync(invocation, Next);
+        Assert.Equal(1, calls);
+
+        await world.ApplyAsync(change);
+        await Assert.ThrowsAsync<Microsoft.AspNetCore.SignalR.HubException>(() => filter.InvokeMethodAsync(invocation, Next).AsTask());
+        Assert.Equal(1, calls);
+        Assert.True(connection.Aborted);
+    }
+
+    private sealed class NoHub : Microsoft.AspNetCore.SignalR.Hub
+    {
+        public void Ping() { }
+    }
+
+    private sealed class HubConnection(ClaimsPrincipal user) : Microsoft.AspNetCore.SignalR.HubCallerContext
+    {
+        public bool Aborted { get; private set; }
+        public override string ConnectionId => "c1";
+        public override string? UserIdentifier => null;
+        public override ClaimsPrincipal? User => user;
+        public override IDictionary<object, object?> Items { get; } = new Dictionary<object, object?>();
+        public override Microsoft.AspNetCore.Http.Features.IFeatureCollection Features { get; } =
+            new Microsoft.AspNetCore.Http.Features.FeatureCollection();
+        public override CancellationToken ConnectionAborted => CancellationToken.None;
+        public override void Abort() => Aborted = true;
+    }
+
+    // ------------------------------------------------------------------------------------------------ audit rows
+
+    [Fact]
+    public async Task A_replayed_revoked_cookie_is_audited_once_per_minute_not_per_request()
+    {
+        var clock = new ManualClock(DateTimeOffset.UnixEpoch);
+        var audit = new RecordingAudit();
+        var log = new AuthAuditLog(audit, NullLogger<AuthAuditLog>.Instance, time: clock);
+        await log.StartAsync(CancellationToken.None);
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+
+        for (var i = 0; i < 50; i++)
+            await log.SessionRevokedAsync(http, World.Ops, "cookie", SessionRevocationReasons.AccountDeleted);
+        await log.SessionRevokedAsync(http, World.Ops, "cookie", SessionRevocationReasons.NotWhitelisted);   // other reason
+        clock.Advance(AuthAuditLog.RevokedRowWindow);
+        await log.SessionRevokedAsync(http, World.Ops, "cookie", SessionRevocationReasons.AccountDeleted);   // next window
+        await log.StopAsync(CancellationToken.None);
+
+        Assert.Equal(3, audit.Rows.Count(r => r.Action == AuthAuditLog.SessionRevokedAction));
+    }
+
+    // ------------------------------------------------------------------------------------------------ page rendering
+
+    [Fact]
+    public async Task Page_role_lookups_reuse_a_fresh_check_but_a_mutation_check_never_does()
+    {
+        var counting = new CountingValidator();
+        var user = new CurrentUserService(new FixedState(new ClaimsPrincipal(
+            new ClaimsIdentity([new Claim(ClaimTypes.Email, World.Ops)], "Google"))), new AutomationMutationRunnerTests.Roles(),
+            counting, new ManualClock(DateTimeOffset.UnixEpoch));
+
+        await user.GetRoleAsync();
+        await user.GetRoleAsync();
+        await user.HasRoleAsync(AppRole.Admin);
+        Assert.Equal(1, counting.Calls);
+        await user.CheckSessionAsync();
+        await user.CheckSessionAsync();
+        Assert.Equal(3, counting.Calls);
+    }
+
+    private sealed class CountingValidator : ISessionValidator
+    {
+        public int Calls;
+        public Task<SessionCheck> CheckAsync(ClaimsPrincipal? principal, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref Calls);
+            return Task.FromResult(SessionCheck.Allowed(AppRole.Admin));
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ terminals
@@ -267,7 +394,7 @@ public sealed class SessionRevocationTests
     public async Task A_web_users_inflight_agent_run_stops_when_their_account_is_deleted()
     {
         await using var world = await World.CreateAsync();
-        var authority = new AgentAuthority(new AutomationMutationRunnerTests.Keys(), world.Owners);
+        var authority = new AgentAuthority(new AutomationMutationRunnerTests.Keys(), world.Owners, world.Roles);
         var invoker = new AgentRunDoubles.Invoker(onCall: calls =>
         {
             if (calls == 1) world.ApplyAsync(Change.LocalDeletion).GetAwaiter().GetResult();
@@ -280,6 +407,24 @@ public sealed class SessionRevocationTests
 
         Assert.Equal(1, invoker.Calls);
         Assert.Contains("deleted", events.OfType<AgentEvent.ToolExecuted>().Last().Result.Content);
+    }
+
+    [Fact]
+    public async Task A_web_users_inflight_agent_run_takes_its_next_call_at_the_lowered_role()
+    {
+        await using var world = await World.CreateAsync();
+        var authority = new AgentAuthority(new AutomationMutationRunnerTests.Keys(), world.Owners, world.Roles);
+        var invoker = new AgentRunDoubles.Invoker(onCall: calls =>
+        {
+            if (calls == 1) world.ApplyAsync(Change.RoleDemotion).GetAwaiter().GetResult();
+        });
+        var session = AgentRunDoubles.Session(new AgentPrincipal(AgentPrincipalKind.WebUser, World.Ops,
+                McpPermissionLevels.Admin, null, UserEmail: World.Ops),
+            AgentRunDoubles.Provider(AgentRunDoubles.ToolTurn("c1", "c2")), invoker, authority);
+
+        await AgentRunDoubles.CollectAsync(session);
+
+        Assert.Equal(new[] { McpPermissionLevels.Admin, McpPermissionLevels.Write }, invoker.Levels);
     }
 
     // ------------------------------------------------------------------------------------------------ helpers
@@ -583,9 +728,9 @@ internal static class AgentRunDoubles
     public static ScriptedProvider Provider(params List<AgentStreamDelta>[] turns) => new(turns);
 
     public static AgentSession Session(AgentPrincipal principal, ScriptedProvider provider, Invoker invoker,
-        IAgentAuthority authority) =>
+        IAgentAuthority authority, IAgentGuardrailEngine? engine = null) =>
         new(new AgentContext("s1", principal, AgentOrigin.McpTool, GuardrailPolicy.SafeDefault()), provider,
-            new NoTools(), invoker, new AllowAll(), AgentToolTestHelpers.DefaultRegistry(),
+            new NoTools(), invoker, engine ?? new AllowAll(), AgentToolTestHelpers.DefaultRegistry(),
             new AgentSettings { Model = "x", MaxToolIterations = 4 }, "system", authority: authority);
 
     public static async Task<List<AgentEvent>> CollectAsync(AgentSession session)

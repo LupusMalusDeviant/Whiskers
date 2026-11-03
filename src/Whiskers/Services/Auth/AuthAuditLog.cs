@@ -39,11 +39,23 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
         // written), so a lost row is always logged and reported.
         new BoundedChannelOptions(Capacity) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
 
-    public AuthAuditLog(IAuditLogService audit, ILogger<AuthAuditLog> logger, IAuditRecovery? recovery = null)
+    /// <summary>At most one <see cref="SessionRevokedAction"/> row per account, surface and reason in this window: a
+    /// revoked cookie replayed in a loop (it stays decryptable until it expires) must not flood the bounded queue.</summary>
+    public static readonly TimeSpan RevokedRowWindow = TimeSpan.FromMinutes(1);
+
+    /// <summary>Beyond this many remembered revocations the stale ones are pruned.</summary>
+    private const int RevokedMemory = 4096;
+
+    private readonly TimeProvider _time;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _revokedRows = new(StringComparer.Ordinal);
+
+    public AuthAuditLog(IAuditLogService audit, ILogger<AuthAuditLog> logger, IAuditRecovery? recovery = null,
+        TimeProvider? time = null)
     {
         _audit = audit;
         _logger = logger;
         _recovery = recovery;
+        _time = time ?? TimeProvider.System;
     }
 
     public Task SignedInAsync(HttpContext context, string method, string email) =>
@@ -61,9 +73,21 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
         return Enqueue(new Row(email, LogoutAction, context.User.Identity?.AuthenticationType ?? "", Details(context, null), true));
     }
 
-    public Task SessionRevokedAsync(HttpContext? context, string? account, string surface, string reason) =>
-        Enqueue(new Row(string.IsNullOrWhiteSpace(account) ? "anonymous" : account, SessionRevokedAction, surface,
+    public Task SessionRevokedAsync(HttpContext? context, string? account, string surface, string reason)
+    {
+        var actor = string.IsNullOrWhiteSpace(account) ? "anonymous" : account;
+        var now = _time.GetUtcNow();
+        var key = $"{actor.ToUpperInvariant()}|{surface}|{reason}";
+        var recorded = false;
+        _revokedRows.AddOrUpdate(key, _ => { recorded = true; return now; },
+            (_, last) => { recorded = now - last >= RevokedRowWindow; return recorded ? now : last; });
+        if (_revokedRows.Count > RevokedMemory)
+            foreach (var (k, at) in _revokedRows)
+                if (now - at >= RevokedRowWindow) _revokedRows.TryRemove(k, out _);
+        if (!recorded) return Task.CompletedTask;
+        return Enqueue(new Row(actor, SessionRevokedAction, surface,
             context is null ? $"reason={reason}" : Details(context, reason), false));
+    }
 
     private Task Enqueue(Row row)
     {

@@ -532,7 +532,7 @@ public sealed class KillSwitchTests : IDisposable
     {
         var f = KeyOwnedFixture();
         var authority = new Whiskers.Services.Agent.AgentAuthority(f.Keys,
-            new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts));
+            new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts), f.Roles);
         var invoker = new AgentRunDoubles.Invoker(onCall: calls =>
         {
             // The key is revoked while the first call runs.
@@ -555,12 +555,46 @@ public sealed class KillSwitchTests : IDisposable
         Assert.DoesNotContain(events, e => e is Whiskers.Models.Agent.AgentEvent.AssistantDelta { Text: "done" });
     }
 
+    /// <summary>A key revoked while its call waits for an approval does not run on that approval.</summary>
+    [Fact]
+    public async Task A_key_revoked_during_an_approval_wait_does_not_run_on_the_approval()
+    {
+        var f = KeyOwnedFixture();
+        var authority = new Whiskers.Services.Agent.AgentAuthority(f.Keys,
+            new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts), f.Roles);
+        var invoker = new AgentRunDoubles.Invoker(onCall: _ => { });
+        var session = AgentRunDoubles.Session(AgentRunDoubles.KeyPrincipal("k1"),
+            AgentRunDoubles.Provider(AgentRunDoubles.ToolTurn("c1"), AgentRunDoubles.TextTurn("done")), invoker, authority,
+            new ConfirmEverything());
+
+        var events = new List<Whiskers.Models.Agent.AgentEvent>();
+        await foreach (var e in session.SendAsync("go"))
+        {
+            events.Add(e);
+            if (e is Whiskers.Models.Agent.AgentEvent.ConfirmationRequired pending)
+            {
+                f.Keys.Data.ApiKeys.Single(k => k.Id == "k1").Enabled = false;   // revoked while waiting
+                await session.ResolveConfirmationAsync(pending.Call.CorrelationId, true);
+            }
+        }
+
+        Assert.Contains(events, e => e is Whiskers.Models.Agent.AgentEvent.ConfirmationRequired);
+        Assert.Equal(0, invoker.Calls);
+        Assert.Contains(events, e => e is Whiskers.Models.Agent.AgentEvent.Failed);
+    }
+
+    private sealed class ConfirmEverything : Whiskers.Services.Guardrails.IAgentGuardrailEngine
+    {
+        public Whiskers.Services.Guardrails.GuardrailDecision Evaluate(Whiskers.Services.Guardrails.GuardrailRequest request) =>
+            new(Whiskers.Services.Guardrails.GuardrailVerdict.Confirm, "needs a person", []);
+    }
+
     [Fact]
     public async Task A_lowered_key_runs_its_next_agent_tool_call_at_the_lower_level()
     {
         var f = KeyOwnedFixture();
         var authority = new Whiskers.Services.Agent.AgentAuthority(f.Keys,
-            new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts));
+            new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts), f.Roles);
         var invoker = new AgentRunDoubles.Invoker(onCall: calls =>
         {
             if (calls == 1) f.Keys.Data.ApiKeys.Single(k => k.Id == "k1").PermissionLevel = "read";

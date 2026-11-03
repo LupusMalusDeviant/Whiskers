@@ -49,6 +49,9 @@ public sealed class AgentService : IAgentService
     private readonly IAgentToolRegistry _registry;
     private readonly IAgentAuthority? _authority;
 
+    /// <summary>True when sessions re-read their principal (R1-26); the boot tests assert it for the real app.</summary>
+    internal bool RevalidatesAuthority => _authority is not null;
+
     // Bounded in-memory session management: bounded so long-running processes (instruct_agent
     // creates a session per call) cannot grow without limit. Insertion-order eviction.
     private const int MaxSessions = 200;

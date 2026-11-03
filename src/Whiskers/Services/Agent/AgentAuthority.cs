@@ -36,12 +36,15 @@ public sealed class AgentAuthority : IAgentAuthority
 {
     private readonly IMcpPermissionService _keys;
     private readonly IAutomationOwnerResolver _owners;
+    private readonly IRoleService _roles;
     private readonly bool _authDisabled;
 
-    public AgentAuthority(IMcpPermissionService keys, IAutomationOwnerResolver owners, IConfiguration? configuration = null)
+    public AgentAuthority(IMcpPermissionService keys, IAutomationOwnerResolver owners, IRoleService roles,
+        IConfiguration? configuration = null)
     {
         _keys = keys ?? throw new ArgumentNullException(nameof(keys));
         _owners = owners ?? throw new ArgumentNullException(nameof(owners));
+        _roles = roles ?? throw new ArgumentNullException(nameof(roles));
         _authDisabled = configuration?.GetValue<bool>("Auth:Disabled") == true;
     }
 
@@ -93,10 +96,15 @@ public sealed class AgentAuthority : IAgentAuthority
                 OwnerState.NotAllowedToSignIn => "The user who started this run may no longer sign in.",
                 _ => "The user who started this run could not be verified.",
             });
-        return new AgentAuthorityCheck(started with
+        // The account state was read once above (it reads the account store); the level comes from the role alone,
+        // mapped as the owner resolver maps it.
+        var level = _roles.GetRole(started.UserEmail) switch
         {
-            PermissionLevel = Lower(started.PermissionLevel, _owners.Resolve(ownerId).PermissionLevel),
-        });
+            AppRole.Admin => McpPermissionLevels.Admin,
+            AppRole.Operator => McpPermissionLevels.Write,
+            _ => McpPermissionLevels.Read,
+        };
+        return new AgentAuthorityCheck(started with { PermissionLevel = Lower(started.PermissionLevel, level) });
     }
 
     private static string Lower(string a, string b)

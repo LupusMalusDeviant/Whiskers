@@ -208,9 +208,9 @@ public sealed class AgentSession : IAgentSession
                         continue;
                     }
 
-                    // Re-read once more right before the call: an approval wait can be long, and a key revoked meanwhile
-                    // must not ride on the approval.
-                    (live, revoked) = Live();
+                    // After an approval wait, re-read once more right before the call: the wait can be long, and a key
+                    // revoked meanwhile must not ride on the approval. Without a wait the check above is current.
+                    if (decision.Verdict == GuardrailVerdict.Confirm) (live, revoked) = Live();
                     if (revoked is not null)
                     {
                         foreach (var ev in Revoked(answered, call, revoked)) yield return ev;
