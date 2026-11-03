@@ -221,6 +221,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         StartedAt = startedAt,
         CompletedAt = null,
         Success = false,
+        ProcessInstance = Whiskers.Services.Mutations.ProcessIdentity.Current,
     };
 
     /// <summary>Records the end of a run opened by <see cref="OpenRunAsync"/>, together with the tracked task's

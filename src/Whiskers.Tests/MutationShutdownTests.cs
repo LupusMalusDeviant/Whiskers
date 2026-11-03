@@ -135,12 +135,12 @@ public sealed class MutationShutdownTests : IDisposable
 
         // A run of the current process is left alone: it is running right now.
         var notifications = new FakeNotifications();
-        Assert.Empty(await Reconciler(notifications, DateTime.UtcNow.AddHours(-1)).ReconcileAsync());
+        Assert.Empty(await Reconciler(notifications, ProcessIdentity.Current).ReconcileAsync());
         Assert.Null((await RunAsync("t1")).CompletedAt);
         Assert.Empty(notifications.Events);
 
         // The next process: the run is marked interrupted, not repeated, and an admin is told.
-        var marked = await Reconciler(notifications, DateTime.UtcNow.AddSeconds(5)).ReconcileAsync();
+        var marked = await Reconciler(notifications).ReconcileAsync();
         Assert.Contains(marked, m => m.StartsWith("scheduled task t1", StringComparison.Ordinal));
         var run = await RunAsync("t1");
         Assert.NotNull(run.CompletedAt);
@@ -154,7 +154,7 @@ public sealed class MutationShutdownTests : IDisposable
         Assert.Contains("t1", note.ImageInfo);
         Assert.Equal(1, executor.Ran.Count);                  // nothing ran it again
 
-        Assert.Empty(await Reconciler(notifications, DateTime.UtcNow.AddSeconds(5)).ReconcileAsync());   // once
+        Assert.Empty(await Reconciler(notifications).ReconcileAsync());   // once
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public sealed class MutationShutdownTests : IDisposable
 
         var notifications = new FakeNotifications();
         var marked = await new InterruptedWorkReconciler(Scopes, after, notifications,
-            NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
+            NullLogger<InterruptedWorkReconciler>.Instance, NextProcess).ReconcileAsync();
 
         Assert.StartsWith("container.restart (started", Assert.Single(marked), StringComparison.Ordinal);
         using (var scope = _sp.CreateScope())
@@ -361,12 +361,13 @@ public sealed class MutationShutdownTests : IDisposable
         var running = scheduler.RunNowAsync("t1");
         await executor.Entered.Task.WaitAsync(Wait);
         var lastRun = (await TaskAsync("t1")).LastRun;
+        var before = DateTime.UtcNow;                           // captured before the tick: no cron boundary race
 
         await scheduler.CheckAndRunDueTasks(CancellationToken.None);
 
         var task = await TaskAsync("t1");
         Assert.Equal(lastRun, task.LastRun);                   // still the running one's start
-        Assert.True(task.NextRun > DateTime.UtcNow);           // the occurrence is skipped, not queued
+        Assert.True(task.NextRun > before);                    // the occurrence is skipped, not queued
         Assert.Single(await RunsAsync("t1"));
         executor.Release.SetResult((true, "done"));
         await running.WaitAsync(Wait);
@@ -388,7 +389,7 @@ public sealed class MutationShutdownTests : IDisposable
             await db.SaveChangesAsync();
         }
 
-        await Reconciler(new FakeNotifications(), DateTime.UtcNow).ReconcileAsync();
+        await Reconciler(new FakeNotifications()).ReconcileAsync();
 
         Assert.Equal(InterruptedWorkReconciler.InterruptedResult, (await RunAsync("t1")).Error);
         var after = await TaskAsync("t1");
@@ -420,7 +421,7 @@ public sealed class MutationShutdownTests : IDisposable
 
         var notifications = new FakeNotifications();
         var marked = await new InterruptedWorkReconciler(rig.Scopes, new DbOperationJournal(rig.Scopes), notifications,
-            NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
+            NullLogger<InterruptedWorkReconciler>.Instance, NextProcess).ReconcileAsync();
 
         Assert.Contains(marked, m => m.StartsWith("auto-update of web", StringComparison.Ordinal));
         using (var scope = rig.Scopes.CreateScope())
@@ -578,7 +579,7 @@ public sealed class MutationShutdownTests : IDisposable
             var scopes = failing.GetRequiredService<IServiceScopeFactory>();
             await Assert.ThrowsAsync<InvalidOperationException>(() => new InterruptedWorkReconciler(scopes,
                 new DbOperationJournal(scopes), new FakeNotifications(), NullLogger<InterruptedWorkReconciler>.Instance,
-                DateTime.UtcNow).ReconcileAsync());
+                NextProcess).ReconcileAsync());
         }
         using (var scope = _sp.CreateScope())
         {
@@ -588,7 +589,7 @@ public sealed class MutationShutdownTests : IDisposable
         }
 
         // The next pass does both.
-        await Reconciler(new FakeNotifications(), DateTime.UtcNow).ReconcileAsync();
+        await Reconciler(new FakeNotifications()).ReconcileAsync();
         using (var scope = _sp.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -663,7 +664,7 @@ public sealed class MutationShutdownTests : IDisposable
         var scopes = retrying.GetRequiredService<IServiceScopeFactory>();
         var notifications = new FakeNotifications();
         var marked = await new InterruptedWorkReconciler(scopes, new DbOperationJournal(scopes), notifications,
-            NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
+            NullLogger<InterruptedWorkReconciler>.Instance, NextProcess).ReconcileAsync();
 
         Assert.True(lost.Fired);
         Assert.StartsWith("container.restart (started", Assert.Single(marked), StringComparison.Ordinal);
@@ -681,10 +682,38 @@ public sealed class MutationShutdownTests : IDisposable
         using var failing = ProviderWith(new FailingReads("AuditLog"));
         var scopes = failing.GetRequiredService<IServiceScopeFactory>();
         var marked = await new InterruptedWorkReconciler(scopes, new DbOperationJournal(scopes), notifications,
-            NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
+            NullLogger<InterruptedWorkReconciler>.Instance, NextProcess).ReconcileAsync();
 
         Assert.StartsWith("container.restart (started", Assert.Single(marked), StringComparison.Ordinal);
         Assert.Contains("container.restart", Assert.Single(notifications.Events).ImageInfo);
+    }
+
+    [Fact]
+    public async Task Which_process_a_run_belongs_to_is_decided_by_identity_not_by_the_clock()
+    {
+        await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        await AddTaskAsync("t2", ScheduledTaskType.CustomCommand);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            // Running now, but the clock was set forward meanwhile: its start lies far in the past.
+            db.TaskRunHistory.Add(new TaskRunHistoryEntity
+            {
+                TaskId = "t1", TaskName = "t1", StartedAt = DateTime.UtcNow.AddDays(-3), ProcessInstance = "this-process",
+            });
+            // Cut off in the earlier process, whose clock ran ahead: its start lies in the future.
+            db.TaskRunHistory.Add(new TaskRunHistoryEntity
+            {
+                TaskId = "t2", TaskName = "t2", StartedAt = DateTime.UtcNow.AddDays(3), ProcessInstance = "earlier-process",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var marked = await Reconciler(new FakeNotifications(), "this-process").ReconcileAsync();
+
+        Assert.StartsWith("scheduled task t2", Assert.Single(marked), StringComparison.Ordinal);
+        Assert.Null((await RunAsync("t1")).CompletedAt);
+        Assert.Equal(InterruptedWorkReconciler.InterruptedResult, (await RunAsync("t2")).Error);
     }
 
     [Fact]
@@ -709,7 +738,7 @@ public sealed class MutationShutdownTests : IDisposable
             var scopes = failing.GetRequiredService<IServiceScopeFactory>();
             await Assert.ThrowsAsync<InvalidOperationException>(() => new InterruptedWorkReconciler(scopes,
                 new DbOperationJournal(scopes), notifications, NullLogger<InterruptedWorkReconciler>.Instance,
-                DateTime.UtcNow).ReconcileAsync());
+                NextProcess).ReconcileAsync());
         }
         var report = Assert.Single(notifications.Events);
         Assert.Contains("container.restart", report.ImageInfo);
@@ -717,7 +746,7 @@ public sealed class MutationShutdownTests : IDisposable
 
         // The next start marks and reports the run that stayed open — and not the operation a second time.
         var next = new FakeNotifications();
-        var marked = await Reconciler(next, DateTime.UtcNow).ReconcileAsync();
+        var marked = await Reconciler(next).ReconcileAsync();
         Assert.StartsWith("scheduled task t1", Assert.Single(marked), StringComparison.Ordinal);
         Assert.Single(next.Events);
     }
@@ -770,7 +799,7 @@ public sealed class MutationShutdownTests : IDisposable
         var scopes = retrying.GetRequiredService<IServiceScopeFactory>();
         var notifications = new FakeNotifications();
         var marked = await new InterruptedWorkReconciler(scopes, new DbOperationJournal(scopes), notifications,
-            NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
+            NullLogger<InterruptedWorkReconciler>.Instance, NextProcess).ReconcileAsync();
 
         // Each committed mark is reported once — the retried one too.
         Assert.True(lost.Fired);
@@ -805,13 +834,13 @@ public sealed class MutationShutdownTests : IDisposable
             var scopes = failing.GetRequiredService<IServiceScopeFactory>();
             await Assert.ThrowsAsync<InvalidOperationException>(() => new InterruptedWorkReconciler(scopes,
                 new DbOperationJournal(scopes), new FakeNotifications(), NullLogger<InterruptedWorkReconciler>.Instance,
-                DateTime.UtcNow).ReconcileAsync());
+                NextProcess).ReconcileAsync());
         }
         Assert.Null((await RunAsync("t1")).CompletedAt);
         Assert.Equal("before", (await TaskAsync("t1")).LastResult);
 
         var notifications = new FakeNotifications();
-        await Reconciler(notifications, DateTime.UtcNow).ReconcileAsync();
+        await Reconciler(notifications).ReconcileAsync();
         Assert.Equal(InterruptedWorkReconciler.InterruptedResult, (await RunAsync("t1")).Error);
         var repaired = await TaskAsync("t1");
         Assert.Equal(InterruptedWorkReconciler.InterruptedResult, repaired.LastResult);
@@ -986,8 +1015,11 @@ public sealed class MutationShutdownTests : IDisposable
     private SchedulerService Scheduler(ITaskExecutor executor, IShutdownDrain drain) =>
         new(Scopes, executor, null!, NullLogger<SchedulerService>.Instance, drain);
 
-    private InterruptedWorkReconciler Reconciler(FakeNotifications notifications, DateTime processStart) =>
-        new(Scopes, new DbOperationJournal(Scopes), notifications, NullLogger<InterruptedWorkReconciler>.Instance, processStart);
+    /// <summary>The identity the next process has in these tests.</summary>
+    private const string NextProcess = "next-process";
+
+    private InterruptedWorkReconciler Reconciler(FakeNotifications notifications, string processInstance = NextProcess) =>
+        new(Scopes, new DbOperationJournal(Scopes), notifications, NullLogger<InterruptedWorkReconciler>.Instance, processInstance);
 
     private static OperationClaimRequest Claim(string id) =>
         new(id, null, "container.restart", "user:admin@example.com", "hash-" + id, null, null, null);

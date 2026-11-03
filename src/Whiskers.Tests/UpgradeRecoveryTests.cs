@@ -78,13 +78,19 @@ public sealed class UpgradeRecoveryTests : IDisposable
                     metrics.Database.EnsureCreated();
                     break;
                 case Start.OneBehind:
-                case Start.OneBehindBroken:
                     metrics.Database.Migrate(metrics.Database.GetMigrations().ToList()[^2]);
                     identity.Database.Migrate();
-                    // The last migration creates AuditChain: a table already there makes it fail, every time.
-                    if (start == Start.OneBehindBroken)
-                        metrics.Database.ExecuteSqlRaw("CREATE TABLE \"AuditChain\" (\"x\" INTEGER)");
                     break;
+                case Start.OneBehindBroken:
+                {
+                    // Before the migration that creates AuditChain: a table already there makes it fail, every time. Found by
+                    // name, so a later migration does not move the failure point.
+                    var all = metrics.Database.GetMigrations().ToList();
+                    metrics.Database.Migrate(all[all.FindIndex(m => m.EndsWith("_AuditChain", StringComparison.Ordinal)) - 1]);
+                    identity.Database.Migrate();
+                    metrics.Database.ExecuteSqlRaw("CREATE TABLE \"AuditChain\" (\"x\" INTEGER)");
+                    break;
+                }
                 case Start.IdentityPending:
                     metrics.Database.Migrate();
                     break;

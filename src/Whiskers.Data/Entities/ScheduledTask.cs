@@ -47,4 +47,7 @@ public class TaskRunHistoryEntity
     public bool Success { get; set; }
     public string? Output { get; set; }
     public string? Error { get; set; }
+    /// <summary>R1-39: the Whiskers process that started this (<c>ProcessIdentity.Current</c>); null for rows written before
+    /// it existed. An open row of another process was cut off by a stop — decided by identity, never by the clock.</summary>
+    public string? ProcessInstance { get; set; }
 }

@@ -38,21 +38,22 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
     private readonly IOperationJournal _journal;
     private readonly INotificationService _notifications;
     private readonly ILogger<InterruptedWorkReconciler> _logger;
-    private readonly DateTime _processStart;
+    private readonly string _instance;
 
     public InterruptedWorkReconciler(IServiceScopeFactory scopes, IOperationJournal journal,
         INotificationService notifications, ILogger<InterruptedWorkReconciler> logger)
-        : this(scopes, journal, notifications, logger,
-            System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()) { }
+        : this(scopes, journal, notifications, logger, ProcessIdentity.Current) { }
 
+    /// <param name="processInstance">This process's identity; open rows of any other one (or of none: written before
+    /// identities existed) are interrupted. Tests pass another one to play the next process.</param>
     internal InterruptedWorkReconciler(IServiceScopeFactory scopes, IOperationJournal journal,
-        INotificationService notifications, ILogger<InterruptedWorkReconciler> logger, DateTime processStartUtc)
+        INotificationService notifications, ILogger<InterruptedWorkReconciler> logger, string processInstance)
     {
         _scopes = scopes;
         _journal = journal;
         _notifications = notifications;
         _logger = logger;
-        _processStart = processStartUtc;
+        _instance = processInstance;
     }
 
     private readonly TaskCompletionSource _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -133,7 +134,7 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
 
         // Task runs of an earlier process that never recorded their end.
         var open = await db.TaskRunHistory.AsNoTracking()
-            .Where(r => r.CompletedAt == null && r.StartedAt < _processStart)
+            .Where(r => r.CompletedAt == null && (r.ProcessInstance == null || r.ProcessInstance != _instance))
             .OrderBy(r => r.StartedAt)
             .ToListAsync(ct);
         foreach (var run in open)
@@ -167,7 +168,7 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
 
         // AutoUpdate attempts of an earlier process that never recorded their end.
         var updates = await db.UpdateHistory.AsNoTracking()
-            .Where(h => h.CompletedAt == null && h.StartedAt < _processStart)
+            .Where(h => h.CompletedAt == null && (h.ProcessInstance == null || h.ProcessInstance != _instance))
             .OrderBy(h => h.StartedAt)
             .ToListAsync(ct);
         foreach (var update in updates)

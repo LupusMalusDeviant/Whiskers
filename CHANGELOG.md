@@ -23,7 +23,8 @@ All notable changes to Whiskers are documented here. The format follows
   deployment app name is now unique (case-insensitive), also when saved on the page. Switching off one of these tools
   in Settings → MCP also stops the matching action on the Git deploy and Webhooks pages.
 
-- R1-39: **A stop lets running work finish; what a hard stop cuts off is reported, not repeated.** When Whiskers
+- R1-39: **A stop lets running work finish; what a hard stop cuts off is reported, not repeated.** (Adds the nullable
+  `ProcessInstance` column to `TaskRunHistory` and `UpdateHistory`; additive migration, applied at start.) When Whiskers
   stops, no scheduled task, AutoUpdate or AutoPatch container is started any more, and what is already running gets
   up to 30 s to finish (the host's shutdown budget is now 45 s; Compose `stop_grace_period` and Helm
   `terminationGracePeriodSeconds` are 60 s so the container is not killed first). A task that falls due during the

@@ -180,6 +180,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 Image = container.Image,
                 StartedAt = DateTime.UtcNow,
                 Error = InProgressResult,
+                ProcessInstance = Whiskers.Services.Mutations.ProcessIdentity.Current,
             };
             // R1-39: the attempt is on record (without an end) before anything is changed — a save that fails starts
             // nothing. An attempt a forced stop cuts off stays open; the next start marks it interrupted and switches
