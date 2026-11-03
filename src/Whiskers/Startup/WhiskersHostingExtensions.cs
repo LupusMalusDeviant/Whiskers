@@ -264,6 +264,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Setup.IProductionReadinessService, Whiskers.Services.Setup.ProductionReadinessService>();
         // Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)
         builder.Services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, Whiskers.Services.Auth.CurrentUserService>();
+        // R1-49: local-account lifecycle (own password, Admin add/reset/delete, recovery codes) on ASP.NET Identity.
+        builder.Services.AddScoped<Whiskers.Services.Auth.ILocalAccountService, Whiskers.Services.Auth.LocalAccountService>();
         // R1-26 (INV-09): one session check for the cookie (every request), the circuit (every 30 s) and the
         // current-user resolver (every UI mutation); the circuit's authentication state re-checks itself.
         builder.Services.AddSingleton<Whiskers.Services.Auth.ISessionValidator, Whiskers.Services.Auth.SessionValidator>();

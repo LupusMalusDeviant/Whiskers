@@ -823,10 +823,15 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `LocalAccountLifecycleTests` covers password change/reset, additional user, deletion and last-Admin protection.
-- [ ] Credential changes revoke existing sessions through R1-26.
-- [ ] Recovery requires explicit authenticated or host-level authority and never logs temporary credentials.
-- [ ] Publish the supported MFA posture; if production requires IdP MFA, state that clearly.
+- [x] `LocalAccountLifecycleTests` covers password change/reset, additional user, deletion and last-Admin protection.
+- [x] Credential changes revoke existing sessions through R1-26.
+- [x] Recovery requires explicit authenticated or host-level authority and never logs temporary credentials.
+- [x] Publish the supported MFA posture; if production requires IdP MFA, state that clearly.
+
+**Done (R1-49, INV-61):** `ILocalAccountService` (`account.password_change` read level/own account, `account.create`,
+`account.password_reset`, `account.delete` Admin), one-time recovery codes instead of temporary passwords
+(`/account/recover`), host recovery `--recover-local-account`, MFA posture "no MFA for local accounts in 1.0 — production
+uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.md`, Settings and *My account*.
 
 **Out of scope:** Mandatory local TOTP unless the maintainer selects it.
 

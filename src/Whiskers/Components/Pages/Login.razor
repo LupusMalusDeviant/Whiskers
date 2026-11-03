@@ -62,6 +62,8 @@
                         @L["Login_Button_Local"]
                     </button>
                 </form>
+                @* R1-49: a one-time recovery code (Admin reset, invitation or host recovery) sets a new password there. *@
+                <MudLink Href="account/recover" Typo="Typo.caption" Class="mt-3">@L["Login_Link_RecoveryCode"]</MudLink>
             }
             @if (!_googleEnabled && !_oidcEnabled && !_localEnabled)
             {

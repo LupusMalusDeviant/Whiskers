@@ -6,6 +6,29 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-49: **Local accounts get a complete lifecycle.** Everyone with a local account changes their own password under
+  *My account* (person icon in the top bar; the current password is required and a wrong one counts towards the
+  lockout). Admins add, reset and delete local accounts under *Settings → Local accounts*. Whiskers never hands out a
+  temporary password: adding an account and resetting a password produce a **one-time recovery code** (shown once,
+  valid 24 hours, cannot sign in by itself) with which the account's owner sets a password at `/account/recover`
+  (linked from the sign-in page); a reset removes the old password at once. Every credential change — own change,
+  reset, code redeemed, account deleted — **ends every session of the account** (new security stamp, R1-26), the
+  changer's own included. If no Admin can sign in any more, the host operator issues a code inside the running
+  container: `docker compose exec serverwatch dotnet Whiskers.dll --recover-local-account <email>` (existing accounts
+  only, printed to the terminal only, never logged; its audit row is written first and without it nothing changes).
+  The last Admin who can sign in cannot be deleted (also when two Admins race; an Admin still waiting for a code does
+  not count), and nobody deletes or resets their own account there. Deleting an account also removes its explicit
+  role. New audited capabilities `account.password_change` (read level, own account only — also allowed while the kill
+  switch is on), `account.create`, `account.password_reset`, `account.delete` (Admin); new audit actions
+  `auth.recovery_issued`, `auth.recovery_redeemed`, `auth.recovery_refused`. Passwords and codes use ASP.NET Identity's
+  hashing; no password, hash or code reaches a log or the audit trail. **MFA posture:** local accounts have **no second
+  factor** in 1.0 — for production, sign in through your identity provider (OIDC) with MFA and keep local accounts as a
+  break-glass fallback ([docs/operations/local-accounts.md](docs/operations/local-accounts.md)).
+  **Upgrade notes:** no database change (codes live in the existing Identity token table, which the SQLite →
+  PostgreSQL migrator copies) and no configuration change; existing passwords keep working. The password policy is
+  unchanged (12 characters, upper- and lower-case letter, digit and symbol; 5 failures lock for 15 minutes).
+  `Auth__LocalLogin__Enabled=false` still only hides the password form — delete local accounts you do not need.
+
 - R1-26: **Revoked sessions and keys stop acting.** Deleting a local account, changing its security stamp, removing a
   user from the whitelist or lowering their role no longer waits for the 24-hour cookie to expire. The cookie is
   re-checked on **every request** (the synthetic identities as before, the local account by id with the same email and

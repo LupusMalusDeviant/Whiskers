@@ -44,6 +44,7 @@ of the third.
 | INV-10 | Local login is protected against brute force: account lockout, per-client rate limit, and equal timing for unknown users and wrong passwords. | ✅ | Fixed in WP1 (TA-03). | `LoginHardeningTests.Five_wrong_passwords_lock_the_account_and_the_client_is_then_rate_limited` | WP1 |
 | INV-11 | First-run setup can only be completed with the one-time setup token, and the last Admin can never be removed or demoted. | ✅ | Fixed in WP1 (TA-02). | `SetupStateServiceTests`, `RoleServiceLastAdminTests` | WP1 |
 | INV-12 | With `AUTH_DISABLED`, only clients from the trusted network with an allowed `Host` and no cross-site `Origin` are served. | ✅ | Fixed in WP1 (TA-11). | `AuthDisabledAccessPolicyTests` | WP1 |
+| INV-61 | A local account's credential can be changed, reset, recovered and the account deleted only by its owner (own password, with the current one) or an Admin (other accounts), each through the Mutation Gateway and audited without the credential; recovery without a signed-in Admin needs host authority. Every credential change ends every session of the account; the last Admin who can sign in cannot be deleted or demoted; no password, hash or recovery code reaches a log, the audit trail or the database in readable form. | ✅ | R1-49 (A-11, TA-24): `ILocalAccountService` on ASP.NET Identity (its hashing, password policy — 12 characters and all character classes —, lockout and security stamp). `account.password_change` (read level, own account only, current password required, a wrong one counts towards the lockout), `account.create` / `account.password_reset` / `account.delete` (Admin, root-equivalent / destructive); the service re-checks the session (R1-26) and the role itself, past the page and the gateway. A reset, an invitation and the host recovery issue a one-time recovery code instead of a temporary password: 120 random bits, stored only as an Identity password hash with its expiry in the Identity token table (no schema change), valid 24 h and once, cannot sign in — `/account/recover` sets a new password with it, so the change on first use is enforced; issuing one removes the password and changes the stamp in one save. Host recovery: `--recover-local-account <email>` inside the running container, existing accounts only, writes its audit row before anything changes (none → no change), prints the code to the terminal only. Admin changes are serialised and re-check caller and last-Admin rule under the lock; another Admin counts only with a local password or as a Google/OIDC user seen signing in; the role store keeps refusing to demote the last explicit Admin (TA-02). Local accounts have no MFA in 1.0 — production uses the IdP with MFA (README, SECURITY.md, `docs/operations/local-accounts.md`, Settings and *My account*). Single instance (PRODUCT_CONTRACT §5.4). | `LocalAccountLifecycleTests` (incl. the wire test `On_the_running_app_a_host_recovery_signs_the_old_cookie_out_and_the_new_password_signs_in`), `LocalAccountsPanelTests`, `CapabilityCatalogTests` | R1-49 |
 
 ## 3. Authorization and scopes
 
@@ -137,8 +138,8 @@ of the third.
 
 | Status | Count |
 |---|---|
-| ✅ | 40 |
+| ✅ | 41 |
 | ⚠️ | 14 (INV-01, 08, 13, 17, 19, 20, 21, 25, 41, 43, 45, 52, 56, 57) |
 | ❌ | 6 (INV-05, 09, 18, 38, 40, 58) |
 | ❓ | 0 |
-| **Total** | **60** |
+| **Total** | **61** |
