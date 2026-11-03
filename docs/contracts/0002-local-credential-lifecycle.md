@@ -1,7 +1,7 @@
 # Contract 0002 — Local credential lifecycle (R1-49)
 
-Status: **Proposed** · 3 November 2026, implemented on branch `r1/49` for review. The maintainer accepts or amends it in
-the pull request; open decisions are listed at the end.
+Status: **Accepted** · 3 November 2026 by the maintainer, including the decisions listed at the end (implemented in
+R1-49).
 
 ## Purpose
 
@@ -62,14 +62,14 @@ UI: `/account` (*My account*), `/account/recover` (anonymous), Settings panel *L
 5. **MFA posture:** none for local accounts in 1.0; production uses the IdP (OIDC) with MFA — stated in README,
    SECURITY.md, `docs/operations/local-accounts.md`, Settings and *My account*.
 
-## Open decisions for the maintainer
+## Decisions (accepted by the maintainer, 3 November 2026)
 
-1. Recovery mechanism: CLI inside the running container (chosen) vs. a file the operator places in the data directory.
+1. Recovery mechanism: CLI inside the running container (not a file the operator places in the data directory).
 2. Password policy stays Identity's (12 + all character classes); no configuration knob in 1.0.
 3. Code lifetime 24 h for resets, invitations and host recovery alike.
 4. Self-service password change at read level is allowed while the kill switch is on.
 5. Deleting an account removes its explicit role (a federated user with the same address loses it too).
-6. No local TOTP (out of scope unless selected).
+6. No local TOTP in 1.0.
 7. Admin impersonation by design: an Admin who resets or adds an account receives its code and could redeem it
    themselves — for another Admin's address too, including a Google/OIDC Admin whose address gets a local account.
    Audited (`account.password_reset` / `account.create`); the owner notices their password stopped working.

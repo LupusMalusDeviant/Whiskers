@@ -844,9 +844,9 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 **Done (R1-49, INV-61):** `ILocalAccountService` (`account.password_change` read level/own account, `account.create`,
 `account.password_reset`, `account.delete` Admin), one-time recovery codes instead of temporary passwords
 (`/account/recover`), host recovery `--recover-local-account`, MFA posture "no MFA for local accounts in 1.0 — production
-uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.md`, Settings and *My account*.
+uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.md`, Settings and *My account*. Contract: `docs/contracts/0002-local-credential-lifecycle.md`.
 
-**Out of scope:** Mandatory local TOTP unless the maintainer selects it.
+**Out of scope:** Mandatory local TOTP — not selected (contract 0002, decision 6).
 
 ### R1-50 — Harden HTTP, cookies and proxy trust
 
