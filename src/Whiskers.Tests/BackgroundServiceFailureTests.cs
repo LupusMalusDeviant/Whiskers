@@ -233,6 +233,35 @@ public class BackgroundServiceFailureTests
     }
 
     [Fact]
+    public async Task A_listing_sent_after_a_long_queue_wait_and_then_cut_short_asked_the_server()
+    {
+        // Review round 5: the budget also reports saturation when the request was sent but ran shorter than it waited
+        // before the deadline expired. That request did reach the server, so it is the server's timeout and counts
+        // toward server_unreachable; only a request still queued at the deadline is NotAsked.
+        var (docker, circuit, budget) = Connection(sentRequest: deadline => Task.Delay(Timeout.Infinite, deadline));
+        var release = new TaskCompletionSource();
+        // The slots are held through the unhooked path, so only the listing meets the silent server.
+        var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
+            .Select(_ => docker.ExecuteGuardedAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+        var ops = Operations(docker, TimeSpan.FromMilliseconds(900));
+
+        // Queued for ~600 ms, then sent to a server that does not answer before the deadline: ran ~300 ms < waited.
+        _ = Task.Delay(600).ContinueWith(_ => release.TrySetResult());
+        var listing = await ops.ListAllContainersDetailedAsync(true, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.WhenAll(busy);
+
+        var failure = Assert.Single(listing.FailedServers);
+        Assert.False(failure.NotAsked, failure.Error);
+        Assert.StartsWith("Timed out", failure.Error);
+        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures); // the budget still saw its own queue
+        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+
+        var tracker = new Whiskers.Services.HealthMonitor.ServerReachabilityTracker(threshold: 2, coldStartThreshold: 2);
+        Assert.Empty(tracker.Evaluate(listing));
+        Assert.Equal("server_unreachable", Assert.Single(tracker.Evaluate(listing)).EventType);
+    }
+
+    [Fact]
     public async Task A_caller_cancelling_a_fleet_listing_queued_for_a_slot_stays_a_cancellation()
     {
         var (docker, circuit, budget) = Connection();
@@ -317,7 +346,8 @@ public class BackgroundServiceFailureTests
             PerServerTimeout = perServer,
         };
 
-    private static (Whiskers.Services.Docker.DockerConnectionManager Docker, ServerCircuitBreaker Circuit, ServerBudget Budget) Connection()
+    private static (Whiskers.Services.Docker.DockerConnectionManager Docker, ServerCircuitBreaker Circuit, ServerBudget Budget) Connection(
+        Func<CancellationToken, Task>? sentRequest = null)
     {
         var servers = new FakeServerConfig(Badwolf);
         var settings = new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings());
@@ -330,6 +360,7 @@ public class BackgroundServiceFailureTests
             suspension, NullLogger<Whiskers.Services.Docker.DockerConnectionManager>.Instance)
         {
             ClientSourceForTests = _ => Task.FromResult<Docker.DotNet.DockerClient>(null!),
+            SentRequestForTests = sentRequest,
         };
         return (docker, circuit, budget);
     }

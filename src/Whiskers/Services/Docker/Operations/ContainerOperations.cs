@@ -168,8 +168,10 @@ internal sealed class ContainerOperations
                 // The deadline ran out in Whiskers' own budget queue: the server was never asked. Its containers are unknown
                 // this cycle, but it must not read as an unreachable host (review round 4) — the failure is marked NotAsked
                 // so the reachability tracker neither counts nor clears an outage for it. The circuit does not count it
-                // either, the budget's SaturationFailures does.
-                catch (Budget.BudgetSaturatedException ex) when (!ct.IsCancellationRequested)
+                // either, the budget's SaturationFailures does. Only while still queued (Ran is zero): a request that was
+                // sent and then cut short by the deadline did ask the server, so it falls through to the timeout below
+                // and counts toward an outage like any other (review round 5).
+                catch (Budget.BudgetSaturatedException ex) when (!ct.IsCancellationRequested && ex.Ran == TimeSpan.Zero)
                 {
                     _logger.LogWarning("Listing containers for server {ServerName} waited {Waited:F1}s in Whiskers' own queue and was not sent — skipping (degraded view).",
                         server.Name, ex.Waited.TotalSeconds);

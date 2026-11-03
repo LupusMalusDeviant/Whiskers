@@ -5,7 +5,7 @@ namespace Whiskers.Models;
 /// <param name="ServerName">Display name, for notifications and logs.</param>
 /// <param name="Error">Why it failed (exception message or timeout).</param>
 /// <param name="NotAsked">R1-41: the server was never reached because the call ran out of time in Whiskers' own budget
-/// queue (<c>BudgetSaturatedException</c>). Its containers are just as unknown this cycle, but it says nothing about the
+/// queue before it was sent (<c>BudgetSaturatedException</c> with a zero <c>Ran</c>). Its containers are just as unknown this cycle, but it says nothing about the
 /// server, so reachability tracking neither counts nor clears an outage streak for it.</param>
 public sealed record FleetServerFailure(string ServerId, string ServerName, string Error, bool NotAsked = false);
 

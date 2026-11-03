@@ -45,6 +45,10 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// cannot load the Docker client this assembly builds). Null in the app.</summary>
     internal Func<string?, Task<DockerClient>>? ClientSourceForTests { get; init; }
 
+    /// <summary>Tests only: awaited inside the budget slot, with the call's deadline, before a retried operation reaches
+    /// the client — stands in for a server that was sent the request and does not answer. Null in the app.</summary>
+    internal Func<CancellationToken, Task>? SentRequestForTests { get; init; }
+
     private Task<DockerClient> AcquireClientAsync(string? serverId) =>
         ClientSourceForTests?.Invoke(serverId) ?? GetClientAsync(serverId);
 
@@ -202,7 +206,10 @@ public class DockerConnectionManager : IDockerConnectionManager
         var client = await AwaitClientAsync(AcquireClientAsync(serverId), callerToken, deadline);
         try
         {
-            var result = await _budget.RunAsync(budgetKey, () => operation(client), callerToken, singleFlightKey, deadline);
+            Func<Task<T>> call = SentRequestForTests is { } sent
+                ? async () => { await sent(deadline); return await operation(client); }
+                : () => operation(client);
+            var result = await _budget.RunAsync(budgetKey, call, callerToken, singleFlightKey, deadline);
             _circuit.RecordSuccess(budgetKey);
             return result;
         }
