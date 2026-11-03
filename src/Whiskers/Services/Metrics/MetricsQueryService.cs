@@ -124,7 +124,17 @@ public class MetricsQueryService : IMetricsQueryService
             var mark = marks.TryGetValue(MetricTiers.StateId(kind.Name, levels[i]), out var m) ? m : DateTime.MinValue;
             if (mark <= upperOf[i - 1]) { upperOf[i] = mark; continue; }
             var finerFirst = await kind.FirstOfAsync(db, levels[i - 1], key, ct);
-            var from = finerFirst is { } f ? MetricTiers.Ceiling(f, MetricTiers.Size(levels[i])) : upperOf[i - 1];
+            var from = upperOf[i - 1];
+            if (finerFirst is { } f)
+            {
+                // Rounded up only when this tier holds the window around it; a series first seen after the correction
+                // has none, and the finer level serves from its window start (nothing of it is lost).
+                var size = MetricTiers.Size(levels[i]);
+                var window = MetricTiers.Floor(f, size);
+                var covered = false;
+                await foreach (var _ in kind.ReadAsync(db, levels[i], key, window, window + size, ct)) { covered = true; break; }
+                from = covered ? MetricTiers.Ceiling(f, size) : window;
+            }
             upperOf[i] = from < upperOf[i - 1] ? from : upperOf[i - 1];
         }
         DateTime Upper(int i) => upperOf[i];

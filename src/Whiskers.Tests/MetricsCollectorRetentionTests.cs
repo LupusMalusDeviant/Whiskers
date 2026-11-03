@@ -63,7 +63,8 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
             new Whiskers.Services.Metrics.HostLoad.RollingBaseline(), new FlakyMonitor(okReads),
             new Microsoft.Extensions.Logging.Logger<MetricsCollectorService>(loggers),
             new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(), interval,
-            new FixedRetention(MetricRetention.Default with { RawDays = 1, AlertHistoryDays = 1 }))
+            new FixedRetention(MetricRetention.Default with { RawDays = 1, AlertHistoryDays = 1 }),
+            new MetricRollupService(new Microsoft.Extensions.Logging.Logger<MetricRollupService>(loggers)))
         {
             StartupDelay = TimeSpan.Zero,
             StartupOffsetForTests = TimeSpan.Zero,
@@ -76,6 +77,41 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
         var deadline = DateTime.UtcNow.AddSeconds(15);
         while (!done() && DateTime.UtcNow < deadline) await Task.Delay(50);
         Assert.True(done(), "timed out; log: " + string.Join(" / ", logs.Lines));
+    }
+
+    [Fact]
+    public async Task A_clock_set_back_while_running_still_rolls_up_with_its_warning_and_still_prunes()
+    {
+        // Review round 2: the schedules were set under the clock of the previous run; set back, real time would stay
+        // below them for the whole episode — no warning, no hourly retention.
+        var t0 = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var (collector, logs, sp) = Collector(okReads: 1);
+        using (sp)
+        {
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+                for (var t = t0; t <= t0.AddHours(2); t = t.AddSeconds(30))
+                    db.ContainerMetrics.Add(new ContainerMetricEntity { ContainerId = "c1", ServerId = "local", Timestamp = t, CpuPercent = 5 });
+                await db.SaveChangesAsync();
+            }
+            var retention = MetricRetention.Default with { RawDays = 1, AlertHistoryDays = 1 };
+            await collector.MaintainAsync(t0.AddHours(2).AddMinutes(1), retention, default);   // rolled up, pruned
+
+            // The clock is set back by an hour; an alert older than its retention arrives meanwhile.
+            var setBack = t0.AddHours(1);
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+                db.AlertHistory.Add(new AlertHistoryEntity { AlertType = "high_cpu", Timestamp = setBack.AddDays(-3) });
+                await db.SaveChangesAsync();
+            }
+            await collector.MaintainAsync(setBack, retention, default);
+
+            Assert.Single(logs.Lines, l => l.Contains("ahead of the clock"));
+            using (var scope = sp.CreateScope())
+                Assert.False(scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AlertHistory.Any(), "the hourly retention ran");
+        }
     }
 
     [Fact]

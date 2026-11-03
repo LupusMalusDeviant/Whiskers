@@ -481,6 +481,8 @@ public sealed class MetricRollupTests : IDisposable
             await db.SaveChangesAsync();
             // The clock is corrected: samples since then lie behind that watermark.
             await SeedContainerAsync(db, T0.AddHours(2).AddSeconds(30), T0.AddHours(2).AddMinutes(30), _ => 33);
+            // A container first seen after the correction, mid-window: no 10-minute window of its own exists.
+            await SeedContainerAsync(db, T0.AddHours(2).AddMinutes(3), T0.AddHours(2).AddMinutes(30), _ => 21, container: "c3");
         }
 
         var now = T0.AddHours(2).AddMinutes(31);
@@ -502,6 +504,10 @@ public sealed class MetricRollupTests : IDisposable
         Assert.Equal(241 + 60, points.Sum(p => p.Samples));
         Assert.Equal(33, points.Max(p => p.Max));
         Assert.Equal(33, points[^1].Max);
+
+        // … also for a series first seen during the episode, from its very first sample (2 h 03 … 2 h 30).
+        var c3 = await Query(now).GetContainerCpuHistoryAsync("c3", "s1", TimeSpan.FromHours(24));
+        Assert.Equal(55, c3.Sum(p => p.Samples));
     }
 
     [Fact]

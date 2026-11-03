@@ -363,10 +363,17 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     /// and never holds up retention, which deletes nothing a coarser tier has not taken over anyway.</summary>
     internal async Task MaintainAsync(DateTime now, MetricRetention retention, CancellationToken ct)
     {
+        // R1-55 (review round 2): both schedules were set under the clock of the last run. A clock set back since then
+        // would hold them off for as long as it was ahead — the roll-up (and its clock warning) and the hourly
+        // retention would wait; a schedule ahead of the clock counts as due instead.
+        static bool RollupDue(DateTime now, DateTime next) =>
+            now >= next || now < next - MetricTiers.Size(MetricTiers.Minutes[0]);
+        static bool PruneDue(DateTime now, DateTime last) => now - last > TimeSpan.FromHours(1) || now < last;
+
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
 
-        if (now >= _nextRollup)
+        if (RollupDue(now, _nextRollup))
         {
             try
             {
@@ -383,7 +390,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
 
         // Pruned at most once an hour — the retention windows are days, so pruning on every 30s cycle just burns
         // ExecuteDelete round-trips for nothing.
-        if (now - _lastPrune > TimeSpan.FromHours(1))
+        if (PruneDue(now, _lastPrune))
         {
             _lastPrune = now;
             try

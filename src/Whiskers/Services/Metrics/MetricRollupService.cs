@@ -59,7 +59,7 @@ public sealed class MetricRollupService : IMetricRollupService
                     // Never past the clock either: a finer watermark ahead of it (the clock was set back) closes nothing.
                     DateTime? cut = sourceMark is { } m ? MetricTiers.Floor(m < now ? m : now, size) : null;
                     var (written, mark, pending) = cut is { } c
-                        ? await RollTierAsync(db, kind, source, tier, c, ct)
+                        ? await RollTierAsync(db, kind, source, tier, c, now, ct)
                         : (0, await MarkAsync(db, kind, tier, ct), false);
                     windows += written;
                     more |= pending;
@@ -81,7 +81,7 @@ public sealed class MetricRollupService : IMetricRollupService
     /// after windows were rolled up. The roll-up then waits until the clock passes the watermark again — it never moves a
     /// watermark back (that would rewrite committed windows); queries read the raw samples for that stretch and retention
     /// leaves the tier below such a watermark alone. Said once per episode, not every cycle.</summary>
-    private void NoteClock(MetricSeriesKind kind, DateTime? mark, DateTime cut)
+    private void NoteClock(MetricSeriesKind kind, DateTime? mark, DateTime cut, DateTime now)
     {
         lock (_clockBehind)
         {
@@ -96,7 +96,7 @@ public sealed class MetricRollupService : IMetricRollupService
         _logger?.LogWarning(
             "The {Kind} metric roll-up watermark {Watermark:o} is ahead of the clock ({Now:o}) — the host clock was set back. " +
             "Roll-up pauses until the clock passes it; charts read the raw samples meanwhile, and raw samples are not pruned " +
-            "while it lasts", kind.Name, mark, cut);
+            "while it lasts", kind.Name, mark, now);
     }
 
     /// <summary>Tests only: whether the clock-behind warning is active for a kind.</summary>
@@ -110,11 +110,11 @@ public sealed class MetricRollupService : IMetricRollupService
     }
 
     private async Task<(int Written, DateTime? Mark, bool Pending)> RollTierAsync(MetricsDbContext db, MetricSeriesKind kind,
-        int source, int tier, DateTime cut, CancellationToken ct)
+        int source, int tier, DateTime cut, DateTime now, CancellationToken ct)
     {
         var size = MetricTiers.Size(tier);
         var mark = await MarkAsync(db, kind, tier, ct);
-        if (source == 0) NoteClock(kind, mark, cut);
+        if (source == 0) NoteClock(kind, mark, cut, now);
         DateTime start;
         if (mark is { } m) start = m;
         else
