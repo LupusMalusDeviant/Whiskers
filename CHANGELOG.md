@@ -37,6 +37,9 @@ All notable changes to Whiskers are documented here. The format follows
   back up, then in one transaction delete that kind's rows of `MetricRollupStates` (`Id` starting `container/` or
   `server/`) and its tier rows (`ContainerMetricRollups` / `ServerMetricRollups`) with `WindowStart` at or after the
   current time floored to 10 minutes — the next cycle rebuilds the tiers from the raw samples (see the Metrics README).
+  A deleted window whose raw samples are already pruned is gone for good, and raw samples still stamped with the old
+  clock are merged into the rebuilt windows (their counts overlap). On PostgreSQL quote the identifiers
+  (`"ContainerMetricRollups"`, `"MetricRollupStates"`).
 
 - R1-53: **One request can be followed from the client to the audit row, and the logs can be JSON.** Every HTTP answer
   now carries an `X-Request-Id`: the client's own when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -`), else

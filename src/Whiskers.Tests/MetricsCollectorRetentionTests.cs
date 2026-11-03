@@ -18,6 +18,7 @@ namespace Whiskers.Tests;
 public sealed class MetricsCollectorRetentionTests : IDisposable
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"sw-r155-col-{Guid.NewGuid():N}.db");
+    private readonly AuditRetentionWiringTests.PruneRecorder _auditChain = new();
 
     public void Dispose()
     {
@@ -47,6 +48,7 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddOptions<MetricAlertSettings>();
+        services.AddSingleton<Whiskers.Services.AuditLog.IAuditChain>(_auditChain);   // records each audit retention run
         services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_path}"));
         services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
             new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }));
@@ -70,6 +72,12 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
             StartupOffsetForTests = TimeSpan.Zero,
         };
         return (collector, logs, sp);
+    }
+
+    private static int RollupCount(ServiceProvider sp)
+    {
+        using var scope = sp.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<MetricsDbContext>().ContainerMetricRollups.Count();
     }
 
     private static async Task WaitFor(Func<bool> done, NotificationDeliveryTests.ListLoggerProvider logs)
@@ -111,6 +119,24 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
             Assert.Single(logs.Lines, l => l.Contains("ahead of the clock"));
             using (var scope = sp.CreateScope())
                 Assert.False(scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AlertHistory.Any(), "the hourly retention ran");
+            // The daily audit retention too: once before, once after the set-back.
+            Assert.Equal([t0.AddHours(2).AddMinutes(1), setBack], _auditChain.Calls.Select(c => c.Cutoff.AddDays(c.Days)));
+
+            // Thirty seconds later: the schedules set at the set-back hold again — no second warning, no second run.
+            var rollups = RollupCount(sp);
+            using (var scope = sp.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+                db.AlertHistory.Add(new AlertHistoryEntity { AlertType = "high_cpu", Timestamp = setBack.AddDays(-3) });
+                await db.SaveChangesAsync();
+            }
+            await collector.MaintainAsync(setBack.AddSeconds(30), retention, default);
+
+            Assert.Single(logs.Lines, l => l.Contains("ahead of the clock"));
+            Assert.Equal(2, _auditChain.Calls.Count);
+            Assert.Equal(rollups, RollupCount(sp));
+            using (var scope = sp.CreateScope())
+                Assert.True(scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AlertHistory.Any(), "no second hourly retention");
         }
     }
 

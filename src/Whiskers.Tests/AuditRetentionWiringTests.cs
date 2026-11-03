@@ -96,7 +96,7 @@ public sealed class AuditRetentionWiringTests
         public IDisposable? OnChange(Action<AuditSettings, string?> listener) => null;
     }
 
-    private sealed class PruneRecorder : IAuditChain
+    internal sealed class PruneRecorder : IAuditChain
     {
         public List<(DateTime Cutoff, int Days)> Calls { get; } = [];
         public bool Fails { get; init; }

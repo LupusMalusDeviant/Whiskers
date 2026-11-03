@@ -363,9 +363,10 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     /// and never holds up retention, which deletes nothing a coarser tier has not taken over anyway.</summary>
     internal async Task MaintainAsync(DateTime now, MetricRetention retention, CancellationToken ct)
     {
-        // R1-55 (review round 2): both schedules were set under the clock of the last run. A clock set back since then
-        // would hold them off for as long as it was ahead — the roll-up (and its clock warning) and the hourly
-        // retention would wait; a schedule ahead of the clock counts as due instead.
+        // R1-55 (review rounds 2–3): all three schedules were set under the clock of the last run. A clock set back since
+        // then would hold them off for as long as it was ahead — the roll-up (and its clock warning), the hourly
+        // retention and the daily audit retention (PruneAuditIfDueAsync) would wait; a schedule ahead of the clock
+        // counts as due instead.
         static bool RollupDue(DateTime now, DateTime next) =>
             now >= next || now < next - MetricTiers.Size(MetricTiers.Minutes[0]);
         static bool PruneDue(DateTime now, DateTime last) => now - last > TimeSpan.FromHours(1) || now < last;
@@ -546,7 +547,8 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     internal static async Task<DateTime> PruneAuditIfDueAsync(IServiceProvider services, MetricsDbContext db, DateTime now,
         DateTime last, CancellationToken ct, ILogger? logger = null)
     {
-        if (now - last <= TimeSpan.FromDays(1)) return last;
+        // A last run ahead of the clock (the clock was set back) counts as due, like the metric schedules (R1-55).
+        if (now - last <= TimeSpan.FromDays(1) && now >= last) return last;
         var auditDays = services.GetService<IOptionsMonitor<AuditSettings>>()?.CurrentValue.EffectiveRetentionDays
                         ?? new AuditSettings().EffectiveRetentionDays;
         var auditCutoff = now.AddDays(-auditDays);
