@@ -101,10 +101,34 @@ public sealed class MutationScope : IDisposable
     /// each container it touches) all belong to the same execution, so any of them covers what it decided. False
     /// outside the gateway and after the scope was closed (R1-48).
     /// </summary>
-    public static bool Authorizes(string capabilityId)
+    public static bool Authorizes(string capabilityId) => Authorizes(capabilityId, serverId: null);
+
+    /// <summary>
+    /// Like <see cref="Authorizes(string)"/>, for a call that names the server it acts on (R1-48, review m1): a nested
+    /// operation that a decision only <em>composes</em> must act on the server that decision was taken for — an
+    /// <c>app.deploy</c> on server A does not pull an image on server B. A call of the decided capability itself, a call
+    /// that names no server and a decision without a server target are not matched by server (the gateway resolved the
+    /// target of the decided call itself; nothing narrower is known).
+    /// </summary>
+    public static bool Authorizes(string capabilityId, string? serverId)
     {
         for (var s = Current; s is not null; s = s._parent)
-            if (MutationCompositions.Allows(s.CapabilityId, capabilityId)) return true;
+        {
+            if (string.Equals(s.CapabilityId, capabilityId, StringComparison.Ordinal)) return true;
+            if (MutationCompositions.Allows(s.CapabilityId, capabilityId)
+                && (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(s._serverId)
+                    || string.Equals(s._serverId, serverId, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>True when an open, attached scope of this flow decided a capability whose execution is a raw host
+    /// command (<see cref="MutationCompositions.RawHostCommands"/>) — the condition for the host executor's primitive.</summary>
+    public static bool AuthorizesRawHostCommand()
+    {
+        for (var s = Current; s is not null; s = s._parent)
+            if (MutationCompositions.AllowsRawHostCommand(s.CapabilityId)) return true;
         return false;
     }
 

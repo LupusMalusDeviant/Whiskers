@@ -151,12 +151,13 @@ public class MutationScopeGuardTests
     }
 
     [Fact]
-    public async Task The_capability_pending_a_decision_is_recorded_not_refused()
+    public async Task The_whitelist_write_is_refused_like_every_other_capability()
     {
         var monitor = Production();
         var guarded = MutationScopeProxy<IProbeService>.Wrap(new ProbeService(), monitor);
 
-        Assert.Equal("saved a@x", await guarded.SaveWhitelistAsync("a@x"));
+        // R1-48: no pending exception remains (the wizard uses the narrow first-admin methods instead).
+        await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.SaveWhitelistAsync("a@x"));
         Assert.Equal("config.whitelist", Assert.Single(monitor.Snapshot()).CapabilityId);
     }
 
@@ -360,6 +361,43 @@ public class MutationScopeGuardTests
     private sealed class PlainProbe : IReadOnlyProbe
     {
         public string Read() => "plain";
+    }
+
+    [Fact]
+    public async Task A_composed_call_must_act_on_the_server_the_decision_was_taken_for()
+    {
+        // R1-48 review m1: an app.deploy decided for server A composes image.pull — on A, not on B.
+        var guarded = MutationScopeProxy<IServerProbe>.Wrap(new ServerProbe(), Production());
+        var request = new MutationRequest("app.deploy",
+            new MutationPrincipal(MutationPrincipalKind.Human, "a@x", "a@x", Whiskers.Models.McpPermissionLevels.Admin),
+            MutationSurface.Ui, new MutationTarget("host", "server-a", ServerId: "server-a"),
+            new Dictionary<string, System.Text.Json.JsonElement>(), OperationId: "op-m1");
+
+        using (MutationScope.Begin("app.deploy", "op-m1", request: request))
+        {
+            Assert.Equal("pulled x on server-a", await guarded.PullAsync("x", "server-a"));
+            Assert.Equal("pulled x on SERVER-A", await guarded.PullAsync("x", "SERVER-A"));   // ids ignore case
+            var refused = await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", "server-b"));
+            Assert.Equal("app.deploy", refused.OpenScope);
+            // A call that names no server is not matched (nothing narrower is known).
+            Assert.Equal("pulled x on ", await guarded.PullAsync("x", ""));
+        }
+
+        // The decided capability itself is the gateway's own resolved target: not matched again here.
+        var pull = request with { CapabilityId = "image.pull", OperationId = "op-m1b" };
+        using (MutationScope.Begin("image.pull", "op-m1b", request: pull))
+            Assert.Equal("pulled x on server-b", await guarded.PullAsync("x", "server-b"));
+    }
+
+    public interface IServerProbe
+    {
+        [MutatingOperation("image.pull")]
+        Task<string> PullAsync(string image, string serverId);
+    }
+
+    private sealed class ServerProbe : IServerProbe
+    {
+        public Task<string> PullAsync(string image, string serverId) => Task.FromResult($"pulled {image} on {serverId}");
     }
 }
 

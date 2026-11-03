@@ -467,8 +467,9 @@ public partial class SecretsAtRestTests : IDisposable
         await vault.SetSecretAsync(cloudRef, _cloudKey);
         await servers.AddServerAsync(new ServerConfig { Id = "hetz", Name = "Hetzner box", CloudProvider = CloudProvider.Hetzner, CloudKeyRef = cloudRef, IsDefault = true });
         // The real Hetzner provider; it is never reached, since the key cannot be read.
-        var cloud = new CloudControlService(servers, [new Whiskers.Services.Cloud.Providers.HetznerCloudProvider(null!)],
-            NullLogger<CloudControlService>.Instance, await Vault(key: null));
+        var hetzner = new Whiskers.Services.Cloud.Providers.HetznerCloudProvider(null!);
+        var cloud = new CloudControlService(servers, [hetzner],
+            NullLogger<CloudControlService>.Instance, await Vault(key: null), [hetzner]);
         // AUTH_DISABLED cookie caller (maps to admin) — only gets past the permission gate.
         var caller = new Microsoft.AspNetCore.Http.HttpContextAccessor
         {

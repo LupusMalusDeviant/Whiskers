@@ -11,7 +11,7 @@ namespace Whiskers.Tests;
 /// INV-38 / ADR-0005, R1-48: every call to a <see cref="MutatingOperationAttribute"/> method runs inside a gateway
 /// decision for that capability, or for one that composes it (<see cref="MutationCompositions"/>). The test reads the IL
 /// of every method in the Whiskers assembly and refuses every call that is not in such a context. The baseline file is
-/// gone; one call waits for a maintainer decision (<see cref="PendingDecision"/>) and nothing else is allowed.
+/// gone and nothing is allowed by list.
 ///
 /// <para>A body is in a context when it is (a) a lambda handed to a runner (<see cref="IUiMutationRunner"/>,
 /// <see cref="IAutomationMutationRunner"/>) next to a capability id literal (WP2 step 2.2/2.3); (b) part of an MCP tool
@@ -24,44 +24,26 @@ namespace Whiskers.Tests;
 /// </summary>
 public class MutationBypassArchitectureTests
 {
-    /// <summary>
-    /// The one call still outside a decision (R1-48): the first-run wizard writes the first admin to the sign-in
-    /// whitelist before anyone exists the gateway could authorize. It is protected sign-in code; how it is decided
-    /// (setup token as host-level authority) is the maintainer's call. Its capability is the only one the runtime
-    /// guard does not refuse yet (<see cref="MutationScopeMonitor.PendingCapabilities"/>). This list may only shrink.
-    /// </summary>
-    internal static readonly string[] PendingDecision =
-    [
-        "Whiskers.Services.Setup.SetupStateService -> config.whitelist",
-    ];
-
     [Fact]
     public void No_call_to_a_mutating_operation_runs_outside_a_decision_that_covers_it()
     {
         var bypasses = MutationCallScanner.FindBypasses(typeof(Program).Assembly);
 
-        var added = bypasses.Except(PendingDecision).ToList();
-        Assert.True(added.Count == 0,
-            "Calls to mutating operations outside a Mutation Gateway decision that covers them. Route them through " +
-            "IMutationGateway (a runner lambda with the capability literal), or, for a nested step of a decided " +
-            "operation, list the pair in MutationCompositions:\n  " + string.Join("\n  ", added));
-        var gone = PendingDecision.Except(bypasses).ToList();
-        Assert.True(gone.Count == 0, "No longer outside a decision — remove from PendingDecision and from " +
-                                     "MutationScopeMonitor.PendingCapabilities:\n  " + string.Join("\n  ", gone));
+        Assert.True(bypasses.Count == 0,
+            "Calls to mutating operations (or the host primitive) outside a Mutation Gateway decision that covers them. " +
+            "Route them through IMutationGateway (a runner lambda with the capability literal), or, for a nested step of a " +
+            "decided operation, list the pair in MutationCompositions:\n  " + string.Join("\n  ", bypasses));
     }
 
     [Fact]
-    public void Only_the_capabilities_still_pending_are_not_refused_at_run_time()
+    public void Every_capability_is_refused_at_run_time_outside_a_decision()
     {
-        var pending = PendingDecision.Select(p => p[(p.IndexOf(" -> ", StringComparison.Ordinal) + 4)..]).ToHashSet();
-        Assert.Equal(pending.Order(), MutationScopeMonitor.PendingCapabilities.Order());
-
+        // R1-48: no pending exception is left — the first-run wizard's writes are narrow first-admin methods.
         var monitor = new MutationScopeMonitor(Microsoft.Extensions.Logging.Abstractions.NullLogger<MutationScopeMonitor>.Instance);
         Assert.True(monitor.Enforce);
         foreach (var capability in new CapabilityCatalog().All.Select(c => c.Id))
-            Assert.Equal(!pending.Contains(capability), monitor.Enforces(capability));
+            Assert.True(monitor.Enforces(capability), capability);
     }
-
     [Fact]
     public void The_bypass_baseline_is_gone()
     {

@@ -34,8 +34,9 @@ public class CloudControlService : ICloudControlService
         _vault = vault;
         _providers = providers.ToList();
         // The registered Hetzner extension (R1-48): a provider resolved from the container is the scope guard around
-        // it, which implements only ICloudProvider, so the extension comes from its own registration.
-        _hetznerExt = hetznerExtensions?.FirstOrDefault() ?? _providers.OfType<IHetznerExtensions>().FirstOrDefault();
+        // it, which implements only ICloudProvider, so the extension comes from its own (guarded) registration — never
+        // from the provider instance itself, which would be the unguarded object.
+        _hetznerExt = hetznerExtensions?.FirstOrDefault();
         _logger = logger;
     }
 

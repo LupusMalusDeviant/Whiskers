@@ -157,6 +157,42 @@ public class RoleService : IRoleService, IInitializable
         finally { _save.Release(); }
     }
 
+    public async Task SetFirstAdminAsync(string email)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        await _save.WaitAsync();
+        try
+        {
+            UserRoleData snapshot, before;
+            _lock.EnterWriteLock();
+            try
+            {
+                // R1-48: checked and written under the same lock — of two concurrent calls, at most one creates an Admin.
+                if (_data.Roles.Any(r => r.Role == AppRole.Admin))
+                    throw new InvalidOperationException("An administrator already exists; the first-admin write is closed.");
+                before = Snapshot(_data);
+                var next = Snapshot(_data);
+                var existing = next.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                    existing.Role = AppRole.Admin;
+                else
+                    next.Roles.Add(new UserRoleEntry { Email = email, Role = AppRole.Admin });
+                _data = next;
+                snapshot = Snapshot(_data);
+            }
+            finally { _lock.ExitWriteLock(); }
+
+            try { await _store.SaveAsync(snapshot); }
+            catch
+            {
+                SetData(before);   // not persisted → not in force: the wizard stays open
+                throw;
+            }
+        }
+        finally { _save.Release(); }
+        _logger.LogInformation("First administrator set by the setup wizard");
+    }
+
     public async Task RemoveRoleAsync(string email)
     {
         await _save.WaitAsync();

@@ -124,6 +124,26 @@ public class WhitelistService : IWhitelistService, IInitializable
         _logger.LogInformation("Whitelist updated: {Count} emails, enabled={Enabled}", copy.Emails.Count, copy.Enabled);
     }
 
+    public async Task AddFirstAdminAsync(string email)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        await _save.WaitAsync();
+        try
+        {
+            // R1-48: closed for good once an administrator exists — from then on only SaveWhitelistAsync, through the gateway.
+            if (_roles.GetRoleData().Roles.Any(r => r.Role == AppRole.Admin))
+                throw new InvalidOperationException("An administrator already exists; the first-admin write is closed.");
+            var current = GetWhitelist();
+            if (current.Emails.Contains(email, StringComparer.OrdinalIgnoreCase)) return;
+            // Only the address is added; Enabled stays as it is (enabling it would lock out unlisted OIDC users).
+            var next = new WhitelistData { Enabled = current.Enabled, Emails = [.. current.Emails, email] };
+            await _store.SaveAsync(next);
+            SetCache(next);
+        }
+        finally { _save.Release(); }
+        _logger.LogInformation("Setup wizard added the first administrator to the whitelist");
+    }
+
     private void SetCache(WhitelistData data)
     {
         _lock.EnterWriteLock();

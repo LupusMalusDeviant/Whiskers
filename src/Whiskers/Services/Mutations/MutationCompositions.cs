@@ -46,7 +46,33 @@ public static class MutationCompositions
         ("workload.restart", ["container.restart"]),
         // Assessing an update pulls the candidate image (it starts and recreates nothing).
         ("image.assess_update", ["image.pull"]),
+        // Setting a DNS record replaces the records it supersedes (same name and type).
+        ("dns.record_set", ["dns.record_delete"]),
+        // A provider without a hard reset of its own (Hostinger) answers it with its restart.
+        ("cloud.hard_reset", ["cloud.reboot"]),
     ];
+
+    /// <summary>
+    /// The capabilities whose decided execution is a raw host command — the only scopes in which the host executor's
+    /// primitive (<c>IHostCommandExecutor.ExecuteMutationAsync</c>) may run (R1-48). A scope of any other capability
+    /// (a configuration save, a webhook management write) cannot run one, even though it is an open decision.
+    /// <c>MutationGatewayCoverageTests</c> holds this set to the capabilities its pinned callers run under.
+    /// </summary>
+    public static IReadOnlySet<string> RawHostCommands { get; } = new[]
+    {
+        "host.exec",                 // execute_command, scheduled custom commands
+        "host.prune",                // scheduled cleanup
+        "db.backup_delete",          // DB-backup retention (rm of old dumps)
+        "container.env_set",         // set_container_env: .env + compose up
+        "container.env_file_save",   // container page: .env save + compose up
+        "container.exec",            // container page: Artisan migrate / rollback
+        "db.query",                  // container page: SQL file import through the container's client
+        "compose.deploy",            // deploy_compose, UI compose deploys, webhook compose deploys
+        "app.deploy",                // UI App Store deploys (a compose deployment planned per container)
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>True when an execution decided as <paramref name="decided"/> may run a raw host command.</summary>
+    public static bool AllowsRawHostCommand(string decided) => RawHostCommands.Contains(decided);
 
     private static readonly FrozenDictionary<string, FrozenSet<string>> Closure = Build();
 

@@ -69,19 +69,9 @@ public sealed class MutationScopeMonitor : IMutationScopeMonitor
 
     public bool Enforce { get; }
 
-    /// <summary>
-    /// The capabilities whose undecided calls are still only recorded, not refused (R1-48). One is left:
-    /// <c>config.whitelist</c>, whose only caller outside a decision is the first-run wizard
-    /// (<c>SetupStateService.CompleteSetupAsync</c>), which writes the first admin to the sign-in whitelist before any
-    /// person exists the gateway could authorize. That path belongs to the protected sign-in code and waits for the
-    /// maintainer's decision on its authority (setup token, host-level); see <c>docs/v1/SECURITY_INVARIANTS.md</c>
-    /// INV-38. <c>MutationBypassArchitectureTests</c> keeps this set equal to what the scanner still finds, so it can
-    /// only shrink.
-    /// </summary>
-    public static IReadOnlySet<string> PendingCapabilities { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { "config.whitelist" };
-
-    public bool Enforces(string capabilityId) => Enforce && !PendingCapabilities.Contains(capabilityId);
+    /// <summary>R1-48: every capability is refused outside a decision; no capability is only recorded any more (the
+    /// first-run wizard's whitelist and role writes became narrow first-admin methods, see <c>IRoleService.SetFirstAdminAsync</c>).</summary>
+    public bool Enforces(string capabilityId) => Enforce;
 
     public void ReportOutsideScope(string capabilityId, MethodInfo method)
     {
@@ -109,7 +99,7 @@ public sealed class MutationScopeMonitor : IMutationScopeMonitor
 /// Wraps a service interface that has <see cref="MutatingOperationAttribute"/> or <see cref="MutationPrimitiveAttribute"/>
 /// methods. A marked operation runs only when an open, attached <see cref="MutationScope"/> of this flow decided that
 /// capability or one that composes it (<see cref="MutationScope.Authorizes"/>); a primitive runs only inside an open,
-/// attached scope. Every other call is passed straight through. The wrapper does not change arguments, results or
+/// attached scope of a <see cref="MutationCompositions.RawHostCommands"/> capability. Every other call is passed straight through. The wrapper does not change arguments, results or
 /// exceptions of a call it lets through.
 /// </summary>
 public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy where TService : class
@@ -149,9 +139,12 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
         // A generic method arrives constructed (SaveSectionAsync<HealthSettings>); its attribute sits on the definition.
         var marked = targetMethod.IsGenericMethod ? targetMethod.GetGenericMethodDefinition() : targetMethod;
         if (_capabilities.TryGetValue(marked, out var capability))
-            Check(capability, targetMethod, MutationScope.Authorizes(capability));
+            Check(capability, targetMethod, MutationScope.Authorizes(capability, ServerIdOf(marked, args)));
         else if (_primitives.Contains(marked))
-            Check($"{PrimitiveLabel}:{targetMethod.DeclaringType?.Name}.{targetMethod.Name}", targetMethod, MutationScope.Current is not null);
+            // A raw host command runs only inside a decision whose execution is one (MutationCompositions.RawHostCommands),
+            // never inside just any open scope (R1-48, review M1).
+            Check($"{PrimitiveLabel}:{targetMethod.DeclaringType?.Name}.{targetMethod.Name}", targetMethod,
+                MutationScope.AuthorizesRawHostCommand());
 
         try
         {
@@ -162,6 +155,18 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
             ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
             throw;   // unreachable
         }
+    }
+
+    /// <summary>The server a call names: its <c>string serverId</c> argument, when it has one (R1-48, review m1).</summary>
+    private static string? ServerIdOf(MethodInfo method, object?[]? args)
+    {
+        if (args is null) return null;
+        var parameters = method.GetParameters();
+        for (var i = 0; i < parameters.Length && i < args.Length; i++)
+            if (parameters[i].ParameterType == typeof(string)
+                && string.Equals(parameters[i].Name, "serverId", StringComparison.Ordinal))
+                return args[i] as string;
+        return null;
     }
 
     /// <summary>Refuses (enforced) or counts (report mode, tests) a call the open scope did not decide.</summary>

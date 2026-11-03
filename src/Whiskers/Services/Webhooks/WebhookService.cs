@@ -1030,7 +1030,8 @@ public class WebhookService : IWebhookService
         {
             throw Unresolved(ex.Message);   // names only containers
         }
-        var result = await _executor.ExecuteAsync(sid, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5), ct);
+        // The host primitive: it runs only inside the compose.deploy decision of this run (R1-48).
+        var result = await _executor.ExecuteMutationAsync(sid, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5), ct);
         return (result.Success, result.Success ? result.Output : result.Error);
     }
 

@@ -18,6 +18,7 @@ public sealed class FederatedSignInTests
         public bool IsEmailAllowed(string? email) => email is not null && allowed.Contains(email);
         public WhitelistData GetWhitelist() => new();
         public Task SaveWhitelistAsync(WhitelistData data) => Task.CompletedTask;
+        public Task AddFirstAdminAsync(string email) => throw new NotSupportedException();
     }
 
     private sealed class Recording : IAuthAuditLog

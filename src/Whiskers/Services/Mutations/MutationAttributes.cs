@@ -21,8 +21,8 @@ public sealed class MutatingOperationAttribute : Attribute
 
 /// <summary>
 /// Marks a raw execution primitive (R1-48): a method that runs whatever the caller hands it — a host shell command —
-/// so it has no capability of its own. It runs only inside an open Mutation Gateway scope, of whatever capability was
-/// decided; outside one the scope guard refuses it. Reads that use the same transport go through an unmarked method,
+/// so it has no capability of its own. It runs only inside an open Mutation Gateway scope whose capability's execution
+/// is a raw host command (<see cref="MutationCompositions.RawHostCommands"/>); anywhere else the scope guard refuses it. Reads that use the same transport go through an unmarked method,
 /// and <c>MutationGatewayCoverageTests</c> lists every caller of both.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, Inherited = false)]

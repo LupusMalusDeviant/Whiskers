@@ -135,6 +135,7 @@ public class AuthBootstrapTests
         public UserRoleData GetRoleData() => new();
         public Task SaveRoleDataAsync(UserRoleData data) => Task.CompletedTask;
         public Task SetRoleAsync(string email, AppRole role) => Task.CompletedTask;
+        public Task SetFirstAdminAsync(string email) => throw new NotSupportedException();
         public Task RemoveRoleAsync(string email) => Task.CompletedTask;
     }
 }

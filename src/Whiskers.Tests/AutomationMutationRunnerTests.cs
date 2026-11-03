@@ -31,6 +31,7 @@ public class AutomationMutationRunnerTests
         public Task SaveRoleDataAsync(UserRoleData data) => throw new NotSupportedException();
         public Task SetRoleAsync(string email, AppRole role) { Map[email] = role; return Task.CompletedTask; }
         public Task RemoveRoleAsync(string email) { Map.Remove(email); return Task.CompletedTask; }
+        public Task SetFirstAdminAsync(string email) => throw new NotSupportedException();
     }
 
     internal sealed class Whitelist : IWhitelistService
@@ -40,6 +41,7 @@ public class AutomationMutationRunnerTests
         public bool IsEmailAllowed(string? email) => email is not null && Allowed.Contains(email);
         public WhitelistData GetWhitelist() => throw new NotSupportedException();
         public Task SaveWhitelistAsync(WhitelistData data) => throw new NotSupportedException();
+        public Task AddFirstAdminAsync(string email) => throw new NotSupportedException();
     }
 
     internal sealed class Keys : IMcpPermissionService

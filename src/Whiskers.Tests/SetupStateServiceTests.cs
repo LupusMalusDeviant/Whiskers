@@ -50,9 +50,110 @@ public sealed class SetupStateServiceTests : IDisposable
         return sp;
     }
 
+    private readonly McpCallOutcomeTests.RecordingAuditLog _audit = new();
+
     private SetupStateService Service(RoleService roles, WhitelistService whitelist, IServiceScopeFactory scopes,
-        IConfiguration? config = null)
-        => new(roles, whitelist, scopes, NullLogger<SetupStateService>.Instance, Paths(), config);
+        IConfiguration? config = null, Whiskers.Services.AuditLog.IAuditLogService? audit = null)
+        => new(roles, whitelist, scopes, NullLogger<SetupStateService>.Instance, Paths(), config, audit ?? _audit);
+
+    // ---------------- first admin outside the gateway (R1-48, option a) ----------------
+
+    [Fact]
+    public async Task The_first_admin_writes_refuse_once_an_admin_exists()
+    {
+        var (roles, whitelist) = await AuthAsync();
+        await whitelist.AddFirstAdminAsync("boss@x");
+        await roles.SetFirstAdminAsync("boss@x");
+        Assert.Equal(AppRole.Admin, roles.GetRole("boss@x"));
+
+        // From now on both are closed: nothing is written, whoever calls.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetFirstAdminAsync("intruder@x"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("intruder@x"));
+        Assert.Equal(AppRole.Viewer, roles.GetRole("intruder@x"));
+        Assert.DoesNotContain("intruder@x", whitelist.GetWhitelist().Emails);
+    }
+
+    [Fact]
+    public async Task The_first_admin_writes_refuse_an_admin_that_came_from_elsewhere()
+    {
+        // C5 bootstrap or a role change made the admin: the wizard's writes are closed just the same.
+        var (roles, whitelist) = await AuthAsync();
+        await roles.SetRoleAsync("seed@x", AppRole.Admin);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetFirstAdminAsync("other@x"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("other@x"));
+        Assert.Equal(AppRole.Viewer, roles.GetRole("other@x"));
+        Assert.Empty(whitelist.GetWhitelist().Emails);
+    }
+
+    [Fact]
+    public async Task Concurrent_first_admin_writes_create_at_most_one_admin()
+    {
+        var (roles, _) = await AuthAsync();
+        var attempts = Enumerable.Range(0, 16).Select(i => Task.Run(async () =>
+        {
+            try { await roles.SetFirstAdminAsync($"user{i}@x"); return true; }
+            catch (InvalidOperationException) { return false; }
+        })).ToArray();
+        var won = await Task.WhenAll(attempts);
+
+        Assert.Equal(1, won.Count(w => w));
+        Assert.Single(roles.GetRoleData().Roles, r => r.Role == AppRole.Admin);
+    }
+
+    [Fact]
+    public async Task Two_wizard_submits_at_once_create_at_most_one_admin()
+    {
+        var (roles, whitelist) = await AuthAsync();
+        using var idp = IdentityProvider();
+        var svc = Service(roles, whitelist, idp.GetRequiredService<IServiceScopeFactory>());
+        await svc.InitializeAsync();
+        var token = Token();
+
+        var results = await Task.WhenAll(
+            Task.Run(() => svc.CompleteSetupAsync(new SetupAdminRequest { IsLocal = false, Email = "a@x", SetupToken = token })),
+            Task.Run(() => svc.CompleteSetupAsync(new SetupAdminRequest { IsLocal = false, Email = "b@x", SetupToken = token })));
+
+        Assert.Single(results, r => r.Status == SetupCompletionStatus.Success);
+        Assert.Single(roles.GetRoleData().Roles, r => r.Role == AppRole.Admin);
+        // The loser wrote nothing: neither a role nor a whitelist entry.
+        var admin = roles.GetRoleData().Roles.Single().Email;
+        Assert.Equal([admin], whitelist.GetWhitelist().Emails);
+    }
+
+    [Fact]
+    public async Task The_first_admin_is_audited_and_without_its_record_nothing_is_written()
+    {
+        var (roles, whitelist) = await AuthAsync();
+        using var idp = IdentityProvider();
+        var down = new DownAudit();
+        var refused = Service(roles, whitelist, idp.GetRequiredService<IServiceScopeFactory>(), audit: down);
+        await refused.InitializeAsync();
+
+        var res = await refused.CompleteSetupAsync(new SetupAdminRequest { IsLocal = false, Email = "boss@x", SetupToken = Token() });
+        Assert.Equal(SetupCompletionStatus.Failed, res.Status);
+        Assert.False(roles.HasAnyRoles());
+        Assert.Empty(whitelist.GetWhitelist().Emails);
+
+        var svc = Service(roles, whitelist, idp.GetRequiredService<IServiceScopeFactory>());
+        await svc.InitializeAsync();
+        var ok = await svc.CompleteSetupAsync(new SetupAdminRequest { IsLocal = false, Email = "boss@x", SetupToken = Token() });
+        Assert.Equal(SetupCompletionStatus.Success, ok.Status);
+        Assert.Contains((SetupStateService.FirstAdminAction, "kind=federated; authority=setup-token"), _audit.Entries);
+    }
+
+    private sealed class DownAudit : Whiskers.Services.AuditLog.IAuditLogService
+    {
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true) => Task.CompletedTask;
+
+        public Task<bool> TryLogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true) => Task.FromResult(false);
+
+        public Task<List<Whiskers.Models.AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0,
+            string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(new List<Whiskers.Models.AuditLogEntity>());
+
+        public Task<int> GetTotalCountAsync(string? actionFilter = null, string? targetTypeFilter = null) => Task.FromResult(0);
+    }
 
     // The generated one-time setup token, as the operator would read it from the data directory.
     private string Token() => File.ReadAllText(Paths().SetupTokenFile);

@@ -135,7 +135,7 @@ public sealed class AuthAuditBootTests
                 var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Whiskers.Services.Persistence.AppUser>>();
                 Assert.True((await users.CreateAsync(new Whiskers.Services.Persistence.AppUser { UserName = viewer, Email = viewer }, Password)).Succeeded);
             }
-            await services.GetRequiredService<IRoleService>().SetRoleAsync(viewer, AppRole.Viewer);
+            await GatewayArrange.RunAsync("config.roles", () => services.GetRequiredService<IRoleService>().SetRoleAsync(viewer, AppRole.Viewer));
             var backup = await GatewayArrange.RunAsync("selfbackup.create", () => services.GetRequiredService<IBackupService>().CreateBackupAsync("test"));
             var token = await AntiforgeryTokenAsync(client);
             Assert.Equal("/", (await LoginAsync(client, token, viewer, Password)).Headers.Location!.OriginalString);
@@ -198,7 +198,7 @@ public sealed class AuthAuditBootTests
                 var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Whiskers.Services.Persistence.AppUser>>();
                 Assert.True((await users.CreateAsync(new Whiskers.Services.Persistence.AppUser { UserName = viewer, Email = viewer }, Password)).Succeeded);
             }
-            await services.GetRequiredService<IRoleService>().SetRoleAsync(viewer, AppRole.Operator);
+            await GatewayArrange.RunAsync("config.roles", () => services.GetRequiredService<IRoleService>().SetRoleAsync(viewer, AppRole.Operator));
             var token = await AntiforgeryTokenAsync(client);
             Assert.Equal("/", (await LoginAsync(client, token, viewer, Password)).Headers.Location!.OriginalString);
 
