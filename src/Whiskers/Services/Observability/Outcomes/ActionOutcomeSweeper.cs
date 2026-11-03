@@ -48,7 +48,7 @@ public sealed class ActionOutcomeSweeper : Whiskers.Services.FleetBackgroundServ
                 if (judged.Count > 0)
                     _logger.LogInformation("Judged {Count} action check window(s)", judged.Count);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
                 success = false;
                 _logger.LogError(ex, "The action-outcome sweep failed");

@@ -39,6 +39,9 @@ public sealed class CveModule : IWhiskersModule
         // Moved verbatim from Program.cs (relocation). Registered after Core's Noop* CVE defaults (the module
         // loop runs after them), so the real services win here by last-registration.
         services.Configure<CveMonitorSettings>(config.GetSection(CveMonitorSettings.SectionName));
+        services.AddOptions<CveMonitorSettings>().ValidateInterval(s => s.CheckIntervalHours,
+            "CveMonitor:CheckIntervalHours", IntervalValidation.MinCheckHours, IntervalValidation.MaxCheckHours,
+            TimeSpan.FromHours(1));   // R1-41: also the shared EffectiveInterval<CveMonitorSettings>
         services.AddSingleton<ICveFindingsStore, CveFindingsStore>();
         services.AddSingleton<ICveAgeStore, CveAgeStore>();
         services.AddSingleton<IOsCveScanner, OsCveScanner>();

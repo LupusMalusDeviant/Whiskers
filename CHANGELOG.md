@@ -26,6 +26,49 @@ All notable changes to Whiskers are documented here. The format follows
   time; a pending release run can be cancelled by GitHub when two more tags arrive, so start it again by hand.
   Untagged per-architecture images from each run stay in the GHCR package (staged by digest).
 
+- R1-41: **A timeout inside a background loop no longer stops Whiskers.** Nine background loops (health, scheduler,
+  AutoUpdate, certificates, log alerts, log hygiene, scan supervisor, self-metrics, action outcomes) treated every
+  cancellation as "Whiskers is stopping", so a dependency's own timeout — an HTTP client timing out is a
+  cancellation too — ended the loop and, with the host's default behaviour, stopped the whole app. Now only a
+  cancellation while the host really stops ends a loop; anything else is one failed cycle, logged, and the next cycle
+  runs. The image-update check catches a failed cycle too. A loop that still dies stops the host as before, so it
+  stays visible (no global "ignore"). Loop intervals have a range: `HealthMonitor:CheckIntervalSeconds` and
+  `Metrics:CollectionIntervalSeconds` 5 s to a day, `ImageUpdate:CheckIntervalHours` and
+  `CveMonitor:CheckIntervalHours` 1 to 720 h (30 days). A positive value outside its range still starts: a warning is
+  logged and the nearest limit is used (a 2-second health check runs every 5 s, a 2000-hour image check every 720 h),
+  so a configuration that ran before keeps running. The Settings page uses the same limits, and saving a value outside
+  them is refused with a message. All four loops use the value actually in effect, and a value that becomes invalid
+  while Whiskers runs (the file edited, also to something that is not a whole number) does not stop a loop: it keeps its last valid interval and logs a warning.
+  **Breaking only for zero or a negative interval:** such a value — which made a loop spin or stopped Whiskers before —
+  now stops the start with an error naming the key. *Upgrade/recovery:* a value saved on the Settings page lives in
+  `app-settings.json` in the data directory (`WHISKERS_DATA_DIR`, by default `/app/data`, the `serverwatch-data`
+  volume of the shipped compose files). That file is the last configuration layer, so an environment variable such as
+  `HealthMonitor__CheckIntervalSeconds` does **not** override it. To recover without the UI, stop the container, edit
+  the key in that file on the volume (or remove it to get the default: 30 s health, 30 s metrics, 6 h image updates,
+  12 h CVE) and start again. `/metrics` escapes label values
+  (quotes, backslashes, line feeds — nothing else, so distinct names stay distinct) and keeps an error comment on one line, so a container, image or server name
+  can no longer break the exposition or forge a series. The AutoPatch planning, the image-update check and the
+  advisor chat's context pass their cancellation to the Docker fleet listing and the image inspect (new
+  `IDockerService` overloads), so the preview deadline, a stop and closing the chat reach them — also while they wait for a connection or a free slot —
+  and a cancelled caller is never counted against the server (the circuit breaker stays closed). The image-update check
+  stops with the host instead of finishing in the background, and changes nothing after the stop. **A stopped loop no
+  longer goes on in the background:** the health, log-alert, log-hygiene, image-update and auto-update loops used to
+  stop *waiting* for a running cycle on shutdown and leave it running, so a listing that answered afterwards could
+  still record metrics, send alerts or change state. Now the stop reaches every call such a cycle waits on — the
+  container listings (fleet-wide and per server), inspects, digest reads and log reads (including their wait for a
+  connection and a free slot), the registry, the notification delivery and its retries — the loop
+  waits for them to end, and nothing happens after the stop. A notification that a stop interrupts is not reported as
+  failed; an important one is kept for redelivery. An update whose container was already replaced is finished and
+  recorded instead of being left unobserved. The fleet listing's 8-second limit per server now also covers the wait
+  for a connection and for a free slot (before, a server whose slots were all taken could hold the listing
+  indefinitely). Running out while waiting for a slot means Whiskers itself was busy and the server was never asked:
+  it is shown as "not asked", never counted against the server's circuit breaker and never toward a
+  `server_unreachable` alert. A log read that runs out of time the same way keeps its window, so the lines are read
+  on the next cycle instead of being skipped (counted as `log_fetch_saturation` in the self-metrics). A CVE or
+  metrics interval reloaded out of range (for example `2147483647` hours) no longer breaks `/metrics`: the loop,
+  `/metrics` and the MCP CVE summary share the interval actually in use, so the staleness series also stays consistent
+  with it.
+
 - R1-42: **Values that end up on a command line can no longer pose as options, and kubeconfigs run no programs.**
   Quoting a value only protects it from the shell; a Git branch like `--upload-pack=…` or an SSH user like
   `-oProxyCommand=…` still reached git or ssh as an option. Whiskers now checks these values with one shared rule

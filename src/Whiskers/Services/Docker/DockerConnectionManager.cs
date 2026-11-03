@@ -41,6 +41,27 @@ public class DockerConnectionManager : IDockerConnectionManager
         _logger = logger;
     }
 
+    /// <summary>Tests only: where the budgeted paths take their client from instead of building one (the test project
+    /// cannot load the Docker client this assembly builds). Null in the app.</summary>
+    internal Func<string?, Task<DockerClient>>? ClientSourceForTests { get; init; }
+
+    /// <summary>Tests only: awaited inside the budget slot, with the call's deadline, before a retried operation reaches
+    /// the client — stands in for a server that was sent the request and does not answer. Null in the app.</summary>
+    internal Func<CancellationToken, Task>? SentRequestForTests { get; init; }
+
+    private Task<DockerClient> AcquireClientAsync(string? serverId) =>
+        ClientSourceForTests?.Invoke(serverId) ?? GetClientAsync(serverId);
+
+    /// <summary>R1-41: the wait for a client ends on the caller's cancellation and on the server's deadline. Building the
+    /// client is shared with every other caller of that server and is not cancelled — only this call stops waiting.</summary>
+    private static async Task<DockerClient> AwaitClientAsync(Task<DockerClient> acquiring, CancellationToken callerToken,
+        CancellationToken deadline)
+    {
+        if (!deadline.CanBeCanceled) return await acquiring.WaitAsync(callerToken);
+        using var either = CancellationTokenSource.CreateLinkedTokenSource(callerToken, deadline);
+        return await acquiring.WaitAsync(either.Token);
+    }
+
     /// <summary>
     /// Get or create a DockerClient for the given server.
     /// If serverId is null, returns the default server's client.
@@ -115,21 +136,23 @@ public class DockerConnectionManager : IDockerConnectionManager
     }
 
     /// <inheritdoc />
-    public async Task<T> ExecuteGuardedAsync<T>(string? serverId, Func<DockerClient, Task<T>> operation, string? singleFlightKey = null)
+    public async Task<T> ExecuteGuardedAsync<T>(string? serverId, Func<DockerClient, Task<T>> operation, string? singleFlightKey = null,
+        CancellationToken callerToken = default, CancellationToken deadline = default)
     {
         var budgetKey = serverId ?? _serverConfig.GetDefaultServer()?.Id ?? "local";
         _circuit.ThrowIfOpen(budgetKey);
         try
         {
-            var client = await GetClientAsync(serverId);
+            var client = await AwaitClientAsync(AcquireClientAsync(serverId), callerToken, deadline);
             try
             {
-                var result = await _budget.RunAsync(budgetKey, () => operation(client), default, singleFlightKey);
+                var result = await _budget.RunAsync(budgetKey, () => operation(client), callerToken, singleFlightKey, deadline);
                 _circuit.RecordSuccess(budgetKey);
                 return result;
             }
             catch (Exception ex) when (ex is not Budget.DuplicateRequestException
-                                       and not Budget.BudgetSaturatedException)
+                                       and not Budget.BudgetSaturatedException
+                                       && !callerToken.IsCancellationRequested)
             {
                 // A discarded duplicate is not a health signal — the server never saw it. Neither is a call that
                 // ran out of time in our own queue: blaming the host for our backlog opens circuits across the
@@ -156,7 +179,8 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// <c>DockerBudgetCoverageTests</c>, which pins the remaining list so it can only shrink. The log fetch,
     /// the call behind the 2026-08-26 incident, was moved onto <see cref="ExecuteGuardedAsync{T}"/> first.</para>
     /// </summary>
-    public async Task<T> ExecuteAsync<T>(string? serverId, Func<DockerClient, Task<T>> operation, string? singleFlightKey = null)
+    public async Task<T> ExecuteAsync<T>(string? serverId, Func<DockerClient, Task<T>> operation, string? singleFlightKey = null,
+        CancellationToken callerToken = default, CancellationToken deadline = default)
     {
         var budgetKey = serverId ?? _serverConfig.GetDefaultServer()?.Id ?? "local";
 
@@ -165,7 +189,7 @@ public class DockerConnectionManager : IDockerConnectionManager
         _circuit.ThrowIfOpen(budgetKey);
         try
         {
-            return await ExecuteWithRetryAsync(serverId, budgetKey, operation, singleFlightKey);
+            return await ExecuteWithRetryAsync(serverId, budgetKey, operation, singleFlightKey, callerToken, deadline);
         }
         finally
         {
@@ -176,14 +200,24 @@ public class DockerConnectionManager : IDockerConnectionManager
     }
 
     private async Task<T> ExecuteWithRetryAsync<T>(
-        string? serverId, string budgetKey, Func<DockerClient, Task<T>> operation, string? singleFlightKey)
+        string? serverId, string budgetKey, Func<DockerClient, Task<T>> operation, string? singleFlightKey,
+        CancellationToken callerToken, CancellationToken deadline)
     {
-        var client = await GetClientAsync(serverId);
+        var client = await AwaitClientAsync(AcquireClientAsync(serverId), callerToken, deadline);
         try
         {
-            var result = await _budget.RunAsync(budgetKey, () => operation(client), default, singleFlightKey);
+            Func<Task<T>> call = SentRequestForTests is { } sent
+                ? async () => { await sent(deadline); return await operation(client); }
+                : () => operation(client);
+            var result = await _budget.RunAsync(budgetKey, call, callerToken, singleFlightKey, deadline);
             _circuit.RecordSuccess(budgetKey);
             return result;
+        }
+        // R1-41: the caller stopped waiting (a chat closed, a preview cancelled). Nothing about the server: no retry, no
+        // circuit failure.
+        catch (Exception) when (callerToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex) when (IsConnectionFailure(ex))
         {
@@ -195,15 +229,15 @@ public class DockerConnectionManager : IDockerConnectionManager
             // Invalidate only the exact client instance this call used — a parallel caller may have
             // already rebuilt a fresh client for this server, and we must not tear that healthy one down.
             InvalidateClient(id, ifCurrent: client);
-            client = await GetClientAsync(serverId);
+            client = await AwaitClientAsync(AcquireClientAsync(serverId), callerToken, deadline);
             try
             {
                 // The retry takes a slot of its own: it is a second request the server has to serve.
-                var retried = await _budget.RunAsync(id, () => operation(client), default, singleFlightKey);
+                var retried = await _budget.RunAsync(id, () => operation(client), callerToken, singleFlightKey, deadline);
                 _circuit.RecordSuccess(id);
                 return retried;
             }
-            catch (Exception retryFailure)
+            catch (Exception retryFailure) when (!callerToken.IsCancellationRequested)
             {
                 // Only the failure AFTER a fresh tunnel counts towards the circuit. The first one is exactly
                 // the transient the retry exists for; counting both would open the circuit twice as fast as
@@ -216,10 +250,16 @@ public class DockerConnectionManager : IDockerConnectionManager
         // about the host, and must not reach the circuit below.
         catch (Budget.BudgetSaturatedException ex)
         {
-            _logger.LogWarning(
-                "Call to {Server} gave up while queued ({Waited:F1}s waiting, {Ran:F1}s running). This is " +
-                "Whiskers being the bottleneck — the server was never asked.",
-                budgetKey, ex.Waited.TotalSeconds, ex.Ran.TotalSeconds);
+            if (ex.Ran == TimeSpan.Zero)
+                _logger.LogWarning(
+                    "Call to {Server} gave up while queued ({Waited:F1}s waiting). This is Whiskers being the " +
+                    "bottleneck — the server was never asked.",
+                    budgetKey, ex.Waited.TotalSeconds);
+            else
+                _logger.LogWarning(
+                    "Call to {Server} ran out of time after a long queue ({Waited:F1}s waiting, {Ran:F1}s running at " +
+                    "the server). The request was sent; most of its time went into Whiskers' own queue.",
+                    budgetKey, ex.Waited.TotalSeconds, ex.Ran.TotalSeconds);
             throw;
         }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)

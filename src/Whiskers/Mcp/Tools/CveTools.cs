@@ -49,7 +49,9 @@ public class CveTools
         // series into the thousands — so the number there says THAT something is stale and this says WHAT.
         // Without this half, an operator sees a count above zero and has nowhere to go with it.
         var stale = Whiskers.Services.Cve.CveMetrics.StaleTargets(
-            store.GetAll(), TimeSpan.FromHours(Math.Max(1, settings.CurrentValue.CheckIntervalHours)),
+            // R1-41: the interval the CVE loop keeps, not the raw (possibly invalid, reloaded) value.
+            store.GetAll(), Whiskers.Configuration.IntervalValidation.CveCheckInterval(
+                httpContextAccessor.HttpContext?.RequestServices, settings.CurrentValue),
             DateTime.UtcNow);
         if (stale.Count > 0)
         {

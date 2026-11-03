@@ -170,7 +170,7 @@ public class AiChatService : IAiChatService
             return "AI chat is not configured. Please set an API key in Settings.";
 
         // Build context with current infrastructure state
-        var context = await BuildContextAsync();
+        var context = await BuildContextAsync(ct);
         var systemMsg = SystemPrompt.Replace("{CONTEXT}", context);
 
         // Build messages
@@ -273,11 +273,12 @@ public class AiChatService : IAiChatService
             .GetString() ?? "No response.";
     }
 
-    private async Task<string> BuildContextAsync()
+    private async Task<string> BuildContextAsync(CancellationToken ct)
     {
         try
         {
-            var containers = await _docker.ListAllContainersAsync(all: true);
+            // R1-41: the caller's cancellation (a closed chat, a stop) reaches the fleet listing.
+            var containers = await _docker.ListAllContainersAsync(true, ct);
             var running = containers.Count(c => c.State == "running");
             var stopped = containers.Count(c => c.State != "running");
             var unhealthy = containers.Count(c => c.HealthStatus == "unhealthy");
@@ -310,7 +311,7 @@ public class AiChatService : IAiChatService
                 {containerList}
                 """;
         }
-        catch
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             return "Context could not be loaded.";
         }

@@ -128,12 +128,13 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         {
             try
             {
-                // The token now reaches the Docker calls themselves, so a stop ends the in-flight fetches
-                // rather than merely abandoning them. WaitAsync stays as the backstop that bounds the cycle
-                // even if some future step forgets to honour the token.
-                await RunScanCycleAsync(stoppingToken).WaitAsync(stoppingToken);
+                // The token reaches the Docker calls themselves, so a stop ends the in-flight fetches rather than
+                // merely abandoning them. R1-41: no WaitAsync backstop any more — an abandoned cycle ran on after the
+                // stop (advancing watermarks, recording cycles, sending alerts); the cycle is owned to its end and makes
+                // no change once the stop is requested.
+                await RunScanCycleAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
                 _logger.LogError(ex, "Log monitor check failed");
             }
@@ -168,7 +169,8 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         // The fleet-wide list: ListContainersAsync() without a server id only ever returns the DEFAULT
         // server's containers, which silently limited every "all containers" rule to one host. The
         // detailed variant also reports which hosts answered — needed for the pruning below.
-        var listing = await _docker.ListAllContainersDetailedAsync(all: false);
+        var listing = await _docker.ListAllContainersDetailedAsync(all: false, ct);
+        ct.ThrowIfCancellationRequested();
         var containers = listing.Containers;
         var selfServerIds = ResolveSelfServerIds();
         var hits = new ConcurrentQueue<LogAlertHit>();
@@ -181,11 +183,12 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         await Task.WhenAll(containers
             .GroupBy(c => c.ServerId, StringComparer.OrdinalIgnoreCase)
             .Select(g => ScanServerAsync(g.ToList(), rules, compiledRegexes, selfServerIds, hits, scanEvents, ct)));
+        ct.ThrowIfCancellationRequested();
 
         // Scan-health notices first: "this container is no longer being read" is context for any alert that
         // follows, and its absence is the thing an operator must not have to infer.
         foreach (var scanEvent in scanEvents)
-            await _notifications.SendAsync(scanEvent);
+            await _notifications.SendAsync(scanEvent, ct);
 
         // Rule bookkeeping and notifications happen back here, on the cycle's own thread: MetricsDbContext
         // is not thread-safe, and the notification order shouldn't depend on which host answered first.
@@ -209,11 +212,12 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
                 ImageInfo = $"{hit.Rule.Name} · {hit.Container.Name} @ {hit.Container.ServerName} — {hit.MatchedLine}",
                 // Abuse RestartCount field for trigger count
                 RestartCount = hit.Rule.TriggerCount
-            });
+            }, ct);
 
             _logger.LogWarning("Log alert triggered: {RuleName} on {Container} ({Server}) — {Line}",
                 hit.Rule.Name, hit.Container.Name, hit.Container.ServerName, hit.MatchedLine);
         }
+        ct.ThrowIfCancellationRequested();
 
         if (!hits.IsEmpty) await db.SaveChangesAsync(ct);
 
@@ -257,7 +261,8 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
 
         foreach (var container in containers)
         {
-            if (ct.IsCancellationRequested) break;
+            // R1-41: a stop ends the scan of this server without a record — not a "cycle" that covered part of it.
+            ct.ThrowIfCancellationRequested();
 
             // Never scan the logs our own traffic writes — our own container (the self-amplifying alert
             // feedback loop) and the access-path container every Docker call passes through, whose log IS the
@@ -291,6 +296,7 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
                 var last = _lastLogCheck.TryGetValue(key, out var watermark) ? watermark : fetchedAt;
                 var since = last > floor ? last : floor;
                 var logs = await FetchLogsAsync(container, since, ct);
+                ct.ThrowIfCancellationRequested();
                 _lastLogCheck[key] = fetchedAt;
                 NoteReadable(container, key, events);
                 var lines = logs.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -335,6 +341,17 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
                     }
                 }
             }
+            // R1-41 (review round 4): the fetch timeout ran out in Whiskers' own budget queue — the request was never sent.
+            // Not the container's fault (no unreadable streak), and not a reason to give up its lines: the watermark stays,
+            // so the next cycle reads the same window (still capped by MaxLookback). Counted on its own. A fetch that was
+            // sent and then cut short (Ran above zero) is turned into a timeout in FetchLogsAsync (review round 6).
+            catch (Whiskers.Services.Docker.Budget.BudgetSaturatedException ex) when (ex.Ran == TimeSpan.Zero)
+            {
+                failed++;
+                _selfMetrics.Count("log_fetch_saturation", container.ServerId);
+                _logger.LogDebug(ex, "Log fetch for {Container} on {Server} ran out of time in Whiskers' own queue; the window is kept",
+                    container.Name, container.ServerName);
+            }
             catch (TimeoutException ex)
             {
                 failed++;
@@ -347,7 +364,8 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
                 _logger.LogDebug(ex, "Log fetch for {Container} on {Server} timed out", container.Name, container.ServerName);
                 NoteUnreadable(container, key, events);
             }
-            catch (Exception ex)
+            // The stop is not a failed read: it advances no watermark and ends the scan.
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
                 failed++;
                 // Everything else — container gone, host refused, malformed response — says nothing about the
@@ -383,7 +401,10 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
 
         try
         {
-            return await _docker.GetContainerLogsAsync(container.Id, TailLines, container.ServerId, since, fetchTimeout.Token);
+            // R1-41: the timeout is the server's deadline (it also bounds the waits for a client and a budget slot, and an
+            // expiry at the host counts against it); the stop is the caller's own and is never held against the server.
+            return await _docker.GetContainerLogsAsync(container.Id, TailLines, container.ServerId, since,
+                deadline: fetchTimeout.Token, callerToken: ct);
         }
         // Only OUR timeout is turned into a failure for this container. A cancelled shutdown token belongs to
         // the caller and must keep propagating, or a stop would look like a fleet of broken containers.
@@ -392,6 +413,16 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
             _logger.LogWarning("Log fetch for {Container} on {Server} aborted after {Timeout}s — request cancelled on the server, not just abandoned here",
                 container.Name, container.ServerName, _logFetchTimeout.TotalSeconds);
             throw new TimeoutException($"Log fetch for {container.Name} on {container.ServerName} timed out.");
+        }
+        // R1-41 (review round 6): the budget also reports saturation when the fetch waited long for a slot, was sent,
+        // and then ran out — it ran shorter than it waited. That request did reach the host, so it is the host's
+        // timeout like any other and counts toward the unreadable streak.
+        catch (Whiskers.Services.Docker.Budget.BudgetSaturatedException ex)
+            when (ex.Ran > TimeSpan.Zero && !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Log fetch for {Container} on {Server} timed out after {Ran:F1}s at the host ({Waited:F1}s queued)",
+                container.Name, container.ServerName, ex.Ran.TotalSeconds, ex.Waited.TotalSeconds);
+            throw new TimeoutException($"Log fetch for {container.Name} on {container.ServerName} timed out.", ex);
         }
     }
 

@@ -66,8 +66,19 @@ public class CompositeNotificationService : INotificationService
         _logger = logger;
     }
 
-    public async Task SendAsync(NotificationEvent evt)
+    public Task SendAsync(NotificationEvent evt) => SendAsync(evt, CancellationToken.None);
+
+    /// <summary>R1-41: <paramref name="ct"/> (a producer stopped by the host) ends the attempts and retries of every
+    /// channel, and they are awaited: when this throws its <see cref="OperationCanceledException"/>, no channel delivery of
+    /// this event runs on. A delivery the stop interrupted is not a failed one; a critical event it interrupted is kept for
+    /// redelivery, as a failed one would be (R1-40), so the stop cannot lose it. The in-app feed entry and the
+    /// <c>AlertHistory</c> row are written before the channels run (a stop already requested ends the send before them; the
+    /// history write observes the token). The AI-trigger dispatch takes no token: it returns at once and the runs it starts
+    /// are bounded on their own (INV-40), so they can outlive the stop.</summary>
+    public async Task SendAsync(NotificationEvent evt, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         // Per-container mute/prefs are enforced HERE, for every producer. They used to be checked only by
         // the container health monitor, so a muted container still sent log alerts, CVE findings, image
         // updates and metric alarms — the mute switch silenced barely a third of what it promised.
@@ -88,17 +99,18 @@ public class CompositeNotificationService : INotificationService
 
         // Always record in the in-app feed (no external channel needed).
         try { _inApp.Add(evt); } catch (Exception ex) { _logger.LogWarning(ex, "In-app notification failed"); }
-        await PersistHistoryAsync(evt);
+        await PersistHistoryAsync(evt, ct);
 
         // Each channel its own copy: what one records about its delivery (the e-mail recipients reached) is kept with
-        // its own outbox entry only.
-        var tasks = _channels.Select(c => DeliverAsync(c, evt.Copy())).ToList();
+        // its own outbox entry only. The producer's stop (R1-41) reaches every channel's attempts and retries.
+        var tasks = _channels.Select(c => DeliverAsync(c, evt.Copy(), ct)).ToList();
         // AI-trigger dispatch runs alongside the channels; lazily resolved to avoid a DI cycle. Once, never retried:
         // a second dispatch would start the triggers a second time. Its wait is bounded; the dispatch itself bounds
         // its runs (INV-40).
         tasks.Add(DispatchTriggersAsync(evt));
 
         await Task.WhenAll(tasks);
+        ct.ThrowIfCancellationRequested();
     }
 
     public async Task SendTestAsync()
@@ -132,10 +144,12 @@ public class CompositeNotificationService : INotificationService
     /// in-memory feed. The table existed from the first migration but nothing ever wrote to it, so every
     /// "what fired last week, and on which host?" question was unanswerable. Retention is handled by the
     /// metrics collector's prune. Never let a history write break the actual notification.</summary>
-    private async Task PersistHistoryAsync(NotificationEvent evt)
+    private async Task PersistHistoryAsync(NotificationEvent evt, CancellationToken ct)
     {
         // Bounded like a channel attempt: a stalled database must not hold the monitoring cycle that sends the event.
-        using var deadline = new CancellationTokenSource(_attemptTimeout);
+        // The producer's stop (R1-41) ends it as well, and that is not logged as a failed write.
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_attemptTimeout);
         try
         {
             using var scope = _sp.CreateScope();
@@ -163,7 +177,7 @@ public class CompositeNotificationService : INotificationService
 
             await db.SaveChangesAsync(deadline.Token).WaitAsync(deadline.Token);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogWarning(ex, "Persisting alert history failed for {EventType}", evt.EventType);
         }
@@ -182,11 +196,31 @@ public class CompositeNotificationService : INotificationService
     /// <summary>One channel: <see cref="MaxAttempts"/> attempts, each within its deadline. A failure the retries could not
     /// overcome is logged and counted with the channel name and the redacted reason only — never the payload, a URL or
     /// a token — and a critical event goes to the outbox. Never throws: a broken channel cannot stop a monitoring loop.</summary>
-    private async Task DeliverAsync(INotificationChannel channel, NotificationEvent evt)
+    private async Task DeliverAsync(INotificationChannel channel, NotificationEvent evt, CancellationToken ct)
     {
         var (ok, last) = await NotificationRetry.TrySendAsync(t => channel.DeliverAsync(evt, t), MaxAttempts,
-            _attemptTimeout, _backoff);
+            _attemptTimeout, _backoff, ct);
         if (ok) return;
+
+        if (ct.IsCancellationRequested)
+        {
+            // R1-41: the producer was stopped, the channel did not fail. Nothing is counted or reported as a failure; a
+            // critical event goes to the outbox so the stop does not lose it, and is redelivered after the restart.
+            if (IsCritical(evt) && _outbox is not null)
+            {
+                try
+                {
+                    await _outbox.AddAsync(channel.Name, evt, new OperationCanceledException("The delivery was interrupted by a stop."), DateTime.UtcNow);
+                    _logger.LogInformation("Notification {EventType} to {Provider} interrupted by a stop; kept for redelivery", evt.EventType, channel.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("Notification {EventType} to {Provider} could not be kept for redelivery ({Error})",
+                        evt.EventType, channel.Name, NotificationOutbox.Describe(ex));
+                }
+            }
+            return;
+        }
 
         var failure = last ?? new InvalidOperationException("The delivery failed.");
         var critical = IsCritical(evt) && _outbox is not null;

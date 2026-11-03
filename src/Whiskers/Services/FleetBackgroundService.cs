@@ -40,7 +40,7 @@ public abstract class FleetBackgroundService : BackgroundService
         // budget at once, calls timed out waiting, and every server's circuit opened within four seconds —
         // followed by a paused/resumed notification per server. Six deploys in a day made that the loudest
         // thing in the notification list. The work is identical either way; only the pile-up was avoidable.
-        var offset = StartupOffset(GetType());
+        var offset = StartupOffsetForTests ?? StartupOffset(GetType());
         if (offset > TimeSpan.Zero)
         {
             try { await Task.Delay(offset, stoppingToken); }
@@ -49,6 +49,10 @@ public abstract class FleetBackgroundService : BackgroundService
 
         await RunAsync(stoppingToken);
     }
+
+    /// <summary>Tests only: replaces the startup offset (null in the app), so a test of the hosted loop does not wait up
+    /// to <see cref="StartupSpread"/> for its first cycle.</summary>
+    internal TimeSpan? StartupOffsetForTests { get; init; }
 
     /// <summary>
     /// A stable per-loop startup offset inside <see cref="StartupSpread"/>.
@@ -73,4 +77,15 @@ public abstract class FleetBackgroundService : BackgroundService
 
     /// <summary>The loop body, exactly as <c>ExecuteAsync</c> would have been written.</summary>
     protected abstract Task RunAsync(CancellationToken stoppingToken);
+
+    /// <summary>
+    /// R1-41 (TA-52): whether <paramref name="ex"/> is the host stopping this loop — a cancellation while
+    /// <paramref name="stoppingToken"/> is cancelled. Only that ends a loop. Every other failure, also a dependency's own
+    /// timeout or cancellation (an <c>HttpClient</c> timeout is a <see cref="TaskCanceledException"/>, a linked deadline
+    /// an <see cref="OperationCanceledException"/>), is a failed cycle: logged, recorded, and the next cycle runs. A loop
+    /// catches with <c>catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))</c>; <c>BackgroundServiceFailureTests</c>
+    /// holds every loop to it.
+    /// </summary>
+    protected internal static bool IsHostStopping(Exception ex, CancellationToken stoppingToken) =>
+        ex is OperationCanceledException && stoppingToken.IsCancellationRequested;
 }

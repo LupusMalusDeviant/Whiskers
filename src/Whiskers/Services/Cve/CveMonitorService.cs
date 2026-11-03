@@ -23,6 +23,10 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
     private readonly ICveFindingsStore _store;
     private readonly IOptionsMonitor<CveMonitorSettings> _settings;
     private readonly ILogger<CveMonitorService> _logger;
+    // R1-41: a reload with an out-of-range interval keeps the last valid one instead of throwing in the loop. The value is
+    // the shared EffectiveInterval — the one /metrics and the MCP summary judge staleness by.
+    private readonly EffectiveInterval<CveMonitorSettings> _interval;
+    private int IntervalHours() => _interval.Value;
     private readonly Whiskers.Services.Observability.SelfMetrics.ISelfMetrics _selfMetrics;
 
     // C8: the scan-cycle collaborators are injected directly instead of being pulled from a per-cycle
@@ -50,11 +54,13 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
         INotificationService notification,
         ICveAgeStore ageStore,
         IHubContext<ContainerHub> hub,
-        Whiskers.Services.Metrics.IMetricsSource metricsSource)
+        Whiskers.Services.Metrics.IMetricsSource metricsSource,
+        EffectiveInterval<CveMonitorSettings>? interval = null)
     {
         _store = store;
         _settings = settings;
         _logger = logger;
+        _interval = interval ?? IntervalValidation.CveCheck(settings, logger);
         _selfMetrics = selfMetrics;
         _serverConfig = serverConfig;
         _docker = docker;
@@ -83,22 +89,22 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                 {
                     // Scan ONLY when actually due — never on every restart. Persisted results from a
                     // previous run are kept until the interval elapses (or a manual scan is triggered).
-                    var interval = TimeSpan.FromHours(Math.Max(1, _settings.CurrentValue.CheckIntervalHours));
+                    var interval = TimeSpan.FromHours(IntervalHours());
                     if (_store.LastScanAt is { } last && DateTime.UtcNow - last < interval)
                         _logger.LogInformation("CVE scan not due yet (last {Last:u}, every {H}h) — using persisted results",
-                            last, _settings.CurrentValue.CheckIntervalHours);
+                            last, interval.TotalHours);
                     else
                         await RunOneCycleAsync(ct);
                 }
             }
-            catch (OperationCanceledException) { /* shutdown */ }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "CVE monitor cycle failed");
                 cycleFailed = true;
             }
 
-            var iv = TimeSpan.FromHours(Math.Max(1, _settings.CurrentValue.CheckIntervalHours));
+            var iv = TimeSpan.FromHours(IntervalHours());
             TimeSpan wait;
             if (cycleFailed)
                 // After a failure, retry soon instead of waiting the full interval.
@@ -328,7 +334,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                 _selfMetrics.RecordCycle(
                     Whiskers.Services.Observability.SelfMetrics.SelfMetricsFleetExtensions.Loops.Cve,
                     server.Id, DateTime.UtcNow - scanStartedAt, success: true,
-                    interval: TimeSpan.FromHours(Math.Max(1, settings.CheckIntervalHours)));
+                    interval: _interval.Interval);
         }
         finally
         {
