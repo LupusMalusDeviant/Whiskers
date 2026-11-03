@@ -2,6 +2,10 @@
 # Dependabot PRs safely mergeable — without it nothing validated dependency bumps.
 # ubuntu-latest ships Docker, so the Testcontainers-based PostgresSmokeTests run for real here
 # (they are skipped-by-failure on dev boxes without Docker Desktop).
+#
+# R1-45: the release workflow calls this file (`workflow_call`) with the tag commit as `ref`, so a release is
+# only published after exactly this suite passed on the commit it ships. Every action is pinned to a full
+# commit SHA (the comment names the release); Dependabot keeps the pins current.
 name: ci
 
 on:
@@ -9,18 +13,28 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to build and test (the release workflow passes the tag commit). Empty = the event's ref."
+        required: false
+        type: string
+        default: ""
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.x"
 

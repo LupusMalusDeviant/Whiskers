@@ -304,7 +304,7 @@ with it. The full design, PKI (step-ca), onboarding flow and trade-offs are in
 
 Every published release image is, from **v0.12.1** on:
 
-- **scanned before it ships** — the release pipeline builds the image, runs a Trivy scan, and **fails the whole run on any CRITICAL** so a vulnerable image is never pushed;
+- **scanned before it ships** — the release pipeline builds the image, runs a Trivy scan, and **fails the whole run on any CRITICAL** so a vulnerable image is never pushed; from the release after 0.15.0 on, both architectures (amd64 and arm64) are scanned by digest and exactly the scanned digests are published, only after the full test suite passed on the tag commit, and a published version is never replaced;
 - **built multi-arch with provenance + an SBOM attestation** (SLSA provenance and an SPDX SBOM attached to the image, and a standalone SBOM as a release asset);
 - **keyless-signed with [cosign](https://github.com/sigstore/cosign)** (Sigstore) — the signature is bound to the release workflow's GitHub OIDC identity and recorded in the public Rekor transparency log; no signing key is held by anyone.
 

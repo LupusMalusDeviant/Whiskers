@@ -13,7 +13,21 @@ Deployment assets — the pieces used to install and run Whiskers, separate from
 
 ## Release pipeline
 
-The image and the release assets are produced by [`.github/workflows/release.yml`](../.github/workflows/release.yml) on every `v*` tag: multi-arch build (`linux/amd64`, `linux/arm64`), a **Trivy scan gate that runs before anything is published** (a CRITICAL fails the whole run), push to GHCR (`latest`, `X.Y.Z`, `X.Y`), then a GitHub Release with an SBOM, checksums, and image-pinned `docker-compose.yml` / `docker-compose.hardened.yml` / `install.sh` attached.
+The image and the release assets are produced by [`.github/workflows/release.yml`](../.github/workflows/release.yml) on every `vX.Y.Z` tag (R1-45):
+
+1. **prepare** — the tag must be `vX.Y.Z` and match `<Version>` in `src/Whiskers/Whiskers.csproj` and `version`/`appVersion` in `deploy/helm/whiskers/Chart.yaml`. Every later job checks out exactly the tag commit. The run fails early if that version is already published.
+2. **test** — the full CI suite ([`ci.yml`](../.github/workflows/ci.yml), called via `workflow_call`) on the tag commit.
+3. **build** — `linux/amd64` and `linux/arm64` are built once each and staged in GHCR **by digest only** (no tag).
+4. **scan** — Trivy scans both staged digests; any CRITICAL fails the run. Findings without a fix are not skipped: an exception must be recorded in [`.trivyignore`](../.trivyignore) with a reason and an expiry date.
+5. **publish-image** — the two scanned digests are merged into one multi-arch index tagged `X.Y.Z`, verified to contain exactly the scanned digests, and cosign-signed (keyless). Then the moving tags `X.Y` and — only for the highest release — `latest` are pointed at it. Nothing is rebuilt.
+6. **publish-chart** — the Helm chart `X.Y.Z` to `oci://ghcr.io/lupusmalusdeviant/charts/whiskers`.
+7. **github-release** — SBOM, checksums, and image-pinned `docker-compose.yml` / `docker-compose.hardened.yml` / `install.sh`.
+
+**Published versions are immutable.** Before each push, [`.github/scripts/assert-not-published.sh`](../.github/scripts/assert-not-published.sh) checks that the `X.Y.Z` image, chart version or GitHub release does not exist yet and fails the run if it does (or if it cannot tell). To fix a bad release, bump the version and tag again. `X.Y` and `latest` are moving tags by design.
+
+**Manual runs** (Actions → release → Run workflow) must be started **from the tag** ("Use workflow from" = `vX.Y.Z`) with the same tag as input; a run from a branch is refused. This keeps the label, the code and the cosign signing identity (`release.yml@refs/tags/vX.Y.Z`) the same. Use it to finish a tag whose release run failed before publishing.
+
+All actions in the workflows are pinned to full commit SHAs (Dependabot updates them); each job holds only the permissions it needs.
 
 See the [README quick start](../README.md#quick-start) for the user-facing install paths.
 
