@@ -19,7 +19,7 @@ namespace Whiskers.Tests;
 /// <summary>
 /// R1-41 (TA-52, F-15): a background loop ends only when the host stops it. A dependency's own timeout or cancellation
 /// (an <c>HttpClient</c> timeout is a <see cref="TaskCanceledException"/>) is a failed cycle — logged, and the next cycle
-/// runs. Before, eight loops caught with <c>when (ex is not OperationCanceledException)</c>: such a timeout escaped the
+/// runs. Before, nine loops caught with <c>when (ex is not OperationCanceledException)</c>: such a timeout escaped the
 /// loop, ended it for good, and with the host's default behaviour stopped Whiskers. A loop interval is checked at start.
 /// </summary>
 public class BackgroundServiceFailureTests
@@ -243,10 +243,11 @@ public class BackgroundServiceFailureTests
         // The slots are held through the unhooked path, so only the listing meets the silent server.
         var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
             .Select(_ => docker.ExecuteGuardedAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
-        var ops = Operations(docker, TimeSpan.FromMilliseconds(900));
+        var ops = Operations(docker, TimeSpan.FromSeconds(3));
 
-        // Queued for ~600 ms, then sent to a server that does not answer before the deadline: ran ~300 ms < waited.
-        _ = Task.Delay(600).ContinueWith(_ => release.TrySetResult());
+        // Queued for ~2 s, then sent to a server that does not answer before the deadline: ran ~1 s < waited. Wide margins
+        // so a slow CI runner cannot leave the listing still queued at the deadline.
+        _ = Task.Delay(2000).ContinueWith(_ => release.TrySetResult());
         var listing = await ops.ListAllContainersDetailedAsync(true, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
         await Task.WhenAll(busy);
 

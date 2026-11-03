@@ -343,8 +343,9 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
             }
             // R1-41 (review round 4): the fetch timeout ran out in Whiskers' own budget queue — the request was never sent.
             // Not the container's fault (no unreadable streak), and not a reason to give up its lines: the watermark stays,
-            // so the next cycle reads the same window (still capped by MaxLookback). Counted on its own.
-            catch (Whiskers.Services.Docker.Budget.BudgetSaturatedException ex)
+            // so the next cycle reads the same window (still capped by MaxLookback). Counted on its own. A fetch that was
+            // sent and then cut short (Ran above zero) is turned into a timeout in FetchLogsAsync (review round 6).
+            catch (Whiskers.Services.Docker.Budget.BudgetSaturatedException ex) when (ex.Ran == TimeSpan.Zero)
             {
                 failed++;
                 _selfMetrics.Count("log_fetch_saturation", container.ServerId);
@@ -412,6 +413,16 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
             _logger.LogWarning("Log fetch for {Container} on {Server} aborted after {Timeout}s — request cancelled on the server, not just abandoned here",
                 container.Name, container.ServerName, _logFetchTimeout.TotalSeconds);
             throw new TimeoutException($"Log fetch for {container.Name} on {container.ServerName} timed out.");
+        }
+        // R1-41 (review round 6): the budget also reports saturation when the fetch waited long for a slot, was sent,
+        // and then ran out — it ran shorter than it waited. That request did reach the host, so it is the host's
+        // timeout like any other and counts toward the unreadable streak.
+        catch (Whiskers.Services.Docker.Budget.BudgetSaturatedException ex)
+            when (ex.Ran > TimeSpan.Zero && !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Log fetch for {Container} on {Server} timed out after {Ran:F1}s at the host ({Waited:F1}s queued)",
+                container.Name, container.ServerName, ex.Ran.TotalSeconds, ex.Waited.TotalSeconds);
+            throw new TimeoutException($"Log fetch for {container.Name} on {container.ServerName} timed out.", ex);
         }
     }
 

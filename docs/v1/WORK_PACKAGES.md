@@ -696,6 +696,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] Review round 3: only zero or a negative interval refuses the start (a positive value out of range is clamped with a warning; image-update/CVE range 1–720 h), with an upgrade/recovery note in the CHANGELOG; a refused save is a localised message; the per-server listing and the log read keep the stop (caller token) apart from the server deadline; the ratchet requires the recovering catch on the outermost loop.
 - [x] Review round 4: a fleet listing that runs out in Whiskers' own budget queue is `NotAsked` and never counts toward `server_unreachable`; a log fetch that runs out there keeps its window (`log_fetch_saturation`); a `RunAsync` without a loop passes the ratchet only for an allow-listed one-shot service; one warning per out-of-range interval instead of two.
 - [x] Review round 5: only a listing that ran out while still queued is `NotAsked`; one that was sent and then cut short by the deadline asked the server and counts as its timeout.
+- [x] Review round 6: the same rule for the log read — a fetch that was sent and then cut short is the host's timeout (window moves on, unreadable streak grows); only one still queued keeps its window. Saturation log wording follows `Ran`; F-16 notes the AutoUpdate part as resolved.
 
 **Out of scope:** Full tracing infrastructure.
 

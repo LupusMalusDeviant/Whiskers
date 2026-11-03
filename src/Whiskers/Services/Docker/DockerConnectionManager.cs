@@ -250,10 +250,16 @@ public class DockerConnectionManager : IDockerConnectionManager
         // about the host, and must not reach the circuit below.
         catch (Budget.BudgetSaturatedException ex)
         {
-            _logger.LogWarning(
-                "Call to {Server} gave up while queued ({Waited:F1}s waiting, {Ran:F1}s running). This is " +
-                "Whiskers being the bottleneck — the server was never asked.",
-                budgetKey, ex.Waited.TotalSeconds, ex.Ran.TotalSeconds);
+            if (ex.Ran == TimeSpan.Zero)
+                _logger.LogWarning(
+                    "Call to {Server} gave up while queued ({Waited:F1}s waiting). This is Whiskers being the " +
+                    "bottleneck — the server was never asked.",
+                    budgetKey, ex.Waited.TotalSeconds);
+            else
+                _logger.LogWarning(
+                    "Call to {Server} ran out of time after a long queue ({Waited:F1}s waiting, {Ran:F1}s running at " +
+                    "the server). The request was sent; most of its time went into Whiskers' own queue.",
+                    budgetKey, ex.Waited.TotalSeconds, ex.Ran.TotalSeconds);
             throw;
         }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)

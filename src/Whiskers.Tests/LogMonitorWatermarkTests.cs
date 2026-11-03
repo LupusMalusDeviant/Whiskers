@@ -77,6 +77,34 @@ public sealed class LogMonitorWatermarkTests : IDisposable
         Assert.DoesNotContain(notifications.Events, e => e.EventType == "log_scan_suspended");
     }
 
+    [Fact]
+    public async Task A_fetch_sent_after_a_long_queue_wait_and_then_cut_short_is_the_hosts_timeout()
+    {
+        // R1-41, review round 6: the budget reports saturation also when the fetch was sent and then ran out (it ran
+        // shorter than it waited). That request reached the host: it is a timeout like any other — the window moves on
+        // and the container's unreadable streak grows — and not a queue wait.
+        var docker = new FakeDocker(
+            new ContainerInfo { Id = "c-web", Name = "web", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+        var metrics = new Whiskers.Services.Observability.SelfMetrics.SelfMetrics();
+        var monitor = Monitor(docker, new FakeNotifications(), metrics);
+
+        await monitor.RunScanCycleAsync(CancellationToken.None);          // healthy: sets the watermark
+
+        docker.FetchException = () => new Whiskers.Services.Docker.Budget.BudgetSaturatedException(
+            "local", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(3), new OperationCanceledException());
+        await monitor.RunScanCycleAsync(CancellationToken.None);
+        docker.FetchException = null;
+        await Task.Delay(20);
+        await monitor.RunScanCycleAsync(CancellationToken.None);
+
+        var calls = docker.CallsInOrder;
+        Assert.Equal(3, calls.Count);
+        Assert.True(calls[2].Since > calls[1].Since, "the cut-short fetch moved the window on, like any timeout");
+        var counters = metrics.Counters();
+        Assert.Equal(1, counters["log_fetch_timeouts"]["local"]);
+        Assert.False(counters.ContainsKey("log_fetch_saturation"));
+    }
+
     private LogMonitorService Monitor(FakeDocker docker, FakeNotifications notifications,
         Whiskers.Services.Observability.SelfMetrics.SelfMetrics? metrics = null) =>
         new(_sp.GetRequiredService<IServiceScopeFactory>(),
