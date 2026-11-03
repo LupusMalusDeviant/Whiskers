@@ -113,6 +113,9 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
                 .ToListAsync(ct);
             foreach (var op in stale)
             {
+                // The target's name is read first and is optional: once the row is marked, nothing may keep it from the
+                // report — a later start no longer sees it.
+                var target = await TargetOfAsync(db, op.AuditId, ct);
                 // Conditional on the row as read: nothing else may have finished it meanwhile.
                 var changed = await db.Operations
                     .Where(o => o.Id == op.Id && o.State == DbOperationJournal.Running && o.Instance == op.Instance)
@@ -120,9 +123,6 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
                         .SetProperty(o => o.State, DbOperationJournal.Interrupted)
                         .SetProperty(o => o.FinishedAt, now), ct);
                 if (changed == 0) continue;
-                var target = op.AuditId is { } auditId
-                    ? await db.AuditLog.AsNoTracking().Where(a => a.Id == auditId).Select(a => a.TargetName).FirstOrDefaultAsync(ct)
-                    : null;
                 marked.Add(string.IsNullOrWhiteSpace(target)
                     ? $"{op.CapabilityId} (started {op.ClaimedAt:u})"
                     : $"{op.CapabilityId} on {target} (started {op.ClaimedAt:u})");
@@ -198,6 +198,21 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
             marked.Add($"auto-update of {update.ContainerName} (started {update.StartedAt:u}; AutoUpdate switched off for it)");
         }
 
+    }
+
+    /// <summary>The audit row's target name, for the report; null when there is none or it cannot be read.</summary>
+    private async Task<string?> TargetOfAsync(MetricsDbContext db, long? auditId, CancellationToken ct)
+    {
+        if (auditId is not { } id) return null;
+        try
+        {
+            return await db.AuditLog.AsNoTracking().Where(a => a.Id == id).Select(a => a.TargetName).FirstOrDefaultAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "The target of an interrupted operation could not be read; it is reported without it");
+            return null;
+        }
     }
 
     private async Task ReportAsync(IReadOnlyList<string> marked)

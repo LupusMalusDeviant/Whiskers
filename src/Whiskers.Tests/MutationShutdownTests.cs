@@ -649,6 +649,23 @@ public sealed class MutationShutdownTests : IDisposable
     }
 
     [Fact]
+    public async Task An_operation_whose_target_cannot_be_read_is_still_marked_and_reported()
+    {
+        var before = new DbOperationJournal(Scopes);
+        Assert.Equal(OperationClaimResult.Claimed, (await before.ClaimAsync(
+            new OperationClaimRequest("op-1", null, "container.restart", "user:admin@example.com", "hash-op-1", null, null, 42))).Result);
+
+        var notifications = new FakeNotifications();
+        using var failing = ProviderWith(new FailingReads("AuditLog"));
+        var scopes = failing.GetRequiredService<IServiceScopeFactory>();
+        var marked = await new InterruptedWorkReconciler(scopes, new DbOperationJournal(scopes), notifications,
+            NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
+
+        Assert.StartsWith("container.restart (started", Assert.Single(marked), StringComparison.Ordinal);
+        Assert.Contains("container.restart", Assert.Single(notifications.Events).ImageInfo);
+    }
+
+    [Fact]
     public async Task What_was_marked_before_a_failure_is_still_reported()
     {
         var before = new DbOperationJournal(Scopes);
@@ -722,15 +739,24 @@ public sealed class MutationShutdownTests : IDisposable
             await db.SaveChangesAsync();
         }
 
+        // The first transaction commits but its answer is lost: the strategy retries it.
+        var lost = new LostCommitOnce();
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}",
-            sqlite => sqlite.ExecutionStrategy(d => new Retrying(d))));
+            sqlite => sqlite.ExecutionStrategy(d => new Retrying(d))).AddInterceptors(lost));
         using var retrying = services.BuildServiceProvider();
         var scopes = retrying.GetRequiredService<IServiceScopeFactory>();
-        var marked = await new InterruptedWorkReconciler(scopes, new DbOperationJournal(scopes), new FakeNotifications(),
+        var notifications = new FakeNotifications();
+        var marked = await new InterruptedWorkReconciler(scopes, new DbOperationJournal(scopes), notifications,
             NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
 
+        // Each committed mark is reported once — the retried one too.
+        Assert.True(lost.Fired);
         Assert.Equal(2, marked.Count);
+        Assert.Single(marked, m => m.StartsWith("scheduled task t1", StringComparison.Ordinal));
+        Assert.Single(marked, m => m.StartsWith("auto-update of web", StringComparison.Ordinal));
+        Assert.Single(notifications.Events);
+        Assert.Equal(InterruptedWorkReconciler.InterruptedResult, (await RunAsync("t1")).Error);
         Assert.Equal(InterruptedWorkReconciler.InterruptedResult, (await TaskAsync("t1")).LastResult);
         using var check = _sp.CreateScope();
         var after = check.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -843,7 +869,31 @@ public sealed class MutationShutdownTests : IDisposable
     private sealed class Retrying(Microsoft.EntityFrameworkCore.Storage.ExecutionStrategyDependencies dependencies)
         : Microsoft.EntityFrameworkCore.Storage.ExecutionStrategy(dependencies, maxRetryCount: 3, maxRetryDelay: TimeSpan.FromMilliseconds(10))
     {
-        protected override bool ShouldRetryOn(Exception exception) => false;
+        protected override bool ShouldRetryOn(Exception exception) => exception is TransientFailure;
+    }
+
+    private sealed class TransientFailure() : Exception("transient");
+
+    /// <summary>The first commit happens, but its answer is lost: the caller sees a transient failure and retries.</summary>
+    private sealed class LostCommitOnce : Microsoft.EntityFrameworkCore.Diagnostics.DbTransactionInterceptor
+    {
+        private int _done;
+        public bool Fired => Volatile.Read(ref _done) == 1;
+
+        public override Task TransactionCommittedAsync(System.Data.Common.DbTransaction transaction,
+            Microsoft.EntityFrameworkCore.Diagnostics.TransactionEndEventData eventData, CancellationToken ct = default)
+            => Interlocked.Exchange(ref _done, 1) == 0 ? throw new TransientFailure() : Task.CompletedTask;
+    }
+
+    /// <summary>Fails every read of the named table.</summary>
+    private sealed class FailingReads(string table) : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command, Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result, CancellationToken ct = default)
+            => command.CommandText.Contains($"FROM \"{table}\"", StringComparison.Ordinal)
+                ? throw new InvalidOperationException("the read failed")
+                : ValueTask.FromResult(result);
     }
 
     /// <summary>A provider on the same database with one interceptor added.</summary>
