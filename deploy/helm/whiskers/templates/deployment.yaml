@@ -23,7 +23,8 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "whiskers.serviceAccountName" . }}
-      terminationGracePeriodSeconds: 30
+      # R1-39: Whiskers drains running unattended work for up to 30 s, then stops (45 s in all).
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

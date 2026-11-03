@@ -226,6 +226,7 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                         if (sink is not null) left++;
                         continue;
                     case DbOperationJournal.Running:
+                    case DbOperationJournal.Interrupted:
                         AuditLogMutationSink.Complete(row, operationId, "Unknown", nameof(VerificationStatus.NotRun),
                             "Recovered: Whiskers stopped while it ran; whether it took effect is unknown.", null);
                         break;

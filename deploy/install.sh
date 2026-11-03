@@ -155,6 +155,8 @@ services:
       - TZ=\${TZ:-Europe/Berlin}
 ${DATA_ENV}
     restart: unless-stopped
+    # Whiskers lets running work finish for up to 30 s when it stops (45 s in all); give it that time.
+    stop_grace_period: 60s
 EOF
   # Declare the named volume only when we are using one (not a host bind path).
   if [ -z "$DATA" ]; then

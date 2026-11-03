@@ -849,6 +849,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.Property<string>("Output")
                         .HasColumnType("text");
 
+                    b.Property<string>("ProcessInstance")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -907,6 +910,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
 
                     b.Property<string>("OldImageDigest")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProcessInstance")
                         .HasColumnType("text");
 
                     b.Property<bool>("RolledBack")

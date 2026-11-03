@@ -138,7 +138,8 @@ context · C-24 `SaveMcpPermissions` has no in-method Admin check · D-12 Secret
 layer · D-13 `VAULT_KEY` env-only, no `_FILE`, no strength check · D-15 SQLite→Postgres migrator not transactional (fixed in R1-34: one transaction across metrics and Identity) ·
 E-03 nginx site-name regex allows `..`/leading `-` · E-08 VPN args concatenated into one `Arguments` string ·
 E-09 kubeconfig `exec` plugins may run on host (needs verification) · F-16 shutdown semantics of mutating background
-work · F-17 no structured logs / correlation IDs / tracing · F-19 Dependabot misses 3 of 5 projects and compose/Helm
+work (fixed in R1-39: bounded shutdown drain of scheduler/AutoUpdate/AutoPatch work, open task runs and running
+journal operations reconciled as interrupted at start, AutoPatch nightly state persisted, 60 s container grace) · F-17 no structured logs / correlation IDs / tracing · F-19 Dependabot misses 3 of 5 projects and compose/Helm
 images, no lock files, no SDK pin · F-20 Helm tailscale `:latest`, emptyDir state · F-21 Tailscale auth key in argv
 under `pid: host` · F-22 legacy AiChat client without cancellation · F-23 release Trivy gate scans amd64/CRITICAL only.
 

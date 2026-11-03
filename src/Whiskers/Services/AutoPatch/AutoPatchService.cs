@@ -46,6 +46,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     /// <summary>How long a preview started from a tool may run: a dry run pulls one image per candidate.</summary>
     public static readonly TimeSpan PreviewDeadline = TimeSpan.FromHours(2);
     private DateOnly? _lastNightlyRun;
+    private bool _nightlyLoaded;
+    private readonly IAutoPatchNightlyStore _nightly;
+    private readonly Whiskers.Services.Mutations.IShutdownDrain _drain;
 
     public AutoPatchService(
         IOptionsMonitor<AutoPatchSettings> settings,
@@ -57,9 +60,11 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         IServiceScopeFactory scopeFactory,
         IAutomationMutationRunner automation,
         IAutomationOwnerStore owners,
-        ILogger<AutoPatchService> logger)
+        ILogger<AutoPatchService> logger,
+        IAutoPatchNightlyStore? nightly = null,
+        Whiskers.Services.Mutations.IShutdownDrain? drain = null)
         : this(settings, docker, cves, updates, runner, notifications, scopeFactory, automation, owners, logger,
-            () => DateTime.UtcNow) { }
+            () => DateTime.UtcNow, nightly, drain) { }
 
     internal AutoPatchService(
         IOptionsMonitor<AutoPatchSettings> settings,
@@ -72,7 +77,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         IAutomationMutationRunner automation,
         IAutomationOwnerStore owners,
         ILogger<AutoPatchService> logger,
-        Func<DateTime> utcNow)
+        Func<DateTime> utcNow,
+        IAutoPatchNightlyStore? nightly = null,
+        Whiskers.Services.Mutations.IShutdownDrain? drain = null)
     {
         _automation = automation;
         _owners = owners;
@@ -85,9 +92,14 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         _scopeFactory = scopeFactory;
         _logger = logger;
         _utcNow = utcNow;
+        _nightly = nightly ?? new InMemoryAutoPatchNightlyStore();
+        _drain = drain ?? Whiskers.Services.Mutations.NoShutdownDrain.Instance;
     }
 
     public AutoPatchCycleReport? LastCycle { get; private set; }
+
+    /// <summary>The day of the last nightly cycle, as <see cref="IsDue"/> sees it. Internal for tests.</summary>
+    internal DateOnly? LastNightlyRun => _lastNightlyRun;
 
     public bool IsRunning => Volatile.Read(ref _running) == 1;
 
@@ -97,11 +109,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         {
             try
             {
+                if (!_nightlyLoaded) await LoadNightlyAsync();
                 if (IsDue(_settings.CurrentValue, _utcNow(), _lastNightlyRun))
-                {
-                    _lastNightlyRun = DateOnly.FromDateTime(_utcNow());
-                    await RunNightlyAsync(ct);
-                }
+                    await RunNightlyRecordedAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex) { _logger.LogError(ex, "Auto-patch cycle failed"); }
@@ -111,27 +121,114 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
     }
 
+    /// <summary>R1-39: the night's day comes from disk, so a restart in the window hour does not run it again; a cycle
+    /// that started and never ended was cut off, which the status shows. Internal for tests.</summary>
+    internal async Task LoadNightlyAsync()
+    {
+        AutoPatchNightlyState state;
+        try
+        {
+            state = await _nightly.LoadAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Fail closed: an unreadable state could hide that tonight already ran. Nothing runs until it is readable.
+            LastCycle = new(_utcNow(), _utcNow(), _settings.CurrentValue.DryRun, [], [], NightStateUnreadable);
+            throw;
+        }
+        _lastNightlyRun = state.Day;
+        _nightlyLoaded = true;
+        if (state is { StartedAt: { } started, CompletedAt: null })
+        {
+            LastCycle ??= new(started, null, state.DryRun, [], [], InterruptedNight);
+            _logger.LogWarning("The nightly auto-patch cycle started {Started:u} was interrupted by a stop", started);
+        }
+        else if (state is { StartedAt: { } began, CompletedAt: { } ended, Error: { } error })
+        {
+            // A night that ended early (a stop, a suspension, an unverified rollback) still says why after a restart.
+            LastCycle ??= new(began, ended, state.DryRun, [], [], error);
+        }
+    }
+
+    internal const string InterruptedNight =
+        "Interrupted: Whiskers stopped while this nightly cycle ran. Containers it had not reached were not patched; " +
+        "it was not run again that night.";
+
+    internal const string NightStateUnreadable =
+        "Not run: the nightly state (autopatch-nightly.json) cannot be read, so it is unknown whether tonight already " +
+        "ran. No night runs until the file is fixed or removed.";
+
+    internal const string NightCancelled =
+        "Stopped: the cycle was cancelled (Whiskers was stopping). Containers it had not finished may not be patched.";
+
+    internal const string NightNotRecorded =
+        "Not run: the start of tonight's cycle could not be saved, so a restart could not tell that it ran. It runs " +
+        "again tomorrow night.";
+
+    /// <summary>The nightly cycle with its day, start and end on disk. The day is written first and must be saved
+    /// before anything is patched: a night a restart could not see would be run a second time (fail closed — the night
+    /// is skipped instead). Its error, if it ended early, is saved with its end. Internal for tests.</summary>
+    internal async Task RunNightlyRecordedAsync(CancellationToken ct)
+    {
+        var now = _utcNow();
+        _lastNightlyRun = DateOnly.FromDateTime(now);
+        var state = new AutoPatchNightlyState { Day = _lastNightlyRun, StartedAt = now, DryRun = _settings.CurrentValue.DryRun };
+        if (!await SaveNightlyAsync(state))
+        {
+            LastCycle = new(now, _utcNow(), state.DryRun, [], [], NightNotRecorded);
+            return;
+        }
+        var refused = await RunNightlyAsync(ct);
+        state.CompletedAt = _utcNow();
+        // A night is recorded clean only when it ran to its end: a cycle error, a refused or failed run, or a stop
+        // (also one that cut off the last container, which leaves no "stopped before" behind) is saved as its reason.
+        state.Error = (LastCycle is { } cycle && cycle.StartedAt >= now ? cycle.Error : null)
+                      ?? refused
+                      ?? (ct.IsCancellationRequested ? NightCancelled : null);
+        if (state.Error is { } error && LastCycle is { } last && last.StartedAt >= now && last.Error is null)
+            LastCycle = last with { Error = error };
+        // A night that did not run says why now, as it does after a restart (LoadNightlyAsync).
+        if (refused is not null && (LastCycle is null || LastCycle.StartedAt < now))
+            LastCycle = new(now, state.CompletedAt, state.DryRun, [], [], state.Error);
+        await SaveNightlyAsync(state);
+    }
+
+    private async Task<bool> SaveNightlyAsync(AutoPatchNightlyState state)
+    {
+        try
+        {
+            await _nightly.SaveAsync(state);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "The nightly auto-patch state could not be saved");
+            return false;
+        }
+    }
+
     private const string NightlyRunner = "autopatch";
 
     internal const string SuspensionNotSaved =
         " The suspension could not be saved: it holds only until Whiskers restarts — take it over or switch it off now.";
 
     /// <summary>The nightly cycle, on the authority of the admin who took AutoPatch over. Without one it does not run:
-    /// the configuration switch alone is not an owner. Internal for tests.</summary>
-    internal async Task RunNightlyAsync(CancellationToken ct)
+    /// the configuration switch alone is not an owner. Returns why the night did not run through, or null. Internal
+    /// for tests.</summary>
+    internal async Task<string?> RunNightlyAsync(CancellationToken ct)
     {
         if (_owners.IsBlocked(IAutomationOwnerStore.AutoPatch))
         {
             _logger.LogError("Auto-patch owner could not be read; tonight's cycle did not run. Take AutoPatch over " +
                              "again in Settings → Automation owners");
-            return;
+            return "Not run: the AutoPatch owner could not be read.";
         }
         var owner = _owners.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId;
         if (owner is null)
         {
             _logger.LogWarning("Auto-patch is switched on but no admin has taken it over (Settings → Automation); " +
                                "tonight's cycle did not run");
-            return;
+            return "Not run: no admin has taken AutoPatch over.";
         }
 
         var dryRun = _settings.CurrentValue.DryRun;
@@ -143,9 +240,14 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         {
             _logger.LogWarning("Auto-patch cycle refused: {Reason}", outcome.Reason);
             await SuspendIfOwnerLostAsync(actor, "autopatch.run", ct);
+            return $"Not run: refused ({outcome.Reason}).";
         }
-        else if (outcome.Status == MutationStatus.Failed)
+        if (outcome.Status == MutationStatus.Failed)
+        {
             _logger.LogError(outcome.Error, "Auto-patch cycle failed: {Reason}", outcome.Reason);
+            return $"Failed: {outcome.Reason}";
+        }
+        return null;
     }
 
     /// <summary>The owner lost their authority (PC-D6): AutoPatch is suspended until an admin takes it over, and the
@@ -313,8 +415,20 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
 
         foreach (var candidate in plan.Candidates)
         {
-            if (ct.IsCancellationRequested) break;
             var c = candidate.Container;
+            if (ct.IsCancellationRequested)
+            {
+                // Said, so a night cut short is not recorded as complete (R1-39).
+                LastCycle = LastCycle! with { Error = $"Stopped before {c.Name}: the cycle was cancelled." };
+                break;
+            }
+            // R1-39: once Whiskers is stopping, no further container is started; the one in progress is drained.
+            using var draining = _drain.TryEnter($"auto-patch of '{c.Name}'");
+            if (draining is null)
+            {
+                LastCycle = LastCycle! with { Error = $"Stopped before {c.Name}: Whiskers is shutting down." };
+                break;
+            }
             var startedAt = _utcNow();
 
             AutoPatchOutcome outcome;
@@ -355,6 +469,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             }
         }
 
+        if (ct.IsCancellationRequested && LastCycle!.Error is null && entries.Count > 0)
+            LastCycle = LastCycle with { Error = $"Stopped at {entries[^1].ContainerName}: the cycle was cancelled." };
         LastCycle = LastCycle! with { CompletedAt = _utcNow() };
         _logger.LogInformation("Auto-patch cycle done: {Summary}",
             string.Join(", ", entries.GroupBy(e => e.Kind).Select(g => $"{g.Count()} {g.Key}")));

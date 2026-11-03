@@ -66,6 +66,10 @@ dropped, `seccompProfile: RuntimeDefault`, `fsGroup: 10001` for PVC ownership. P
 5 minutes (`probes.startup.periodSeconds` × `failureThreshold`): an upgrade takes a pre-upgrade backup and runs
 the schema migrations before Whiskers answers. Raise `probes.startup.failureThreshold` for a large database.
 
+Stopping: `terminationGracePeriodSeconds` is 60. On SIGTERM Whiskers starts no new scheduled task, AutoUpdate or
+AutoPatch container and gives running ones up to 30 s to finish (host shutdown budget 45 s). What a kill cuts off
+anyway is marked interrupted at the next start and reported to the admins, never run again.
+
 ## Backup
 
 The PVC is the state. Use Whiskers' built-in self-backup (Settings → Backup & Restore /

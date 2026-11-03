@@ -584,6 +584,15 @@ public class AutoPatchTests
 
     internal static string TempPath() => Path.Combine(Path.GetTempPath(), $"cve-{Guid.NewGuid():N}.json");
 
+    /// <summary>R1-39: with a clock, the nightly state store and the shutdown drain.</summary>
+    internal static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store, AutoPatchSettings settings,
+        IAutomationOwnerStore owners, Func<DateTime> utcNow, IAutoPatchNightlyStore nightly, IShutdownDrain drain,
+        params ContainerInfo[] containers)
+        => new(new StaticOptionsMonitor<AutoPatchSettings>(settings), new FakeDocker(containers), store,
+            new NoopImageUpdateStore(), runner, new FakeNotifications(),
+            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new RecordingAutomation(), owners, NullLogger<AutoPatchService>.Instance, utcNow, nightly, drain);
+
     private static AutoPatchService NewService(IAutoPatchRunner runner, ICveFindingsStore store, params ContainerInfo[] containers)
         => NewService(runner, store, new FakeNotifications(), new AutoPatchSettings(), containers);
 

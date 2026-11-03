@@ -149,6 +149,8 @@ services:
       - MetricAlert__AnomalySigma=${METRICALERT_ANOMALYSIGMA:-3}
       - MetricAlert__AnomalyFloorPercent=${METRICALERT_ANOMALYFLOORPERCENT:-40}
     restart: unless-stopped
+    # R1-39: room for the shutdown drain (see docker-compose.yml).
+    stop_grace_period: 60s
 
 volumes:
   serverwatch-data:

@@ -826,6 +826,9 @@ namespace Whiskers.Migrations
                     b.Property<string>("Output")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ProcessInstance")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("TEXT");
 
@@ -882,6 +885,9 @@ namespace Whiskers.Migrations
 
                     b.Property<string>("OldImageDigest")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProcessInstance")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("RolledBack")

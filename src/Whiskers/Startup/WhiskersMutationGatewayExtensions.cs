@@ -76,6 +76,18 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<AuditRecovery>();
         services.AddSingleton<IAuditRecovery>(sp => sp.GetRequiredService<AuditRecovery>());
         services.AddHostedService(sp => sp.GetRequiredService<AuditRecovery>());
+        // R1-39 (F-16): on stop, no new unattended work starts and running work gets a bounded time to finish; the
+        // next start reports what was cut off as interrupted and repeats nothing.
+        services.AddSingleton<ShutdownDrain>();
+        services.AddSingleton<IShutdownDrain>(sp => sp.GetRequiredService<ShutdownDrain>());
+        services.AddHostedService(sp => sp.GetRequiredService<ShutdownDrain>());
+        services.AddSingleton<InterruptedWorkReconciler>();
+        services.AddSingleton<IStartupReconciliation>(sp => sp.GetRequiredService<InterruptedWorkReconciler>());
+        services.AddHostedService(sp => sp.GetRequiredService<InterruptedWorkReconciler>());
+        services.Configure<HostOptions>(o =>
+        {
+            if (o.ShutdownTimeout < ShutdownDrain.HostTimeout) o.ShutdownTimeout = ShutdownDrain.HostTimeout;
+        });
         // R1-36 / R1-37 (INV-43/44): the read-back of every capability whose contract declares one.
         foreach (var verifier in MutationVerifiers.Factories)
             services.AddSingleton<IMutationVerifier>(verifier);

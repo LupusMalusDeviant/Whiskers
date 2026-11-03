@@ -24,6 +24,8 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
     private readonly IAutomationOwnerStore _owners;
     // R1-31 (INV-52): a snapshot holds the container's environment, so it is stored encrypted with a vault-derived key.
     private readonly Whiskers.Services.Vault.IVaultService? _vault;
+    private readonly Whiskers.Services.Mutations.IShutdownDrain _drain;
+    private readonly Whiskers.Services.Mutations.IStartupReconciliation _reconciled;
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
@@ -36,9 +38,13 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         IAutomationMutationRunner automation,
         IAutomationOwnerStore owners,
         ILogger<AutoUpdateService> logger,
-        Whiskers.Services.Vault.IVaultService? vault = null)
+        Whiskers.Services.Vault.IVaultService? vault = null,
+        Whiskers.Services.Mutations.IShutdownDrain? drain = null,
+        Whiskers.Services.Mutations.IStartupReconciliation? reconciled = null)
     {
         _vault = vault;
+        _reconciled = reconciled ?? Whiskers.Services.Mutations.NoStartupReconciliation.Instance;
+        _drain = drain ?? Whiskers.Services.Mutations.NoShutdownDrain.Instance;
         _automation = automation;
         _owners = owners;
         _scopeFactory = scopeFactory;
@@ -53,6 +59,8 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
     {
         _logger.LogInformation("Auto-update service started (opt-in only). Check interval: {Interval}m", CheckInterval.TotalMinutes);
         await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+        // R1-39: not before the start-up pass has switched off the policies of updates an earlier process cut off.
+        await _reconciled.Completed.WaitAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -60,8 +68,9 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
             var success = true;
             try
             {
-                // WaitAsync bounds the cycle to shutdown: RecreateContainerAsync pulls an image and can
-                // run for minutes with no cancellation token, so abandon it on stop rather than block.
+                // R1-39: on stop the shutdown drain first waits (bounded) for the update in progress — no new one starts —
+                // and only then is stoppingToken cancelled. What still runs then (a recreate has no cancellation token)
+                // is cut off here: a forced stop, reported as interrupted at the next start, never repeated blindly.
                 await CheckAndUpdateAsync(stoppingToken).WaitAsync(stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -122,6 +131,21 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 continue;
             }
 
+            // R1-39: an attempt on this container that never recorded its end was cut off by a stop: it is not started
+            // again — also not before the start-up reconciliation has switched its policy off.
+            if (await db.UpdateHistory.AnyAsync(h => h.CompletedAt == null && h.ContainerName == container.Name
+                                                     && h.ServerId == container.ServerId, ct))
+            {
+                _logger.LogWarning("Auto-update of {Container} skipped: an earlier attempt was interrupted", container.Name);
+                continue;
+            }
+
+            // R1-39: once Whiskers is stopping no update starts; one that runs is waited for by the shutdown drain.
+            // A policy left here keeps its LastChecked unsaved, so it is checked again after the restart.
+            using var draining = _drain.TryEnter($"auto-update of '{container.Name}'");
+            if (draining is null)
+                break;
+
             _logger.LogInformation("Auto-update triggered for {Container} (opt-in policy)", container.Name);
 
             // Notify before update — a notification failure must not abort the update.
@@ -154,8 +178,15 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 OldImageDigest = updateInfo.LocalDigest ?? "",
                 NewImageDigest = updateInfo.RemoteDigest ?? "",
                 Image = container.Image,
-                StartedAt = DateTime.UtcNow
+                StartedAt = DateTime.UtcNow,
+                Error = InProgressResult,
+                ProcessInstance = Whiskers.Services.Mutations.ProcessIdentity.Current,
             };
+            // R1-39: the attempt is on record (without an end) before anything is changed — a save that fails starts
+            // nothing. An attempt a forced stop cuts off stays open; the next start marks it interrupted and switches
+            // the policy off, so it is never run again automatically (InterruptedWorkReconciler).
+            db.UpdateHistory.Add(history);
+            await db.SaveChangesAsync(ct);
 
             try
             {
@@ -230,6 +261,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                     throw new UpdateUnhealthyException(health.State, health.OomKilled);
 
                 history.Success = true;
+                history.Error = null;
                 history.CompletedAt = DateTime.UtcNow;
                 policy.LastUpdated = DateTime.UtcNow;
                 // R1-31: an update without a way back says so where its result is read.
@@ -281,10 +313,14 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 catch (Exception nex) { _logger.LogWarning(nex, "Auto-update failure notification failed for {Container}", container.Name); }
             }
 
-            db.UpdateHistory.Add(history);
-            await db.SaveChangesAsync(ct);
+            // Not cancellable: an attempt that ended — also one that finished after the drain budget, while Whiskers stops —
+            // is recorded with its result, never left open to be reported as interrupted at the next start.
+            await db.SaveChangesAsync(CancellationToken.None);
         }
     }
+
+    /// <summary>The result an update attempt carries while it runs (R1-39).</summary>
+    internal const string InProgressResult = "IN PROGRESS: the update has started.";
 
     /// <summary>Tells the admins that AutoUpdate was suspended and how to take it over (R1-04). An administrative
     /// event: no container mute or update preference hides it.</summary>

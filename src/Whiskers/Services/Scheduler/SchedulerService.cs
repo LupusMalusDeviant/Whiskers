@@ -15,17 +15,20 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
     // Per-taskId in-flight guard so the same task never runs twice concurrently.
     private readonly ConcurrentDictionary<string, byte> _running = new();
+    private readonly Whiskers.Services.Mutations.IShutdownDrain _drain;
 
     public SchedulerService(
         IServiceScopeFactory scopeFactory,
         ITaskExecutor executor,
         Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
-        ILogger<SchedulerService> logger)
+        ILogger<SchedulerService> logger,
+        Whiskers.Services.Mutations.IShutdownDrain? drain = null)
     {
         _scopeFactory = scopeFactory;
         _executor = executor;
         _selfMetrics = selfMetrics;
         _logger = logger;
+        _drain = drain ?? Whiskers.Services.Mutations.NoShutdownDrain.Instance;
     }
 
     protected override async Task RunAsync(CancellationToken stoppingToken)
@@ -57,7 +60,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         }
     }
 
-    private async Task CheckAndRunDueTasks(CancellationToken ct)
+    internal async Task CheckAndRunDueTasks(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -83,6 +86,8 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
             }
 
             // Calculate next run
+            IDisposable? draining = null;
+            var guarded = false;
             try
             {
                 var nextRun = cron!.GetNextOccurrence(now);
@@ -95,71 +100,163 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
                     continue;
                 }
 
-                // Persist NextRun/LastRun BEFORE starting so a long-running task doesn't re-trigger on the
-                // next 30s tick (it's no longer "due", and the in-flight guard backs that up).
-                task.LastRun = DateTime.UtcNow;
-                task.NextRun = cron.GetNextOccurrence(DateTime.UtcNow);
-                await db.SaveChangesAsync(ct);
+                // R1-39: once Whiskers is stopping, nothing new starts — the occurrence stays due and runs after the
+                // restart, exactly once (NextRun is advanced only when it really starts).
+                draining = _drain.TryEnter($"scheduled task '{task.Name}'");
+                if (draining is null)
+                    break;
 
-                // Fire without blocking the loop, but never run the same task twice at once. TryAdd AFTER the
-                // save so a failed persist can't leak the in-flight guard.
+                // Never the same task twice at once: an occurrence that falls due while the task still runs (a run
+                // started by hand, or a long one) is skipped — NextRun moves on, LastRun stays the running one's.
                 if (!_running.TryAdd(task.TaskId, 0))
+                {
+                    draining.Dispose();
+                    draining = null;
+                    task.NextRun = cron.GetNextOccurrence(DateTime.UtcNow);
+                    await db.SaveChangesAsync(ct);
                     continue;
+                }
+                guarded = true;
+
+                // The occurrence is consumed and the run is on record in ONE save, before it starts (R1-39): a run
+                // cut off by a stop or a crash stays open and the next start marks it interrupted, never as a success;
+                // a failed save starts nothing and consumes nothing. Saved before starting, so a long-running task
+                // doesn't re-trigger on the next 30s tick either.
+                long runId;
+                var startedAt = DateTime.UtcNow;
+                var run = NewRun(task, startedAt);
+                var (lastRun, dueAt) = (task.LastRun, task.NextRun);
+                try
+                {
+                    task.LastRun = startedAt;
+                    task.NextRun = cron.GetNextOccurrence(startedAt);
+                    db.TaskRunHistory.Add(run);
+                    await db.SaveChangesAsync(ct);
+                    runId = run.Id;
+                }
+                catch
+                {
+                    // Nothing of it may be saved later with the error below: the occurrence stays due, no run is on
+                    // record, and the error save does not consume it either.
+                    db.Entry(run).State = EntityState.Detached;
+                    (task.LastRun, task.NextRun) = (lastRun, dueAt);
+                    throw;
+                }
 
                 _logger.LogInformation("Running scheduled task: {Name} (Type: {Type})", task.Name, task.TaskType);
                 var taskId = task.TaskId;
-                _ = Task.Run(() => RunTaskAsync(taskId), CancellationToken.None);
+                var entry = draining;
+                draining = null;   // the run owns it now
+                guarded = false;   // and the in-flight guard
+                _ = Task.Run(() => RunTaskAsync(taskId, runId, entry), CancellationToken.None);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to process task {Name}", task.Name);
-                task.LastResult = $"FEHLER: {ex.Message}";
-                task.LastSuccess = false;
-                task.LastRun = DateTime.UtcNow;
-                await db.SaveChangesAsync(ct);
+                if (!guarded)
+                {
+                    // Not this tick's run (the task runs, or nothing was started): no result of its own to record — a
+                    // running task's result is its run's. The unsaved change is dropped; the next tick tries again.
+                    db.Entry(task).State = EntityState.Detached;
+                    draining?.Dispose();
+                    continue;
+                }
+                try
+                {
+                    // Only the error: nothing ran, so LastRun stays the last real run's (R1-39). Still under the in-flight
+                    // guard, so a "Run now" cannot start in between and have its result overwritten by this one.
+                    task.LastResult = $"FEHLER: {ex.Message}";
+                    task.LastSuccess = false;
+                    await db.SaveChangesAsync(ct);
+                }
+                finally
+                {
+                    if (guarded) _running.TryRemove(task.TaskId, out _);
+                    draining?.Dispose();
+                }
             }
         }
     }
 
     /// <summary>Runs one due task in the background (its own DB scope), recording the result + history and
     /// clearing the in-flight guard when done. NextRun/LastRun were already persisted by the caller.</summary>
-    private async Task RunTaskAsync(string taskId)
+    private async Task RunTaskAsync(string taskId, long runId, IDisposable draining)
     {
         try
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
             var task = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == taskId);
-            if (task == null) return;
+            if (task == null)
+            {
+                await CloseRunAsync(db, runId, false, "The task was deleted before it ran.");
+                return;
+            }
 
-            var startedAt = task.LastRun ?? DateTime.UtcNow;
             var (success, output) = await _executor.ExecuteAsync(task);
 
             task.LastResult = success ? output : $"FEHLER: {output}";
             task.LastSuccess = success;
-            db.TaskRunHistory.Add(new TaskRunHistoryEntity
-            {
-                TaskId = task.TaskId,
-                TaskName = task.Name,
-                TaskType = task.TaskType,
-                StartedAt = startedAt,
-                CompletedAt = DateTime.UtcNow,
-                Success = success,
-                Output = success ? output : null,
-                Error = success ? null : output
-            });
-            await db.SaveChangesAsync();
+            await CloseRunAsync(db, runId, success, output);
 
             _logger.LogInformation("Task {Name} completed: success={Success}", task.Name, success);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Scheduled task {TaskId} failed", taskId);
+            await TryCloseFailedRunAsync(runId, ex);
         }
         finally
         {
             _running.TryRemove(taskId, out _);
+            draining.Dispose();
         }
+    }
+
+    /// <summary>A run as started: no end yet (R1-39).</summary>
+    private static TaskRunHistoryEntity NewRun(ScheduledTaskEntity task, DateTime startedAt) => new()
+    {
+        TaskId = task.TaskId,
+        TaskName = task.Name,
+        TaskType = task.TaskType,
+        StartedAt = startedAt,
+        CompletedAt = null,
+        Success = false,
+        ProcessInstance = Whiskers.Services.Mutations.ProcessIdentity.Current,
+    };
+
+    /// <summary>A run whose record could not be finished normally (the database failed while it was read or closed) is
+    /// closed as failed, best effort and in a scope of its own — it was not cut off by a stop, so the next start must not
+    /// report it as interrupted. A second failure is only logged.</summary>
+    private async Task TryCloseFailedRunAsync(long runId, Exception failure)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var run = await db.TaskRunHistory.FirstOrDefaultAsync(r => r.Id == runId);
+            if (run is null || run.CompletedAt is not null) return;
+            await CloseRunAsync(db, runId, false, $"The run's result could not be recorded: {failure.Message}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The failed run {RunId} could not be closed; the next start reports it as interrupted", runId);
+        }
+    }
+
+    /// <summary>Records the end of a run opened by <see cref="NewRun"/>, together with the tracked task's
+    /// result. Not cancellable: a run that ended is recorded as such, also while Whiskers is stopping.</summary>
+    private static async Task CloseRunAsync(MetricsDbContext db, long runId, bool success, string output)
+    {
+        var run = await db.TaskRunHistory.FirstOrDefaultAsync(r => r.Id == runId);
+        if (run is not null)
+        {
+            run.CompletedAt = DateTime.UtcNow;
+            run.Success = success;
+            run.Output = success ? output : null;
+            run.Error = success ? null : output;
+        }
+        await db.SaveChangesAsync();
     }
 
     /// <summary>Parses a cron expression, returning false instead of throwing on an invalid one.</summary>
@@ -253,6 +350,12 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         }
     }
 
+    /// <summary>Stable result of <see cref="RunNowAsync"/> while Whiskers stops; the UI shows it translated.</summary>
+    public const string ShuttingDownResult = "Whiskers is shutting down; the task was not started.";
+
+    /// <summary>Stable result of <see cref="RunNowAsync"/> while the task runs; the UI shows it translated.</summary>
+    public const string AlreadyRunningResult = "The task is already running.";
+
     public async Task<(bool Success, string Output)> RunNowAsync(string taskId)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -260,26 +363,40 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         var task = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == taskId);
         if (task == null) return (false, "Task not found");
 
-        var (success, output) = await _executor.ExecuteAsync(task);
-
-        task.LastRun = DateTime.UtcNow;
-        task.LastResult = success ? output : $"FEHLER: {output}";
-        task.LastSuccess = success;
-
-        db.TaskRunHistory.Add(new TaskRunHistoryEntity
+        // R1-39: a run by hand is admitted like a scheduled one — not while Whiskers stops, not while the task runs —
+        // and the drain waits for it until its result is recorded.
+        using var draining = _drain.TryEnter($"scheduled task '{task.Name}' (run now)");
+        if (draining is null) return (false, ShuttingDownResult);
+        if (!_running.TryAdd(task.TaskId, 0)) return (false, AlreadyRunningResult);
+        long? runId = null;
+        try
         {
-            TaskId = task.TaskId,
-            TaskName = task.Name,
-            TaskType = task.TaskType,
-            StartedAt = DateTime.UtcNow,
-            CompletedAt = DateTime.UtcNow,
-            Success = success,
-            Output = success ? output : null,
-            Error = success ? null : output
-        });
+            // On record before it runs, together with its start: a run a stop cuts off is reported as interrupted at
+            // the next start.
+            var startedAt = DateTime.UtcNow;
+            var run = NewRun(task, startedAt);
+            task.LastRun = startedAt;
+            db.TaskRunHistory.Add(run);
+            await db.SaveChangesAsync();
 
-        await db.SaveChangesAsync();
-        return (success, output);
+            runId = run.Id;
+
+            var (success, output) = await _executor.ExecuteAsync(task);
+
+            task.LastResult = success ? output : $"FEHLER: {output}";
+            task.LastSuccess = success;
+            await CloseRunAsync(db, run.Id, success, output);
+            return (success, output);
+        }
+        catch (Exception ex) when (runId is { } opened)
+        {
+            await TryCloseFailedRunAsync(opened, ex);
+            throw;
+        }
+        finally
+        {
+            _running.TryRemove(task.TaskId, out _);
+        }
     }
 
     public async Task<List<TaskRunHistoryEntity>> GetHistoryAsync(string? taskId = null, int limit = 50)

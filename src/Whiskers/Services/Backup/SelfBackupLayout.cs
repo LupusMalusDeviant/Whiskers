@@ -85,6 +85,7 @@ public static class SelfBackupLayout
         [Rel(Probe.RestoreAppliedNote)] = "restore state",
         [Rel(Probe.LastStartedVersionFile)] = "upgrade state of this install (R1-34)",
         [Rel(Probe.UpgradePendingMarker)] = "upgrade state of this install (R1-34)",
+        [Rel(Probe.AutoPatchNightlyJson)] = "when this install last ran its nightly AutoPatch cycle (R1-39)",
         // Not a DataPathOptions path: the vault's recovery copies from the CBC-to-GCM conversion (vault.json.legacy-cbc*.bak).
         ["vault.json.legacy-cbc.bak"] = "recovery copy of the old unauthenticated vault, kept on this volume only",
     };

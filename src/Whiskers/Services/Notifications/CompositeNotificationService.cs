@@ -23,7 +23,7 @@ public class CompositeNotificationService : INotificationService
 
     /// <summary>Events an admin must see whatever the target's mute or preferences say.</summary>
     internal static readonly IReadOnlySet<string> AdministrativeEvents =
-        new HashSet<string>(StringComparer.Ordinal) { "automation_suspended", "automation_refused" };
+        new HashSet<string>(StringComparer.Ordinal) { "automation_suspended", "automation_refused", "operations_interrupted" };
 
     public CompositeNotificationService(
         IEnumerable<INotificationChannel> channels,

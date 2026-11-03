@@ -3923,6 +3923,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_History_Result" xml:space="preserve">
     <value>Ergebnis</value>
   </data>
+  <data name="ScheduledTasksView_History_Running" xml:space="preserve">
+    <value>Läuft</value>
+  </data>
   <data name="ScheduledTasksView_History_Started" xml:space="preserve">
     <value>Gestartet</value>
   </data>
@@ -3952,6 +3955,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="ScheduledTasksView_Snackbar_TaskRunning" xml:space="preserve">
     <value>Task '{0}' wird ausgeführt...</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_ShuttingDown" xml:space="preserve">
+    <value>Whiskers fährt herunter; Task '{0}' wurde nicht gestartet.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_AlreadyRunning" xml:space="preserve">
+    <value>Task '{0}' läuft bereits.</value>
   </data>
   <data name="ScheduledTasksView_Stat_Active" xml:space="preserve">
     <value>Aktiv</value>
