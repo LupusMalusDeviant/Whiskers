@@ -50,9 +50,7 @@ public sealed class OutboundExceptionService : IOutboundExceptionService
             // A failed write throws here and leaves the live list as it was.
             await _store.SaveSectionAsync(OutboundGuardSettings.SectionName, settings);
             _current = new OutboundExceptionList(parsed, before.Version + 1);
-            // The versioned, redacted diff is part of the gateway's event (R1-22).
-            Whiskers.Services.Mutations.ConfigChange.Record("outbound-exceptions",
-                new OutboundGuardSettings { Exceptions = before.Entries.Select(e => e.ToEntry()).ToList() }, settings);
+            // The versioned, redacted diff of the section is recorded by the store itself (R1-22), once.
         }
         finally { _lock.Release(); }
     }

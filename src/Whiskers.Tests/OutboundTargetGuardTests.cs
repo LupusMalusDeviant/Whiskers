@@ -310,6 +310,17 @@ public sealed class OutboundTargetGuardTests : IAsyncDisposable
     public void The_tls_mode_follows_the_settings(bool useSsl, int port, MailKit.Security.SecureSocketOptions expected) =>
         Assert.Equal(expected, EmailNotificationService.TlsMode(new EmailSettings { UseSsl = useSsl, Port = port }));
 
+    [Fact]
+    public void The_smtp_client_validates_the_certificate_but_not_its_revocation_as_before()
+    {
+        // System.Net.Mail did not check revocation; MailKit does by default and would refuse a relay with a private CA
+        // that publishes no CRL. The chain and the name are still validated (no custom callback that accepts all).
+        using var client = EmailNotificationService.NewClient(TimeSpan.FromSeconds(20));
+        Assert.False(client.CheckCertificateRevocation);
+        Assert.Null(client.ServerCertificateValidationCallback);
+        Assert.Equal(25_000, client.Timeout);
+    }
+
     private EmailNotificationService Email(string host, int port) =>
         new(new StaticOptionsMonitor<EmailSettings>(new EmailSettings
         {

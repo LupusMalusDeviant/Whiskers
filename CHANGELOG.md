@@ -20,7 +20,8 @@ All notable changes to Whiskers are documented here. The format follows
   connection it allowed. A refused delivery is logged and counted as a failed notification with its reason (host,
   port and refused address, never the URL's path or query) and is neither retried nor kept for redelivery. The e-mail
   channel now uses MailKit (implicit TLS on port 465, which did not work before, and required STARTTLS on every other
-  port when *SSL/TLS* is on, as before).
+  port when *SSL/TLS* is on, as before). The server certificate is checked against the configured name as before;
+  its revocation is not checked, as before (a relay with a private CA and no CRL keeps working).
   **Upgrade notes:** (1) a channel inside your network — a self-hosted ntfy, Mattermost or Matrix, an SMTP relay on the
   LAN or on Tailscale — is **refused from the first start after the upgrade until an Admin adds an exception** for it.
   The start-up log and the *Notification targets* panel list every configured channel the guard refuses, with the

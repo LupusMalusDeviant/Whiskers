@@ -117,7 +117,7 @@ public class EmailNotificationService : IEmailNotificationService
         msg.Body = new TextPart("plain") { Text = body };
 
         var host = c.Host.Trim().Trim('[', ']');
-        using var client = new RecipientTrackingSmtpClient { Timeout = (int)(SmtpDeadline + TimeSpan.FromSeconds(5)).TotalMilliseconds };
+        using var client = NewClient(SmtpDeadline);
         Stream? stream = null;
         try
         {
@@ -160,7 +160,17 @@ public class EmailNotificationService : IEmailNotificationService
 
     /// <summary>Records each recipient the server refuses instead of giving up on the first, so the message still goes
     /// to the ones it took (as <c>System.Net.Mail</c> did); none taken is an <see cref="EmailRecipientsRefusedException"/>.</summary>
-    private sealed class RecipientTrackingSmtpClient : SmtpClient
+    /// <summary>The SMTP client as every send uses it. The certificate chain and the configured host name are checked as
+    /// before; certificate revocation is not, as <c>System.Net.Mail</c> did not check it either: MailKit's default
+    /// (on) would refuse a LAN or tailnet relay whose private CA publishes no CRL or OCSP responder, and silence its
+    /// alerts after an upgrade (R1-54 review round 1).</summary>
+    internal static RecipientTrackingSmtpClient NewClient(TimeSpan deadline) => new()
+    {
+        Timeout = (int)(deadline + TimeSpan.FromSeconds(5)).TotalMilliseconds,
+        CheckCertificateRevocation = false,
+    };
+
+    internal sealed class RecipientTrackingSmtpClient : SmtpClient
     {
         public HashSet<string> Refused { get; } = new(StringComparer.OrdinalIgnoreCase);
 
