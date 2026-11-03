@@ -615,10 +615,91 @@ public sealed class MutationShutdownTests : IDisposable
         Assert.False(task.LastSuccess);                        // the error was recorded
         Assert.StartsWith("FEHLER", task.LastResult);
 
-        // The guard is free again: the next tick runs it.
+        // The guard is free again: the next tick runs it, and its result is recorded before the fixture goes away.
         await scheduler.CheckAndRunDueTasks(CancellationToken.None);
         await executor.Entered.Task.WaitAsync(Wait);
         executor.Release.SetResult((true, "ok"));
+        var until = DateTime.UtcNow + Wait;
+        while ((await RunAsync("t1")).CompletedAt is null && DateTime.UtcNow < until) await Task.Delay(20);
+        var run = await RunAsync("t1");
+        Assert.True(run.Success);
+        Assert.Equal("ok", (await TaskAsync("t1")).LastResult);
+    }
+
+    [Fact]
+    public async Task A_failed_skip_of_a_running_task_records_no_result_of_its_own()
+    {
+        await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var failOnce = new FailingCommandsOnce("ScheduledTasks");
+        using var provider = ProviderWith(failOnce);
+        var executor = new GatedExecutor();
+        var scheduler = new SchedulerService(provider.GetRequiredService<IServiceScopeFactory>(), executor, null!,
+            NullLogger<SchedulerService>.Instance, Drain());
+        var running = scheduler.RunNowAsync("t1");               // the task runs (by hand)
+        await executor.Entered.Task.WaitAsync(Wait);
+
+        failOnce.Armed = true;                                   // the save of the skipped occurrence fails
+        await scheduler.CheckAndRunDueTasks(CancellationToken.None);
+
+        var during = await TaskAsync("t1");
+        Assert.False(during.LastResult?.StartsWith("FEHLER", StringComparison.Ordinal) ?? false);   // not its result to write
+        executor.Release.SetResult((true, "ok"));
+        Assert.True((await running).Success);
+        Assert.Equal("ok", (await TaskAsync("t1")).LastResult);
+    }
+
+    [Fact]
+    public async Task What_was_marked_before_a_failure_is_still_reported()
+    {
+        var before = new DbOperationJournal(Scopes);
+        Assert.Equal(OperationClaimResult.Claimed, (await before.ClaimAsync(Claim("op-1"))).Result);
+        await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var old = DateTime.UtcNow.AddHours(-1);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.TaskRunHistory.Add(new TaskRunHistoryEntity { TaskId = "t1", TaskName = "t1", StartedAt = old });
+            (await db.ScheduledTasks.SingleAsync(t => t.TaskId == "t1")).LastRun = old;
+            await db.SaveChangesAsync();
+        }
+
+        // The operation is marked; the task run's transaction then fails.
+        var notifications = new FakeNotifications();
+        using (var failing = ProviderWith(new FailingCommands("ScheduledTasks")))
+        {
+            var scopes = failing.GetRequiredService<IServiceScopeFactory>();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => new InterruptedWorkReconciler(scopes,
+                new DbOperationJournal(scopes), notifications, NullLogger<InterruptedWorkReconciler>.Instance,
+                DateTime.UtcNow).ReconcileAsync());
+        }
+        var report = Assert.Single(notifications.Events);
+        Assert.Contains("container.restart", report.ImageInfo);
+        Assert.DoesNotContain("scheduled task", report.ImageInfo);
+
+        // The next start marks and reports the run that stayed open — and not the operation a second time.
+        var next = new FakeNotifications();
+        var marked = await Reconciler(next, DateTime.UtcNow).ReconcileAsync();
+        Assert.StartsWith("scheduled task t1", Assert.Single(marked), StringComparison.Ordinal);
+        Assert.Single(next.Events);
+    }
+
+    [Fact]
+    public async Task The_nightly_file_keeps_no_secret_from_a_failure_reason()
+    {
+        var paths = new DataPathOptions(_dataDir);
+        var store = new AutoPatchNightlyStore(paths);
+        await store.SaveAsync(new AutoPatchNightlyState
+        {
+            Day = new DateOnly(2026, 11, 3), StartedAt = DateTime.UtcNow, CompletedAt = DateTime.UtcNow,
+            Error = "Failed: login to https://deploy:s3cr3t-pw@registry.example.com failed, password=hunter2-canary",
+        });
+
+        var text = await File.ReadAllTextAsync(paths.AutoPatchNightlyJson);
+        Assert.DoesNotContain("s3cr3t-pw", text);
+        Assert.DoesNotContain("hunter2-canary", text);
+        var restored = (await store.LoadAsync()).Error!;
+        Assert.DoesNotContain("hunter2-canary", restored);
+        Assert.StartsWith("Failed:", restored);
     }
 
     [Fact]
@@ -782,6 +863,36 @@ public sealed class MutationShutdownTests : IDisposable
             => command.CommandText.Contains($"UPDATE \"{table}\"", StringComparison.Ordinal)
                 ? throw new InvalidOperationException("the database went away")
                 : ValueTask.FromResult(result);
+    }
+
+    /// <summary>Fails the next command that writes the named table once it is armed.</summary>
+    private sealed class FailingCommandsOnce(string table) : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        public volatile bool Armed;
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> NonQueryExecutingAsync(
+            System.Data.Common.DbCommand command, Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken ct = default)
+        {
+            if (Armed && command.CommandText.Contains($"UPDATE \"{table}\"", StringComparison.Ordinal))
+            {
+                Armed = false;
+                throw new InvalidOperationException("the database went away");
+            }
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command, Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result, CancellationToken ct = default)
+        {
+            if (Armed && command.CommandText.Contains($"UPDATE \"{table}\"", StringComparison.Ordinal))
+            {
+                Armed = false;
+                throw new InvalidOperationException("the database went away");
+            }
+            return ValueTask.FromResult(result);
+        }
     }
 
     /// <summary>Fails the save that would put a run on record, once.</summary>

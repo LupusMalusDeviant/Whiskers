@@ -50,7 +50,14 @@ public sealed class AutoPatchNightlyStore(DataPathOptions paths) : IAutoPatchNig
     {
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        await DurableFile.WriteAllTextAsync(_path, JsonSerializer.Serialize(state, Json), keepPrevious: false);
+        // The error is free text (a gateway's failure reason can carry an exception message): redacted like every other
+        // persistent sink (INV-51) before it is written.
+        var saved = new AutoPatchNightlyState
+        {
+            Day = state.Day, StartedAt = state.StartedAt, CompletedAt = state.CompletedAt, DryRun = state.DryRun,
+            Error = Whiskers.Utils.SinkRedaction.Text(state.Error),
+        };
+        await DurableFile.WriteAllTextAsync(_path, JsonSerializer.Serialize(saved, Json), keepPrevious: false);
     }
 }
 

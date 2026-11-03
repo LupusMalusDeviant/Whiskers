@@ -68,8 +68,8 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            // Nothing is lost: the rows stay as they are and are classified the same way (outcome unknown) until the
-            // next start tries again; an open AutoUpdate attempt keeps its container from being updated meanwhile.
+            // What was marked before the failure is reported already (ReconcileAsync); what was not stays open and is
+            // marked by the next start. An open AutoUpdate attempt keeps its container from being updated meanwhile.
             _logger.LogError(ex, "Interrupted work of an earlier run could not be reconciled");
         }
         finally
@@ -85,7 +85,24 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var now = DateTime.UtcNow;
         var marked = new List<string>();
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure = null;
+        try
+        {
+            await MarkAsync(db, now, marked, ct);
+        }
+        catch (Exception ex)
+        {
+            // Every mark is committed on its own: those made before the failure are reported now — the next start no
+            // longer sees them — and the failure is raised after the report.
+            failure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex);
+        }
+        await ReportAsync(marked);
+        failure?.Throw();
+        return marked;
+    }
 
+    private async Task MarkAsync(MetricsDbContext db, DateTime now, List<string> marked, CancellationToken ct)
+    {
         // Operations: only claims of another process. A claim of this one is running right now.
         if (_journal is DbOperationJournal journal)
         {
@@ -181,7 +198,11 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
             marked.Add($"auto-update of {update.ContainerName} (started {update.StartedAt:u}; AutoUpdate switched off for it)");
         }
 
-        if (marked.Count == 0) return marked;
+    }
+
+    private async Task ReportAsync(IReadOnlyList<string> marked)
+    {
+        if (marked.Count == 0) return;
         _logger.LogWarning("Whiskers stopped while {Count} operation(s) ran; marked as interrupted: {Work}",
             marked.Count, string.Join("; ", marked));
         try
@@ -200,7 +221,6 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
         {
             _logger.LogWarning(ex, "Notification about interrupted operations failed");
         }
-        return marked;
     }
 
     /// <summary>

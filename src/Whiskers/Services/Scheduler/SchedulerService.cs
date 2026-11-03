@@ -153,6 +153,14 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to process task {Name}", task.Name);
+                if (!guarded)
+                {
+                    // Not this tick's run (the task runs, or nothing was started): no result of its own to record — a
+                    // running task's result is its run's. The unsaved change is dropped; the next tick tries again.
+                    db.Entry(task).State = EntityState.Detached;
+                    draining?.Dispose();
+                    continue;
+                }
                 try
                 {
                     // Only the error: nothing ran, so LastRun stays the last real run's (R1-39). Still under the in-flight
