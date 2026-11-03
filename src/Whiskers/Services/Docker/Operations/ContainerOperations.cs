@@ -44,7 +44,9 @@ internal sealed class ContainerOperations
         => await _connectionManager.GetClientAsync(serverId);
 
     public Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default)
-        => ListContainersAsync(all, serverId, ct, callerToken: default, deadline: default);
+        // R1-41: ct is the caller's own (a loop's stop, a request aborted): it reaches the request and the waits for the
+        // client and a slot, and a call it cancelled is not held against the server.
+        => ListContainersAsync(all, serverId, ct, callerToken: ct, deadline: default);
 
     /// <summary><paramref name="ct"/> bounds the request; <paramref name="callerToken"/> is the caller's own cancellation,
     /// which is not held against the server; <paramref name="deadline"/> is the server's deadline and also bounds the waits
@@ -311,7 +313,22 @@ internal sealed class ContainerOperations
             new ContainerRemoveParameters { Force = force });
     }
 
-    public async Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null, CancellationToken ct = default)
+    public Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null, CancellationToken ct = default)
+        => GetContainerLogsAsync(containerId, tailLines, serverId, since, ct, callerToken: default, deadline: default);
+
+    /// <summary>R1-41: the log read with the server's <paramref name="deadline"/> (the log monitor's fetch timeout — it
+    /// bounds the request and the waits for the client and a slot, and an expiry at the host counts against it) kept
+    /// apart from the <paramref name="callerToken"/> (the loop's stop — it ends the same waits and is never held against
+    /// the server).</summary>
+    public async Task<string> GetContainerLogsAsync(string containerId, int tailLines, string? serverId, DateTime? since,
+        CancellationToken deadline, CancellationToken callerToken)
+    {
+        using var either = CancellationTokenSource.CreateLinkedTokenSource(deadline, callerToken);
+        return await GetContainerLogsAsync(containerId, tailLines, serverId, since, either.Token, callerToken, deadline);
+    }
+
+    private async Task<string> GetContainerLogsAsync(string containerId, int tailLines, string? serverId, DateTime? since,
+        CancellationToken ct, CancellationToken callerToken, CancellationToken deadline)
     {
         var logParams = new ContainerLogsParameters
         {
@@ -335,7 +352,7 @@ internal sealed class ContainerOperations
         // than queue; the UI keeps its own lane.
         using var muxStream = await _connectionManager.ExecuteGuardedAsync(serverId,
             c => c.Containers.GetContainerLogsAsync(containerId, false, logParams, ct),
-            singleFlightKey: $"logs:{containerId}");
+            singleFlightKey: $"logs:{containerId}", callerToken: callerToken, deadline: deadline);
 
         var sb = new StringBuilder();
         var stdout = new MemoryStream();

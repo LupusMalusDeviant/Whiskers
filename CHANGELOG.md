@@ -6,19 +6,26 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-- R1-41: **A timeout inside a background loop no longer stops Whiskers.** Eight background loops (health, scheduler,
+- R1-41: **A timeout inside a background loop no longer stops Whiskers.** Nine background loops (health, scheduler,
   AutoUpdate, certificates, log alerts, log hygiene, scan supervisor, self-metrics, action outcomes) treated every
   cancellation as "Whiskers is stopping", so a dependency's own timeout — an HTTP client timing out is a
   cancellation too — ended the loop and, with the host's default behaviour, stopped the whole app. Now only a
   cancellation while the host really stops ends a loop; anything else is one failed cycle, logged, and the next cycle
   runs. The image-update check catches a failed cycle too. A loop that still dies stops the host as before, so it
-  stays visible (no global "ignore"). Loop intervals are checked at start: `HealthMonitor:CheckIntervalSeconds` and
+  stays visible (no global "ignore"). Loop intervals have a range: `HealthMonitor:CheckIntervalSeconds` and
   `Metrics:CollectionIntervalSeconds` 5 s to a day, `ImageUpdate:CheckIntervalHours` and
-  `CveMonitor:CheckIntervalHours` 1 to 168 h — a value outside that is a clear configuration error at start
-  instead of a loop without a pause or a crash hours later; the Settings page uses the same limits and saving a value
-  outside them is refused. A value that becomes invalid while Whiskers runs (the file edited) does not stop a loop: it
-  keeps its last valid interval and logs a warning. **Breaking for
-  a configuration with such a value: Whiskers does not start until it is fixed.** `/metrics` escapes label values
+  `CveMonitor:CheckIntervalHours` 1 to 720 h (30 days). A positive value outside its range still starts: a warning is
+  logged and the nearest limit is used (a 2-second health check runs every 5 s, a 2000-hour image check every 720 h),
+  so a configuration that ran before keeps running. The Settings page uses the same limits, and saving a value outside
+  them is refused with a message. All four loops use the value actually in effect, and a value that becomes invalid
+  while Whiskers runs (the file edited) does not stop a loop: it keeps its last valid interval and logs a warning.
+  **Breaking only for zero or a negative interval:** such a value — which made a loop spin or stopped Whiskers before —
+  now stops the start with an error naming the key. *Upgrade/recovery:* a value saved on the Settings page lives in
+  `app-settings.json` in the data directory (`WHISKERS_DATA_DIR`, by default `/app/data`, the `serverwatch-data`
+  volume of the shipped compose files). That file is the last configuration layer, so an environment variable such as
+  `HealthMonitor__CheckIntervalSeconds` does **not** override it. To recover without the UI, stop the container, edit
+  the key in that file on the volume (or remove it to get the default: 30 s health, 30 s metrics, 6 h image updates,
+  12 h CVE) and start again. `/metrics` escapes label values
   (quotes, backslashes, line feeds — nothing else, so distinct names stay distinct) and keeps an error comment on one line, so a container, image or server name
   can no longer break the exposition or forge a series. The AutoPatch planning, the image-update check and the
   advisor chat's context pass their cancellation to the Docker fleet listing and the image inspect (new
@@ -28,7 +35,8 @@ All notable changes to Whiskers are documented here. The format follows
   longer goes on in the background:** the health, log-alert, log-hygiene, image-update and auto-update loops used to
   stop *waiting* for a running cycle on shutdown and leave it running, so a listing that answered afterwards could
   still record metrics, send alerts or change state. Now the stop reaches every call such a cycle waits on — the
-  container listing, inspects and digest reads, the registry, the notification delivery and its retries — the loop
+  container listings (fleet-wide and per server), inspects, digest reads and log reads (including their wait for a
+  connection and a free slot), the registry, the notification delivery and its retries — the loop
   waits for them to end, and nothing happens after the stop. A notification that a stop interrupts is not reported as
   failed; an important one is kept for redelivery. An update whose container was already replaced is finished and
   recorded instead of being left unobserved. The fleet listing's 8-second limit per server now also covers the wait

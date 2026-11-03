@@ -90,11 +90,14 @@ public sealed class ServerBudget : IServerBudget
         // R1-41: a deadline about the call ends the wait too. Running out here is the queue's doing — never the server's,
         // and never mistaken for the caller giving up.
         using var waitLimit = deadline.CanBeCanceled ? CancellationTokenSource.CreateLinkedTokenSource(ct, deadline) : null;
+        // A deadline already spent before the queue was even reached (the wait for a client used it up) is not this
+        // queue's backlog: it still ends the call the same way, but is not counted as saturation.
+        var spentBeforeQueue = deadline.IsCancellationRequested;
         try { await gate.WaitAsync(waitLimit?.Token ?? ct); }
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested && deadline.IsCancellationRequested)
         {
             if (dedupe is not null) lanes.InFlightKeys.TryRemove(dedupe, out _);
-            Interlocked.Increment(ref lanes.SaturationFailures);
+            if (!spentBeforeQueue) Interlocked.Increment(ref lanes.SaturationFailures);
             throw new BudgetSaturatedException(serverId, Stopwatch.GetElapsedTime(waited), TimeSpan.Zero, ex);
         }
         catch { if (dedupe is not null) lanes.InFlightKeys.TryRemove(dedupe, out _); throw; }

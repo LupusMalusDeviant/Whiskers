@@ -29,6 +29,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
     // A host dropping off the fleet used to be silent everywhere; the tracker turns "did not answer"
     // into server_unreachable / server_recovered events (see ServerReachabilityTracker).
     private readonly ServerReachabilityTracker _reachability;
+    private readonly EffectiveInterval<HealthMonitorSettings> _interval;
 
     public ContainerHealthMonitor(
         IDockerService docker,
@@ -39,8 +40,12 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
         ILogger<ContainerHealthMonitor> logger,
         Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
         Whiskers.Services.Observability.ILoopSuspensionService suspension,
-        Whiskers.Services.ServerConfig.IServerConfigService serverConfig)
+        Whiskers.Services.ServerConfig.IServerConfigService serverConfig,
+        EffectiveInterval<HealthMonitorSettings>? interval = null)
     {
+        // R1-41: the interval in use — a configured value out of range is clamped (and warned about), never handed to
+        // Task.Delay as it is; shared with everything that reports against it.
+        _interval = interval ?? IntervalValidation.HealthCheck(settings.Value, logger);
         _docker = docker;
         _healthStore = healthStore;
         _notifications = notifications;
@@ -57,7 +62,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
     protected override async Task RunAsync(CancellationToken ct)
     {
         _logger.LogInformation("Container health monitor started (interval: {Interval}s)",
-            _settings.CheckIntervalSeconds);
+            _interval.Value);
 
         while (!ct.IsCancellationRequested)
         {
@@ -74,7 +79,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
                 _logger.LogError(ex, "Health check cycle failed");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(_settings.CheckIntervalSeconds), ct);
+            await Task.Delay(_interval.Interval, ct);
         }
     }
 
@@ -89,12 +94,13 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
         // Every server this cycle touched gets a record, and every Kubernetes server it stepped over gets a
         // skip. Without the skip a K8s host produces no health metrics at all, which looks exactly like a
         // host with nothing wrong (Plan-0003 WP2).
+        var interval = _interval.Interval;
         foreach (var responded in listing.RespondedServerIds)
             _selfMetrics.RecordCycle(SelfMetricsFleetExtensions.Loops.Health, responded, DateTime.UtcNow - startedAt, success: true,
-                interval: TimeSpan.FromSeconds(_settings.CheckIntervalSeconds));
+                interval: interval);
         foreach (var failure in listing.FailedServers)
             _selfMetrics.RecordCycle(SelfMetricsFleetExtensions.Loops.Health, failure.ServerId, DateTime.UtcNow - startedAt, success: false,
-                interval: TimeSpan.FromSeconds(_settings.CheckIntervalSeconds));
+                interval: interval);
         _selfMetrics.RecordKubernetesSkips(SelfMetricsFleetExtensions.Loops.Health, _serverConfig.GetEnabledServers());
 
         await ProcessServerReachabilityAsync(listing, ct);

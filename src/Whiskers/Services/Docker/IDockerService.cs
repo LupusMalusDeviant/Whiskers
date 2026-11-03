@@ -35,6 +35,17 @@ public interface IDockerService
     [MutatingOperation("container.remove")]
     Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null);
     Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null, CancellationToken ct = default);
+
+    /// <summary>R1-41: the log read with a server <paramref name="deadline"/> (bounds the request and the waits for a client
+    /// and a budget slot; an expiry at the host counts against the server) and the caller's own
+    /// <paramref name="callerToken"/> (a loop's stop: ends the same waits, never held against the server). The default
+    /// links both into the plain read's token; <c>DockerService</c> keeps them apart.</summary>
+    async Task<string> GetContainerLogsAsync(string containerId, int tailLines, string? serverId, DateTime? since,
+        CancellationToken deadline, CancellationToken callerToken)
+    {
+        using var either = CancellationTokenSource.CreateLinkedTokenSource(deadline, callerToken);
+        return await GetContainerLogsAsync(containerId, tailLines, serverId, since, either.Token);
+    }
     [MutatingOperation("container.create")]
     Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null);
     [MutatingOperation("image.pull")]

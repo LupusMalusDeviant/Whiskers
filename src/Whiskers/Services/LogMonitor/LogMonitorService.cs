@@ -390,7 +390,10 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
 
         try
         {
-            return await _docker.GetContainerLogsAsync(container.Id, TailLines, container.ServerId, since, fetchTimeout.Token);
+            // R1-41: the timeout is the server's deadline (it also bounds the waits for a client and a budget slot, and an
+            // expiry at the host counts against it); the stop is the caller's own and is never held against the server.
+            return await _docker.GetContainerLogsAsync(container.Id, TailLines, container.ServerId, since,
+                deadline: fetchTimeout.Token, callerToken: ct);
         }
         // Only OUR timeout is turned into a failure for this container. A cancelled shutdown token belongs to
         // the caller and must keep propagating, or a stop would look like a fleet of broken containers.

@@ -69,9 +69,12 @@ public class CompositeNotificationService : INotificationService
     public Task SendAsync(NotificationEvent evt) => SendAsync(evt, CancellationToken.None);
 
     /// <summary>R1-41: <paramref name="ct"/> (a producer stopped by the host) ends the attempts and retries of every
-    /// channel, and they are awaited: when this throws its <see cref="OperationCanceledException"/>, no delivery of this
-    /// event runs on. A delivery the stop interrupted is not a failed one; a critical event it interrupted is kept for
-    /// redelivery, as a failed one would be (R1-40), so the stop cannot lose it.</summary>
+    /// channel, and they are awaited: when this throws its <see cref="OperationCanceledException"/>, no channel delivery of
+    /// this event runs on. A delivery the stop interrupted is not a failed one; a critical event it interrupted is kept for
+    /// redelivery, as a failed one would be (R1-40), so the stop cannot lose it. The in-app feed entry and the
+    /// <c>AlertHistory</c> row are written before the channels run (a stop already requested ends the send before them; the
+    /// history write observes the token). The AI-trigger dispatch takes no token: it returns at once and the runs it starts
+    /// are bounded on their own (INV-40), so they can outlive the stop.</summary>
     public async Task SendAsync(NotificationEvent evt, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();

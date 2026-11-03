@@ -2333,6 +2333,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Settings_Snackbar_HealthSaved" xml:space="preserve">
     <value>Health monitoring saved.</value>
   </data>
+  <data name="Settings_Error_IntervalOutOfRange" xml:space="preserve">
+    <value>Not saved: {0} must be between {1} and {2}.</value>
+  </data>
   <data name="Settings_Snackbar_ImageUpdatesSaved" xml:space="preserve">
     <value>Image updates saved.</value>
   </data>

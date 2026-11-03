@@ -16,6 +16,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
     private readonly ILogger<ImageUpdateChecker> _logger;
     private readonly Whiskers.Services.Observability.SelfMetrics.ISelfMetrics _selfMetrics;
     private readonly ImageUpdateSettings _settings;
+    private readonly EffectiveInterval<ImageUpdateSettings> _interval;
 
     public ImageUpdateChecker(
         IServiceProvider services,
@@ -23,8 +24,12 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
         IRegistryClient registry,
         IOptions<ImageUpdateSettings> settings,
         ILogger<ImageUpdateChecker> logger,
-        Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics)
+        Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
+        EffectiveInterval<ImageUpdateSettings>? interval = null)
     {
+        // R1-41: the interval in use — a configured value out of range is clamped (and warned about), never handed to
+        // Task.Delay as it is.
+        _interval = interval ?? IntervalValidation.ImageUpdateCheck(settings.Value, logger);
         _services = services;
         _store = store;
         _registry = registry;
@@ -41,7 +46,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
             return;
         }
 
-        _logger.LogInformation("Image update checker started (interval: {Hours}h)", _settings.CheckIntervalHours);
+        _logger.LogInformation("Image update checker started (interval: {Hours}h)", _interval.Value);
 
         // Initial delay: wait 30s after startup, then check
         await Task.Delay(TimeSpan.FromSeconds(30), ct);
@@ -60,7 +65,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 // R1-41: a failed check (a registry timeout included) used to escape the loop and stop the host.
                 _logger.LogError(ex, "Image update check failed");
             }
-            await Task.Delay(TimeSpan.FromHours(_settings.CheckIntervalHours), ct);
+            await Task.Delay(_interval.Interval, ct);
         }
     }
 

@@ -42,11 +42,14 @@ public class BackgroundServiceFailureTests
     [Fact]
     public async Task A_dependency_timeout_fails_one_cycle_and_the_next_cycle_runs()
     {
-        var loop = new FlakyLoop(failures: [new TaskCanceledException("registry timed out"), new OperationCanceledException()]);
+        var loop = new FlakyLoop(failures: [new TaskCanceledException("registry timed out"), new OperationCanceledException()])
+        {
+            StartupOffsetForTests = TimeSpan.Zero,   // the real hosted path, without waiting out the startup spread
+        };
         using var host = new HostBuilder().ConfigureServices(s => s.AddHostedService(_ => loop)).Build();
         await host.StartAsync();
 
-        await loop.ThirdCycle.Task.WaitAsync(TimeSpan.FromSeconds(60));   // the startup offset is up to 30 s
+        await loop.ThirdCycle.Task.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Equal(2, loop.Failed);
         Assert.False(loop.Ended);
 
@@ -108,10 +111,12 @@ public class BackgroundServiceFailureTests
     [Fact]
     public void Saving_an_interval_out_of_range_is_refused()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => IntervalValidation.ThrowIfInvalid(new MetricsSettings { CollectionIntervalSeconds = 0 }));
-        Assert.Throws<ArgumentOutOfRangeException>(() => IntervalValidation.ThrowIfInvalid(new CveMonitorSettings { CheckIntervalHours = 169 }));
-        Assert.Throws<ArgumentOutOfRangeException>(() => IntervalValidation.ThrowIfInvalid(new HealthMonitorSettings { CheckIntervalSeconds = 1 }));
-        Assert.Throws<ArgumentOutOfRangeException>(() => IntervalValidation.ThrowIfInvalid(new ImageUpdateSettings { CheckIntervalHours = 0 }));
+        Assert.Throws<IntervalOutOfRangeException>(() => IntervalValidation.ThrowIfInvalid(new MetricsSettings { CollectionIntervalSeconds = 0 }));
+        var refused = Assert.Throws<IntervalOutOfRangeException>(() => IntervalValidation.ThrowIfInvalid(new CveMonitorSettings { CheckIntervalHours = 721 }));
+        Assert.Equal(("CveMonitor:CheckIntervalHours", 1, 720), (refused.Key, refused.Min, refused.Max));   // what the page says
+        Assert.Throws<IntervalOutOfRangeException>(() => IntervalValidation.ThrowIfInvalid(new HealthMonitorSettings { CheckIntervalSeconds = 1 }));
+        Assert.Throws<IntervalOutOfRangeException>(() => IntervalValidation.ThrowIfInvalid(new ImageUpdateSettings { CheckIntervalHours = 0 }));
+        IntervalValidation.ThrowIfInvalid(new ImageUpdateSettings { CheckIntervalHours = 720 });   // monthly is fine
         IntervalValidation.ThrowIfInvalid(new MetricsSettings());
         IntervalValidation.ThrowIfInvalid(new { Other = 0 });
     }
@@ -212,6 +217,59 @@ public class BackgroundServiceFailureTests
         await Task.WhenAll(busy);
     }
 
+    [Fact]
+    public async Task The_per_server_listing_and_the_log_read_keep_the_stop_and_the_server_deadline_apart()
+    {
+        // Review round 3: the log-alert and log-hygiene loops' per-server calls passed no caller token, so their stop did
+        // not reach the waits for a client or a slot, and a cancellation there could be counted against the server.
+        var (docker, circuit, budget) = Connection();
+        var release = new TaskCompletionSource();
+        var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
+            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+        var ops = Operations(docker, TimeSpan.FromMinutes(5));
+
+        // The stop while queued: a cancellation, not the queue's, not the server's.
+        using (var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(100)))
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => ops.ListContainersAsync(true, "badwolf", stop.Token).WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        using (var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(100)))
+        using (var fetchTimeout = CancellationTokenSource.CreateLinkedTokenSource(stop.Token))
+        {
+            var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ops.GetContainerLogsAsync("c1", 10, "badwolf",
+                null, deadline: fetchTimeout.Token, callerToken: stop.Token).WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.IsNotType<BudgetSaturatedException>(ex);
+        }
+        Assert.Equal(0, budget.Snapshot("badwolf").SaturationFailures);
+        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+
+        // The fetch timeout running out in the queue: the queue's doing, still not the server's.
+        using (var fetchTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(100)))
+            await Assert.ThrowsAsync<BudgetSaturatedException>(() => ops.GetContainerLogsAsync("c1", 10, "badwolf", null,
+                deadline: fetchTimeout.Token, callerToken: CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
+        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+
+        release.SetResult();
+        await Task.WhenAll(busy);
+    }
+
+    [Fact]
+    public async Task A_deadline_spent_before_the_queue_is_not_counted_as_saturation()
+    {
+        var budget = (ServerBudget)TestBudget.Create();
+        var release = new TaskCompletionSource();
+        var busy = Enumerable.Range(0, 4).Select(_ => budget.RunAsync("s1", async () => { await release.Task; return 0; })).ToList();
+
+        await Assert.ThrowsAsync<BudgetSaturatedException>(() => budget.RunAsync("s1", () => Task.FromResult(1),
+            deadline: new CancellationToken(canceled: true)));
+        Assert.Equal(0, budget.Snapshot("s1").SaturationFailures);
+
+        release.SetResult();
+        await Task.WhenAll(busy);
+    }
+
     private static readonly ServerConfig Badwolf = new()
     {
         Id = "badwolf", Name = "Badwolf", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local,
@@ -295,6 +353,8 @@ public class BackgroundServiceFailureTests
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, other)) { Log(ex); }")));   // another token
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(e2, ct)) { Log(ex); }")));     // another exception
         Assert.NotNull(VerdictOf("try { " + InLoop("await Run(ct);") + " } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }"));   // outside the loop
+        Assert.NotNull(VerdictOf(InLoop("foreach (var s in Servers()) { try { await Run(s, ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); } }")));   // only in a nested loop
+        Assert.Null(VerdictOf(InLoop("try { foreach (var s in Servers()) { try { await Run(s, ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); } } } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));   // nested one too, outer one present
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { }")));
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) { break; }\ncatch (Exception ex) { }")));
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) when (!ct.IsCancellationRequested) { break; }\ncatch (Exception ex) { }")));
@@ -303,8 +363,7 @@ public class BackgroundServiceFailureTests
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
-    [InlineData(IntervalValidation.MaxHealthSeconds + 1)]
-    public async Task An_interval_out_of_range_stops_the_start_with_a_clear_error(int seconds)
+    public async Task An_interval_that_would_break_the_loop_stops_the_start_with_a_clear_error(int seconds)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddOptions<HealthMonitorSettings>().Configure(s => s.CheckIntervalSeconds = seconds)
@@ -314,13 +373,35 @@ public class BackgroundServiceFailureTests
 
         var ex = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
         Assert.Contains("HealthMonitor:CheckIntervalSeconds", ex.Message);
+        Assert.Contains("app-settings.json", ex.Message);                 // where to fix it
+    }
+
+    [Theory]
+    [InlineData(1, IntervalValidation.MinHealthSeconds)]
+    [InlineData(IntervalValidation.MaxHealthSeconds + 1, IntervalValidation.MaxHealthSeconds)]
+    [InlineData(int.MaxValue, IntervalValidation.MaxHealthSeconds)]
+    public async Task A_positive_interval_out_of_range_starts_with_a_warning_and_is_clamped(int seconds, int used)
+    {
+        // Review round 3: earlier versions accepted such values; refusing them would make an upgrade a restart loop.
+        var logs = new NotificationDeliveryTests.ListLoggerProvider();
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(logs);
+        builder.Services.AddOptions<HealthMonitorSettings>().Configure(s => s.CheckIntervalSeconds = seconds)
+            .ValidateInterval(s => s.CheckIntervalSeconds, "HealthMonitor:CheckIntervalSeconds",
+                IntervalValidation.MinHealthSeconds, IntervalValidation.MaxHealthSeconds, TimeSpan.FromSeconds(1));
+        using var host = builder.Build();
+
+        await host.StartAsync();
+        Assert.Equal(TimeSpan.FromSeconds(used), host.Services.GetRequiredService<EffectiveInterval<HealthMonitorSettings>>().Interval);
+        Assert.Contains(logs.Lines, l => l.Contains("HealthMonitor:CheckIntervalSeconds"));
+        await host.StopAsync();
     }
 
     [Theory]
     [InlineData("ImageUpdate:CheckIntervalHours", "0")]
-    [InlineData("ImageUpdate:CheckIntervalHours", "169")]
+    [InlineData("ImageUpdate:CheckIntervalHours", "-3")]
     [InlineData("CveMonitor:CheckIntervalHours", "0")]
-    [InlineData("CveMonitor:CheckIntervalHours", "100000")]
+    [InlineData("CveMonitor:CheckIntervalHours", "-100000")]
     public void The_module_check_intervals_are_validated(string key, string value)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { [key] = value }).Build();
@@ -413,10 +494,16 @@ public class BackgroundServiceFailureTests
         foreach (var c in Outside<CatchClauseSyntax>(body))
             if (Problem(c, token) is { } problem) return problem;
 
-        // The recovering catch must sit inside the loop: one outside it lets the first failure end the loop.
-        var loops = Outside<StatementSyntax>(body).Where(IsLoop).ToList();
+        // The recovering catch must sit inside the loop: one outside it lets the first failure end the loop. And inside the
+        // OUTERMOST loop's body: a catch in a nested loop (a foreach over the servers) leaves everything between the loops —
+        // the enumeration itself included — free to end the outer one.
+        var loops = Outside<StatementSyntax>(body)
+            .Where(IsLoop)
+            .Where(l => !l.Ancestors().TakeWhile(a => a != body).OfType<StatementSyntax>().Any(IsLoop))
+            .ToList();
         var candidates = loops.Count > 0
-            ? loops.SelectMany(l => Outside<TryStatementSyntax>(LoopBody(l)))
+            ? loops.SelectMany(l => Outside<TryStatementSyntax>(LoopBody(l))
+                .Where(t => !t.Ancestors().TakeWhile(a => a != l).OfType<StatementSyntax>().Any(IsLoop)))
             : body.Statements.OfType<TryStatementSyntax>();
         return candidates.Any(t => Recovers(t, token))
             ? null

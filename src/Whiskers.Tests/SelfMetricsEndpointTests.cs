@@ -274,7 +274,7 @@ public class SelfMetricsEndpointTests
         Assert.Contains("whiskers_self_series_total", body);
         Assert.Contains("whiskers_cve_distinct_ids", body);
 
-        Reload("169");                                           // just out of range: 2 × 169 h would have hidden it
+        Reload("721");                                           // just out of range: 2 × 721 h would have hidden it
         Assert.Contains(stale, await ScrapeAsync(client));
         Assert.Equal(TimeSpan.FromHours(12),
             services.GetRequiredService<Whiskers.Configuration.EffectiveInterval<Whiskers.Configuration.CveMonitorSettings>>().Interval);

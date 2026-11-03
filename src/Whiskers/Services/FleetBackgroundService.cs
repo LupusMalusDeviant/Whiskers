@@ -40,7 +40,7 @@ public abstract class FleetBackgroundService : BackgroundService
         // budget at once, calls timed out waiting, and every server's circuit opened within four seconds —
         // followed by a paused/resumed notification per server. Six deploys in a day made that the loudest
         // thing in the notification list. The work is identical either way; only the pile-up was avoidable.
-        var offset = StartupOffset(GetType());
+        var offset = StartupOffsetForTests ?? StartupOffset(GetType());
         if (offset > TimeSpan.Zero)
         {
             try { await Task.Delay(offset, stoppingToken); }
@@ -49,6 +49,10 @@ public abstract class FleetBackgroundService : BackgroundService
 
         await RunAsync(stoppingToken);
     }
+
+    /// <summary>Tests only: replaces the startup offset (null in the app), so a test of the hosted loop does not wait up
+    /// to <see cref="StartupSpread"/> for its first cycle.</summary>
+    internal TimeSpan? StartupOffsetForTests { get; init; }
 
     /// <summary>
     /// A stable per-loop startup offset inside <see cref="StartupSpread"/>.
