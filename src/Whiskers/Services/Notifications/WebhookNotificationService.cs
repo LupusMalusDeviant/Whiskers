@@ -45,7 +45,8 @@ public class WebhookNotificationService : IWebhookNotificationService
         await PostAsync(c, new NotificationEvent { EventType = NotificationEventTypes.Test, ContainerName = "Whiskers", ImageInfo = "Benachrichtigungen funktionieren." });
     }
 
-    private async Task PostAsync(WebhookNotificationSettings c, NotificationEvent evt, CancellationToken ct = default)
+    /// <summary>The JSON body of one event, exactly as it goes on the wire (and is signed).</summary>
+    internal static byte[] Body(NotificationEvent evt)
     {
         var (title, severity) = NotificationFormatter.Describe(evt);
         var payload = new
@@ -59,9 +60,18 @@ public class WebhookNotificationService : IWebhookNotificationService
             container = evt.ContainerName,
             image = evt.Image,
             timestamp = evt.Timestamp,
+            // Follow-up (2026-11-03, review R1-56 NIT-4): a <kind>_recovered that no reading confirmed (the alert was
+            // closed because its series stopped or was dropped), as a field a receiver can act on without parsing the
+            // title. Additive: false for every other event.
+            recoveryUnconfirmed = evt.RecoveryUnconfirmed,
         };
+        return JsonSerializer.SerializeToUtf8Bytes(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
+    private async Task PostAsync(WebhookNotificationSettings c, NotificationEvent evt, CancellationToken ct = default)
+    {
         // Serialize once and sign exactly the bytes that go on the wire.
-        var body = JsonSerializer.SerializeToUtf8Bytes(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var body = Body(evt);
         using var request = new HttpRequestMessage(HttpMethod.Post, c.Url) { Content = new ByteArrayContent(body) };
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         foreach (var (name, value) in SignatureHeaders(c.Secret, body, DateTimeOffset.UtcNow))

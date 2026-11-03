@@ -19,6 +19,24 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"sw-r155-col-{Guid.NewGuid():N}.db");
     private readonly AuditRetentionWiringTests.PruneRecorder _auditChain = new();
+    private CountingRollup? _rollups;
+
+    /// <summary>Follow-up (2026-11-03, review R1-55 MINOR): the real roll-up, counting its calls. A roll-up attempted again
+    /// writes no window and warns only once per clock episode, so only the count shows a second attempt.</summary>
+    private sealed class CountingRollup(IMetricRollupService inner) : IMetricRollupService
+    {
+        private int _rollUps;
+        public int RollUps => Volatile.Read(ref _rollUps);
+
+        public Task<MetricRollupResult> RollUpAsync(MetricsDbContext db, DateTime now, CancellationToken ct)
+        {
+            Interlocked.Increment(ref _rollUps);
+            return inner.RollUpAsync(db, now, ct);
+        }
+
+        public Task<MetricPruneResult> PruneAsync(MetricsDbContext db, DateTime now, MetricRetention retention, CancellationToken ct) =>
+            inner.PruneAsync(db, now, retention, ct);
+    }
 
     public void Dispose()
     {
@@ -66,7 +84,7 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
             new Microsoft.Extensions.Logging.Logger<MetricsCollectorService>(loggers),
             new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(), interval,
             new FixedRetention(MetricRetention.Default with { RawDays = 1, AlertHistoryDays = 1 }),
-            new MetricRollupService(new Microsoft.Extensions.Logging.Logger<MetricRollupService>(loggers)))
+            _rollups = new CountingRollup(new MetricRollupService(new Microsoft.Extensions.Logging.Logger<MetricRollupService>(loggers))))
         {
             StartupDelay = TimeSpan.Zero,
             StartupOffsetForTests = TimeSpan.Zero,
@@ -122,7 +140,11 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
             // The daily audit retention too: once before, once after the set-back.
             Assert.Equal([t0.AddHours(2).AddMinutes(1), setBack], _auditChain.Calls.Select(c => c.Cutoff.AddDays(c.Days)));
 
-            // Thirty seconds later: the schedules set at the set-back hold again — no second warning, no second run.
+            // The roll-up ran once per MaintainAsync so far: before and after the set-back.
+            Assert.Equal(2, _rollups!.RollUps);
+
+            // Thirty seconds later: the schedules set at the set-back hold again — no second warning, and no second run of
+            // the roll-up (counted), the hourly prune (the old alert survives) or the daily audit retention (recorded).
             var rollups = RollupCount(sp);
             using (var scope = sp.CreateScope())
             {
@@ -134,6 +156,7 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
 
             Assert.Single(logs.Lines, l => l.Contains("ahead of the clock"));
             Assert.Equal(2, _auditChain.Calls.Count);
+            Assert.Equal(2, _rollups.RollUps);
             Assert.Equal(rollups, RollupCount(sp));
             using (var scope = sp.CreateScope())
                 Assert.True(scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AlertHistory.Any(), "no second hourly retention");

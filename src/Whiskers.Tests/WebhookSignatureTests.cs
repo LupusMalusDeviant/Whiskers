@@ -39,4 +39,21 @@ public class WebhookSignatureTests
             .Single(h => h.Name == "X-Hub-Signature-256").Value;
         Assert.Equal("sha256=" + Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes("s3cret"), Body)), hub);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void The_payload_carries_whether_a_recovery_was_confirmed(bool unconfirmed)
+    {
+        // Follow-up (2026-11-03, review R1-56 NIT-4): a receiver tells an unconfirmed close from a recovery by a field.
+        var body = WebhookNotificationService.Body(new Whiskers.Models.NotificationEvent
+        {
+            EventType = NotificationEventTypes.Recovered(NotificationEventTypes.HighCpu),
+            ContainerName = "web",
+            RecoveryUnconfirmed = unconfirmed,
+        });
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        Assert.Equal(unconfirmed, json.RootElement.GetProperty("recoveryUnconfirmed").GetBoolean());
+        Assert.Equal("high_cpu_recovered", json.RootElement.GetProperty("event").GetString());
+    }
 }

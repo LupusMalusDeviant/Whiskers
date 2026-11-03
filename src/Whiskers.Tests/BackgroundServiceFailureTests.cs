@@ -124,6 +124,26 @@ public class BackgroundServiceFailureTests
         IntervalValidation.ThrowIfInvalid(new { Other = 0 });
     }
 
+    [Theory]
+    [InlineData("SaveHealth")]
+    [InlineData("SaveCve")]
+    [InlineData("SaveImageUpdate")]
+    public void The_settings_page_refuses_an_interval_before_the_gateway_runs(string method)
+    {
+        // Follow-up (2026-11-03, review R1-41 round 7 NIT 5): refused inside config.save, the value left a Failed mutation
+        // in the audit trail although nothing was written. The page checks it first; the store still refuses on its own.
+        var page = File.ReadAllText(Path.Combine(SourceRoot(), "src", "Whiskers", "Components", "Pages", "Settings.razor"));
+        var start = page.IndexOf($"private async Task {method}()", StringComparison.Ordinal);
+        Assert.True(start >= 0, $"{method} not found");
+        var body = page[start..];
+        body = body[..body.IndexOf("\n    private ", 1, StringComparison.Ordinal)];
+
+        var check = body.IndexOf("IntervalValidation.ThrowIfInvalid(", StringComparison.Ordinal);
+        var gateway = body.IndexOf("Mutations.RunAsync(", StringComparison.Ordinal);
+        Assert.True(check >= 0 && gateway > check, $"{method}: the interval is not checked before Mutations.RunAsync");
+        Assert.Contains("catch (Whiskers.Configuration.IntervalOutOfRangeException", body);
+    }
+
     [Fact]
     public async Task A_caller_cancellation_is_not_held_against_the_server()
     {
@@ -318,6 +338,25 @@ public class BackgroundServiceFailureTests
         var tracker = new Whiskers.Services.HealthMonitor.ServerReachabilityTracker(threshold: 2, coldStartThreshold: 2);
         Assert.Empty(tracker.Evaluate(listing));
         Assert.Equal("server_unreachable", Assert.Single(tracker.Evaluate(listing)).EventType);
+    }
+
+    [Fact]
+    public async Task A_listing_that_fails_for_another_reason_after_the_deadline_names_that_reason()
+    {
+        // Follow-up (2026-11-03, review R1-41 round 8 NIT 1): any exception that happened to end after the deadline read
+        // "Timed out", hiding what the server actually said.
+        var (docker, _, _) = Connection(sentRequest: async _ =>
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(400));            // the deadline (100 ms) passes meanwhile
+            throw new InvalidOperationException("the daemon refused: permission denied");
+        });
+        var ops = Operations(docker, TimeSpan.FromMilliseconds(100));
+
+        var listing = await ops.ListAllContainersDetailedAsync(true, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        var failure = Assert.Single(listing.FailedServers);
+        Assert.DoesNotContain("Timed out", failure.Error);
+        Assert.Contains("permission denied", failure.Error);
     }
 
     [Fact]

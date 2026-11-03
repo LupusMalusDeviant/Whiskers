@@ -56,12 +56,12 @@ carry a channel's capability URL, which the redaction then has to catch.
 
 | Id | Where it comes from | Where it appears |
 |---|---|---|
-| `HttpRequestId` | The client's `X-Request-Id` header when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -`); otherwise the W3C trace id of an incoming `traceparent`; otherwise a new id | The `X-Request-Id` response header; the log scope `HttpRequestId`; the gateway's decision and outcome lines |
+| `HttpRequestId` | The client's `X-Request-Id` header when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -`); otherwise the W3C trace id of an incoming `traceparent`; otherwise a new id | The `X-Request-Id` response header; the log scope `HttpRequestId`; the gateway's decision, refusal and outcome lines |
 | `OperationId` | The Mutation Gateway: the caller's own id (an agent tool call) or a new one; an approve-then-retry continues the operation that raised the approval | The log scope `OperationId` around the whole execution, also in the lines of the services it calls; the policy decision, the approval (its correlation id), the operation journal and the audit row |
 
 To follow a request:
 
-1. Take the `X-Request-Id` the client received, or send your own.
+1. Take the `X-Request-Id` the client received, or send your own — use a plain id such as a UUID (values that look like tokens are written as `***` in the log, like any other value the log redaction catches).
 2. Find the gateway line that names it:
    `Operation 5f0c... (container.restart, Mcp) decided Confirm: decision 91ab..., request req-42`.
 3. Follow the `OperationId`. With scopes switched on, every line of the run carries it: the gateway's

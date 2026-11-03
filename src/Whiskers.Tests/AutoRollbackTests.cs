@@ -58,7 +58,7 @@ public sealed class AutoRollbackTests : IDisposable
     /// <summary>The service with an opt-in policy for "web"; with <paramref name="second"/> also one for a second
     /// container of that name (checked after "web"), which has an update too.</summary>
     internal async Task<AutoUpdateService> ServiceAsync(bool autoRollback, bool vault = true, IShutdownDrain? drain = null,
-        string? second = null)
+        string? second = null, Whiskers.Services.Notifications.INotificationService? notifications = null)
     {
         const string SecondId = "dddddddddddd4444";
         using (var scope = _sp.CreateScope())
@@ -100,7 +100,7 @@ public sealed class AutoRollbackTests : IDisposable
         var owners = new MemoryAutomationOwners();
         await owners.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:admin@example.com");
         return new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(), _service, updates,
-            new FakeNotifications(), null!, Runner(), owners, NullLogger<AutoUpdateService>.Instance,
+            notifications ?? new FakeNotifications(), null!, Runner(), owners, NullLogger<AutoUpdateService>.Instance,
             vault ? TestVault.Usable : null, drain) { HealthDelay = TimeSpan.Zero };
     }
 
@@ -178,6 +178,42 @@ public sealed class AutoRollbackTests : IDisposable
         Assert.True(history.RolledBack);
         Assert.Contains("unhealthy", history.Error);
         Assert.Equal(0, snapshots);
+    }
+
+    [Fact]
+    public async Task The_failure_notification_carries_the_stop_and_a_stop_during_it_still_records_the_attempt()
+    {
+        // Follow-up (2026-11-03, review R1-41 round 6 NIT 8): the failure notification went out on the token-less overload,
+        // so a stop could not end its retries (the composite keeps a critical event in the outbox when it does).
+        using var stop = new CancellationTokenSource();
+        var notifications = new StopRecordingNotifications(stop);
+        UpdateThatLaterReads(n => Task.FromResult(n == 1 ? ("running", 0, false) : ("exited", 137, false)));
+        var service = await ServiceAsync(autoRollback: false, notifications: notifications);
+
+        try { await service.CheckAndUpdateAsync(stop.Token); }
+        catch (OperationCanceledException) { /* the stop may end the cycle after the attempt was recorded */ }
+
+        Assert.True(notifications.FailureSawTheStop, "the failure notification was sent without the cycle's token");
+        var (history, policy, _) = await ResultAsync();
+        Assert.False(history.Success);                     // recorded although the stop ended the notification
+        Assert.NotNull(history.CompletedAt);
+        Assert.StartsWith("FEHLER", policy.LastUpdateResult);
+    }
+
+    /// <summary>Records whether the auto_update_failed delivery could be stopped, then stops it as the host would.</summary>
+    private sealed class StopRecordingNotifications(CancellationTokenSource stop) : Whiskers.Services.Notifications.INotificationService
+    {
+        public bool FailureSawTheStop { get; private set; }
+        public Task SendAsync(NotificationEvent evt) => Task.CompletedTask;
+        public Task SendTestAsync() => Task.CompletedTask;
+
+        public Task SendAsync(NotificationEvent evt, CancellationToken ct)
+        {
+            if (evt.EventType != Whiskers.Services.Notifications.NotificationEventTypes.AutoUpdateFailed) return Task.CompletedTask;
+            stop.Cancel();
+            FailureSawTheStop = ct.IsCancellationRequested;
+            return Task.FromException(new OperationCanceledException(ct));
+        }
     }
 
     [Fact]

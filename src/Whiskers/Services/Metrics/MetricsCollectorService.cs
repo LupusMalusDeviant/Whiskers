@@ -483,7 +483,10 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                 {
                     ContainerId = id, ContainerName = owner.Name, ServerId = owner.ServerId, ServerName = owner.ServerName,
                 };
-                var reason = string.IsNullOrEmpty(owner.ServerName)
+                // Follow-up (2026-11-03, review R1-56 NIT-5): a container of a server that was removed says so.
+                var reason = !string.IsNullOrEmpty(owner.ServerId) && !configured.Contains(owner.ServerId)
+                    ? $"the server of container {owner.Name} ({owner.ServerName}) was removed from the configuration"
+                    : string.IsNullOrEmpty(owner.ServerName)
                     ? $"container {owner.Name} is no longer running"
                     : $"container {owner.Name} is no longer running on {owner.ServerName}";
                 await CloseDroppedAsync(notify, _ => template, _thresholds.Close(id, now, reason), _gaps.Close(now, id, reason), ct);
@@ -501,6 +504,14 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         foreach (var id in _hostLoad.Tracked())
             if (!configured.Contains(id))
                 await CloseDroppedAsync(notify, f => ServerEvent(id, f.ServerName), _hostLoad.Close(id, now, removed), null, ct);
+        // Follow-up (2026-11-03, review R1-56 MINOR-2): the API-latency and baseline rules raise and close too — the open
+        // alerts of a removed server are closed the same way, unconfirmed.
+        foreach (var id in _apiLatency.Tracked())
+            if (!configured.Contains(id))
+                await CloseDroppedAsync(notify, f => ServerEvent(id, f.ServerName), _apiLatency.Close(id, now, removed), null, ct);
+        foreach (var id in _baseline.Tracked())
+            if (!configured.Contains(id))
+                await CloseDroppedAsync(notify, f => ServerEvent(id, f.ServerName), _baseline.Close(id, now, removed), null, ct);
         foreach (var id in _containerServer.Keys.ToList())
             if (Gone(id) || !configured.Contains(_containerServer[id].ServerId)) _containerServer.TryRemove(id, out _);
 
@@ -560,9 +571,14 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
             foreach (var s in saved.Thresholds)
                 if (s.Series.StartsWith(DiskPrefix, StringComparison.Ordinal)) _diskRead.Add(s.Series[DiskPrefix.Length..]);
             _hostLoad.Restore(saved.HostLoad, now);
+            // Follow-up (2026-11-03, review R1-56 MINOR-1): the reported gaps, so each is closed once and never raised twice.
+            // A file written before has none.
+            var gaps = (saved.Gaps ?? []).Where(g => g is not null).ToList();
+            _gaps.Restore(gaps);
             _savedBreaches = Serialize(saved);
             var open = saved.Thresholds.Concat(saved.HostLoad).Count(s => s.Reported is not null);
             if (open > 0) _logger.LogInformation("Resumed {Open} threshold alerts that were open when Whiskers stopped", open);
+            if (gaps.Count > 0) _logger.LogInformation("Resumed {Open} missing-readings alerts that were open when Whiskers stopped", gaps.Count);
         }
         catch (Exception ex)
         {
@@ -576,11 +592,14 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     {
         if (_services.GetService<IAlertBreachStore>() is not { } store) return;
         var thresholds = _thresholds.Snapshot();
+        var gaps = _gaps.Snapshot();
         var state = new AlertBreachFile
         {
             Thresholds = [.. thresholds],
             HostLoad = [.. _hostLoad.Snapshot()],
-            Containers = thresholds.Select(s => s.Series).Distinct()
+            Gaps = [.. gaps],
+            // The server of each container with a kept breach or a kept gap (follow-up 2026-11-03).
+            Containers = thresholds.Select(s => s.Series).Concat(gaps.Select(g => g.Series)).Distinct()
                 .Where(id => _containerServer.ContainsKey(id))
                 .Select(id => new ContainerOwner(id, _containerServer[id].ServerId, _containerServer[id].ServerName, _containerServer[id].Name))
                 .OrderBy(o => o.Id, StringComparer.Ordinal).ToList(),

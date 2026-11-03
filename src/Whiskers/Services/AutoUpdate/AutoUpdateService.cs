@@ -324,7 +324,10 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                         : $"FEHLER (Rollback fehlgeschlagen): {ex.Message}";
                 }
 
-                // Notify about failure — wrapped so a notify error can't skip the history save below.
+                // Notify about failure — wrapped so a notify error (or the stop) can't skip the history save below.
+                // Follow-up (2026-11-03, review R1-41 round 6 NIT 8): with the cycle's token, so a stop ends its retries
+                // instead of running them into the shutdown window; the composite keeps this critical event in the outbox
+                // when the stop interrupts it, and redelivers it after the restart.
                 try
                 {
                     await _notifications.SendAsync(new NotificationEvent
@@ -333,7 +336,11 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                         ContainerName = container.Name,
                         Image = container.Image,
                         EventType = NotificationEventTypes.AutoUpdateFailed
-                    });
+                    }, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Auto-update failure notification for {Container} interrupted by the stop", container.Name);
                 }
                 catch (Exception nex) { _logger.LogWarning(nex, "Auto-update failure notification failed for {Container}", container.Name); }
             }

@@ -57,7 +57,7 @@ concurrency cap. Runs only when the agent is enabled.
 | File | Purpose |
 |---|---|
 | `AiTriggerStore.cs` | `IAiTriggerStore` + `AiTriggerStore`, persists the triggers in `ai-triggers.json` (admin-only). |
-| `AiTriggerDispatcher.cs` | `IAiTriggerDispatcher` + `AiTriggerDispatcher`, matches events to triggers and runs the agent autonomously with the event as delimited data; resolves its dependencies lazily from the root provider to avoid a DI cycle with the notification service. |
+| `AiTriggerDispatcher.cs` | `IAiTriggerDispatcher` + `AiTriggerDispatcher`, matches events to triggers and runs the agent autonomously with the event as delimited data; resolves its dependencies lazily from the root provider to avoid a DI cycle with the notification service. The event data carries `recoveryUnconfirmed` (follow-up 2026-11-03). |
 | `AiTriggerAuthority.cs` | `IAiTriggerAuthority` + `AiTriggerAuthority`: the level a run starts with, and the gateway's per-mutation check of grant and owner (`ITriggerAuthority`); suspends a trigger whose owner lost the right. |
 
 ## Related

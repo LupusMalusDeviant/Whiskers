@@ -101,6 +101,13 @@ public sealed class ApiLatencyEvaluator
 
     public IReadOnlyList<OpenFinding> OpenFindings() => _tracker.OpenFindings();
 
+    /// <summary>Follow-up (2026-11-03, review R1-56 MINOR-2): the servers this rule holds state for.</summary>
+    public IReadOnlyCollection<string> Tracked() => _tracker.Tracked();
+
+    /// <summary>Follow-up (2026-11-03, review R1-56 MINOR-2): drops the state of a removed server and closes its reported
+    /// <c>host_api_slow</c>, unconfirmed (<see cref="BreachTracker.Close"/>).</summary>
+    public IReadOnlyList<HostLoadFinding> Close(string serverId, DateTime atUtc, string reason) => _tracker.Close(serverId, atUtc, reason);
+
     /// <summary>Median rather than mean: one 8-second timeout in a window of twenty would drag an average
     /// far enough to raise an alert on a host that is perfectly fine.</summary>
     private static TimeSpan Median(IReadOnlyList<TimeSpan> values)
