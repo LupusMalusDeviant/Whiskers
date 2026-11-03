@@ -110,6 +110,9 @@ public class NotificationsModuleTests
         services.AddSingleton<IAiTriggerDispatcher, RecordingDispatcher>();
         services.AddSingleton<IContainerNotificationPrefsService, AllowAllPrefs>();
         services.AddSingleton(new Whiskers.Configuration.DataPathOptions(Path.Combine(Path.GetTempPath(), "whiskers-notif-module-tests")));   // the outbox file (R1-40)
+        // Core's settings store: the outbound guard's exceptions are kept in it (R1-54).
+        services.AddSingleton<Whiskers.Services.Persistence.IAppSettingsStore>(sp =>
+            new Whiskers.Services.Persistence.AppSettingsStore(dataPaths: sp.GetRequiredService<Whiskers.Configuration.DataPathOptions>()));
         // Registered BEFORE the module (like Program.cs registers it before the module loop).
         services.AddSingleton<INotificationService, NoopNotificationService>();
         return services;

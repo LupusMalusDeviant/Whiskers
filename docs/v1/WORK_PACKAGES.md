@@ -908,7 +908,7 @@ exception settings with UI and en/de strings, README and tests; approximately 12
 
 **Acceptance criteria:**
 
-- [ ] **Default-denied ranges are built in, not configured:** loopback (`127.0.0.0/8`, `::1`), unspecified
+- [x] **Default-denied ranges are built in, not configured:** loopback (`127.0.0.0/8`, `::1`), unspecified
   (`0.0.0.0/8`, `::`), link-local (`169.254.0.0/16`, `fe80::/10`), RFC 1918 (`10/8`, `172.16/12`, `192.168/16`),
   CGNAT/Tailscale (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), IPv6 ULA (`fc00::/7`), deprecated site-local
   (`fec0::/10`), reserved `240.0.0.0/4`, IETF `192.0.0.0/24`, benchmarking `198.18.0.0/15`, documentation
@@ -923,18 +923,18 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   inside RFC 1918); an empty configuration denies all of them. Addresses are canonicalised first (IPv4-mapped and
   IPv4-compatible IPv6, NAT64 `64:ff9b::/96`, decimal/octal/hex IPv4 literals, zone-scoped literals such as
   `fe80::1%eth0`, judged without the zone and refused when link-local).
-- [ ] `OutboundTargetGuardTests` check the **address actually connected to** (a `SocketsHttpHandler.ConnectCallback`
+- [x] `OutboundTargetGuardTests` check the **address actually connected to** (a `SocketsHttpHandler.ConnectCallback`
   that resolves, filters and connects itself): a name with one public and one internal answer, a name that rebinds
   between check and connect, and each canonical form above are refused.
-- [ ] An SMTP host that resolves to loopback or link-local (`169.254.169.254`) is refused — tested — like every HTTP
+- [x] An SMTP host that resolves to loopback or link-local (`169.254.169.254`) is refused — tested — like every HTTP
   channel.
-- [ ] Redirects are refused (`AllowAutoRedirect = false`; a 3xx answer is a delivery failure) — tested with a public
+- [x] Redirects are refused (`AllowAutoRedirect = false`; a 3xx answer is a delivery failure) — tested with a public
   URL redirecting to `169.254.169.254` and to `[::ffff:127.0.0.1]`.
-- [ ] Proxies are disabled for these clients (`UseProxy = false`), since a proxy's address says nothing about the
+- [x] Proxies are disabled for these clients (`UseProxy = false`), since a proxy's address says nothing about the
   destination; a test configures an `IWebProxy` pointing at a local listener and asserts that nothing arrives there.
   An installation that reached Slack or Telegram through an egress proxy loses that path: the CHANGELOG carries an
   upgrade note, and such a delivery fails with a reason of its own (not a generic network error).
-- [ ] The upgrade cannot silently cost all alerts: every existing LAN or Tailscale channel (a self-hosted ntfy,
+- [x] The upgrade cannot silently cost all alerts: every existing LAN or Tailscale channel (a self-hosted ntfy,
   Mattermost, Matrix, an SMTP relay) is refused from the first start after the upgrade until an Admin adds an
   exception. The CHANGELOG upgrade note names this case; the startup log and the Admin-only notification settings
   page list each configured channel the guard would refuse, with the address that would be refused — tested. The
@@ -944,17 +944,17 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   path; R1-25 applies to this new sink too). The anonymous `/readyz` stays status-only
   (`Startup/WhiskersPipelineExtensions.cs`), so nothing internal leaks there. A guard refusal is final for that
   delivery: `CompositeNotificationService.SafeSend` does not retry it.
-- [ ] Exceptions are narrow: an Admin-only list of entries, each either an IP literal plus port, or a name plus port
+- [x] Exceptions are narrow: an Admin-only list of entries, each either an IP literal plus port, or a name plus port
   plus the address(es) it may resolve to. The guard compares the **connected address** with the entry, so an excepted
   name that rebinds to another address (for example `169.254.169.254`) is refused — tested. Ranges or wildcards are
   not accepted. Each change is a gated configuration write (R1-11) with audit (R1-22); Viewer/Operator and a demoted
   Admin are refused, the kill switch refuses, an audit failure refuses before the list is published, and a failed
   save leaves the live list unchanged.
-- [ ] Removing or narrowing an exception also ends the connections it allowed: the guard runs in `ConnectCallback`,
+- [x] Removing or narrowing an exception also ends the connections it allowed: the guard runs in `ConnectCallback`,
   which a pooled keep-alive connection does not pass again, so a published change replaces the outbound handler
   (or its connection pool) before the next delivery starts. A test removes an exception and sends a second request
   that would otherwise reuse the keep-alive connection; it is refused.
-- [ ] A refused delivery is a visible notification failure (R1-40), with the reason and without the URL's secrets
+- [x] A refused delivery is a visible notification failure (R1-40), with the reason and without the URL's secrets
   (R1-25).
 
 **Out of scope:** Inbound webhooks (R1-09/10). The other operator-configured outbound fetchers — those the audit lists

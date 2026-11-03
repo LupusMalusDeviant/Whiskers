@@ -10,8 +10,12 @@ extracted from the transitional `AllInOnePseudoModule` into its own `IWhiskersMo
   they are bound (on first use after a Settings save — until the channel next reads its settings, a new ntfy topic or
   custom webhook URL is covered only by the patterns) (R1-25: bot token, webhook and ntfy topic URLs — the bare topic only when it looks like a capability, 16+ characters with a digit, `-` or `_` — Matrix token, SMTP password, signing secret), registers the 8 channels as `INotificationChannel`
   (changeme C9), registers `CompositeNotificationService` as `INotificationService`, and (R1-40) the notification
-  outbox (`INotificationOutbox`) with its redelivery worker (`NotificationOutboxWorker`). No nav entry and no
-  MCP tools.
+  outbox (`INotificationOutbox`) with its redelivery worker (`NotificationOutboxWorker`). R1-54 (INV-60): the
+  outbound guard — `IOutboundExceptionService` (needs Core's `IAppSettingsStore` and `IConfiguration`),
+  `IOutboundDnsResolver`, `IOutboundTargetGuard`, `IOutboundHttp`, `IOutboundTargetReport` and the
+  `OutboundTargetStartupCheck` hosted service; the seven HTTP channels are constructed with the factory client
+  `notification-channels` (15 s), whose primary handler forwards to the guarded handler, and the e-mail channel gets
+  the guard itself. No nav entry and no MCP tools.
 
 **Toggle:** `Features:notifications:Enabled` (`Features__notifications__Enabled=false`), restart-only.
 

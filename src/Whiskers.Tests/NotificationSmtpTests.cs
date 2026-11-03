@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Mail;
 using System.Net.Sockets;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -35,7 +34,8 @@ public sealed class NotificationSmtpTests : IDisposable
         {
             Enabled = true, Host = "127.0.0.1", Port = smtp.Port, UseSsl = false, From = "whiskers@example.test", To = to,
             ThrottleMinutes = 0,
-        }), NullLogger<EmailNotificationService>.Instance) { SmtpDeadline = deadline ?? TimeSpan.FromSeconds(10) };
+        }), OutboundTestDoubles.GuardAllowing("127.0.0.1", smtp.Port), NullLogger<EmailNotificationService>.Instance)
+        { SmtpDeadline = deadline ?? TimeSpan.FromSeconds(10) };
 
     [Fact]
     public async Task A_recipient_the_server_took_does_not_get_the_message_again()
@@ -44,8 +44,10 @@ public sealed class NotificationSmtpTests : IDisposable
         var email = Email(smtp, "a@example.test, b@example.test");
         var evt = Failed();
 
-        await Assert.ThrowsAnyAsync<SmtpFailedRecipientException>(() => email.DeliverAsync(evt, CancellationToken.None));
+        var refused = await Assert.ThrowsAsync<EmailRecipientsRefusedException>(() => email.DeliverAsync(evt, CancellationToken.None));
+        Assert.Equal(["b@example.test"], refused.Refused);
         Assert.Equal(["a@example.test"], evt.DeliveredRecipients!);
+        Assert.Equal(1, smtp.Received("a@example.test"));      // the message went to the one the server took
 
         smtp.Refuse = _ => false;
         Assert.True(await email.DeliverAsync(evt, CancellationToken.None));
@@ -62,7 +64,7 @@ public sealed class NotificationSmtpTests : IDisposable
         var email = Email(smtp, "a@example.test, b@example.test");
         var evt = Failed();
 
-        await Assert.ThrowsAnyAsync<SmtpFailedRecipientException>(() => email.DeliverAsync(evt, CancellationToken.None));
+        await Assert.ThrowsAsync<EmailRecipientsRefusedException>(() => email.DeliverAsync(evt, CancellationToken.None));
 
         Assert.Null(evt.DeliveredRecipients);
         Assert.Equal(0, smtp.Received("a@example.test"));
@@ -128,7 +130,7 @@ public sealed class NotificationSmtpTests : IDisposable
         var error = await Assert.ThrowsAnyAsync<Exception>(
             () => email.DeliverAsync(Failed(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(8)));
 
-        Assert.True(error is TimeoutException or SmtpException, error.ToString());
+        Assert.True(error is TimeoutException, error.ToString());
         await smtp.ClosedByClient.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
@@ -136,11 +138,13 @@ public sealed class NotificationSmtpTests : IDisposable
     public async Task A_stop_while_connecting_ends_the_send()
     {
         // 192.0.2.1 (TEST-NET-1) is never routed: the connect hangs (or fails at once where there is no route at all).
+        // It is a documentation address the outbound guard denies (R1-54), so the test excepts it exactly.
         var email = new EmailNotificationService(new StaticOptionsMonitor<EmailSettings>(new EmailSettings
         {
             Enabled = true, Host = "192.0.2.1", Port = 25, UseSsl = false, From = "whiskers@example.test",
             To = "a@example.test",
-        }), NullLogger<EmailNotificationService>.Instance) { SmtpDeadline = TimeSpan.FromSeconds(60) };
+        }), OutboundTestDoubles.GuardAllowing("192.0.2.1", 25), NullLogger<EmailNotificationService>.Instance)
+        { SmtpDeadline = TimeSpan.FromSeconds(60) };
         using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
         var started = DateTime.UtcNow;
 
@@ -160,6 +164,9 @@ public sealed class NotificationSmtpTests : IDisposable
 
         public Func<string, bool> Refuse { get; set; } = _ => false;
         public bool StallFinalAnswer { get; init; }
+        /// <summary>Takes the message, then never answers QUIT.</summary>
+        public bool StallQuit { get; init; }
+        public TaskCompletionSource QuitAwaited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource FinalAnswerAwaited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ClosedByClient { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         /// <summary>The recipients each conversation named (taken or not).</summary>
@@ -228,6 +235,11 @@ public sealed class NotificationSmtpTests : IDisposable
                             lock (_delivered) _delivered.AddRange(taken);
                             await writer.WriteLineAsync("250 queued");
                             break;
+                        case "QUIT" when StallQuit:
+                            QuitAwaited.TrySetResult();
+                            while (await reader.ReadLineAsync(_stop.Token) is not null) { }
+                            ClosedByClient.TrySetResult();
+                            return;
                         case "QUIT": await writer.WriteLineAsync("221 bye"); return;
                         default: await writer.WriteLineAsync("250 ok"); break;
                     }

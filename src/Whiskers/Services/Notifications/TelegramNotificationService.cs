@@ -20,6 +20,10 @@ public class TelegramNotificationService : ITelegramNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
+    /// <summary>The fixed Bot API host; it goes through the outbound guard like every channel (R1-54).</summary>
+    public IReadOnlyList<OutboundEndpoint> Targets =>
+        _settings.CurrentValue.Enabled ? [new OutboundEndpoint("https", "api.telegram.org", 443)] : [];
+
     public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var c = _settings.CurrentValue;

@@ -5183,4 +5183,70 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="SelfBackupPanel_Tooltip_FilesOnly" xml:space="preserve">
     <value>Dieses Backup enthält nur die Dateien, nicht die PostgreSQL-Datenbank (es stammt aus der Zeit vor den Datenbank-Dumps). Es kann nicht wiederhergestellt werden.</value>
   </data>
+  <data name="OutboundGuard_Panel" xml:space="preserve">
+    <value>Benachrichtigungsziele (Ausgangssperre)</value>
+  </data>
+  <data name="OutboundGuard_Intro" xml:space="preserve">
+    <value>Benachrichtigungskanäle und der ausgehende Webhook verbinden sich nie mit Loopback-, Link-Local-, privaten, CGNAT/Tailscale-, Unique-Local- oder reservierten Adressen; sie folgen keiner Weiterleitung und nutzen keinen Proxy. Ein Kanal im eigenen Netz (ein selbst betriebenes ntfy, Mattermost, Matrix oder ein SMTP-Relay) braucht eine genaue Ausnahme: eine IP-Adresse mit Port oder einen Hostnamen mit Port und den genauen Adressen, zu denen er auflösen darf. Bereiche und Platzhalter werden nicht angenommen.</value>
+  </data>
+  <data name="OutboundGuard_Heading_Refused" xml:space="preserve">
+    <value>Eingerichtete Kanäle, die die Sperre abweist</value>
+  </data>
+  <data name="OutboundGuard_Refused_None" xml:space="preserve">
+    <value>Kein eingerichteter Kanal wird abgewiesen.</value>
+  </data>
+  <data name="OutboundGuard_Refused_Hint" xml:space="preserve">
+    <value>Diese Kanäle stellen nichts zu, bis eine Ausnahme ihre Adresse nennt. Gezeigt werden nur Schema, Host und Port.</value>
+  </data>
+  <data name="OutboundGuard_Th_Channel" xml:space="preserve">
+    <value>Kanal</value>
+  </data>
+  <data name="OutboundGuard_Th_Target" xml:space="preserve">
+    <value>Ziel</value>
+  </data>
+  <data name="OutboundGuard_Th_Address" xml:space="preserve">
+    <value>Abgewiesene Adresse</value>
+  </data>
+  <data name="OutboundGuard_Unresolved" xml:space="preserve">
+    <value>nicht aufgelöst</value>
+  </data>
+  <data name="OutboundGuard_Button_Recheck" xml:space="preserve">
+    <value>Erneut prüfen</value>
+  </data>
+  <data name="OutboundGuard_Heading_Exceptions" xml:space="preserve">
+    <value>Ausnahmen</value>
+  </data>
+  <data name="OutboundGuard_Th_Host" xml:space="preserve">
+    <value>Host oder IP-Adresse</value>
+  </data>
+  <data name="OutboundGuard_Th_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="OutboundGuard_Th_Addresses" xml:space="preserve">
+    <value>Erlaubte Adressen</value>
+  </data>
+  <data name="OutboundGuard_Exceptions_None" xml:space="preserve">
+    <value>Keine Ausnahmen.</value>
+  </data>
+  <data name="OutboundGuard_Label_Host" xml:space="preserve">
+    <value>Host oder IP-Adresse</value>
+  </data>
+  <data name="OutboundGuard_Label_Addresses" xml:space="preserve">
+    <value>Erlaubte Adressen (bei einem Hostnamen)</value>
+  </data>
+  <data name="OutboundGuard_Helper_Addresses" xml:space="preserve">
+    <value>Genaue IP-Adressen, durch Kommas getrennt</value>
+  </data>
+  <data name="OutboundGuard_Button_Save" xml:space="preserve">
+    <value>Ausnahmen speichern</value>
+  </data>
+  <data name="OutboundGuard_Snackbar_Saved" xml:space="preserve">
+    <value>Ausnahmen gespeichert — sie gelten ab der nächsten Zustellung.</value>
+  </data>
+  <data name="OutboundGuard_Snackbar_SaveFailed" xml:space="preserve">
+    <value>Die Ausnahmen wurden nicht gespeichert: {0}</value>
+  </data>
+  <data name="OutboundGuard_Snackbar_ScanFailed" xml:space="preserve">
+    <value>Die eingerichteten Kanäle konnten nicht geprüft werden.</value>
+  </data>
 </root>

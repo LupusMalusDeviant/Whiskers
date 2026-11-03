@@ -44,6 +44,9 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(IVaultService), nameof(IVaultService.DeleteSecretAsync), "vault.secret_delete"),
         (typeof(IRegistryConfigService), nameof(IRegistryConfigService.SaveRegistryAsync), "registry.save"),
         (typeof(IRegistryConfigService), nameof(IRegistryConfigService.DeleteRegistryAsync), "registry.delete"),
+        // R1-54: the outbound guard's exceptions.
+        (typeof(Whiskers.Services.Notifications.IOutboundExceptionService),
+            nameof(Whiskers.Services.Notifications.IOutboundExceptionService.SaveAsync), "config.save"),
     ];
 
     public static TheoryData<string> Capabilities()
@@ -144,6 +147,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Pages.Servers), "RemoveUnusedCloudKeyAsync", "vault.secret_delete"),
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Save", "registry.save"),
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Delete", "registry.delete"),
+        (typeof(Whiskers.Components.Shared.OutboundExceptionsPanel), "Save", "config.save"),
     ];
 
     [Fact]

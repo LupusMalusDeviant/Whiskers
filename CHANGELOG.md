@@ -6,6 +6,31 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-54: **Notifications no longer reach into Whiskers' own network unless an Admin allows it.** Every notification
+  channel (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, the outgoing webhook) and the e-mail channel's SMTP host
+  now go through one outbound guard: it resolves the name once, refuses it when any answer is a loopback, link-local
+  (the cloud metadata address `169.254.169.254` included), private (RFC 1918, which covers Docker's networks),
+  CGNAT/Tailscale, unique-local, site-local, multicast, broadcast or otherwise reserved address — also in disguise
+  (`::ffff:127.0.0.1`, `2130706433`, `0177.0.0.1`, NAT64, 6to4, a zone such as `fe80::1%eth0`; Teredo and local-use
+  NAT64 always) — and connects to exactly the address it checked, so a name that changes its answer in between cannot
+  slip through. Redirects are no longer followed (a 3xx answer is a failed delivery) and proxies are no longer used.
+  The ranges are fixed; an Admin can add exact exceptions under Settings → *Notification targets*: an IP address and
+  port, or a host name, port and the exact addresses it may resolve to (no ranges, no wildcards). Each change is a
+  gated, audited configuration write and takes effect from the next delivery on — removing one also ends the open
+  connection it allowed. A refused delivery is logged and counted as a failed notification with its reason (host,
+  port and refused address, never the URL's path or query) and is neither retried nor kept for redelivery. The e-mail
+  channel now uses MailKit (implicit TLS on port 465, which did not work before, and required STARTTLS on every other
+  port when *SSL/TLS* is on, as before). The server certificate is checked against the configured name as before;
+  its revocation is not checked, as before (a relay with a private CA and no CRL keeps working).
+  **Upgrade notes:** (1) a channel inside your network — a self-hosted ntfy, Mattermost or Matrix, an SMTP relay on the
+  LAN or on Tailscale — is **refused from the first start after the upgrade until an Admin adds an exception** for it.
+  The start-up log and the *Notification targets* panel list every configured channel the guard refuses, with the
+  address it refuses (a host that does not resolve is listed as unresolved); check them right after upgrading. (2) An
+  installation that reached Slack, Telegram or another channel **only through an egress proxy** (`HTTPS_PROXY`) loses
+  that path: such a delivery now fails with its own reason ("an egress proxy is configured for it, but notification
+  channels do not use a proxy"); allow the direct connection. (3) A stored notification kept for redelivery before the
+  upgrade whose target is now refused is dropped (logged and counted).
+
 - R1-45: **A release can only ship what was tested and scanned, and never replaces a published version.** Every
   GitHub Action in the CI, chart and release workflows is pinned to a full commit SHA, and each job holds only the
   permissions it needs. A release now runs the full test suite on the tag commit first, builds amd64 and arm64

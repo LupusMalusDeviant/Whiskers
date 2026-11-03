@@ -413,6 +413,10 @@ public sealed partial class SinkRedactionTests
         }).Build();
         var services = new ServiceCollection();
         services.AddLogging(b => b.AddProvider(capture).SetMinimumLevel(LogLevel.Trace));
+        // Core registrations the module's outbound guard (R1-54) reads its exceptions from; nothing is written.
+        services.AddSingleton<IConfiguration>(config);
+        services.AddSingleton<Whiskers.Services.Persistence.IAppSettingsStore>(new Whiskers.Services.Persistence.AppSettingsStore(
+            Path.Combine(Path.GetTempPath(), $"sw-redaction-{Guid.NewGuid():N}", "app-settings.json")));
         new NotificationsModule().ConfigureServices(services, config);
         services.ConfigureAll<HttpClientFactoryOptions>(o =>
             o.HttpMessageHandlerBuilderActions.Add(b => b.PrimaryHandler = handler));
