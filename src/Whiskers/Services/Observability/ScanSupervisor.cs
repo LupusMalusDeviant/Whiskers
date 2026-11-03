@@ -72,7 +72,7 @@ public sealed class ScanSupervisor : Whiskers.Services.FleetBackgroundService
             {
                 await CheckAsync();
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
             {
                 _logger.LogError(ex, "Scan supervisor check failed");
             }

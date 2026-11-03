@@ -16,6 +16,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
     private readonly ILogger<ImageUpdateChecker> _logger;
     private readonly Whiskers.Services.Observability.SelfMetrics.ISelfMetrics _selfMetrics;
     private readonly ImageUpdateSettings _settings;
+    private readonly EffectiveInterval<ImageUpdateSettings> _interval;
 
     public ImageUpdateChecker(
         IServiceProvider services,
@@ -23,8 +24,12 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
         IRegistryClient registry,
         IOptions<ImageUpdateSettings> settings,
         ILogger<ImageUpdateChecker> logger,
-        Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics)
+        Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
+        EffectiveInterval<ImageUpdateSettings>? interval = null)
     {
+        // R1-41: the interval in use — a configured value out of range is clamped (and warned about), never handed to
+        // Task.Delay as it is.
+        _interval = interval ?? IntervalValidation.ImageUpdateCheck(settings.Value, logger);
         _services = services;
         _store = store;
         _registry = registry;
@@ -41,17 +46,26 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
             return;
         }
 
-        _logger.LogInformation("Image update checker started (interval: {Hours}h)", _settings.CheckIntervalHours);
+        _logger.LogInformation("Image update checker started (interval: {Hours}h)", _interval.Value);
 
         // Initial delay: wait 30s after startup, then check
         await Task.Delay(TimeSpan.FromSeconds(30), ct);
 
         while (!ct.IsCancellationRequested)
         {
-            // WaitAsync bounds the cycle to shutdown: registry/Docker digest calls carry no token, so
-            // abandon an in-flight check on stop instead of blocking the host's shutdown window.
-            await CheckAllImagesAsync(ct).WaitAsync(ct);
-            await Task.Delay(TimeSpan.FromHours(_settings.CheckIntervalHours), ct);
+            try
+            {
+                // R1-41: the cycle is owned to its end — not abandoned with WaitAsync. The stop reaches every dependency
+                // (the listing, the digest reads, the registry, the notification delivery and its retries), the cycle
+                // awaits their real end, and after a stop it changes no state and sends nothing.
+                await CheckAllImagesAsync(ct);
+            }
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
+            {
+                // R1-41: a failed check (a registry timeout included) used to escape the loop and stop the host.
+                _logger.LogError(ex, "Image update check failed");
+            }
+            await Task.Delay(_interval.Interval, ct);
         }
     }
 
@@ -77,7 +91,9 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 Whiskers.Services.Observability.SelfMetrics.SelfMetricsFleetExtensions.Loops.ImageUpdate,
                 allServers);
 
-            var containers = await docker.ListAllContainersAsync(all: false);
+            var containers = await docker.ListAllContainersAsync(false, ct);
+            // A listing that answered after the stop changes nothing: no cycle is recorded, no image is checked.
+            ct.ThrowIfCancellationRequested();
 
             foreach (var server in allServers.Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes))
                 _selfMetrics.RecordCycle(
@@ -94,6 +110,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 try
                 {
                     var info = await CheckSingleImageAsync(docker, container, ct);
+                    ct.ThrowIfCancellationRequested();
                     if (info != null)
                     {
                         // Read the prior state BEFORE overwriting, so we only notify when an update FIRST
@@ -111,6 +128,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
             });
 
             await Task.WhenAll(tasks);
+            ct.ThrowIfCancellationRequested();
 
             _store.LastCheckAt = DateTime.UtcNow;
 
@@ -119,6 +137,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
             {
                 foreach (var update in newUpdates)
                 {
+                    ct.ThrowIfCancellationRequested();
                     try
                     {
                         await notification.SendAsync(new NotificationEvent
@@ -128,9 +147,10 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                             EventType = "image_update",
                             ImageName = update.Image,
                             ImageInfo = $"Local: {Truncate(update.LocalDigest)} → Remote: {Truncate(update.RemoteDigest)}"
-                        });
+                        }, ct);
                     }
-                    catch (Exception ex)
+                    // A stop ends the delivery (its retries included) and the cycle; any other failure costs one notice.
+                    catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
                     {
                         _logger.LogWarning(ex, "Failed to send update notification for {Container}", update.ContainerName);
                     }
@@ -140,6 +160,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
             // Broadcast to UI
             await hubContext.Clients.All.SendAsync("ImageUpdatesChanged", ct);
 
+            ct.ThrowIfCancellationRequested();
             await _store.SaveAsync();
 
             // Coverage, not just a count. "21 containers" used to be printed whether the fleet had 21 or 46,
@@ -166,7 +187,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                     "{Pending} update(s) known ({New} new this cycle)",
                     containers.Count, expected.Count, pending, newUpdates.Count);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogError(ex, "Image update check failed");
         }
@@ -216,7 +237,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
         try
         {
             var configured = LooksLikeImageId(container.Image)
-                ? await docker.GetConfiguredImageAsync(container.Id, container.ServerId)
+                ? await docker.GetConfiguredImageAsync(container.Id, container.ServerId, ct)
                 : null;
             var (image, localRef) = ResolveCheckRefs(container.Image, configured, container.ImageId);
 
@@ -226,10 +247,10 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 return null;
 
             // Local digest of the image the container RUNS, not of whatever the tag points at now.
-            var localDigest = await docker.GetImageDigestAsync(localRef, container.ServerId);
+            var localDigest = await docker.GetImageDigestAsync(localRef, container.ServerId, ct);
 
             // Get remote digest
-            var remoteDigest = await _registry.GetRemoteDigestAsync(image);
+            var remoteDigest = await _registry.GetRemoteDigestAsync(image, ct);
 
             if (localDigest == null || remoteDigest == null)
             {
@@ -261,7 +282,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 ServerId = container.ServerId
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogDebug(ex, "Failed to check image for container {Name}", container.Name);
             return null;

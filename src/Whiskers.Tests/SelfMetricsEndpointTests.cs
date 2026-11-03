@@ -240,4 +240,43 @@ public class SelfMetricsEndpointTests
             Assert.DoesNotContain("authentik-worker-1", line);
         }
     });
+
+    [Fact]
+    public async Task An_invalid_reloaded_CVE_interval_neither_breaks_the_scrape_nor_moves_the_staleness() =>
+        await WithAppAsync(async (client, services) =>
+    {
+        // R1-41, review round 2: the reload is allowed (the loop keeps its last valid interval), but /metrics converted the
+        // raw value — 2147483647 hours overflowed TimeSpan and the whole scrape answered 500 — and a smaller bad value made
+        // the staleness threshold disagree with the cadence the loop keeps. Driven through a real reload of the real app.
+        var config = (Microsoft.Extensions.Configuration.IConfigurationRoot)services
+            .GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+        var options = services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Whiskers.Configuration.CveMonitorSettings>>();
+        void Reload(string hours)
+        {
+            config["CveMonitor:CheckIntervalHours"] = hours;
+            config.Reload();
+            Assert.Equal(int.Parse(hours), options.CurrentValue.CheckIntervalHours);   // the reload really happened
+        }
+
+        var store = services.GetRequiredService<Whiskers.Services.Cve.ICveFindingsStore>();
+        store.Set(new Whiskers.Models.Cve.CveScanResult
+        {
+            ServerId = "badwolf", Source = Whiskers.Models.Cve.CveSource.Os, ScannedAt = DateTime.UtcNow.AddHours(-30),
+        });
+        const string stale = "whiskers_cve_stale_targets{server=\"badwolf\"} 1";   // 30 h old, past two 12-hour intervals
+
+        Reload("12");
+        Assert.Contains(stale, await ScrapeAsync(client));
+
+        Reload("2147483647");
+        var body = await ScrapeAsync(client);                    // answered, not an overflow
+        Assert.Contains(stale, body);                            // judged by the interval the loop keeps
+        Assert.Contains("whiskers_self_series_total", body);
+        Assert.Contains("whiskers_cve_distinct_ids", body);
+
+        Reload("721");                                           // just out of range: 2 × 721 h would have hidden it
+        Assert.Contains(stale, await ScrapeAsync(client));
+        Assert.Equal(TimeSpan.FromHours(12),
+            services.GetRequiredService<Whiskers.Configuration.EffectiveInterval<Whiskers.Configuration.CveMonitorSettings>>().Interval);
+    });
 }

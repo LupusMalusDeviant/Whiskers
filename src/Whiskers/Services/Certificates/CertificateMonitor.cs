@@ -64,7 +64,7 @@ public sealed class CertificateMonitor : FleetBackgroundService
 
                 _logger.LogInformation("Certificate check: {Count} certificate(s) looked at", observed.Count);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
                 success = false;
                 _logger.LogError(ex, "Certificate check failed");

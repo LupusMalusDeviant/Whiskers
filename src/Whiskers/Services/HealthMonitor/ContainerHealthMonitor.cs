@@ -29,6 +29,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
     // A host dropping off the fleet used to be silent everywhere; the tracker turns "did not answer"
     // into server_unreachable / server_recovered events (see ServerReachabilityTracker).
     private readonly ServerReachabilityTracker _reachability;
+    private readonly EffectiveInterval<HealthMonitorSettings> _interval;
 
     public ContainerHealthMonitor(
         IDockerService docker,
@@ -39,8 +40,12 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
         ILogger<ContainerHealthMonitor> logger,
         Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
         Whiskers.Services.Observability.ILoopSuspensionService suspension,
-        Whiskers.Services.ServerConfig.IServerConfigService serverConfig)
+        Whiskers.Services.ServerConfig.IServerConfigService serverConfig,
+        EffectiveInterval<HealthMonitorSettings>? interval = null)
     {
+        // R1-41: the interval in use — a configured value out of range is clamped (and warned about), never handed to
+        // Task.Delay as it is; shared with everything that reports against it.
+        _interval = interval ?? IntervalValidation.HealthCheck(settings.Value, logger);
         _docker = docker;
         _healthStore = healthStore;
         _notifications = notifications;
@@ -57,53 +62,60 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
     protected override async Task RunAsync(CancellationToken ct)
     {
         _logger.LogInformation("Container health monitor started (interval: {Interval}s)",
-            _settings.CheckIntervalSeconds);
+            _interval.Value);
 
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                // WaitAsync bounds the whole cycle to shutdown: an in-flight Docker call (which carries
-                // no cancellation token) is abandoned so the service still stops within the host window.
-                await RunHealthCycleAsync(ct).WaitAsync(ct);
+                // R1-41: the cycle is owned, not abandoned with WaitAsync — an abandoned cycle went on after the stop and
+                // recorded metrics, sent notifications and touched the per-container state once its listing answered.
+                // The stop now reaches the listing, every inspect and every notification, and the cycle checks it before
+                // each effect, so a stop ends the cycle without one.
+                await RunHealthCycleAsync(ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
             {
                 _logger.LogError(ex, "Health check cycle failed");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(_settings.CheckIntervalSeconds), ct);
+            await Task.Delay(_interval.Interval, ct);
         }
     }
 
     private async Task RunHealthCycleAsync(CancellationToken ct)
     {
         var startedAt = DateTime.UtcNow;
-        var listing = await _docker.ListAllContainersDetailedAsync(all: true);
+        var listing = await _docker.ListAllContainersDetailedAsync(all: true, ct);
+        // A listing that answers after the stop (a dependency that ignored the token) changes nothing.
+        ct.ThrowIfCancellationRequested();
         var containers = listing.Containers;
 
         // Every server this cycle touched gets a record, and every Kubernetes server it stepped over gets a
         // skip. Without the skip a K8s host produces no health metrics at all, which looks exactly like a
         // host with nothing wrong (Plan-0003 WP2).
+        var interval = _interval.Interval;
         foreach (var responded in listing.RespondedServerIds)
             _selfMetrics.RecordCycle(SelfMetricsFleetExtensions.Loops.Health, responded, DateTime.UtcNow - startedAt, success: true,
-                interval: TimeSpan.FromSeconds(_settings.CheckIntervalSeconds));
+                interval: interval);
         foreach (var failure in listing.FailedServers)
             _selfMetrics.RecordCycle(SelfMetricsFleetExtensions.Loops.Health, failure.ServerId, DateTime.UtcNow - startedAt, success: false,
-                interval: TimeSpan.FromSeconds(_settings.CheckIntervalSeconds));
+                interval: interval);
         _selfMetrics.RecordKubernetesSkips(SelfMetricsFleetExtensions.Loops.Health, _serverConfig.GetEnabledServers());
 
-        await ProcessServerReachabilityAsync(listing);
+        await ProcessServerReachabilityAsync(listing, ct);
 
         foreach (var container in containers)
         {
-            await ProcessContainer(container);
+            ct.ThrowIfCancellationRequested();
+            await ProcessContainer(container, ct);
         }
 
         // Bound the per-container maps: drop entries for containers that no longer exist — but keep the
         // state of servers that did NOT answer this cycle. Their containers are missing from the list
         // because the host is silent, not because they are gone; dropping the state here means a real
         // stop during the outage is never reported and every container looks "new" on recovery.
+        ct.ThrowIfCancellationRequested();
         var liveKeys = containers.Select(CompositeKey).ToHashSet();
         PruneToLive(_previousStates, liveKeys, listing);
         PruneToLive(_restartTimestamps, liveKeys, listing);
@@ -112,7 +124,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
         await _hubContext.Clients.All.SendAsync("ContainerListUpdated", containers, ct);
     }
 
-    private async Task ProcessServerReachabilityAsync(FleetContainerListing listing)
+    private async Task ProcessServerReachabilityAsync(FleetContainerListing listing, CancellationToken ct)
     {
         foreach (var evt in _reachability.Evaluate(listing))
         {
@@ -126,7 +138,8 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
             else
                 _logger.LogInformation("Server {ServerName} is reachable again", evt.ServerName);
 
-            await _notifications.SendAsync(evt);
+            ct.ThrowIfCancellationRequested();
+            await _notifications.SendAsync(evt, ct);
         }
     }
 
@@ -141,10 +154,11 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
                 map.TryRemove(key, out _);
     }
 
-    private async Task ProcessContainer(ContainerInfo container)
+    private async Task ProcessContainer(ContainerInfo container, CancellationToken ct)
     {
         var key = CompositeKey(container);
-        var (state, exitCode, oomKilled) = await SafeInspect(container.Id, container.ServerId);
+        var (state, exitCode, oomKilled) = await SafeInspect(container.Id, container.ServerId, ct);
+        ct.ThrowIfCancellationRequested();
 
         var record = new HealthRecord
         {
@@ -164,7 +178,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
         {
             if (prevHealth != "unhealthy" && container.HealthStatus == "unhealthy")
             {
-                await SendNotificationIfAllowed(new NotificationEvent
+                await SendNotificationIfAllowed(ct, new NotificationEvent
                 {
                     ContainerId = container.Id,
                     ContainerName = container.Name,
@@ -184,7 +198,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
             {
                 if (oomKilled)
                 {
-                    await SendNotificationIfAllowed(new NotificationEvent
+                    await SendNotificationIfAllowed(ct, new NotificationEvent
                     {
                         ContainerId = container.Id,
                         ContainerName = container.Name,
@@ -196,7 +210,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
                 }
                 else if (exitCode != 0)
                 {
-                    await SendNotificationIfAllowed(new NotificationEvent
+                    await SendNotificationIfAllowed(ct, new NotificationEvent
                     {
                         ContainerId = container.Id,
                         ContainerName = container.Name,
@@ -220,7 +234,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
 
                 if (timestamps.Count >= _settings.RestartLoopThreshold)
                 {
-                    await SendNotificationIfAllowed(new NotificationEvent
+                    await SendNotificationIfAllowed(ct, new NotificationEvent
                     {
                         ContainerId = container.Id,
                         ContainerName = container.Name,
@@ -245,15 +259,16 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
     /// <summary>Send a container event. The per-container mute/prefs check that used to live here now runs
     /// centrally in <see cref="CompositeNotificationService"/>, so every producer honours it — not just this
     /// monitor.</summary>
-    private Task SendNotificationIfAllowed(NotificationEvent evt) => _notifications.SendAsync(evt);
+    private Task SendNotificationIfAllowed(CancellationToken ct, NotificationEvent evt) => _notifications.SendAsync(evt, ct);
 
-    private async Task<(string State, int ExitCode, bool OomKilled)> SafeInspect(string containerId, string serverId)
+    private async Task<(string State, int ExitCode, bool OomKilled)> SafeInspect(string containerId, string serverId, CancellationToken ct)
     {
         try
         {
-            return await _docker.InspectContainerStateAsync(containerId, serverId);
+            return await _docker.InspectContainerStateAsync(containerId, serverId, ct);
         }
-        catch
+        // The stop is not an unknown state: it ends the cycle.
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             return ("unknown", 0, false);
         }

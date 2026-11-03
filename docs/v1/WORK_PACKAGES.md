@@ -687,11 +687,19 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `BackgroundServiceFailureTests` distinguishes host shutdown from dependency timeout/cancellation and verifies later cycles continue.
-- [ ] Invalid intervals fail configuration validation rather than spinning or terminating the host.
-- [ ] `MetricsLabelEscapingTests` covers quotes, backslashes and newlines.
-- [ ] Loop death/stall remains observable; do not simply hide failures globally.
-- [ ] Carried over from R1-38: the Docker reads in the AutoPatch planning (`ListAllContainersAsync`, `GetImageContractAsync` in `AutoPatchService`) and in the advisor chat's context (`AiChatService.BuildContextAsync`) take the caller's token (new `IDockerService` overloads), so the preview deadline, host stop and closing the chat reach them too.
+- [x] `BackgroundServiceFailureTests` distinguishes host shutdown from dependency timeout/cancellation and verifies later cycles continue.
+- [x] Invalid intervals fail configuration validation rather than spinning or terminating the host.
+- [x] `MetricsLabelEscapingTests` covers quotes, backslashes and newlines.
+- [x] Loop death/stall remains observable; do not simply hide failures globally.
+- [x] Carried over from R1-38: the Docker reads in the AutoPatch planning (`ListAllContainersAsync`, `GetImageContractAsync` in `AutoPatchService`) and in the advisor chat's context (`AiChatService.BuildContextAsync`) take the caller's token (new `IDockerService` overloads), so the preview deadline, host stop and closing the chat reach them too.
+- [x] Review round 2: loops own their cycles (no whole-cycle `WaitAsync`): the stop reaches the fleet listing, inspects, digest reads, the registry and the notification delivery with its retries, and nothing happens after it (`LoopShutdownTests`); the fleet listing's per-server timeout also bounds the waits for the client and a budget slot, classified as the server's timeout and never as caller cancellation; one shared `EffectiveInterval` for loop, `/metrics` and staleness thresholds (invalid reload + scrape tested on the real endpoint); the ratchet reads the syntax tree and refuses reversed filters, comment/string matches and catches that end the loop.
+- [x] Review round 3: only zero or a negative interval refuses the start (a positive value out of range is clamped with a warning; image-update/CVE range 1–720 h), with an upgrade/recovery note in the CHANGELOG; a refused save is a localised message; the per-server listing and the log read keep the stop (caller token) apart from the server deadline; the ratchet requires the recovering catch on the outermost loop.
+- [x] Review round 4: a fleet listing that runs out in Whiskers' own budget queue is `NotAsked` and never counts toward `server_unreachable`; a log fetch that runs out there keeps its window (`log_fetch_saturation`); a `RunAsync` without a loop passes the ratchet only for an allow-listed one-shot service; one warning per out-of-range interval instead of two.
+- [x] Review round 5: only a listing that ran out while still queued is `NotAsked`; one that was sent and then cut short by the deadline asked the server and counts as its timeout.
+- [x] Review round 6: the same rule for the log read — a fetch that was sent and then cut short is the host's timeout (window moves on, unreadable streak grows); only one still queued keeps its window. Saturation log wording follows `Ran`; F-16 notes the AutoUpdate part as resolved.
+- [x] Review round 7: the Operations README row for `ContainerLifecycleOperations.cs` is its own row again; the NotAsked text names the time actually queued.
+- [x] Review round 8: an interval that does not bind after a hand edit keeps the last valid one (one warning) instead of ending the loop; the ratchet also fails a typed catch in the loop that leaves it on anything but the host's stop.
+- [x] Review round 9: the metrics loop, which reads its whole section each cycle, keeps its last valid settings when a reload does not bind, and a failure recording its cycle no longer ends it; the ratchet also fails a `return` from a nested loop's catch and accepts a rethrow inside the recovering try.
 
 **Out of scope:** Full tracing infrastructure.
 

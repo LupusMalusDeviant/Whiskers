@@ -62,8 +62,12 @@ public sealed class AppSettingsStore : IAppSettingsStore
             .SelectMany(s => Whiskers.Services.Vault.VaultBackedSettings.Fields[s].Select(p => (s, p))),
     ];
 
-    public Task SaveSectionAsync<T>(string section, T value) =>
-        SaveSectionsAsync(new Dictionary<string, object> { [section] = JsonSerializer.SerializeToNode(value)! });
+    public Task SaveSectionAsync<T>(string section, T value)
+    {
+        // R1-41: a loop interval out of range is refused here, not found by the loop at the next reload.
+        Whiskers.Configuration.IntervalValidation.ThrowIfInvalid(value);
+        return SaveSectionsAsync(new Dictionary<string, object> { [section] = JsonSerializer.SerializeToNode(value)! });
+    }
 
     /// <inheritdoc />
     public async Task<JsonObject?> ReadSectionAsync(string section)

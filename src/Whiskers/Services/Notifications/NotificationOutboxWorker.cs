@@ -51,8 +51,9 @@ public sealed class NotificationOutboxWorker : FleetBackgroundService
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex) { _logger.LogError(ex, "Notification redelivery failed"); }
 
+            // R1-41: only the host's stop ends the loop here (the ratchet in BackgroundServiceFailureTests holds it to that).
             try { await _outbox.WaitForWorkAsync(Tick, stoppingToken); }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
         }
         // What changed last is written before the process ends, bounded so a stalled volume cannot hold the stop.
         try { await _outbox.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5)); }

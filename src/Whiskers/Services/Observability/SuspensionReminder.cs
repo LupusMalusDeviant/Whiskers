@@ -53,12 +53,13 @@ public sealed class SuspensionReminder : Whiskers.Services.FleetBackgroundServic
             {
                 Remind(DateTime.UtcNow);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
                 _logger.LogError(ex, "Could not check for long-standing pauses");
             }
 
-            await Task.Delay(CheckInterval, stoppingToken);
+            try { await Task.Delay(CheckInterval, stoppingToken); }
+            catch (OperationCanceledException) { break; }
         }
     }
 

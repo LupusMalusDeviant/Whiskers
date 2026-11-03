@@ -58,6 +58,24 @@ public class DockerService : IDockerService
     public Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all = true)
         => _containers.ListAllContainersDetailedAsync(all);
 
+    public Task<IList<ContainerInfo>> ListAllContainersAsync(bool all, CancellationToken ct)
+        => _containers.ListAllContainersAsync(all, ct);
+
+    public Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all, CancellationToken ct)
+        => _containers.ListAllContainersDetailedAsync(all, ct);
+
+    public Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId, CancellationToken ct)
+        => _containers.InspectContainerStateAsync(containerId, serverId, ct);
+
+    public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId, CancellationToken ct)
+        => _containers.GetConfiguredImageAsync(containerId, serverId, ct);
+
+    public Task<string?> GetImageDigestAsync(string imageRef, string? serverId, CancellationToken ct)
+        => _images.GetImageDigestAsync(imageRef, serverId, ct);
+
+    public Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId, CancellationToken ct)
+        => _images.GetImageContractAsync(imageRef, serverId, ct);
+
     public Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null)
         => _containers.GetContainerAsync(id, serverId);
 
@@ -78,6 +96,10 @@ public class DockerService : IDockerService
 
     public Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null, CancellationToken ct = default)
         => _containers.GetContainerLogsAsync(containerId, tailLines, serverId, since, ct);
+
+    public Task<string> GetContainerLogsAsync(string containerId, int tailLines, string? serverId, DateTime? since,
+        CancellationToken deadline, CancellationToken callerToken)
+        => _containers.GetContainerLogsAsync(containerId, tailLines, serverId, since, deadline, callerToken);
 
     public Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null)
         => _containers.InspectContainerStateAsync(containerId, serverId);

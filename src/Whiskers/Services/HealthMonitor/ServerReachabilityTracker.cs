@@ -40,6 +40,9 @@ public sealed class ServerReachabilityTracker
 
         foreach (var failure in listing.FailedServers)
         {
+            // R1-41: a call that ran out of time in Whiskers' own queue never reached the server. It is neither evidence
+            // of an outage (no streak) nor of a recovery (the streak stays as it was).
+            if (failure.NotAsked) continue;
             var streak = _failStreak.AddOrUpdate(failure.ServerId, 1, (_, prev) => prev + 1);
             var needed = _everAnswered.ContainsKey(failure.ServerId) ? _threshold : _coldStartThreshold;
             if (streak < needed || _outageAlerted.GetValueOrDefault(failure.ServerId)) continue;

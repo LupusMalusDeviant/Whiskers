@@ -403,9 +403,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             return true;
         }
 
-        var containers = await _docker.ListAllContainersAsync(all: false);
+        var containers = await _docker.ListAllContainersAsync(false, ct);
         var results = _cves.GetAll();
-        var localBuilds = await FindLocalBuildsAsync(containers, results);
+        var localBuilds = await FindLocalBuildsAsync(containers, results, ct);
         var plan = AutoPatchPlanner.Plan(containers, results, settings, UpdateAvailable,
             c => localBuilds.Contains((c.ServerId, c.Name)));
         LastCycle = new(started, null, dryRun, [], plan.Skipped);
@@ -481,7 +481,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     /// such container; an image that cannot be inspected counts as not local — the host script checks the same
     /// label again before it pulls anything.</summary>
     private async Task<HashSet<(string ServerId, string Name)>> FindLocalBuildsAsync(
-        IEnumerable<ContainerInfo> containers, IEnumerable<Whiskers.Models.Cve.CveScanResult> results)
+        IEnumerable<ContainerInfo> containers, IEnumerable<Whiskers.Models.Cve.CveScanResult> results, CancellationToken ct)
     {
         var withFindings = results
             .Where(r => r.Findings.Count > 0 && !string.IsNullOrEmpty(r.ContainerName))
@@ -491,7 +491,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         foreach (var c in containers.Where(c => withFindings.Contains((c.ServerId.ToUpperInvariant(), c.Name.ToUpperInvariant()))))
         {
             var imageRef = string.IsNullOrEmpty(c.ImageId) ? c.Image : c.ImageId;
-            var contract = await _docker.GetImageContractAsync(imageRef, c.ServerId);
+            var contract = await _docker.GetImageContractAsync(imageRef, c.ServerId, ct);
             if (contract?.IsComposeBuilt == true) local.Add((c.ServerId, c.Name));
         }
         return local;

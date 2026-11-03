@@ -175,7 +175,7 @@ else
     @* Health Monitoring *@
     <MudExpansionPanel Text="@L["Settings_Panel_HealthMonitoring"]" Icon="@Icons.Material.Filled.MonitorHeart">
         <MudGrid>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hInterval" Label="@L["Settings_Label_CheckIntervalSeconds"]" Min="5" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hInterval" Label="@L["Settings_Label_CheckIntervalSeconds"]" Min="5" Max="86400" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hRetention" Label="@L["Settings_Label_HistoryRetentionHours"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hLoopThreshold" Label="@L["Settings_Label_RestartLoopThreshold"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6"><MudNumericField @bind-Value="_hLoopWindow" Label="@L["Settings_Label_RestartLoopWindow"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
@@ -210,7 +210,7 @@ else
     <MudExpansionPanel Text="@L["Settings_Panel_ImageUpdates"]" Icon="@Icons.Material.Filled.SystemUpdate">
         <MudGrid>
             <MudItem xs="12"><MudSwitch @bind-Value="_iuEnabled" Color="Color.Primary" Label="@L["Settings_Label_ImageUpdateEnabled"]" /></MudItem>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_iuInterval" Label="@L["Settings_Label_CheckIntervalHours"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_iuInterval" Label="@L["Settings_Label_CheckIntervalHours"]" Min="1" Max="720" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6"><MudSwitch @bind-Value="_iuNotify" Color="Color.Primary" Label="@L["Settings_Label_NotifyOnUpdate"]" /></MudItem>
         </MudGrid>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveImageUpdate" Class="mt-2">@L["Settings_Button_Save"]</MudButton>
@@ -261,7 +261,7 @@ else
             <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveEnabled" Color="Color.Primary" Label="@L["Settings_Label_Enabled"]" /></MudItem>
             <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveScanContainers" Color="Color.Primary" Label="@L["Settings_Label_ScanContainers"]" /></MudItem>
             <MudItem xs="12" md="4"><MudSwitch @bind-Value="_cveScanOs" Color="Color.Primary" Label="@L["Settings_Label_ScanHostOs"]" /></MudItem>
-            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_cveInterval" Label="@L["Settings_Label_CheckIntervalHours"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="6"><MudNumericField @bind-Value="_cveInterval" Label="@L["Settings_Label_CheckIntervalHours"]" Min="1" Max="720" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6"><MudNumericField @bind-Value="_cveMaxScans" Label="@L["Settings_Label_MaxParallelScans"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6"><MudTextField @bind-Value="_cveTrivy" Label="@L["Settings_Label_TrivyImage"]" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="6">
@@ -883,6 +883,11 @@ else
             Snackbar.Add(L["Settings_Snackbar_HealthSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        // R1-41: an interval outside its range is refused by the settings store; say so instead of failing the circuit.
+        catch (Whiskers.Configuration.IntervalOutOfRangeException ex)
+        {
+            Snackbar.Add(L["Settings_Error_IntervalOutOfRange", ex.Key, ex.Min, ex.Max].Value, Severity.Warning);
+        }
     }
 
     private async Task SaveMetricAlert()
@@ -921,6 +926,11 @@ else
             Snackbar.Add(L["Settings_Snackbar_CveSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        // R1-41: an interval outside its range is refused by the settings store; say so instead of failing the circuit.
+        catch (Whiskers.Configuration.IntervalOutOfRangeException ex)
+        {
+            Snackbar.Add(L["Settings_Error_IntervalOutOfRange", ex.Key, ex.Min, ex.Max].Value, Severity.Warning);
+        }
     }
 
     private async Task SaveImageUpdate()
@@ -937,6 +947,11 @@ else
             Snackbar.Add(L["Settings_Snackbar_ImageUpdatesSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        // R1-41: an interval outside its range is refused by the settings store; say so instead of failing the circuit.
+        catch (Whiskers.Configuration.IntervalOutOfRangeException ex)
+        {
+            Snackbar.Add(L["Settings_Error_IntervalOutOfRange", ex.Key, ex.Min, ex.Max].Value, Severity.Warning);
+        }
     }
 
     private async Task SaveTerminal()
