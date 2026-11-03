@@ -173,6 +173,41 @@ public class SelfMetricsEndpointTests
     });
 
     [Fact]
+    public async Task An_incomplete_audit_trail_shows_up_as_a_number() => await WithAppAsync(async (client, services) =>
+    {
+        // R1-53: the audit trail's completeness was a readiness check only. An outcome that could not be written is now
+        // a series an alert can watch. (A failed write of the older audit holds for an hour, so the value is stable
+        // while the recovery loop runs beside the test.)
+        var recovery = services.GetRequiredService<Whiskers.Services.Mutations.IAuditRecovery>();
+        Assert.Contains("whiskers_self_audit_legacy_write_failed 0", await ScrapeAsync(client));
+
+        recovery.LegacyWriteFailed();
+        var body = await ScrapeAsync(client);
+
+        Assert.Contains("whiskers_self_audit_legacy_write_failed 1", body);
+        Assert.Contains("# TYPE whiskers_self_audit_events_pending gauge", body);
+        Assert.Contains("# TYPE whiskers_self_audit_intents_unsettled gauge", body);
+    });
+
+    [Fact]
+    public async Task Every_answer_carries_its_request_id() => await WithAppAsync(async (client, _) =>
+    {
+        // R1-53: the correlation middleware runs in the real pipeline — a safe client id comes back, an unsafe one is
+        // replaced, and an answer the auth chain refuses carries one too (the middleware runs before it).
+        var request = new HttpRequestMessage(HttpMethod.Get, "/metrics");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ScrapeToken);
+        request.Headers.TryAddWithoutValidation("X-Request-Id", "scrape-42");
+        var response = await client.SendAsync(request);
+        Assert.Equal("scrape-42", Assert.Single(response.Headers.GetValues("X-Request-Id")));
+
+        var unsafeRequest = new HttpRequestMessage(HttpMethod.Get, "/metrics");
+        unsafeRequest.Headers.TryAddWithoutValidation("X-Request-Id", "<b>not an id</b>");
+        var refused = await client.SendAsync(unsafeRequest);
+        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        Assert.Matches("^[0-9a-f]{32}$", Assert.Single(refused.Headers.GetValues("X-Request-Id")));
+    });
+
+    [Fact]
     public async Task The_endpoint_stays_shut_without_the_token() => await WithAppAsync(async (client, _) =>
     {
         var response = await client.GetAsync("/metrics");

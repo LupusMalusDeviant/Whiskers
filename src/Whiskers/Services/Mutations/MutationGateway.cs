@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Whiskers.Models;
 using Whiskers.Services.Approvals;
+using Whiskers.Services.Observability.Correlation;
 
 namespace Whiskers.Services.Mutations;
 
@@ -417,6 +418,13 @@ public sealed class MutationGateway : IMutationGateway
             request = request with { DecisionId = decisionId };
         }
 
+        // R1-53: the request this operation came from, next to the ids that carry it on (decision, operation) — one
+        // line that links the client's X-Request-Id to the operation id of the decision, approval, run and audit row.
+        _logger.LogInformation(
+            "Operation {OperationId} ({Capability}, {Surface}) decided {Verdict}: decision {DecisionId}, request {HttpRequestId}",
+            operationId, capability.Id, request.Surface, decision.Verdict, request.DecisionId ?? "none",
+            RequestCorrelation.CurrentOrNone);
+
         if (decision.Verdict == MutationVerdict.Deny)
             return Prepared.Refused(await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied,
                 $"Blocked by guardrails: {decision.Reason}", ct) with { MatchedRules = decision.MatchedRules },
@@ -481,6 +489,9 @@ public sealed class MutationGateway : IMutationGateway
         var capability = prepared.Capability!;
         var decision = prepared.Decision!;
         var operationId = request.OperationId!;
+        // R1-53: every log line of this operation from here on — the gateway's and those of the services the execution
+        // calls — carries its operation id as a structured scope (written by the redacting logger factory, R1-25).
+        using var operationScope = _logger.BeginScope("Operation {OperationId} ({Capability})", operationId, capability.Id);
 
         // 4: Confirm runs only with a human approval for exactly this call.
         ApprovalGateResult? approval = null;
@@ -665,6 +676,11 @@ public sealed class MutationGateway : IMutationGateway
         await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, outcome.Status, outcome.Verification,
             outcome.Reason ?? (outcome.VerificationNote is { } note ? $"Not verifiable: {note}" : null),
             _time.GetElapsedTime(started), results), capability);
+        // R1-53: how it ended, under the ids an operator follows it by. The reason stays in the audit row.
+        _logger.Log(outcome.Status == MutationStatus.Executed ? LogLevel.Information : LogLevel.Warning,
+            "Operation {OperationId} ({Capability}) {Status}: verification {Verification}, approval {ApprovalId}, audit {AuditId}, request {HttpRequestId}",
+            operationId, capability.Id, outcome.Status, outcome.Verification, outcome.ApprovalId ?? "none", auditId,
+            RequestCorrelation.CurrentOrNone);
         return outcome with { DecisionId = request.DecisionId };
     }
 
@@ -854,6 +870,11 @@ public sealed class MutationGateway : IMutationGateway
             _logger.LogError(ex, "Audit record for refused {Capability} (operation {OperationId}) could not be written",
                 request.CapabilityId, operationId);
         }
+        // R1-53: a refusal or a wait for approval, linked to its request; the reason stays in the audit row.
+        _logger.LogInformation(
+            "Operation {OperationId} ({Capability}) not run: {Status}, approval {ApprovalId}, decision {DecisionId}, request {HttpRequestId}",
+            operationId, request.CapabilityId, status, approvalId ?? "none", request.DecisionId ?? "none",
+            RequestCorrelation.CurrentOrNone);
         return new MutationOutcome<T>(operationId, status, default, reason, VerificationStatus.NotRun, ApprovalId: approvalId)
         {
             DecisionId = request.DecisionId,

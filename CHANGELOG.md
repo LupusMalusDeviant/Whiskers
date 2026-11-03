@@ -6,6 +6,26 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-53: **One request can be followed from the client to the audit row, and the logs can be JSON.** Every HTTP answer
+  now carries an `X-Request-Id`: the client's own when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -` that the
+  log redaction leaves as they are), else the W3C trace id of an incoming `traceparent`, else a new one — an unsafe
+  value is replaced, never echoed or logged. The id is the log scope `HttpRequestId`. The Mutation Gateway now writes
+  one line per decision (`Operation … decided …: decision …, request …`), one per refusal or wait for approval and one
+  per outcome (`… Executed: verification …, approval …, audit …, request …`; `Warning` when it failed), and
+  puts the operation id around the whole execution as the log scope `OperationId`, so the lines of the services it
+  calls carry it too. The ids pass the log redaction (R1-25) unchanged; nothing else of the request (headers, path,
+  query, body) is logged for this. Structured logs need no new setting: `Logging__Console__FormatterName=json` and
+  `Logging__Console__FormatterOptions__IncludeScopes=true` write one redacted JSON object per line with the scopes.
+  `/metrics` adds the audit trail's completeness, so far only the `audit` readiness check:
+  `whiskers_self_audit_events_pending`, `whiskers_self_audit_intents_unsettled` and
+  `whiskers_self_audit_legacy_write_failed`. The new guide `docs/operations/observability.md` lists where the logs
+  are, how to follow a request, and the loop-stall, operation-incomplete and audit-failure signals with example
+  alert rules. The correlation middleware is registered first in the pipeline; the forwarded-headers and
+  authentication order behind it is unchanged. No database change. **Upgrade notes:** at the default `Information`
+  level the gateway now logs two to three lines per mutation; raise `Logging__LogLevel__Whiskers.Services.Mutations`
+  to `Warning` to keep only failed outcomes. An `X-Request-Id` a reverse proxy already sets is taken over when it
+  is safe.
+
 - R1-54: **Notifications no longer reach into Whiskers' own network unless an Admin allows it.** Every notification
   channel (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, the outgoing webhook) and the e-mail channel's SMTP host
   now go through one outbound guard: it resolves the name once, refuses it when any answer is a loopback, link-local

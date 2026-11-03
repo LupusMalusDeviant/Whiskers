@@ -89,6 +89,19 @@ For each call: timestamp, actor + actor type, tool name, required permission lev
 |---|---|
 | `McpCallLogStore.cs` | `IMcpCallLogStore` + `McpCallLogStore`, records and queries tool-call entries. Writes through a scoped `MetricsDbContext` (safe to call from singletons). Query filters: actor, tool, verdict, writes-only, since. |
 
+## Which request was it? (`Correlation/`, R1-53)
+
+| File | Purpose |
+|---|---|
+| `Correlation/RequestCorrelation.cs` | The request id, ambient like `MutationScope`: `IsAcceptable` (1–64 characters of `A-Z a-z 0-9 . _ -` that the log redaction leaves unchanged — a registered secret is never used), `Choose` (one acceptable `X-Request-Id`, else the W3C trace id, else a new id), `Enter` / `Current` / `CurrentOrNone`. |
+| `Correlation/RequestCorrelationMiddleware.cs` | The first middleware of the pipeline: picks the id, echoes it as `X-Request-Id` (again on start, so an error page keeps it), and opens the log scope `HttpRequestId` through the redacting logger factory. It reads one header and the activity, nothing else. |
+
+The Mutation Gateway names the request in its decision, refusal and outcome lines and holds the scope `OperationId`
+around the execution, so one id leads from the client to the operation, and the operation id to the decision,
+approval, journal and audit row. No database column holds the request id: the log links it to the operation id.
+Operator guide: [`docs/operations/observability.md`](../../../../docs/operations/observability.md). Tests:
+`OperationalCorrelationTests`, `SelfMetricsEndpointTests.Every_answer_carries_its_request_id`.
+
 ## Related
 
 - Dashboard: [`../../Components/Pages/AgentHistory.razor`](../../Components/Pages/AgentHistory.razor)
