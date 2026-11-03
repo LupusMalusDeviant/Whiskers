@@ -36,6 +36,10 @@ public sealed class KubeconfigExecutionTests : IDisposable
         // The plugin prints no ExecCredential, so the build fails — but only after the program has run on this host.
         Assert.ThrowsAny<Exception>(() => KubernetesClientConfiguration.BuildConfigFromConfigObject(config));
 
+        // The client may give up on the plugin's output before the started program has finished (seen on Linux): the
+        // program still runs on this host, so its marker appears shortly after.
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!File.Exists(_marker) && DateTime.UtcNow < deadline) Thread.Sleep(50);
         Assert.True(File.Exists(_marker), "the client started the exec plugin during BuildConfigFromConfigObject");
     }
 
