@@ -16,6 +16,13 @@ public class CapabilityTableConsistencyTests
     public void Every_mutating_capability_has_one_level_on_every_surface(string id)
     {
         var capability = Catalog.Find(id)!;
+        // R1-49: the own password change is the one read-level capability (own account only, UI only).
+        if (id == "account.password_change")
+        {
+            Assert.Equal(McpPermissionLevels.Read, capability.RequiredLevel);
+            Assert.Null(capability.McpTool);
+            return;
+        }
         Assert.Contains(capability.RequiredLevel, new[] { McpPermissionLevels.Write, McpPermissionLevels.Admin });
         if (capability.McpTool is null) return;
         // The MCP gate, the guardrail filter and the approval card read DefaultToolLevels; the tool attribute is

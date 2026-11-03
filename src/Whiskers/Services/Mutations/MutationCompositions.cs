@@ -46,6 +46,10 @@ public static class MutationCompositions
         ("workload.restart", ["container.restart"]),
         // Assessing an update pulls the candidate image (it starts and recreates nothing).
         ("image.assess_update", ["image.pull"]),
+        // R1-49 local accounts: creating one gives it its role, deleting one removes the role (and puts it back when the
+        // deletion fails halfway). The Identity row itself is the account capability's own write.
+        ("account.create", ["config.roles"]),
+        ("account.delete", ["config.roles"]),
         // Setting a DNS record replaces the records it supersedes (same name and type).
         ("dns.record_set", ["dns.record_delete"]),
         // A provider without a hard reset of its own (Hostinger) answers it with its restart.

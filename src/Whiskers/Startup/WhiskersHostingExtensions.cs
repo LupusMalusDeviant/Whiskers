@@ -264,6 +264,18 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Setup.IProductionReadinessService, Whiskers.Services.Setup.ProductionReadinessService>();
         // Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)
         builder.Services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, Whiskers.Services.Auth.CurrentUserService>();
+        // R1-49: local-account lifecycle (own password, Admin add/reset/delete, recovery codes) on ASP.NET Identity.
+        builder.Services.AddScoped<Whiskers.Services.Auth.ILocalAccountService, Whiskers.Services.Auth.LocalAccountService>();
+        // The recovery page runs in a circuit, outside the sign-in's HTTP rate limiter: the service limits per client
+        // address (read once per circuit) and per account.
+        builder.Services.AddSingleton<Whiskers.Services.Auth.IRecoveryAttemptLimiter, Whiskers.Services.Auth.RecoveryAttemptLimiter>();
+        builder.Services.AddScoped<Whiskers.Services.Auth.IClientAddress, Whiskers.Services.Auth.HttpClientAddress>();
+        // In a circuit the client address comes from its hub connection (WebSockets and long polling), taken when the
+        // circuit starts and when its connection comes back up.
+        builder.Services.AddSingleton<Whiskers.Services.Auth.ClientAddressHubFilter>();
+        builder.Services.AddScoped<Whiskers.Services.Auth.CircuitClientAddress>();
+        builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler>(sp =>
+            sp.GetRequiredService<Whiskers.Services.Auth.CircuitClientAddress>());
         // R1-26 (INV-09): one session check for the cookie (every request), the circuit (every 30 s) and the
         // current-user resolver (every UI mutation); the circuit's authentication state re-checks itself.
         builder.Services.AddSingleton<Whiskers.Services.Auth.ISessionValidator, Whiskers.Services.Auth.SessionValidator>();
@@ -414,6 +426,9 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSignalR(options =>
         {
             options.MaximumReceiveMessageSize = 64 * 1024;
+            // R1-49: every hub (also Blazor's circuit hub) makes the calling connection's client address available to
+            // the call — read-only, it refuses nothing (the recovery page's per-client limit, CircuitClientAddress).
+            Microsoft.AspNetCore.SignalR.HubOptionsExtensions.AddFilter<Whiskers.Services.Auth.ClientAddressHubFilter>(options);
         })
         // R1-26 (INV-09): every ContainerHub call re-checks its session (only this hub; Blazor's circuit hub is
         // covered by the circuit's own revalidating authentication state).

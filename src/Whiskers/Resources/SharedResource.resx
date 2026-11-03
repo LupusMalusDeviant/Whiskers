@@ -5405,4 +5405,202 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Session_Revoked_Refusal" xml:space="preserve">
     <value>Your session has ended. Sign in again.</value>
   </data>
+  <data name="Layout_Account" xml:space="preserve">
+    <value>My account</value>
+  </data>
+  <data name="Login_Link_RecoveryCode" xml:space="preserve">
+    <value>Have a recovery code? Set a new password</value>
+  </data>
+  <data name="LocalAccounts_Panel" xml:space="preserve">
+    <value>Local accounts</value>
+  </data>
+  <data name="LocalAccounts_MfaPosture" xml:space="preserve">
+    <value>Local accounts have no second factor (MFA) in Whiskers 1.0: a password alone signs in. For production, sign in through your identity provider (OIDC) and require MFA there; keep local accounts for the first setup and as a break-glass fallback with long, unique passwords.</value>
+  </data>
+  <data name="LocalAccounts_AuthDisabled" xml:space="preserve">
+    <value>Authentication is disabled (AUTH_DISABLED): local accounts are not used for sign-in until it is enabled again.</value>
+  </data>
+  <data name="LocalAccounts_Code_Intro" xml:space="preserve">
+    <value>Recovery code for {0} — shown only now, valid until {1} UTC:</value>
+  </data>
+  <data name="LocalAccounts_Code_Hint" xml:space="preserve">
+    <value>Hand it to the account's owner over a trusted channel. With it they set their own password at /account/recover; the code cannot sign in by itself and works once. It is not stored in readable form and cannot be shown again.</value>
+  </data>
+  <data name="LocalAccounts_Th_Email" xml:space="preserve">
+    <value>Email</value>
+  </data>
+  <data name="LocalAccounts_Th_Role" xml:space="preserve">
+    <value>Role</value>
+  </data>
+  <data name="LocalAccounts_Th_State" xml:space="preserve">
+    <value>State</value>
+  </data>
+  <data name="LocalAccounts_None" xml:space="preserve">
+    <value>No local accounts.</value>
+  </data>
+  <data name="LocalAccounts_Role_Default" xml:space="preserve">
+    <value>{0} (default, no explicit role)</value>
+  </data>
+  <data name="LocalAccounts_Confirm_Delete" xml:space="preserve">
+    <value>Delete this account and its role?</value>
+  </data>
+  <data name="LocalAccounts_Button_DeleteConfirm" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="LocalAccounts_Button_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="LocalAccounts_Button_Reset" xml:space="preserve">
+    <value>Reset password</value>
+  </data>
+  <data name="LocalAccounts_Button_Delete" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="LocalAccounts_Button_Add" xml:space="preserve">
+    <value>Add account</value>
+  </data>
+  <data name="LocalAccounts_OwnAccount" xml:space="preserve">
+    <value>Your account — change the password under My account</value>
+  </data>
+  <data name="LocalAccounts_Add_Heading" xml:space="preserve">
+    <value>Add a local account</value>
+  </data>
+  <data name="LocalAccounts_Label_Email" xml:space="preserve">
+    <value>Email</value>
+  </data>
+  <data name="LocalAccounts_Label_Role" xml:space="preserve">
+    <value>Role</value>
+  </data>
+  <data name="LocalAccounts_Add_Hint" xml:space="preserve">
+    <value>The new account has no password yet: you get a one-time recovery code for its owner, who sets the password. Resetting a password removes the old one and ends every session of the account at once. Deleting is refused for your own account and for the last Admin who can still sign in.</value>
+  </data>
+  <data name="LocalAccounts_State_Active" xml:space="preserve">
+    <value>Active</value>
+  </data>
+  <data name="LocalAccounts_State_LockedOut" xml:space="preserve">
+    <value>Locked (too many failed attempts)</value>
+  </data>
+  <data name="LocalAccounts_State_RecoveryPending" xml:space="preserve">
+    <value>Waiting for a new password (code valid until {0} UTC)</value>
+  </data>
+  <data name="LocalAccounts_State_NoCredential" xml:space="preserve">
+    <value>No password — reset to issue a new code</value>
+  </data>
+  <data name="LocalAccounts_Snackbar_Created" xml:space="preserve">
+    <value>Account {0} added.</value>
+  </data>
+  <data name="LocalAccounts_Snackbar_Reset" xml:space="preserve">
+    <value>The password of {0} was reset; its sessions have ended.</value>
+  </data>
+  <data name="LocalAccounts_Snackbar_Deleted" xml:space="preserve">
+    <value>Account {0} deleted.</value>
+  </data>
+  <data name="LocalAccounts_PasswordPolicy" xml:space="preserve">
+    <value>At least 12 characters with upper- and lower-case letters, a digit and a symbol.</value>
+  </data>
+  <data name="LocalAccounts_Error_failed" xml:space="preserve">
+    <value>The action failed ({0}); see the log.</value>
+  </data>
+  <data name="LocalAccounts_Error_not_authorized" xml:space="preserve">
+    <value>Only an Admin can do this.</value>
+  </data>
+  <data name="LocalAccounts_Error_session_invalid" xml:space="preserve">
+    <value>Your session has ended. Sign in again.</value>
+  </data>
+  <data name="LocalAccounts_Error_not_found" xml:space="preserve">
+    <value>There is no such local account.</value>
+  </data>
+  <data name="LocalAccounts_Error_already_exists" xml:space="preserve">
+    <value>A local account with this email already exists.</value>
+  </data>
+  <data name="LocalAccounts_Error_invalid_email" xml:space="preserve">
+    <value>This is not a valid email address.</value>
+  </data>
+  <data name="LocalAccounts_Error_role_conflict" xml:space="preserve">
+    <value>This email already has a different role. Change it under User roles, or add the account with that role.</value>
+  </data>
+  <data name="LocalAccounts_Error_own_account" xml:space="preserve">
+    <value>Not for your own account: change your password under My account; another Admin deletes your account.</value>
+  </data>
+  <data name="LocalAccounts_Error_last_admin" xml:space="preserve">
+    <value>Refused: this is the last Admin who can sign in. Add or activate another Admin first.</value>
+  </data>
+  <data name="LocalAccounts_Error_wrong_password" xml:space="preserve">
+    <value>The current password is wrong.</value>
+  </data>
+  <data name="LocalAccounts_Error_locked_out" xml:space="preserve">
+    <value>The account is locked after too many failed attempts. Try again later.</value>
+  </data>
+  <data name="LocalAccounts_Error_password_policy" xml:space="preserve">
+    <value>The new password does not meet the policy: at least 12 characters with upper- and lower-case letters, a digit and a symbol.</value>
+  </data>
+  <data name="LocalAccounts_Error_invalid_code" xml:space="preserve">
+    <value>The email or the recovery code is wrong, the code was used or has expired, or the account is locked.</value>
+  </data>
+  <data name="LocalAccounts_Error_store_unavailable" xml:space="preserve">
+    <value>The account store could not be read.</value>
+  </data>
+  <data name="LocalAccounts_Error_conflict" xml:space="preserve">
+    <value>The account changed at the same time. Reload and try again.</value>
+  </data>
+  <data name="LocalAccounts_Error_auth_disabled" xml:space="preserve">
+    <value>Authentication is disabled (AUTH_DISABLED): local accounts are not added, reset or deleted until it is enabled again.</value>
+  </data>
+  <data name="Account_PageTitle" xml:space="preserve">
+    <value>My account - Whiskers</value>
+  </data>
+  <data name="Account_Header_Title" xml:space="preserve">
+    <value>My account</value>
+  </data>
+  <data name="Account_NotLocal" xml:space="preserve">
+    <value>You signed in through Google or your identity provider. Your password and second factor are managed there, not in Whiskers.</value>
+  </data>
+  <data name="Account_ChangePassword_Heading" xml:space="preserve">
+    <value>Change password</value>
+  </data>
+  <data name="Account_ChangePassword_Intro" xml:space="preserve">
+    <value>Changing the password ends every session of your account, this one included; sign in again with the new password.</value>
+  </data>
+  <data name="Account_Label_Current" xml:space="preserve">
+    <value>Current password</value>
+  </data>
+  <data name="Account_Label_New" xml:space="preserve">
+    <value>New password</value>
+  </data>
+  <data name="Account_Label_Confirm" xml:space="preserve">
+    <value>Repeat the new password</value>
+  </data>
+  <data name="Account_Button_Change" xml:space="preserve">
+    <value>Change password</value>
+  </data>
+  <data name="Account_Snackbar_Changed" xml:space="preserve">
+    <value>Password changed. Sign in again.</value>
+  </data>
+  <data name="Account_Error_Mismatch" xml:space="preserve">
+    <value>The two new passwords differ.</value>
+  </data>
+  <data name="Recover_PageTitle" xml:space="preserve">
+    <value>Set a new password - Whiskers</value>
+  </data>
+  <data name="Recover_Title" xml:space="preserve">
+    <value>Set a new password</value>
+  </data>
+  <data name="Recover_Intro" xml:space="preserve">
+    <value>Enter your email, the one-time recovery code you were given and a new password. The code works once and only for a limited time.</value>
+  </data>
+  <data name="Recover_Done" xml:space="preserve">
+    <value>Your new password is set. Sign in with it.</value>
+  </data>
+  <data name="Recover_Button_SignIn" xml:space="preserve">
+    <value>Sign in</value>
+  </data>
+  <data name="Recover_Label_Code" xml:space="preserve">
+    <value>Recovery code</value>
+  </data>
+  <data name="Recover_Button_Set" xml:space="preserve">
+    <value>Set password</value>
+  </data>
+  <data name="Recover_NoCode" xml:space="preserve">
+    <value>No code? An Admin resets your password under Settings → Local accounts; if no Admin can sign in, the host operator issues one with --recover-local-account.</value>
+  </data>
 </root>

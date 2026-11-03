@@ -172,7 +172,17 @@ public static class VerificationContracts
             ["vault.secret_delete"] = VerificationContract.None(OwnRecord),
             ["registry.save"] = VerificationContract.None(OwnRecord),
             ["registry.delete"] = VerificationContract.None(OwnRecord),
+
+            // Local accounts (R1-49)
+            ["account.password_change"] = VerificationContract.None(OwnAccount),
+            ["account.create"] = VerificationContract.None(OwnAccount),
+            ["account.password_reset"] = VerificationContract.None(OwnAccount),
+            ["account.delete"] = VerificationContract.None(OwnAccount),
         };
+
+    private const string OwnAccount =
+        "Whiskers' own account store: ASP.NET Identity writes the account in one save and reports its result; " +
+        "there is no external effect to read back.";
 
     public static VerificationContract? Find(string capabilityId) => All.GetValueOrDefault(capabilityId);
 }

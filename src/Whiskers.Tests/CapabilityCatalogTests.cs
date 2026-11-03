@@ -47,7 +47,12 @@ public class CapabilityCatalogTests
         foreach (var c in _catalog.All)
         {
             Assert.Matches("^[a-z]+\\.[a-z_]+$", c.Id);
-            Assert.Contains(c.RequiredLevel, new[] { McpPermissionLevels.Write, McpPermissionLevels.Admin });
+            // R1-49: changing one's own password is the one read-level capability (every signed-in user, own account
+            // only — the service refuses anyone else's); everything else changes shared state and needs write or admin.
+            if (c.Id == "account.password_change")
+                Assert.Equal(McpPermissionLevels.Read, c.RequiredLevel);
+            else
+                Assert.Contains(c.RequiredLevel, new[] { McpPermissionLevels.Write, McpPermissionLevels.Admin });
             // A fleet-wide run (the nightly AutoPatch cycle) patches one container after another; everything else is
             // bounded at an hour.
             Assert.InRange(c.Deadline, TimeSpan.FromSeconds(1), TimeSpan.FromHours(c.TargetKind == "fleet" ? 4 : 1));

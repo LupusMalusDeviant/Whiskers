@@ -416,7 +416,8 @@ public class MutationGatewayCoverageTests
         "^(Save|Set|Add|Remove|Delete|Create|Update|Start|Stop|Restart|Deploy|Rotate|Revoke|Enable|Disable|Apply|Run|" +
         "Execute|Install|Purge|Prune|Write|Put|Import|Restore|Take|Adopt|Register|Pause|Resume|Suspend|Kill|Reset|" +
         "Clear|Rename|Upload|Move|Grant|Approve|Reject|Issue|Renew|Recreate|Rollback|Pull|Push|Connect|Disconnect|" +
-        "Patch|Change|Begin|Mark|Record|Store|Seed|Onboard|Enroll|Toggle|Assign|Unassign|Attach|Detach|Mount|Open|Close)",
+        "Patch|Change|Begin|Mark|Record|Store|Seed|Onboard|Enroll|Toggle|Assign|Unassign|Attach|Detach|Mount|Open|Close|" +
+        "Redeem|Recover|Consume|Lock|Unlock|Acquire|TryAcquire)",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     [Fact]
@@ -451,6 +452,8 @@ public class MutationGatewayCoverageTests
         // The gateway and its records.
         ("IActionOutcomeService.RecordAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
         ("IApprovalGate.OpenOperationOf", "a lookup of the open approval of an operation (no write)"),
+        ("IApprovalPersistence.ConsumeAsync", "the gateway uses up an approval (R1-14), its own record"),
+        ("IAuditRecovery.RecoverAsync", "settles and re-writes the gateway's own audit events (R1-19)"),
         ("IApprovalStore.CreateAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
         ("IAuditChain.PruneAsync", "audit retention (S-08), the audit trail's own housekeeping"),
         ("IAuditChain.UpdateAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
@@ -473,6 +476,7 @@ public class MutationGatewayCoverageTests
         ("IServerConfigService.AdoptCloudKeyRefAsync", "start-up credential migration (R1-29), pinned by CredentialAdoptionCallersTests"),
         ("IVaultService.AdoptLegacyCredentialAsync", "start-up credential migration, pinned by CredentialAdoptionCallersTests"),
         ("IWhitelistService.AddFirstAdminAsync", "first-run wizard, refuses once an Admin exists, pinned to SetupStateService"),
+        ("ILocalAccountService.RedeemRecoveryCodeAsync", "S-12 (R1-49): the holder of a one-time recovery code sets that account's own password on the anonymous /account/recover page — no person exists the gateway could decide for; audited, rate-limited, pinned to AccountRecover"),
         // Execution plumbing beneath a marked operation or the primitive.
         ("IDockerConnectionManager.ExecuteAsync", "the Docker API transport the marked IDockerService operations run on"),
         ("IDockerConnectionManager.ExecuteGuardedAsync", "the Docker API transport the marked IDockerService operations run on"),
@@ -531,6 +535,7 @@ public class MutationGatewayCoverageTests
         ("IMetricRollupService.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("INotificationOutbox.AddAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("INotificationOutbox.AddOnceAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
+        ("IRecoveryAttemptLimiter.TryAcquire", "in-memory attempt counter of the recovery page (R1-49)"),
         ("ISelfMetrics.RecordApiCall", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ISelfMetrics.RecordCycle", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ISelfMetrics.RecordSkip", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
@@ -606,6 +611,26 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Webhooks.WebhookService.StartAsync", "runs on the webhook worker, which StartAsync starts with the flow suppressed: never inside a decision"),
     ];
 
+    [Fact]
+    public void The_account_recovery_paths_have_exactly_their_callers()
+    {
+        // R1-49 merged with R1-48: recovery runs outside the gateway on the authority of host access (S-11, the CLI) or
+        // of a one-time code (S-12, the anonymous page). Both are audited first; here they are pinned to their callers.
+        static IReadOnlyList<string> CallersOf(Func<MethodInfo, bool> match) => MutationCallScanner.Callers(App, match)
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().Order(StringComparer.Ordinal).ToList();
+
+        Assert.Equal(["Whiskers.Components.Pages.AccountRecover.Redeem"],
+            CallersOf(m => m.Name == "RedeemRecoveryCodeAsync"
+                           && m.DeclaringType?.Name is "ILocalAccountService" or "LocalAccountService"));
+        // Issuing a code: the host CLI (S-11), and inside the decided account.create / account.password_reset.
+        Assert.Equal(["Whiskers.Services.Auth.LocalAccountRecoveryCli.RunAsync",
+                "Whiskers.Services.Auth.LocalAccountService.CreateAsync",
+                "Whiskers.Services.Auth.LocalAccountService.ResetPasswordAsync"],
+            CallersOf(m => m.Name == "IssueAsync" && m.DeclaringType?.Name == "RecoveryCodes"));
+        Assert.Equal(["Program"], MutationCallScanner
+            .Callers(App, m => m.Name == "RunAsync" && m.DeclaringType?.Name == "LocalAccountRecoveryCli")
+            .Select(c => c.Owner.FullName!).Distinct());
+    }
     [Fact]
     public void The_first_admin_writes_have_exactly_the_setup_wizard_as_caller()
     {

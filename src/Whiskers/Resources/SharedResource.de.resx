@@ -5405,4 +5405,202 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Session_Revoked_Refusal" xml:space="preserve">
     <value>Deine Sitzung wurde beendet. Bitte melde dich erneut an.</value>
   </data>
+  <data name="Layout_Account" xml:space="preserve">
+    <value>Mein Konto</value>
+  </data>
+  <data name="Login_Link_RecoveryCode" xml:space="preserve">
+    <value>Wiederherstellungscode erhalten? Neues Passwort setzen</value>
+  </data>
+  <data name="LocalAccounts_Panel" xml:space="preserve">
+    <value>Lokale Konten</value>
+  </data>
+  <data name="LocalAccounts_MfaPosture" xml:space="preserve">
+    <value>Lokale Konten haben in Whiskers 1.0 keinen zweiten Faktor (MFA): Ein Passwort allein meldet an. Im Produktivbetrieb meldest du dich über deinen Identitätsanbieter (OIDC) an und verlangst dort MFA; lokale Konten bleiben für die Ersteinrichtung und als Notzugang mit langen, einmaligen Passwörtern.</value>
+  </data>
+  <data name="LocalAccounts_AuthDisabled" xml:space="preserve">
+    <value>Die Anmeldung ist abgeschaltet (AUTH_DISABLED): Lokale Konten werden erst wieder genutzt, wenn sie eingeschaltet ist.</value>
+  </data>
+  <data name="LocalAccounts_Code_Intro" xml:space="preserve">
+    <value>Wiederherstellungscode für {0} – wird nur jetzt angezeigt, gültig bis {1} UTC:</value>
+  </data>
+  <data name="LocalAccounts_Code_Hint" xml:space="preserve">
+    <value>Gib ihn der Person, der das Konto gehört, über einen vertrauenswürdigen Weg. Damit setzt sie unter /account/recover ihr eigenes Passwort; der Code meldet allein nicht an und gilt nur einmal. Er wird nicht lesbar gespeichert und kann nicht erneut angezeigt werden.</value>
+  </data>
+  <data name="LocalAccounts_Th_Email" xml:space="preserve">
+    <value>E-Mail</value>
+  </data>
+  <data name="LocalAccounts_Th_Role" xml:space="preserve">
+    <value>Rolle</value>
+  </data>
+  <data name="LocalAccounts_Th_State" xml:space="preserve">
+    <value>Zustand</value>
+  </data>
+  <data name="LocalAccounts_None" xml:space="preserve">
+    <value>Keine lokalen Konten.</value>
+  </data>
+  <data name="LocalAccounts_Role_Default" xml:space="preserve">
+    <value>{0} (Standard, keine eigene Rolle)</value>
+  </data>
+  <data name="LocalAccounts_Confirm_Delete" xml:space="preserve">
+    <value>Dieses Konto und seine Rolle löschen?</value>
+  </data>
+  <data name="LocalAccounts_Button_DeleteConfirm" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="LocalAccounts_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="LocalAccounts_Button_Reset" xml:space="preserve">
+    <value>Passwort zurücksetzen</value>
+  </data>
+  <data name="LocalAccounts_Button_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="LocalAccounts_Button_Add" xml:space="preserve">
+    <value>Konto hinzufügen</value>
+  </data>
+  <data name="LocalAccounts_OwnAccount" xml:space="preserve">
+    <value>Dein Konto – das Passwort änderst du unter „Mein Konto“</value>
+  </data>
+  <data name="LocalAccounts_Add_Heading" xml:space="preserve">
+    <value>Lokales Konto hinzufügen</value>
+  </data>
+  <data name="LocalAccounts_Label_Email" xml:space="preserve">
+    <value>E-Mail</value>
+  </data>
+  <data name="LocalAccounts_Label_Role" xml:space="preserve">
+    <value>Rolle</value>
+  </data>
+  <data name="LocalAccounts_Add_Hint" xml:space="preserve">
+    <value>Das neue Konto hat noch kein Passwort: Du erhältst einen einmaligen Wiederherstellungscode für die Person, die es nutzt, und sie setzt das Passwort selbst. Zurücksetzen entfernt das alte Passwort und beendet sofort jede Sitzung des Kontos. Löschen wird für dein eigenes Konto und für den letzten Admin, der sich noch anmelden kann, abgelehnt.</value>
+  </data>
+  <data name="LocalAccounts_State_Active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="LocalAccounts_State_LockedOut" xml:space="preserve">
+    <value>Gesperrt (zu viele Fehlversuche)</value>
+  </data>
+  <data name="LocalAccounts_State_RecoveryPending" xml:space="preserve">
+    <value>Wartet auf ein neues Passwort (Code gültig bis {0} UTC)</value>
+  </data>
+  <data name="LocalAccounts_State_NoCredential" xml:space="preserve">
+    <value>Kein Passwort – zurücksetzen, um einen neuen Code auszustellen</value>
+  </data>
+  <data name="LocalAccounts_Snackbar_Created" xml:space="preserve">
+    <value>Konto {0} hinzugefügt.</value>
+  </data>
+  <data name="LocalAccounts_Snackbar_Reset" xml:space="preserve">
+    <value>Das Passwort von {0} wurde zurückgesetzt; seine Sitzungen sind beendet.</value>
+  </data>
+  <data name="LocalAccounts_Snackbar_Deleted" xml:space="preserve">
+    <value>Konto {0} gelöscht.</value>
+  </data>
+  <data name="LocalAccounts_PasswordPolicy" xml:space="preserve">
+    <value>Mindestens 12 Zeichen mit Groß- und Kleinbuchstaben, einer Ziffer und einem Sonderzeichen.</value>
+  </data>
+  <data name="LocalAccounts_Error_failed" xml:space="preserve">
+    <value>Die Aktion ist fehlgeschlagen ({0}); siehe Protokoll.</value>
+  </data>
+  <data name="LocalAccounts_Error_not_authorized" xml:space="preserve">
+    <value>Das darf nur ein Admin.</value>
+  </data>
+  <data name="LocalAccounts_Error_session_invalid" xml:space="preserve">
+    <value>Deine Sitzung wurde beendet. Bitte melde dich erneut an.</value>
+  </data>
+  <data name="LocalAccounts_Error_not_found" xml:space="preserve">
+    <value>Dieses lokale Konto gibt es nicht.</value>
+  </data>
+  <data name="LocalAccounts_Error_already_exists" xml:space="preserve">
+    <value>Ein lokales Konto mit dieser E-Mail gibt es schon.</value>
+  </data>
+  <data name="LocalAccounts_Error_invalid_email" xml:space="preserve">
+    <value>Das ist keine gültige E-Mail-Adresse.</value>
+  </data>
+  <data name="LocalAccounts_Error_role_conflict" xml:space="preserve">
+    <value>Diese E-Mail hat schon eine andere Rolle. Ändere sie unter „Benutzerrollen“ oder lege das Konto mit dieser Rolle an.</value>
+  </data>
+  <data name="LocalAccounts_Error_own_account" xml:space="preserve">
+    <value>Nicht für dein eigenes Konto: Dein Passwort änderst du unter „Mein Konto“; dein Konto löscht ein anderer Admin.</value>
+  </data>
+  <data name="LocalAccounts_Error_last_admin" xml:space="preserve">
+    <value>Abgelehnt: Das ist der letzte Admin, der sich anmelden kann. Lege zuerst einen weiteren Admin an oder aktiviere ihn.</value>
+  </data>
+  <data name="LocalAccounts_Error_wrong_password" xml:space="preserve">
+    <value>Das aktuelle Passwort ist falsch.</value>
+  </data>
+  <data name="LocalAccounts_Error_locked_out" xml:space="preserve">
+    <value>Das Konto ist nach zu vielen Fehlversuchen gesperrt. Versuche es später noch einmal.</value>
+  </data>
+  <data name="LocalAccounts_Error_password_policy" xml:space="preserve">
+    <value>Das neue Passwort erfüllt die Vorgaben nicht: mindestens 12 Zeichen mit Groß- und Kleinbuchstaben, einer Ziffer und einem Sonderzeichen.</value>
+  </data>
+  <data name="LocalAccounts_Error_invalid_code" xml:space="preserve">
+    <value>E-Mail oder Wiederherstellungscode sind falsch, der Code wurde schon benutzt oder ist abgelaufen, oder das Konto ist gesperrt.</value>
+  </data>
+  <data name="LocalAccounts_Error_store_unavailable" xml:space="preserve">
+    <value>Die Kontendatenbank konnte nicht gelesen werden.</value>
+  </data>
+  <data name="LocalAccounts_Error_conflict" xml:space="preserve">
+    <value>Das Konto wurde gleichzeitig geändert. Lade neu und versuche es noch einmal.</value>
+  </data>
+  <data name="LocalAccounts_Error_auth_disabled" xml:space="preserve">
+    <value>Die Anmeldung ist abgeschaltet (AUTH_DISABLED): Lokale Konten werden erst wieder angelegt, zurückgesetzt oder gelöscht, wenn sie eingeschaltet ist.</value>
+  </data>
+  <data name="Account_PageTitle" xml:space="preserve">
+    <value>Mein Konto - Whiskers</value>
+  </data>
+  <data name="Account_Header_Title" xml:space="preserve">
+    <value>Mein Konto</value>
+  </data>
+  <data name="Account_NotLocal" xml:space="preserve">
+    <value>Du hast dich über Google oder deinen Identitätsanbieter angemeldet. Passwort und zweiter Faktor werden dort verwaltet, nicht in Whiskers.</value>
+  </data>
+  <data name="Account_ChangePassword_Heading" xml:space="preserve">
+    <value>Passwort ändern</value>
+  </data>
+  <data name="Account_ChangePassword_Intro" xml:space="preserve">
+    <value>Eine Passwortänderung beendet jede Sitzung deines Kontos, auch diese; melde dich danach mit dem neuen Passwort an.</value>
+  </data>
+  <data name="Account_Label_Current" xml:space="preserve">
+    <value>Aktuelles Passwort</value>
+  </data>
+  <data name="Account_Label_New" xml:space="preserve">
+    <value>Neues Passwort</value>
+  </data>
+  <data name="Account_Label_Confirm" xml:space="preserve">
+    <value>Neues Passwort wiederholen</value>
+  </data>
+  <data name="Account_Button_Change" xml:space="preserve">
+    <value>Passwort ändern</value>
+  </data>
+  <data name="Account_Snackbar_Changed" xml:space="preserve">
+    <value>Passwort geändert. Bitte melde dich erneut an.</value>
+  </data>
+  <data name="Account_Error_Mismatch" xml:space="preserve">
+    <value>Die beiden neuen Passwörter stimmen nicht überein.</value>
+  </data>
+  <data name="Recover_PageTitle" xml:space="preserve">
+    <value>Neues Passwort setzen - Whiskers</value>
+  </data>
+  <data name="Recover_Title" xml:space="preserve">
+    <value>Neues Passwort setzen</value>
+  </data>
+  <data name="Recover_Intro" xml:space="preserve">
+    <value>Gib deine E-Mail, den erhaltenen einmaligen Wiederherstellungscode und ein neues Passwort ein. Der Code gilt nur einmal und nur für begrenzte Zeit.</value>
+  </data>
+  <data name="Recover_Done" xml:space="preserve">
+    <value>Dein neues Passwort ist gesetzt. Melde dich damit an.</value>
+  </data>
+  <data name="Recover_Button_SignIn" xml:space="preserve">
+    <value>Anmelden</value>
+  </data>
+  <data name="Recover_Label_Code" xml:space="preserve">
+    <value>Wiederherstellungscode</value>
+  </data>
+  <data name="Recover_Button_Set" xml:space="preserve">
+    <value>Passwort setzen</value>
+  </data>
+  <data name="Recover_NoCode" xml:space="preserve">
+    <value>Kein Code? Ein Admin setzt dein Passwort unter Einstellungen → Lokale Konten zurück; kann sich kein Admin mehr anmelden, stellt der Host-Betreiber mit --recover-local-account einen aus.</value>
+  </data>
 </root>
