@@ -700,6 +700,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] Review round 7: the Operations README row for `ContainerLifecycleOperations.cs` is its own row again; the NotAsked text names the time actually queued.
 - [x] Review round 8: an interval that does not bind after a hand edit keeps the last valid one (one warning) instead of ending the loop; the ratchet also fails a typed catch in the loop that leaves it on anything but the host's stop.
 - [x] Review round 9: the metrics loop, which reads its whole section each cycle, keeps its last valid settings when a reload does not bind, and a failure recording its cycle no longer ends it; the ratchet also fails a `return` from a nested loop's catch and accepts a rethrow inside the recovering try.
+- [x] Follow-up (2026-11-03): a stop after the verified recreate, during the health check, records the update as done with its health not checked (and a missing snapshot named, R1-31), not as a failure; a budget saturation — first attempt or retry, also when it wraps a `TimeoutException` — is never a connection failure, never retried as one and never counted by the circuit; the CVE start log reads the guarded interval; the ratchet flags any `not` pattern naming a cancellation type and every await (`await using`/`await foreach` included) in a loop body outside the recovering try that is not the pause.
 
 **Out of scope:** Full tracing infrastructure.
 
@@ -944,6 +945,8 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   path; R1-25 applies to this new sink too). The anonymous `/readyz` stays status-only
   (`Startup/WhiskersPipelineExtensions.cs`), so nothing internal leaks there. A guard refusal is final for that
   delivery: `CompositeNotificationService.DeliverAsync` does not retry it.
+  Follow-up (2026-11-03): once the SMTP server took the message, a stop or the deadline during QUIT keeps the result
+  the server answered — a partial refusal stays one, with who was reached (`NotificationSmtpTests`).
 - [x] Exceptions are narrow: an Admin-only list of entries, each either an IP literal plus port, or a name plus port
   plus the address(es) it may resolve to. The guard compares the **connected address** with the entry, so an excepted
   name that rebinds to another address (for example `169.254.169.254`) is refused — tested. Ranges or wildcards are

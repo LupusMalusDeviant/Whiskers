@@ -209,6 +209,33 @@ public class BackgroundServiceFailureTests
     }
 
     [Fact]
+    public async Task A_first_attempt_that_ran_out_of_time_in_the_queue_is_not_retried_as_a_broken_tunnel()
+    {
+        // R1-41 follow-up review: the saturation wraps the TimeoutException, and the connection-failure catch walks the
+        // chain. Before, it matched first: the tunnel was rebuilt and the request sent a second time.
+        var (docker, circuit, budget) = Connection();
+        var release = new TaskCompletionSource();
+        var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
+            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+        var calls = 0;
+
+        var call = docker.ExecuteAsync<int>("badwolf", _ =>
+        {
+            Interlocked.Increment(ref calls);
+            throw new TimeoutException("the deadline, spent in the queue");
+        });
+        await Task.Delay(300);
+        release.SetResult();
+
+        var ex = await Assert.ThrowsAsync<BudgetSaturatedException>(() => call.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TimeoutException>(ex.InnerException);
+        Assert.Equal(1, calls);
+        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
+        await Task.WhenAll(busy);
+    }
+
+    [Fact]
     public async Task A_fleet_listing_does_not_queue_past_the_server_deadline_for_a_slot()
     {
         // Review round 2: the 8 s per-server timeout reached only the Docker request. With every slot of a server taken,
@@ -465,6 +492,10 @@ public class BackgroundServiceFailureTests
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\n" +
                                         "try { await Other(ct); } catch (Exception ex) when (ex is not (OperationCanceledException or TaskCanceledException)) { }")));
         Assert.Null(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\nawait Task.Delay(Pause, ct);")));
+        // Follow-up review: `await foreach` / `await using` outside the recovering try.
+        Assert.NotNull(VerdictOf(InLoop("await foreach (var x in Stream(ct)) { }\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.NotNull(VerdictOf(InLoop("await using var lease = await Lease(ct);\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.Null(VerdictOf(InLoop("try { await foreach (var x in Stream(ct)) { } } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\nawait Task.Delay(Pause, ct);")));
         // Review round 9: a return from a nested loop's catch leaves RunAsync too; a rethrow inside the recovering try does not.
         Assert.NotNull(VerdictOf(InLoop("try { foreach (var s in Xs) { try { await Run(s, ct); } catch (TimeoutException) { return; } } } " +
                                         "catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
@@ -729,9 +760,15 @@ public class BackgroundServiceFailureTests
         // R1-41 follow-up: placement. A recovering try somewhere in the loop is not enough when the work itself runs
         // outside it — every await in the outermost loop body is inside a recovering try's block, or is the pause.
         foreach (var l in loops)
+        {
             foreach (var a in Outside<AwaitExpressionSyntax>(LoopBody(l)))
                 if (!InsideRecoveringTry(a, l, token) && !IsPauseAwait(a, token))
-                    return $"`{Code(a)}` runs in the loop outside the catch that recovers from a failed cycle";
+                    return $"`{a.NormalizeWhitespace()}` runs in the loop outside the catch that recovers from a failed cycle";
+            // `await using` and `await foreach` await as well, without an await expression.
+            foreach (var s in Outside<StatementSyntax>(LoopBody(l)).Where(AwaitsWithoutExpression))
+                if (!InsideRecoveringTry(s, l, token))
+                    return $"`{s.NormalizeWhitespace().ToString().Split('\n')[0]}` runs in the loop outside the catch that recovers from a failed cycle";
+        }
         var candidates = loops.Count > 0
             ? loops.SelectMany(l => Outside<TryStatementSyntax>(LoopBody(l))
                 .Where(t => !t.Ancestors().TakeWhile(a => a != l).OfType<StatementSyntax>().Any(IsLoop)))
@@ -761,6 +798,14 @@ public class BackgroundServiceFailureTests
             _ => false,
         });
     }
+
+    private static bool AwaitsWithoutExpression(StatementSyntax s) => s switch
+    {
+        CommonForEachStatementSyntax f => f.AwaitKeyword.IsKind(SyntaxKind.AwaitKeyword),
+        UsingStatementSyntax u => u.AwaitKeyword.IsKind(SyntaxKind.AwaitKeyword),
+        LocalDeclarationStatementSyntax d => d.AwaitKeyword.IsKind(SyntaxKind.AwaitKeyword),
+        _ => false,
+    };
 
     private static bool InsideRecoveringTry(SyntaxNode node, StatementSyntax loop, string token) =>
         node.Ancestors().TakeWhile(a => a != loop).OfType<BlockSyntax>()

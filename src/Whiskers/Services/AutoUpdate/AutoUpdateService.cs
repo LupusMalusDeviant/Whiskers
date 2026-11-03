@@ -286,6 +286,12 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 history.Error = "Whiskers was stopping: the container was replaced and verified, its health was not checked afterwards.";
                 policy.LastUpdated = DateTime.UtcNow;
                 policy.LastUpdateResult = "OK (health not checked: Whiskers was stopping)";
+                // R1-31: the missing way back is named here too.
+                if (noRollback)
+                {
+                    history.Error += " No rollback snapshot was kept for this update; it cannot be rolled back from Whiskers.";
+                    policy.LastUpdateResult = "OK (health not checked: Whiskers was stopping; no rollback snapshot)";
+                }
                 _updateStore.Remove(container.Id, container.ServerId);
                 _logger.LogWarning("Auto-update for {Container} replaced the container; Whiskers stopped before its health check",
                     container.Name);
