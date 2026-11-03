@@ -18,9 +18,12 @@ All notable changes to Whiskers are documented here. The format follows
   only a log warning: it raises one `metrics_gap` (naming the alerts it leaves unconfirmed) and a
   `metrics_gap_recovered` when readings are back, and an open breach starts again from the new readings instead of
   being bridged — a raise such a reset ends (a series gap, a paused server, a failed listing, alerts switched off and on,
-  a held-up cycle) is always closed with its `*_recovered`, saying the recovery is not confirmed, so no raise is left
-  open and a breach that goes on is raised again as a new incident. A collection cycle that was itself held up past the tolerance is said once per server with an alert it
-  resets, not once per series; a paused server and a `df` that never answered since the start raise no gap. A listing
+  a held-up cycle, a disabled server enabled again) is always closed with its `*_recovered`, marked as not confirmed —
+  titled "<alert> closed — recovery not confirmed", severity Warning, never "back to normal" — and a breach that goes on
+  is raised again after `SustainedMinutes`, without waiting for `CooldownMinutes`. State that is dropped is closed the
+  same way: a container that stops, is removed or recreated, and a server removed from the configuration, have their
+  open alerts and their open `metrics_gap` closed. A collection cycle that was itself held up past the tolerance is a
+  log line (its open alerts are closed by the rule), not one message per series; a paused server and a `df` that never answered since the start raise no gap. A listing
   that fails for a cycle no longer drops a container's breach. Open threshold alerts survive a restart of Whiskers
   (`alert-breaches.json`): a breach raised before the restart is closed with its recovery afterwards and not raised a
   second time. Raises, recoveries, gaps and the quiet-hours summary bypass the per-channel
@@ -53,10 +56,12 @@ All notable changes to Whiskers are documented here. The format follows
   it held since. (7) The new file `alert-breaches.json` in the data directory holds the open threshold alerts; it is
   local to the install and not part of a self-backup. Open API-latency and rolling-baseline findings are not kept: a
   restart during one of them raises it again if it goes on, as before. (8) A container that stops or is removed during
-  a breach gets no `*_recovered`: its stop is reported by the health monitor. (9) A host whose `df` has not answered
+  a breach gets its `*_recovered` (unconfirmed, "no longer running"); the health monitor reports the stop as before. (9) A host whose `df` has not answered
   since the start (no command channel) gets one log line instead of a `metrics_gap`; one with a kept disk breach counts
-  as read before. (10) The kept alerts of a server that was removed from the configuration are dropped; a disabled
-  server keeps them. The recovery of an alert resumed across a restart says so (its duration includes the downtime).
+  as read before. (10) The open alerts of a server that was removed from the configuration are closed (unconfirmed) and
+  dropped; a disabled server keeps them, containers included, and closes them by the gap rule once it is enabled again.
+  (11) A `<kind>_recovered` now carries `RecoveryUnconfirmed`; the notifications log calls the type "closed"
+  ("beendet") instead of "recovered", since a close is not always a recovery. The recovery of an alert resumed across a restart says so (its duration includes the downtime).
 
 - R1-55: **Metric history keeps its peaks and goes back 30 days and further.** Container and server samples are no
   longer only kept raw and deleted after one retention window: closed windows roll up into three tiers — 10 minutes,

@@ -9,7 +9,16 @@ public static class NotificationFormatter
 {
     /// <summary>Title and severity of an event type, read from <see cref="NotificationEventTypes"/> (R1-56). A type the
     /// registry does not know keeps its raw id as the title.</summary>
-    public static (string Title, string Severity) Describe(NotificationEvent e) => e.EventType switch
+    public static (string Title, string Severity) Describe(NotificationEvent e) =>
+        // R1-56 (review round 3): a close that no reading confirmed is no "back to normal" — a Warning of its own.
+        e.RecoveryUnconfirmed && NotificationEventTypes.IsRecovery(e.EventType)
+            ? (Capitalized(NotificationEventTypes.BreachName(e.EventType[..^NotificationEventTypes.RecoveredSuffix.Length])) +
+               " alert closed — recovery not confirmed", "Warning")
+            : DescribeType(e);
+
+    private static string Capitalized(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
+
+    private static (string Title, string Severity) DescribeType(NotificationEvent e) => e.EventType switch
     {
         NotificationEventTypes.Unhealthy => ("Container unhealthy", "Error"),
         NotificationEventTypes.OomKilled => ("Container OOM-killed", "Error"),

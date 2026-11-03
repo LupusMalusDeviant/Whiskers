@@ -5364,6 +5364,6 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>No readings</value>
   </data>
   <data name="NotificationsLog_Type_Recovered" xml:space="preserve">
-    <value>{0}: recovered</value>
+    <value>{0}: closed</value>
   </data>
 </root>

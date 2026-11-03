@@ -1130,7 +1130,9 @@ containers; a held-up cycle is said once per server with an open alert, not per 
 breaches survive a restart (`alert-breaches.json`, `IAlertBreachStore`); no gap for a paused server or a `df` that never
 answered. Review round 2: one rule — a reported breach that a gap resets is always closed with its `<kind>_recovered`
 (unconfirmed), whatever caused the gap (pause, failed listing, alerts off and on, held-up cycle); container owners and
-read disks are kept with the breaches; the state of removed servers is dropped.
+read disks are kept with the breaches; the state of removed servers is dropped. Review round 3: the unconfirmed close
+is flagged (`RecoveryUnconfirmed`: its own title, Warning) and sets no minimum gap; a disabled server keeps its
+containers' state; dropped state (a gone container, a removed server) is closed; a held-up cycle is a log line.
 
 **Out of scope:** On-call rotation and escalation chains.
 

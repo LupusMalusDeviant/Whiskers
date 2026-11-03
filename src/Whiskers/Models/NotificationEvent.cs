@@ -22,6 +22,11 @@ public class NotificationEvent
     /// <summary>R1-56: for a <c>cve_finding</c> batch, the highest severity among its findings. Structured rather than read
     /// from the text: quiet hours never hold a batch holding a Critical finding.</summary>
     public Whiskers.Models.Cve.CveSeverity? HighestCveSeverity { get; set; }
+
+    /// <summary>R1-56 (review round 3): a <c>&lt;kind&gt;_recovered</c> that closes an alert without a reading showing the
+    /// recovery (the series went without readings, its container or server is gone). Titled and graded as such — never
+    /// "back to normal".</summary>
+    public bool RecoveryUnconfirmed { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     /// <summary>R1-40: one identity per event (shared by its channels), set before the first attempt and kept for every
     /// retry and redelivery, so a channel with idempotent requests (Matrix transaction ids) does not post an event twice when an

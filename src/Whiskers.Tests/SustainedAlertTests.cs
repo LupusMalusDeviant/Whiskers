@@ -208,6 +208,16 @@ public sealed class SustainedAlertTests : IDisposable
         public bool DfFails { get; set; }
         public bool ListingFails { get; set; }
         public bool Paused { get; set; }
+        public bool ContainerGone { get; set; }
+        public double HostCpu { get; set; } = 20;
+        public required ServerConfig Server { get; init; }
+        public required FakeServerConfig Config { get; init; }
+
+        /// <summary>Removes the server from the configuration, as the Servers page does.</summary>
+        public void RemoveServer() => Config.GetServers().Clear();
+
+        /// <summary>Whether the listing and the system-info read ask this server at all (enabled and configured).</summary>
+        public bool Asked => Server.Enabled && Config.GetServers().Count > 0;
         public TimeSpan Interval { get; init; }
 
         public List<NotificationEvent> Events
@@ -233,18 +243,25 @@ public sealed class SustainedAlertTests : IDisposable
         var container = new ContainerInfo { Id = "c1", Name = "web", Image = "nginx", ServerId = "local", ServerName = "Badwolf" };
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_db}"));
-        services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
-            new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }));
+        var server = new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true };
+        var config = new FakeServerConfig(server);
+        services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(config);
         services.AddSingleton(Proxy<IDockerService>.Create((m, _) => m.Name switch
         {
             nameof(IDockerService.ListAllContainersAsync) => Task.FromResult<IList<ContainerInfo>>([container]),
             // The listing as the collector reads it: a failed server answers with no containers and is named as failed.
-            nameof(IDockerService.ListAllContainersDetailedAsync) => Task.FromResult(rig!.ListingFails || rig.Paused
+            // A server that is disabled or removed is not asked at all: neither answered nor failed (as ContainerOperations).
+            nameof(IDockerService.ListAllContainersDetailedAsync) => Task.FromResult(!rig!.Asked
+                ? new FleetContainerListing()
+                : rig.ListingFails || rig.Paused
                 ? new FleetContainerListing
                 {
                     FailedServers = [new FleetServerFailure("local", "Badwolf", rig.Paused ? "paused" : "timed out", NotAsked: rig.Paused)],
                 }
-                : new FleetContainerListing { Containers = [container], RespondedServerIds = new HashSet<string> { "local" } }),
+                : new FleetContainerListing
+                {
+                    Containers = rig.ContainerGone ? [] : [container], RespondedServerIds = new HashSet<string> { "local" },
+                }),
             _ => null,
         }));
         services.AddSingleton(Proxy<Whiskers.Services.Observability.ILoopSuspensionService>.Create((m, _) => m.Name switch
@@ -258,12 +275,12 @@ public sealed class SustainedAlertTests : IDisposable
             nameof(IMetricsSource.GetContainerStatsAsync) => rig!.StatsFail
                 ? Task.FromException<ContainerStats?>(new HttpRequestException("stats failed"))
                 : Task.FromResult<ContainerStats?>(new ContainerStats { ContainerId = "c1", CpuPercent = rig.Cpu }),
-            nameof(IMetricsSource.GetAllServerSystemInfoAsync) => Task.FromResult(rig!.HostMissing
+            nameof(IMetricsSource.GetAllServerSystemInfoAsync) => Task.FromResult(rig!.HostMissing || !rig.Asked
                 ? new Dictionary<string, ServerSystemInfo>()
                 : new Dictionary<string, ServerSystemInfo>
                 {
                     ["local"] = new() { ServerId = "local", ServerName = "Badwolf", IsReachable = true, CpuCount = 2,
-                        CpuUsagePercent = 20, MemoryTotalBytes = 1000, MemoryUsedBytes = 300 },
+                        CpuUsagePercent = rig.HostCpu, MemoryTotalBytes = 1000, MemoryUsedBytes = 300 },
                 }),
             _ => null,
         }));
@@ -292,7 +309,7 @@ public sealed class SustainedAlertTests : IDisposable
             new StaticOptionsMonitor<MetricsSettings>(new MetricsSettings()),
             NullLogger<MetricsCollectorService>.Instance,
             new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(), interval, time: clock);
-        rig = new Rig { Collector = collector, Clock = clock, Notifications = notifications, Alert = alert, Interval = TimeSpan.FromSeconds(intervalSeconds) };
+        rig = new Rig { Server = server, Config = config, Collector = collector, Clock = clock, Notifications = notifications, Alert = alert, Interval = TimeSpan.FromSeconds(intervalSeconds) };
         return rig;
     }
 
@@ -461,6 +478,11 @@ public sealed class SustainedAlertTests : IDisposable
         Assert.Contains("listing its containers failed", gap.ImageInfo);
         Assert.Contains("high_cpu (web)", gap.ImageInfo);
         Assert.Equal(T0.AddMinutes(12), Assert.Single(OfType(rig.Events, "metrics_gap_recovered")).Timestamp);
+        // Review round 3 (MINOR-4): the raise the failed listing reset is closed, unconfirmed, when the readings are back.
+        var closed = Assert.Single(OfType(rig.Events, "high_cpu_recovered"));
+        Assert.Equal(T0.AddMinutes(12), closed.Timestamp);
+        Assert.True(closed.RecoveryUnconfirmed);
+        AssertEveryRaiseIsClosedInOrder(rig.Events, NotificationEventTypes.HighCpu);
     }
 
     [Fact]
@@ -480,10 +502,124 @@ public sealed class SustainedAlertTests : IDisposable
         await rig.RunUntilAsync(TimeSpan.FromMinutes(31));
 
         Assert.Empty(OfType(rig.Events, NotificationEventTypes.MetricsGap));
-        var held = Assert.Single(OfType(rig.Events, "metrics_gap_recovered"));
-        Assert.Equal(("local", "Badwolf"), (held.ServerId, held.ServerName));
-        Assert.Contains("Metrics collection was held up", held.ImageInfo);
-        Assert.Contains("high_cpu (web)", held.ImageInfo);
+        // Review round 3 (NIT-5): no notice of its own (it was a close without a raise); the open alert is closed by the
+        // gap rule — once, unconfirmed, naming the gap.
+        Assert.Empty(OfType(rig.Events, "metrics_gap_recovered"));
+        var closed = Assert.Single(OfType(rig.Events, "high_cpu_recovered"));
+        Assert.Equal(T0.AddMinutes(30), closed.Timestamp);
+        Assert.True(closed.RecoveryUnconfirmed);
+        Assert.Contains("no readings for 10 minutes", closed.ImageInfo);
+        AssertEveryRaiseIsClosedInOrder(rig.Events, NotificationEventTypes.HighCpu);
+    }
+
+    [Fact]
+    public async Task An_unconfirmed_close_says_so_and_a_breach_that_goes_on_is_raised_again_without_the_cooldown()
+    {
+        // Review round 3 (MAJOR-1): it was titled "CPU load back to normal" (Info), and the cooldown then held the new raise
+        // back while the container stayed pegged.
+        var rig = NewRig(cooldownMinutes: 15);
+        rig.Cpu = 97;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(5));                 // high_cpu at 3 min
+        rig.StatsFail = true;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(9.5));               // the last reading at 4:30
+        rig.StatsFail = false;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(20));
+
+        var closed = Assert.Single(OfType(rig.Events, "high_cpu_recovered"));
+        Assert.Equal(T0.AddMinutes(9.5), closed.Timestamp);
+        Assert.True(closed.RecoveryUnconfirmed);
+        Assert.Equal(("High CPU alert closed — recovery not confirmed", "Warning"), NotificationFormatter.Describe(closed));
+        Assert.StartsWith("web: the high CPU alert is closed without a confirmed recovery — no readings for 5 minutes", closed.ImageInfo);
+        // Raised again at resume + SustainedMinutes, not 15 minutes after the last reading before the gap.
+        var raises = OfType(rig.Events, NotificationEventTypes.HighCpu);
+        Assert.Equal([T0.AddMinutes(3), T0.AddMinutes(12.5)], raises.Select(e => e.Timestamp));
+        // A confirmed recovery keeps its title.
+        Assert.Equal(("CPU load back to normal", "Info"), NotificationFormatter.Describe(new NotificationEvent { EventType = "high_cpu_recovered" }));
+    }
+
+    [Fact]
+    public async Task A_disabled_server_keeps_its_container_breach_and_closes_it_on_re_enable()
+    {
+        // Review round 3 (MAJOR-2): disabling a server dropped its container breaches without a close.
+        var rig = NewRig();
+        rig.Cpu = 97;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(5));
+        rig.Server.Enabled = false;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(20));
+        rig.Server.Enabled = true;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(30));
+        rig.Cpu = 20;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(40));
+
+        var closes = OfType(rig.Events, "high_cpu_recovered");
+        Assert.Equal(T0.AddMinutes(20), closes[0].Timestamp);               // on re-enable, by the gap rule
+        Assert.Contains("no readings for", closes[0].ImageInfo);
+        Assert.Equal([T0.AddMinutes(3), T0.AddMinutes(23)], OfType(rig.Events, NotificationEventTypes.HighCpu).Select(e => e.Timestamp));
+        AssertEveryRaiseIsClosedInOrder(rig.Events, NotificationEventTypes.HighCpu);
+    }
+
+    [Fact]
+    public async Task A_container_that_is_gone_has_its_raise_and_its_gap_closed()
+    {
+        // Review round 3 (MINOR-3): its state was dropped without a word — the gap text promised a close that never came.
+        var rig = NewRig();
+        rig.Cpu = 97;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(5));                 // high_cpu at 3
+        rig.StatsFail = true;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(10));                // metrics_gap at 8
+        rig.ContainerGone = true;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(12));
+
+        var closed = Assert.Single(OfType(rig.Events, "high_cpu_recovered"));
+        Assert.Equal(T0.AddMinutes(10), closed.Timestamp);
+        Assert.True(closed.RecoveryUnconfirmed);
+        Assert.Contains("container web is no longer running on Badwolf", closed.ImageInfo);
+        var gapClosed = Assert.Single(OfType(rig.Events, "metrics_gap_recovered"));
+        Assert.True(gapClosed.RecoveryUnconfirmed);
+        Assert.Equal(("Missing readings alert closed — recovery not confirmed", "Warning"), NotificationFormatter.Describe(gapClosed));
+        AssertEveryRaiseIsClosedInOrder(rig.Events, NotificationEventTypes.HighCpu);
+        AssertEveryRaiseIsClosedInOrder(rig.Events, NotificationEventTypes.MetricsGap);
+    }
+
+    [Fact]
+    public async Task A_server_that_was_removed_has_its_disk_and_host_raises_closed()
+    {
+        // Review round 3 (MINOR-3): its kept high_disk and host alerts were forgotten without a close.
+        var rig = NewRig();
+        rig.DiskPercent = 95;
+        rig.HostCpu = 99;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(12));                // high_disk at 3, host_cpu_high at 10
+        Assert.Single(OfType(rig.Events, NotificationEventTypes.HostCpuHigh));
+        rig.RemoveServer();
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(13));
+
+        foreach (var kind in new[] { NotificationEventTypes.HighDisk, NotificationEventTypes.HostCpuHigh })
+        {
+            var closed = Assert.Single(OfType(rig.Events, NotificationEventTypes.Recovered(kind)));
+            Assert.True(closed.RecoveryUnconfirmed);
+            Assert.Contains("its server was removed from the configuration", closed.ImageInfo);
+            Assert.Equal("local", closed.ServerId);
+            AssertEveryRaiseIsClosedInOrder(rig.Events, kind);
+        }
+    }
+
+    [Fact]
+    public async Task A_host_load_breach_reset_by_a_gap_is_closed_unconfirmed()
+    {
+        // Review round 3 (MINOR-4): the same rule for the host-load tracker.
+        var rig = NewRig();
+        rig.HostCpu = 99;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(12));                // host_cpu_high at 10
+        rig.HostMissing = true;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(20));
+        rig.HostMissing = false;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(22));
+
+        var closed = Assert.Single(OfType(rig.Events, NotificationEventTypes.Recovered(NotificationEventTypes.HostCpuHigh)));
+        Assert.Equal(T0.AddMinutes(20), closed.Timestamp);
+        Assert.True(closed.RecoveryUnconfirmed);
+        Assert.Contains("the server CPU alert is closed without a confirmed recovery", closed.ImageInfo);
+        AssertEveryRaiseIsClosedInOrder(rig.Events, NotificationEventTypes.HostCpuHigh);
     }
 
     [Fact]
@@ -547,6 +683,8 @@ public sealed class SustainedAlertTests : IDisposable
         var findings = Drive(Tracker(), [(TimeSpan.Zero, 95), (TimeSpan.FromMinutes(10), 95), (TimeSpan.FromMinutes(10.5), 95)], rules);
         Assert.Equal([FindingKind.Raised, FindingKind.Cleared, FindingKind.Raised], findings.Select(x => x.What));
         Assert.Equal([T0, T0.AddMinutes(10), T0.AddMinutes(10.5)], findings.Select(x => x.AtUtc));
+        Assert.True(findings[1].Unconfirmed);                                   // review round 3: a Warning, not "back to normal"
+        Assert.Equal(("Warning", "Info"), (findings[1].Severity, new HostLoadFinding(T0, "s", "S", NotificationEventTypes.HighCpu, FindingKind.Cleared, "", 0, 0, TimeSpan.Zero).Severity));
     }
 
     [Fact]

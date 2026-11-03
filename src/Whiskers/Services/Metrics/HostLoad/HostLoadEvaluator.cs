@@ -28,7 +28,8 @@ public sealed record HostLoadFinding(
     string Summary,
     double Value,
     double Threshold,
-    TimeSpan OpenFor)
+    TimeSpan OpenFor,
+    bool Unconfirmed = false)
 {
     /// <summary>The event type this is delivered as. An all-clear must not arrive under the alert's own name:
     /// every channel, filter rule and severity mapping keys off this string, so a closing message labelled
@@ -36,7 +37,8 @@ public sealed record HostLoadFinding(
     public string EventType => What == FindingKind.Cleared ? Whiskers.Services.Notifications.NotificationEventTypes.Recovered(Kind) : Kind;
 
     /// <summary>Warning for a problem, informational for its end.</summary>
-    public string Severity => What == FindingKind.Cleared ? "Info" : "Warning";
+    // R1-56 (review round 3): a close no reading confirmed (Unconfirmed) stays a Warning.
+    public string Severity => What == FindingKind.Cleared && !Unconfirmed ? "Info" : "Warning";
 }
 
 /// <summary>An unresolved finding, for the "is the closing path working?" metric (Plan-0004 WP5.4).</summary>
@@ -173,6 +175,9 @@ public sealed class HostLoadEvaluator
 
     /// <summary>Review round 2: drops the state of a server that is no longer configured.</summary>
     public void Forget(string serverId) => _tracker.Forget(serverId);
+
+    /// <summary>Review round 3: drops the state of a removed server and closes its reported breaches, unconfirmed.</summary>
+    public IReadOnlyList<HostLoadFinding> Close(string serverId, DateTime atUtc, string reason) => _tracker.Close(serverId, atUtc, reason);
 
     /// <summary>The CPU threshold this evaluator is using. Exposed so the rolling baseline can compare its
     /// learned mean against the SAME number rather than keeping its own copy — two definitions of "too high"

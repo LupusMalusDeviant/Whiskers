@@ -222,11 +222,13 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         }
 
         // R1-56 (review MAJOR-3): a cycle that starts more than the tolerance after the last one was held up — every series
-        // went without readings, none through a fault of its own. Said once, per server with an alert it resets.
-        var heldUp = _lastCycleAt is { } previous && now - previous > tolerance ? now - previous : (TimeSpan?)null;
+        // went without readings, none through a fault of its own. Never one message per series: each open alert it resets
+        // is closed by the gap rule (BreachTracker, unconfirmed), which says why; the cycle itself is a log line, and the
+        // scan supervisor reports a stalled loop (review round 3: no separate notice, no close without a raise).
+        if (_lastCycleAt is { } previous && now - previous > tolerance)
+            _logger.LogWarning("Metrics collection was held up: {Held} without a cycle (tolerance {Tolerance}); open alerts it " +
+                "resets are closed as unconfirmed", now - previous, tolerance);
         _lastCycleAt = now;
-        if (heldUp is { } held && alertCfg.Enabled)
-            await ReportHeldUpCycleAsync(notify, servers, held, tolerance, ct);
 
         // Container listing still goes through Docker (an inventory call, not a metric); the metric
         // reads below go through IMetricsSource so Prometheus-configured servers bypass SSH.
@@ -456,41 +458,49 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         // "disk:{server}" keys are kept — one per server, stable.
         // R1-56 (review MAJOR-2): gone means absent from a listing its server answered. A container of a server whose
         // listing failed (or that is paused) is kept with its open breach, so a transient failure neither forgets a
-        // reported breach nor raises it a second time.
+        // reported breach nor raises it a second time. Review round 3: a server that is configured but disabled is not
+        // asked for its containers at all — they are kept too (re-enabled, their breaches meet the gap rule and are closed).
+        var configured = scope.ServiceProvider.GetRequiredService<Whiskers.Services.ServerConfig.IServerConfigService>().GetServers()
+            .Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        var enabledIds = servers.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        bool Kept(string serverId) => !listing.MayPruneStateFor(serverId) || pausedServers.Contains(serverId)
+            || (configured.Contains(serverId) && !enabledIds.Contains(serverId));
         var liveIds = containers.Select(c => c.Id).ToHashSet();
         bool Gone(string id) => !liveIds.Contains(id)
-            && (!_containerServer.TryGetValue(id, out var where)
-                || (listing.MayPruneStateFor(where.ServerId) && !pausedServers.Contains(where.ServerId)));
+            && (!_containerServer.TryGetValue(id, out var where) || !Kept(where.ServerId));
         foreach (var kv in _alert.ToArray())
             if (!kv.Key.StartsWith("disk:", StringComparison.Ordinal) && Gone(kv.Key))
                 _alert.TryRemove(kv.Key, out _);
-        // R1-56: the same for the breach and gap state — a container that is gone is not a gap (its stop is reported by
-        // the health monitor; an open breach of it is not closed with a recovery).
+
+        // Review round 3 (MINOR-3): what is dropped is closed — an open raise and an open gap of a container that is gone
+        // (stopped, removed or recreated) and of a server that was removed are closed as unconfirmed, never left open.
         foreach (var id in _thresholds.Tracked().Concat(_gaps.Tracked()).Distinct().ToList())
             if (!id.StartsWith(DiskPrefix, StringComparison.Ordinal) && !id.StartsWith(HostPrefix, StringComparison.Ordinal)
                 && !id.StartsWith(ListingPrefix, StringComparison.Ordinal) && Gone(id))
             {
-                _thresholds.Forget(id);
-                _gaps.Forget(id);
+                var owner = _containerServer.TryGetValue(id, out var w) ? w : (ServerId: "", ServerName: "", Name: id);
+                var template = new NotificationEvent
+                {
+                    ContainerId = id, ContainerName = owner.Name, ServerId = owner.ServerId, ServerName = owner.ServerName,
+                };
+                var reason = string.IsNullOrEmpty(owner.ServerName)
+                    ? $"container {owner.Name} is no longer running"
+                    : $"container {owner.Name} is no longer running on {owner.ServerName}";
+                await CloseDroppedAsync(notify, _ => template, _thresholds.Close(id, now, reason), _gaps.Close(now, id, reason), ct);
             }
-        // Review round 2 (NIT-5): the host, disk and listing state of a server that is no longer configured.
-        // Every server still configured, enabled or not: a disabled server keeps its state (re-enabled, its breaches meet the
-        // gap rule and are closed); a removed one has nothing more to say.
-        var configured = scope.ServiceProvider.GetRequiredService<Whiskers.Services.ServerConfig.IServerConfigService>().GetServers()
-            .Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
         static string? ServerOfSeries(string id) =>
             id.StartsWith(DiskPrefix, StringComparison.Ordinal) ? id[DiskPrefix.Length..]
             : id.StartsWith(HostPrefix, StringComparison.Ordinal) ? id[HostPrefix.Length..]
             : id.StartsWith(ListingPrefix, StringComparison.Ordinal) ? id[ListingPrefix.Length..]
             : null;
+        const string removed = "its server was removed from the configuration";
         foreach (var id in _thresholds.Tracked().Concat(_gaps.Tracked()).Distinct().ToList())
-            if (ServerOfSeries(id) is { } owner && !configured.Contains(owner))
-            {
-                _thresholds.Forget(id);
-                _gaps.Forget(id);
-            }
+            if (ServerOfSeries(id) is { } server && !configured.Contains(server))
+                await CloseDroppedAsync(notify, f => ServerEvent(server, f.ServerName), _thresholds.Close(id, now, removed),
+                    _gaps.Close(now, id, removed), ct);
         foreach (var id in _hostLoad.Tracked())
-            if (!configured.Contains(id)) _hostLoad.Forget(id);
+            if (!configured.Contains(id))
+                await CloseDroppedAsync(notify, f => ServerEvent(id, f.ServerName), _hostLoad.Close(id, now, removed), null, ct);
         foreach (var id in _containerServer.Keys.ToList())
             if (Gone(id) || !configured.Contains(_containerServer[id].ServerId)) _containerServer.TryRemove(id, out _);
 
@@ -509,37 +519,25 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     private bool _breachesRestored;
     private string? _savedBreaches;
 
-    private List<string> KnownContainersOf(string serverId) =>
-        _containerServer.Where(kv => kv.Value.ServerId == serverId).Select(kv => kv.Key).ToList();
-
-    /// <summary>R1-56 (review MAJOR-3): one finding per server whose open alerts a held-up cycle resets — not one per series.
-    /// Nothing but a log line when no alert was open: the scan supervisor reports a stalled loop.</summary>
-    private async Task ReportHeldUpCycleAsync(INotificationService notify, IEnumerable<Whiskers.Models.ServerConfig> servers,
-        TimeSpan held, TimeSpan tolerance, CancellationToken ct)
+    /// <summary>Review round 3: sends the closes of state that is dropped. A failed send is logged; the state is gone either
+    /// way (it would otherwise be closed again every cycle).</summary>
+    private async Task CloseDroppedAsync(INotificationService notify,
+        Func<Whiskers.Services.Metrics.HostLoad.HostLoadFinding, NotificationEvent> template,
+        IEnumerable<Whiskers.Services.Metrics.HostLoad.HostLoadFinding> closes,
+        Whiskers.Services.Metrics.HostLoad.HostLoadFinding? gap, CancellationToken ct)
     {
-        _logger.LogWarning("Metrics collection was held up: {Held} without a cycle (tolerance {Tolerance}); open alerts are reset",
-            held, tolerance);
-        string? ServerOf(string series) =>
-            series.StartsWith(DiskPrefix, StringComparison.Ordinal) ? series[DiskPrefix.Length..]
-            : _containerServer.TryGetValue(series, out var where) ? where.ServerId : null;
-        var open = _thresholds.OpenFindings()
-            .Select(f => (Server: ServerOf(f.ServerId), Alert: $"{f.Kind} ({f.ServerName})"))
-            .Concat(_hostLoad.OpenFindings().Select(f => (Server: (string?)f.ServerId, Alert: $"{f.Kind} ({f.ServerName})")))
-            .Where(x => x.Server is not null)
-            .GroupBy(x => x.Server!);
-        var names = servers.ToDictionary(s => s.Id, s => s.Name, StringComparer.Ordinal);
-        var now = Now();
-        foreach (var group in open)
+        foreach (var finding in gap is null ? closes : closes.Append(gap))
         {
-            var name = names.GetValueOrDefault(group.Key, group.Key);
-            await NotifyFindingAsync(notify, ServerEvent(group.Key, name), new Whiskers.Services.Metrics.HostLoad.HostLoadFinding(
-                now, group.Key, name, NotificationEventTypes.MetricsGap, Whiskers.Services.Metrics.HostLoad.FindingKind.Cleared,
-                $"Metrics collection was held up: no readings of {name} for {Whiskers.Services.Metrics.HostLoad.BreachTracker.Describe(held)} " +
-                $"(tolerance {Whiskers.Services.Metrics.HostLoad.BreachTracker.Describe(tolerance)}); readings are back. Alerts open " +
-                $"before are closed (unconfirmed) and raised again only if new readings confirm them: {string.Join(", ", group.Select(x => x.Alert))}.",
-                0, 0, held), ct);
+            try { await NotifyFindingAsync(notify, template(finding), finding, ct); }
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
+            {
+                _logger.LogWarning(ex, "The close of {EventType} on {Target} could not be sent", finding.EventType, finding.ServerName);
+            }
         }
     }
+
+    private List<string> KnownContainersOf(string serverId) =>
+        _containerServer.Where(kv => kv.Value.ServerId == serverId).Select(kv => kv.Key).ToList();
 
     /// <summary>R1-56 (review MAJOR-4): takes over the breaches open when Whiskers last stopped. A file that cannot be read
     /// is logged and ignored — the alerts are then raised again if the breach goes on (delivered rather than lost).</summary>
@@ -630,6 +628,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
             "{EventType} on {Target}: {Summary}", finding.EventType, finding.ServerName, finding.Summary);
         var evt = template.Copy();
         evt.EventType = finding.EventType;
+        evt.RecoveryUnconfirmed = finding.Unconfirmed;         // review round 3: titled and graded as such
         evt.ImageInfo = finding.Summary;
         evt.Timestamp = finding.AtUtc;
         await notify.SendAsync(evt, ct);

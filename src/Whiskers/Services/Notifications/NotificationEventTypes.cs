@@ -93,6 +93,22 @@ public static class NotificationEventTypes
             ? kind + RecoveredSuffix
             : throw new ArgumentException($"'{kind}' has no recovery event.", nameof(kind));
 
+    /// <summary>Review round 3: how a breach kind is named in a sentence ("the high CPU alert").</summary>
+    public static string BreachName(string kind) => kind switch
+    {
+        HighCpu => "high CPU",
+        HighMemory => "high memory",
+        HighDisk => "high disk usage",
+        MetricsGap => "missing readings",
+        HostCpuHigh => "server CPU",
+        HostMemoryHigh => "server memory",
+        HostCpuUnexplained => "unexplained host load",
+        HostApiSlow => "slow Docker API",
+        HostCpuAnomaly => "unusual server CPU",
+        HostCpuBaselineDrifted => "drifted CPU baseline",
+        _ => kind,
+    };
+
     /// <summary>The kinds a breach tracker raises and closes: each has a <c>&lt;kind&gt;_recovered</c>.</summary>
     public static readonly IReadOnlySet<string> RecoverableKinds = new HashSet<string>(StringComparer.Ordinal)
     {

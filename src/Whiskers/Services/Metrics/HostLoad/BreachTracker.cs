@@ -127,11 +127,13 @@ public sealed class BreachTracker
             {
                 if (breach.Reported is not null)
                 {
-                    breach.LastEnded = last;
+                    // Review round 3: no minimum gap after it (LastEnded unchanged) — a gap is no proof the breach ended,
+                    // so a breach that goes on is raised again after the sustained duration, not held back by the cooldown.
                     closed = new HostLoadFinding(atUtc, serverId, serverName, kind, FindingKind.Cleared,
-                        $"{serverName}: the {kind} alert is closed without a confirmed recovery — no readings for " +
-                        $"{Describe(atUtc - last)} (tolerance {Describe(tolerance)}). It is raised again only if new readings " +
-                        "confirm the breach.", value, threshold, last - (breach.Since ?? last));
+                        $"{serverName}: the {Whiskers.Services.Notifications.NotificationEventTypes.BreachName(kind)} alert is " +
+                        $"closed without a confirmed recovery — no readings for {Describe(atUtc - last)} (tolerance " +
+                        $"{Describe(tolerance)}). It is raised again if new readings confirm the breach.",
+                        value, threshold, last - (breach.Since ?? last), Unconfirmed: true);
                 }
                 Reset(breach);
             }
@@ -232,6 +234,32 @@ public sealed class BreachTracker
         breach.BelowSince = null;
         breach.Peak = 0;
         breach.Resumed = false;
+    }
+
+    /// <summary>Review round 3: drops every breach of <paramref name="serverId"/> (a container that is gone, a server that
+    /// was removed) and closes each one that was reported, unconfirmed, naming <paramref name="reason"/> — what is
+    /// dropped never leaves a raise open.</summary>
+    public IReadOnlyList<HostLoadFinding> Close(string serverId, DateTime atUtc, string reason)
+    {
+        lock (_sync)
+        {
+            var name = _serverNames.GetValueOrDefault(serverId, serverId);
+            var closes = _breaches
+                .Where(kv => kv.Key.StartsWith(serverId + "|", StringComparison.Ordinal) && kv.Value.Reported is not null)
+                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv =>
+                {
+                    var kind = kv.Key[(serverId.Length + 1)..];
+                    var since = kv.Value.Since ?? kv.Value.Reported!.Value;
+                    return new HostLoadFinding(atUtc, serverId, name, kind, FindingKind.Cleared,
+                        $"{name}: the {Whiskers.Services.Notifications.NotificationEventTypes.BreachName(kind)} alert is closed " +
+                        $"without a confirmed recovery — {reason}.", kv.Value.Peak, 0, (kv.Value.LastAt ?? atUtc) - since,
+                        Unconfirmed: true);
+                })
+                .ToList();
+            Forget(serverId);
+            return closes;
+        }
     }
 
     /// <summary>R1-56: drops every series of <paramref name="serverId"/> (a container that is gone), so the state stays

@@ -20,6 +20,7 @@ public sealed class SeriesGapTracker
     {
         public DateTime LastSeen;            // the last reading, or the first miss of a series never seen
         public DateTime? Announced;          // when the gap was reported (null = not reported)
+        public string? Name;                 // review round 3: for a close when the series is dropped
     }
 
     private readonly Dictionary<string, Series> _series = new(StringComparer.Ordinal);
@@ -32,7 +33,8 @@ public sealed class SeriesGapTracker
         lock (_sync)
         {
             var known = _series.TryGetValue(seriesId, out var series);
-            if (!known) { _series[seriesId] = new Series { LastSeen = atUtc }; return null; }
+            if (!known) { _series[seriesId] = new Series { LastSeen = atUtc, Name = name }; return null; }
+            series!.Name = name;
 
             var gap = atUtc - series!.LastSeen;
             var announced = series.Announced;
@@ -61,6 +63,7 @@ public sealed class SeriesGapTracker
         {
             if (!_series.TryGetValue(seriesId, out var series))
                 _series[seriesId] = series = new Series { LastSeen = atUtc };
+            series.Name = name;
             if (series.Announced is not null) return null;
 
             var gap = atUtc - series.LastSeen;
@@ -68,7 +71,7 @@ public sealed class SeriesGapTracker
 
             series.Announced = atUtc;
             var open = openAlerts is { Count: > 0 }
-                ? $" Open alerts for it are closed (unconfirmed) when readings are back and raised again only if new readings confirm them: {string.Join(", ", openAlerts)}."
+                ? $" Open alerts for it are closed (unconfirmed) when readings are back or the series is dropped, and raised again only if new readings confirm them: {string.Join(", ", openAlerts)}."
                 : "";
             return new HostLoadFinding(atUtc, seriesId, name, NotificationEventTypes.MetricsGap, FindingKind.Raised,
                 $"No readings of {what} for {BreachTracker.Describe(gap)} (tolerance {BreachTracker.Describe(tolerance)})" +
@@ -86,6 +89,19 @@ public sealed class SeriesGapTracker
         {
             if (!_series.TryGetValue(seriesId, out var series)) _series[seriesId] = new Series { LastSeen = atUtc };
             else if (series.Announced is null) series.LastSeen = atUtc;
+        }
+    }
+
+    /// <summary>Review round 3: drops a series that is no longer collected (a container that is gone, a server that was
+    /// removed) and closes its reported gap, unconfirmed, naming <paramref name="reason"/>.</summary>
+    public HostLoadFinding? Close(DateTime atUtc, string seriesId, string reason)
+    {
+        lock (_sync)
+        {
+            if (!_series.Remove(seriesId, out var series) || series.Announced is null) return null;
+            var name = series.Name ?? seriesId;
+            return new HostLoadFinding(atUtc, seriesId, name, NotificationEventTypes.MetricsGap, FindingKind.Cleared,
+                $"{name}: the missing-readings alert is closed — {reason}.", 0, 0, atUtc - series.LastSeen, Unconfirmed: true);
         }
     }
 

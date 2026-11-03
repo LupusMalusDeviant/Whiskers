@@ -5364,6 +5364,6 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Keine Messwerte</value>
   </data>
   <data name="NotificationsLog_Type_Recovered" xml:space="preserve">
-    <value>{0}: wieder normal</value>
+    <value>{0}: beendet</value>
   </data>
 </root>
