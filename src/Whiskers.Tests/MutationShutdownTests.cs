@@ -488,7 +488,8 @@ public sealed class MutationShutdownTests : IDisposable
         };
         var paths = new DataPathOptions(_dataDir);
         var settings = new AutoPatchSettings { Enabled = true, DryRun = false };
-        var service = AutoPatchTests.NewService(runner, cves, settings, owners, () => DateTime.UtcNow,
+        var night = DateTime.UtcNow;                            // one instant throughout: no midnight in between
+        var service = AutoPatchTests.NewService(runner, cves, settings, owners, () => night,
             new AutoPatchNightlyStore(paths), drain, AutoPatchTests.Compose("a"), AutoPatchTests.Compose("b"));
 
         await service.RunNightlyRecordedAsync(CancellationToken.None);
@@ -496,12 +497,12 @@ public sealed class MutationShutdownTests : IDisposable
         Assert.Equal(["a"], runner.Calls.Select(c => c.Name));
 
         var restarted = AutoPatchTests.NewService(new AutoPatchTests.RecordingRunner(), cves, settings, owners,
-            () => DateTime.UtcNow, new AutoPatchNightlyStore(paths), Drain());
+            () => night, new AutoPatchNightlyStore(paths), Drain());
         await restarted.LoadNightlyAsync();
         Assert.Contains("Stopped before b", restarted.LastCycle!.Error);
         Assert.NotNull(restarted.LastCycle.CompletedAt);
-        Assert.False(AutoPatchService.IsDue(new AutoPatchSettings { Enabled = true, RunAtHourUtc = DateTime.UtcNow.Hour },
-            DateTime.UtcNow, restarted.LastNightlyRun));
+        Assert.False(AutoPatchService.IsDue(new AutoPatchSettings { Enabled = true, RunAtHourUtc = night.Hour },
+            night, restarted.LastNightlyRun));
     }
 
     private static IHost Host(ShutdownDrain drain, HoldingWorker worker, TimeSpan shutdownTimeout) =>
@@ -646,6 +647,27 @@ public sealed class MutationShutdownTests : IDisposable
         executor.Release.SetResult((true, "ok"));
         Assert.True((await running).Success);
         Assert.Equal("ok", (await TaskAsync("t1")).LastResult);
+    }
+
+    [Fact]
+    public async Task An_operation_mark_whose_commit_answer_was_lost_is_still_reported()
+    {
+        var before = new DbOperationJournal(Scopes);
+        Assert.Equal(OperationClaimResult.Claimed, (await before.ClaimAsync(Claim("op-1"))).Result);
+
+        var lost = new LostCommitOnce();
+        var services = new ServiceCollection();
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}",
+            sqlite => sqlite.ExecutionStrategy(d => new Retrying(d))).AddInterceptors(lost));
+        using var retrying = services.BuildServiceProvider();
+        var scopes = retrying.GetRequiredService<IServiceScopeFactory>();
+        var notifications = new FakeNotifications();
+        var marked = await new InterruptedWorkReconciler(scopes, new DbOperationJournal(scopes), notifications,
+            NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
+
+        Assert.True(lost.Fired);
+        Assert.StartsWith("container.restart (started", Assert.Single(marked), StringComparison.Ordinal);
+        Assert.Single(notifications.Events);
     }
 
     [Fact]

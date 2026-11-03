@@ -116,13 +116,15 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
                 // The target's name is read first and is optional: once the row is marked, nothing may keep it from the
                 // report — a later start no longer sees it.
                 var target = await TargetOfAsync(db, op.AuditId, ct);
-                // Conditional on the row as read: nothing else may have finished it meanwhile.
-                var changed = await db.Operations
+                // Conditional on the row as read: nothing else may have finished it meanwhile. In the execution strategy
+                // like the other marks, so a retry after a lost commit still reports this pass's own mark.
+                var changed = await InTransactionAsync(db, async () => await db.Operations
                     .Where(o => o.Id == op.Id && o.State == DbOperationJournal.Running && o.Instance == op.Instance)
                     .ExecuteUpdateAsync(s => s
                         .SetProperty(o => o.State, DbOperationJournal.Interrupted)
-                        .SetProperty(o => o.FinishedAt, now), ct);
-                if (changed == 0) continue;
+                        .SetProperty(o => o.FinishedAt, now), ct) > 0,
+                    () => db.Operations.AnyAsync(o => o.Id == op.Id && o.State == DbOperationJournal.Interrupted && o.FinishedAt == now, ct), ct);
+                if (!changed) continue;
                 marked.Add(string.IsNullOrWhiteSpace(target)
                     ? $"{op.CapabilityId} (started {op.ClaimedAt:u})"
                     : $"{op.CapabilityId} on {target} (started {op.ClaimedAt:u})");

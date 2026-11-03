@@ -3923,6 +3923,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="ScheduledTasksView_History_Result" xml:space="preserve">
     <value>Result</value>
   </data>
+  <data name="ScheduledTasksView_History_Running" xml:space="preserve">
+    <value>Running</value>
+  </data>
   <data name="ScheduledTasksView_History_Started" xml:space="preserve">
     <value>Started</value>
   </data>

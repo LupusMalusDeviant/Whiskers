@@ -207,9 +207,14 @@ else
             <MudTd>@context.TaskName</MudTd>
             <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text">@GetTypeLabel(context.TaskType)</MudChip></MudTd>
             <MudTd>@context.StartedAt.ToLocalTime().ToString("dd.MM. HH:mm:ss")</MudTd>
-            <MudTd>@((context.CompletedAt ?? context.StartedAt).Subtract(context.StartedAt).TotalSeconds.ToString("F1"))s</MudTd>
+            <MudTd>@(context.CompletedAt is { } ended ? ended.Subtract(context.StartedAt).TotalSeconds.ToString("F1") + "s" : "—")</MudTd>
             <MudTd>
-                @if (context.Success)
+                @if (context.CompletedAt is null)
+                {
+                    @* R1-39: a run is on record before it starts; without an end it is still running *@
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Info">@L["ScheduledTasksView_History_Running"]</MudChip>
+                }
+                else if (context.Success)
                 {
                     <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
                     @if (!string.IsNullOrEmpty(context.Output))

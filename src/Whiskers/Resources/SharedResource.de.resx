@@ -3923,6 +3923,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_History_Result" xml:space="preserve">
     <value>Ergebnis</value>
   </data>
+  <data name="ScheduledTasksView_History_Running" xml:space="preserve">
+    <value>Läuft</value>
+  </data>
   <data name="ScheduledTasksView_History_Started" xml:space="preserve">
     <value>Gestartet</value>
   </data>
