@@ -637,7 +637,7 @@ public sealed class LocalAccountLifecycleTests
         public Task SaveRoleDataAsync(UserRoleData data) => inner.SaveRoleDataAsync(data);
         public Task SetRoleAsync(string email, AppRole role) => inner.SetRoleAsync(email, role);
         public Task RemoveRoleAsync(string email) => inner.RemoveRoleAsync(email);
-        public Task SetFirstAdminAsync(string email) => inner.SetFirstAdminAsync(email);
+        public Task SetFirstAdminAsync(string email, Whiskers.Services.Auth.AccessControlWriteGate.Lease lease) => inner.SetFirstAdminAsync(email, lease);
     }
 
     // ------------------------------------------------------------------------------------------------ review round 2
@@ -796,7 +796,7 @@ public sealed class LocalAccountLifecycleTests
         public Task SaveRoleDataAsync(UserRoleData data) => inner.SaveRoleDataAsync(data);
         public Task SetRoleAsync(string email, AppRole role) => inner.SetRoleAsync(email, role);
         public Task RemoveRoleAsync(string email) => Task.FromException(failure);
-        public Task SetFirstAdminAsync(string email) => inner.SetFirstAdminAsync(email);
+        public Task SetFirstAdminAsync(string email, Whiskers.Services.Auth.AccessControlWriteGate.Lease lease) => inner.SetFirstAdminAsync(email, lease);
     }
 
     // ------------------------------------------------------------------------------------------------ wire
@@ -878,7 +878,7 @@ public sealed class LocalAccountLifecycleTests
         public Task SaveRoleDataAsync(UserRoleData data) => inner.SaveRoleDataAsync(data);
         public Task SetRoleAsync(string email, AppRole role) => inner.SetRoleAsync(email, role);
         public Task RemoveRoleAsync(string email) => inner.RemoveRoleAsync(email);
-        public Task SetFirstAdminAsync(string email) => inner.SetFirstAdminAsync(email);
+        public Task SetFirstAdminAsync(string email, Whiskers.Services.Auth.AccessControlWriteGate.Lease lease) => inner.SetFirstAdminAsync(email, lease);
     }
 
     private static async Task SignInAsync(HttpClient client, string email, string password)

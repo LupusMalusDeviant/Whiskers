@@ -25,6 +25,7 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
     private readonly ILogger<SetupStateService> _logger;
     private readonly Whiskers.Services.AuditLog.IAuditLogService? _audit;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly AccessControlWriteGate _writeGate;
 
     /// <summary>The audit action of the wizard's first-admin write (R1-48).</summary>
     public const string FirstAdminAction = "setup.first_admin";
@@ -33,9 +34,12 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
 
     public SetupStateService(IRoleService roles, IWhitelistService whitelist, IServiceScopeFactory scopeFactory,
         ILogger<SetupStateService> logger, DataPathOptions? dataPaths = null, IConfiguration? configuration = null,
-        Whiskers.Services.AuditLog.IAuditLogService? audit = null)
+        Whiskers.Services.AuditLog.IAuditLogService? audit = null, AccessControlWriteGate? writeGate = null)
     {
         _audit = audit;
+        // R1-48 review round 2: the boundary the role and whitelist writers share. Without the shared instance the
+        // first-admin writes refuse (their lease would hold another gate) — fail closed.
+        _writeGate = writeGate ?? new AccessControlWriteGate();
         _roles = roles;
         _whitelist = whitelist;
         _scopeFactory = scopeFactory;
@@ -169,11 +173,14 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
             // methods, which refuse once any Admin exists, so the whitelist goes first (after the role it would be
             // closed). A crash between the two leaves the address listed and no Admin: setup stays open with the same
             // token, and the next attempt finds the address already there. Enabled is deliberately NOT flipped
-            // (disabled→enabled would lock out unlisted OIDC users).
+            // (disabled→enabled would lock out unlisted OIDC users). Review round 2: both writes run under one held
+            // AccessControlWriteGate, the boundary every role and whitelist writer takes — no other writer can add an
+            // Admin after the check or change the whitelist between the two writes.
             try
             {
-                await _whitelist.AddFirstAdminAsync(email);
-                await _roles.SetFirstAdminAsync(email);
+                using var lease = await _writeGate.EnterAsync(ct);
+                await _whitelist.AddFirstAdminAsync(email, lease);
+                await _roles.SetFirstAdminAsync(email, lease);
             }
             catch (Exception ex)
             {

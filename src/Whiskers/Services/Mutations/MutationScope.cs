@@ -108,17 +108,29 @@ public sealed class MutationScope : IDisposable
     /// operation that a decision only <em>composes</em> must act on the server that decision was taken for — an
     /// <c>app.deploy</c> on server A does not pull an image on server B. A call of the decided capability itself, a call
     /// that names no server and a decision without a server target are not matched by server (the gateway resolved the
-    /// target of the decided call itself; nothing narrower is known).
+    /// target of the decided call itself; nothing narrower is known). This form treats a missing server as "no server";
+    /// the scope guard uses the overload below, which resolves an omitted server argument to the default server.
     /// </summary>
-    public static bool Authorizes(string capabilityId, string? serverId)
+    public static bool Authorizes(string capabilityId, string? serverId) =>
+        Authorizes(capabilityId, actsOnServer: !string.IsNullOrEmpty(serverId), serverId, canonical: null);
+
+    /// <summary>
+    /// The server-matching form the scope guard uses (R1-48, review round 2). <paramref name="actsOnServer"/> is false
+    /// only for an operation that has no server at all; an operation whose server argument was <em>omitted</em> acts on
+    /// the transport's default server, and <paramref name="server"/> is then that default's canonical id. A
+    /// <c>null</c> <paramref name="server"/> on a server operation means the server could not be resolved: a composed
+    /// call then matches no decision taken for a server (fail closed). <paramref name="canonical"/> maps the decision's
+    /// server to the same canonical form before the comparison.
+    /// </summary>
+    public static bool Authorizes(string capabilityId, bool actsOnServer, string? server, Func<string, string?>? canonical)
     {
         for (var s = Current; s is not null; s = s._parent)
         {
             if (string.Equals(s.CapabilityId, capabilityId, StringComparison.Ordinal)) return true;
-            if (MutationCompositions.Allows(s.CapabilityId, capabilityId)
-                && (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(s._serverId)
-                    || string.Equals(s._serverId, serverId, StringComparison.OrdinalIgnoreCase)))
-                return true;
+            if (!MutationCompositions.Allows(s.CapabilityId, capabilityId)) continue;
+            if (!actsOnServer || string.IsNullOrEmpty(s._serverId)) return true;
+            var decided = canonical?.Invoke(s._serverId) ?? s._serverId;
+            if (server is not null && string.Equals(decided, server, StringComparison.OrdinalIgnoreCase)) return true;
         }
         return false;
     }

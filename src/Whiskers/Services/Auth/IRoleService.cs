@@ -28,6 +28,9 @@ public interface IRoleService
     /// Admin exists — checked and written under the store's own write lock, so of two concurrent calls at most one
     /// creates an Admin. Its only caller is <c>SetupStateService.CompleteSetupAsync</c>, after the setup token was
     /// verified (pinned by <c>MutationGatewayCoverageTests</c>); the wizard audits it (<c>setup.first_admin</c>).
+    /// Review round 2: the caller must hold the shared <see cref="AccessControlWriteGate"/> (<paramref name="lease"/>),
+    /// the boundary every role and whitelist writer takes, so no writer runs between the check and the write or between
+    /// the wizard's whitelist and role writes. The Admin becomes visible to readers only after it was persisted.
     /// </summary>
-    Task SetFirstAdminAsync(string email);
+    Task SetFirstAdminAsync(string email, AccessControlWriteGate.Lease lease);
 }

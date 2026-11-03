@@ -379,8 +379,9 @@ public class MutationScopeGuardTests
             Assert.Equal("pulled x on SERVER-A", await guarded.PullAsync("x", "SERVER-A"));   // ids ignore case
             var refused = await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", "server-b"));
             Assert.Equal("app.deploy", refused.OpenScope);
-            // A call that names no server is not matched (nothing narrower is known).
-            Assert.Equal("pulled x on ", await guarded.PullAsync("x", ""));
+            // R1-48 review round 2: an omitted server is the transport's default — without a registry it cannot be
+            // resolved, so it matches no decided server (fail closed).
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", ""));
         }
 
         // The decided capability itself is the gateway's own resolved target: not matched again here.
@@ -389,15 +390,80 @@ public class MutationScopeGuardTests
             Assert.Equal("pulled x on server-b", await guarded.PullAsync("x", "server-b"));
     }
 
+    // A monitor whose server registry has server-a and server-b, with <paramref name="defaultServer"/> as the default.
+    private static MutationScopeMonitor WithRegistry(string defaultServer)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
+            new Whiskers.Models.ServerConfig { Id = "server-a", Name = "Alpha", IsDefault = defaultServer == "server-a" },
+            new Whiskers.Models.ServerConfig { Id = "server-b", Name = "Beta", IsDefault = defaultServer == "server-b" }));
+        return new MutationScopeMonitor(NullLogger<MutationScopeMonitor>.Instance, services: services.BuildServiceProvider());
+    }
+
+    private static MutationRequest DeployOn(string serverId, string op) => new("app.deploy",
+        new MutationPrincipal(MutationPrincipalKind.Human, "a@x", "a@x", Whiskers.Models.McpPermissionLevels.Admin),
+        MutationSurface.Ui, new MutationTarget("host", serverId, ServerId: serverId),
+        new Dictionary<string, System.Text.Json.JsonElement>(), OperationId: op);
+
+    [Fact]
+    public async Task A_composed_call_that_omits_its_server_acts_on_the_default_and_is_matched_against_it()
+    {
+        // R1-48 review round 2: app.deploy decided for A; the pull names no server, and the transport's default is B.
+        var inner = new ServerProbe();
+        var guarded = MutationScopeProxy<IServerProbe>.Wrap(inner, WithRegistry(defaultServer: "server-b"));
+        using (MutationScope.Begin("app.deploy", "op-r2a", request: DeployOn("server-a", "op-r2a")))
+        {
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullOnDefaultAsync("x"));
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", null!));
+            Assert.Equal(0, inner.Calls);                                         // refused before it ran
+            // A named server is compared canonically: the display name of A is A.
+            Assert.Equal("pulled x on Alpha", await guarded.PullAsync("x", "Alpha"));
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", "Beta"));
+        }
+
+        // The same pull is allowed when the default is the decided server.
+        var onA = MutationScopeProxy<IServerProbe>.Wrap(new ServerProbe(), WithRegistry(defaultServer: "server-a"));
+        using (MutationScope.Begin("app.deploy", "op-r2b", request: DeployOn("server-a", "op-r2b")))
+            Assert.Equal("pulled x on default", await onA.PullOnDefaultAsync("x"));
+    }
+
+    [Fact]
+    public async Task A_serverless_composed_operation_is_not_matched_by_server()
+    {
+        // An operation without a server parameter has no server to compare: the decision covers it as before.
+        var guarded = MutationScopeProxy<IServerProbe>.Wrap(new ServerProbe(), WithRegistry(defaultServer: "server-b"));
+        using (MutationScope.Begin("app.deploy", "op-r2c", request: DeployOn("server-a", "op-r2c")))
+            Assert.Equal("created", await guarded.CreateAsync());
+    }
+
     public interface IServerProbe
     {
         [MutatingOperation("image.pull")]
         Task<string> PullAsync(string image, string serverId);
+
+        [MutatingOperation("image.pull")]
+        Task<string> PullOnDefaultAsync(string image, string? serverId = null);
+
+        [MutatingOperation("container.create")]
+        Task<string> CreateAsync();
     }
 
     private sealed class ServerProbe : IServerProbe
     {
-        public Task<string> PullAsync(string image, string serverId) => Task.FromResult($"pulled {image} on {serverId}");
+        public int Calls;
+        public Task<string> PullAsync(string image, string serverId)
+        {
+            Interlocked.Increment(ref Calls);
+            return Task.FromResult($"pulled {image} on {serverId}");
+        }
+
+        public Task<string> PullOnDefaultAsync(string image, string? serverId = null)
+        {
+            Interlocked.Increment(ref Calls);
+            return Task.FromResult($"pulled {image} on {serverId ?? "default"}");
+        }
+
+        public Task<string> CreateAsync() => Task.FromResult("created");
     }
 }
 

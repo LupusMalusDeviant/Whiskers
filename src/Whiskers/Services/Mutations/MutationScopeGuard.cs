@@ -42,6 +42,14 @@ public interface IMutationScopeMonitor
     void ReportOutsideScope(string capabilityId, MethodInfo method);
 
     IReadOnlyList<MutationBypassReport> Snapshot();
+
+    /// <summary>
+    /// The canonical id of the server a call acts on (R1-48, review round 2): the named server, or — when the call's
+    /// <c>serverId</c> argument was omitted — the server the transport falls back to (the configured default). Null
+    /// when it cannot be resolved; a composed call then matches no decision taken for a server. Without a server
+    /// registry this resolves nothing for an omitted argument.
+    /// </summary>
+    string? ResolveServer(string? serverId) => string.IsNullOrEmpty(serverId) ? null : serverId;
 }
 
 public sealed class MutationScopeMonitor : IMutationScopeMonitor
@@ -49,18 +57,41 @@ public sealed class MutationScopeMonitor : IMutationScopeMonitor
     private readonly ConcurrentDictionary<string, MutationBypassReport> _reports = new(StringComparer.Ordinal);
     private readonly ILogger<MutationScopeMonitor> _logger;
     private readonly TimeProvider _time;
+    private readonly IServiceProvider? _services;
 
-    /// <summary>The production monitor: it enforces. There is no setting that turns it off.</summary>
-    public MutationScopeMonitor(ILogger<MutationScopeMonitor> logger, TimeProvider? time = null)
-        : this(logger, time, enforce: true)
+    /// <summary>The production monitor: it enforces. There is no setting that turns it off. <paramref name="services"/>
+    /// gives it the server registry, resolved on use (the registry is itself guarded, so it cannot be a dependency).</summary>
+    public MutationScopeMonitor(ILogger<MutationScopeMonitor> logger, TimeProvider? time = null, IServiceProvider? services = null)
+        : this(logger, time, enforce: true, services)
     {
     }
 
-    private MutationScopeMonitor(ILogger<MutationScopeMonitor> logger, TimeProvider? time, bool enforce)
+    private MutationScopeMonitor(ILogger<MutationScopeMonitor> logger, TimeProvider? time, bool enforce,
+        IServiceProvider? services = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = time ?? TimeProvider.System;
         Enforce = enforce;
+        _services = services;
+    }
+
+    /// <inheritdoc />
+    public string? ResolveServer(string? serverId)
+    {
+        var omitted = string.IsNullOrEmpty(serverId);
+        try
+        {
+            var servers = _services?.GetService(typeof(Whiskers.Services.ServerConfig.IServerConfigService))
+                as Whiskers.Services.ServerConfig.IServerConfigService;
+            if (servers is null) return omitted ? null : serverId;
+            var server = omitted ? servers.GetDefaultServer() : servers.GetServer(serverId!);
+            return server?.Id ?? (omitted ? null : serverId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The server of a guarded call could not be resolved; it matches no decided server");
+            return null;
+        }
     }
 
     /// <summary>A monitor that only counts (the behaviour before R1-48). For tests of the counting itself.</summary>
@@ -139,7 +170,13 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
         // A generic method arrives constructed (SaveSectionAsync<HealthSettings>); its attribute sits on the definition.
         var marked = targetMethod.IsGenericMethod ? targetMethod.GetGenericMethodDefinition() : targetMethod;
         if (_capabilities.TryGetValue(marked, out var capability))
-            Check(capability, targetMethod, MutationScope.Authorizes(capability, ServerIdOf(marked, args)));
+        {
+            // An omitted server argument is not "no server": the transport falls back to its default server, which is
+            // resolved and compared with the decision like a named one (R1-48, review round 2).
+            var actsOnServer = TryGetServerArgument(marked, args, out var named);
+            var server = actsOnServer ? _monitor.ResolveServer(named) : null;
+            Check(capability, targetMethod, MutationScope.Authorizes(capability, actsOnServer, server, _monitor.ResolveServer));
+        }
         else if (_primitives.Contains(marked))
             // A raw host command runs only inside a decision whose execution is one (MutationCompositions.RawHostCommands),
             // never inside just any open scope (R1-48, review M1).
@@ -157,16 +194,21 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
         }
     }
 
-    /// <summary>The server a call names: its <c>string serverId</c> argument, when it has one (R1-48, review m1).</summary>
-    private static string? ServerIdOf(MethodInfo method, object?[]? args)
+    /// <summary>Whether the operation acts on a server — it has a <c>string serverId</c> parameter — and the value the
+    /// call passed (<c>null</c> or empty when omitted, i.e. the default server). An operation without such a parameter
+    /// is serverless (R1-48, review m1 and round 2).</summary>
+    private static bool TryGetServerArgument(MethodInfo method, object?[]? args, out string? serverId)
     {
-        if (args is null) return null;
+        serverId = null;
         var parameters = method.GetParameters();
-        for (var i = 0; i < parameters.Length && i < args.Length; i++)
+        for (var i = 0; i < parameters.Length; i++)
             if (parameters[i].ParameterType == typeof(string)
                 && string.Equals(parameters[i].Name, "serverId", StringComparison.Ordinal))
-                return args[i] as string;
-        return null;
+            {
+                serverId = args is not null && i < args.Length ? args[i] as string : null;
+                return true;
+            }
+        return false;
     }
 
     /// <summary>Refuses (enforced) or counts (report mode, tests) a call the open scope did not decide.</summary>

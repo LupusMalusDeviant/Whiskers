@@ -12,15 +12,22 @@ public class RoleService : IRoleService, IInitializable
     private readonly ILogger<RoleService> _logger;
     private UserRoleData _data = new();
     private readonly ReaderWriterLockSlim _lock = new();
-    // R1-22: one writer at a time from capture to diff, so a save's recorded change is the change it made.
-    private readonly SemaphoreSlim _save = new(1, 1);
+    // R1-22: one writer at a time from capture to diff, so a save's recorded change is the change it made. R1-48 review
+    // round 2: the boundary is shared with the whitelist and the setup wizard (AccessControlWriteGate).
+    private readonly AccessControlWriteGate _gate;
 
-    public RoleService(IConfiguration configuration, ILogger<RoleService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
+    public RoleService(IConfiguration configuration, ILogger<RoleService> logger, string? storePath = null, DataPathOptions? dataPaths = null,
+        AccessControlWriteGate? writeGate = null)
     {
         _store = new JsonFileStore<UserRoleData>(storePath ?? (dataPaths ?? DataPathOptions.Default).RolesJson);
         _configuration = configuration;
         _logger = logger;
+        _gate = writeGate ?? new AccessControlWriteGate();
     }
+
+    /// <summary>Tests only: replaces the persistence of <see cref="SetFirstAdminAsync"/> (a save that waits or fails on
+    /// cue). Null in the app.</summary>
+    internal Func<UserRoleData, Task>? PersistFirstAdminForTests { get; set; }
 
     public int Order => 20;
 
@@ -115,8 +122,7 @@ public class RoleService : IRoleService, IInitializable
     {
         // Clone before persisting/caching so the caller's mutable object can't alias the enforcement state.
         var copy = Snapshot(data);
-        await _save.WaitAsync();
-        try
+        using (await _gate.EnterAsync())
         {
             var before = GetRoleData();
             EnsureAdminRemains(before, copy);
@@ -124,14 +130,12 @@ public class RoleService : IRoleService, IInitializable
             SetData(copy);
             Whiskers.Services.Mutations.ConfigChange.Record("roles", before, copy);   // R1-22
         }
-        finally { _save.Release(); }
         _logger.LogInformation("Roles updated: {Count} entries, default={Default}", copy.Roles.Count, copy.DefaultRole);
     }
 
     public async Task SetRoleAsync(string email, AppRole role)
     {
-        await _save.WaitAsync();
-        try
+        using (await _gate.EnterAsync())
         {
             UserRoleData snapshot, before;
             _lock.EnterWriteLock();
@@ -154,49 +158,41 @@ public class RoleService : IRoleService, IInitializable
             await _store.SaveAsync(snapshot);
             Whiskers.Services.Mutations.ConfigChange.Record("roles", before, snapshot);   // R1-22
         }
-        finally { _save.Release(); }
     }
 
-    public async Task SetFirstAdminAsync(string email)
+    public async Task SetFirstAdminAsync(string email, AccessControlWriteGate.Lease lease)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
-        await _save.WaitAsync();
+        // R1-48 review round 2: the caller holds the boundary every role and whitelist writer takes, so nothing can
+        // establish an Admin between this check and the write. Of two wizard calls, at most one creates an Admin.
+        _gate.Demand(lease);
+        UserRoleData candidate;
+        _lock.EnterReadLock();
         try
         {
-            UserRoleData snapshot, before;
-            _lock.EnterWriteLock();
-            try
-            {
-                // R1-48: checked and written under the same lock — of two concurrent calls, at most one creates an Admin.
-                if (_data.Roles.Any(r => r.Role == AppRole.Admin))
-                    throw new InvalidOperationException("An administrator already exists; the first-admin write is closed.");
-                before = Snapshot(_data);
-                var next = Snapshot(_data);
-                var existing = next.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-                if (existing != null)
-                    existing.Role = AppRole.Admin;
-                else
-                    next.Roles.Add(new UserRoleEntry { Email = email, Role = AppRole.Admin });
-                _data = next;
-                snapshot = Snapshot(_data);
-            }
-            finally { _lock.ExitWriteLock(); }
-
-            try { await _store.SaveAsync(snapshot); }
-            catch
-            {
-                SetData(before);   // not persisted → not in force: the wizard stays open
-                throw;
-            }
+            if (_data.Roles.Any(r => r.Role == AppRole.Admin))
+                throw new InvalidOperationException("An administrator already exists; the first-admin write is closed.");
+            candidate = Snapshot(_data);
         }
-        finally { _save.Release(); }
+        finally { _lock.ExitReadLock(); }
+
+        var existing = candidate.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+            existing.Role = AppRole.Admin;
+        else
+            candidate.Roles.Add(new UserRoleEntry { Email = email, Role = AppRole.Admin });
+
+        // Persist first, publish after: no reader (GetRole, session validation, the gateway's principal) sees the Admin
+        // before it is on disk. A failed save throws here and leaves the published roles untouched — the wizard stays open.
+        await (PersistFirstAdminForTests?.Invoke(Snapshot(candidate)) ?? _store.SaveAsync(Snapshot(candidate)));
+        _gate.Demand(lease);   // still held: nobody else may have written while the save ran
+        SetData(candidate);
         _logger.LogInformation("First administrator set by the setup wizard");
     }
 
     public async Task RemoveRoleAsync(string email)
     {
-        await _save.WaitAsync();
-        try
+        using (await _gate.EnterAsync())
         {
             UserRoleData snapshot, before;
             _lock.EnterWriteLock();
@@ -214,7 +210,6 @@ public class RoleService : IRoleService, IInitializable
             await _store.SaveAsync(snapshot);
             Whiskers.Services.Mutations.ConfigChange.Record("roles", before, snapshot);   // R1-22
         }
-        finally { _save.Release(); }
     }
 
     /// <summary>Once an instance has an explicit Admin it must keep one. Without an explicit Admin the first-run

@@ -78,7 +78,15 @@ public class MutationEnforcementBootTests
             var whitelist = factory.Services.GetRequiredService<Whiskers.Services.Auth.IWhitelistService>();
             await Assert.ThrowsAsync<MutationScopeViolationException>(() => whitelist.SaveWhitelistAsync(new()));
             await Assert.ThrowsAsync<MutationScopeViolationException>(() => roles.SetRoleAsync("x@example.com", Whiskers.Models.AppRole.Admin));
-            await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("x@example.com"));
+            // The app's services share one write boundary: a lease of the registered gate is accepted, and the write is
+            // refused because an Admin exists (not because the lease holds another gate).
+            using (var lease = await factory.Services.GetRequiredService<Whiskers.Services.Auth.AccessControlWriteGate>().EnterAsync())
+            {
+                var closed = await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("x@example.com", lease));
+                Assert.Contains("administrator already exists", closed.Message);
+                closed = await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetFirstAdminAsync("x@example.com", lease));
+                Assert.Contains("administrator already exists", closed.Message);
+            }
         }
         finally
         {

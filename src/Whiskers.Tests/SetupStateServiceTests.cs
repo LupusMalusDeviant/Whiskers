@@ -21,11 +21,14 @@ public sealed class SetupStateServiceTests : IDisposable
     private static IConfiguration Empty() => new ConfigurationBuilder().Build();
     private DataPathOptions Paths() => new(_dir);
 
-    // Real RoleService + WhitelistService on temp stores (no admin-bootstrap config).
+    // The write boundary the app registers once and shares (R1-48 review round 2).
+    private readonly AccessControlWriteGate _gate = new();
+
+    // Real RoleService + WhitelistService on temp stores (no admin-bootstrap config), sharing the write boundary.
     private async Task<(RoleService roles, WhitelistService whitelist)> AuthAsync()
     {
-        var roles = new RoleService(Empty(), NullLogger<RoleService>.Instance, dataPaths: Paths());
-        var whitelist = new WhitelistService(Empty(), roles, NullLogger<WhitelistService>.Instance, Paths());
+        var roles = new RoleService(Empty(), NullLogger<RoleService>.Instance, dataPaths: Paths(), writeGate: _gate);
+        var whitelist = new WhitelistService(Empty(), roles, NullLogger<WhitelistService>.Instance, Paths(), _gate);
         await roles.InitializeAsync();
         await whitelist.InitializeAsync();
         return (roles, whitelist);
@@ -52,9 +55,9 @@ public sealed class SetupStateServiceTests : IDisposable
 
     private readonly McpCallOutcomeTests.RecordingAuditLog _audit = new();
 
-    private SetupStateService Service(RoleService roles, WhitelistService whitelist, IServiceScopeFactory scopes,
+    private SetupStateService Service(IRoleService roles, IWhitelistService whitelist, IServiceScopeFactory scopes,
         IConfiguration? config = null, Whiskers.Services.AuditLog.IAuditLogService? audit = null)
-        => new(roles, whitelist, scopes, NullLogger<SetupStateService>.Instance, Paths(), config, audit ?? _audit);
+        => new(roles, whitelist, scopes, NullLogger<SetupStateService>.Instance, Paths(), config, audit ?? _audit, _gate);
 
     // ---------------- first admin outside the gateway (R1-48, option a) ----------------
 
@@ -62,13 +65,19 @@ public sealed class SetupStateServiceTests : IDisposable
     public async Task The_first_admin_writes_refuse_once_an_admin_exists()
     {
         var (roles, whitelist) = await AuthAsync();
-        await whitelist.AddFirstAdminAsync("boss@x");
-        await roles.SetFirstAdminAsync("boss@x");
+        using (var lease = await _gate.EnterAsync())
+        {
+            await whitelist.AddFirstAdminAsync("boss@x", lease);
+            await roles.SetFirstAdminAsync("boss@x", lease);
+        }
         Assert.Equal(AppRole.Admin, roles.GetRole("boss@x"));
 
         // From now on both are closed: nothing is written, whoever calls.
-        await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetFirstAdminAsync("intruder@x"));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("intruder@x"));
+        using (var lease = await _gate.EnterAsync())
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetFirstAdminAsync("intruder@x", lease));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("intruder@x", lease));
+        }
         Assert.Equal(AppRole.Viewer, roles.GetRole("intruder@x"));
         Assert.DoesNotContain("intruder@x", whitelist.GetWhitelist().Emails);
     }
@@ -79,10 +88,124 @@ public sealed class SetupStateServiceTests : IDisposable
         // C5 bootstrap or a role change made the admin: the wizard's writes are closed just the same.
         var (roles, whitelist) = await AuthAsync();
         await roles.SetRoleAsync("seed@x", AppRole.Admin);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetFirstAdminAsync("other@x"));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("other@x"));
+        using (var lease = await _gate.EnterAsync())
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetFirstAdminAsync("other@x", lease));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("other@x", lease));
+        }
         Assert.Equal(AppRole.Viewer, roles.GetRole("other@x"));
         Assert.Empty(whitelist.GetWhitelist().Emails);
+    }
+
+    [Fact]
+    public async Task The_first_admin_writes_refuse_without_the_shared_boundary()
+    {
+        // Review round 2: a lease of another gate, or one already released, is no proof — nothing is written.
+        var (roles, whitelist) = await AuthAsync();
+        using (var foreign = await new AccessControlWriteGate().EnterAsync())
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetFirstAdminAsync("boss@x", foreign));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("boss@x", foreign));
+        }
+        var released = await _gate.EnterAsync();
+        released.Dispose();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => roles.SetFirstAdminAsync("boss@x", released));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => whitelist.AddFirstAdminAsync("boss@x", released));
+        Assert.False(roles.HasAnyRoles());
+        Assert.Empty(whitelist.GetWhitelist().Emails);
+    }
+
+    /// <summary>Lets the wizard's whitelist write through, then holds the wizard between its two writes until released.</summary>
+    private sealed class PausingWhitelist(IWhitelistService inner) : IWhitelistService
+    {
+        public readonly TaskCompletionSource Between = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task InitializeAsync(CancellationToken ct = default) => inner.InitializeAsync(ct);
+        public bool IsEmailAllowed(string? email) => inner.IsEmailAllowed(email);
+        public WhitelistData GetWhitelist() => inner.GetWhitelist();
+        public Task SaveWhitelistAsync(WhitelistData data) => inner.SaveWhitelistAsync(data);
+        public async Task AddFirstAdminAsync(string email, AccessControlWriteGate.Lease lease)
+        {
+            await inner.AddFirstAdminAsync(email, lease);
+            Between.SetResult();
+            await Resume.Task;
+        }
+    }
+
+    private static async Task AssertStillWaiting(Task writer)
+    {
+        // The ordinary writer is parked on the shared boundary; it cannot finish while the wizard holds it.
+        Assert.NotSame(writer, await Task.WhenAny(writer, Task.Delay(TimeSpan.FromMilliseconds(500))));
+    }
+
+    [Fact]
+    public async Task An_ordinary_role_writer_cannot_establish_an_admin_between_the_wizard_writes()
+    {
+        var (roles, whitelist) = await AuthAsync();
+        var pausing = new PausingWhitelist(whitelist);
+        using var idp = IdentityProvider();
+        var svc = Service(roles, pausing, idp.GetRequiredService<IServiceScopeFactory>());
+        await svc.InitializeAsync();
+
+        var wizard = Task.Run(() => svc.CompleteSetupAsync(new SetupAdminRequest { IsLocal = false, Email = "boss@x", SetupToken = Token() }));
+        await pausing.Between.Task;                                    // the whitelist entry is written, the role is not
+        var rival = Task.Run(() => roles.SetRoleAsync("rival@x", AppRole.Admin));
+        await AssertStillWaiting(rival);
+        Assert.False(roles.HasAnyRoles());
+
+        pausing.Resume.SetResult();
+        Assert.Equal(SetupCompletionStatus.Success, (await wizard).Status);
+        Assert.Equal(AppRole.Admin, roles.GetRole("boss@x"));
+        await rival;                                                   // runs only after the wizard released the boundary
+    }
+
+    [Fact]
+    public async Task An_ordinary_whitelist_writer_cannot_run_between_the_wizard_writes()
+    {
+        var (roles, whitelist) = await AuthAsync();
+        var pausing = new PausingWhitelist(whitelist);
+        using var idp = IdentityProvider();
+        var svc = Service(roles, pausing, idp.GetRequiredService<IServiceScopeFactory>());
+        await svc.InitializeAsync();
+
+        var wizard = Task.Run(() => svc.CompleteSetupAsync(new SetupAdminRequest { IsLocal = false, Email = "boss@x", SetupToken = Token() }));
+        await pausing.Between.Task;
+        var clearing = Task.Run(() => whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = false, Emails = [] }));
+        await AssertStillWaiting(clearing);
+        Assert.Contains("boss@x", whitelist.GetWhitelist().Emails);
+
+        pausing.Resume.SetResult();
+        Assert.Equal(SetupCompletionStatus.Success, (await wizard).Status);
+        await clearing;                                                // a later, separate write — after the Admin exists
+        Assert.Equal(AppRole.Admin, roles.GetRole("boss@x"));
+    }
+
+    [Fact]
+    public async Task An_unpersisted_first_admin_is_never_visible_to_readers()
+    {
+        // Review round 2: the Admin is published only after its save; while the save runs, and after it failed, every
+        // reader — GetRole (session validation, the current user, the gateway's principal), HasRole, the role data —
+        // sees no Admin.
+        var (roles, whitelist) = await AuthAsync();
+        var saving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fail = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        roles.PersistFirstAdminForTests = async _ => { saving.SetResult(); await fail.Task; throw new IOException("disk full"); };
+        using var idp = IdentityProvider();
+        var svc = Service(roles, whitelist, idp.GetRequiredService<IServiceScopeFactory>());
+        await svc.InitializeAsync();
+
+        var wizard = Task.Run(() => svc.CompleteSetupAsync(new SetupAdminRequest { IsLocal = false, Email = "boss@x", SetupToken = Token() }));
+        await saving.Task;                                             // inside the save
+        Assert.Equal(AppRole.Viewer, roles.GetRole("boss@x"));
+        Assert.False(roles.HasRole("boss@x", AppRole.Admin));
+        Assert.DoesNotContain(roles.GetRoleData().Roles, r => r.Role == AppRole.Admin);
+        Assert.False(svc.IsSetupComplete);
+
+        fail.SetResult();
+        await Assert.ThrowsAsync<IOException>(() => wizard);
+        Assert.Equal(AppRole.Viewer, roles.GetRole("boss@x"));
+        Assert.False(roles.HasAnyRoles());
+        Assert.False(svc.IsSetupComplete);
     }
 
     [Fact]
@@ -91,7 +214,8 @@ public sealed class SetupStateServiceTests : IDisposable
         var (roles, _) = await AuthAsync();
         var attempts = Enumerable.Range(0, 16).Select(i => Task.Run(async () =>
         {
-            try { await roles.SetFirstAdminAsync($"user{i}@x"); return true; }
+            using var lease = await _gate.EnterAsync();
+            try { await roles.SetFirstAdminAsync($"user{i}@x", lease); return true; }
             catch (InvalidOperationException) { return false; }
         })).ToArray();
         var won = await Task.WhenAll(attempts);

@@ -25,15 +25,17 @@ All notable changes to Whiskers are documented here. The format follows
   guarded now), the AutoPatch runner (`container.update`), cloud power/snapshot with the Hetzner extensions and the
   Hostinger client, DNS provider writes and container notification preferences are marked; every other write-named
   interface method is listed with the reason it is no gateway operation. A nested operation must act on the server its
-  decision was taken for (an `app.deploy` on server A cannot pull on server B). **Detached work:** a closed scope
+  decision was taken for (an `app.deploy` on server A cannot pull on server B); a call that omits its server acts on
+  the transport's default server and is matched against that (a serverless operation is not matched). **Detached work:** a closed scope
   authorizes nothing — work that escaped it (`Task.Run`, a timer, a fire-and-forget continuation) is refused once the
   decision ended, and a decision started there does not nest under the dead one; background work started from code
   that can run inside a decision suppresses the flow (test-enforced). The automatic end of a check pause is no longer
   a `checks.resume`: it removes only the expired pause it read (a newer pause stays). **First-run wizard:** it creates
   the first administrator through two narrow methods (`IWhitelistService.AddFirstAdminAsync`,
-  `IRoleService.SetFirstAdminAsync`) that refuse as soon as any Admin exists — checked and written under the store's
-  lock, so two submits at once create at most one admin — whose only caller is the wizard after the setup token was
-  verified; the step is recorded in the audit log first (`setup.first_admin`) and nothing is written without that
+  `IRoleService.SetFirstAdminAsync`) that refuse as soon as any Admin exists — checked and written while the wizard holds
+  the one write boundary every role and whitelist writer shares (`AccessControlWriteGate`), across both writes, so two
+  submits at once create at most one admin and no other writer runs in between; the Admin is published only after it
+  was saved — whose only caller is the wizard after the setup token was verified; the step is recorded in the audit log first (`setup.first_admin`) and nothing is written without that
   record. The whitelist entry is now written before the role (a crash in between leaves setup open). From then on the
   whitelist and roles change only through the gateway. **Local accounts (R1-49):** creating and deleting an account compose its role write (`account.create` / `account.delete` → `config.roles`); the host recovery CLI and the recovery-code page stay outside the gateway on their own authority (audited, pinned to their callers). **CVE scanners:** `apt-get update` and Trivy's image, throw-away
   container and cache volume are a designed exemption of the monitoring cycle (pinned). **Architecture test:**
@@ -47,7 +49,7 @@ All notable changes to Whiskers are documented here. The format follows
   audit record cannot be written (nothing is changed; try again once the database answers). (3) For code built
   against Whiskers' interfaces: `IBackupService` has three start-up methods (`CreatePreUpgradeBackupAsync`,
   `DeletePreUpgradeBackupAsync`, `BeginHostRestoreAsync`) used only by the upgrade guard and `--restore-backup`;
-  `IRoleService.SetFirstAdminAsync` and `IWhitelistService.AddFirstAdminAsync` are new; `IHostingerService.DeleteSnapshotAsync`
+  `IRoleService.SetFirstAdminAsync` and `IWhitelistService.AddFirstAdminAsync` are new and take an`n  `AccessControlWriteGate.Lease` (a new singleton that `RoleService`, `WhitelistService` and `SetupStateService` must share);`n  `IMutationScopeMonitor.ResolveServer` is new (default: no registry); `IHostingerService.DeleteSnapshotAsync`
   (never called) is removed; `IServerConfigService.AdoptCloudKeyRefAsync` has no default body any more;
   `WorkloadProviderFactory` needs an `IMutationScopeMonitor`; `CloudControlService` takes the Hetzner extensions only
   from their own registration; `[MutationHandler]` needs a capability. (4) A custom service or test that writes through
