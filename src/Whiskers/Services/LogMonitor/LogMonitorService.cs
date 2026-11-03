@@ -341,6 +341,16 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
                     }
                 }
             }
+            // R1-41 (review round 4): the fetch timeout ran out in Whiskers' own budget queue — the request was never sent.
+            // Not the container's fault (no unreadable streak), and not a reason to give up its lines: the watermark stays,
+            // so the next cycle reads the same window (still capped by MaxLookback). Counted on its own.
+            catch (Whiskers.Services.Docker.Budget.BudgetSaturatedException ex)
+            {
+                failed++;
+                _selfMetrics.Count("log_fetch_saturation", container.ServerId);
+                _logger.LogDebug(ex, "Log fetch for {Container} on {Server} ran out of time in Whiskers' own queue; the window is kept",
+                    container.Name, container.ServerName);
+            }
             catch (TimeoutException ex)
             {
                 failed++;

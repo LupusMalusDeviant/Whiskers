@@ -41,7 +41,10 @@ All notable changes to Whiskers are documented here. The format follows
   failed; an important one is kept for redelivery. An update whose container was already replaced is finished and
   recorded instead of being left unobserved. The fleet listing's 8-second limit per server now also covers the wait
   for a connection and for a free slot (before, a server whose slots were all taken could hold the listing
-  indefinitely); running out counts as that server timing out, never against the server's circuit breaker. A CVE or
+  indefinitely). Running out while waiting for a slot means Whiskers itself was busy and the server was never asked:
+  it is shown as "not asked", never counted against the server's circuit breaker and never toward a
+  `server_unreachable` alert. A log read that runs out of time the same way keeps its window, so the lines are read
+  on the next cycle instead of being skipped (counted as `log_fetch_saturation` in the self-metrics). A CVE or
   metrics interval reloaded out of range (for example `2147483647` hours) no longer breaks `/metrics`: the loop,
   `/metrics` and the MCP CVE summary share the interval actually in use, so the staleness series also stays consistent
   with it.

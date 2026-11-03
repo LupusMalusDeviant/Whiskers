@@ -165,9 +165,20 @@ internal sealed class ContainerOperations
                     _selfMetrics.RecordApiCall(server.Id, System.Diagnostics.Stopwatch.GetElapsedTime(started));
                     return listing;
                 }
-                // The server's deadline ran out — in the request, or still waiting for its client or a budget slot (then
-                // the budget reports saturation, which the circuit does not count). Either way it is this server's
-                // timeout, never the caller's cancellation.
+                // The deadline ran out in Whiskers' own budget queue: the server was never asked. Its containers are unknown
+                // this cycle, but it must not read as an unreachable host (review round 4) — the failure is marked NotAsked
+                // so the reachability tracker neither counts nor clears an outage for it. The circuit does not count it
+                // either, the budget's SaturationFailures does.
+                catch (Budget.BudgetSaturatedException ex) when (!ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning("Listing containers for server {ServerName} waited {Waited:F1}s in Whiskers' own queue and was not sent — skipping (degraded view).",
+                        server.Name, ex.Waited.TotalSeconds);
+                    return new ServerListing(server, new List<ContainerInfo>(),
+                        new FleetServerFailure(server.Id, server.Name,
+                            $"Not asked: waited in Whiskers' own queue for {perServerTimeout.TotalSeconds:0}s", NotAsked: true));
+                }
+                // The server's deadline ran out — in the request, or still waiting for its client. Either way it is this
+                // server's timeout, never the caller's cancellation.
                 catch (Exception) when (timeout.IsCancellationRequested && !ct.IsCancellationRequested)
                 {
                     _logger.LogWarning("Listing containers for server {ServerName} aborted after {Timeout}s — skipping (degraded view).",

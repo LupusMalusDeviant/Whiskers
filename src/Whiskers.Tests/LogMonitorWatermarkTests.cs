@@ -45,13 +45,46 @@ public sealed class LogMonitorWatermarkTests : IDisposable
         try { File.Delete(_dbPath); } catch { /* best-effort temp cleanup */ }
     }
 
-    private LogMonitorService Monitor(FakeDocker docker, FakeNotifications notifications) =>
+    [Fact]
+    public async Task A_fetch_that_ran_out_in_the_budget_queue_keeps_its_window()
+    {
+        // R1-41, review round 4: the fetch timeout also bounds the wait for a budget slot. Running out there means the
+        // request was never sent — the lines of that window are still unread and must not be skipped, nor may the
+        // container count as unreadable.
+        var docker = new FakeDocker(
+            new ContainerInfo { Id = "c-web", Name = "web", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+        var metrics = new Whiskers.Services.Observability.SelfMetrics.SelfMetrics();
+        var notifications = new FakeNotifications();
+        var monitor = Monitor(docker, notifications, metrics);
+
+        await monitor.RunScanCycleAsync(CancellationToken.None);          // healthy: sets the watermark
+
+        docker.FetchException = () => new Whiskers.Services.Docker.Budget.BudgetSaturatedException(
+            "local", TimeSpan.FromSeconds(15), TimeSpan.Zero, new OperationCanceledException());
+        for (var i = 0; i < 3; i++)
+            await monitor.RunScanCycleAsync(CancellationToken.None);
+        docker.FetchException = null;
+        await monitor.RunScanCycleAsync(CancellationToken.None);
+
+        // Call 0 is the healthy read; calls 1-3 ran out in the queue; call 4 is the read after. Every one after the
+        // healthy read starts at the same watermark — the saturated cycles did not move the window on.
+        var calls = docker.CallsInOrder;
+        Assert.Equal(5, calls.Count);
+        Assert.NotNull(calls[1].Since);
+        Assert.All(calls.Skip(1), c => Assert.Equal(calls[1].Since, c.Since));
+        Assert.Equal(3, metrics.Counters()["log_fetch_saturation"]["local"]);
+        Assert.Empty(monitor.SuspendedContainers());
+        Assert.DoesNotContain(notifications.Events, e => e.EventType == "log_scan_suspended");
+    }
+
+    private LogMonitorService Monitor(FakeDocker docker, FakeNotifications notifications,
+        Whiskers.Services.Observability.SelfMetrics.SelfMetrics? metrics = null) =>
         new(_sp.GetRequiredService<IServiceScopeFactory>(),
             docker,
             new FakeServerConfig(new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }),
             notifications,
             NullLogger<LogMonitorService>.Instance,
-            TestBudget.Create(), new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(),
+            TestBudget.Create(), metrics ?? new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(),
             new NoExclusions(), new NoOutcomes(),
             FetchTimeout);
 

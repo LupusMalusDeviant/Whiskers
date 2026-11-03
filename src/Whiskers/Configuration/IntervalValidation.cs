@@ -116,8 +116,10 @@ public static class IntervalValidation
     }
 
     /// <summary>Runs every registered check in <see cref="IHostedLifecycleService.StartingAsync"/>, before the loops start:
-    /// zero or negative refuses the start, a positive value out of range is a warning (it is clamped where it is used).</summary>
-    internal sealed class IntervalStartupCheck(IEnumerable<IIntervalCheck> checks, ILogger<IntervalStartupCheck>? logger = null)
+    /// zero or negative refuses the start. A positive value out of range starts: it is clamped where it is used, and the
+    /// <see cref="IntervalGuard"/> behind <see cref="EffectiveInterval{T}"/> warns about it once on its first read — so this
+    /// check does not warn as well (review round 4: one warning per bad value, not two).</summary>
+    internal sealed class IntervalStartupCheck(IEnumerable<IIntervalCheck> checks)
         : IHostedLifecycleService
     {
         public Task StartingAsync(CancellationToken cancellationToken)
@@ -129,9 +131,6 @@ public static class IntervalValidation
                     throw new OptionsValidationException(check.Key, check.OptionsType,
                     [$"{check.Key} must be greater than zero (it is {value}); the loop would spin or stop the host. " +
                      $"Set it between {check.Min} and {check.Max} — in the data directory's app-settings.json if it was saved there."]);
-                if (value < check.Min || value > check.Max)
-                    logger?.LogWarning("{Key} is {Value}, outside {Min}–{Max}; {Used} is used until it is changed",
-                        check.Key, value, check.Min, check.Max, Math.Clamp(value, check.Min, check.Max));
             }
             return Task.CompletedTask;
         }

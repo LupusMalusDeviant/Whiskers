@@ -58,9 +58,12 @@ public class BackgroundServiceFailureTests
     }
 
     [Fact]
-    public async Task A_cancelled_caller_stops_waiting_for_a_fleet_listing()
+    public async Task The_interface_default_stops_waiting_for_a_fleet_listing_when_the_caller_cancels()
     {
-        // R1-38 carry-over: the AutoPatch planning and the advisor chat pass their token to the Docker reads.
+        // R1-38 carry-over: the AutoPatch planning and the advisor chat pass their token to the Docker reads. This pins the
+        // DEFAULT IDockerService.ListAllContainersAsync(all, ct) (a WaitAsync over the token-less call) that a fake or a
+        // future implementation inherits; the real DockerService passes the token on — see
+        // A_caller_cancelling_a_fleet_listing_queued_for_a_slot_stays_a_cancellation.
         Whiskers.Services.Docker.IDockerService docker = new FakeDocker { ListingGate = new() };
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
@@ -187,15 +190,46 @@ public class BackgroundServiceFailureTests
 
         var listing = await ops.ListAllContainersDetailedAsync(true, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
 
-        // The server's timeout: reported as a silent server, not held against it, counted as the queue's doing.
+        // The server's timeout ran out in Whiskers' own queue: the server was never asked (review round 4), not held
+        // against it, counted as the queue's doing.
         var failure = Assert.Single(listing.FailedServers);
         Assert.Equal("badwolf", failure.ServerId);
-        Assert.StartsWith("Timed out", failure.Error);
+        Assert.True(failure.NotAsked);
+        Assert.StartsWith("Not asked", failure.Error);
         Assert.Empty(listing.RespondedServerIds);
         Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
         Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
         release.SetResult();
         await Task.WhenAll(busy);
+    }
+
+    [Fact]
+    public async Task A_saturated_fleet_listing_does_not_report_the_server_unreachable()
+    {
+        // Review round 4: own-queue saturation is not evidence about the server. Before, three saturated cycles in a row
+        // announced server_unreachable for a host that was never asked.
+        var (docker, _, _) = Connection();
+        var release = new TaskCompletionSource();
+        var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
+            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+        var ops = Operations(docker, TimeSpan.FromMilliseconds(100));
+        var tracker = new Whiskers.Services.HealthMonitor.ServerReachabilityTracker(threshold: 2, coldStartThreshold: 2);
+
+        var events = new List<NotificationEvent>();
+        for (var i = 0; i < 4; i++)
+        {
+            var listing = await ops.ListAllContainersDetailedAsync(true, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(Assert.Single(listing.FailedServers).NotAsked);
+            events.AddRange(tracker.Evaluate(listing));
+        }
+        Assert.Empty(events);
+        release.SetResult();
+        await Task.WhenAll(busy);
+
+        // Control: the same server failing for real does trip the tracker.
+        var real = new FleetContainerListing { FailedServers = [new FleetServerFailure("badwolf", "Badwolf", "Timed out after 8s")] };
+        Assert.Empty(tracker.Evaluate(real));
+        Assert.Equal("server_unreachable", Assert.Single(tracker.Evaluate(real)).EventType);
     }
 
     [Fact]
@@ -317,7 +351,7 @@ public class BackgroundServiceFailureTests
             if (declarations.Count == 0) { offenders.Add($"{loop.Name}: source not found"); continue; }
             var run = declarations.SelectMany(c => c.Members.OfType<MethodDeclarationSyntax>())
                 .SingleOrDefault(m => m.Identifier.ValueText == "RunAsync" && m.Modifiers.Any(SyntaxKind.OverrideKeyword));
-            if (Verdict(run) is { } verdict) offenders.Add($"{loop.Name}: {verdict}");
+            if (Verdict(run, OneShotServices.Contains(loop.Name)) is { } verdict) offenders.Add($"{loop.Name}: {verdict}");
         }
         Assert.True(offenders.Count == 0, "Loops that do not recover from a failed cycle the R1-41 way " +
             "(`catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))` inside the loop with a body that carries on, " +
@@ -337,10 +371,15 @@ public class BackgroundServiceFailureTests
         Assert.Null(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
         Assert.Null(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }\ncatch (Exception ex) { Log(ex); }")));
         Assert.Null(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { foreach (var x in Xs) { if (x) break; } continue; }")));
-        Assert.Null(VerdictOf("try { await Once(ct); } catch (OperationCanceledException) when (ct.IsCancellationRequested) { } catch (Exception ex) { Log(ex); }"));   // a one-shot service
+        Assert.Null(VerdictOf("try { await Once(ct); } catch (OperationCanceledException) when (ct.IsCancellationRequested) { } catch (Exception ex) { Log(ex); }",
+            oneShot: true));                                                                                // an allow-listed one-shot service
 
         // What it refuses.
         Assert.NotNull(Verdict(null));                                                                      // expression body
+        // Review round 4: a loop moved into a helper. Without a loop in RunAsync the ratchet cannot see one, so the catch
+        // around the helper call would end the service on its first failure — refused unless allow-listed as one-shot.
+        Assert.NotNull(VerdictOf("try { await LoopAsync(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }"));
+        Assert.NotNull(VerdictOf("try { await Once(ct); } catch (OperationCanceledException) when (ct.IsCancellationRequested) { } catch (Exception ex) { Log(ex); }"));
         Assert.NotNull(VerdictOf(InLoop("await Run(ct);")));                                                // no recovery
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (IsHostStopping(ex, ct)) { Log(ex); }")));   // reversed filter
         Assert.NotNull(VerdictOf(InLoop("// catch (Exception ex) when (!IsHostStopping(ex, ct)) { }\nawait Run(ct);")));               // a comment
@@ -392,8 +431,11 @@ public class BackgroundServiceFailureTests
         using var host = builder.Build();
 
         await host.StartAsync();
-        Assert.Equal(TimeSpan.FromSeconds(used), host.Services.GetRequiredService<EffectiveInterval<HealthMonitorSettings>>().Interval);
-        Assert.Contains(logs.Lines, l => l.Contains("HealthMonitor:CheckIntervalSeconds"));
+        var effective = host.Services.GetRequiredService<EffectiveInterval<HealthMonitorSettings>>();
+        Assert.Equal(TimeSpan.FromSeconds(used), effective.Interval);
+        Assert.Equal(TimeSpan.FromSeconds(used), effective.Interval);
+        // One warning for the value, not one from the start check and another from the guard (review round 4).
+        Assert.Single(logs.Lines, l => l.Contains("HealthMonitor:CheckIntervalSeconds"));
         await host.StopAsync();
     }
 
@@ -476,15 +518,23 @@ public class BackgroundServiceFailureTests
     }
 
     /// <summary>The verdict on a <c>RunAsync</c> body given as text (the mutation cases), with <c>ct</c> as its token.</summary>
-    internal static string? VerdictOf(string body)
+    internal static string? VerdictOf(string body, bool oneShot = false)
     {
         var root = CSharpSyntaxTree.ParseText(
             "class Loop : FleetBackgroundService { protected override async Task RunAsync(CancellationToken ct) {\n" + body + "\n} }").GetRoot();
-        return Verdict(root.DescendantNodes().OfType<MethodDeclarationSyntax>().Single());
+        return Verdict(root.DescendantNodes().OfType<MethodDeclarationSyntax>().Single(), oneShot);
     }
 
+    /// <summary>The services that run once at start and have no loop by design. Only these may have a <c>RunAsync</c>
+    /// without a loop: anywhere else a loop-less body means the loop sits in a helper the ratchet cannot see (review
+    /// round 4), and the catch around the helper call would end the service on its first failure.</summary>
+    private static readonly HashSet<string> OneShotServices = new(StringComparer.Ordinal)
+    {
+        "InterruptedWorkReconciler",
+    };
+
     /// <summary>Null when <c>RunAsync</c> recovers from a failed cycle and ends only on the host's stop; otherwise why not.</summary>
-    internal static string? Verdict(MethodDeclarationSyntax? run)
+    internal static string? Verdict(MethodDeclarationSyntax? run, bool oneShot = false)
     {
         if (run?.Body is null || run.ParameterList.Parameters.Count != 1)
             return "RunAsync is not a block body with one token parameter the ratchet can read";
@@ -501,6 +551,9 @@ public class BackgroundServiceFailureTests
             .Where(IsLoop)
             .Where(l => !l.Ancestors().TakeWhile(a => a != body).OfType<StatementSyntax>().Any(IsLoop))
             .ToList();
+        if (loops.Count == 0 && !oneShot)
+            return "RunAsync has no loop the ratchet can see; a loop in a helper is not checked — keep the loop in RunAsync " +
+                   "or, for a service that runs once by design, add it to OneShotServices";
         var candidates = loops.Count > 0
             ? loops.SelectMany(l => Outside<TryStatementSyntax>(LoopBody(l))
                 .Where(t => !t.Ancestors().TakeWhile(a => a != l).OfType<StatementSyntax>().Any(IsLoop)))

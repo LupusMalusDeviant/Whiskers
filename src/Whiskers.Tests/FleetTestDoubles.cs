@@ -205,6 +205,9 @@ internal sealed class FakeDocker : IDockerService
     /// </summary>
     public bool FetchHangs { get; set; }
 
+    /// <summary>When it returns an exception, every log fetch throws it (R1-41: a fetch that ran out in the budget queue).</summary>
+    public Func<Exception?>? FetchException { get; set; }
+
     private int _completedFetches;
     /// <summary>Fetches that ran to completion instead of being cancelled — the number that decides whether a
     /// "wedged" container really wedged.</summary>
@@ -225,6 +228,7 @@ internal sealed class FakeDocker : IDockerService
     public async Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null, CancellationToken ct = default)
     {
         Calls.Enqueue(new LogCall(containerId, serverId, since));
+        if (FetchException?.Invoke() is { } fetchFailure) throw fetchFailure;
         if (FailingServerIds.Contains(serverId ?? "")) throw new InvalidOperationException("host down");
 
         var key = $"{serverId}/{containerId}";
