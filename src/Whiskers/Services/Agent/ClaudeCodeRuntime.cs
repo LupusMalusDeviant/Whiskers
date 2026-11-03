@@ -128,6 +128,7 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
         // Never let the CLI touch the local filesystem/shell — only our guardrailed MCP tools.
         psi.ArgumentList.Add("--disallowedTools");
         psi.ArgumentList.Add("Edit,Write,Bash,NotebookEdit");
+        Whiskers.Utils.SecretEnvironment.Scrub(psi);   // R1-43: no VPN key in a child's environment
 
         try { return Process.Start(psi); }
         catch (Exception ex) { _logger?.LogError(ex, "Claude-Code-Start fehlgeschlagen"); return null; }
@@ -177,6 +178,7 @@ public sealed class ClaudeCodeRuntime : IClaudeCodeRuntime
                 UseShellExecute = false,
             };
             psi.ArgumentList.Add("--version");
+            Whiskers.Utils.SecretEnvironment.Scrub(psi);   // R1-43: no VPN key in a child's environment
             using var p = Process.Start(psi);
             if (p == null) return false;
             if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }

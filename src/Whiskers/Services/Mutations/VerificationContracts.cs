@@ -147,6 +147,8 @@ public static class VerificationContracts
                 "each container it patches is updated as container.update, which is verified."),
             ["autoupdate.policy_set"] = VerificationContract.None(OwnRecord),
             ["automation.owner_set"] = VerificationContract.None(OwnRecord),
+            ["vpn.bootstrap"] = VerificationContract.None(
+                "the VPN CLI's own exit code decides (a failure is recorded as failed); the mesh state is read live on the status page, not by the gateway."),
 
             // Volume backups
             ["volume.backup"] = VerificationContract.ReadBack("the archive is recorded and on disk, not empty."),

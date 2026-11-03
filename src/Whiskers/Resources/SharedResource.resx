@@ -4850,6 +4850,42 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="AutomationOwners_AutoPatchConfigOff" xml:space="preserve">
     <value>Switched off in the configuration (AutoPatch:Enabled).</value>
   </data>
+  <data name="AutomationOwners_VpnBootstrap" xml:space="preserve">
+    <value>VPN bring-up at start (Tailscale/NetBird run by Whiskers)</value>
+  </data>
+  <data name="AutomationOwners_NoOwner_VpnBootstrap" xml:space="preserve">
+    <value>No owner: the VPN is not brought up when Whiskers starts.</value>
+  </data>
+  <data name="AutomationOwners_VpnNotManaged" xml:space="preserve">
+    <value>Provider "none": the VPN is managed outside Whiskers, nothing runs here.</value>
+  </data>
+  <data name="AutomationOwners_VpnLastRun" xml:space="preserve">
+    <value>This start: {0} — {1}</value>
+  </data>
+  <data name="AutomationOwners_VpnNextStart" xml:space="preserve">
+    <value>The bring-up runs once per start: a takeover takes effect at the next start of Whiskers.</value>
+  </data>
+  <data name="AutomationOwners_VpnStatus_Pending" xml:space="preserve">
+    <value>not run yet</value>
+  </data>
+  <data name="AutomationOwners_VpnStatus_NotManaged" xml:space="preserve">
+    <value>managed outside Whiskers</value>
+  </data>
+  <data name="AutomationOwners_VpnStatus_Done" xml:space="preserve">
+    <value>up</value>
+  </data>
+  <data name="AutomationOwners_VpnStatus_NoOwner" xml:space="preserve">
+    <value>not run, no owner</value>
+  </data>
+  <data name="AutomationOwners_VpnStatus_Blocked" xml:space="preserve">
+    <value>not run, owner unreadable or suspended</value>
+  </data>
+  <data name="AutomationOwners_VpnStatus_Refused" xml:space="preserve">
+    <value>refused</value>
+  </data>
+  <data name="AutomationOwners_VpnStatus_Failed" xml:space="preserve">
+    <value>failed</value>
+  </data>
   <data name="AutomationOwners_Button_TakeOver" xml:space="preserve">
     <value>Take over</value>
   </data>

@@ -38,6 +38,73 @@ All notable changes to Whiskers are documented here. The format follows
   private networks, so a LAN client could pose as many clients to the recovery page's (and the sign-in's) per-client
   limit; a proxy outside the list makes all visitors share one limit.
 
+- R1-43: **The VPN bring-up is decided, recorded and owned, and its key never reaches a command line.** With
+  `VPN_PROVIDER=tailscale` or `netbird`, Whiskers started the VPN daemon and joined the mesh at every start on no
+  one's authority and without an audit record. That bring-up now runs through the same gateway as every other change
+  (`vpn.bootstrap`, Admin): unattended, on the authority of the admin who takes **"VPN bring-up"** over in **Settings →
+  Automation owners**, re-checked at every start — never as an admin of its own and never with an implied confirmation.
+  Every start is one audit event (executed, failed, or refused — also when it was refused for having no owner); an owner
+  who can no longer sign in or is no Admin any more is refused and the bring-up is suspended until an admin takes it
+  over again; the kill switch refuses it. The result of this start is shown in that panel. **The key:** `tailscale up`
+  now reads it from `--auth-key=file:<path>` and NetBird from `--setup-key-file=<path>` — a file of mode 0600 in a
+  private directory, deleted as soon as the call returns. The earlier hand-over through `TS_AUTHKEY` did not log
+  Tailscale in at all: the `tailscale` CLI does not read that variable (upstream `cmd/tailscale/cli/up.go`, read
+  2026-11-03 — only Tailscale's own container start script `containerboot` does). NetBird needs a CLI that has
+  `--setup-key-file` (an older one fails with an unknown-flag error). CLI
+  errors are logged and recorded with the key removed, also when the tool echoes part of it. Every argument is passed as
+  a separate argv element, and the mesh hostname and the login server / management URL are checked before anything runs
+  (a host name; an absolute http(s) URL without user info) — an invalid value fails the bring-up with "Invalid VPN
+  hostname" / "Invalid … URL". **No key in a child's environment:** docker-compose passes the keys as
+  `Vpn__Tailscale__AuthKey` / `Vpn__Netbird__SetupKey` in every mode, so every process Whiskers started — tailscaled
+  for as long as it runs, ssh, docker, nsenter, shells — inherited them, readable in `/proc/<pid>/environ` under
+  `pid: host`. Now `entrypoint.sh` moves the active provider's key into a 0600 file in memory (`/dev/shm`, or
+  `WHISKERS_SECRET_DIR`) and hands Whiskers only its path (`Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`),
+  and drops every key variable — also behind the `ASPNETCORE_` / `DOTNET_` prefixes the configuration reads — before
+  it starts its first process, so neither the app nor the long-lived `tailscaled` of the legacy path inherits one. It
+  takes the provider and the keys in the order Whiskers' configuration lets them win (the bare name, then `DOTNET_`,
+  then `ASPNETCORE_`; `VPN_PROVIDER` only when no `Vpn__Provider` is set, and then it is handed to Whiskers as
+  `Vpn__Provider` so both decide alike), and warns on the console when it drops a key no provider will read — expected
+  on a compose start with `VPN_PROVIDER` unset and `TAILSCALE_AUTHKEY` in `.env` (compose passes it as
+  `Vpn__Tailscale__AuthKey`, which only the in-app provider reads) — and when `VPN_PROVIDER` and `Vpn__Provider` differ.
+  **Exactly one side brings the VPN up:** the in-app provider when Whiskers' provider is `tailscale`/`netbird`; the
+  legacy entrypoint bring-up only when `VPN_PROVIDER` is unset and Whiskers' provider is not `tailscale`/`netbird`
+  (before, `Vpn__Provider=tailscale` without `VPN_PROVIDER` — a `docker run`/k8s shape — ran both, the legacy
+  `tailscale up` ungoverned; and `VPN_PROVIDER=tailscale` without `Vpn__Provider` ran neither); nobody when
+  `VPN_PROVIDER` is set and the provider is `none`. Compose is unchanged (it sets `Vpn__Provider=${VPN_PROVIDER:-none}`).
+  A provider given on Whiskers' command line or in the data directory's JSON layers is not visible to the script.
+  Whiskers drops them (also prefixed) from its own environment after
+  reading its configuration and removes them from the environment of every process it starts. Only the exact spelling
+  is moved by the script: a name in other letter case still reaches Whiskers' own start environment. **New, preferred:**
+  `TAILSCALE_AUTHKEY_FILE` / `NETBIRD_SETUP_KEY_FILE` (`Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`) —
+  a file only Whiskers can read, mode 0600 or 0400, e.g. a Docker secret; it wins over the value, is read once at start,
+  a wider mode is logged as a warning and an unreadable or empty file fails the bring-up. The value variant keeps
+  working, but stays visible in `docker inspect`, and when Whiskers is started without `entrypoint.sh` its own
+  `/proc/<pid>/environ` keeps showing it. A key file left by a crash or a kill during `tailscale up` is removed at the
+  next start; key files are no longer flushed to disk. **Legacy entrypoint** (`VPN_PROVIDER` unset; it reads
+  `TAILSCALE_AUTHKEY`, which docker-compose does not set — this applies to `docker run -e TAILSCALE_AUTHKEY=…`):
+  `entrypoint.sh` no longer runs `tailscale up --authkey="$TAILSCALE_AUTHKEY"` (readable by every process on the host
+  under `pid: host`); it writes the key with the shell's `printf` builtin into a 0600 file and passes
+  `--auth-key=file:…`, removes the file right after — also when the script ends early — passes a stop signal during the
+  call on (exit 143) instead of starting Whiskers, and prints `ERROR: tailscale up failed …` instead of swallowing a
+  failure. The data directory there follows `WHISKERS_DATA_DIR` (default `/app/data`, as before). This path is still the
+  host operator's container start and is not recorded by the gateway. **Upgrade:** when Whiskers' provider is
+  `tailscale` or `netbird` — `Vpn__Provider` (also `DOTNET_Vpn__Provider` / `ASPNETCORE_Vpn__Provider`) or, without it,
+  `VPN_PROVIDER` — **the VPN is not brought up after the upgrade until an admin takes "VPN bring-up" over** in Settings →
+  Automation owners and Whiskers is restarted (the panel says "not run, no owner"; the log says why). If the Whiskers
+  UI is reachable only over that mesh, open it over the host's LAN address for the takeover, or run the mesh on the
+  host (`VPN_PROVIDER=none`) until then. This now includes a container started with `Vpn__Provider=tailscale` (bare or
+  prefixed) and `TAILSCALE_AUTHKEY` but no `VPN_PROVIDER`, which the legacy entrypoint used to bring up: the legacy
+  path is skipped there and `TAILSCALE_AUTHKEY` is no longer used (the entrypoint says so by name) — move the key to
+  `Vpn__Tailscale__AuthKey`, better `Vpn__Tailscale__AuthKeyFile` (`TAILSCALE_AUTHKEY_FILE` in compose). A Tailscale node that relied on
+  `TS_AUTHKEY` and never logged in now does so with the key. New optional `VPN_FAIL_STARTUP_ON_ERROR`
+  (`Vpn__FailStartupOnError`, default `false`): `true` stops a start whose bring-up does not succeed — set it only after
+  the takeover, or every start stops. **Recovery** when it locks you out (the owner later lost the Admin role or the
+  sign-in, or `automation-owners.json` became unreadable, and the container restarts in a loop): set
+  `VPN_FAIL_STARTUP_ON_ERROR=false`, restart, take "VPN bring-up" over again (or fix the VPN settings), restart, set it
+  back to `true`; the error message names these steps. Recommended: move the keys to `TAILSCALE_AUTHKEY_FILE` /
+  `NETBIRD_SETUP_KEY_FILE`. `VPN_PROVIDER` unset or `none`: nothing to do. Recovery: an unreadable
+  `automation-owners.json` now also blocks the VPN bring-up until an admin takes it over. No database change.
+
 - R1-26: **Revoked sessions and keys stop acting.** Deleting a local account, changing its security stamp, removing a
   user from the whitelist or lowering their role no longer waits for the 24-hour cookie to expire. The cookie is
   re-checked on **every request** (the synthetic identities as before, the local account by id with the same email and

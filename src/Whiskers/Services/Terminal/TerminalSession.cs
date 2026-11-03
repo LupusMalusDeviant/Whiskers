@@ -114,6 +114,7 @@ public sealed class ProcessTerminalLauncher : ITerminalLauncher
         };
         foreach (var arg in launch.Arguments)
             psi.ArgumentList.Add(arg);
+        Whiskers.Utils.SecretEnvironment.Scrub(psi);   // R1-43: no VPN key in a child's environment
         psi.Environment["TERM"] = "xterm-256color";
         var process = new Process { StartInfo = psi };
         process.Start();

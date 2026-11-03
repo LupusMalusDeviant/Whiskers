@@ -191,6 +191,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("autoupdate.policy_set", A, "container", Dis, Short);
         // Who AutoPatch / AutoUpdate run as (PC-D6): an admin hands their authority to an unattended feature.
         yield return Ui("automation.owner_set", A, "fleet", Root, Short);
+        // The in-app VPN bring-up at start (R1-43, S-07): starts the VPN daemon as root and joins the mesh with the
+        // configured key. Unattended, on the authority of the admin who took it over; `tailscale up` waits up to 60 s.
+        yield return Ui("vpn.bootstrap", A, "whiskers", Root, Normal);
 
         // Volume backups
         yield return Ui("volume.backup", W, "volume", Rev, Long);
