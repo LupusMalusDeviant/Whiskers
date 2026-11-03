@@ -7,9 +7,11 @@ All notable changes to Whiskers are documented here. The format follows
 ## [Unreleased]
 
 - R1-53: **One request can be followed from the client to the audit row, and the logs can be JSON.** Every HTTP answer
-  now carries an `X-Request-Id`: the client's own when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -` that the
-  log redaction leaves as they are), else the W3C trace id of an incoming `traceparent`, else a new one — an unsafe
-  value is replaced, never echoed or logged. The id is the log scope `HttpRequestId`. The Mutation Gateway now writes
+  now carries an `X-Request-Id`: the client's own when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -`), else
+  the W3C trace id of an incoming `traceparent`, else a new one — an unsafe value is replaced, never echoed or logged.
+  Whether an id is accepted never depends on Whiskers' secrets (that would let anyone probe them before signing in); a
+  secret sent as the id goes back only to its sender and is written as `***` in every log line, like any other value
+  the log redaction catches. The id is the log scope `HttpRequestId`. The Mutation Gateway now writes
   one line per decision (`Operation … decided …: decision …, request …`), one per refusal or wait for approval and one
   per outcome (`… Executed: verification …, approval …, audit …, request …`; `Warning` when it failed), and
   puts the operation id around the whole execution as the log scope `OperationId`, so the lines of the services it

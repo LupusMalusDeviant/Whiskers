@@ -56,7 +56,7 @@ carry a channel's capability URL, which the redaction then has to catch.
 
 | Id | Where it comes from | Where it appears |
 |---|---|---|
-| `HttpRequestId` | The client's `X-Request-Id` header when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -`, and not a value the redaction would change); otherwise the W3C trace id of an incoming `traceparent`; otherwise a new id | The `X-Request-Id` response header; the log scope `HttpRequestId`; the gateway's decision and outcome lines |
+| `HttpRequestId` | The client's `X-Request-Id` header when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -`); otherwise the W3C trace id of an incoming `traceparent`; otherwise a new id | The `X-Request-Id` response header; the log scope `HttpRequestId`; the gateway's decision and outcome lines |
 | `OperationId` | The Mutation Gateway: the caller's own id (an agent tool call) or a new one; an approve-then-retry continues the operation that raised the approval | The log scope `OperationId` around the whole execution, also in the lines of the services it calls; the policy decision, the approval (its correlation id), the operation journal and the audit row |
 
 To follow a request:
@@ -77,7 +77,9 @@ than the single click. Background work (the scheduler, AutoUpdate, AutoPatch) ha
 `request none` and are followed by the operation id alone.
 
 Whiskers never logs request headers, query strings or bodies for this; it reads the one header and echoes only a value
-it accepted. An id it did not accept is replaced, not repeated.
+it accepted. An id it did not accept is replaced, not repeated. Whether an id is accepted never depends on
+Whiskers' secrets; if a secret is sent as the id, it goes back only to its sender, and every log line writes it as
+`***`, like any other value the log redaction catches.
 
 ## Signals to alert on
 

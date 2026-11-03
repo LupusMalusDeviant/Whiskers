@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Primitives;
-using Whiskers.Utils;
 
 namespace Whiskers.Services.Observability.Correlation;
 
@@ -32,9 +31,11 @@ public static class RequestCorrelation
 
     /// <summary>
     /// Whether a client-supplied id may be used and echoed: 1–64 characters of <c>A–Z a–z 0–9 . _ -</c> only, so it can
-    /// neither split a header or a log line nor smuggle markup, and the redaction leaves it as it is — an id the
-    /// redaction would change (a registered secret, a token shape) is never used, so the id in the log is the id the
-    /// client got back, and Whiskers never repeats a secret in a header.
+    /// neither split a header or a log line nor smuggle markup. Deliberately <b>not</b> compared with Whiskers' secrets:
+    /// whether a value is accepted is visible before authentication, and a check against the secret registry would let
+    /// anyone test candidate strings for membership. The log stays safe anyway — every value of the scope and of the
+    /// gateway's lines passes the redacting logger factory (R1-25), which writes <c>***</c> for a secret; only the
+    /// sender's own value goes back to the sender.
     /// </summary>
     public static bool IsAcceptable(string? candidate)
     {
@@ -42,7 +43,7 @@ public static class RequestCorrelation
         foreach (var c in candidate)
             if (!(char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-'))
                 return false;
-        return string.Equals(SinkRedaction.Text(candidate), candidate, StringComparison.Ordinal);
+        return true;
     }
 
     /// <summary>
@@ -53,6 +54,8 @@ public static class RequestCorrelation
     public static string Choose(StringValues clientValues, Activity? activity)
     {
         if (clientValues.Count == 1 && IsAcceptable(clientValues[0])) return clientValues[0]!;
+        // Not passed through IsAcceptable on purpose: a W3C trace id is always 32 lowercase hex characters (the framework
+        // parsed and validated any inbound traceparent), so it is safe as it is.
         if (activity is { IdFormat: ActivityIdFormat.W3C } && activity.TraceId != default)
             return activity.TraceId.ToHexString();
         return Guid.NewGuid().ToString("N");

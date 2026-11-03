@@ -890,8 +890,9 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] Document actionable loop-stall, operation-incomplete and audit-failure signals
   (`docs/operations/observability.md`; the audit trail's completeness is now also on `/metrics`:
   `whiskers_self_audit_events_pending`, `whiskers_self_audit_intents_unsettled`, `whiskers_self_audit_legacy_write_failed`).
-- [x] Correlation metadata passes R1-25 redaction checks (ids through the redacting factory unchanged; a client id the
-  redaction would change, or outside `A-Z a-z 0-9 . _ -` / 64 characters, is replaced, never echoed or logged).
+- [x] Correlation metadata passes R1-25 redaction checks (ids through the redacting factory unchanged; a client id
+  outside `A-Z a-z 0-9 . _ -` / 64 characters is replaced, never echoed or logged; acceptance never consults the secret
+  registry — no membership oracle before sign-in — and a secret sent as the id is `***` in every log line).
 
 **Out of scope:** Requiring an external tracing backend for a single-instance installation.
 

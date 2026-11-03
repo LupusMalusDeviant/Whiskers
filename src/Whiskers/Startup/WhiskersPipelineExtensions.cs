@@ -829,7 +829,7 @@ public static class WhiskersPipelineExtensions
         if (audit is not null)
         {
             // R1-53: the audit trail's completeness (R1-19), so far only the `audit` readiness check — now a number an
-            // alert can watch. Read from memory (the outbox is a directory listing), no database round trip.
+            // alert can watch. No database call; the outbox count is a directory listing.
             var health = audit.Health;
             sb.AppendLine("# HELP whiskers_self_audit_events_pending Audit events not written yet: outcomes kept for a retry, refusals in the outbox, and lost events. Above zero for minutes means the audit database is failing.");
             sb.AppendLine("# TYPE whiskers_self_audit_events_pending gauge");

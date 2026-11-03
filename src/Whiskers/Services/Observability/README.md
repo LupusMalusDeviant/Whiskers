@@ -93,7 +93,7 @@ For each call: timestamp, actor + actor type, tool name, required permission lev
 
 | File | Purpose |
 |---|---|
-| `Correlation/RequestCorrelation.cs` | The request id, ambient like `MutationScope`: `IsAcceptable` (1–64 characters of `A-Z a-z 0-9 . _ -` that the log redaction leaves unchanged — a registered secret is never used), `Choose` (one acceptable `X-Request-Id`, else the W3C trace id, else a new id), `Enter` / `Current` / `CurrentOrNone`. |
+| `Correlation/RequestCorrelation.cs` | The request id, ambient like `MutationScope`: `IsAcceptable` (1–64 characters of `A-Z a-z 0-9 . _ -`; deliberately not checked against the secret registry, which would be a membership oracle before sign-in — the redacting logger factory writes a secret sent as the id as `***`), `Choose` (one acceptable `X-Request-Id`, else the W3C trace id, else a new id), `Enter` / `Current` / `CurrentOrNone`. |
 | `Correlation/RequestCorrelationMiddleware.cs` | The first middleware of the pipeline: picks the id, echoes it as `X-Request-Id` (again on start, so an error page keeps it), and opens the log scope `HttpRequestId` through the redacting logger factory. It reads one header and the activity, nothing else. |
 
 The Mutation Gateway names the request in its decision, refusal and outcome lines and holds the scope `OperationId`

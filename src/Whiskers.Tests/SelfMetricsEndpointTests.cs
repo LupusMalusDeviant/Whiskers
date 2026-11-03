@@ -193,7 +193,8 @@ public class SelfMetricsEndpointTests
     public async Task Every_answer_carries_its_request_id() => await WithAppAsync(async (client, _) =>
     {
         // R1-53: the correlation middleware runs in the real pipeline — a safe client id comes back, an unsafe one is
-        // replaced, and an answer the auth chain refuses carries one too (the middleware runs before it).
+        // replaced, and a refused answer carries one too (here the 401 of the /metrics scrape-token check; the boot runs
+        // with the LAN bypass, so no auth-chain refusal is exercised).
         var request = new HttpRequestMessage(HttpMethod.Get, "/metrics");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ScrapeToken);
         request.Headers.TryAddWithoutValidation("X-Request-Id", "scrape-42");

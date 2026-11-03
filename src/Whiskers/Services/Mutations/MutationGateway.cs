@@ -538,6 +538,7 @@ public sealed class MutationGateway : IMutationGateway
         {
             _logger.LogError(ex, "Audit intent for {Capability} could not be written; operation {OperationId} refused",
                 capability.Id, operationId);
+            LogNotRun(operationId, capability.Id, MutationStatus.Denied, approval?.ApprovalId, request.DecisionId);
             return new MutationOutcome<T>(operationId, MutationStatus.Denied, default,
                 "The audit record could not be written; the mutation was refused.", VerificationStatus.NotRun, ex)
                 { DecisionId = request.DecisionId };
@@ -554,6 +555,7 @@ public sealed class MutationGateway : IMutationGateway
         {
             await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, MutationStatus.Denied,
                 VerificationStatus.NotRun, duplicate!.Value.Reason, TimeSpan.Zero), capability);
+            LogNotRun(operationId, capability.Id, MutationStatus.Denied, approval?.ApprovalId, request.DecisionId);
             return new MutationOutcome<T>(operationId, MutationStatus.Denied, default, duplicate!.Value.Reason,
                 VerificationStatus.NotRun)
             {
@@ -573,6 +575,7 @@ public sealed class MutationGateway : IMutationGateway
             var reason = $"Approval {approvalId} is no longer usable (used by another call, revoked or expired); the mutation was refused.";
             await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, MutationStatus.Denied,
                 VerificationStatus.NotRun, reason, TimeSpan.Zero), capability);
+            LogNotRun(operationId, capability.Id, MutationStatus.Denied, approvalId, request.DecisionId);
             return new MutationOutcome<T>(operationId, MutationStatus.Denied, default, reason, VerificationStatus.NotRun,
                 ApprovalId: approvalId) { MatchedRules = decision.MatchedRules, DecisionId = request.DecisionId };
         }
@@ -870,16 +873,21 @@ public sealed class MutationGateway : IMutationGateway
             _logger.LogError(ex, "Audit record for refused {Capability} (operation {OperationId}) could not be written",
                 request.CapabilityId, operationId);
         }
-        // R1-53: a refusal or a wait for approval, linked to its request; the reason stays in the audit row.
-        _logger.LogInformation(
-            "Operation {OperationId} ({Capability}) not run: {Status}, approval {ApprovalId}, decision {DecisionId}, request {HttpRequestId}",
-            operationId, request.CapabilityId, status, approvalId ?? "none", request.DecisionId ?? "none",
-            RequestCorrelation.CurrentOrNone);
+        LogNotRun(operationId, request.CapabilityId, status, approvalId, request.DecisionId);
         return new MutationOutcome<T>(operationId, status, default, reason, VerificationStatus.NotRun, ApprovalId: approvalId)
         {
             DecisionId = request.DecisionId,
         };
     }
+
+    /// <summary>R1-53: a refusal or a wait for approval, linked to its request — every path that ends an operation
+    /// without running it. The reason stays in the audit row; every value passes the redacting logger factory.</summary>
+    private void LogNotRun(string operationId, string capabilityId, MutationStatus status, string? approvalId,
+        string? decisionId) =>
+        _logger.LogInformation(
+            "Operation {OperationId} ({Capability}) not run: {Status}, approval {ApprovalId}, decision {DecisionId}, request {HttpRequestId}",
+            operationId, capabilityId, status, approvalId ?? "none", decisionId ?? "none",
+            RequestCorrelation.CurrentOrNone);
 
     /// <summary>Nobody is there to confirm: an automation run, or anything made for an AI trigger (R1-13).</summary>
     private static bool Unattended(MutationRequest request) =>

@@ -228,23 +228,121 @@ public sealed class OperationalCorrelationTests : IDisposable
     }
 
     [Fact]
-    public async Task A_client_id_the_redaction_would_change_is_never_used_echoed_or_logged()
+    public async Task A_secret_sent_as_the_request_id_never_reaches_the_log()
     {
-        // A secret Whiskers holds (R1-25 registers every channel credential) sent as the request id — by mistake or to
-        // make Whiskers repeat it. It passes the charset, but the redaction would change it: it is not used.
+        // A secret Whiskers holds (R1-25 registers every channel credential) sent as the request id. Whether it is
+        // accepted must not depend on the secret registry — that answer is visible before authentication and would let
+        // anyone test candidates for membership — so it is handled like any other id of that shape: used, and echoed to
+        // its own sender only. The log never holds it: the scope and the gateway's request field are redacted.
         var held = Canary();
+        var ordinary = Canary();
         KnownSecrets.Register(held);
+        Assert.Equal(RequestCorrelation.IsAcceptable(ordinary), RequestCorrelation.IsAcceptable(held));   // no oracle
 
-        var (seen, echoed) = await InRequest(held, () =>
+        var gateway = Gateway();
+        _policy.RequireConfirmationForWrites = false;
+        var (outcome, echoed) = await InRequest(held, async () =>
         {
             _loggers.CreateLogger("work").LogInformation("Working");
-            return Task.FromResult(RequestCorrelation.Current);
+            return await gateway.ExecuteAsync(Restart(), (_, _) => Task.FromResult(0));
         });
 
-        Assert.NotEqual(held, seen);
-        Assert.Equal(seen, echoed);
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(held, echoed);                                     // back to the sender who sent it
         Assert.DoesNotContain(held, _capture.AllText);
-        Assert.False(RequestCorrelation.IsAcceptable(held));
+        Assert.Equal("***", Assert.Single(_capture.Entries, e => e.Category == "work").Scoped("HttpRequestId"));
+        Assert.All(_capture.With("HttpRequestId"), e => Assert.Equal("***", e.Value("HttpRequestId")));
+        Assert.NotEmpty(_capture.With("HttpRequestId"));
+    }
+
+    // ---------------------------------------------------------------- every way an operation ends is linked
+
+    [Fact]
+    public async Task A_duplicate_refused_at_the_claim_names_its_request()
+    {
+        var gateway = Gateway();
+        _policy.RequireConfirmationForWrites = false;
+        var request = Restart() with { OperationId = "op-dup" };
+
+        var (first, _) = await InRequest("req-dup-1", () => gateway.ExecuteAsync(request, (_, _) => Task.FromResult(0)));
+        var (again, _) = await InRequest("req-dup-2", () => gateway.ExecuteAsync(request, (_, _) => Task.FromResult(0)));
+
+        Assert.Equal(MutationStatus.Executed, first.Status);
+        Assert.Equal(MutationReasonCodes.OperationAlreadyRun, again.ReasonCode);
+        var refused = Assert.Single(_capture.With("Status"), e => e.Value("HttpRequestId") == "req-dup-2");
+        Assert.Equal(nameof(MutationStatus.Denied), refused.Value("Status"));
+        Assert.Equal("op-dup", refused.Value("OperationId"));
+        Assert.Equal(again.DecisionId, refused.Value("DecisionId"));
+    }
+
+    [Fact]
+    public async Task A_mutation_refused_because_its_audit_intent_failed_names_its_request()
+    {
+        _policy.RequireConfirmationForWrites = false;
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store),
+            new IntentFails(), [], new Logger<MutationGateway>(_loggers), decisions: new DbPolicyDecisionStore(_db.Scopes),
+            approvals: new ApprovalGate(_approvals, _store), journal: new DbOperationJournal(_db.Scopes));
+        var ran = false;
+
+        var (outcome, _) = await InRequest("req-noaudit-1", () => gateway.ExecuteAsync(Restart(), (_, _) =>
+        {
+            ran = true;
+            return Task.FromResult(0);
+        }));
+
+        Assert.False(ran);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        var refused = Assert.Single(_capture.With("Status"), e => e.Value("Status") == nameof(MutationStatus.Denied));
+        Assert.Equal("req-noaudit-1", refused.Value("HttpRequestId"));
+        Assert.Equal(outcome.OperationId, refused.Value("OperationId"));
+    }
+
+    [Fact]
+    public async Task An_approval_no_longer_usable_names_its_request()
+    {
+        // The approval lapses between the gate's answer and its use: the third way an operation ends without running.
+        var gateway = Gateway();
+        var (asked, _) = await InRequest("req-ask", () => gateway.ExecuteAsync(Restart(), (_, _) => Task.FromResult(0)));
+        await _approvals.DecideAsync(asked.ApprovalId!, true, ApprovalResolver.User("other-admin@example.com", AppRole.Admin));
+        var consumer = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store),
+            new AuditLogMutationSink(_db.Scopes), [], new Logger<MutationGateway>(_loggers),
+            decisions: new DbPolicyDecisionStore(_db.Scopes),
+            approvals: new ConsumedMeanwhile(new ApprovalGate(_approvals, _store)),
+            journal: new DbOperationJournal(_db.Scopes));
+
+        var (outcome, _) = await InRequest("req-lapsed", () => consumer.ExecuteAsync(Restart(), (_, _) => Task.FromResult(0)));
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Equal(asked.ApprovalId, outcome.ApprovalId);
+        var refused = Assert.Single(_capture.With("Status"), e => e.Value("HttpRequestId") == "req-lapsed");
+        Assert.Equal(nameof(MutationStatus.Denied), refused.Value("Status"));
+        Assert.Equal(asked.ApprovalId, refused.Value("ApprovalId"));
+    }
+
+    /// <summary>A gate whose approval was used up (or revoked) between its answer and its use.</summary>
+    private sealed class ConsumedMeanwhile(IApprovalGate inner) : IApprovalGate
+    {
+        public Task<ApprovalGateResult> CheckAsync(ApprovalSubject subject, string reason,
+            IReadOnlyList<string> matchedRules, CancellationToken ct = default) =>
+            inner.CheckAsync(subject, reason, matchedRules, ct);
+
+        public Task<bool> TryConsumeAsync(string approvalId, string operationId, CancellationToken ct = default) =>
+            Task.FromResult(false);
+
+        public string? OpenOperationOf(string binding) => inner.OpenOperationOf(binding);
+    }
+
+    /// <summary>An audit sink whose intent cannot be written.</summary>
+    private sealed class IntentFails : IMutationAuditSink
+    {
+        public Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
+            ApprovalGateResult? approval, CancellationToken ct) => throw new InvalidOperationException("database down");
+
+        public Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
+            string? reason, TimeSpan duration, CancellationToken ct) => Task.CompletedTask;
+
+        public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
+            MutationStatus status, string reason, CancellationToken ct) => Task.CompletedTask;
     }
 
     [Fact]
