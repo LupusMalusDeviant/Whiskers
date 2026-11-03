@@ -10,5 +10,7 @@ namespace Whiskers.Services.Notifications;
 public sealed class NoopNotificationService : INotificationService
 {
     public Task SendAsync(NotificationEvent evt) => Task.CompletedTask;
+    public Task SendAsync(NotificationEvent evt, CancellationToken ct) =>
+        ct.IsCancellationRequested ? Task.FromCanceled(ct) : Task.CompletedTask;
     public Task SendTestAsync() => Task.CompletedTask;
 }

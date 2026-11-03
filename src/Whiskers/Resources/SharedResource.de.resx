@@ -2333,6 +2333,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Settings_Snackbar_HealthSaved" xml:space="preserve">
     <value>Zustandsüberwachung gespeichert.</value>
   </data>
+  <data name="Settings_Error_IntervalOutOfRange" xml:space="preserve">
+    <value>Nicht gespeichert: {0} muss zwischen {1} und {2} liegen.</value>
+  </data>
   <data name="Settings_Snackbar_ImageUpdatesSaved" xml:space="preserve">
     <value>Image-Updates gespeichert.</value>
   </data>

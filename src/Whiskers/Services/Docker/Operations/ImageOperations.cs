@@ -76,13 +76,18 @@ internal sealed class ImageOperations
     /// The part of an image a running container depends on — entrypoint, user, ports, volumes, healthcheck,
     /// OS. Read before an update so the risk can be measured instead of guessed (GAP-6).
     /// </summary>
-    public async Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null)
+    public Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null)
+        => GetImageContractAsync(imageRef, serverId, CancellationToken.None);
+
+    /// <summary>R1-41: the caller's cancellation reaches the inspect and the wait for a slot; a cancelled caller gets the
+    /// cancellation, not a null that reads as "could not inspect".</summary>
+    public async Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId, CancellationToken ct)
     {
         try
         {
             var inspect = await _connectionManager.ExecuteGuardedAsync(
-                serverId, c => c.Images.InspectImageAsync(imageRef),
-                singleFlightKey: $"imagecontract:{imageRef}");
+                serverId, c => c.Images.InspectImageAsync(imageRef, ct),
+                singleFlightKey: $"imagecontract:{imageRef}", callerToken: ct);
 
             var cfg = inspect.Config;
             return new ImageUpdate.ImageContract(
@@ -96,7 +101,7 @@ internal sealed class ImageOperations
                 inspect.Os,
                 cfg?.Labels is { } labels ? new Dictionary<string, string>(labels) : null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             // Null, not an empty contract: an empty one would compare as "everything was removed" and turn a
             // missing image into a fleet of high-risk findings.
@@ -105,7 +110,12 @@ internal sealed class ImageOperations
         }
     }
 
-    public async Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null)
+    public Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null)
+        => GetImageDigestAsync(imageRef, serverId, CancellationToken.None);
+
+    /// <summary>R1-41: <paramref name="ct"/> (the image checker's stop) reaches the inspect and the wait for a slot; a
+    /// cancelled caller gets the cancellation, not a null that reads as "no local digest".</summary>
+    public async Task<string?> GetImageDigestAsync(string imageRef, string? serverId, CancellationToken ct)
     {
         try
         {
@@ -113,8 +123,8 @@ internal sealed class ImageOperations
             // pass, so it is steady background traffic — and it was taking a bare client, invisible to both
             // the cap and the circuit breaker.
             var inspect = await _connectionManager.ExecuteGuardedAsync(
-                serverId, c => c.Images.InspectImageAsync(imageRef),
-                singleFlightKey: $"imagedigest:{imageRef}");
+                serverId, c => c.Images.InspectImageAsync(imageRef, ct),
+                singleFlightKey: $"imagedigest:{imageRef}", callerToken: ct);
 
             // RepoDigests contains the pull-able digest, e.g. "nginx@sha256:abc..."
             if (inspect.RepoDigests?.Count > 0)
@@ -127,7 +137,7 @@ internal sealed class ImageOperations
             // Fallback to image ID
             return inspect.ID;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogDebug(ex, "Failed to get image digest for {Image}", imageRef);
             return null;

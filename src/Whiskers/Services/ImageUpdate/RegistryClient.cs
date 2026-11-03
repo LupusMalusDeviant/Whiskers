@@ -27,7 +27,11 @@ public class RegistryClient : IRegistryClient
     /// Get the remote manifest digest for an image reference.
     /// Returns null if the image can't be resolved (private registry, auth required, etc.)
     /// </summary>
-    public async Task<string?> GetRemoteDigestAsync(string imageRef)
+    public Task<string?> GetRemoteDigestAsync(string imageRef) => GetRemoteDigestAsync(imageRef, CancellationToken.None);
+
+    /// <summary>R1-41: <paramref name="ct"/> reaches every request (token and manifest); a cancelled caller gets the
+    /// cancellation, not a null that reads as "could not reach the registry".</summary>
+    public async Task<string?> GetRemoteDigestAsync(string imageRef, CancellationToken ct)
     {
         if (_cache.TryGetValue($"digest:{imageRef}", out string? cached))
             return cached;
@@ -42,9 +46,9 @@ public class RegistryClient : IRegistryClient
             var url = $"https://{registry}/v2/{repo}/manifests/{tag}";
 
             // Docker Hub: pre-fetch an anonymous pull token (its manifest endpoint always requires one).
-            string? token = registry == "registry-1.docker.io" ? await GetDockerHubTokenAsync(repo) : null;
+            string? token = registry == "registry-1.docker.io" ? await GetDockerHubTokenAsync(repo, ct) : null;
 
-            var response = await SendManifestHeadAsync(url, token);
+            var response = await SendManifestHeadAsync(url, token, ct);
 
             // Registry-agnostic bearer flow: GHCR/Quay/LSCR (and Docker Hub if the pre-fetch missed) answer
             // 401 with a WWW-Authenticate: Bearer challenge. Fetch a token from its realm and retry once.
@@ -54,11 +58,11 @@ public class RegistryClient : IRegistryClient
                     string.Equals(h.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase));
                 if (bearer?.Parameter is { } param)
                 {
-                    var challengeToken = await GetRegistryTokenAsync(ParseBearerChallenge(param));
+                    var challengeToken = await GetRegistryTokenAsync(ParseBearerChallenge(param), ct);
                     if (challengeToken != null)
                     {
                         response.Dispose();
-                        response = await SendManifestHeadAsync(url, challengeToken);
+                        response = await SendManifestHeadAsync(url, challengeToken, ct);
                     }
                 }
             }
@@ -78,7 +82,7 @@ public class RegistryClient : IRegistryClient
 
             return digest;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogDebug(ex, "Failed to get remote digest for {Image}", imageRef);
             return null;
@@ -151,26 +155,26 @@ public class RegistryClient : IRegistryClient
         return (registry, repo, tag);
     }
 
-    private async Task<string?> GetDockerHubTokenAsync(string repo)
+    private async Task<string?> GetDockerHubTokenAsync(string repo, CancellationToken ct)
     {
         try
         {
             var url = $"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull";
-            var response = await _http.GetAsync(url);
+            var response = await _http.GetAsync(url, ct);
             if (!response.IsSuccessStatusCode) return null;
 
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
             return doc.RootElement.GetProperty("token").GetString();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogDebug(ex, "Failed to get Docker Hub token for {Repo}", repo);
             return null;
         }
     }
 
-    private async Task<HttpResponseMessage> SendManifestHeadAsync(string url, string? token)
+    private async Task<HttpResponseMessage> SendManifestHeadAsync(string url, string? token, CancellationToken ct)
     {
         var request = new HttpRequestMessage(HttpMethod.Head, url);
         // Accept manifest v2 and OCI index for multi-arch images.
@@ -180,7 +184,7 @@ public class RegistryClient : IRegistryClient
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.oci.image.manifest.v1+json"));
         if (token != null)
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        return await _http.SendAsync(request);
+        return await _http.SendAsync(request, ct);
     }
 
     private static readonly Regex ChallengeRegex = new(@"(?<key>\w+)=""(?<val>[^""]*)""", RegexOptions.Compiled);
@@ -198,7 +202,7 @@ public class RegistryClient : IRegistryClient
 
     /// <summary>Fetches an anonymous pull token from a registry's auth realm (from the parsed challenge).
     /// Returns null on any failure so the caller degrades to "unknown" rather than a crash/false update.</summary>
-    private async Task<string?> GetRegistryTokenAsync(IReadOnlyDictionary<string, string> challenge)
+    private async Task<string?> GetRegistryTokenAsync(IReadOnlyDictionary<string, string> challenge, CancellationToken ct)
     {
         if (!challenge.TryGetValue("realm", out var realm) || string.IsNullOrWhiteSpace(realm))
             return null;
@@ -209,16 +213,16 @@ public class RegistryClient : IRegistryClient
             if (challenge.TryGetValue("scope", out var scope)) query.Add($"scope={Uri.EscapeDataString(scope)}");
             var url = query.Count > 0 ? $"{realm}?{string.Join("&", query)}" : realm;
 
-            var response = await _http.GetAsync(url);
+            var response = await _http.GetAsync(url, ct);
             if (!response.IsSuccessStatusCode) return null;
 
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("token", out var t)) return t.GetString();
             if (doc.RootElement.TryGetProperty("access_token", out var at)) return at.GetString();
             return null;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             // Realm only — never log the token.
             _logger.LogDebug(ex, "Failed to fetch registry token from realm {Realm}", realm);

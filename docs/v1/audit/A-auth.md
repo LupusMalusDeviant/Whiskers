@@ -192,6 +192,8 @@ I read and checked: `Program.cs`, `Startup/WhiskersAuthenticationExtensions.cs`,
 - **Recommendation:** Default to loopback only, and require operators to set `ForwardedHeaders:TrustedNetworks` to their proxy address.
 
 ### A-16 Minor HTTP-surface robustness issues
+
+_R1-41: the Prometheus part (label values interpolated unescaped in `/metrics`) is fixed — `PrometheusText.Label` escapes them, an error comment stays on one line. The other points below are tracked elsewhere (R1-50)._
 - **Severity:** Low · **Category:** Reliability/UX · **v1-blocker:** no
 - **Evidence and impact:**
   - `GET /logout` is anonymous and uses GET (line 241), so a cross-site `<img>` can log the user out (CSRF logout).

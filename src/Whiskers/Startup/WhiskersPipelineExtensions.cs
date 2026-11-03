@@ -447,7 +447,16 @@ public static class WhiskersPipelineExtensions
             // numbers you need precisely when the fleet is not answering. Exporting the whole container
             // inventory while saying nothing about the exporter is how a monitor stays blind to itself —
             // the log monitor wrote "timed out" every cycle for six days and no series carried it.
-            AppendSelfMetrics(sb, ctx.RequestServices);
+            // R1-41: "cannot fail" was not true — a reloaded CVE interval of 2147483647 hours overflowed in here and the
+            // whole scrape answered 500. The interval is fixed at its source (EffectiveInterval); this guard keeps any
+            // future slip in one section from taking the rest of the endpoint down with it.
+            try { AppendSelfMetrics(sb, ctx.RequestServices); }
+            catch (Exception ex)
+            {
+                ctx.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Whiskers.Metrics")
+                    .LogError(ex, "The whiskers_self_* section of /metrics failed; the scrape goes on without the rest of it");
+                sb.AppendLine("# whiskers_self_* section incomplete: it failed while being written (see the log)");
+            }
 
             try
             {
@@ -478,7 +487,7 @@ public static class WhiskersPipelineExtensions
 
                 foreach (var c in containers)
                 {
-                    var labels = $"name=\"{c.Name}\",image=\"{c.Image}\",server=\"{c.ServerName}\",project=\"{c.ComposeProject}\"";
+                    var labels = $"name=\"{PrometheusText.Label(c.Name)}\",image=\"{PrometheusText.Label(c.Image)}\",server=\"{PrometheusText.Label(c.ServerName)}\",project=\"{PrometheusText.Label(c.ComposeProject)}\"";
                     sb.AppendLine($"serverwatch_container_up{{{labels}}} {(c.State == "running" ? 1 : 0)}");
 
                     if (c.LatestStats != null)
@@ -503,7 +512,7 @@ public static class WhiskersPipelineExtensions
             }
             catch (Exception ex)
             {
-                sb.AppendLine($"# ERROR: {ex.Message}");
+                sb.AppendLine($"# ERROR: {PrometheusText.Comment(ex.Message)}");
             }
 
             ctx.Response.ContentType = "text/plain; version=0.0.4; charset=utf-8";
@@ -639,7 +648,7 @@ public static class WhiskersPipelineExtensions
     /// a monitoring outage caused by monitoring.</para></summary>
     private static void AppendSelfMetrics(System.Text.StringBuilder sb, IServiceProvider services)
     {
-        static string Esc(string v) => v.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        static string Esc(string v) => PrometheusText.Label(v);
 
         var loops = services.GetService<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>();
         var budget = services.GetService<Whiskers.Services.Docker.Budget.IServerBudget>();
@@ -680,7 +689,10 @@ public static class WhiskersPipelineExtensions
         var cveSettings = services.GetService<Microsoft.Extensions.Options.IOptionsMonitor<CveMonitorSettings>>();
         if (cveStore is not null && cveSettings is not null)
         {
-            var interval = TimeSpan.FromHours(Math.Max(1, cveSettings.CurrentValue.CheckIntervalHours));
+            // R1-41: the interval the CVE loop actually keeps (the shared EffectiveInterval), never the raw reloaded value —
+            // 2147483647 hours overflowed TimeSpan here and failed the whole scrape, and a smaller bad value made the
+            // staleness thresholds disagree with the loop's cadence.
+            var interval = IntervalValidation.CveCheckInterval(services, cveSettings.CurrentValue);
             var cve = Whiskers.Services.Cve.CveMetrics.Build(cveStore.GetAll(), interval, now);
 
             sb.AppendLine("# HELP whiskers_cve_findings Open CVE findings per server and severity. The count of instances, not of distinct vulnerabilities — see whiskers_cve_distinct_ids.");

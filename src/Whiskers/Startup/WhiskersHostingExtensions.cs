@@ -176,6 +176,9 @@ public static class WhiskersHostingExtensions
         builder.Services.Configure<DockerSettings>(builder.Configuration.GetSection(DockerSettings.SectionName));
         builder.Services.Configure<GoogleAuthSettings>(builder.Configuration.GetSection(GoogleAuthSettings.SectionName));
         builder.Services.Configure<HealthMonitorSettings>(builder.Configuration.GetSection(HealthMonitorSettings.SectionName));
+        builder.Services.AddOptions<HealthMonitorSettings>().ValidateInterval(s => s.CheckIntervalSeconds,
+            "HealthMonitor:CheckIntervalSeconds", IntervalValidation.MinHealthSeconds, IntervalValidation.MaxHealthSeconds,
+            TimeSpan.FromSeconds(1));   // R1-41
 
         // Server config + Docker services
         builder.Services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService, ServerConfigService>();
@@ -290,6 +293,9 @@ public static class WhiskersHostingExtensions
             // R1-19: Degraded (still ready) while an audit event is incomplete.
             .AddCheck<AuditTrailCheck>("audit", tags: new[] { "ready" });
         builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
+        builder.Services.AddOptions<MetricsSettings>().ValidateInterval(s => s.CollectionIntervalSeconds,
+            "Metrics:CollectionIntervalSeconds", IntervalValidation.MinMetricsSeconds, IntervalValidation.MaxMetricsSeconds,
+            TimeSpan.FromSeconds(1));   // R1-41: also the shared EffectiveInterval<MetricsSettings>
         builder.Services.Configure<AuditSettings>(builder.Configuration.GetSection(AuditSettings.SectionName));
         builder.Services.Configure<MetricAlertSettings>(builder.Configuration.GetSection(MetricAlertSettings.SectionName));
         builder.Services.AddSingleton<Whiskers.Services.Persistence.IAppSettingsStore, Whiskers.Services.Persistence.AppSettingsStore>();

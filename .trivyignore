@@ -1,0 +1,16 @@
+# Release scan exceptions (R1-45).
+#
+# The release gate (.github/workflows/release.yml, job `scan`) scans the amd64 AND the arm64 image by digest and
+# fails on ANY CRITICAL finding, including findings that have no fix yet. There is no blanket `ignore-unfixed`:
+# an unfixed CRITICAL is either waited out or recorded here, visibly, in the commit history of this file.
+#
+# Every exception is two lines and nothing else:
+#
+#   # reason: <why this finding does not affect Whiskers or cannot be fixed yet; who decided; link/issue>
+#   CVE-YYYY-NNNNN exp:YYYY-MM-DD
+#
+# `exp:` is the review date. Trivy stops ignoring the entry after that date, so the next release fails again
+# until someone re-checks the finding and either removes the entry or renews it with a new reason.
+# ReleaseWorkflowTests rejects entries without a reason line or without an expiry date.
+#
+# No exceptions are recorded.
