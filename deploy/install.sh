@@ -2,25 +2,27 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Whiskers installer (outOfTheBox W2, R1-46).
 #
-#   # The installer of a release (recommended: it installs exactly that release; check it against checksums.txt):
+#   # The installer of a release (recommended: it installs exactly that release):
 #   curl -fsSLO https://github.com/LupusMalusDeviant/Whiskers/releases/download/vX.Y.Z/install.sh
 #   bash install.sh [--version X.Y.Z] [--port 5100] [--bind 127.0.0.1] [--data <path>] [--verify auto|require|off] [--yes]
 #
 # Installs one released, version-pinned image (never `latest`) and brings Whiskers up with a small compose file in
 # ./whiskers/. On a new install it generates the vault key into ./whiskers/secrets/vault.key (0600, never printed) and
-# hands it to Whiskers as a secret file. It verifies the image's cosign signature when cosign is installed. Re-running
-# it with a newer --version (or the installer of a newer release) UPGRADES in place: only the image line changes, the
-# previous compose file is kept as a copy, and a downgrade is refused. It never installs Docker and never exposes
-# anything publicly without an explicit opt-in.
+# hands it to Whiskers as a secret file. It verifies the image's cosign signature when cosign is installed and then
+# pins the verified digest. Re-running it with a newer --version (or the installer of a newer release) UPGRADES in
+# place: only the image line changes, the previous compose file is kept as a copy, and a downgrade is refused. It
+# never installs Docker and never exposes anything publicly without an explicit opt-in.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-# The release this installer installs by default. The release pipeline refuses a tag whose version differs from it
-# (release.yml, prepare), so the install.sh of release X.Y.Z installs X.Y.Z.
+# The release this installer installs by default. The release pipeline accepts only vX.Y.Z tags and refuses one whose
+# version differs from this line (release.yml, prepare), so the install.sh of release X.Y.Z installs X.Y.Z.
 WHISKERS_RELEASE="0.15.0"
 REPOSITORY="ghcr.io/lupusmalusdeviant/whiskers"
-# The identity the release workflow signs with (keyless cosign, see README "Supply chain").
-SIGNER_IDENTITY_RE='^https://github.com/LupusMalusDeviant/Whiskers/.github/workflows/release.yml@refs/tags/v'
+# The identity the release workflow signs with (keyless cosign, see README "Supply chain"). For a release X.Y.Z the
+# installer requires exactly the run of tag vX.Y.Z (signer_identity below), so an older signed image re-tagged as
+# X.Y.Z does not pass.
+SIGNER_IDENTITY_PREFIX='^https://github\.com/LupusMalusDeviant/Whiskers/\.github/workflows/release\.yml@refs/tags/v'
 SIGNER_ISSUER="https://token.actions.githubusercontent.com"
 BACKUP_GUIDE="https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/backup-and-recovery.md"
 
@@ -32,7 +34,13 @@ DATA="${WHISKERS_DATA:-}"            # empty → named docker volume `whiskers-d
 DIR="${WHISKERS_DIR:-./whiskers}"
 VERIFY="${WHISKERS_VERIFY:-auto}"    # auto | require | off
 ASSUME_YES="${WHISKERS_YES:-false}"
+ALLOW_UNKNOWN_CURRENT="${WHISKERS_ALLOW_UNKNOWN_CURRENT:-false}"
 INSTALL_DOCKER=false
+# Settings that only a new install uses (a re-run keeps what the compose file says).
+NEW_INSTALL_FLAGS=()
+[ -n "${WHISKERS_PORT:-}" ] && NEW_INSTALL_FLAGS+=(--port)
+[ -n "${WHISKERS_BIND:-}" ] && NEW_INSTALL_FLAGS+=(--bind)
+[ -n "${WHISKERS_DATA:-}" ] && NEW_INSTALL_FLAGS+=(--data)
 
 # ── pretty logging ───────────────────────────────────────────────────────────
 if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; N=$'\033[0m'; else B=; G=; Y=; R=; N=; fi
@@ -52,17 +60,20 @@ Usage: install.sh [options]
                     digest (@sha256:…). Its signature can only be verified for ${REPOSITORY}.
   --verify <mode>   Image signature check with cosign: auto (default: verify when cosign is installed, refuse a
                     bad signature), require (refuse to install without a verified signature), off.
-  --port <n>        Host port (default 5100)
-  --bind <addr>     Host bind address (default 127.0.0.1 — localhost only; put a
-                    reverse proxy in front before exposing, or use --bind 0.0.0.0)
-  --data <path>     Host directory for /app/data (default: named volume whiskers-data)
+  --port <n>        Host port (default 5100)                      ┐ new installs only: a re-run keeps
+  --bind <addr>     Host bind address, an IPv4 address or [IPv6]  │ what the compose file says
+                    (default 127.0.0.1 — localhost only)          │
+  --data <path>     Host directory for /app/data                  ┘ (default: named volume whiskers-data)
   --dir <path>      Where to write the compose project (default ./whiskers)
+  --allow-unknown-current
+                    Upgrade even when the installed release cannot be determined (an install of "latest" by an
+                    older installer whose container is not running). Only when you know it is older.
   --install-docker  Install Docker via get.docker.com if missing (explicit opt-in)
   --yes             Non-interactive; accept defaults, no prompts
   --help            This help
 
 Env equivalents: WHISKERS_VERSION, WHISKERS_IMAGE, WHISKERS_VERIFY, WHISKERS_PORT, WHISKERS_BIND, WHISKERS_DATA,
-WHISKERS_DIR, WHISKERS_YES=true
+WHISKERS_DIR, WHISKERS_ALLOW_UNKNOWN_CURRENT=true, WHISKERS_YES=true
 EOF
 }
 
@@ -72,10 +83,11 @@ while [ $# -gt 0 ]; do
     --version) VERSION="${2:?}"; shift 2;;
     --image) IMAGE="${2:?}"; shift 2;;
     --verify) VERIFY="${2:?}"; shift 2;;
-    --port) PORT="${2:?}"; shift 2;;
-    --bind) BIND="${2:?}"; shift 2;;
-    --data) DATA="${2:?}"; shift 2;;
+    --port) PORT="${2:?}"; NEW_INSTALL_FLAGS+=(--port); shift 2;;
+    --bind) BIND="${2:?}"; NEW_INSTALL_FLAGS+=(--bind); shift 2;;
+    --data) DATA="${2:?}"; NEW_INSTALL_FLAGS+=(--data); shift 2;;
     --dir)  DIR="${2:?}"; shift 2;;
+    --allow-unknown-current) ALLOW_UNKNOWN_CURRENT=true; shift;;
     --install-docker) INSTALL_DOCKER=true; shift;;
     --yes|-y) ASSUME_YES=true; shift;;
     --help|-h) usage; exit 0;;
@@ -92,6 +104,11 @@ ask() { # ask "prompt" "default" -> echoes answer (or default in --yes mode)
 
 # ── which image (pinned, never latest) ───────────────────────────────────────
 SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+# An image reference as Docker writes it: lowercase repository path (optional registry host and port), an optional
+# tag and an optional sha256 digest. Nothing else — the value goes into sed and YAML.
+IMAGE_RE='^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(@sha256:[0-9a-f]{64})?$'
+IPV4_RE='^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$'
+IPV6_RE='^\[[0-9A-Fa-f:.]+\]$'
 
 # True when the reference names a digest, or a tag other than "latest".
 image_pinned() {
@@ -102,7 +119,7 @@ image_pinned() {
   [ -n "$tag" ] && [ "$tag" != "latest" ]
 }
 
-# The release number of an image of $REPOSITORY (empty for anything else).
+# The release number of an image reference of $REPOSITORY (empty for anything else, a digest only or "latest").
 release_of() {
   local ref="$1" tag
   case "$ref" in "${REPOSITORY}:"*) ;; *) return 0;; esac
@@ -110,6 +127,9 @@ release_of() {
   tag="${tag%%@*}"
   if [[ "$tag" =~ $SEMVER_RE ]]; then printf '%s' "$tag"; fi
 }
+
+# The reference without its digest.
+without_digest() { printf '%s' "${1%%@*}"; }
 
 # version_lt A B: true when release A is older than release B.
 version_lt() {
@@ -125,9 +145,10 @@ version_lt() {
 }
 
 if [ -n "$IMAGE" ]; then
+  [[ "$IMAGE" =~ $IMAGE_RE ]] || die "--image '$IMAGE' is not a valid image reference (lowercase repository, optional :tag, optional @sha256:<64 hex>)."
   image_pinned "$IMAGE" || die "--image '$IMAGE' is not pinned: name a release tag (not \"latest\") or a digest (@sha256:…)."
 else
-  [[ "$VERSION" =~ $SEMVER_RE ]] || die "--version must be a release number X.Y.Z (got '$VERSION'). \"latest\" is not offered: pick a release from https://github.com/LupusMalusDeviant/Whiskers/releases"
+  [[ "$VERSION" =~ $SEMVER_RE ]] || die "--version must be a release number X.Y.Z (got '$VERSION'). \"latest\" and pre-releases are not offered: pick a release from https://github.com/LupusMalusDeviant/Whiskers/releases"
   IMAGE="${REPOSITORY}:${VERSION}"
 fi
 case "$VERIFY" in auto|require|off) ;; *) die "--verify must be auto, require or off (got '$VERIFY')";; esac
@@ -163,11 +184,22 @@ fi
 ok "Docker $(docker version -f '{{.Server.Version}}' 2>/dev/null || echo present) + Compose available"
 
 # ── signature (cosign, keyless; before anything is pulled or written) ────────
+# The identity a signature must carry: exactly the release workflow run of tag vX.Y.Z for an image of that release,
+# any release tag for a digest-only reference of $REPOSITORY.
+signer_identity() {
+  local ver
+  ver="$(release_of "$IMAGE")"
+  if [ -n "$ver" ]; then printf '%s%s$' "$SIGNER_IDENTITY_PREFIX" "${ver//./\\.}"
+  else printf '%s' "$SIGNER_IDENTITY_PREFIX"; fi
+}
+
+# TARGET is what the compose file names: the image, plus the verified digest once cosign has checked it.
+TARGET="$IMAGE"
 verify_signature() {
-  local official=false out
+  local official=false out identity digest digests
   case "$IMAGE" in "${REPOSITORY}:"*|"${REPOSITORY}@"*) official=true;; esac
   if [ "$VERIFY" = off ]; then
-    warn "Image signature NOT verified (--verify off)."
+    warn "Image signature NOT verified (--verify off); the compose file names the tag only."
     return 0
   fi
   if [ "$official" != true ]; then
@@ -175,30 +207,45 @@ verify_signature() {
     warn "Image signature NOT verified: $IMAGE is not an image of ${REPOSITORY}."
     return 0
   fi
+  identity="$(signer_identity)"
   if ! command -v cosign >/dev/null 2>&1; then
     [ "$VERIFY" = require ] && die "--verify require: cosign is not installed (https://docs.sigstore.dev/cosign/system_config/installation/)."
-    warn "cosign is not installed — the image signature is NOT verified. Install cosign and re-run, or check it by hand:"
-    warn "  cosign verify $IMAGE --certificate-identity-regexp '$SIGNER_IDENTITY_RE' --certificate-oidc-issuer $SIGNER_ISSUER"
+    warn "cosign is not installed — the image signature is NOT verified and the compose file names the tag only."
+    warn "Install cosign and re-run, or check it by hand:"
+    warn "  cosign verify $IMAGE --certificate-identity-regexp '$identity' --certificate-oidc-issuer $SIGNER_ISSUER"
     return 0
   fi
   info "Verifying the signature of $IMAGE (cosign)…"
-  if out="$(cosign verify "$IMAGE" --certificate-identity-regexp "$SIGNER_IDENTITY_RE" --certificate-oidc-issuer "$SIGNER_ISSUER" 2>&1)"; then
-    ok "Signature verified: built and signed by the Whiskers release workflow."
-  else
+  if ! out="$(cosign verify "$IMAGE" --certificate-identity-regexp "$identity" --certificate-oidc-issuer "$SIGNER_ISSUER" 2>&1)"; then
     printf '%s\n' "$out" >&2
     die "Signature verification FAILED for $IMAGE — nothing was installed or changed."
   fi
+  # The digest the signature covers. Pinning it means the image pulled below is the one that was verified, even if
+  # the tag is moved in between.
+  digests="$(printf '%s' "$out" | grep -oE '"docker-manifest-digest" *: *"sha256:[0-9a-f]{64}"' | grep -oE 'sha256:[0-9a-f]{64}' | sort -u || true)"
+  [ "$(printf '%s\n' "$digests" | grep -c . || true)" = 1 ] \
+    || die "cosign verified $IMAGE but did not name exactly one signed digest — nothing was installed or changed."
+  digest="$digests"
+  case "$IMAGE" in
+    *@sha256:*) [ "${IMAGE##*@}" = "$digest" ] || die "cosign verified digest $digest, not the one $IMAGE names." ;;
+  esac
+  TARGET="$(without_digest "$IMAGE")@${digest}"
+  ok "Signature verified (release workflow, ${identity}); pinned to ${digest}."
 }
 verify_signature
 
-# ── interactive settings (skipped with --yes / no TTY) ───────────────────────
+# ── input checks (the values go into the compose file) ───────────────────────
 COMPOSE="$DIR/docker-compose.yml"
 if [ ! -f "$COMPOSE" ] && [ "$ASSUME_YES" != true ] && [ -t 0 ]; then
   PORT="$(ask 'Host port' "$PORT")"
   BIND="$(ask 'Bind address (127.0.0.1 = localhost only)' "$BIND")"
   DATA="$(ask 'Data directory (empty = docker named volume)' "$DATA")"
 fi
-[ "$PORT" -gt 0 ] 2>/dev/null || die "Invalid port: $PORT"
+valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
+valid_bind() { [[ "$1" =~ $IPV4_RE ]] || [[ "$1" =~ $IPV6_RE ]]; }
+valid_port "$PORT" || die "Invalid port: '$PORT' (1–65535)"
+valid_bind "$BIND" || die "Invalid bind address: '$BIND' (an IPv4 address such as 127.0.0.1, or [IPv6])"
+case "$DATA" in *$'\n'*|*:*|*'#'*|*'"'*) die "Invalid data directory: '$DATA' (no ':', '#', quotes or line breaks)";; esac
 
 # ── vault key: generated once, 0600, never printed ───────────────────────────
 SECRETS_DIR="$DIR/secrets"
@@ -233,8 +280,27 @@ port_in_use() {
   else return 1; fi
 }
 
+# The release the existing install runs. The compose file's tag when it names one; else (an install of "latest" by
+# an older installer, or a digest only) what the running Whiskers recorded at its last start (/app/data/
+# .last-started-version, R1-34) or its image label. Whichever is newest counts; empty when nothing tells.
+installed_release() {
+  local current="$1" from v label
+  from="$(release_of "$current")"
+  v="$(docker exec whiskers cat /app/data/.last-started-version 2>/dev/null || true)"
+  v="$(printf '%s' "$v" | head -n 1 | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true)"
+  label="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' whiskers 2>/dev/null || true)"
+  label="$(printf '%s' "$label" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+  for c in "$v" "$label"; do
+    if [[ "$c" =~ $SEMVER_RE ]]; then
+      if [ -z "$from" ] || version_lt "$from" "$c"; then from="$c"; fi
+    fi
+  done
+  printf '%s' "$from"
+}
+
 # ── write the compose project, or upgrade the existing one ───────────────────
 UPGRADED_FROM=""
+BACKUP_COMPOSE=""
 mkdir -p "$DIR"
 if [ -f "$COMPOSE" ]; then
   info "Existing install found at $COMPOSE"
@@ -242,21 +308,40 @@ if [ -f "$COMPOSE" ]; then
     || die "$COMPOSE was not written by this installer; change its image line by hand (pull + up), the installer leaves it alone."
   [ "$(grep -c '^    image: ' "$COMPOSE" || true)" = 1 ] \
     || die "$COMPOSE does not have exactly one 'image:' line of the Whiskers service; change it by hand."
-  CURRENT="$(sed -n 's/^    image: *//p' "$COMPOSE")"
-  if [ "$CURRENT" = "$IMAGE" ]; then
-    info "Already on $IMAGE — pull + up only."
+  if [ "${#NEW_INSTALL_FLAGS[@]}" -gt 0 ]; then
+    warn "${NEW_INSTALL_FLAGS[*]} only apply to a new install and are ignored: this install keeps the port, bind address and data of $COMPOSE (edit it to change them)."
+  fi
+  # The port and bind address this install was written with (for the health check and the URL below).
+  PORTS_LINE="$(sed -n 's/^      - "\(.*\):\([0-9][0-9]*\):8080"$/\1 \2/p' "$COMPOSE" | head -n 1)"
+  if [ -n "$PORTS_LINE" ] && valid_bind "${PORTS_LINE% *}" && valid_port "${PORTS_LINE#* }"; then
+    BIND="${PORTS_LINE% *}"; PORT="${PORTS_LINE#* }"
   else
-    FROM_VER="$(release_of "$CURRENT")"
+    warn "Could not read the host port from $COMPOSE; checking http://${BIND}:${PORT} — adjust if yours differs."
+  fi
+  CURRENT="$(sed -n 's/^    image: *//p' "$COMPOSE")"
+  if [ "$CURRENT" = "$TARGET" ] || { [ "$TARGET" = "$IMAGE" ] && [ "$(without_digest "$CURRENT")" = "$IMAGE" ]; }; then
+    info "Already on $CURRENT — pull + up only."
+  else
     TO_VER="$(release_of "$IMAGE")"
+    FROM_VER="$(installed_release "$CURRENT")"
     if [ -n "$FROM_VER" ] && [ -n "$TO_VER" ] && version_lt "$TO_VER" "$FROM_VER"; then
       die "Refusing to downgrade from $FROM_VER to $TO_VER: a newer release may have migrated the database. A downgrade is the older release on the pre-upgrade backup — see $BACKUP_GUIDE"
     fi
+    if [ -z "$FROM_VER" ] || [ -z "$TO_VER" ]; then
+      if [ "$ALLOW_UNKNOWN_CURRENT" != true ]; then
+        die "Cannot tell which release $CURRENT runs${TO_VER:+ (the target is $TO_VER)}, so a downgrade cannot be ruled out. Start the existing Whiskers (it records its version at start) and re-run, or — if you know the installed release is not newer — re-run with --allow-unknown-current."
+      fi
+      warn "Changing $CURRENT → $TARGET without knowing the installed release (--allow-unknown-current)."
+    fi
     BACKUP_COMPOSE="$COMPOSE.bak-$(date +%Y%m%d%H%M%S)"
     cp -p "$COMPOSE" "$BACKUP_COMPOSE"
-    sed "s#^    image: .*#    image: ${IMAGE}#" "$COMPOSE" > "$COMPOSE.tmp"
+    # The rewrite keeps the file's mode and owner: the temporary file starts as a copy (cp -p) and is overwritten in
+    # place before it replaces the original.
+    cp -p "$COMPOSE" "$COMPOSE.tmp"
+    sed "s#^    image: .*#    image: ${TARGET}#" "$COMPOSE" > "$COMPOSE.tmp"
     mv "$COMPOSE.tmp" "$COMPOSE"
     UPGRADED_FROM="$CURRENT"
-    ok "Image changed: $CURRENT → $IMAGE (previous compose file: $BACKUP_COMPOSE)"
+    ok "Image changed: $CURRENT → $TARGET (previous compose file: $BACKUP_COMPOSE)"
   fi
   if ! grep -q 'VAULT_KEY' "$COMPOSE"; then
     warn "This install has no vault key: the secret vault and encrypted backups are off. To add one, see 'Vault key' in"
@@ -284,7 +369,7 @@ else
 # docker-compose.hardened.yml.
 services:
   whiskers:
-    image: ${IMAGE}
+    image: ${TARGET}
     container_name: whiskers
     pid: host
     privileged: true
@@ -318,7 +403,7 @@ EOF
 fi
 
 # ── pull + up (idempotent — same commands for install and upgrade) ───────────
-info "Pulling image ${IMAGE}…"
+info "Pulling image ${TARGET}…"
 ( cd "$DIR" && "${DC[@]}" pull )
 info "Starting Whiskers…"
 ( cd "$DIR" && "${DC[@]}" up -d )
@@ -326,7 +411,8 @@ info "Starting Whiskers…"
 # ── wait for readiness (C11 /healthz) ────────────────────────────────────────
 URL="http://${BIND}:${PORT}"
 [ "$BIND" = "0.0.0.0" ] && URL="http://127.0.0.1:${PORT}"
-info "Waiting for Whiskers to become healthy…"
+[ "$BIND" = "[::]" ] && URL="http://[::1]:${PORT}"
+info "Waiting for Whiskers to become healthy at ${URL}…"
 ready=false
 # An upgrade first takes a pre-upgrade backup and migrates the database (R1-34): up to ~5 min.
 for _ in $(seq 1 150); do
@@ -364,6 +450,8 @@ if [ -n "$UPGRADED_FROM" ]; then
   cat <<EOF
   • Upgraded from ${UPGRADED_FROM}. Whiskers took a pre-upgrade backup before migrating; to go back, follow
     ${BACKUP_GUIDE}
+  • The previous compose file is kept as ${BACKUP_COMPOSE} (same permissions). It may contain secrets
+    (e.g. a VAULT_KEY you set inline): delete it once the upgrade works.
 EOF
 fi
 if [ -s "$KEY_FILE" ]; then

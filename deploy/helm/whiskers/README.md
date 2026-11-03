@@ -71,10 +71,31 @@ fresh key); from then on it keeps its identity. If you overrode `tailscaleSideca
 | `tailscaleSidecar.enabled` | `false` | Userspace tailscaled (no NET_ADMIN / /dev/net/tun) for outbound mesh access; `authKeySecret` key `authKey`. |
 | `tailscaleSidecar.image` | `tailscale/tailscale:v1.104.4@sha256:…` | Pinned (tag + index digest). No tag/digest or `latest` is refused. |
 | `tailscaleSidecar.state.persistent` / `size` / `existingClaim` | `true` / `128Mi` / unset | The node identity (tailscaled state) on its own PVC, so a restarted pod is the same tailnet node and the auth key is used once (`TS_AUTH_ONCE`). The chart sets `TS_KUBE_SECRET=""`: inside Kubernetes the Tailscale image would otherwise keep its state in a Secret named `tailscale`, which needs RBAC the chart does not grant. `persistent=false` = `emptyDir`: a new node at every restart. |
-| VPN mode (fixed) | `VPN_PROVIDER=none`, `Vpn__Provider=none` | Set on every render (R1-46). The pod is non-root with a read-only root file system, where the image's legacy `tailscaled` bring-up cannot work; the in-app providers (`tailscale`/`netbird`) are not supported in the chart. Mesh access = the sidecar. `extraEnv` cannot override these names (also `DOTNET_`/`ASPNETCORE_`-prefixed), `TAILSCALE_AUTHKEY` or `VPN_FORCE_LEGACY_TAILSCALE`. |
+| VPN mode (fixed) | `VPN_PROVIDER=none`, `Vpn__Provider=none` | Set on every render (R1-46). The pod is non-root with a read-only root file system, where the image's legacy `tailscaled` bring-up cannot work; the in-app providers (`tailscale`/`netbird`) are not supported in the chart. Mesh access = the sidecar. `extraEnv` cannot override these names (also `DOTNET_`/`ASPNETCORE_`-prefixed, in any letter case and spelled with `:`, e.g. `Vpn:Provider`), `TAILSCALE_AUTHKEY` or `VPN_FORCE_LEGACY_TAILSCALE`. |
 | `localDocker.enabled` | `false` | Mounts the node's Docker socket. Root-equivalent on that node + node pinning — almost never what you want. |
 | `trustedProxyCidrs` | `[]` | Whiskers trusts RFC1918 + loopback + Tailscale CGNAT for `X-Forwarded-*`. Add your pod CIDR only if it is outside RFC1918. |
 | `auth.adminEmail` / `adminPasswordSecret` | unset | Unattended admin seed (`WHISKERS_ADMIN_EMAIL` + password file mount). |
+
+## Uninstall
+
+`helm uninstall` deletes the PVCs the chart created — the data PVC **and** the Tailscale sidecar's state PVC (neither
+carries `helm.sh/resource-policy: keep`). Back up first (see Backup). Without the state PVC the sidecar's next install
+registers a new tailnet node; remove the old one in the Tailscale admin console. To keep either across an uninstall,
+create the PVC yourself and pass it as `persistence.existingClaim` / `tailscaleSidecar.state.existingClaim`.
+
+## Verification checklist (needs a cluster)
+
+The chart's unit tests and `chart-ci.yml` render the templates and check that the pinned sidecar digest is the
+digest of its tag; they do not start a pod. Before a release that changes the chart or the sidecar pin, run once on
+a disposable cluster (kind):
+
+1. `helm install` with `vault.existingSecret` → the pod becomes Ready; `kubectl logs … -c whiskers` shows
+   `VPN provider 'none' … skipping legacy bring-up` and no `tailscaled` line.
+2. With `tailscaleSidecar.enabled=true` and a real `authKeySecret`: the `tailscale` container (uid 10001 from the pod,
+   `TS_KUBE_SECRET=""`) starts, logs in, and the node appears in the tailnet; its state is on the
+   `<release>-whiskers-tailscale` PVC.
+3. `kubectl delete pod …` → the new pod is the **same** tailnet node (no second node, no new login with the key).
+4. `helm upgrade` to the next chart version → Ready within the startup budget; the setup token and data survive.
 
 ## WebSockets / SignalR through Ingress
 

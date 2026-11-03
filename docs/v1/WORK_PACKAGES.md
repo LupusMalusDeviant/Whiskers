@@ -809,6 +809,15 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > with this `entrypoint.sh`, uid 10001, read-only root, `VPN_PROVIDER=none`/`Vpn__Provider=none` → healthy, no
 > `tailscaled`; without them it starts `tailscaled`. Decision: the in-app VPN providers are not offered in the chart
 > (no value to choose them); a `--profile hardened` for the installer was not added.
+> Review round 1: the downgrade guard also covers installs of `:latest`/a digest (installed release = newest of the
+> compose tag, `/app/data/.last-started-version` of the running container and the image's version label; unknown →
+> refused unless `--allow-unknown-current`, which never allows a known downgrade); the cosign identity is the exact
+> tag `vX.Y.Z` and the verified digest is pinned (`repo:X.Y.Z@sha256:…`); image reference, bind, port and data path are
+> validated strictly; a rewrite keeps the compose file's mode (the `.bak` copy is flagged as possibly holding
+> secrets); a re-run reads port/bind back and warns about ignored `--port/--bind/--data`; pre-releases are refused on
+> both sides (release `prepare` accepts only `vX.Y.Z`, the installer only X.Y.Z); `extraEnv` names are normalised
+> (`:` → `__`) before the VPN deny-list; chart-ci compares the pinned sidecar digest with the tag's digest; the kind
+> run with the sidecar is a manual checklist in the chart README.
 
 **Out of scope:** Socket-proxy verb changes.
 

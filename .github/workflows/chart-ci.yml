@@ -25,6 +25,21 @@ jobs:
       - name: helm lint
         run: helm lint deploy/helm/whiskers
 
+      # R1-46: the sidecar is pinned by tag AND digest; both must name the same image, or enabling the sidecar ends in
+      # ImagePullBackOff (or runs another build than the tag says).
+      - name: Pinned sidecar digest matches its tag
+        run: |
+          set -euo pipefail
+          PIN="$(sed -n 's#^  image: \(tailscale/tailscale:v[0-9.]*\)@\(sha256:[0-9a-f]\{64\}\)$#\1 \2#p' deploy/helm/whiskers/values.yaml)"
+          if [ -z "$PIN" ]; then echo "::error::no pinned tailscaleSidecar.image (tag@sha256) in values.yaml"; exit 1; fi
+          REF="${PIN% *}"
+          WANT="${PIN#* }"
+          GOT="$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' | jq -er .digest)"
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::${REF} resolves to ${GOT}, values.yaml pins ${WANT}"; exit 1
+          fi
+          echo "${REF} = ${WANT}"
+
       # Golden-invariant checks: render default + full-variant values and assert the properties
       # the chart must never lose (single replica/Recreate, non-root, probes, V4 env, secrets wiring).
       - name: helm template invariants

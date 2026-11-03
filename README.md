@@ -99,7 +99,8 @@ VER=X.Y.Z   # a release from https://github.com/LupusMalusDeviant/Whiskers/relea
 # if cosign is installed, writes ./whiskers/ and waits until healthy:
 curl -fsSLO "https://github.com/LupusMalusDeviant/Whiskers/releases/download/v${VER}/install.sh"
 curl -fsSLO "https://github.com/LupusMalusDeviant/Whiskers/releases/download/v${VER}/checksums.txt"
-sha256sum --check --ignore-missing checksums.txt && bash install.sh
+sha256sum --check --ignore-missing checksums.txt && bash install.sh   # the checksum catches a broken download; the
+                                                                     # signature check inside the installer protects the image
 
 # ...or a bare docker run (no vault key — set VAULT_KEY_FILE before you store secrets):
 docker run -d --name whiskers -p 127.0.0.1:5100:8080 \

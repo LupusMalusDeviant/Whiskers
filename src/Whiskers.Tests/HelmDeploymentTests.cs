@@ -58,6 +58,20 @@ public class HelmDeploymentTests : IDisposable
         Assert.DoesNotContain(":latest", image);
     }
 
+    /// <summary>chart-ci resolves the pinned tag in the registry and compares it with the pinned digest; the line it
+    /// reads must exist in exactly the shape its sed expects, or the step fails on every run.</summary>
+    [Fact]
+    public void Chart_ci_checks_that_the_pinned_digest_is_the_tags_digest()
+    {
+        var ci = DeploymentScripts.ReadRepoFile(".github", "workflows", "chart-ci.yml");
+        var step = ci[ci.IndexOf("- name: Pinned sidecar digest matches its tag", StringComparison.Ordinal)..];
+        step = step[..step.IndexOf("- name:", 10, StringComparison.Ordinal)];
+        Assert.Contains("docker buildx imagetools inspect \"$REF\"", step);
+        Assert.Contains("if [ \"$GOT\" != \"$WANT\" ]", step);
+        var values = DeploymentScripts.ReadRepoFile("deploy", "helm", "whiskers", "values.yaml");
+        Assert.Single(Regex.Matches(values, @"(?m)^  image: tailscale/tailscale:v[0-9.]*@sha256:[0-9a-f]{64}$"));
+    }
+
     [Fact]
     public void The_sidecar_state_is_durable_by_default()
     {
@@ -105,6 +119,8 @@ public class HelmDeploymentTests : IDisposable
                  })
             Assert.Contains(refusal, Helpers);
         Assert.Contains("list \"vpn_provider\" \"vpn__provider\" \"tailscale_authkey\" \"vpn_force_legacy_tailscale\"", Helpers);
+        // ".NET reads Vpn:Provider as Vpn__Provider": the name is normalised before the deny-list sees it.
+        Assert.Contains("{{- $n := regexReplaceAll \":\" (lower (toString .name)) \"__\" -}}", Helpers);
     }
 
     [Fact]
@@ -256,6 +272,9 @@ public class HelmDeploymentTests : IDisposable
     [InlineData("the chart fixes the VPN mode", "extraEnv[0].name=VPN_PROVIDER", "extraEnv[0].value=tailscale")]
     [InlineData("the chart fixes the VPN mode", "extraEnv[0].name=DOTNET_Vpn__Provider", "extraEnv[0].value=tailscale")]
     [InlineData("the chart fixes the VPN mode", "extraEnv[0].name=TAILSCALE_AUTHKEY", "extraEnv[0].value=x")]
+    [InlineData("the chart fixes the VPN mode", "extraEnv[0].name=Vpn:Provider", "extraEnv[0].value=tailscale")]
+    [InlineData("the chart fixes the VPN mode", "extraEnv[0].name=DOTNET_Vpn:Provider", "extraEnv[0].value=tailscale")]
+    [InlineData("the chart fixes the VPN mode", "extraEnv[0].name=aspnetcore_VPN__PROVIDER", "extraEnv[0].value=tailscale")]
     [InlineData("is refused", "image.tag=latest")]
     public void A_render_that_cannot_work_is_refused(string message, params string[] set)
     {

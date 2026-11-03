@@ -75,7 +75,8 @@ starts in an unintended mode.
 {{- end -}}
 {{- $fixed := list "vpn_provider" "vpn__provider" "tailscale_authkey" "vpn_force_legacy_tailscale" -}}
 {{- range .Values.extraEnv -}}
-{{- $n := lower (toString .name) -}}
+{{- /* .NET reads "Vpn:Provider" as the same key as "Vpn__Provider" (and Kubernetes accepts ":" in env names). */ -}}
+{{- $n := regexReplaceAll ":" (lower (toString .name)) "__" -}}
 {{- $bare := regexReplaceAll "^(dotnet_|aspnetcore_)" $n "" -}}
 {{- if has $bare $fixed -}}
 {{- fail (printf "extraEnv %q is refused: the chart fixes the VPN mode (VPN_PROVIDER=none, Vpn__Provider=none; see values.yaml)" (toString .name)) -}}

@@ -120,7 +120,8 @@ probes:
     failureThreshold: 5
 
 # Extra environment variables (name/value pairs), e.g. OIDC settings. The VPN mode (VPN_PROVIDER, Vpn__Provider, also
-# behind DOTNET_/ASPNETCORE_), TAILSCALE_AUTHKEY and VPN_FORCE_LEGACY_TAILSCALE are fixed by the chart and refused here.
+# behind DOTNET_/ASPNETCORE_, in any letter case, with ":" for "__"), TAILSCALE_AUTHKEY and VPN_FORCE_LEGACY_TAILSCALE are
+# fixed by the chart and refused here.
 # Put secrets in a Secret and use valueFrom, not a value.
 extraEnv: []
 
