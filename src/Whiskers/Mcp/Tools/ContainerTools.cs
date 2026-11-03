@@ -434,7 +434,7 @@ public class ContainerTools
         var workingDir = plan.ProjectDirectory;
 
         // Write the planned .env and bring the project up with the planned files
-        var restartResult = await executor.ExecuteAsync(sid, plan.DeployScript(pull: false), TimeSpan.FromMinutes(2));
+        var restartResult = await executor.ExecuteMutationAsync(sid, plan.DeployScript(pull: false), TimeSpan.FromMinutes(2));
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         if (!restartResult.Success)
@@ -485,7 +485,7 @@ public class ContainerTools
         ComposeImpact.ReportProject(plan);
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
-        var deployResult = await executor.ExecuteAsync(serverId, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5));
+        var deployResult = await executor.ExecuteMutationAsync(serverId, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5));
 
         await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, serverId: serverId, success: deployResult.Success);
         if (deployResult.Success)

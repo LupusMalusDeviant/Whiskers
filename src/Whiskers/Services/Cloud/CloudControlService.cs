@@ -27,12 +27,15 @@ public class CloudControlService : ICloudControlService
         IServerConfigService serverConfig,
         IEnumerable<ICloudProvider> providers,
         ILogger<CloudControlService> logger,
-        IVaultService vault)
+        IVaultService vault,
+        IEnumerable<IHetznerExtensions>? hetznerExtensions = null)
     {
         _serverConfig = serverConfig;
         _vault = vault;
         _providers = providers.ToList();
-        _hetznerExt = _providers.OfType<IHetznerExtensions>().FirstOrDefault();
+        // The registered Hetzner extension (R1-48): a provider resolved from the container is the scope guard around
+        // it, which implements only ICloudProvider, so the extension comes from its own registration.
+        _hetznerExt = hetznerExtensions?.FirstOrDefault() ?? _providers.OfType<IHetznerExtensions>().FirstOrDefault();
         _logger = logger;
     }
 

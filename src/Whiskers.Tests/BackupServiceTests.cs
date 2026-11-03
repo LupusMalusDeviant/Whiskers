@@ -181,6 +181,25 @@ public class BackupServiceTests
     }
 
     [Fact]
+    public async Task A_start_up_deletion_refuses_every_backup_but_a_pre_upgrade_one()
+    {
+        // R1-48: the start-up path (S-09) runs before the gateway; it may delete only what it created.
+        var (svc, _, root, sp) = NewService(vaultKey: null);
+        try
+        {
+            var manual = await svc.CreateBackupAsync("manual");
+            var pre = await svc.CreatePreUpgradeBackupAsync();
+            Assert.StartsWith(BackupService.PreUpgradeLabelPrefix, pre.Label);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => svc.DeletePreUpgradeBackupAsync(manual.Id));
+            await svc.DeletePreUpgradeBackupAsync(pre.Id);
+
+            Assert.Equal([manual.Id], (await svc.ListBackupsAsync()).Select(b => b.Id));
+        }
+        finally { Cleanup(sp, root); }
+    }
+
+    [Fact]
     public async Task Validate_rejects_a_provider_mismatch()
     {
         var (svc, _, root, sp) = NewService(vaultKey: null);

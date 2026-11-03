@@ -18,20 +18,25 @@ public interface IWebhookService
     /// <summary>Creates the webhook. An empty <see cref="WebhookEntity.Secret"/> is replaced with a
     /// freshly generated 256-bit secret; the returned entity carries it for one-time display.
     /// <see cref="WebhookEntity.Owner"/> is the principal id an external trigger runs on (R1-09): the creator.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("webhook.save")]
     Task<WebhookEntity> CreateWebhookAsync(WebhookEntity webhook);
 
     /// <summary>Takes the webhook over (R1-09): sets <paramref name="ownerId"/> as its owner, only while its owner is
     /// still <paramref name="expectedOwnerId"/>. <c>false</c> when it is gone or was taken over meanwhile.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("webhook.save")]
     Task<bool> SetOwnerAsync(string webhookId, string ownerId, string? expectedOwnerId);
 
+    [Whiskers.Services.Mutations.MutatingOperation("webhook.delete")]
     Task DeleteWebhookAsync(string webhookId);
 
     /// <summary>Replaces the webhook's HMAC secret with a freshly generated one and returns it
     /// (one-time display — it is not retrievable afterwards).</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("webhook.rotate_secret")]
     Task<string> RegenerateSecretAsync(string webhookId);
 
     /// <summary>Enables/disables a webhook. Enabling a webhook without a secret is rejected
     /// (legacy pre-F11 rows) — regenerate its secret first.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("webhook.set_enabled")]
     Task SetEnabledAsync(string webhookId, bool enabled);
 
     /// <summary>Takes an incoming delivery (R1-10, INV-42). Bounded first (request rates, body size), then checked

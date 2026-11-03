@@ -108,11 +108,9 @@ public class UiMutationGatewayCoverageTests : IDisposable
     [Fact]
     public void No_page_or_component_writes_configuration_past_the_gateway()
     {
-        var baseline = File.ReadAllLines(Path.Combine(McpToolCatalogSnapshotTests.RepositoryRoot(), "docs", "v1",
-            "mutation-bypass-baseline.txt"));
         var capabilities = Writes.Select(w => w.Capability).ToHashSet();
-        var bypasses = baseline
-            .Where(l => !l.StartsWith('#') && l.Contains(" -> "))
+        var bypasses = MutationCallScanner.FindBypasses(typeof(Program).Assembly)
+            .Where(l => l.Contains(" -> "))
             .Where(l => capabilities.Contains(l[(l.IndexOf(" -> ", StringComparison.Ordinal) + 4)..].Trim()))
             .ToList();
 

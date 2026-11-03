@@ -5,5 +5,6 @@ namespace Whiskers.Services.Onboarding;
 /// <see cref="OnboardingResult"/>; every step is idempotent, so a re-run resumes after a failure.</summary>
 public interface IOnboardingService
 {
+    [Whiskers.Services.Mutations.MutatingOperation("server.onboard")]
     Task<OnboardingResult> OnboardServerAsync(string serverId, IProgress<string> progress, CancellationToken ct = default);
 }

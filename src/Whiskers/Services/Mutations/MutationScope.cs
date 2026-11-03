@@ -11,7 +11,9 @@ public sealed record MutationDomainResult(string Action, string TargetType, stri
 /// The ambient marker the Mutation Gateway sets around an execution delegate (ADR-0005). It flows with the async
 /// call chain (<see cref="AsyncLocal{T}"/>), so service calls made inside the delegate — including nested ones such
 /// as stop + recreate inside an update — run "inside" the capability that was decided. Work queued with
-/// <c>Task.Run</c> inherits it; work started from a hosted-service loop does not.
+/// <c>Task.Run</c> inherits it while the operation runs; once the gateway closes the scope, <see cref="Current"/> no
+/// longer returns it on any flow (R1-48), so detached work cannot act on the decision afterwards. Work started from a
+/// hosted-service loop never inherits it.
 /// </summary>
 public sealed class MutationScope : IDisposable
 {
@@ -26,7 +28,7 @@ public sealed class MutationScope : IDisposable
     private static readonly AsyncLocal<MutationScope?> CurrentScope = new();
 
     private readonly MutationScope? _parent;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     private readonly string? _serverId;
     private readonly HashSet<string> _decided;
@@ -72,8 +74,39 @@ public sealed class MutationScope : IDisposable
         return false;
     }
 
-    /// <summary>The innermost open scope on this async flow, or <c>null</c> outside the gateway.</summary>
-    public static MutationScope? Current => CurrentScope.Value;
+    /// <summary>
+    /// The innermost open scope on this async flow, or <c>null</c> outside the gateway. A scope the gateway has closed
+    /// is never returned (R1-48): work that escaped it — a <c>Task.Run</c>, a timer or a fire-and-forget started
+    /// inside the delegate that is still running once the operation ended — carries the closed scope in its copy of the
+    /// async flow, and must not act on that decision. Neither does work under a scope whose enclosing scope was
+    /// closed.
+    /// </summary>
+    public static MutationScope? Current
+    {
+        get
+        {
+            var scope = CurrentScope.Value;
+            for (var s = scope; s is not null; s = s._parent)
+                if (s._disposed) return null;
+            return scope;
+        }
+    }
+
+    /// <summary>True once the gateway closed this scope.</summary>
+    public bool IsClosed => _disposed;
+
+    /// <summary>
+    /// True when the open scope on this flow, or an open scope enclosing it, decided <paramref name="capabilityId"/> or
+    /// a capability that composes it (<see cref="MutationCompositions"/>). Nested decisions (a deployment decided, then
+    /// each container it touches) all belong to the same execution, so any of them covers what it decided. False
+    /// outside the gateway and after the scope was closed (R1-48).
+    /// </summary>
+    public static bool Authorizes(string capabilityId)
+    {
+        for (var s = Current; s is not null; s = s._parent)
+            if (MutationCompositions.Allows(s.CapabilityId, capabilityId)) return true;
+        return false;
+    }
 
     public string CapabilityId { get; }
     public string OperationId { get; }
@@ -203,7 +236,9 @@ public sealed class MutationScope : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(capabilityId);
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
-        var scope = new MutationScope(capabilityId, operationId, principal, CurrentScope.Value, request);
+        // The parent is the scope that is still open: a gateway call made from work that escaped a closed scope starts
+        // on its own, and is not nested in (or inheriting the pin or trigger of) a decision that has ended.
+        var scope = new MutationScope(capabilityId, operationId, principal, Current, request);
         CurrentScope.Value = scope;
         return scope;
     }

@@ -28,4 +28,16 @@ public interface IHostCommandExecutor
     /// </param>
     Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
         CancellationToken ct = default, int? maxOutputChars = null);
+
+    /// <summary>
+    /// The same execution as <see cref="ExecuteAsync"/>, for a command that changes something (R1-48, INV-38): a raw
+    /// shell command, a <c>docker exec</c>, a compose <c>.env</c> write, a prune, a retention <c>rm</c>. It has no
+    /// capability of its own — what it may do is whatever the open Mutation Gateway scope decided — so the scope guard
+    /// refuses it outside one. Reads keep <see cref="ExecuteAsync"/>; <c>MutationGatewayCoverageTests</c> lists every
+    /// page and tool that calls either.
+    /// </summary>
+    [Whiskers.Services.Mutations.MutationPrimitive]
+    Task<CommandResult> ExecuteMutationAsync(string serverId, string command, TimeSpan? timeout = null,
+        CancellationToken ct = default, int? maxOutputChars = null) =>
+        ExecuteAsync(serverId, command, timeout, ct, maxOutputChars);
 }

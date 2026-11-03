@@ -84,6 +84,7 @@ internal sealed class FakeServerConfig : IServerConfigService, Whiskers.Services
     public Task SaveSshKeyAsync(string serverId, string fileName, byte[] keyData) => throw new NotSupportedException();
     public string? GetSshKeyPath(Whiskers.Models.ServerConfig server) => null;
     public Task DeleteSshKeyAsync(string serverId) => throw new NotSupportedException();
+    public Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef) => throw new NotSupportedException();
 }
 
 /// <summary>

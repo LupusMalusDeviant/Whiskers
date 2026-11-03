@@ -31,7 +31,8 @@ public interface IAutoPatchService
     /// — bounded by <see cref="AutoPatchService.PreviewDeadline"/>, cancelled when Whiskers stops, its failure logged —
     /// instead of a task nobody waits for. The caller's operation scope does not flow into it: each container is decided
     /// on the caller's authority as the cycle reaches it. False when a cycle is already running or Whiskers is
-    /// stopping.</summary>
-    [MutatingOperation("autopatch.run")]
+    /// stopping. It is the execution of <c>autopatch.preview</c> (the <c>preview_auto_patch</c> tool's own capability,
+    /// R1-48), not of <c>autopatch.run</c>: it is always a dry run, and every container is decided on its own.</summary>
+    [MutatingOperation("autopatch.preview")]
     bool StartPreview(string onBehalfOf);
 }

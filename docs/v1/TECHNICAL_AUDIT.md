@@ -165,6 +165,7 @@ Paths that mutate without the full chain are listed in [`audit/B-mutations.md` Â
    - Guardrails sit in `AgentToolInvoker` and `McpGuardrailFilter`, and audit calls are scattered across UI pages, tools and services.
    - Every new entry point (UI, scheduler, webhook, terminal) must re-implement the chain, and today most do not.
    - A single *mutation gateway* is needed. Every infrastructure mutation would pass through one service that owns authorization, policy, approval binding, execution, verification and audit. That is the structural fix behind TA-01, 04, 05, 06, 10, 26, 28.
+   - **Enforced since R1-48:** the gateway exists (WP2) and the scope guard now refuses, in production, every marked write and every write through the host primitive that no open decision covers; nested operations are an explicit table (`MutationCompositions`), a closed scope authorizes nothing (also for work that escaped it), and the architecture test has no baseline file. Open: the first-run wizard's whitelist write (`config.whitelist`, a protected auth path awaiting a maintainer decision) is recorded, not refused.
 2. **Two permission models.**
    - UI roles (`AppRole`) and MCP levels (`DefaultToolLevels` + stored overrides) are mapped ad hoc and disagree (TA-01, TA-10, TA-28).
    - v1 needs one capability table per action, consulted by every surface.

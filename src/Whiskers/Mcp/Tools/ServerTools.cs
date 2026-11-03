@@ -138,7 +138,7 @@ public class ServerTools
         // Cap per-stream output so a chatty command can't blow up the model context.
         const int maxStreamChars = 50_000;
 
-        var result = await executor.ExecuteAsync(serverId, command, TimeSpan.FromSeconds(timeoutSeconds));
+        var result = await executor.ExecuteMutationAsync(serverId, command, TimeSpan.FromSeconds(timeoutSeconds));
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         // The command is a payload: the audit log keeps only its length (R1-24) — no pattern knows every credential
         // syntax a shell line can carry (curl -u user:pass, …). The executed command is unchanged.

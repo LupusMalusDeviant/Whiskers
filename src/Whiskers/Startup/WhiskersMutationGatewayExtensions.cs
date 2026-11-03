@@ -9,7 +9,7 @@ namespace Whiskers.Startup;
 
 /// <summary>
 /// Registers the Mutation Gateway (ADR-0005) and wraps every service interface that has
-/// <see cref="MutatingOperationAttribute"/> methods in the scope guard. Must run after every other registration —
+/// <see cref="MutatingOperationAttribute"/> or <see cref="MutationPrimitiveAttribute"/> methods in the scope guard, which refuses an undecided call (R1-48). Must run after every other registration —
 /// core and modules — so that no mutating service escapes the wrapper.
 /// </summary>
 public static class WhiskersMutationGatewayExtensions
@@ -122,7 +122,8 @@ public static class WhiskersMutationGatewayExtensions
         {
             var descriptor = services[i];
             if (descriptor.IsKeyedService || !descriptor.ServiceType.IsInterface
-                || descriptor.ServiceType.IsGenericTypeDefinition || MutatingMethods.Of(descriptor.ServiceType).Count == 0)
+                || descriptor.ServiceType.IsGenericTypeDefinition
+                || (MutatingMethods.Of(descriptor.ServiceType).Count == 0 && MutatingMethods.PrimitivesOf(descriptor.ServiceType).Count == 0))
                 continue;
             guard.MakeGenericMethod(descriptor.ServiceType).Invoke(null, [services, i, registeredTypes]);
         }

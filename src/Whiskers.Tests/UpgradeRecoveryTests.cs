@@ -249,6 +249,11 @@ public sealed class UpgradeRecoveryTests : IDisposable
     {
         public Task<SelfBackupInfo> CreateBackupAsync(string label, CancellationToken ct = default) =>
             throw new IOException("No space left on device");
+        public Task<SelfBackupInfo> CreatePreUpgradeBackupAsync(CancellationToken ct = default) =>
+            throw new IOException("No space left on device");
+        public Task DeletePreUpgradeBackupAsync(string id, CancellationToken ct = default) => inner.DeletePreUpgradeBackupAsync(id, ct);
+        public Task BeginHostRestoreAsync(string backupId, string actor, RestoreTarget target, CancellationToken ct = default) =>
+            inner.BeginHostRestoreAsync(backupId, actor, target, ct);
         public Task<IReadOnlyList<SelfBackupInfo>> ListBackupsAsync(CancellationToken ct = default) => inner.ListBackupsAsync(ct);
         public string? ResolveArchivePath(string id) => inner.ResolveArchivePath(id);
         public Task DeleteBackupAsync(string id, CancellationToken ct = default) => inner.DeleteBackupAsync(id, ct);

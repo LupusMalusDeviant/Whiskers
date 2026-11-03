@@ -343,10 +343,10 @@ public class ToolAuthorizationWireTests
             using var client = factory.CreateClient();
 
             var permissions = factory.Services.GetRequiredService<IMcpPermissionService>();
-            var key = await permissions.AddApiKeyAsync("narrow", McpPermissionLevels.Read);
+            var key = await GatewayArrange.RunAsync("mcp.key_create", () => permissions.AddApiKeyAsync("narrow", McpPermissionLevels.Read));
             var data = permissions.GetPermissionData();
             data.ApiKeys.Single(k => k.Id == key.Id).AllowedTools = ["start_container", "list_servers"];
-            await permissions.SavePermissionDataAsync(data);
+            await GatewayArrange.RunAsync("config.mcp_permissions", () => permissions.SavePermissionDataAsync(data));
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key.Key);
 
             var session = await McpServedSurfaceTests.InitializeAsync(client);
@@ -395,15 +395,15 @@ public class ToolAuthorizationWireTests
                 });
             using var client = factory.CreateClient();
             var permissions = factory.Services.GetRequiredService<IMcpPermissionService>();
-            var key = await permissions.AddApiKeyAsync("ops", McpPermissionLevels.Write);
+            var key = await GatewayArrange.RunAsync("mcp.key_create", () => permissions.AddApiKeyAsync("ops", McpPermissionLevels.Write));
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key.Key);
             var guardrails = factory.Services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
             var config = guardrails.Config;
             var policy = config.ActivePolicy();
             policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
             policy.RequireConfirmationForWrites = false;
-            await guardrails.SaveConfigAsync(config,
-                new AgentPrincipal(AgentPrincipalKind.WebUser, "admin", McpPermissionLevels.Admin, null, UserEmail: "admin@example.com"));
+            await GatewayArrange.RunAsync("guardrails.save", () => guardrails.SaveConfigAsync(config,
+                new AgentPrincipal(AgentPrincipalKind.WebUser, "admin", McpPermissionLevels.Admin, null, UserEmail: "admin@example.com")));
 
             var session = await McpServedSurfaceTests.InitializeAsync(client);
             using var response = await McpServedSurfaceTests.PostAsync(client, session,
@@ -436,15 +436,15 @@ public class ToolAuthorizationWireTests
 
             // Writes run without a human here, so the call reaches the tool.
             var permissions = factory.Services.GetRequiredService<IMcpPermissionService>();
-            var key = await permissions.AddApiKeyAsync("ops", McpPermissionLevels.Admin);
+            var key = await GatewayArrange.RunAsync("mcp.key_create", () => permissions.AddApiKeyAsync("ops", McpPermissionLevels.Admin));
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key.Key);
             var guardrails = factory.Services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
             var config = guardrails.Config;
             var policy = config.ActivePolicy();
             policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
             policy.RequireConfirmationForWrites = false;
-            await guardrails.SaveConfigAsync(config,
-                new AgentPrincipal(AgentPrincipalKind.WebUser, "admin", McpPermissionLevels.Admin, null, UserEmail: "admin@example.com"));
+            await GatewayArrange.RunAsync("guardrails.save", () => guardrails.SaveConfigAsync(config,
+                new AgentPrincipal(AgentPrincipalKind.WebUser, "admin", McpPermissionLevels.Admin, null, UserEmail: "admin@example.com")));
 
             var session = await McpServedSurfaceTests.InitializeAsync(client);
             using var response = await McpServedSurfaceTests.PostAsync(client, session,

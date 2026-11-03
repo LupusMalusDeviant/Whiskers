@@ -11,15 +11,22 @@ public interface IHetznerExtensions
 {
     Task<HetznerServer?> GetServerAsync(string token, long id, CancellationToken ct = default);
 
+    // R1-48: each changing operation carries the capability of the Hetzner tool that executes it.
+    [Whiskers.Services.Mutations.MutatingOperation("hetzner.rescue_enable")]
     Task<HetznerActionResponse?> EnableRescueAsync(string token, long id, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("hetzner.rescue_disable")]
     Task<HetznerAction?> DisableRescueAsync(string token, long id, CancellationToken ct = default);
 
+    [Whiskers.Services.Mutations.MutatingOperation("hetzner.backups_enable")]
     Task<HetznerAction?> EnableBackupsAsync(string token, long id, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("hetzner.backups_disable")]
     Task<HetznerAction?> DisableBackupsAsync(string token, long id, CancellationToken ct = default);
 
+    [Whiskers.Services.Mutations.MutatingOperation("hetzner.server_type_change")]
     Task<HetznerAction?> ChangeServerTypeAsync(string token, long id, string serverType, bool upgradeDisk, CancellationToken ct = default);
 
     Task<List<HetznerImage>> ListSnapshotsAsync(string token, CancellationToken ct = default);
     Task<HetznerImage?> GetImageAsync(string token, long imageId, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("hetzner.snapshot_delete")]
     Task DeleteImageAsync(string token, long imageId, CancellationToken ct = default);
 }

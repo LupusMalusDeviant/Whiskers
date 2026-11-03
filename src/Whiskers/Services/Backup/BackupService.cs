@@ -66,7 +66,30 @@ public sealed class BackupService : IBackupService
 
     // ---------------------------------------------------------------- create
 
-    public async Task<SelfBackupInfo> CreateBackupAsync(string label, CancellationToken ct = default)
+    public Task<SelfBackupInfo> CreateBackupAsync(string label, CancellationToken ct = default) => CreateCoreAsync(label, ct);
+
+    /// <inheritdoc />
+    public Task<SelfBackupInfo> CreatePreUpgradeBackupAsync(CancellationToken ct = default) =>
+        CreateCoreAsync($"{PreUpgradeLabelPrefix}{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
+
+    /// <inheritdoc />
+    public async Task DeletePreUpgradeBackupAsync(string id, CancellationToken ct = default)
+    {
+        var backup = (await ListBackupsAsync(ct)).FirstOrDefault(b => b.Id == id);
+        if (backup is null || !backup.Label.StartsWith(PreUpgradeLabelPrefix, StringComparison.Ordinal))
+            throw new InvalidOperationException($"'{id}' is not a pre-upgrade backup; start-up deletes only those.");
+        await DeleteCoreAsync(id);
+    }
+
+    /// <inheritdoc />
+    public Task BeginHostRestoreAsync(string backupId, string actor, RestoreTarget target, CancellationToken ct = default)
+    {
+        var archive = ResolveArchivePath(backupId)
+                      ?? throw new BackupValidationException($"No self-backup with the id '{backupId}' in this data directory.");
+        return BeginRestoreCoreAsync(archive, actor, target, ct);
+    }
+
+    private async Task<SelfBackupInfo> CreateCoreAsync(string label, CancellationToken ct)
     {
         // R1-28: the archive key is VAULT_KEY. When the vault rejected it, it is a mistyped or changed key — an archive
         // sealed with it would need that very typo to restore, and the panel would call it encrypted. No backup then.
@@ -260,7 +283,9 @@ public sealed class BackupService : IBackupService
         return null;
     }
 
-    public Task DeleteBackupAsync(string id, CancellationToken ct = default)
+    public Task DeleteBackupAsync(string id, CancellationToken ct = default) => DeleteCoreAsync(id);
+
+    private Task DeleteCoreAsync(string id)
     {
         if (!SafeName.IsMatch(id)) throw new ArgumentException($"Invalid backup id '{id}'.");
         var archive = ResolveArchivePath(id);
@@ -280,7 +305,7 @@ public sealed class BackupService : IBackupService
             .Where(b => !b.Label.StartsWith(PreUpgradeLabelPrefix, StringComparison.Ordinal));
         foreach (var old in all.Skip(keepNewest))
         {
-            try { await DeleteBackupAsync(old.Id, ct); }
+            try { await DeleteCoreAsync(old.Id); }
             catch (Exception ex) { _logger.LogWarning(ex, "Retention: failed to delete backup {Id}", old.Id); }
         }
     }
@@ -339,9 +364,12 @@ public sealed class BackupService : IBackupService
     }
 
     public Task BeginRestoreAsync(string uploadedPath, string actor, CancellationToken ct = default) =>
-        BeginRestoreAsync(uploadedPath, actor, RestoreTarget.ThisRelease, ct);
+        BeginRestoreCoreAsync(uploadedPath, actor, RestoreTarget.ThisRelease, ct);
 
-    public async Task BeginRestoreAsync(string uploadedPath, string actor, RestoreTarget target, CancellationToken ct = default)
+    public Task BeginRestoreAsync(string uploadedPath, string actor, RestoreTarget target, CancellationToken ct = default) =>
+        BeginRestoreCoreAsync(uploadedPath, actor, target, ct);
+
+    private async Task BeginRestoreCoreAsync(string uploadedPath, string actor, RestoreTarget target, CancellationToken ct)
     {
         var forward = target == RestoreTarget.ThisRelease;
         await _restoreLock.WaitAsync(ct);
@@ -394,7 +422,7 @@ public sealed class BackupService : IBackupService
                 SelfBackupInfo safety;
                 try
                 {
-                    safety = await CreateBackupAsync($"pre-restore-{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
+                    safety = await CreateCoreAsync($"pre-restore-{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
                 }
                 catch (Exception ex)
                 {

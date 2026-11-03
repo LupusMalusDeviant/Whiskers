@@ -22,6 +22,9 @@ public interface IUpdateRiskService
     /// <param name="scanCandidate">Scan the candidate image for CVEs so the benefit side of the decision has
     /// a number. Costs a Trivy run (tens of seconds); without it the report says the benefit is unknown
     /// rather than pretending it is zero.</param>
+    /// <remarks>It pulls the candidate image, so it is a mutation of its own (<c>image.assess_update</c>, R1-48) that
+    /// composes <c>image.pull</c>; it starts and recreates nothing.</remarks>
+    [Whiskers.Services.Mutations.MutatingOperation("image.assess_update")]
     Task<UpdateRiskReport> AssessAsync(string serverId, string container, bool scanCandidate = true,
         CancellationToken ct = default);
 }

@@ -196,12 +196,12 @@ public class TaskExecutor : ITaskExecutor
             return (false, "No command specified");
 
         var sid = ScheduledTaskServer.Of(task);
-        // The executor is not marked yet (it is a primitive); gating the call still re-checks the owner, who must
+        // The raw execution is the executor's primitive (R1-48): it runs only inside this scope; gating the call re-checks the owner, who must
         // hold host.exec (Admin), and applies the kill switch. The command goes to the policy (forbidden arguments as
         // they are today, not when the task was created); the audit row keeps only its length.
         var outcome = await _automation.RunAsync(ActorOf(task), "host.exec",
             new { serverId = sid, taskId = task.TaskId, command },
-            _ => _executor.ExecuteAsync(sid, command, TimeSpan.FromMinutes(5)));
+            _ => _executor.ExecuteMutationAsync(sid, command, TimeSpan.FromMinutes(5)));
         if (Problem(outcome, "host.exec") is { } problem) return (false, problem);
         var result = outcome.Value!;
 
@@ -224,7 +224,7 @@ public class TaskExecutor : ITaskExecutor
         var ids = stopped.Select(c => c.Id).ToList();
         var outcome = await _automation.RunAsync(ActorOf(task), "host.prune",
             new { serverId = sid, taskId = task.TaskId, containerIds = string.Join('\n', ids) },
-            _ => _executor.ExecuteAsync(sid, CleanupCommandFor(ids), TimeSpan.FromMinutes(2)));
+            _ => _executor.ExecuteMutationAsync(sid, CleanupCommandFor(ids), TimeSpan.FromMinutes(2)));
         if (Problem(outcome, "host.prune") is { } problem) return (false, problem);
         var result = outcome.Value!;
 
@@ -321,7 +321,7 @@ public class TaskExecutor : ITaskExecutor
                 // Deleting dumps is its own decision, taken now: the owner may have lost the right since the backup.
                 var outcome = await _automation.RunAsync(ActorOf(task), "db.backup_delete",
                     new { containerId = task.TargetId, database = dbName, keep = maxBackups, serverId = ScheduledTaskServer.Of(task) },
-                    _ => _executor.ExecuteAsync(sid, script, TimeSpan.FromSeconds(15)));
+                    _ => _executor.ExecuteMutationAsync(sid, script, TimeSpan.FromSeconds(15)));
                 if (Problem(outcome, "db.backup_delete") is { } problem)
                     _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);
             }

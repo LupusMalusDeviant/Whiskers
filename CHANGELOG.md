@@ -6,6 +6,37 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-48: **A change that no decision covers is refused, not just noticed.** The Mutation Gateway's scope guard ran in
+  report mode: a call to a marked service outside a gateway decision was logged and then ran. It now throws
+  (`MutationScopeViolationException`) before the call runs, in production, and logs the attempt at Error. A decision
+  covers its own capability and the nested operations listed explicitly in `MutationCompositions` (a deployment
+  pulling its image and creating its container, onboarding issuing a certificate and saving the server, a workload
+  start being a container start, a store writing its vault secrets, an nginx change reloading nginx, …) — nothing
+  else, and no class is exempt as a whole: a `[MutationHandler]` now names the capability it runs under and its calls
+  are checked against it. **Coverage:** raw host commands that change something go through the executor's new
+  primitive `IHostCommandExecutor.ExecuteMutationAsync` (`execute_command`, `set_container_env`, `deploy_compose`,
+  scheduled commands, cleanup and DB-backup retention, the container page's `.env` save and Artisan commands, UI
+  compose deploys), which runs only inside a decision; server records (add/update/SSH key, remove), onboarding,
+  webhook management, AI-trigger save, self-backup create/delete/prune/restore, Kubernetes workload start/stop/restart
+  (the provider from `WorkloadProviderFactory` is guarded now), cloud power/snapshot and the Hetzner extensions are
+  marked. **Detached work:** a closed scope authorizes nothing — work that escaped it (`Task.Run`, a timer, a
+  fire-and-forget continuation) is refused once the decision ended, and a decision started there does not nest under
+  the dead one. The automatic end of a check pause is no longer a `checks.resume`: it removes only the expired pause it
+  read (a newer pause stays). **Architecture test:** `docs/v1/mutation-bypass-baseline.txt` is removed; the test
+  allows no call by file. `MutationGatewayCoverageTests` lists every write by surface (UI, MCP/agent, background,
+  webhook, terminal) and pins who may call the primitive. **Open:** the first-run wizard's write of the sign-in
+  whitelist (`config.whitelist`) is a protected authentication path this change does not touch; it stays recorded
+  rather than refused (`MutationScopeMonitor.PendingCapabilities`) until the maintainer decides how the wizard is
+  decided. No database change.
+  **Upgrade notes:** (1) `assess_update_risk` pulls the candidate image and is now **write** (new capability
+  `image.assess_update`, was read): a read-only key or a Viewer can no longer call it; a stricter stored level stays.
+  An assessment that could not be made is recorded as `Failed`. (2) For code built against Whiskers' interfaces:
+  `IBackupService` has three start-up methods (`CreatePreUpgradeBackupAsync`, `DeletePreUpgradeBackupAsync`,
+  `BeginHostRestoreAsync`) used only by the upgrade guard and `--restore-backup`; `IServerConfigService.AdoptCloudKeyRefAsync`
+  has no default body any more; `WorkloadProviderFactory` needs an `IMutationScopeMonitor`; `[MutationHandler]` needs a
+  capability. (3) A custom service or test that writes through a guarded service outside the gateway now fails with
+  `MutationScopeViolationException` instead of a log line — run it through `IUiMutationRunner` /
+  `IAutomationMutationRunner` / an MCP tool.
 - R1-43: **The VPN bring-up is decided, recorded and owned, and its key never reaches a command line.** With
   `VPN_PROVIDER=tailscale` or `netbird`, Whiskers started the VPN daemon and joined the mesh at every start on no
   one's authority and without an audit record. That bring-up now runs through the same gateway as every other change

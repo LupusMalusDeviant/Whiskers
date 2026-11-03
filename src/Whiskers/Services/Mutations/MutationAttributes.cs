@@ -2,9 +2,10 @@ namespace Whiskers.Services.Mutations;
 
 /// <summary>
 /// Marks a service-interface method that changes infrastructure, and names the capability it performs
-/// (<c>&lt;area&gt;.&lt;verb&gt;</c>, ADR-0005). Two checks read it: the runtime scope guard reports a call that runs
-/// outside a Mutation Gateway scope, and <c>MutationBypassArchitectureTests</c> lists every caller outside a
-/// <see cref="MutationHandlerAttribute"/> type. Put it on the <b>interface</b> method; implementations inherit nothing.
+/// (<c>&lt;area&gt;.&lt;verb&gt;</c>, ADR-0005). Two checks read it: the runtime scope guard refuses a call that runs
+/// outside a Mutation Gateway scope that decided this capability (or one that composes it,
+/// <see cref="MutationCompositions"/>), and <c>MutationBypassArchitectureTests</c> refuses every caller outside such a
+/// context. Put it on the <b>interface</b> method; implementations inherit nothing.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, Inherited = false)]
 public sealed class MutatingOperationAttribute : Attribute
@@ -19,13 +20,32 @@ public sealed class MutatingOperationAttribute : Attribute
 }
 
 /// <summary>
-/// Marks a class whose methods are the execution delegates the Mutation Gateway runs. Only these classes (and the
-/// gateway itself) may call a <see cref="MutatingOperationAttribute"/> method; everything else goes through
-/// <see cref="IMutationGateway"/>. Enforced by <c>MutationBypassArchitectureTests</c>.
+/// Marks a raw execution primitive (R1-48): a method that runs whatever the caller hands it — a host shell command —
+/// so it has no capability of its own. It runs only inside an open Mutation Gateway scope, of whatever capability was
+/// decided; outside one the scope guard refuses it. Reads that use the same transport go through an unmarked method,
+/// and <c>MutationGatewayCoverageTests</c> lists every caller of both.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class MutationPrimitiveAttribute : Attribute
+{
+}
+
+/// <summary>
+/// Marks a helper class whose methods run only as part of one capability's execution (R1-48): the class is the
+/// execution of <see cref="CapabilityId"/>, and the operations it calls must be that capability or one it composes
+/// (<see cref="MutationCompositions"/>). It is not an exemption: <c>MutationBypassArchitectureTests</c> checks every
+/// call in the class against the capability, and at run time the scope guard checks the open scope.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
 public sealed class MutationHandlerAttribute : Attribute
 {
+    public MutationHandlerAttribute(string capabilityId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(capabilityId);
+        CapabilityId = capabilityId;
+    }
+
+    public string CapabilityId { get; }
 }
 
 /// <summary>

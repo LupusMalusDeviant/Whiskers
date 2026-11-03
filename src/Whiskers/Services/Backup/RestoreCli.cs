@@ -77,7 +77,7 @@ public static class RestoreCli
             await log.WriteLineAsync($"Staging backup {id} for restore{(forPrevious ? " by the previous release" : "")} " +
                 "(a safety backup of the current state is taken first)…");
             // Staging also resets the upgrade state (BackupService), as for a restore from the Settings panel.
-            await backups.BeginRestoreAsync(archive, Actor,
+            await backups.BeginHostRestoreAsync(id!, Actor,
                 forPrevious ? RestoreTarget.PreviousRelease : RestoreTarget.ThisRelease, ct);
             await log.WriteLineAsync($"Backup {id} is staged. " + (forPrevious
                 ? "Start the previous release now — it applies the restore before it opens the database."
