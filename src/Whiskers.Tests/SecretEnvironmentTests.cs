@@ -18,7 +18,8 @@ public class SecretEnvironmentTests : IDisposable
 {
     private const string Key = VpnSecretHandlingTests.TailscaleKey;
     private static readonly string[] Names =
-        ["Vpn__Tailscale__AuthKey", "VPN__NETBIRD__SETUPKEY", "TAILSCALE_AUTHKEY", "NETBIRD_SETUP_KEY", "TS_AUTHKEY", "NB_SETUP_KEY"];
+        ["Vpn__Tailscale__AuthKey", "VPN__NETBIRD__SETUPKEY", "TAILSCALE_AUTHKEY", "NETBIRD_SETUP_KEY", "TS_AUTHKEY", "NB_SETUP_KEY",
+         "ASPNETCORE_Vpn__Tailscale__AuthKey", "dotnet_NB_SETUP_KEY"];   // round 2 (m2): behind a configuration prefix
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "secret-env-" + Guid.NewGuid().ToString("N"));
 
@@ -43,6 +44,13 @@ public class SecretEnvironmentTests : IDisposable
     [InlineData("Vpn:Netbird:SetupKey", true)]
     [InlineData("TS_AUTHKEY", true)]
     [InlineData("nb_setup_key", true)]
+    [InlineData("ASPNETCORE_Vpn__Tailscale__AuthKey", true)]   // round 2 (m2): the configuration reads these too
+    [InlineData("aspnetcore_vpn:netbird:setupkey", true)]
+    [InlineData("DOTNET_Vpn__Netbird__SetupKey", true)]
+    [InlineData("DOTNET_TS_AUTHKEY", true)]
+    [InlineData("ASPNETCORE_", false)]
+    [InlineData("ASPNETCORE_Vpn__Tailscale__AuthKeyFile", false)]
+    [InlineData("OTHER_Vpn__Tailscale__AuthKey", false)]       // not a prefix the configuration reads
     [InlineData("Vpn__Tailscale__AuthKeyFile", false)]   // a path, not the key
     [InlineData("Vpn__Tailscale__LoginServer", false)]
     [InlineData("PATH", false)]
@@ -119,6 +127,47 @@ public class SecretEnvironmentTests : IDisposable
             Assert.True(scrubs >= starts,
                 $"{Path.GetRelativePath(root, file)} builds {starts} ProcessStartInfo but scrubs only {scrubs}.");
         }
+
+        // Round 2 NIT: a Process.Start(string, …) overload builds its start info where nothing can scrub it — every
+        // call hands over a (scrubbed) ProcessStartInfo variable instead.
+        foreach (var file in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+        {
+            var text = File.ReadAllText(file);
+            var calls = CountOf(text, "Process.Start(");
+            var withStartInfo = System.Text.RegularExpressions.Regex.Matches(text, @"Process\.Start\(\s*[A-Za-z_]\w*\s*\)").Count;
+            Assert.True(calls == withStartInfo,
+                $"{Path.GetRelativePath(root, file)} calls Process.Start with something other than a ProcessStartInfo variable.");
+        }
+    }
+
+    /// <summary>Round 2 (m2): the configuration reads the environment unprefixed and behind prefixes (the prefix is
+    /// dropped: <c>ASPNETCORE_Vpn__Tailscale__AuthKey</c> is <c>Vpn:Tailscale:AuthKey</c>). The prefixes are taken from
+    /// the builder Program.cs uses, so a prefix added there that <see cref="SecretEnvironment"/> misses fails here.</summary>
+    [Fact]
+    public void Every_environment_prefix_the_configuration_reads_is_a_secret_prefix_too()
+    {
+        SetAll();
+        var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
+        var prefixes = ((Microsoft.Extensions.Configuration.IConfigurationBuilder)builder.Configuration).Sources
+            .OfType<Microsoft.Extensions.Configuration.EnvironmentVariables.EnvironmentVariablesConfigurationSource>()
+            .Select(s => s.Prefix ?? "")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Assert.Contains("", prefixes);
+        Assert.Contains(prefixes, p => p.Length > 0);
+        foreach (var prefix in prefixes.Where(p => p.Length > 0))
+        {
+            Assert.Contains(prefix, SecretEnvironment.ConfigurationPrefixes, StringComparer.OrdinalIgnoreCase);
+            Assert.True(SecretEnvironment.IsSecret(prefix + "Vpn__Tailscale__AuthKey"), prefix);
+            Assert.True(SecretEnvironment.IsSecret(prefix.ToLowerInvariant() + "TS_AUTHKEY"), prefix);
+        }
+        // The prefixed name really is the configuration key (what makes it a secret).
+        Assert.Equal(Key, builder.Configuration["Vpn:Tailscale:AuthKey"]);
+        // And Whiskers adds no environment source of its own beyond the builder's.
+        var root = Path.Combine(McpToolCatalogSnapshotTests.RepositoryRoot(), "src", "Whiskers");
+        Assert.DoesNotContain(Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories),
+            f => File.ReadAllText(f).Contains("AddEnvironmentVariables(", StringComparison.Ordinal));
     }
 
     private static int CountOf(string text, string what)

@@ -21,6 +21,13 @@ public sealed class VpnSecretFile : IDisposable
     /// <summary>Mode of the directory around it: owner only.</summary>
     public const UnixFileMode DirectoryMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 
+    /// <summary>The read/write/execute bits of owner, group and others. Only these are compared: a setgid or sticky bit
+    /// inherited from the parent (a setgid <c>WHISKERS_SECRET_DIR</c>) says nothing about who can read the key.</summary>
+    private const UnixFileMode PermissionBits =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+        | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute
+        | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+
     /// <summary>Name prefix of the directories, also what <see cref="RemoveStale"/> removes.</summary>
     public const string DirectoryPrefix = "whiskers-vpn-";
 
@@ -82,7 +89,8 @@ public sealed class VpnSecretFile : IDisposable
             else Directory.CreateDirectory(directory, DirectoryMode);
             created = true;
             if (!OperatingSystem.IsWindows()
-                && (new DirectoryInfo(directory).LinkTarget is not null || File.GetUnixFileMode(directory) != DirectoryMode))
+                && (new DirectoryInfo(directory).LinkTarget is not null
+                    || (File.GetUnixFileMode(directory) & PermissionBits) != DirectoryMode))
                 throw new IOException("The VPN key directory could not be created with mode 0700.");
 
             var options = new FileStreamOptions
@@ -96,7 +104,7 @@ public sealed class VpnSecretFile : IDisposable
             {
                 // Checked before the key is written: a umask can only narrow the mode, but a file system that ignores
                 // it (or a mount that forces wider modes) must not receive the key.
-                if (!OperatingSystem.IsWindows() && File.GetUnixFileMode(path) != FileMode)
+                if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(path) & PermissionBits) != FileMode)
                     throw new IOException("The VPN key file could not be created with mode 0600.");
                 // Not flushed to disk: the file lives for one CLI call, in memory where that is possible.
                 stream.Write(Encoding.UTF8.GetBytes(secret.Trim()));
@@ -111,7 +119,10 @@ public sealed class VpnSecretFile : IDisposable
     }
 
     /// <summary>Removes key directories a previous process left behind (a crash or a kill during the CLI call) under
-    /// <paramref name="parents"/> (default: <see cref="DefaultParents"/>). Returns how many were removed.</summary>
+    /// <paramref name="parents"/> (default: <see cref="DefaultParents"/>). Returns how many were removed. It runs once,
+    /// before this process's own bring-up; two Whiskers instances that share one temp directory (bare metal, a
+    /// developer machine) would remove each other's directory of an in-flight call, so give each its own
+    /// <c>WHISKERS_SECRET_DIR</c> there. In a container the directory is the container's own.</summary>
     public static int RemoveStale(IEnumerable<string>? parents = null, ILogger? logger = null)
     {
         var removed = 0;

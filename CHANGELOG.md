@@ -27,8 +27,12 @@ All notable changes to Whiskers are documented here. The format follows
   for as long as it runs, ssh, docker, nsenter, shells — inherited them, readable in `/proc/<pid>/environ` under
   `pid: host`. Now `entrypoint.sh` moves the active provider's key into a 0600 file in memory (`/dev/shm`, or
   `WHISKERS_SECRET_DIR`) and hands Whiskers only its path (`Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`),
-  and drops every key variable on every way into the app; Whiskers drops them from its own environment after reading
-  its configuration and removes them from the environment of every process it starts. **New, preferred:**
+  and drops every key variable — also behind the `ASPNETCORE_` / `DOTNET_` prefixes the configuration reads — before
+  it starts its first process, so neither the app nor the long-lived `tailscaled` of the legacy path inherits one. It
+  takes the provider from `Vpn__Provider` (also prefixed) before `VPN_PROVIDER`, as Whiskers does, and warns on the
+  console when it drops a key no provider will read. Whiskers drops them (also prefixed) from its own environment after
+  reading its configuration and removes them from the environment of every process it starts. Only the exact spelling
+  is moved by the script: a name in other letter case still reaches Whiskers' own start environment. **New, preferred:**
   `TAILSCALE_AUTHKEY_FILE` / `NETBIRD_SETUP_KEY_FILE` (`Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`) —
   a file only Whiskers can read, mode 0600 or 0400, e.g. a Docker secret; it wins over the value, is read once at start,
   a wider mode is logged as a warning and an unreadable or empty file fails the bring-up. The value variant keeps

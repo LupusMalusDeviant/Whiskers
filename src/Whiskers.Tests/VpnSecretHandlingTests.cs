@@ -202,6 +202,23 @@ public class VpnSecretHandlingTests : IDisposable
         Assert.False(Directory.Exists(Path.GetDirectoryName(path)));
     }
 
+    /// <summary>Round 2 NIT: a setgid parent (the directory then inherits the bit) is no reason to refuse — only the
+    /// permission bits say who can read the key.</summary>
+    [SkippableFact]
+    public void A_secret_file_can_be_created_under_a_setgid_parent()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "Windows has no Unix file modes");
+        var parent = Path.Combine(_dir, "setgid");
+        Directory.CreateDirectory(parent);
+        File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                                     | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.SetGroup);
+        Skip.IfNot(File.GetUnixFileMode(parent).HasFlag(UnixFileMode.SetGroup), "this file system does not keep setgid");
+
+        using var file = VpnSecretFile.Create(TailscaleKey, parent);
+        Assert.Equal(TailscaleKey, File.ReadAllText(file.Path));
+        Assert.Equal(VpnSecretFile.FileMode, File.GetUnixFileMode(file.Path) & ~UnixFileMode.SetGroup);
+    }
+
     [Fact]
     public void A_secret_file_holds_the_key_without_a_newline_and_is_removed_on_dispose()
     {
@@ -269,34 +286,59 @@ public class VpnSecretHandlingTests : IDisposable
             .Where(l => l.Length > 0 && !l.StartsWith('#'))
             .ToList();
 
-        // Every line that reads a key's value ("$NAME" / "${NAME"): only a test, the builtin printf into a private file
-        // or the call of the function that does that — never a command that receives it as an argument.
+        // Round 2 (M1): every key variable is copied into a shell variable and unset — under every prefix the
+        // configuration reads — before the script starts its first process, so not even tailscaled inherits one.
         string[] names = ["TAILSCALE_AUTHKEY", "Vpn__Tailscale__AuthKey", "Vpn__Netbird__SetupKey", "NETBIRD_SETUP_KEY", "TS_AUTHKEY", "NB_SETUP_KEY"];
-        var reads = lines.Where(l => names.Any(n =>
-            System.Text.RegularExpressions.Regex.IsMatch(l, @"\$\{?" + n + "(?![A-Za-z0-9_])"))).ToList();
+        string[] prefixes = ["", .. SecretEnvironment.ConfigurationPrefixes];
+        var unsetLoop = lines.FindIndex(l => l == "for ws_prefix in \"\" " + string.Join(' ', SecretEnvironment.ConfigurationPrefixes) + "; do");
+        Assert.True(unsetLoop >= 0, "the unset loop covers the configuration prefixes");
+        var unsetLine = lines[unsetLoop + 1] + " " + lines[unsetLoop + 2];
+        Assert.StartsWith("unset ", unsetLine);
+        foreach (var name in names) Assert.Contains("\"${ws_prefix}" + name + "\"", unsetLine);
+        int First(Predicate<string> p) { var i = lines.FindIndex(p); Assert.True(i >= 0); return i; }
+        var firstProcess = new[]
+        {
+            First(l => l == "remove_stale_keys \"$WHISKERS_SECRET_DIR\""),
+            First(l => l.StartsWith("ws_provider=$(", StringComparison.Ordinal)),
+            First(l => l.StartsWith("tailscaled --state", StringComparison.Ordinal)),
+        }.Min();
+        Assert.True(unsetLoop < firstProcess, "the keys are unset before the first process is started");
+
+        // Every line that reads a key variable ("$NAME" / "${NAME", under any prefix) is a copy into a shell variable
+        // above the unset; the copies are read only by a test, the builtin printf into a private file or key_to_file.
+        var reads = lines.Select((l, i) => (l, i)).Where(x => names.Any(n => prefixes.Any(p =>
+            System.Text.RegularExpressions.Regex.IsMatch(x.l, @"\$\{?" + p + n + "(?![A-Za-z0-9_])")))).ToList();
         Assert.NotEmpty(reads);
-        foreach (var line in reads)
-            Assert.True(line.StartsWith("if [ -n \"${", StringComparison.Ordinal)
-                        || line.StartsWith("printf '%s' \"$TAILSCALE_AUTHKEY\" > ", StringComparison.Ordinal)
+        foreach (var (line, index) in reads)
+        {
+            Assert.True(index < unsetLoop, $"A key variable is read after it was unset: {line}");
+            Assert.Matches(@"^ws_\w+=\$\{", line);
+        }
+        string[] copies = ["ws_ts_legacy_key", "ws_ts_key", "ws_nb_key"];
+        foreach (var line in lines.Where(l => copies.Any(c =>
+                     System.Text.RegularExpressions.Regex.IsMatch(l, @"\$\{?" + c + "(?![A-Za-z0-9_])"))))
+            Assert.True(line.StartsWith("if [ -n \"$ws_", StringComparison.Ordinal)
+                        || line.StartsWith("printf '%s' \"$ws_ts_legacy_key\" > ", StringComparison.Ordinal)
                         || System.Text.RegularExpressions.Regex.IsMatch(line,
-                            @"^Vpn__\w+File=\$\(key_to_file ""\$Vpn__\w+""\)$"),
+                            @"^Vpn__\w+File=\$\(key_to_file ""\$ws_\w+_key""\)$"),
                 $"A key's value is used outside a test, the printf builtin or key_to_file: {line}");
+        Assert.DoesNotContain(lines, l => l.StartsWith("export ws_", StringComparison.Ordinal));
+        // m1: the provider is the one Whiskers resolves (Vpn__Provider, then behind its prefixes), VPN_PROVIDER last.
+        Assert.Contains("ws_app_provider=${Vpn__Provider:-${ASPNETCORE_Vpn__Provider:-${DOTNET_Vpn__Provider:-${VPN_PROVIDER:-}}}}", lines);
+        Assert.Contains("ws_provider=$(printf '%s' \"$ws_app_provider\" | tr '[:upper:]' '[:lower:]')", lines);
         Assert.Contains("printf '%s' \"$1\" > \"$kf_dir/key\"", lines);   // key_to_file itself
         // The CLI gets a file, and nothing else hands a key over.
         Assert.Contains(lines, l => l.StartsWith("tailscale up --auth-key=\"file:", StringComparison.Ordinal));
         Assert.DoesNotContain(lines, l => l.Contains("--authkey", StringComparison.Ordinal));
         Assert.DoesNotContain(lines, l => l.Contains("--setup-key=", StringComparison.Ordinal));
-        // Every way into the application drops the keys and the traps (B1).
-        Assert.Contains("unset TAILSCALE_AUTHKEY NETBIRD_SETUP_KEY TS_AUTHKEY NB_SETUP_KEY", lines);
-        Assert.Contains("unset Vpn__Tailscale__AuthKey", lines);
-        Assert.Contains("unset Vpn__Netbird__SetupKey", lines);
+        // Every way into the application drops the traps (B1).
         Assert.Equal(1, lines.Count(l => l.StartsWith("exec ", StringComparison.Ordinal)));
         Assert.Contains("exec dotnet Whiskers.dll \"$@\"", lines);
         Assert.Equal(3, lines.Count(l => l == "start_app \"$@\""));
         // The legacy file is private: umask 077 before it is written, removed after the call, also on an early exit and
         // on a stop signal, which is passed on (m4).
         var umask = lines.FindIndex(l => l == "umask 077");
-        var write = lines.FindIndex(l => l.StartsWith("printf '%s' \"$TAILSCALE_AUTHKEY\"", StringComparison.Ordinal));
+        var write = lines.FindIndex(l => l.StartsWith("printf '%s' \"$ws_ts_legacy_key\"", StringComparison.Ordinal));
         var remove = lines.FindIndex(Math.Max(write, 0), l => l == "rm -rf \"$ts_key_dir\"");
         Assert.True(umask >= 0 && umask < write && write < remove, "umask 077 → printf → rm -rf in this order");
         Assert.Contains("trap 'rm -rf \"$ts_key_dir\"' EXIT", lines);
@@ -353,7 +395,8 @@ public class VpnSecretHandlingTests : IDisposable
         Directory.CreateDirectory(bin);
         Directory.CreateDirectory(secrets);
         Directory.CreateDirectory(record);
-        WriteScript(Path.Combine(bin, "tailscaled"), "exit 0");
+        // The fake daemon records the environment the real one would keep for the container's lifetime (M1).
+        WriteScript(Path.Combine(bin, "tailscaled"), $"env > '{record}/tailscaled-env'\nexit 0");
         // The fake application records its environment and, when it got a key file, that file's mode and content.
         WriteScript(Path.Combine(bin, "dotnet"), $$"""
             env > '{{record}}/env'
@@ -379,6 +422,7 @@ public class VpnSecretHandlingTests : IDisposable
         var (bin, secrets, record) = EntrypointDirs("legacy");
         WriteScript(Path.Combine(bin, "tailscale"), $$"""
             if [ "$1" = "up" ]; then
+                env > '{{record}}/tailscale-env'
                 for a in "$@"; do printf '%s\n' "$a" >> '{{record}}/args'; done
                 for a in "$@"; do
                     case "$a" in
@@ -400,9 +444,15 @@ public class VpnSecretHandlingTests : IDisposable
             ["TAILSCALE_AUTHKEY"] = TailscaleKey,
             ["TAILSCALE_HOSTNAME"] = "edge node",                 // a space stays inside one argv element
             ["Vpn__Tailscale__AuthKey"] = TailscaleKey,           // what compose sets in every mode
+            ["TS_AUTHKEY"] = TailscaleKey,
+            ["ASPNETCORE_Vpn__Tailscale__AuthKey"] = TailscaleKey,
+            ["DOTNET_TAILSCALE_AUTHKEY"] = TailscaleKey,
         }));
         Assert.True(code == 0, $"entrypoint failed: {stderr}");
 
+        // M1: neither the long-lived daemon nor the CLI inherits a key under any name.
+        AssertNoKey(File.ReadAllText(Path.Combine(record, "tailscaled-env")), TailscaleKey);
+        AssertNoKey(File.ReadAllText(Path.Combine(record, "tailscale-env")), TailscaleKey);
         var args = File.ReadAllLines(Path.Combine(record, "args"));
         var keyPath = File.ReadAllText(Path.Combine(record, "path"));
         Assert.Equal(["up", "--auth-key=file:" + keyPath, "--accept-routes", "--hostname=edge node"], args);
@@ -448,6 +498,35 @@ public class VpnSecretHandlingTests : IDisposable
         AssertNoKey(stdout + stderr, TailscaleKey);
     }
 
+    /// <summary>Round 2 (m1): the provider is resolved as Whiskers resolves it — <c>Vpn__Provider</c> (also behind the
+    /// configuration prefixes) before its compose mirror <c>VPN_PROVIDER</c> — and so is the key.</summary>
+    [SkippableFact]
+    public async Task The_entrypoint_follows_the_configured_provider_when_VPN_PROVIDER_is_not_set()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "the entrypoint is POSIX sh; Windows has no Unix file modes");
+        var (bin, secrets, record) = EntrypointDirs("config-provider");
+        WriteScript(Path.Combine(bin, "tailscale"), "exit 0");
+
+        var (code, stdout, stderr) = await RunAsync(Entrypoint(bin, secrets, new Dictionary<string, string>
+        {
+            ["ASPNETCORE_Vpn__Provider"] = "tailscale",              // no VPN_PROVIDER: a k8s / docker run shape
+            ["ASPNETCORE_Vpn__Tailscale__AuthKey"] = TailscaleKey,
+            ["Vpn__Netbird__SetupKey"] = NetbirdKey,                 // no provider reads it: dropped, and said so
+        }));
+        Assert.True(code == 0, $"entrypoint failed: {stderr}");
+
+        var appEnv = File.ReadAllText(Path.Combine(record, "env"));
+        AssertNoKey(appEnv, TailscaleKey);
+        AssertNoKey(appEnv, NetbirdKey);
+        Assert.Contains("Vpn__Tailscale__AuthKeyFile=" + secrets, appEnv);
+        Assert.Equal("600", File.ReadAllText(Path.Combine(record, "appmode")).Trim());
+        Assert.Equal(TailscaleKey, File.ReadAllText(Path.Combine(record, "appcontent")));
+        Assert.Contains("Vpn__Netbird__SetupKey is set but the VPN provider is 'tailscale'", stderr);
+        AssertNoKey(File.ReadAllText(Path.Combine(record, "tailscaled-env")), TailscaleKey);
+        AssertNoKey(stdout + stderr, TailscaleKey);
+        AssertNoKey(stdout + stderr, NetbirdKey);
+    }
+
     [SkippableFact]
     public async Task The_entrypoint_drops_every_key_variable_on_the_provider_none_path_and_removes_stale_key_dirs()
     {
@@ -478,6 +557,7 @@ public class VpnSecretHandlingTests : IDisposable
         AssertNoKey(appEnv, TailscaleKey);
         AssertNoKey(appEnv, NetbirdKey);
         Assert.Equal(["unrelated"], Directory.GetDirectories(secrets).Select(Path.GetFileName));
+        Assert.Contains("Vpn__Tailscale__AuthKey is set but the VPN provider is 'none'", stderr);
     }
 
     [SkippableFact]

@@ -43,9 +43,17 @@ of a baked-in VPN daemon, which is a prerequisite for a future distroless/chisel
   `Vpn__Netbird__SetupKey` in every mode. `entrypoint.sh` moves the active provider's key into a 0600 file
   (`whiskers-vpnkey.*` under `WHISKERS_SECRET_DIR`, else `/dev/shm`, else `TMPDIR`; it stays there while the container
   runs and is removed at the next start), passes `Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile` instead and
-  drops every key variable (`Vpn__…`, `TAILSCALE_AUTHKEY`, `NETBIRD_SETUP_KEY`, `TS_AUTHKEY`, `NB_SETUP_KEY`) on every
-  way into the app. Whiskers itself drops them from its environment after the configuration read them and scrubs them
-  from every process it starts (`Utils/SecretEnvironment`). Best: deliver the key as a file from the start
+  drops every key variable (`Vpn__…`, `TAILSCALE_AUTHKEY`, `NETBIRD_SETUP_KEY`, `TS_AUTHKEY`, `NB_SETUP_KEY`, each also
+  behind `ASPNETCORE_` / `DOTNET_`) before it starts its first process — the values live on in unexported shell
+  variables — so neither the app nor the legacy `tailscaled` (which runs as long as the container) inherits one. The
+  provider is resolved as Whiskers resolves it: `Vpn__Provider` (then `ASPNETCORE_…`, `DOTNET_…`), else `VPN_PROVIDER`;
+  a key no provider will read is dropped with a console warning. The script moves only the **exact spelling** of these
+  names: a variant in other letter case (`VPN__TAILSCALE__AUTHKEY`) reaches Whiskers' start environment, from where
+  Whiskers drops it as below. Whiskers itself drops them (any case, also behind the configuration prefixes
+  `ASPNETCORE_` / `DOTNET_`, which `SecretEnvironmentTests` derives from the real builder) from its environment after
+  the configuration read them and scrubs them from every process it starts (`Utils/SecretEnvironment`). Two Whiskers
+  instances outside a container that share one temp directory should each get their own `WHISKERS_SECRET_DIR`: the
+  stale-key cleanup at start would otherwise remove the other's in-flight key directory. Best: deliver the key as a file from the start
   (`TAILSCALE_AUTHKEY_FILE` / `NETBIRD_SETUP_KEY_FILE`, e.g. a Docker secret, mode 0600/0400). **Residual:** a value set
   as an environment variable stays visible in `docker inspect` and in Docker's container record; and when Whiskers is
   started **without** `entrypoint.sh` with the key in its environment, `/proc/<whiskers-pid>/environ` keeps showing the

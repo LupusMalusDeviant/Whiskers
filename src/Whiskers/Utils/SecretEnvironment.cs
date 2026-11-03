@@ -24,9 +24,26 @@ public static class SecretEnvironment
         "TS_AUTHKEY", "NB_SETUP_KEY",                       // what Tailscale's image and the NetBird CLI read
     };
 
-    /// <summary>True when <paramref name="name"/> is one of <see cref="Names"/>.</summary>
-    public static bool IsSecret(string? name) =>
-        !string.IsNullOrEmpty(name) && Names.Contains(name.Replace("__", ":", StringComparison.Ordinal));
+    /// <summary>The prefixes under which the configuration also reads environment variables: <c>WebApplication.CreateBuilder</c>
+    /// adds the unprefixed set plus <c>ASPNETCORE_</c> and <c>DOTNET_</c> (the prefix is dropped, so
+    /// <c>ASPNETCORE_Vpn__Tailscale__AuthKey</c> becomes <c>Vpn:Tailscale:AuthKey</c>). <c>SecretEnvironmentTests</c> derives
+    /// the prefixes from the builder's real environment sources and fails when one is missing here.</summary>
+    public static readonly IReadOnlyList<string> ConfigurationPrefixes = ["ASPNETCORE_", "DOTNET_"];
+
+    /// <summary>True when <paramref name="name"/> is one of <see cref="Names"/>, also behind one of the
+    /// <see cref="ConfigurationPrefixes"/> (compared without case, like the names).</summary>
+    public static bool IsSecret(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        if (Names.Contains(name.Replace("__", ":", StringComparison.Ordinal))) return true;
+        foreach (var prefix in ConfigurationPrefixes)
+        {
+            if (name.Length > prefix.Length && name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                && Names.Contains(name[prefix.Length..].Replace("__", ":", StringComparison.Ordinal)))
+                return true;
+        }
+        return false;
+    }
 
     /// <summary>Removes every secret name from the environment <paramref name="psi"/> hands to its child. Call it on
     /// every <see cref="ProcessStartInfo"/> Whiskers creates (<c>SecretEnvironmentTests</c> checks that each one does).</summary>
@@ -39,7 +56,10 @@ public static class SecretEnvironment
     }
 
     /// <summary>Removes every secret name from this process's environment and returns how many were set. Call it once
-    /// the configuration has loaded the environment: the values stay in the configuration, not in what a child inherits.</summary>
+    /// the configuration has loaded the environment: the values stay in the configuration, not in what a child inherits.
+    /// It changes .NET's own copy of the environment, which every <see cref="Process"/> start uses; the native
+    /// <c>environ</c> of the process stays as it was, so a native library that forked a child itself would still pass
+    /// the key on (Whiskers loads none that does).</summary>
     public static int RemoveFromProcess()
     {
         var removed = 0;
