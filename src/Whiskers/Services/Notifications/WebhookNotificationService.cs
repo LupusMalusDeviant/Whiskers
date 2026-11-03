@@ -42,7 +42,7 @@ public class WebhookNotificationService : IWebhookNotificationService
     {
         var c = _settings.CurrentValue;
         if (string.IsNullOrWhiteSpace(c.Url)) return;
-        await PostAsync(c, new NotificationEvent { EventType = "test", ContainerName = "Whiskers", ImageInfo = "Benachrichtigungen funktionieren." });
+        await PostAsync(c, new NotificationEvent { EventType = NotificationEventTypes.Test, ContainerName = "Whiskers", ImageInfo = "Benachrichtigungen funktionieren." });
     }
 
     private async Task PostAsync(WebhookNotificationSettings c, NotificationEvent evt, CancellationToken ct = default)

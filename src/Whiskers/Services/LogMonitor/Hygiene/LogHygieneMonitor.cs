@@ -138,7 +138,7 @@ public sealed class LogHygieneMonitor : Whiskers.Services.FleetBackgroundService
 
             await _notifications.SendAsync(new NotificationEvent
             {
-                EventType = "log_rotation_missing",
+                EventType = NotificationEventTypes.LogRotationMissing,
                 ServerId = entry.ServerId,
                 ServerName = server.Name,
                 ContainerName = entry.ContainerName,

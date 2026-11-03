@@ -144,7 +144,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                         {
                             ContainerId = update.ContainerId,
                             ContainerName = update.ContainerName,
-                            EventType = "image_update",
+                            EventType = NotificationEventTypes.ImageUpdate,
                             ImageName = update.Image,
                             ImageInfo = $"Local: {Truncate(update.LocalDigest)} → Remote: {Truncate(update.RemoteDigest)}"
                         }, ct);

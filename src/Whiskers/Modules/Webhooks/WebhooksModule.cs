@@ -62,7 +62,7 @@ public sealed class WebhooksModule : IWhiskersModule
         {
             await notify.SendAsync(new NotificationEvent
             {
-                EventType = "webhook_disabled",
+                EventType = NotificationEventTypes.WebhookDisabled,
                 ImageInfo = $"{legacy.Count} Webhook(s) ohne Secret wurden deaktiviert (Secret ist jetzt Pflicht): {names}. " +
                             "Secret in der Webhook-Ansicht neu generieren und wieder aktivieren.",
             });

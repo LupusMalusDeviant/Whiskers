@@ -72,7 +72,7 @@ public sealed class LoopSuspensionService : ILoopSuspensionService
         try { _ = _outcomes.RecordAsync(Outcomes.AutomaticActionKind.EmergencyStop, serverId, serverId, name, reason); }
         catch (Exception ex) { _logger.LogDebug(ex, "Could not file the pause of {ServerId} for an outcome check", serverId); }
 
-        Announce("loops_paused", serverId, name,
+        Announce(NotificationEventTypes.LoopsPaused, serverId, name,
             $"Background checks for {name} are paused" +
             (until is null ? " until revoked" : $" until {deadline:HH:mm} UTC") +
             $" ({reason}). Nothing is being checked there meanwhile — that is not the same as nothing being wrong." +
@@ -85,7 +85,7 @@ public sealed class LoopSuspensionService : ILoopSuspensionService
 
         var name = ServerName(serverId);
         _logger.LogInformation("Background loops for {Server} resumed", name);
-        Announce("loops_resumed", serverId, name,
+        Announce(NotificationEventTypes.LoopsResumed, serverId, name,
             $"Background checks for {name} are running again" + (was.Automatic ? " (the server started answering)." : "."));
     }
 

@@ -90,7 +90,7 @@ public sealed class ApiLatencyEvaluator
         var ratio = recent.TotalMilliseconds / baseline.TotalMilliseconds;
 
         return _tracker.Consider(
-            atUtc, serverId, serverName, "host_api_slow", ratio, _settings.Factor,
+            atUtc, serverId, serverName, Whiskers.Services.Notifications.NotificationEventTypes.HostApiSlow, ratio, _settings.Factor,
             (r, open) =>
                 $"Docker on {serverName} is answering {r:F1}× slower than usual — {recent.TotalMilliseconds:F0} ms " +
                 $"against a baseline of {baseline.TotalMilliseconds:F0} ms, for {BreachTracker.Describe(open)}. " +

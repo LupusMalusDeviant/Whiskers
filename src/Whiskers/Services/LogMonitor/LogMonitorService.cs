@@ -204,7 +204,7 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
                 Image = hit.Container.Image,
                 ServerId = hit.Container.ServerId,
                 ServerName = hit.Container.ServerName,
-                EventType = $"log_alert:{hit.Rule.Severity}",
+                EventType = NotificationEventTypes.LogAlert(hit.Rule.Severity),
                 // The detail line every channel renders (NotificationFormatter.Detail): which rule fired,
                 // on which host (container names repeat across a fleet) and the line that matched. The
                 // matched line is third-party text — the Matrix HTML body escapes it (MatrixNotification-
@@ -452,7 +452,7 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
 
         events.Enqueue(new NotificationEvent
         {
-            EventType = "log_scan_suspended",
+            EventType = NotificationEventTypes.LogScanSuspended,
             ContainerId = container.Id,
             ContainerName = container.Name,
             Image = container.Image,
@@ -475,7 +475,7 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         _logger.LogInformation("Log scan for {Container} on {Server} resumed", container.Name, container.ServerName);
         events.Enqueue(new NotificationEvent
         {
-            EventType = "log_scan_resumed",
+            EventType = NotificationEventTypes.LogScanResumed,
             ContainerId = container.Id,
             ContainerName = container.Name,
             Image = container.Image,

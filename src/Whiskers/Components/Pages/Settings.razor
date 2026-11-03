@@ -195,9 +195,11 @@ else
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCpu" Label="@L["Settings_Label_CpuThreshold"]" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maMem" Label="@L["Settings_Label_MemoryThreshold"]" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maDisk" Label="@L["Settings_Label_DiskThreshold"]" Min="1" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maSustained" Label="@L["Settings_Label_SustainedMinutes"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
-            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCooldown" Label="@L["Settings_Label_CooldownMinutes"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maSustained" Label="@L["Settings_Label_SustainedMinutes"]" HelperText="@L["Settings_Helper_SustainedMinutes"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maCooldown" Label="@L["Settings_Label_CooldownMinutes"]" HelperText="@L["Settings_Helper_CooldownMinutes"]" Min="1" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
         </MudGrid>
+        @* R1-56: what the two durations mean now — one raise per breach plus a recovery, elapsed time, not samples. *@
+        <MudAlert Severity="Severity.Info" Dense="true" Class="my-2" id="metric-alert-semantics">@L["Settings_MetricAlerts_Semantics"]</MudAlert>
         <MudDivider Class="my-2" />
         <MudGrid>
             <MudItem xs="12"><MudSwitch @bind-Value="_maAnom" Color="Color.Secondary" Label="@L["Settings_Label_AnomalyEnabled"]" /></MudItem>
@@ -206,6 +208,11 @@ else
             <MudItem xs="12" md="4"><MudNumericField @bind-Value="_maAnomFloor" Label="@L["Settings_Label_AnomalyFloor"]" Min="0" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@(!_maAnom)" /></MudItem>
         </MudGrid>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveMetricAlert" Class="mt-2">@L["Settings_Button_Save"]</MudButton>
+    </MudExpansionPanel>
+
+    @* R1-56: quiet hours — held from the channels, summarized after the window. *@
+    <MudExpansionPanel Text="@L["QuietHours_Panel"]" Icon="@Icons.Material.Filled.Bedtime">
+        <QuietHoursPanel />
     </MudExpansionPanel>
 
     @* R1-55: retention of the metric tiers and the alert history. *@

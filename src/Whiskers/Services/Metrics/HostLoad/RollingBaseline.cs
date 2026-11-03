@@ -79,6 +79,13 @@ public sealed class RollingBaseline
     public IReadOnlyList<HostLoadFinding> Observe(
         DateTime atUtc, string serverId, string serverName, string kind, double value, double absoluteThreshold)
     {
+        // R1-56: the event types come from the registry; a kind it has no anomaly/drift type for is a programming error.
+        var (anomalyKind, driftKind) = kind switch
+        {
+            "host_cpu" => (Whiskers.Services.Notifications.NotificationEventTypes.HostCpuAnomaly,
+                Whiskers.Services.Notifications.NotificationEventTypes.HostCpuBaselineDrifted),
+            _ => throw new ArgumentException($"No anomaly event type is registered for '{kind}'.", nameof(kind)),
+        };
         var key = $"{serverId}|{kind}";
         var series = _series.TryGetValue(key, out var existing) ? existing : _series[key] = new Series { FirstSeenUtc = atUtc };
         var findings = new List<HostLoadFinding>();
@@ -94,7 +101,7 @@ public sealed class RollingBaseline
         if (!learning)
         {
             var anomaly = _tracker.Consider(
-                atUtc, serverId, serverName, kind + "_anomaly", z, _settings.Sigma,
+                atUtc, serverId, serverName, anomalyKind, z, _settings.Sigma,
                 (score, open) =>
                     $"{serverName}: {kind.Replace("host_", "").Replace("_", " ")} is {value:F0}, which is " +
                     $"{score:F1} standard deviations from this server's own normal of {series.Mean:F0} " +
@@ -110,7 +117,7 @@ public sealed class RollingBaseline
         // very first 48 hours are already spent above the threshold, that is the most important thing this
         // rule could possibly say, and "still learning" would be the worst possible moment to stay silent.
         var drift = _tracker.Consider(
-            atUtc, serverId, serverName, kind + "_baseline_drifted", series.Mean, absoluteThreshold,
+            atUtc, serverId, serverName, driftKind, series.Mean, absoluteThreshold,
             (mean, open) =>
                 $"{serverName}: the learned normal for {kind.Replace("host_", "").Replace("_", " ")} has itself " +
                 $"risen to {mean:F0}, past the fixed threshold of {absoluteThreshold:F0}, over {BreachTracker.Describe(open)}. " +

@@ -72,10 +72,12 @@ public static class SqliteToPostgresMigrator
         "NULL AS \"Verification\", NULL AS \"DurationMs\" FROM \"AuditLog\"";
 
     /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack
-    /// exactly one of these sets — the tables of every release after its own (R1-55: the metric roll-up tiers; R1-10: the
+    /// exactly one of these sets — the tables of every release after its own (R1-56: what quiet hours held back; R1-55: the
+    /// metric roll-up tiers; R1-10: the
     /// webhook deliveries; R1-18: the operations; R1-14: the approvals; R1-12: the decision tables).</summary>
     internal static readonly IReadOnlyList<HashSet<string>> OlderReleaseTables =
     [
+        new(StringComparer.Ordinal) { "QuietHoursSuppressions" },
         Older(),
         Older("WebhookDeliveries"),
         Older("WebhookDeliveries", "Operations"),
@@ -84,9 +86,10 @@ public static class SqliteToPostgresMigrator
     ];
 
     /// <summary>A release before R1-55 lacks its tables too: it has raw samples only — they are copied, and the target
-    /// rolls them up once on its first start, as an upgrade in place would.</summary>
+    /// rolls them up once on its first start, as an upgrade in place would. And R1-56's: nothing was held by quiet hours.</summary>
     private static HashSet<string> Older(params string[] tables) =>
-        new([.. tables, "ContainerMetricRollups", "ServerMetricRollups", "MetricRollupStates"], StringComparer.Ordinal);
+        new([.. tables, "ContainerMetricRollups", "ServerMetricRollups", "MetricRollupStates", "QuietHoursSuppressions"],
+            StringComparer.Ordinal);
 
     /// <summary>Whether the SQLite source has the table at all. Any other provider is assumed to have the full schema.</summary>
     private static async Task<bool> SourceHasTableAsync(MetricsDbContext source, Table table, CancellationToken ct)
@@ -120,6 +123,9 @@ public static class SqliteToPostgresMigrator
         T("ContainerMetricRollups", c => c.ContainerMetricRollups, e => e.Id = 0),
         T("ServerMetricRollups",    c => c.ServerMetricRollups,    e => e.Id = 0),
         T("MetricRollupStates",     c => c.MetricRollupStates,     _ => { }),
+        // R1-56: what quiet hours held back and is still to be summarized (keyed by rule, window and target, copied as
+        // it is) — a move during quiet hours neither loses nor doubles the summary.
+        T("QuietHoursSuppressions", c => c.QuietHoursSuppressions, _ => { }),
         // R1-18: an operation names its audit row — the new id of every named row is remembered.
         T("AuditLog",          (c, run) => run.AuditLogWithoutTypedFields
                                    ? c.AuditLog.FromSqlRaw(AuditLogWithoutTypedFieldsSql)

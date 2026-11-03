@@ -1,0 +1,137 @@
+@using Whiskers.Configuration
+@using Whiskers.Services.Notifications
+@inject IQuietHoursService QuietHours
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+@inject IUiMutationRunner Mutations
+@inject IStringLocalizer<SharedResource> L
+
+@* R1-56: quiet hours. Each rule is a daily window in an explicit IANA time zone, global or for chosen event types; it holds
+   notifications back from the channels (never the in-app feed, the alert history or the AI triggers) and delivers them as
+   one summary afterwards. Never held: the events in NotificationEventTypes.UnsuppressibleEvents and a CVE batch with a
+   Critical finding. Each save is a gated, audited config.save (R1-11, R1-22). *@
+
+@if (_isAdmin)
+{
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">@L["QuietHours_Intro"]</MudText>
+<MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">@L["QuietHours_NeverHeld"]</MudAlert>
+
+<MudSimpleTable Dense="true" Elevation="0" Class="mb-2" id="quiet-hours-rules">
+    <thead><tr><th>@L["QuietHours_Th_Name"]</th><th>@L["QuietHours_Th_Window"]</th><th>@L["QuietHours_Th_Types"]</th><th>@L["QuietHours_Th_Enabled"]</th><th></th></tr></thead>
+    <tbody>
+        @if (_rules.Count == 0)
+        {
+            <tr><td colspan="5">@L["QuietHours_None"]</td></tr>
+        }
+        @foreach (var r in _rules)
+        {
+            <tr>
+                <td>@r.Name</td>
+                <td><code>@r.Start–@r.End</code> @r.TimeZone</td>
+                <td>@(r.EventTypes.Count == 0 ? L["QuietHours_AllTypes"].Value : string.Join(", ", r.EventTypes))</td>
+                <td><MudSwitch T="bool" Value="@r.Enabled" ValueChanged="@(v => Toggle(r, v))" Color="Color.Primary" /></td>
+                <td><MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Remove(r))" /></td>
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+<MudGrid>
+    <MudItem xs="12" md="3"><MudTextField @bind-Value="_name" Label="@L["QuietHours_Label_Name"]" Variant="Variant.Outlined" Margin="Margin.Dense" id="quiet-hours-name" /></MudItem>
+    <MudItem xs="12" md="3"><MudTextField @bind-Value="_zone" Label="@L["QuietHours_Label_TimeZone"]" HelperText="@L["QuietHours_Helper_TimeZone"]"
+                                           Variant="Variant.Outlined" Margin="Margin.Dense" id="quiet-hours-zone" /></MudItem>
+    <MudItem xs="6" md="2"><MudTextField @bind-Value="_start" Label="@L["QuietHours_Label_Start"]" Placeholder="22:00" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+    <MudItem xs="6" md="2"><MudTextField @bind-Value="_end" Label="@L["QuietHours_Label_End"]" Placeholder="07:00" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+    <MudItem xs="12" md="6">
+        <MudSelect T="string" MultiSelection="true" @bind-SelectedValues="_types" Label="@L["QuietHours_Label_Types"]"
+                   HelperText="@L["QuietHours_Helper_Types"]" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+            @foreach (var type in Selectable)
+            {
+                <MudSelectItem T="string" Value="@type">@type</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" md="2" Class="d-flex align-center">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Add"
+                   Disabled="@string.IsNullOrWhiteSpace(_name)">@L["Settings_Button_Add"]</MudButton>
+    </MudItem>
+</MudGrid>
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save" Class="mt-3"
+           Disabled="@(!_dirty)">@L["QuietHours_Button_Save"]</MudButton>
+}
+
+@code {
+    private bool _isAdmin;
+    private List<QuietHoursRule> _rules = new();
+    private bool _dirty;
+    private string _name = "";
+    private string _zone = DefaultZone();
+    private string _start = "22:00";
+    private string _end = "07:00";
+    private IReadOnlyCollection<string> _types = new HashSet<string>();
+
+    /// <summary>What a rule may name: every suppressible type, and every log alert.</summary>
+    private static readonly IReadOnlyList<string> Selectable = NotificationEventTypes.SuppressibleEvents
+        .Append(NotificationEventTypes.LogAlertPrefix).OrderBy(t => t, StringComparer.Ordinal).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The Settings page is Admin-only; the panel checks again before it shows anything.
+        _isAdmin = await CurrentUser.HasRoleAsync(Whiskers.Models.AppRole.Admin);
+        if (_isAdmin) Load();
+    }
+
+    /// <summary>The server's own zone as an IANA id, if it has one; otherwise UTC. Only a suggestion: the rule names its zone.</summary>
+    private static string DefaultZone()
+    {
+        var local = TimeZoneInfo.Local;
+        if (local.HasIanaId) return local.Id;
+        return TimeZoneInfo.TryConvertWindowsIdToIanaId(local.Id, out var iana) ? iana : "UTC";
+    }
+
+    private void Load()
+    {
+        _rules = QuietHours.Rules.ToList();
+        _dirty = false;
+    }
+
+    private void Add()
+    {
+        _rules.Add(new QuietHoursRule
+        {
+            Name = _name.Trim(), TimeZone = _zone.Trim(), Start = _start.Trim(), End = _end.Trim(),
+            EventTypes = _types.ToList(),
+        });
+        _name = "";
+        _types = new HashSet<string>();
+        _dirty = true;
+    }
+
+    private void Toggle(QuietHoursRule rule, bool enabled)
+    {
+        rule.Enabled = enabled;
+        _dirty = true;
+    }
+
+    private void Remove(QuietHoursRule rule)
+    {
+        _rules.Remove(rule);
+        _dirty = true;
+    }
+
+    private async Task Save()
+    {
+        var rules = _rules.Select(r => r.Clone()).ToList();
+        try
+        {
+            await Mutations.RunAsync("config.save", new { section = "quiet-hours" }, ct => QuietHours.SaveAsync(rules, ct));
+            Snackbar.Add(L["QuietHours_Snackbar_Saved"].Value, Severity.Success);
+            Load();
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (ArgumentException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) when (ex is MutationFailedException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Snackbar.Add(L["QuietHours_Snackbar_SaveFailed", ex.Message].Value, Severity.Error);
+        }
+    }
+}

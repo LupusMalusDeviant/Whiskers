@@ -291,7 +291,7 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             var notify = _sp.GetRequiredService<INotificationService>();
             await notify.SendAsync(new NotificationEvent
             {
-                EventType = "agent_action",
+                EventType = NotificationEventTypes.AgentAction,
                 ContainerId = evt.ContainerId,
                 ContainerName = evt.ContainerName,
                 Image = evt.Image,

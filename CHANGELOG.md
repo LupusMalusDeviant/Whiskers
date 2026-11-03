@@ -6,6 +6,63 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-56: **Threshold alerts say a breach once and say when it is over; quiet hours hold the channels back.** `high_cpu`,
+  `high_memory` and `high_disk` now follow the host rules' duration model: a breach is raised once, after the value
+  stayed at or above the threshold for `SustainedMinutes` of **elapsed time** (no longer a sample count that assumed a
+  30-second interval — a changed collection interval or a missed sample no longer changes what "3 minutes" means), is
+  never repeated while it lasts, and is closed by a new `high_cpu_recovered` / `high_memory_recovered` /
+  `high_disk_recovered` once the value stayed five minutes below the threshold minus 5 points (a value hovering just
+  under the threshold neither closes nor reopens it). A series without readings for longer than three collection
+  intervals (at least three minutes) — a container whose stats call fails, a host whose node_exporter is down, a `df`
+  that stopped answering, a server whose container listing keeps failing (one gap for its containers) — is no longer
+  only a log warning: it raises one `metrics_gap` (naming the alerts it leaves unconfirmed) and a
+  `metrics_gap_recovered` when readings are back, and an open breach starts again from the new readings instead of
+  being bridged — a raise such a reset ends (a series gap, a paused server, a failed listing, alerts switched off and on,
+  a held-up cycle, a disabled server enabled again) is always closed with its `*_recovered`, marked as not confirmed —
+  titled "<alert> closed — recovery not confirmed", severity Warning, never "back to normal" — and a breach that goes on
+  is raised again after `SustainedMinutes`, without waiting for `CooldownMinutes`. State that is dropped is closed the
+  same way: a container that stops, is removed or recreated, and a server removed from the configuration, have their
+  open alerts and their open `metrics_gap` closed. A collection cycle that was itself held up past the tolerance is a
+  log line (its open alerts are closed by the rule), not one message per series; a paused server and a `df` that never answered since the start raise no gap. A listing
+  that fails for a cycle no longer drops a container's breach. Open threshold alerts survive a restart of Whiskers
+  (`alert-breaches.json`): a breach raised before the restart is closed with its recovery afterwards and not raised a
+  second time. Raises, recoveries, gaps and the quiet-hours summary bypass the per-channel
+  throttle, like reachability and certificate events. **Quiet hours** (Settings → *Quiet hours*, Admin only, a gated,
+  audited configuration write): daily windows in an explicit IANA time zone (`Europe/Berlin`, `UTC`; a Windows zone name
+  or an unknown zone is refused on save), global or for chosen event types, crossing midnight, on the local wall clock
+  across DST changes. They hold notifications back from the channels only — the in-app feed and the alert history keep
+  recording, AI triggers are dispatched as always — and record what they held (at most 20 events per rule, window and
+  target, plus a count of the rest) for one summary per window, delivered when the window ends (or earlier, when the rule
+  is changed, switched off or removed) through the notification outbox. Never held: suspended or refused automation,
+  interrupted operations, a disabled webhook, an approval request, the paused-checks reminder, a suspended or resumed
+  log scan, stalled or resumed monitoring, a failed update, and a CVE batch holding a Critical finding (CVE notifications
+  now carry the batch's highest severity as a field). A muted container stays muted — only the administrative events
+  override the mute, as before. Event types now come from one registry (`NotificationEventTypes`); a type it does not
+  know is always delivered.
+  **Upgrade notes:** (1) **Behaviour change** for `high_cpu`, `high_memory` and `high_disk`: they no longer re-fire every
+  `CooldownMinutes` while a breach lasts — expect one alert and one recovery per breach. `MetricAlert:CooldownMinutes`
+  now means the least gap between the end of one breach and the alert for the next breach of the same container or
+  disk (a breach that becomes reportable sooner is raised once that gap has passed, if it is still going on); it still is
+  the repeat interval of `metric_anomaly`, which is a point-in-time outlier and unchanged. Filters, AI triggers or channel
+  rules keyed on the old repetition should listen for the new `*_recovered` and `metrics_gap` types instead. (2) Host
+  CPU, memory and unexplained-load alerts reset an open breach after the same gap tolerance instead of bridging any gap.
+  (3) The alert texts of the container and disk alerts are English now. (4) The migration `QuietHoursSuppressions` only
+  adds one table; `--migrate-to-postgres` copies it. (5) No quiet hours exist after the upgrade — nothing is held until
+  an Admin adds a rule. (6) A summary is created exactly once and delivered at least once: if Whiskers stops after a
+  channel accepted a summary but before the outbox recorded that, the summary is sent again after the restart (Slack,
+  Discord, ntfy, Telegram, e-mail and generic webhooks cannot deduplicate it; Matrix does, by its transaction id).
+  `notification-outbox.json` now also remembers the keys of summaries for seven days; an older release reading the file
+  ignores them. A window that is in effect again after its summary (its end moved later) gets a second summary of what
+  it held since. (7) The new file `alert-breaches.json` in the data directory holds the open threshold alerts; it is
+  local to the install and not part of a self-backup. Open API-latency and rolling-baseline findings are not kept: a
+  restart during one of them raises it again if it goes on, as before. (8) A container that stops or is removed during
+  a breach gets its `*_recovered` (unconfirmed, "no longer running"); the health monitor reports the stop as before. (9) A host whose `df` has not answered
+  since the start (no command channel) gets one log line instead of a `metrics_gap`; one with a kept disk breach counts
+  as read before. (10) The open alerts of a server that was removed from the configuration are closed (unconfirmed) and
+  dropped; a disabled server keeps them, containers included, and closes them by the gap rule once it is enabled again.
+  (11) A `<kind>_recovered` now carries `RecoveryUnconfirmed`; the notifications log calls the type "closed"
+  ("beendet") instead of "recovered", since a close is not always a recovery. The recovery of an alert resumed across a restart says so (its duration includes the downtime).
+
 - R1-55: **Metric history keeps its peaks and goes back 30 days and further.** Container and server samples are no
   longer only kept raw and deleted after one retention window: closed windows roll up into three tiers — 10 minutes,
   1 hour and 8 hours — each keeping the sample-weighted average, the true maximum and the sample count per series.

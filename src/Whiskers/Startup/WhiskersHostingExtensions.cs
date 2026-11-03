@@ -308,12 +308,24 @@ public static class WhiskersHostingExtensions
                 sp.GetRequiredService<Whiskers.Services.Persistence.IAppSettingsStore>(),
                 sp.GetRequiredService<ILogger<Whiskers.Services.Metrics.MetricRetentionService>>(),
                 sp.GetRequiredService<DataPathOptions>().AppSettingsJson));
+        // R1-56: quiet hours (their one, gated write path) and the durable record of what they held back. Core, so the
+        // Settings page has them with the Notifications module switched off; the summaries are made by its outbox worker.
+        builder.Services.AddSingleton<Whiskers.Services.Notifications.IQuietHoursService>(sp =>
+            new Whiskers.Services.Notifications.QuietHoursService(
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<Whiskers.Services.Persistence.IAppSettingsStore>(),
+                sp.GetRequiredService<ILogger<Whiskers.Services.Notifications.QuietHoursService>>(),
+                sp.GetService<TimeProvider>()));
+        builder.Services.AddSingleton<Whiskers.Services.Notifications.IAlertSuppressionStore, Whiskers.Services.Notifications.AlertSuppressionStore>();
         // Metrics source seam: collector reads through IMetricsSource so a server can be switched to a
         // push/scrape TSDB (VictoriaMetrics) instead of SSH/Docker. Docker is the default + fallback.
         builder.Services.AddHttpClient();
         builder.Services.AddSingleton<Whiskers.Services.Metrics.IDockerMetricsSource, DockerMetricsSource>();
         builder.Services.AddSingleton<Whiskers.Services.Metrics.IPrometheusMetricsSource, PrometheusMetricsSource>();
         builder.Services.AddSingleton<IMetricsSource, MetricsSourceDispatcher>();
+        // R1-56 (review MAJOR-4): the open threshold breaches, kept across a restart.
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.IAlertBreachStore>(sp =>
+            new Whiskers.Services.Metrics.AlertBreachStore(sp.GetRequiredService<DataPathOptions>().AlertBreachesJson));
         builder.Services.AddHostedService<MetricsCollectorService>();
 
         // Database service

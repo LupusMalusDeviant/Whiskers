@@ -133,7 +133,7 @@ public sealed class ScanSupervisor : Whiskers.Services.FleetBackgroundService
 
         await _notifications.SendAsync(new NotificationEvent
         {
-            EventType = stalled ? "monitoring_stalled" : "monitoring_resumed",
+            EventType = stalled ? NotificationEventTypes.MonitoringStalled : NotificationEventTypes.MonitoringResumed,
             ServerId = loop.ServerId,
             ServerName = serverName,
             ContainerName = serverName,

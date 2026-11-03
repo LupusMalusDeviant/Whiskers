@@ -1050,7 +1050,7 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
 
 **Acceptance criteria:**
 
-- [ ] `SustainedAlertTests` pin one documented semantics for every threshold alert: duration is elapsed time, not a
+- [x] `SustainedAlertTests` pin one documented semantics for every threshold alert: duration is elapsed time, not a
   sample count. A reading at or above the threshold starts or continues a breach; a reading inside the hysteresis
   band neither resets nor clears it; a breach ends only after readings stayed below the clear bound (threshold minus
   the documented margin) for the documented clear duration, with a Cleared finding if the breach was reported —
@@ -1069,16 +1069,16 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
   throttle; a test delivers two breaches and their recoveries inside one channel-throttle window. `metric_anomaly` (the rolling z-score rule in
   `MetricsCollectorService`) is a point-in-time outlier, not a threshold breach: it keeps re-firing after
   `CooldownMinutes` as today and is not migrated to breach semantics.
-- [ ] Quiet hours (per rule or global, IANA time zone explicit) suppress delivery to channels, never evaluation: the
+- [x] Quiet hours (per rule or global, IANA time zone explicit) suppress delivery to channels, never evaluation: the
   in-app feed and `AlertHistory` keep recording during quiet hours, and AI-trigger dispatch is not held (a trigger
   decides for itself). Windows crossing midnight, DST changes and an invalid time zone (refused on save) are tested.
-- [ ] Event types come from one registry, created by this package (today the literals are spread across the
+- [x] Event types come from one registry, created by this package (today the literals are spread across the
   producers): `NotificationEventTypes`, constants plus the two runtime patterns
   `log_alert:<severity>` and `<kind>_recovered`, that `NotificationFormatter.Describe`, `NotificationsLog.razor` and the
   suppression rule all read; an architecture test refuses any `EventType` value not drawn from it (variables included,
   `ServerCircuitBreaker`, `WebhookService`, `MetricsCollectorService.Emit`). A type the rule does not know at runtime
   is delivered, never suppressed.
-- [ ] Never suppressed by quiet hours: a named constant set in that registry (for example `UnsuppressibleEvents`)
+- [x] Never suppressed by quiet hours: a named constant set in that registry (for example `UnsuppressibleEvents`)
   containing the administrative events (`automation_suspended`, `automation_refused`, INV-04)
   and `cve_finding` notifications whose batch contains a Critical finding. `NotificationEvent` has no severity today
   (`CveMonitorService` sends one aggregate event per target with severities only in its text): the aggregate gains a
@@ -1093,7 +1093,7 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
   The set bypasses quiet hours only: the per-container mute keeps its meaning (only `AdministrativeEvents` override
   it, as today, INV-04); a Critical CVE batch for a muted container stays muted. Events
   for audit failures or the kill switch do not exist today; adding them is not part of this package.
-- [ ] What was suppressed is recorded durably (bounded aggregation per rule and target; past the bound the summary
+- [x] What was suppressed is recorded durably (bounded aggregation per rule and target; past the bound the summary
   carries an "N further events suppressed" count, so overflow is never silent) and delivered as one summary
   after the window, through R1-40's outbox — widened by this package from Critical notifications to these summaries —
   with an idempotency key: the summary is created exactly once (a restart during quiet hours neither loses nor
@@ -1101,9 +1101,38 @@ on the CVE event, settings UI with en/de strings; approximately 14–18 files.
   may deliver it again, which the documentation states (Slack and others offer no receiver-side deduplication);
   tested at that crash boundary. A window that ends early (rule changed) delivers it then. The
   summary bypasses the per-channel `NotificationThrottler`, as state transitions do (tested).
-- [ ] Rule and quiet-hour changes are gated configuration writes (R1-11) with audit (R1-22): Viewer/Operator and a
+- [x] Rule and quiet-hour changes are gated configuration writes (R1-11) with audit (R1-22): Viewer/Operator and a
   demoted Admin are refused, the kill switch refuses, an audit failure refuses before publication, and a failed save
   leaves the live rules unchanged.
+
+**Done (R1-56):** One duration model: `BreachTracker` takes its rules as a `BreachRules` (sustained duration, clear
+margin, clear duration, escalation step, gap tolerance, minimum gap between breaches) per reading, and the collector reads
+an injected `TimeProvider`. Container CPU/memory and host disk run on it (`BreachRules.Threshold`): sustained for
+`SustainedMinutes` of elapsed time, cleared after 5 minutes below the threshold minus 5 points, never restated; the
+gap tolerance is the larger of 3 minutes and three collection intervals (`BreachRules.GapToleranceFor`); host CPU,
+memory and unexplained load get the same tolerance (their own thresholds unchanged). `SeriesGapTracker` raises one
+`metrics_gap` per series (container, host — a host's disk is part of its gap —, or a host's `df`) and one
+`metrics_gap_recovered`. `CooldownMinutes` is the least gap between the end of one reported breach and the raise of
+the next (a breach reportable sooner is raised once the gap passed, if still open); `metric_anomaly` keeps its cooldown.
+Registry: `Services/Notifications/NotificationEventTypes.cs` (constants, `LogAlert(…)`, `Recovered(…)`,
+`AdministrativeEvents`, `UnsuppressibleEvents` — the named set plus `operations_interrupted`, the resumption of a
+suspended log scan and of stalled monitoring, the summary itself and a channel test —, `SuppressibleEvents`,
+`IsStateTransition`, `IsSuppressible`); `NotificationEvent.HighestCveSeverity`. Quiet hours: rules in
+`app-settings.json` section `QuietHours` (`QuietHoursService`, IANA zone required, wall-clock windows), held events in
+`QuietHoursSuppressions` (migration `QuietHoursSuppressions`, SQLite and PostgreSQL, one table; copied by
+`--migrate-to-postgres`), at most 20 per rule, window and target plus a count; summaries made by the outbox worker's
+pass (`QuietHoursSummarizer`) under the outbox's new idempotency keys (`AddOnceAsync`, keys remembered 7 days in
+`notification-outbox.json`). Tests: `SustainedAlertTests`, `QuietHoursTests`, `NotificationEventTypeArchitectureTests`,
+`QuietHoursPanelTests`, `NotificationThrottlerTests`, `UiMutationGatewayCoverageTests`, `SqliteToPostgresMigratorTests`;
+`HostLoadReplayTests` unchanged and green. Review round 1: a summary key per summarized set (a re-opened window is
+summarized again, never refused); a failed container listing keeps the breach state and is one gap for the server's
+containers; a held-up cycle is said once per server with an open alert, not per series; open threshold and host-load
+breaches survive a restart (`alert-breaches.json`, `IAlertBreachStore`); no gap for a paused server or a `df` that never
+answered. Review round 2: one rule — a reported breach that a gap resets is always closed with its `<kind>_recovered`
+(unconfirmed), whatever caused the gap (pause, failed listing, alerts off and on, held-up cycle); container owners and
+read disks are kept with the breaches; the state of removed servers is dropped. Review round 3: the unconfirmed close
+is flagged (`RecoveryUnconfirmed`: its own title, Warning) and sets no minimum gap; a disabled server keeps its
+containers' state; dropped state (a gone container, a removed server) is closed; a held-up cycle is a log line.
 
 **Out of scope:** On-call rotation and escalation chains.
 

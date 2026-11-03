@@ -118,6 +118,8 @@ public sealed class NotificationsModule : IWhiskersModule
         // when the module is enabled; when it's disabled the Noop remains. (RoadToSAP §2.1 soft dependency.)
         // R1-40: critical notifications a channel still failed are kept and redelivered, also after a restart.
         services.AddSingleton<INotificationOutbox, NotificationOutbox>();
+        // R1-56: the quiet-hours summaries, made by the outbox worker's pass and delivered through the outbox.
+        services.AddSingleton<IQuietHoursSummarizer, QuietHoursSummarizer>();
         services.AddHostedService<NotificationOutboxWorker>();
         services.AddSingleton<INotificationService, CompositeNotificationService>();
     }

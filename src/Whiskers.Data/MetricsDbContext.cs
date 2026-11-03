@@ -75,6 +75,9 @@ public class MetricsDbContext : DbContext
     /// <summary>How far each tier is rolled up (R1-55).</summary>
     public DbSet<MetricRollupStateEntity> MetricRollupStates => Set<MetricRollupStateEntity>();
 
+    /// <summary>What quiet hours held back, per rule, window and target, until its summary is made (R1-56).</summary>
+    public DbSet<QuietHoursSuppressionEntity> QuietHoursSuppressions => Set<QuietHoursSuppressionEntity>();
+
     public DbSet<AuditLogEntity> AuditLog => Set<AuditLogEntity>();
     /// <summary>The audit hash chain and its signed checkpoints (R1-23, ADR-0006).</summary>
     public DbSet<AuditChainEntry> AuditChain => Set<AuditChainEntry>();
@@ -151,6 +154,13 @@ public class MetricsDbContext : DbContext
         });
 
         modelBuilder.Entity<MetricRollupStateEntity>(e => e.HasKey(x => x.Id));
+
+        // R1-56: one row per rule, window and target (the key); the summarizer reads the rows still to be summarized.
+        modelBuilder.Entity<QuietHoursSuppressionEntity>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.SummarizedAt);
+        });
 
         modelBuilder.Entity<AlertHistoryEntity>(e =>
         {

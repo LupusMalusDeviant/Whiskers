@@ -35,10 +35,13 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
     [InlineData("DROP TABLE WebhookDeliveries;", "WebhookDeliveries")]                                               // before R1-10
     [InlineData("DROP TABLE AuditChain; DROP TABLE AuditCheckpoints; DROP TABLE WebhookDeliveries;", "WebhookDeliveries")]  // before R1-10 and R1-23
     [InlineData("", "MetricRollupStates")]                                                                            // before R1-55
+    [InlineData("", "QuietHoursSuppressions")]                                                                        // before R1-56
     public async Task A_source_from_an_older_release_migrates_completely(string drop, string absent)
     {
-        // Every release before R1-55 also lacks the roll-up tiers.
-        drop += " DROP TABLE ContainerMetricRollups; DROP TABLE ServerMetricRollups; DROP TABLE MetricRollupStates;";
+        // Every release before R1-55 also lacks the roll-up tiers, and every release before R1-56 what quiet hours held.
+        if (absent != "QuietHoursSuppressions")
+            drop += " DROP TABLE ContainerMetricRollups; DROP TABLE ServerMetricRollups; DROP TABLE MetricRollupStates;";
+        drop += " DROP TABLE QuietHoursSuppressions;";
         // A database migrated by an older release lacks the tables of every release after its own.
         var srcPath = NewDbPath();
         var dstPath = NewDbPath();
@@ -103,7 +106,8 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
             src.Webhooks.Add(new WebhookEntity { WebhookId = "hook-legacy-01", Name = "ci", Secret = "s", TargetId = "web-1" });
             await src.SaveChangesAsync();
             await src.Database.ExecuteSqlRawAsync("DROP TABLE WebhookDeliveries; ALTER TABLE Webhooks DROP COLUMN Provider; " +
-                "DROP TABLE ContainerMetricRollups; DROP TABLE ServerMetricRollups; DROP TABLE MetricRollupStates;");   // nor R1-55's
+                "DROP TABLE ContainerMetricRollups; DROP TABLE ServerMetricRollups; DROP TABLE MetricRollupStates; " +
+                "DROP TABLE QuietHoursSuppressions;");   // nor R1-55's or R1-56's
         }
 
         int rc;
@@ -298,6 +302,10 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
             src.ServerMetricRollups.Add(new ServerMetricRollupEntity { Id = 9, TierMinutes = 480, ServerId = "s1",
                 WindowStart = new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc), SampleCount = 960, CpuMax = 88 });
             src.MetricRollupStates.Add(new MetricRollupStateEntity { Id = "container/60", RolledUpTo = new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc) });
+            // R1-56: what quiet hours held and is still to be summarized — a move during quiet hours keeps it.
+            src.QuietHoursSuppressions.Add(new QuietHoursSuppressionEntity { Id = "night|2026-10-01|web @ s1", RuleId = "night",
+                RuleName = "Night", WindowKey = "2026-10-01", Target = "web @ s1", Count = 3, ItemsJson = "[]",
+                FirstAt = new DateTime(2026, 10, 1, 23, 0, 0, DateTimeKind.Utc), LastAt = new DateTime(2026, 10, 2, 1, 0, 0, DateTimeKind.Utc) });
             await src.SaveChangesAsync();
         }
 
@@ -313,6 +321,8 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         Assert.Equal((60, 120, 97.0), (tier.TierMinutes, tier.SampleCount, tier.CpuMax));
         Assert.Equal(88, (await check.ServerMetricRollups.SingleAsync()).CpuMax);
         Assert.Equal(new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc), (await check.MetricRollupStates.SingleAsync(s => s.Id == "container/60")).RolledUpTo);
+        var held = await check.QuietHoursSuppressions.SingleAsync();
+        Assert.Equal(("night|2026-10-01|web @ s1", 3, (DateTime?)null), (held.Id, held.Count, held.SummarizedAt));
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Whiskers.Models;
+using Whiskers.Services.Notifications;
 
 namespace Whiskers.Services.HealthMonitor;
 
@@ -51,7 +52,7 @@ public sealed class ServerReachabilityTracker
             events.Add(new NotificationEvent
             {
                 // Server-level event: no container, so the detail line carries the host and the reason.
-                EventType = "server_unreachable",
+                EventType = NotificationEventTypes.ServerUnreachable,
                 ServerId = failure.ServerId,
                 ServerName = failure.ServerName,
                 ImageInfo = $"{failure.ServerName} — {failure.Error}"
@@ -68,7 +69,7 @@ public sealed class ServerReachabilityTracker
                 string.Equals(c.ServerId, serverId, StringComparison.OrdinalIgnoreCase))?.ServerName ?? serverId;
             events.Add(new NotificationEvent
             {
-                EventType = "server_recovered",
+                EventType = NotificationEventTypes.ServerRecovered,
                 ServerId = serverId,
                 ServerName = name,
                 ImageInfo = $"{name} — reachable again"

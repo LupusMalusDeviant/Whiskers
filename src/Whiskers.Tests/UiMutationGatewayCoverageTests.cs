@@ -50,6 +50,9 @@ public class UiMutationGatewayCoverageTests : IDisposable
         // R1-55: the metric tiers' retention.
         (typeof(Whiskers.Services.Metrics.IMetricRetentionService),
             nameof(Whiskers.Services.Metrics.IMetricRetentionService.SaveAsync), "config.save"),
+        // R1-56: quiet hours.
+        (typeof(Whiskers.Services.Notifications.IQuietHoursService),
+            nameof(Whiskers.Services.Notifications.IQuietHoursService.SaveAsync), "config.save"),
     ];
 
     public static TheoryData<string> Capabilities()
@@ -152,6 +155,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Delete", "registry.delete"),
         (typeof(Whiskers.Components.Shared.OutboundExceptionsPanel), "Save", "config.save"),
         (typeof(Whiskers.Components.Shared.MetricRetentionPanel), "Save", "config.save"),
+        (typeof(Whiskers.Components.Shared.QuietHoursPanel), "Save", "config.save"),
     ];
 
     [Fact]

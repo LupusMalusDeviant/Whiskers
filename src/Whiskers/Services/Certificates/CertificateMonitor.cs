@@ -146,7 +146,7 @@ public sealed class CertificateMonitor : FleetBackgroundService
 
     internal static NotificationEvent ToEvent(ObservedCertificate cert, int stage, DateTime nowUtc) => new()
     {
-        EventType = stage == 0 ? "certificate_expired" : "certificate_expiring",
+        EventType = stage == 0 ? NotificationEventTypes.CertificateExpired : NotificationEventTypes.CertificateExpiring,
         ServerId = cert.ServerId,
         ServerName = cert.ServerName ?? "Whiskers",
         ImageInfo = CertificateExpiry.Describe(cert, nowUtc),
