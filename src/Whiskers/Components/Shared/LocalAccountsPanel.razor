@@ -1,0 +1,207 @@
+@using Whiskers.Services.Auth
+@using Microsoft.Extensions.DependencyInjection
+@inject ILocalAccountService Accounts
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject IConfiguration Configuration
+@inject IServiceProvider ServiceProvider
+@inject ISnackbar Snackbar
+@inject IUiMutationRunner Mutations
+@inject IStringLocalizer<SharedResource> L
+
+@* R1-49: local accounts (ASP.NET Identity). An Admin adds an account (with a role) and gets a one-time recovery code
+   for its owner, resets another account (the password is removed, its sessions end, a new code is shown once) and
+   deletes one (never their own, never the last Admin who can sign in). Each action is an audited gateway call
+   (account.create / account.password_reset / account.delete); the code is never part of what is recorded. The MFA
+   posture is stated here because this is where an Admin decides to rely on local accounts. *@
+
+@if (_isAdmin)
+{
+<MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3" id="local-accounts-mfa">@L["LocalAccounts_MfaPosture"]</MudAlert>
+@if (_authDisabled)
+{
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">@L["LocalAccounts_AuthDisabled"]</MudAlert>
+}
+
+@if (_issued is { } issued)
+{
+    <MudAlert Severity="Severity.Success" Class="mb-3" id="local-accounts-code" ShowCloseIcon="true" CloseIconClicked="DismissCode">
+        <MudText Typo="Typo.body2">@L["LocalAccounts_Code_Intro", issued.Email, issued.ExpiresUtc.ToString("yyyy-MM-dd HH:mm")]</MudText>
+        <MudText Typo="Typo.h6" Class="my-2" Style="font-family: monospace; letter-spacing: 1px;">@issued.Code</MudText>
+        <MudText Typo="Typo.body2">@L["LocalAccounts_Code_Hint"]</MudText>
+    </MudAlert>
+}
+
+<MudSimpleTable Dense="true" Elevation="0" Class="mb-3" id="local-accounts-table">
+    <thead><tr><th>@L["LocalAccounts_Th_Email"]</th><th>@L["LocalAccounts_Th_Role"]</th><th>@L["LocalAccounts_Th_State"]</th><th></th></tr></thead>
+    <tbody>
+        @if (_accounts.Count == 0)
+        {
+            <tr><td colspan="4">@L["LocalAccounts_None"]</td></tr>
+        }
+        @foreach (var a in _accounts)
+        {
+            <tr>
+                <td>@a.Email</td>
+                <td>@(a.HasExplicitRole ? a.Role.ToString() : L["LocalAccounts_Role_Default", a.Role].Value)</td>
+                <td>@StateText(a)</td>
+                <td style="white-space: nowrap;">
+                    @if (_confirmDelete == a.Email)
+                    {
+                        <MudText Typo="Typo.caption" Class="mr-2">@L["LocalAccounts_Confirm_Delete"]</MudText>
+                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" OnClick="@(() => Delete(a.Email))"
+                                   Disabled="@_busy">@L["LocalAccounts_Button_DeleteConfirm"]</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => _confirmDelete = null)">@L["LocalAccounts_Button_Cancel"]</MudButton>
+                    }
+                    else if (!Same(a.Email, _self))
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.LockReset"
+                                   OnClick="@(() => Reset(a.Email))" Disabled="@_busy">@L["LocalAccounts_Button_Reset"]</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                                   OnClick="@(() => _confirmDelete = a.Email)" Disabled="@_busy">@L["LocalAccounts_Button_Delete"]</MudButton>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L["LocalAccounts_OwnAccount"]</MudText>
+                    }
+                </td>
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">@L["LocalAccounts_Add_Heading"]</MudText>
+<MudGrid>
+    <MudItem xs="12" md="5">
+        <MudTextField @bind-Value="_newEmail" Label="@L["LocalAccounts_Label_Email"]" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      InputType="InputType.Email" id="local-accounts-email" />
+    </MudItem>
+    <MudItem xs="12" md="3">
+        <MudSelect T="AppRole" @bind-Value="_newRole" Label="@L["LocalAccounts_Label_Role"]" Variant="Variant.Outlined" Margin="Margin.Dense">
+            <MudSelectItem T="AppRole" Value="AppRole.Viewer">Viewer</MudSelectItem>
+            <MudSelectItem T="AppRole" Value="AppRole.Operator">Operator</MudSelectItem>
+            <MudSelectItem T="AppRole" Value="AppRole.Admin">Admin</MudSelectItem>
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" md="4" Class="d-flex align-center">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="Create"
+                   Disabled="@(_busy || string.IsNullOrWhiteSpace(_newEmail))">@L["LocalAccounts_Button_Add"]</MudButton>
+    </MudItem>
+</MudGrid>
+<MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2 d-block">@L["LocalAccounts_Add_Hint"]</MudText>
+}
+
+@code {
+    /// <summary>The clock the service uses when one is registered (tests), the system clock otherwise.</summary>
+    private TimeProvider Clock => ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+
+    private bool _isAdmin;
+    private bool _authDisabled;
+    private bool _busy;
+    private string? _self;
+    private IReadOnlyList<LocalAccountInfo> _accounts = [];
+    private string _newEmail = "";
+    private AppRole _newRole = AppRole.Viewer;
+    private string? _confirmDelete;
+
+    /// <summary>The code just issued; shown until dismissed or the next action, never stored anywhere else.</summary>
+    private Issued? _issued;
+    private sealed record Issued(string Email, string Code, DateTimeOffset ExpiresUtc);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The Settings page is Admin-only; the panel checks again before it shows anything.
+        _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
+        _authDisabled = Configuration.GetValue<bool>("Auth:Disabled");
+        if (!_isAdmin) return;
+        _self = await CurrentUser.GetEmailAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try { _accounts = await Accounts.ListAsync(); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _accounts = [];
+            Snackbar.Add(L["LocalAccounts_Error_store_unavailable"].Value, Severity.Error);
+        }
+    }
+
+    private string StateText(LocalAccountInfo a) => a.State switch
+    {
+        LocalAccountState.Active => L["LocalAccounts_State_Active"].Value,
+        LocalAccountState.LockedOut => L["LocalAccounts_State_LockedOut"].Value,
+        LocalAccountState.RecoveryPending when a.RecoveryExpiresUtc is { } until && until > Clock.GetUtcNow() =>
+            L["LocalAccounts_State_RecoveryPending", until.ToString("yyyy-MM-dd HH:mm")].Value,
+        _ => L["LocalAccounts_State_NoCredential"].Value,
+    };
+
+    private static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    private void DismissCode() => _issued = null;
+
+    private async Task Create()
+    {
+        var email = _newEmail.Trim();
+        var role = _newRole;
+        _issued = null;
+        var result = await RunAsync(() => Mutations.RunAsync("account.create", new { account = email, role = role.ToString() },
+            ct => Accounts.CreateAsync(email, role, ct)));
+        if (result is { Success: true, RecoveryCode: { } code, RecoveryExpiresUtc: { } expires })
+        {
+            _issued = new Issued(email, code, expires);
+            _newEmail = "";
+            Snackbar.Add(L["LocalAccounts_Snackbar_Created", email].Value, Severity.Success);
+        }
+        await LoadAsync();
+    }
+
+    private async Task Reset(string email)
+    {
+        _issued = null;
+        var result = await RunAsync(() => Mutations.RunAsync("account.password_reset", new { account = email },
+            ct => Accounts.ResetPasswordAsync(email, ct)));
+        if (result is { Success: true, RecoveryCode: { } code, RecoveryExpiresUtc: { } expires })
+        {
+            _issued = new Issued(email, code, expires);
+            Snackbar.Add(L["LocalAccounts_Snackbar_Reset", email].Value, Severity.Success);
+        }
+        await LoadAsync();
+    }
+
+    private async Task Delete(string email)
+    {
+        _issued = null;
+        _confirmDelete = null;
+        var result = await RunAsync(() => Mutations.RunAsync("account.delete", new { account = email },
+            ct => Accounts.DeleteAsync(email, ct)));
+        if (result is { Success: true }) Snackbar.Add(L["LocalAccounts_Snackbar_Deleted", email].Value, Severity.Success);
+        await LoadAsync();
+    }
+
+    /// <summary>Runs one gated call and shows why it was refused; the result only when it succeeded.</summary>
+    private async Task<LocalAccountResult?> RunAsync(Func<Task<LocalAccountResult>> call)
+    {
+        _busy = true;
+        try
+        {
+            var result = await call();
+            if (!result.Success) Snackbar.Add(ErrorText(result), Severity.Warning);
+            return result;
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) when (ex is MutationFailedException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // The type only: the message of a store failure is not shown (it is in the log).
+            Snackbar.Add(L["LocalAccounts_Error_failed", ex.GetType().Name].Value, Severity.Error);
+        }
+        finally { _busy = false; }
+        return null;
+    }
+
+    private string ErrorText(LocalAccountResult result)
+    {
+        var text = L[$"LocalAccounts_Error_{result.Error}"];
+        return text.ResourceNotFound ? result.Error ?? "" : text.Value;
+    }
+}

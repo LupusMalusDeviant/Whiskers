@@ -96,7 +96,7 @@ The area reports contain 111 findings: A 18, B 20, C 24, D 17, E 9, F 23. After 
 | TA-21 | Security | Webhooks: no replay protection (no timestamp/delivery ID), ID-enumeration oracle, no rate limit, long work inside the HTTP request, no per-target serialization | A-07, B-14, F-06, E-07 |
 | TA-22 | Security | Viewer can delete all notifications, start fleet-wide CVE scans, reject any approval | A-09 |
 | TA-23 | Security | Fail-open whitelist before setup: any Google/OIDC account gets Viewer | A-12 |
-| TA-24 | Commercial readiness | No local user management (password change/reset, extra users, MFA) | A-11 |
+| TA-24 | Commercial readiness | No local user management (password change/reset, extra users, MFA). **Fixed in R1-49 (INV-61):** own password change (current password required), Admin add/reset/delete of local accounts through the gateway (`account.*`), one-time recovery codes instead of temporary passwords (`/account/recover`), host recovery with `--recover-local-account`, the last Admin who can sign in kept, every credential change ending the account's sessions through R1-26 (`LocalAccountLifecycleTests`). **MFA is not offered for local accounts in 1.0 (product decision):** production uses the IdP with MFA, stated in README, SECURITY.md, `docs/operations/local-accounts.md` and the UI. | A-11 |
 | TA-25 | Testing | No integration tests asserting the auth requirement of every endpoint | A-18 |
 | TA-26 | Security | UI actions never consult the guardrail engine (kill switch / protected resources apply to AI+MCP only) — needs an explicit product decision | B-09 |
 | TA-27 | Security | Direct MCP calls get no guardrails when the Agent module is disabled | B-12, C-14 |

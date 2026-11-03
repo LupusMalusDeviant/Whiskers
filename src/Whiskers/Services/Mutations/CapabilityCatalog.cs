@@ -217,5 +217,14 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("vault.secret_delete", A, "config", Des, Short);
         yield return Ui("registry.save", A, "config", Root, Short);
         yield return Ui("registry.delete", A, "config", Dis, Short);
+
+        // Local accounts (R1-49); the target id is the account's email. Adding an account, resetting another one's
+        // password (which hands out a recovery code) and deleting one are Admin. Changing one's own password is the
+        // one capability at read level: every signed-in user may do it for their own account, and the service refuses
+        // anyone else's (it needs the current password too). The kill switch lets a read-level capability through.
+        yield return Ui("account.password_change", McpPermissionLevels.Read, "account", Rev, Short);
+        yield return Ui("account.create", A, "account", Root, Short);
+        yield return Ui("account.password_reset", A, "account", Root, Short);
+        yield return Ui("account.delete", A, "account", Des, Short);
     }
 }

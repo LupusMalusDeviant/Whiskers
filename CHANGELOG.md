@@ -6,6 +6,38 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-49: **Local accounts get a complete lifecycle.** Everyone with a local account changes their own password under
+  *My account* (person icon in the top bar; the current password is required and a wrong one counts towards the
+  lockout). Admins add, reset and delete local accounts under *Settings → Local accounts*. Whiskers never hands out a
+  temporary password: adding an account and resetting a password produce a **one-time recovery code** (shown once,
+  valid 24 hours, cannot sign in by itself) with which the account's owner sets a password at `/account/recover`
+  (linked from the sign-in page); a reset removes the old password at once. Every credential change — own change,
+  reset, code redeemed, account deleted — **ends every session of the account** (new security stamp, R1-26), the
+  changer's own included. If no Admin can sign in any more, the host operator issues a code inside the running
+  container: `docker compose exec serverwatch dotnet Whiskers.dll --recover-local-account <email>` (existing accounts
+  only, printed to the terminal only, never logged; its audit row is written first and without it nothing changes).
+  The last Admin who can sign in cannot be deleted (also when two Admins race; an Admin still waiting for a code does
+  not count), and nobody deletes or resets their own account there. Deleting an account also removes its explicit
+  role. New audited capabilities `account.password_change` (read level, own account only — also allowed while the kill
+  switch is on), `account.create`, `account.password_reset`, `account.delete` (Admin); new audit actions
+  `auth.recovery_issued`, `auth.recovery_redeemed`, `auth.recovery_refused`. `/account/recover` is limited to 10
+  attempts per client per minute (an IPv4 address or an IPv6 /64, taken from the page's live connection — WebSockets
+  or long polling — after the forwarded headers) and 10 per account per 15 minutes (throttled attempts check nothing
+  and are audited once per client and minute; at most 4096 clients and accounts are remembered, beyond that new ones
+  share one bucket); every answer takes at least one second; trying codes for an account that has none does not lock
+  it; a successful redemption is audited before the password is set. Adding, resetting and deleting accounts, and
+  redeeming a code, are refused while `AUTH_DISABLED` is set. Passwords and codes use ASP.NET Identity's
+  hashing; no password, hash or code reaches a log or the audit trail. **MFA posture:** local accounts have **no second
+  factor** in 1.0 — for production, sign in through your identity provider (OIDC) with MFA and keep local accounts as a
+  break-glass fallback ([docs/operations/local-accounts.md](docs/operations/local-accounts.md)).
+  **Upgrade notes:** no database change (codes live in the existing Identity token table, which the SQLite →
+  PostgreSQL migrator copies) and no configuration change; existing passwords keep working. The password policy is
+  unchanged (12 characters, upper- and lower-case letter, digit and symbol; 5 failures lock for 15 minutes).
+  `Auth__LocalLogin__Enabled=false` still only hides the password form — delete local accounts you do not need.
+  Behind a reverse proxy, narrow `ForwardedHeaders:TrustedNetworks` to the proxy's address: the default trusts all
+  private networks, so a LAN client could pose as many clients to the recovery page's (and the sign-in's) per-client
+  limit; a proxy outside the list makes all visitors share one limit.
+
 - R1-43: **The VPN bring-up is decided, recorded and owned, and its key never reaches a command line.** With
   `VPN_PROVIDER=tailscale` or `netbird`, Whiskers started the VPN daemon and joined the mesh at every start on no
   one's authority and without an audit record. That bring-up now runs through the same gateway as every other change

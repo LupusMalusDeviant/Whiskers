@@ -1,0 +1,108 @@
+@page "/account"
+@attribute [Authorize]
+@inject ILocalAccountService Accounts
+@inject ICurrentUserService CurrentUser
+@inject IUiMutationRunner Mutations
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
+
+@* R1-49: the signed-in user's own account. A local account changes its password here (the current one is required;
+   a wrong one counts towards the lockout); the change ends every session of the account, this one included, so the
+   page signs out afterwards. A Google/OIDC account is managed by its provider. The MFA posture is stated for both. *@
+
+<PageTitle>@L["Account_PageTitle"]</PageTitle>
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon"><MudIcon Icon="@Icons.Material.Filled.AccountCircle" Size="Size.Large" /></div>
+        <div>
+            <MudText Typo="Typo.h5">@L["Account_Header_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@_email</MudText>
+        </div>
+    </MudStack>
+</div>
+
+<MudPaper Class="pa-4 mt-4" Style="max-width: 640px;">
+    @if (!_loaded)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (_account is null)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" id="account-federated">@L["Account_NotLocal"]</MudAlert>
+    }
+    else
+    {
+        <MudText Typo="Typo.h6" Class="mb-2">@L["Account_ChangePassword_Heading"]</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">@L["Account_ChangePassword_Intro"]</MudText>
+        <MudTextField @bind-Value="_current" Label="@L["Account_Label_Current"]" InputType="InputType.Password"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" id="account-current" />
+        <MudTextField @bind-Value="_new" Label="@L["Account_Label_New"]" InputType="InputType.Password"
+                      HelperText="@L["LocalAccounts_PasswordPolicy"]" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" id="account-new" />
+        <MudTextField @bind-Value="_confirm" Label="@L["Account_Label_Confirm"]" InputType="InputType.Password"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="account-confirm" />
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3" id="account-error">@_error</MudAlert>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Password" OnClick="Change"
+                   Disabled="@(_busy || string.IsNullOrEmpty(_current) || string.IsNullOrEmpty(_new))">@L["Account_Button_Change"]</MudButton>
+    }
+    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-4" id="account-mfa">@L["LocalAccounts_MfaPosture"]</MudAlert>
+</MudPaper>
+
+@code {
+    private bool _loaded;
+    private bool _busy;
+    private string? _email;
+    private LocalAccountInfo? _account;
+    private string _current = "";
+    private string _new = "";
+    private string _confirm = "";
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _account = await Accounts.GetOwnAccountAsync(); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { _account = null; }
+        _email = _account?.Email ?? await CurrentUser.GetEmailAsync();
+        _loaded = true;
+    }
+
+    private async Task Change()
+    {
+        _error = null;
+        if (!string.Equals(_new, _confirm, StringComparison.Ordinal))
+        {
+            _error = L["Account_Error_Mismatch"].Value;
+            return;
+        }
+        var current = _current;
+        var next = _new;
+        _busy = true;
+        try
+        {
+            // The arguments name the account only; the passwords stay inside the call.
+            var result = await Mutations.RunAsync("account.password_change", new { account = _account!.Email },
+                ct => Accounts.ChangeOwnPasswordAsync(current, next, ct));
+            if (result.Success)
+            {
+                _current = _new = _confirm = "";
+                Snackbar.Add(L["Account_Snackbar_Changed"].Value, Severity.Success);
+                // Every session of the account has ended (new security stamp, R1-26): sign in again.
+                Nav.NavigateTo("logout", forceLoad: true);
+                return;
+            }
+            var text = L[$"LocalAccounts_Error_{result.Error}"];
+            _error = text.ResourceNotFound ? result.Error : text.Value;
+            _current = "";
+        }
+        catch (MutationRefusedException ex) { _error = ex.Message; }
+        catch (Exception ex) when (ex is MutationFailedException or InvalidOperationException)
+        {
+            _error = L["LocalAccounts_Error_failed", ex.GetType().Name].Value;
+        }
+        finally { _busy = false; }
+    }
+}
