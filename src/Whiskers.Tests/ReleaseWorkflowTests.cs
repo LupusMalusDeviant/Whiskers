@@ -35,6 +35,7 @@ public class ReleaseWorkflowTests
             ["publish-image"] = ["packages", "id-token"], // tag the scanned digests, cosign keyless signing
             ["publish-chart"] = ["packages"],
             ["github-release"] = ["contents"],
+            ["move-tags"] = ["packages"],                 // move X.Y and latest after the GitHub release exists
         },
     };
 
@@ -166,6 +167,12 @@ public class ReleaseWorkflowTests
     [InlineData("          ref: refs/tags/${{ steps.tag.outputs.tag }}", "          ref: ${{ github.ref }}")]
     [InlineData("if [ \"$GITHUB_REF\" != \"refs/tags/${TAG}\" ]; then", "if false; then")] // dispatch from any ref
     [InlineData("CSPROJ_VER=", "IGNORED_VER=")] // tag no longer compared with the csproj version
+    [InlineData("    needs: [prepare, test, build, scan, publish-image, publish-chart, github-release]\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read    # list",
+                "    needs: [prepare, test, build, scan, publish-image, publish-chart]\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read    # list")] // tags move before the GitHub release exists
+    [InlineData("          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          # The moving tags",
+                "          GH_TOKEN: ${{ github.token }}\n          PUSH_LATEST: ${{ needs.prepare.outputs.push_latest }}\n        run: |\n          set -euo pipefail\n          # The moving tags")] // a decision frozen in prepare, under any name
+    [InlineData("          PUBLISHED=\"$(gh release list --repo \"$GITHUB_REPOSITORY\" --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName')\"\n          ALL=",
+                "          PUBLISHED=\"$LIST\"\n          ALL=")] // the list taken from elsewhere
     public void A_broken_release_gate_is_caught(string from, string to)
         => Assert.NotEmpty(WorkflowPolicy.ReleaseGateViolations(Mutate(Workflow("release.yml"), from, to), Workflow("ci.yml")));
 
@@ -558,16 +565,31 @@ internal static class WorkflowPolicy
             if (!prepareRuns.Contains(required)) violations.Add($"the prepare job does not verify '{required}'");
         if (!Regex.IsMatch(prepareRuns, @"CSPROJ_VER=") || !Regex.IsMatch(prepareRuns, @"CHART_VER="))
             violations.Add("the prepare job does not compare the tag with the csproj and chart versions");
-        // The moving tags are decided from the published releases right where they move (review round 3: a decision
-        // taken in prepare is replayed by "Re-run failed jobs" and could move them back past a later release).
-        var moveRuns = jobs.TryGetValue("publish-image", out var publishImage)
-            ? string.Join("\n", Steps(publishImage).Select(s => Scalar(Child(s, "run"))).OfType<string>()
-                .Where(r => r.Contains("imagetools create -t \"$t\"")))
-            : "";
-        if (!moveRuns.Contains("gh release list") || moveRuns.Contains("git tag -l"))
-            violations.Add("`latest` and X.Y are not decided from the published releases in the step that moves them");
-        if (prepareRuns.Contains("push_latest"))
-            violations.Add("`latest` is decided when the run starts, so a re-run can move it back");
+        // The moving tags are decided from the published releases right where they move, in the last job (review rounds
+        // 3 and 4): a decision taken earlier is replayed by "Re-run failed jobs" and could move them back past a later
+        // release, and a move before the GitHub release exists is not repeated when only that release had to be finished.
+        var moveSteps = jobs.SelectMany(j => Steps(j.Value).Select(s => (Job: j.Key, Step: s)))
+            .Where(x => Scalar(Child(x.Step, "run"))?.Contains("imagetools create -t \"$t\"") == true).ToList();
+        if (moveSteps.Count != 1)
+            violations.Add($"expected exactly one step that moves X.Y and latest, found {moveSteps.Count}");
+        else
+        {
+            var (moveJob, moveStep) = moveSteps[0];
+            var moveRun = Scalar(Child(moveStep, "run"))!;
+            if (!moveRun.Contains("gh release list") || moveRun.Contains("git tag -l"))
+                violations.Add("`latest` and X.Y are not decided from the published releases in the step that moves them");
+            var release = JobsUsing(jobs, "softprops/action-gh-release@").FirstOrDefault() ?? "github-release";
+            if (!Needs(jobs[moveJob]).Contains(release))
+                violations.Add($"X.Y and latest move in '{moveJob}', which does not wait for the GitHub release ('{release}')");
+            // Only the version, its line and the published digest may come from earlier jobs — not a decision.
+            var inputs = Child(moveStep, "env") is YamlMappingNode env
+                ? env.Children.Values.Select(Scalar).OfType<string>()
+                    .SelectMany(v => Regex.Matches(v, @"needs\.([\w-]+)\.outputs\.([\w-]+)").Select(m => $"{m.Groups[1].Value}.{m.Groups[2].Value}"))
+                    .ToList()
+                : [];
+            foreach (var input in inputs.Except(["prepare.ver", "prepare.minor", "publish-image.digest"]))
+                violations.Add($"the move step takes '{input}' from an earlier job, so a re-run replays it");
+        }
 
         return violations;
     }
