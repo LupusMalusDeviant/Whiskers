@@ -267,6 +267,8 @@ public static class WhiskersHostingExtensions
         // R1-26 (INV-09): one session check for the cookie (every request), the circuit (every 30 s) and the
         // current-user resolver (every UI mutation); the circuit's authentication state re-checks itself.
         builder.Services.AddSingleton<Whiskers.Services.Auth.ISessionValidator, Whiskers.Services.Auth.SessionValidator>();
+        builder.Services.AddSingleton<Whiskers.Hubs.HubSessionSweep>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<Whiskers.Hubs.HubSessionSweep>());
         builder.Services.AddSingleton<Whiskers.Hubs.SessionHubFilter>();
         builder.Services.AddScoped<Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider,
             Whiskers.Services.Auth.SessionRevalidatingAuthenticationStateProvider>();

@@ -209,7 +209,8 @@ public sealed class AgentSession : IAgentSession
                     }
 
                     // After an approval wait, re-read once more right before the call: the wait can be long, and a key
-                    // revoked meanwhile must not ride on the approval. Without a wait the check above is current.
+                    // revoked meanwhile must not ride on the approval. Without a wait the last check ran a moment ago, before
+                    // the ToolProposed event (a slow event consumer widens that gap; a revocation then stops the next call).
                     if (decision.Verdict == GuardrailVerdict.Confirm) (live, revoked) = Live();
                     if (revoked is not null)
                     {

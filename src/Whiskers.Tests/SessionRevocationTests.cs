@@ -184,8 +184,13 @@ public sealed class SessionRevocationTests
     public async Task An_open_hub_connection_is_refused_and_closed_on_its_next_call(Change change)
     {
         await using var world = await World.CreateAsync();
-        var filter = new Whiskers.Hubs.SessionHubFilter(world.Validator);
+        var audit = new RecordingAudit();
+        var log = new AuthAuditLog(audit, NullLogger<AuthAuditLog>.Instance);
+        await log.StartAsync(CancellationToken.None);
+        var sweep = new Whiskers.Hubs.HubSessionSweep(world.Validator, audit: log);
+        var filter = new Whiskers.Hubs.SessionHubFilter(world.Validator, sweep);
         var connection = new HubConnection(world.OpsCookiePrincipal());
+        sweep.Track(connection);
         var calls = 0;
         ValueTask<object?> Next(Microsoft.AspNetCore.SignalR.HubInvocationContext _) { calls++; return ValueTask.FromResult<object?>(null); }
         var invocation = new Microsoft.AspNetCore.SignalR.HubInvocationContext(connection, world.Scopes.CreateScope().ServiceProvider,
@@ -198,6 +203,43 @@ public sealed class SessionRevocationTests
         await Assert.ThrowsAsync<Microsoft.AspNetCore.SignalR.HubException>(() => filter.InvokeMethodAsync(invocation, Next).AsTask());
         Assert.Equal(1, calls);
         Assert.True(connection.Aborted);
+        Assert.Equal(0, sweep.Count);
+        await log.StopAsync(CancellationToken.None);
+        Assert.Contains(audit.Rows, r => r.Action == AuthAuditLog.SessionRevokedAction && r.TargetId == "hub");
+    }
+
+    /// <summary>The server pushes to every connection without the client calling anything: a revoked connection that
+    /// stays silent is closed by the sweep within 60 seconds, and only that one.</summary>
+    [Theory]
+    [InlineData(Change.LocalDeletion)]
+    [InlineData(Change.WhitelistRemoval)]
+    public async Task A_silent_hub_connection_is_closed_by_the_sweep_within_sixty_seconds(Change change)
+    {
+        await using var world = await World.CreateAsync();
+        Assert.True(Whiskers.Hubs.HubSessionSweep.SweepInterval <= Inv09Bound);
+        var clock = new ManualClock(DateTimeOffset.UnixEpoch);
+        var audit = new RecordingAudit();
+        var log = new AuthAuditLog(audit, NullLogger<AuthAuditLog>.Instance);
+        await log.StartAsync(CancellationToken.None);
+        using var sweep = new Whiskers.Hubs.HubSessionSweep(world.Validator, clock, log);
+        await sweep.StartAsync(CancellationToken.None);
+        var ops = new HubConnection(world.OpsCookiePrincipal(), "ops");
+        var other = new HubConnection(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Email, World.Root)], "Google")), "root");
+        var filter = new Whiskers.Hubs.SessionHubFilter(world.Validator, sweep);
+        await filter.OnConnectedAsync(new Microsoft.AspNetCore.SignalR.HubLifetimeContext(ops,
+            world.Scopes.CreateScope().ServiceProvider, new NoHub()), _ => Task.CompletedTask);
+        sweep.Track(other);
+        Assert.Equal(2, sweep.Count);
+
+        await world.ApplyAsync(change);
+        clock.Advance(Whiskers.Hubs.HubSessionSweep.SweepInterval);
+        await WaitUntilAsync(() => ops.Aborted);
+
+        Assert.False(other.Aborted);
+        Assert.Equal(1, sweep.Count);
+        await log.StopAsync(CancellationToken.None);
+        Assert.Contains(audit.Rows, r => r.Action == AuthAuditLog.SessionRevokedAction && r.TargetId == "hub");
     }
 
     private sealed class NoHub : Microsoft.AspNetCore.SignalR.Hub
@@ -205,10 +247,10 @@ public sealed class SessionRevocationTests
         public void Ping() { }
     }
 
-    private sealed class HubConnection(ClaimsPrincipal user) : Microsoft.AspNetCore.SignalR.HubCallerContext
+    private sealed class HubConnection(ClaimsPrincipal user, string id = "c1") : Microsoft.AspNetCore.SignalR.HubCallerContext
     {
         public bool Aborted { get; private set; }
-        public override string ConnectionId => "c1";
+        public override string ConnectionId => id;
         public override string? UserIdentifier => null;
         public override ClaimsPrincipal? User => user;
         public override IDictionary<object, object?> Items { get; } = new Dictionary<object, object?>();
@@ -241,21 +283,76 @@ public sealed class SessionRevocationTests
 
     // ------------------------------------------------------------------------------------------------ page rendering
 
+    /// <summary>Pages gate actions on <c>GetRoleAsync</c>/<c>HasRoleAsync</c> and stamp principals from it
+    /// (<c>BuildPrincipalAsync</c> in the trigger and guardrail views): every lookup is a fresh check.</summary>
     [Fact]
-    public async Task Page_role_lookups_reuse_a_fresh_check_but_a_mutation_check_never_does()
+    public async Task Every_role_lookup_checks_the_session_afresh()
     {
         var counting = new CountingValidator();
         var user = new CurrentUserService(new FixedState(new ClaimsPrincipal(
             new ClaimsIdentity([new Claim(ClaimTypes.Email, World.Ops)], "Google"))), new AutomationMutationRunnerTests.Roles(),
-            counting, new ManualClock(DateTimeOffset.UnixEpoch));
+            counting);
 
         await user.GetRoleAsync();
         await user.GetRoleAsync();
         await user.HasRoleAsync(AppRole.Admin);
-        Assert.Equal(1, counting.Calls);
         await user.CheckSessionAsync();
-        await user.CheckSessionAsync();
-        Assert.Equal(3, counting.Calls);
+        Assert.Equal(4, counting.Calls);
+    }
+
+    [Theory]
+    [InlineData(Change.LocalDeletion)]
+    [InlineData(Change.WhitelistRemoval)]
+    [InlineData(Change.RoleDemotion)]
+    public async Task Role_lookups_right_after_a_revocation_hold_the_new_state(Change change)
+    {
+        await using var world = await World.CreateAsync();
+        var user = new CurrentUserService(new FixedState(world.OpsCookiePrincipal()), world.Roles, world.Validator);
+        Assert.Equal(AppRole.Admin, await user.GetRoleAsync());     // what a page loaded a moment ago
+
+        await world.ApplyAsync(change);
+
+        var expected = change == Change.RoleDemotion ? AppRole.Operator : AppRole.Viewer;
+        Assert.Equal(expected, await user.GetRoleAsync());
+        Assert.False(await user.HasRoleAsync(AppRole.Admin));
+    }
+
+    /// <summary>Approve/reject in the approvals page, the agent page and the chat decide through
+    /// <c>ApprovalResolver.CurrentAsync</c>; <c>ApprovalStore.DecideAsync</c> does not pass the UI mutation runner.</summary>
+    [Theory]
+    [InlineData(Change.LocalDeletion)]
+    [InlineData(Change.WhitelistRemoval)]
+    [InlineData(Change.RoleDemotion)]
+    public async Task An_approval_decision_right_after_a_revocation_uses_the_new_state(Change change)
+    {
+        await using var world = await World.CreateAsync();
+        var user = new CurrentUserService(new FixedState(world.OpsCookiePrincipal()), world.Roles, world.Validator);
+        Assert.Equal(McpPermissionLevels.Admin, (await ApprovalResolver.CurrentAsync(user))!.Level);
+
+        await world.ApplyAsync(change);
+
+        var resolver = await ApprovalResolver.CurrentAsync(user);
+        if (change == Change.RoleDemotion) Assert.Equal(McpPermissionLevels.Write, resolver!.Level);
+        else Assert.Null(resolver);
+    }
+
+    [Fact]
+    public async Task A_promotion_only_a_page_saw_then_a_demotion_ends_the_circuit()
+    {
+        await using var world = await World.CreateAsync();
+        await world.Roles.SetRoleAsync(World.Ops, AppRole.Viewer);
+        var clock = new ManualClock(DateTimeOffset.UnixEpoch);
+        using var provider = new SessionRevalidatingAuthenticationStateProvider(world.Validator, clock);
+        provider.SetAuthenticationState(Task.FromResult(new AuthenticationState(world.OpsCookiePrincipal())));
+        await WaitUntilAsync(() => clock.Periods.Count == 1);
+        var page = new CurrentUserService(provider, world.Roles, world.Validator);
+
+        await world.Roles.SetRoleAsync(World.Ops, AppRole.Admin);
+        Assert.Equal(AppRole.Admin, await page.GetRoleAsync());      // only the page saw the promotion
+        await world.Roles.SetRoleAsync(World.Ops, AppRole.Operator);
+
+        Assert.False(await provider.RevalidateAsync());
+        Assert.False((await provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
     }
 
     private sealed class CountingValidator : ISessionValidator

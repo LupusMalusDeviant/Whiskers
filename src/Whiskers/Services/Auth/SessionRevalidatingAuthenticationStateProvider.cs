@@ -28,6 +28,10 @@ public sealed class SessionRevalidatingAuthenticationStateProvider : ServerAuthe
     private ClaimsPrincipal? _watched;
     private AppRole? _highestRole;
     private bool _disposed;
+    // n1: each state change gets a number; only the newest one may set what is watched.
+    private long _sequence;
+    // A role a page was handed before the circuit started watching that principal.
+    private (ClaimsPrincipal User, AppRole Role)? _earlyNote;
 
     public SessionRevalidatingAuthenticationStateProvider(ISessionValidator sessions, TimeProvider? time = null,
         IAuthAuditLog? audit = null, ILogger<SessionRevalidatingAuthenticationStateProvider>? logger = null)
@@ -39,9 +43,9 @@ public sealed class SessionRevalidatingAuthenticationStateProvider : ServerAuthe
         AuthenticationStateChanged += OnStateChanged;
     }
 
-    private void OnStateChanged(Task<AuthenticationState> state) => _ = WatchAsync(state);
+    private void OnStateChanged(Task<AuthenticationState> state) => _ = WatchAsync(state, Interlocked.Increment(ref _sequence));
 
-    private async Task WatchAsync(Task<AuthenticationState> stateTask)
+    private async Task WatchAsync(Task<AuthenticationState> stateTask, long sequence)
     {
         // Out of the notification that called us: a check that completes synchronously must not set (and announce) the
         // anonymous state while later subscribers still receive the authenticated one.
@@ -52,19 +56,43 @@ public sealed class SessionRevalidatingAuthenticationStateProvider : ServerAuthe
 
         lock (_gate)
         {
+            // A newer state was set while this one waited: it alone decides what is watched.
+            if (sequence != Interlocked.Read(ref _sequence)) return;
             _timer?.Dispose();
             _timer = null;
             _watched = null;
             _highestRole = null;
             if (_disposed || state.User.Identity?.IsAuthenticated != true) return;
             _watched = state.User;
+            if (_earlyNote is { } note && ReferenceEquals(note.User, state.User)) _highestRole = note.Role;
+            _earlyNote = null;
         }
         // The first check fixes the role the circuit starts with; a session already invalid ends right here.
         if (!await RevalidateAsync()) return;
         lock (_gate)
         {
-            if (_disposed || !ReferenceEquals(_watched, state.User)) return;
+            if (_disposed || sequence != Interlocked.Read(ref _sequence) || !ReferenceEquals(_watched, state.User)) return;
             _timer = _time.CreateTimer(_ => _ = RevalidateAsync(), null, RevalidationInterval, RevalidationInterval);
+        }
+    }
+
+    /// <summary>Records that <paramref name="role"/> was handed to a page of this circuit for <paramref name="user"/>
+    /// (<see cref="CurrentUserService"/> calls it on every valid check): the circuit's later checks compare against the
+    /// highest role any page may have cached, so a promotion only a page saw, followed by a demotion, still ends it.</summary>
+    public void NoteRole(ClaimsPrincipal user, AppRole role)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        lock (_gate)
+        {
+            if (_disposed) return;
+            if (ReferenceEquals(_watched, user))
+            {
+                if (_highestRole is not { } highest || role > highest) _highestRole = role;
+            }
+            else if (_watched is null && (_earlyNote is not { } early || !ReferenceEquals(early.User, user) || role > early.Role))
+            {
+                _earlyNote = (user, role);
+            }
         }
     }
 

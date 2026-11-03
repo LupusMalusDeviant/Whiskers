@@ -17,12 +17,15 @@ All notable changes to Whiskers are documented here. The format follows
   the circuit anonymous (the sign-in page is
   shown, a page no longer acts on the role it cached); a raised role keeps it. Every UI mutation re-checks the session
   through the current-user resolver and a revoked one is refused by the Mutation Gateway and recorded, whatever role
-  the page cached. An open `/hubs/containers` connection re-checks its session on every call and is closed when it
+  the page cached; so does every role lookup a page makes (no reuse) and every approval decision (a revoked session
+  decides nothing, a lowered role decides at that role). An open `/hubs/containers` connection re-checks its session on
+  every call and is swept every 15 seconds (it receives server broadcasts without calling anything), and is closed and
+  audited (surface `hub`) when it
   is revoked. Terminals keep ending within 15 seconds (R1-17). A running agent session (`instruct_agent`, the agent
   chat) re-reads the key or user that started it before **every** tool call: a disabled or deleted key, or a user
   whose account was deleted or who may no longer sign in, stops the run at its next call — the call already running
   finishes; a lowered key level or narrowed tool list applies to the next call. Every revocation is audited as
-  `auth.session_revoked` (surface `cookie` or `circuit`, the reason only — never a cookie, claim value or stamp), at
+  `auth.session_revoked` (surface `cookie`, `circuit` or `hub`, the reason only — never a cookie, claim value or stamp), at
   most once per minute for the same account, surface and reason (a replayed cookie cannot flood the audit queue). A
   local account without a security stamp gets one at sign-in (a sign-in that cannot store it is refused,
   `no_security_stamp`).

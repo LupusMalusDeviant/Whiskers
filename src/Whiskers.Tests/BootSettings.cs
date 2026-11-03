@@ -116,6 +116,13 @@ internal sealed class BootSettings : IDisposable
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(hubOptions)
             as System.Collections.ICollection;
         Assert.True(filters is { Count: > 0 }, "The ContainerHub has no hub filter: open connections are never re-checked.");
+        // The entries are internal factories that keep the filter's type in a field: one must name SessionHubFilter.
+        Assert.Contains(filters!.Cast<object>(), entry => entry is Whiskers.Hubs.SessionHubFilter
+            || entry.GetType().GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Public)
+                .Any(f => f.FieldType == typeof(Type) && (Type?)f.GetValue(entry) == typeof(Whiskers.Hubs.SessionHubFilter)));
+        Assert.Contains(services.GetServices<Microsoft.Extensions.Hosting.IHostedService>(),
+            s => s is Whiskers.Hubs.HubSessionSweep);
         if (agentEnabled)
         {
             var agent = Assert.IsType<Whiskers.Services.Agent.AgentService>(

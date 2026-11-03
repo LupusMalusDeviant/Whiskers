@@ -20,21 +20,12 @@ public class CurrentUserService : ICurrentUserService
     private readonly AuthenticationStateProvider _authProvider;
     private readonly IRoleService _roles;
     private readonly ISessionValidator? _sessions;
-    private readonly TimeProvider _time;
-    // The last check, for page rendering only (GetRoleAsync): a mutation always checks afresh (CheckSessionAsync).
-    private (ClaimsPrincipal User, SessionCheck Check, DateTimeOffset At)? _recent;
-
-    /// <summary>How long <see cref="GetRoleAsync"/> may reuse a check for the same principal — a page rendering several
-    /// role-gated parts does not hit the account store for each. Never used to authorize a mutation.</summary>
-    public static readonly TimeSpan RoleReuse = TimeSpan.FromSeconds(5);
-
     public CurrentUserService(AuthenticationStateProvider authProvider, IRoleService roles,
-        ISessionValidator? sessions = null, TimeProvider? time = null)
+        ISessionValidator? sessions = null)
     {
         _authProvider = authProvider;
         _roles = roles;
         _sessions = sessions;
-        _time = time ?? TimeProvider.System;
     }
 
     /// <summary>True when the validator is wired (R1-26); the boot tests assert it for the real app.</summary>
@@ -48,11 +39,9 @@ public class CurrentUserService : ICurrentUserService
 
     public async Task<AppRole> GetRoleAsync()
     {
-        var state = await _authProvider.GetAuthenticationStateAsync();
-        var check = _recent is { } recent && ReferenceEquals(recent.User, state.User)
-                    && _time.GetUtcNow() - recent.At < RoleReuse
-            ? recent.Check
-            : await CheckSessionAsync();
+        // Always a fresh check (R1-26): this role gates approvals, principals pages hand to stores, and what a page
+        // shows — no caller may act on an answer that is older than the call.
+        var check = await CheckSessionAsync();
         return check.Valid ? check.Role : AppRole.Viewer;
     }
 
@@ -62,7 +51,10 @@ public class CurrentUserService : ICurrentUserService
         if (_sessions is not null)
         {
             var check = await _sessions.CheckAsync(state.User);
-            _recent = (state.User, check, _time.GetUtcNow());
+            // The circuit compares later checks against the highest role any page was handed (a promotion its own
+            // checks never saw, then a demotion, still ends it).
+            if (check.Valid && _authProvider is SessionRevalidatingAuthenticationStateProvider circuit)
+                circuit.NoteRole(state.User, check.Role);
             return check;
         }
 

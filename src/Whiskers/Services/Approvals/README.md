@@ -58,7 +58,8 @@ lapses ten minutes after the approval (`GrantExpiresAt`). A host without a datab
 ## Who decides (R1-15)
 
 A human decides through `IApprovalStore.DecideAsync` with an `ApprovalResolver` — their principal id
-(`user:<email>`) and the level their role grants **now** (`ApprovalResolver.CurrentAsync`); the chat, the Approvals
+(`user:<email>`) and the level their role grants **now** (`ApprovalResolver.CurrentAsync`, R1-26: a fresh session check —
+nobody whose session was revoked decides anything, `null`); the chat, the Approvals
 page and the bell all go through it. `ApprovalEligibility` holds approving and rejecting to the same rules (INV-37):
 
 - **Level (INV-34).** The resolver holds at least the approval's level — the effective level of the action. An
