@@ -672,10 +672,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `NotificationRetryTests.Provider_failure_reaches_retry_and_second_attempt_succeeds` runs through real provider adapters.
-- [ ] SMTP and every delivery have deadlines; monitoring cycles cannot wait indefinitely.
-- [ ] Critical notifications use a bounded durable outbox with restart/redelivery tests.
-- [ ] Exhausted retries are observable without exposing credentials.
+- [x] `NotificationRetryTests.Provider_failure_reaches_retry_and_second_attempt_succeeds` runs through real provider adapters.
+- [x] SMTP and every delivery have deadlines; monitoring cycles cannot wait indefinitely.
+- [x] Critical notifications use a bounded durable outbox with restart/redelivery tests.
+- [x] Exhausted retries are observable without exposing credentials.
 
 **Out of scope:** New notification providers.
 

@@ -24,18 +24,15 @@ public class WebhookNotificationService : IWebhookNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
-    public async Task SendAsync(NotificationEvent evt)
+    public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var c = _settings.CurrentValue;
-        if (!c.Enabled || string.IsNullOrWhiteSpace(c.Url)) return;
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return;
-        try
-        {
-            await PostAsync(c, evt);
-            _throttler.Record(evt);
-            _logger.LogInformation("Webhook notification sent: {EventType}", evt.EventType);
-        }
-        catch (Exception ex) { _logger.LogError(ex, "Failed to send webhook notification"); }
+        if (!c.Enabled || string.IsNullOrWhiteSpace(c.Url)) return false;
+        if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
+        await PostAsync(c, evt, ct);
+        _throttler.Record(evt);
+        _logger.LogInformation("Webhook notification sent: {EventType}", evt.EventType);
+        return true;
     }
 
     public async Task SendTestAsync()
@@ -45,7 +42,7 @@ public class WebhookNotificationService : IWebhookNotificationService
         await PostAsync(c, new NotificationEvent { EventType = "test", ContainerName = "Whiskers", ImageInfo = "Benachrichtigungen funktionieren." });
     }
 
-    private async Task PostAsync(WebhookNotificationSettings c, NotificationEvent evt)
+    private async Task PostAsync(WebhookNotificationSettings c, NotificationEvent evt, CancellationToken ct = default)
     {
         var (title, severity) = NotificationFormatter.Describe(evt);
         var payload = new
@@ -67,7 +64,7 @@ public class WebhookNotificationService : IWebhookNotificationService
         foreach (var (name, value) in SignatureHeaders(c.Secret, body, DateTimeOffset.UtcNow))
             request.Headers.TryAddWithoutValidation(name, value);
 
-        var resp = await _http.SendAsync(request);
+        using var resp = await _http.SendAsync(request, ct);
         resp.EnsureSuccessStatusCode();
     }
 

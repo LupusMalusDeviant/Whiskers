@@ -23,36 +23,30 @@ public class MattermostNotificationService : IMattermostNotificationService
         _logger = logger;
     }
 
-    public async Task SendAsync(NotificationEvent evt)
+    public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var config = _settings.CurrentValue;
         if (!config.Enabled || string.IsNullOrWhiteSpace(config.WebhookUrl))
-            return;
+            return false;
 
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes))
-            return;
+        if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes))
+            return false;
 
-        try
+        var payload = new
         {
-            var payload = new
-            {
-                channel = string.IsNullOrWhiteSpace(config.Channel) ? (string?)null : config.Channel,
-                username = config.BotUsername,
-                icon_url = string.IsNullOrWhiteSpace(config.BotIconUrl) ? (string?)null : config.BotIconUrl,
-                text = FormatMessage(evt)
-            };
+            channel = string.IsNullOrWhiteSpace(config.Channel) ? (string?)null : config.Channel,
+            username = config.BotUsername,
+            icon_url = string.IsNullOrWhiteSpace(config.BotIconUrl) ? (string?)null : config.BotIconUrl,
+            text = FormatMessage(evt)
+        };
 
-            var response = await _httpClient.PostAsJsonAsync(config.WebhookUrl, payload);
-            response.EnsureSuccessStatusCode();
+        using var response = await _httpClient.PostAsJsonAsync(config.WebhookUrl, payload, ct);
+        response.EnsureSuccessStatusCode();
 
-            _throttler.Record(evt);
-            _logger.LogInformation("Mattermost notification sent: {EventType} for {Container}",
-                evt.EventType, evt.ContainerName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to send Mattermost notification for {Container}", evt.ContainerName);
-        }
+        _throttler.Record(evt);
+        _logger.LogInformation("Mattermost notification sent: {EventType} for {Container}",
+            evt.EventType, evt.ContainerName);
+        return true;
     }
 
     public async Task SendTestAsync()

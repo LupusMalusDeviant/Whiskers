@@ -20,7 +20,19 @@ public class NotificationEvent
     /// <summary>R1-15: for agent-approval events, the approval to open (the in-app link goes to its card).</summary>
     public string? ApprovalId { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    /// <summary>R1-40: one identity per event (shared by its channels), set before the first attempt and kept for every
+    /// retry and redelivery, so a channel with idempotent requests (Matrix transaction ids) does not post an event twice when an
+    /// accepted request's answer was lost.</summary>
+    public string? DeliveryId { get; set; }
+    /// <summary>R1-40: set by the outbox worker. The event already passed the channel's throttle when it was first sent;
+    /// a redelivery is not throttled again.</summary>
+    public bool IsRedelivery { get; set; }
 
-    /// <summary>A shallow copy (every member is a value or an immutable string).</summary>
+    /// <summary>R1-40: the e-mail recipients this event already reached (an SMTP server accepted some recipients and
+    /// refused others). A retry or redelivery sends only to the others. Replaced, never changed in place.</summary>
+    public string[]? DeliveredRecipients { get; set; }
+
+    /// <summary>A shallow copy: every member is a value, an immutable string or an array that is replaced, never
+    /// changed in place.</summary>
     public NotificationEvent Copy() => (NotificationEvent)MemberwiseClone();
 }

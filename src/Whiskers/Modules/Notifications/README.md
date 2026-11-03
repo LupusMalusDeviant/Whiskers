@@ -9,7 +9,8 @@ extracted from the transitional `AllInOnePseudoModule` into its own `IWhiskersMo
   bound (R1-30, `AddVaultBackedSecrets`, registered first) and registers each one's secrets with `KnownSecrets` whenever
   they are bound (on first use after a Settings save — until the channel next reads its settings, a new ntfy topic or
   custom webhook URL is covered only by the patterns) (R1-25: bot token, webhook and ntfy topic URLs — the bare topic only when it looks like a capability, 16+ characters with a digit, `-` or `_` — Matrix token, SMTP password, signing secret), registers the 8 channels as `INotificationChannel`
-  (changeme C9), and registers `CompositeNotificationService` as `INotificationService`. No nav entry and no
+  (changeme C9), registers `CompositeNotificationService` as `INotificationService`, and (R1-40) the notification
+  outbox (`INotificationOutbox`) with its redelivery worker (`NotificationOutboxWorker`). No nav entry and no
   MCP tools.
 
 **Toggle:** `Features:notifications:Enabled` (`Features__notifications__Enabled=false`), restart-only.

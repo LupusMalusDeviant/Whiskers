@@ -166,7 +166,7 @@ public sealed class NotificationPipelineTests : IDisposable
     {
         public List<NotificationEvent> Sent { get; } = new();
         public string Name => "Recording";
-        public Task SendAsync(NotificationEvent evt) { Sent.Add(evt); return Task.CompletedTask; }
+        public Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct) { Sent.Add(evt); return Task.FromResult(true); }
         public Task SendTestAsync() => Task.CompletedTask;
     }
 

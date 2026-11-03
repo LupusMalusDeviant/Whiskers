@@ -17,7 +17,7 @@ Plain data models, DTOs, records and enums passed between services, the UI, and 
 | `AppTemplate.cs` | An app-store deployment template. |
 | `LogAlertRule.cs` | A log-pattern alert rule. |
 | `ScheduledTask.cs` | A scheduled task definition. |
-| `NotificationEvent.cs` | A notification payload. `ApprovalId` (R1-15) makes an approval notification open the approval's card. |
+| `NotificationEvent.cs` | A notification payload. `ApprovalId` (R1-15) makes an approval notification open the approval's card. R1-40: `DeliveryId` (one identity for every retry and redelivery), `IsRedelivery` (set by the outbox worker; not throttled again) and `DeliveredRecipients` (the e-mail recipients already reached after a partial SMTP delivery; replaced, never changed in place, so `Copy()` stays shallow). |
 | `ContainerNotificationPrefs.cs` | Per-container notification preferences. |
 | `VolumeBackup.cs` | A volume backup record. |
 | `AuditLogEntry.cs` | An audit-trail entry. |

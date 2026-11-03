@@ -20,6 +20,18 @@ public class CompositeNotificationService : INotificationService
     private readonly IContainerNotificationPrefsService _prefs;
     private readonly IServiceProvider _sp;
     private readonly ILogger<CompositeNotificationService> _logger;
+    private readonly INotificationOutbox? _outbox;
+    private readonly TimeSpan _attemptTimeout;
+    private readonly TimeSpan _backoff;
+
+    /// <summary>R1-40: how long one delivery attempt to one channel may take (its deadline reaches the network call).</summary>
+    public static readonly TimeSpan AttemptTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>Attempts per channel and event; with <see cref="AttemptTimeout"/> and <see cref="Backoff"/> the longest a
+    /// producer waits for <see cref="SendAsync"/> is 2 × 20 s + 2 s, the channels running side by side.</summary>
+    internal const int MaxAttempts = 2;
+
+    internal static readonly TimeSpan Backoff = TimeSpan.FromSeconds(2);
 
     /// <summary>Events an admin must see whatever the target's mute or preferences say.</summary>
     internal static readonly IReadOnlySet<string> AdministrativeEvents =
@@ -30,8 +42,23 @@ public class CompositeNotificationService : INotificationService
         IInAppNotificationStore inApp,
         IContainerNotificationPrefsService prefs,
         IServiceProvider sp,
-        ILogger<CompositeNotificationService> logger)
+        ILogger<CompositeNotificationService> logger,
+        INotificationOutbox? outbox = null)
+        : this(channels, inApp, prefs, sp, logger, outbox, AttemptTimeout, Backoff) { }
+
+    internal CompositeNotificationService(
+        IEnumerable<INotificationChannel> channels,
+        IInAppNotificationStore inApp,
+        IContainerNotificationPrefsService prefs,
+        IServiceProvider sp,
+        ILogger<CompositeNotificationService> logger,
+        INotificationOutbox? outbox,
+        TimeSpan attemptTimeout,
+        TimeSpan backoff)
     {
+        _outbox = outbox;
+        _attemptTimeout = attemptTimeout;
+        _backoff = backoff;
         _channels = channels.ToList();
         _inApp = inApp;
         _prefs = prefs;
@@ -63,9 +90,13 @@ public class CompositeNotificationService : INotificationService
         try { _inApp.Add(evt); } catch (Exception ex) { _logger.LogWarning(ex, "In-app notification failed"); }
         await PersistHistoryAsync(evt);
 
-        var tasks = _channels.Select(c => SafeSend(c.Name, () => c.SendAsync(evt))).ToList();
-        // AI-trigger dispatch runs alongside the channels; lazily resolved to avoid a DI cycle.
-        tasks.Add(SafeSend("AI-Trigger", () => _sp.GetRequiredService<IAiTriggerDispatcher>().OnEventAsync(evt)));
+        // Each channel its own copy: what one records about its delivery (the e-mail recipients reached) is kept with
+        // its own outbox entry only.
+        var tasks = _channels.Select(c => DeliverAsync(c, evt.Copy())).ToList();
+        // AI-trigger dispatch runs alongside the channels; lazily resolved to avoid a DI cycle. Once, never retried:
+        // a second dispatch would start the triggers a second time. Its wait is bounded; the dispatch itself bounds
+        // its runs (INV-40).
+        tasks.Add(DispatchTriggersAsync(evt));
 
         await Task.WhenAll(tasks);
     }
@@ -93,6 +124,7 @@ public class CompositeNotificationService : INotificationService
         copy.ImageName = SinkRedaction.Text(evt.ImageName) ?? "";
         copy.ImageInfo = SinkRedaction.Text(evt.ImageInfo);
         copy.ServerName = SinkRedaction.Text(evt.ServerName);
+        copy.DeliveryId ??= Guid.NewGuid().ToString("N");   // R1-40: the same for every retry and redelivery
         return copy;
     }
 
@@ -102,6 +134,8 @@ public class CompositeNotificationService : INotificationService
     /// metrics collector's prune. Never let a history write break the actual notification.</summary>
     private async Task PersistHistoryAsync(NotificationEvent evt)
     {
+        // Bounded like a channel attempt: a stalled database must not hold the monitoring cycle that sends the event.
+        using var deadline = new CancellationTokenSource(_attemptTimeout);
         try
         {
             using var scope = _sp.CreateScope();
@@ -124,10 +158,10 @@ public class CompositeNotificationService : INotificationService
             {
                 await db.AlertHistory
                     .Where(a => a.ServerId == sid && a.AlertType == "server_unreachable" && !a.Resolved)
-                    .ExecuteUpdateAsync(u => u.SetProperty(a => a.Resolved, true));
+                    .ExecuteUpdateAsync(u => u.SetProperty(a => a.Resolved, true), deadline.Token);
             }
 
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(deadline.Token).WaitAsync(deadline.Token);
         }
         catch (Exception ex)
         {
@@ -135,12 +169,52 @@ public class CompositeNotificationService : INotificationService
         }
     }
 
-    private async Task SafeSend(string provider, Func<Task> action)
+    /// <summary>Events whose loss matters: administrative ones, errors and approvals waiting for a person. A channel that
+    /// still fails them after the retries keeps them in the outbox for redelivery (R1-40).</summary>
+    internal static bool IsCritical(NotificationEvent evt) =>
+        AdministrativeEvents.Contains(evt.EventType)
+        || evt.EventType == "agent_approval"
+        // The end of an outage goes where its start went: an "unreachable" redelivered without its recovery reads as
+        // an outage still going on.
+        || evt.EventType == "server_recovered"
+        || NotificationFormatter.Describe(evt).Severity == "Error";
+
+    /// <summary>One channel: <see cref="MaxAttempts"/> attempts, each within its deadline. A failure the retries could not
+    /// overcome is logged and counted with the channel name and the redacted reason only — never the payload, a URL or
+    /// a token — and a critical event goes to the outbox. Never throws: a broken channel cannot stop a monitoring loop.</summary>
+    private async Task DeliverAsync(INotificationChannel channel, NotificationEvent evt)
     {
-        // Retry once on failure; the per-client 15s HttpClient timeout (Program.cs) bounds each attempt so a
-        // slow endpoint can't stall the loop. Log only the provider name (never the payload/URL).
-        var (ok, last) = await NotificationRetry.TrySendAsync(action, maxAttempts: 2);
-        if (!ok)
-            _logger.LogError(last, "Notification provider {Provider} failed after retry", provider);
+        var (ok, last) = await NotificationRetry.TrySendAsync(t => channel.DeliverAsync(evt, t), MaxAttempts,
+            _attemptTimeout, _backoff);
+        if (ok) return;
+
+        var failure = last ?? new InvalidOperationException("The delivery failed.");
+        var critical = IsCritical(evt) && _outbox is not null;
+        _logger.LogError("Notification {EventType} to {Provider} failed after {Attempts} attempts ({Error}){Kept}",
+            evt.EventType, channel.Name, MaxAttempts, NotificationOutbox.Describe(failure),
+            critical ? "; kept for redelivery" : "");
+        _sp.GetService<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>()?.Count("notification_failed", "*");
+        if (!critical) return;
+        try
+        {
+            await _outbox!.AddAsync(channel.Name, evt, failure, DateTime.UtcNow);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Notification {EventType} to {Provider} could not be kept for redelivery ({Error})",
+                evt.EventType, channel.Name, NotificationOutbox.Describe(ex));
+        }
+    }
+
+    private async Task DispatchTriggersAsync(NotificationEvent evt)
+    {
+        try
+        {
+            await _sp.GetRequiredService<IAiTriggerDispatcher>().OnEventAsync(evt).WaitAsync(_attemptTimeout);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("AI-trigger dispatch for {EventType} failed ({Error})", evt.EventType, NotificationOutbox.Describe(ex));
+        }
     }
 }

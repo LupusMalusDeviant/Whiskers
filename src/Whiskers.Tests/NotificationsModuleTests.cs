@@ -24,7 +24,7 @@ public class NotificationsModuleTests
         public string Name { get; }
         public int SendCount;
         public int TestCount;
-        public Task SendAsync(NotificationEvent evt) { SendCount++; return Task.CompletedTask; }
+        public Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct) { SendCount++; return Task.FromResult(true); }
         public Task SendTestAsync() { TestCount++; return Task.CompletedTask; }
     }
 
@@ -109,6 +109,7 @@ public class NotificationsModuleTests
         services.AddSingleton<IInAppNotificationStore, CountingInApp>();
         services.AddSingleton<IAiTriggerDispatcher, RecordingDispatcher>();
         services.AddSingleton<IContainerNotificationPrefsService, AllowAllPrefs>();
+        services.AddSingleton(new Whiskers.Configuration.DataPathOptions(Path.Combine(Path.GetTempPath(), "whiskers-notif-module-tests")));   // the outbox file (R1-40)
         // Registered BEFORE the module (like Program.cs registers it before the module loop).
         services.AddSingleton<INotificationService, NoopNotificationService>();
         return services;

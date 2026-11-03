@@ -278,11 +278,11 @@ public sealed partial class SinkRedactionTests
         Assert.Contains(Canary, evt.ImageInfo);
 
         // Three providers failed, with the token-bearing URL in the exception text; the log shows none of them.
-        Assert.Contains("Failed to send Telegram notification", capture.All);
+        Assert.Contains("to Telegram failed after 2 attempts", capture.All);
         // The HttpClient request log is on in this provider (Trace): it names each request URI, redacted.
         Assert.Contains("HTTP request", capture.All);
-        Assert.Contains("Failed to send ntfy notification", capture.All);
-        Assert.Contains("Failed to send webhook notification", capture.All);
+        Assert.Contains("to Ntfy failed after 2 attempts", capture.All);
+        Assert.Contains("to Webhook failed after 2 attempts", capture.All);
         AssertClean(capture.All);
         foreach (var secret in ChannelSecrets) Assert.DoesNotContain(secret, capture.All);
     }
