@@ -85,8 +85,8 @@ people counted as one client — when:
 - the address cannot be determined at all: those clients share one bucket (`unknown`);
 - Whiskers remembers 4096 clients and 4096 accounts at most: beyond that, while the older entries have not expired,
   every new address (or account) shares one overflow bucket. Under a flood of new addresses recovery may then be
-  refused for a few minutes (clients) and up to about 15 minutes after the flood stops (accounts); the limit is never
-  lifted. IPv6 clients are counted per /64, so a site with a delegated /56 or /48 prefix can present many clients.
+  refused for a few minutes (clients) and up to about 15 minutes after the flood stops (accounts), and new entries may
+  share one budget for up to about two windows (2 minutes for clients, 30 for accounts); the limit is never lifted. IPv6 clients are counted per /64, so a site with a delegated /56 or /48 prefix can present many clients.
 
 **Narrow `ForwardedHeaders:TrustedNetworks` to your real proxy.** The default trusts loopback, all private (RFC 1918)
 networks and the Tailscale range, so any client on your LAN can send its own `X-Forwarded-For` and pose as many clients.
