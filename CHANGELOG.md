@@ -6,6 +6,14 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-41/R1-54 follow-up: **a stop at the wrong moment no longer rewrites what happened.** An e-mail the SMTP server
+  already took and partially refused now stays a partial refusal, with who was reached, when Whiskers stops while
+  saying goodbye — before, the stop turned it into a cancellation and the retry mailed the reached recipients again.
+  An auto-update whose container was replaced and verified is recorded as done when Whiskers stops during the health
+  check that follows, not as a failure. A retry that ran out of time in Whiskers' own queue no longer counts against the server's circuit,
+  and a first attempt that ran out of time there is no longer mistaken for a broken tunnel and sent again.
+  The CVE monitor's start log shows the effective interval and no longer reads raw options outside its recovering loop,
+  and the background-loop ratchet now also flags work that runs in a loop outside the catch that recovers a cycle.
 - R1-53: **One request can be followed from the client to the audit row, and the logs can be JSON.** Every HTTP answer
   now carries an `X-Request-Id`: the client's own when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -`), else
   the W3C trace id of an incoming `traceparent`, else a new one — an unsafe value is replaced, never echoed or logged.

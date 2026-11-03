@@ -178,6 +178,64 @@ public class BackgroundServiceFailureTests
     }
 
     [Fact]
+    public async Task A_retry_that_runs_out_of_time_in_the_queue_is_not_held_against_the_server()
+    {
+        // R1-41 follow-up: the retry after a connection failure spent its time in a full queue and then timed out at
+        // once. That is the budget's saturation, wrapping a TimeoutException — before, the retry's catch handed it to
+        // the circuit, which counts a timeout anywhere in the chain as the host's.
+        var (docker, circuit, budget) = Connection();
+        var release = new TaskCompletionSource();
+        var busy = new List<Task<int>>();
+        var calls = 0;
+
+        var call = docker.ExecuteAsync<int>("badwolf", _ =>
+        {
+            if (Interlocked.Increment(ref calls) > 1)
+                throw new TimeoutException("the retry's deadline, spent in the queue");
+            // Every slot is taken (and one more caller waits) before the first attempt fails: the retry has to queue.
+            busy.AddRange(Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
+                .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })));
+            throw new IOException("the tunnel dropped");
+        });
+        await Task.Delay(300);
+        release.SetResult();
+
+        var ex = await Assert.ThrowsAsync<BudgetSaturatedException>(() => call.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TimeoutException>(ex.InnerException);
+        Assert.Equal(2, calls);
+        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
+        await Task.WhenAll(busy);
+    }
+
+    [Fact]
+    public async Task A_first_attempt_that_ran_out_of_time_in_the_queue_is_not_retried_as_a_broken_tunnel()
+    {
+        // R1-41 follow-up review: the saturation wraps the TimeoutException, and the connection-failure catch walks the
+        // chain. Before, it matched first: the tunnel was rebuilt and the request sent a second time.
+        var (docker, circuit, budget) = Connection();
+        var release = new TaskCompletionSource();
+        var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
+            .Select(_ => docker.ExecuteAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
+        var calls = 0;
+
+        var call = docker.ExecuteAsync<int>("badwolf", _ =>
+        {
+            Interlocked.Increment(ref calls);
+            throw new TimeoutException("the deadline, spent in the queue");
+        });
+        await Task.Delay(300);
+        release.SetResult();
+
+        var ex = await Assert.ThrowsAsync<BudgetSaturatedException>(() => call.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TimeoutException>(ex.InnerException);
+        Assert.Equal(1, calls);
+        Assert.Equal(0, circuit.Snapshot("badwolf").ConsecutiveFailures);
+        Assert.Equal(1, budget.Snapshot("badwolf").SaturationFailures);
+        await Task.WhenAll(busy);
+    }
+
+    [Fact]
     public async Task A_fleet_listing_does_not_queue_past_the_server_deadline_for_a_slot()
     {
         // Review round 2: the 8 s per-server timeout reached only the Docker request. With every slot of a server taken,
@@ -429,6 +487,18 @@ public class BackgroundServiceFailureTests
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { }")));
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) { break; }\ncatch (Exception ex) { }")));
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) when (!ct.IsCancellationRequested) { break; }\ncatch (Exception ex) { }")));
+        // R1-41 follow-up: the work outside the recovering try, and a filter that excludes cancellations as a pattern list.
+        Assert.NotNull(VerdictOf(InLoop("await Work(ct);\ntry { Log(); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { }\nawait Task.Delay(Pause, ct);")));
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\n" +
+                                        "try { await Other(ct); } catch (Exception ex) when (ex is not (OperationCanceledException or TaskCanceledException)) { }")));
+        Assert.Null(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\nawait Task.Delay(Pause, ct);")));
+        // Follow-up review: `await foreach` / `await using` outside the recovering try.
+        Assert.NotNull(VerdictOf(InLoop("await foreach (var x in Stream(ct)) { }\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        // No await expression in these two: only the statement rule can refuse them.
+        Assert.NotNull(VerdictOf(InLoop("await using var lease = Lease();\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.NotNull(VerdictOf(InLoop("await using (var lease = Lease()) { }\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.Null(VerdictOf(InLoop("try { await using var lease = Lease(); await using (var other = Lease()) { } } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\nawait Task.Delay(Pause, ct);")));
+        Assert.Null(VerdictOf(InLoop("try { await foreach (var x in Stream(ct)) { } } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\nawait Task.Delay(Pause, ct);")));
         // Review round 9: a return from a nested loop's catch leaves RunAsync too; a rethrow inside the recovering try does not.
         Assert.NotNull(VerdictOf(InLoop("try { foreach (var s in Xs) { try { await Run(s, ct); } catch (TimeoutException) { return; } } } " +
                                         "catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
@@ -690,6 +760,18 @@ public class BackgroundServiceFailureTests
             foreach (var c in Outside<CatchClauseSyntax>(LoopBody(l)))
                 if (LeavesTheLoop(c, l, token))
                     return "a catch in the loop leaves it on something other than the host's stop";
+        // R1-41 follow-up: placement. A recovering try somewhere in the loop is not enough when the work itself runs
+        // outside it — every await in the outermost loop body is inside a recovering try's block, or is the pause.
+        foreach (var l in loops)
+        {
+            foreach (var a in Outside<AwaitExpressionSyntax>(LoopBody(l)))
+                if (!InsideRecoveringTry(a, l, token) && !IsPauseAwait(a, token))
+                    return $"`{a.NormalizeWhitespace()}` runs in the loop outside the catch that recovers from a failed cycle";
+            // `await using` and `await foreach` await as well, without an await expression.
+            foreach (var s in Outside<StatementSyntax>(LoopBody(l)).Where(AwaitsWithoutExpression))
+                if (!InsideRecoveringTry(s, l, token))
+                    return $"`{s.NormalizeWhitespace(eol: "\n").ToString().Split('\n')[0]}` runs in the loop outside the catch that recovers from a failed cycle";
+        }
         var candidates = loops.Count > 0
             ? loops.SelectMany(l => Outside<TryStatementSyntax>(LoopBody(l))
                 .Where(t => !t.Ancestors().TakeWhile(a => a != l).OfType<StatementSyntax>().Any(IsLoop)))
@@ -720,6 +802,29 @@ public class BackgroundServiceFailureTests
         });
     }
 
+    private static bool AwaitsWithoutExpression(StatementSyntax s) => s switch
+    {
+        CommonForEachStatementSyntax f => f.AwaitKeyword.IsKind(SyntaxKind.AwaitKeyword),
+        UsingStatementSyntax u => u.AwaitKeyword.IsKind(SyntaxKind.AwaitKeyword),
+        LocalDeclarationStatementSyntax d => d.AwaitKeyword.IsKind(SyntaxKind.AwaitKeyword),
+        _ => false,
+    };
+
+    private static bool InsideRecoveringTry(SyntaxNode node, StatementSyntax loop, string token) =>
+        node.Ancestors().TakeWhile(a => a != loop).OfType<BlockSyntax>()
+            .Any(b => b.Parent is TryStatementSyntax t && t.Block == b && Recovers(t, token));
+
+    /// <summary>Waits that only the stopping token can end, so they need no recovering try: <c>Task.Delay</c>, and the
+    /// outbox worker's <c>WaitForWorkAsync</c> (a semaphore wait with a timeout, <c>NotificationOutbox.cs</c>). A new
+    /// entry here needs the same proof.</summary>
+    private static readonly HashSet<string> PauseCalls = ["Task.Delay", "_outbox.WaitForWorkAsync"];
+
+    /// <summary>The loop's own pause: one of <see cref="PauseCalls"/> with the stopping token as its last argument.</summary>
+    private static bool IsPauseAwait(AwaitExpressionSyntax a, string token) =>
+        a.Expression is InvocationExpressionSyntax call
+        && PauseCalls.Contains(Code(call.Expression))
+        && call.ArgumentList.Arguments.LastOrDefault()?.Expression is IdentifierNameSyntax last && last.Identifier.ValueText == token;
+
     /// <summary>A catch whose block may leave the loop is fine only when it is reached on the host's stop: filtered on the
     /// stopping token (or <c>IsHostStopping</c>), or the loop's own pause.</summary>
     private static bool LeavesOnlyOnTheStop(CatchClauseSyntax c, string token) =>
@@ -731,8 +836,8 @@ public class BackgroundServiceFailureTests
     {
         var filter = c.Filter?.FilterExpression;
         if (filter is not null && filter.DescendantNodesAndSelf().OfType<IsPatternExpressionSyntax>().Any(p =>
-                p.Pattern is UnaryPatternSyntax { Pattern: TypePatternSyntax or ConstantPatternSyntax } u
-                && u.OperatorToken.IsKind(SyntaxKind.NotKeyword) && Code(u.Pattern).EndsWith("CanceledException", StringComparison.Ordinal)))
+                p.Pattern.DescendantNodesAndSelf().OfType<UnaryPatternSyntax>().Any(u =>
+                    u.OperatorToken.IsKind(SyntaxKind.NotKeyword) && Code(u.Pattern).Contains("CanceledException", StringComparison.Ordinal))))
             return "`is not OperationCanceledException` lets a dependency's cancellation end the loop";
         if (!IsCancellationType(c)) return null;
         if (filter is not null && AsksTheStoppingToken(filter, token, c)) return null;

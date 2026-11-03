@@ -119,6 +119,9 @@ public class EmailNotificationService : IEmailNotificationService
         var host = c.Host.Trim().Trim('[', ']');
         using var client = NewClient(SmtpDeadline);
         Stream? stream = null;
+        // Once the server took the message, the result is what it said — a stop or the deadline afterwards (during
+        // QUIT) turns neither a delivery nor a partial refusal into a cancellation or a timeout.
+        var sent = false;
         try
         {
             // The guard resolves, judges and connects; MailKit talks SMTP (and TLS, with the configured name) over that
@@ -131,19 +134,19 @@ public class EmailNotificationService : IEmailNotificationService
                 if (!string.IsNullOrWhiteSpace(c.Username) && client.Capabilities.HasFlag(SmtpCapabilities.Authentication))
                     await client.AuthenticateAsync(c.Username, c.Password, deadline.Token);
                 await client.SendAsync(msg, deadline.Token);
-                // The server took the message: a failed goodbye changes nothing about that — not even a stop that lands
-                // during QUIT, which would otherwise report a delivered message as cancelled (R1-54 review round 3).
+                sent = true;
+                // The server took the message: a failed goodbye changes nothing about that.
                 try { await client.DisconnectAsync(quit: true, deadline.Token); }
-                catch (Exception) { /* sent; the connection is closed by the using below */ }
+                catch (Exception) { /* sent; the finally closes the stream, the client's using the client */ }
             }
             if (client.Refused.Count > 0)
                 throw new EmailRecipientsRefusedException(client.Refused);
         }
-        catch (Exception) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
+        catch (Exception) when (!sent && deadline.IsCancellationRequested && !ct.IsCancellationRequested)
         {
             throw new TimeoutException($"The SMTP server did not complete the send within {SmtpDeadline.TotalSeconds:0} s.");
         }
-        catch (Exception) when (ct.IsCancellationRequested)
+        catch (Exception) when (!sent && ct.IsCancellationRequested)
         {
             throw new OperationCanceledException(ct);
         }

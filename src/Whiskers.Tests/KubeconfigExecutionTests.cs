@@ -234,11 +234,13 @@ public sealed class KubeconfigExecutionTests : IDisposable
     ///
     /// <para>Not <c>sh -c "…"</c> on Linux: the client joins the args with spaces into one command line, which .NET splits
     /// again, so <c>sh</c> would get <c>-c echo</c> and the redirect as separate words and never write the marker. An
-    /// executable script with no args has nothing to split.</para></summary>
+    /// executable script with no args has nothing to split. On Windows cmd reads everything after <c>/c</c> as one
+    /// command line, so the split does not matter there; the marker path is quoted for a temp folder with spaces.</para>
+    /// </summary>
     private string MarkerExecKubeconfig()
     {
         if (OperatingSystem.IsWindows())
-            return ExecKubeconfig("cmd", ["/c", $"echo x> {_marker}"]);
+            return ExecKubeconfig("cmd", ["/c", $"echo x> \"{_marker}\""]);
 
         var script = Path.Combine(_dir, "plugin.sh");
         File.WriteAllText(script, $"#!/bin/sh\necho x > '{_marker}'\n");

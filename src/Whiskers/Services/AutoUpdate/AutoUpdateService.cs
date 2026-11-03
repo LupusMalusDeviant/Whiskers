@@ -276,6 +276,26 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 _updateStore.Remove(container.Id, container.ServerId);
                 _logger.LogInformation("Auto-update succeeded for {Container}", container.Name);
             }
+            // R1-41 follow-up: Whiskers stopped after the gateway executed and verified the recreate, while waiting for or
+            // reading the health check. The container was replaced; only the extra health check is missing. Recorded as
+            // the update it was, with that gap named — not as a failed update, and nothing to notify.
+            catch (OperationCanceledException) when (recreateReturned && ct.IsCancellationRequested)
+            {
+                history.Success = true;
+                history.CompletedAt = DateTime.UtcNow;
+                history.Error = "Whiskers was stopping: the container was replaced and verified, its health was not checked afterwards.";
+                policy.LastUpdated = DateTime.UtcNow;
+                policy.LastUpdateResult = "OK (health not checked: Whiskers was stopping)";
+                // R1-31: the missing way back is named here too.
+                if (noRollback)
+                {
+                    history.Error += " No rollback snapshot was kept for this update; it cannot be rolled back from Whiskers.";
+                    policy.LastUpdateResult = "OK (health not checked: Whiskers was stopping; no rollback snapshot)";
+                }
+                _updateStore.Remove(container.Id, container.ServerId);
+                _logger.LogWarning("Auto-update for {Container} replaced the container; Whiskers stopped before its health check",
+                    container.Name);
+            }
             catch (Exception ex)
             {
                 history.Success = false;
