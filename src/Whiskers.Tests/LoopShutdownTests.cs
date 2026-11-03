@@ -252,6 +252,35 @@ public sealed class LoopShutdownTests : IDisposable
         Assert.StartsWith("OperationCanceledException", kept.LastError);
     }
 
+    [Fact]
+    public async Task A_stop_that_ends_a_non_critical_delivery_leaves_a_log_line_and_keeps_nothing()
+    {
+        // Follow-up (2026-11-03, review R1-41 round 8 NIT 2): it was let go without a trace.
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new NotificationDeliveryTests.ScriptedHandler(async (_, ct) =>
+        {
+            started.TrySetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        });
+        var outbox = NotificationOutbox.InMemory(NullLogger<NotificationOutbox>.Instance);
+        var logs = new NotificationDeliveryTests.ListLoggerProvider();
+        var composite = NotificationDeliveryTests.Composite([NotificationDeliveryTests.Slack(handler)], outbox,
+            TimeSpan.FromMinutes(5), logger: new Microsoft.Extensions.Logging.Logger<CompositeNotificationService>(new Microsoft.Extensions.Logging.LoggerFactory([logs])));
+
+        using var stopping = new CancellationTokenSource();
+        var evt = new NotificationEvent { EventType = "image_update", ContainerName = "web", ContainerId = "web-1" };
+        Assert.False(CompositeNotificationService.IsCritical(evt));
+        var send = composite.SendAsync(evt, stopping.Token);
+        await started.Task.WaitAsync(Wait);
+
+        stopping.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => send.WaitAsync(Wait));
+
+        Assert.Empty(await outbox.DueAsync(DateTime.UtcNow.AddHours(1)));
+        Assert.Single(logs.Lines, l => l.Contains("image_update to Slack interrupted by a stop; not critical, not kept"));
+    }
+
     // ---- doubles --------------------------------------------------------------------------------------------------
 
     /// <summary>Messages a hub context sent, with a signal on the first.</summary>

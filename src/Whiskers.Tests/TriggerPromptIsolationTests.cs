@@ -65,6 +65,23 @@ public class TriggerPromptIsolationTests
         Assert.EndsWith("TASK (set by an admin):\nSummarize the error.", string.Join('\n', lines));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void The_event_data_says_whether_a_recovery_was_confirmed(bool unconfirmed)
+    {
+        // Follow-up (2026-11-03, review R1-56 NIT-4): a trigger on high_cpu_recovered can tell an unconfirmed close apart.
+        var evt = new NotificationEvent
+        {
+            EventType = "high_cpu_recovered", ContainerName = "web", ServerId = "srv1", RecoveryUnconfirmed = unconfirmed,
+        };
+        var lines = AiTriggerDispatcher.BuildTaskMessage(Trigger(), evt, Boundary).Split('\n').Select(l => l.TrimEnd('\r')).ToList();
+        var open = lines.FindIndex(l => l == $"<event-data id=\"{Boundary}\">");
+        var close = lines.FindIndex(l => l == $"</event-data id=\"{Boundary}\">");
+        using var data = JsonDocument.Parse(string.Join('\n', lines.Skip(open + 1).Take(close - open - 1)));
+        Assert.Equal(unconfirmed, data.RootElement.GetProperty("recoveryUnconfirmed").GetBoolean());
+    }
+
     [Fact]
     public void Each_message_gets_its_own_unguessable_marker()
     {

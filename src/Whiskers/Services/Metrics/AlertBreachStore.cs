@@ -14,6 +14,10 @@ public sealed class AlertBreachFile
 
     /// <summary>Review round 2: the server of each container with a kept breach, so it is known before the first listing.</summary>
     public List<ContainerOwner>? Containers { get; set; } = [];
+
+    /// <summary>Follow-up (2026-11-03, review R1-56 MINOR-1): the reported <c>metrics_gap</c>s still open, so each is closed
+    /// once after a restart and not raised a second time. Optional: a file written before has none (read as empty).</summary>
+    public List<GapState>? Gaps { get; set; } = [];
 }
 
 /// <summary>R1-56 (review round 2): which server a container with a kept breach belongs to.</summary>
@@ -38,7 +42,7 @@ public interface IAlertBreachStore
 public sealed class AlertBreachStore(string path) : IAlertBreachStore
 {
     private readonly JsonFileStore<AlertBreachFile> _file = new(path,
-        problem: f => f.Thresholds is null || f.HostLoad is null || f.Thresholds.Concat(f.HostLoad).Any(s => s is null) || (f.Containers ?? []).Any(c => c is null)
+        problem: f => f.Thresholds is null || f.HostLoad is null || f.Thresholds.Concat(f.HostLoad).Any(s => s is null) || (f.Containers ?? []).Any(c => c is null) || (f.Gaps ?? []).Any(g => g is null)
             ? "a list of breaches is missing or holds an empty entry" : null);
 
     public Task<AlertBreachFile> LoadAsync() => _file.LoadAsync();

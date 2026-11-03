@@ -889,13 +889,17 @@ else
     {
         try
         {
+            var health = new HealthMonitorSettings
+            {
+                CheckIntervalSeconds = _hInterval, HistoryRetentionHours = _hRetention,
+                RestartLoopThreshold = _hLoopThreshold, RestartLoopWindowMinutes = _hLoopWindow,
+            };
+            // Follow-up (2026-11-03, review R1-41 round 7 NIT 5): an interval out of range is refused before the gateway
+            // runs — not recorded as a failed config.save (the store refuses it again on its own).
+            Whiskers.Configuration.IntervalValidation.ThrowIfInvalid(health);
             await Mutations.RunAsync("config.save", new { section = "healthmonitor" }, async _ =>
             {
-                await AppSettings.SaveSectionAsync("HealthMonitor", new HealthMonitorSettings
-                {
-                    CheckIntervalSeconds = _hInterval, HistoryRetentionHours = _hRetention,
-                    RestartLoopThreshold = _hLoopThreshold, RestartLoopWindowMinutes = _hLoopWindow,
-                });
+                await AppSettings.SaveSectionAsync("HealthMonitor", health);
             });
             Snackbar.Add(L["Settings_Snackbar_HealthSaved"].Value, Severity.Success);
         }
@@ -930,15 +934,17 @@ else
         var cur = CveSettings.CurrentValue;
         try
         {
+            var cve = new CveMonitorSettings
+            {
+                Enabled = _cveEnabled, CheckIntervalHours = _cveInterval, ScanContainers = _cveScanContainers,
+                ScanOs = _cveScanOs, EnableOsCveIds = _cveOsIds, TrivyImage = string.IsNullOrWhiteSpace(_cveTrivy) ? cur.TrivyImage : _cveTrivy.Trim(),
+                NotifyOnFinding = _cveNotify, NotifySeverity = _cveSeverity, MaxConcurrentScans = _cveMaxScans,
+                OsChangelogTimeoutSeconds = cur.OsChangelogTimeoutSeconds,
+            };
+            Whiskers.Configuration.IntervalValidation.ThrowIfInvalid(cve);   // before the gateway (follow-up 2026-11-03)
             await Mutations.RunAsync("config.save", new { section = "cvemonitor" }, async _ =>
             {
-                await AppSettings.SaveSectionAsync("CveMonitor", new CveMonitorSettings
-                {
-                    Enabled = _cveEnabled, CheckIntervalHours = _cveInterval, ScanContainers = _cveScanContainers,
-                    ScanOs = _cveScanOs, EnableOsCveIds = _cveOsIds, TrivyImage = string.IsNullOrWhiteSpace(_cveTrivy) ? cur.TrivyImage : _cveTrivy.Trim(),
-                    NotifyOnFinding = _cveNotify, NotifySeverity = _cveSeverity, MaxConcurrentScans = _cveMaxScans,
-                    OsChangelogTimeoutSeconds = cur.OsChangelogTimeoutSeconds,
-                });
+                await AppSettings.SaveSectionAsync("CveMonitor", cve);
             });
             Snackbar.Add(L["Settings_Snackbar_CveSaved"].Value, Severity.Success);
         }
@@ -954,12 +960,14 @@ else
     {
         try
         {
+            var imageUpdate = new ImageUpdateSettings
+            {
+                Enabled = _iuEnabled, CheckIntervalHours = _iuInterval, NotifyOnUpdate = _iuNotify,
+            };
+            Whiskers.Configuration.IntervalValidation.ThrowIfInvalid(imageUpdate);   // before the gateway (follow-up 2026-11-03)
             await Mutations.RunAsync("config.save", new { section = "imageupdate" }, async _ =>
             {
-                await AppSettings.SaveSectionAsync("ImageUpdate", new ImageUpdateSettings
-                {
-                    Enabled = _iuEnabled, CheckIntervalHours = _iuInterval, NotifyOnUpdate = _iuNotify,
-                });
+                await AppSettings.SaveSectionAsync("ImageUpdate", imageUpdate);
             });
             Snackbar.Add(L["Settings_Snackbar_ImageUpdatesSaved"].Value, Severity.Success);
         }

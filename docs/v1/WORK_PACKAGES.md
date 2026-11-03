@@ -701,6 +701,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] Review round 8: an interval that does not bind after a hand edit keeps the last valid one (one warning) instead of ending the loop; the ratchet also fails a typed catch in the loop that leaves it on anything but the host's stop.
 - [x] Review round 9: the metrics loop, which reads its whole section each cycle, keeps its last valid settings when a reload does not bind, and a failure recording its cycle no longer ends it; the ratchet also fails a `return` from a nested loop's catch and accepts a rethrow inside the recovering try.
 - [x] Follow-up (2026-11-03): a stop after the verified recreate, during the health check, records the update as done with its health not checked (and a missing snapshot named, R1-31), not as a failure; a budget saturation — first attempt or retry, also when it wraps a `TimeoutException` — is never a connection failure, never retried as one and never counted by the circuit; the CVE start log reads the guarded interval; the ratchet flags any `not` pattern naming a cancellation type and every await (`await using`/`await foreach` included) in a loop body outside the recovering try that is not the pause.
+- [x] Follow-up (2026-11-03, second pass): the Settings page checks a loop interval before `config.save` runs, so a refused value leaves no failed mutation in the audit trail (`BackgroundServiceFailureTests`); the AutoUpdate failure notification carries the cycle's token (a stop ends its retries; the composite keeps it for redelivery) and the attempt is still recorded (`AutoRollbackTests`); a fleet listing failure after the deadline reads "Timed out" only when the deadline caused it; a non-critical delivery a stop interrupts leaves a log line (`LoopShutdownTests`).
 
 **Out of scope:** Full tracing infrastructure.
 
@@ -894,6 +895,8 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] Correlation metadata passes R1-25 redaction checks (ids through the redacting factory unchanged; a client id
   outside `A-Z a-z 0-9 . _ -` / 64 characters is replaced, never echoed or logged; acceptance never consults the secret
   registry — no membership oracle before sign-in — and a secret sent as the id is `***` in every log line).
+- [x] Follow-up (2026-11-03): `docs/operations/observability.md` names the gateway's decision, refusal and outcome
+  lines and advises a plain id such as a UUID (an id that looks like a token is `***` in the log).
 
 **Out of scope:** Requiring an external tracing backend for a single-instance installation.
 
@@ -954,6 +957,12 @@ exception settings with UI and en/de strings, README and tests; approximately 12
   delivery: `CompositeNotificationService.DeliverAsync` does not retry it.
   Follow-up (2026-11-03): once the SMTP server took the message, a stop or the deadline during QUIT keeps the result
   the server answered — a partial refusal stays one, with who was reached (`NotificationSmtpTests`).
+  Follow-up (2026-11-03, second pass): the TLS path end to end against a local server with a certificate generated in
+  the test (`SmtpTlsTests`): with TLS on, a server without STARTTLS gets nothing in plain text; port 465 opens with the
+  TLS handshake; an untrusted certificate ends the send before MAIL; the TLS name (SNI) is the configured host, not the
+  connected address; the client sets no validation callback. A trusted certificate for another name cannot be shown
+  without trusting a test certificate on the machine — that check is `SslStream`'s own against the name pinned here.
+  The config diff of an exception change is written once (by the settings store; fixed in review round 1).
 - [x] Exceptions are narrow: an Admin-only list of entries, each either an IP literal plus port, or a name plus port
   plus the address(es) it may resolve to. The guard compares the **connected address** with the entry, so an excepted
   name that rebinds to another address (for example `169.254.169.254`) is refused — tested. Ranges or wildcards are
@@ -1026,6 +1035,8 @@ Query: the coarsest tier whose window is at most range / 100 (raw for 1 h and 6 
 `MetricsCollectorRetentionTests`, `MetricRetentionPanelTests`, `UiMutationGatewayCoverageTests`,
 `SqliteToPostgresMigratorTests`. Read role: no new endpoint — the charts stay on their pages and the MCP tools keep
 their `Read` level and permission check; the write path is the Admin-only gated panel.
+Follow-up (2026-11-03): `MetricsCollectorRetentionTests` counts the roll-up calls (a counting `IMetricRollupService`
+around the real one) and pins that the cycle after a clock set back runs no second roll-up.
 
 **Out of scope:** Whiskers' own self-metrics (`SelfMetricSamples`, pruned by `SelfMetricsRecorder`), which keep their
 retention. Managing the storage of an external time-series database (VictoriaMetrics). Readings Whiskers
@@ -1133,6 +1144,11 @@ answered. Review round 2: one rule — a reported breach that a gap resets is al
 read disks are kept with the breaches; the state of removed servers is dropped. Review round 3: the unconfirmed close
 is flagged (`RecoveryUnconfirmed`: its own title, Warning) and sets no minimum gap; a disabled server keeps its
 containers' state; dropped state (a gone container, a removed server) is closed; a held-up cycle is a log line.
+Follow-up (2026-11-03): an announced `metrics_gap` is kept in `alert-breaches.json` (optional `Gaps`, with the owner of a
+container gap; an older file is read) and after a restart is closed once and never raised twice
+(`SeriesGapTracker.Snapshot`/`Restore`); `ApiLatencyEvaluator` and `RollingBaseline` close the open alerts of a removed
+server (`Close`); the container alert of a removed server names the removal; the webhook payload and the AI-trigger
+event data carry `recoveryUnconfirmed`.
 
 **Out of scope:** On-call rotation and escalation chains.
 

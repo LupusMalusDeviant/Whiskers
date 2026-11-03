@@ -95,7 +95,8 @@
     private List<string> _eventTypes = new();
 
     // Localized labels for the event types we know, keyed by the registry (R1-56); a <kind>_recovered reads as its kind's
-    // label plus "recovered", a type with no label of its own as the registry's title, anything unknown by its raw id.
+    // label plus "closed" (NotificationsLog_Type_Recovered — a close is not always a confirmed recovery; the row's own
+    // title and severity say which), a type with no label of its own as the registry's title, anything unknown by its raw id.
     private static readonly Dictionary<string, string> TypeLabelKeys = new(StringComparer.Ordinal)
     {
         [NotificationEventTypes.Unhealthy] = "NotificationsLog_Type_Unhealthy",

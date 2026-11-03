@@ -180,8 +180,10 @@ internal sealed class ContainerOperations
                             $"Not asked: waited in Whiskers' own queue for {ex.Waited.TotalSeconds:0.0}s", NotAsked: true));
                 }
                 // The server's deadline ran out — in the request, or still waiting for its client. Either way it is this
-                // server's timeout, never the caller's cancellation.
-                catch (Exception) when (timeout.IsCancellationRequested && !ct.IsCancellationRequested)
+                // server's timeout, never the caller's cancellation. Follow-up (2026-11-03, review R1-41 round 8 NIT 1): only
+                // a failure the deadline caused reads as a timeout; another one that merely ended after it (the daemon's
+                // own error) keeps its reason below.
+                catch (Exception ex) when (timeout.IsCancellationRequested && !ct.IsCancellationRequested && CausedByDeadline(ex))
                 {
                     _logger.LogWarning("Listing containers for server {ServerName} aborted after {Timeout}s — skipping (degraded view).",
                         server.Name, perServerTimeout.TotalSeconds);
@@ -207,6 +209,15 @@ internal sealed class ContainerOperations
                 .Select(r => r.Server.Id).ToHashSet(StringComparer.OrdinalIgnoreCase),
             FailedServers = results.Where(r => r.Failure != null).Select(r => r.Failure!).ToList()
         };
+    }
+
+    /// <summary>Whether <paramref name="ex"/> (or what it wraps) is a cancellation or a timeout — what a deadline that ran
+    /// out produces, in the request as in the wait for a client or a budget slot.</summary>
+    private static bool CausedByDeadline(Exception? ex)
+    {
+        for (; ex is not null; ex = ex.InnerException)
+            if (ex is OperationCanceledException or TimeoutException) return true;
+        return false;
     }
 
     public async Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null)

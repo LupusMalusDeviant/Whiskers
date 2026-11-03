@@ -116,4 +116,35 @@ public sealed class SeriesGapTracker
     {
         lock (_sync) return _series.Keys.ToList();
     }
+
+    /// <summary>Follow-up (2026-11-03, review R1-56 MINOR-1): the gaps that were reported and are still open, to keep
+    /// across a restart. A gap not yet reported is not kept: it was never said, and the tolerance counts again from the
+    /// restart.</summary>
+    public IReadOnlyList<GapState> Snapshot()
+    {
+        lock (_sync)
+            return _series
+                .Where(kv => kv.Value.Announced is not null)
+                .Select(kv => new GapState(kv.Key, kv.Value.Name, kv.Value.LastSeen, kv.Value.Announced!.Value))
+                .OrderBy(g => g.Series, StringComparer.Ordinal)
+                .ToList();
+    }
+
+    /// <summary>Follow-up (2026-11-03, review R1-56 MINOR-1): takes over the reported gaps <see cref="Snapshot"/> saved
+    /// before a restart. Each stays open: readings that are back close it once (<see cref="Seen"/>), readings that are
+    /// still missing do not raise it a second time (<see cref="Missing"/>), and a series that is dropped closes it
+    /// (<see cref="Close"/>). An entry without a series id is skipped.</summary>
+    public void Restore(IEnumerable<GapState> states)
+    {
+        lock (_sync)
+            foreach (var s in states)
+            {
+                if (s is null || string.IsNullOrEmpty(s.Series)) continue;
+                _series[s.Series] = new Series { LastSeen = s.LastSeen, Announced = s.Announced, Name = s.Name };
+            }
+    }
 }
+
+/// <summary>Follow-up (2026-11-03, review R1-56 MINOR-1): a reported <c>metrics_gap</c> that was open when Whiskers stopped,
+/// as <c>alert-breaches.json</c> keeps it.</summary>
+public sealed record GapState(string Series, string? Name, DateTime LastSeen, DateTime Announced);

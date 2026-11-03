@@ -236,6 +236,9 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             exitCode = evt.ExitCode,
             restartCount = evt.RestartCount,
             info = evt.ImageInfo,
+            // Follow-up (2026-11-03, review R1-56 NIT-4): a recovery no reading confirmed, as a field — a trigger acting on
+            // a <kind>_recovered can tell it from a confirmed one without parsing the text.
+            recoveryUnconfirmed = evt.RecoveryUnconfirmed,
         }, EventDataJson);
 
         var sb = new StringBuilder();

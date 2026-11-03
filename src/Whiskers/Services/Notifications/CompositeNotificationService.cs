@@ -262,6 +262,12 @@ public class CompositeNotificationService : INotificationService
                         evt.EventType, channel.Name, NotificationOutbox.Describe(ex));
                 }
             }
+            else
+            {
+                // Follow-up (2026-11-03, review R1-41 round 8 NIT 2): a non-critical one is let go, but not without a trace.
+                _logger.LogInformation("Notification {EventType} to {Provider} interrupted by a stop; not critical, not kept",
+                    evt.EventType, channel.Name);
+            }
             return;
         }
 

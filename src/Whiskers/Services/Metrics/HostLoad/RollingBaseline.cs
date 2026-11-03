@@ -165,4 +165,16 @@ public sealed class RollingBaseline
         .ToList();
 
     public IReadOnlyList<OpenFinding> OpenFindings() => _tracker.OpenFindings();
+
+    /// <summary>Follow-up (2026-11-03, review R1-56 MINOR-2): the servers this rule holds alert state for.</summary>
+    public IReadOnlyCollection<string> Tracked() => _tracker.Tracked();
+
+    /// <summary>Follow-up (2026-11-03, review R1-56 MINOR-2): drops what is learned about a removed server and closes its
+    /// reported anomaly and drift alerts, unconfirmed (<see cref="BreachTracker.Close"/>).</summary>
+    public IReadOnlyList<HostLoadFinding> Close(string serverId, DateTime atUtc, string reason)
+    {
+        foreach (var key in _series.Keys.Where(k => k.StartsWith(serverId + "|", StringComparison.Ordinal)).ToList())
+            _series.Remove(key);
+        return _tracker.Close(serverId, atUtc, reason);
+    }
 }

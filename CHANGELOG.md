@@ -6,6 +6,21 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-41/R1-53/R1-54/R1-55/R1-56 follow-up: **open alerts are closed once, also across a restart and a removed
+  server.** A `metrics_gap` that was open when Whiskers stopped is now kept in `alert-breaches.json` (a new optional
+  `Gaps` list; a file written before is still read): after the restart it is not raised a second time while readings
+  are still missing, and it is closed once with `metrics_gap_recovered` when they are back. The open `host_api_slow`,
+  `host_cpu_anomaly` and `host_cpu_baseline_drifted` alerts of a server removed from the configuration are closed
+  (unconfirmed), like its other alerts; a container alert of such a server now says that its server was removed instead
+  of "no longer running". The generic webhook payload and the AI-trigger event data carry a new field
+  `recoveryUnconfirmed` (`true` for a `<kind>_recovered` that no reading confirmed, `false` otherwise). A settings save
+  with a loop interval out of range is refused before the gateway runs, so it no longer leaves a failed `config.save` in
+  the audit trail. The AutoUpdate failure notification now ends with the stop (it is kept for redelivery like every
+  critical event); a non-critical delivery a stop interrupts leaves a log line. A fleet container listing that fails for
+  another reason after its deadline names that reason instead of "Timed out". Tests now cover the e-mail channel's TLS
+  path end to end (no fallback to plain text when STARTTLS is missing, TLS from the first byte on port 465, an untrusted
+  certificate ends the send, the TLS name is the configured host) and count the roll-ups after a clock set back.
+
 - R1-56: **Threshold alerts say a breach once and say when it is over; quiet hours hold the channels back.** `high_cpu`,
   `high_memory` and `high_disk` now follow the host rules' duration model: a breach is raised once, after the value
   stayed at or above the threshold for `SustainedMinutes` of **elapsed time** (no longer a sample count that assumed a
@@ -320,12 +335,14 @@ All notable changes to Whiskers are documented here. The format follows
   of being recorded as executed. A compose deployment is read back under the project the plan resolved (a top-level `name:` included), a one-shot
   systemd unit that ran to completion counts as started, and a unit without an `[Install]` section is not verifiable
   for enable / disable. Also fixed: the firewall page showed an inactive ufw as active.
+
 - R1-34 follow-up: **the recovery command is recognised in every spelling.** `--restore-backup=<id>` and the option
   after `--for-previous-release` now stage the restore; before, they started Whiskers normally on the data the restore
   was meant to replace. A restore staged from the Settings panel now resets the upgrade state like the command line,
   so the first start on the restored data takes a pre-upgrade backup of it; a failure to reset it no longer reports a
   staged restore as failed. When an unfinished upgrade's own backup is gone, the log lists the older pre-upgrade
   backups by id, and only a schema that had migrations pending logs its migration time.
+
 - Dependencies: **three known high-severity flaws removed.** The unused SignalR client package is gone; it pulled
   `SignalR.Common` 10.0.10 (CVE-2026-70159 / GHSA-334f-vvp4-7g6p, a denial of service up to 10.0.12). The server-side
   SignalR of the Blazor circuit and the container hub is part of the ASP.NET Core runtime in the base image, and the
@@ -337,6 +354,7 @@ All notable changes to Whiskers are documented here. The format follows
   `KubernetesYaml.Deserialize`), Markdig 1.5.1, Blazor-ApexCharts 7.1.0, SQLitePCLRaw bundle 3.0.5, bUnit 2.13.3,
   coverlet 10.1.0, ASP.NET Core test host 10.0.14. `dotnet list package --vulnerable --include-transitive` reports no
   vulnerable package.
+
 - R1-34: **An upgrade starts from a recovery point.** When another release starts on an existing database (a new
   version, or schema migrations to run), it first takes a self-backup labelled `pre-upgrade-…` — right after the vault
   checked `VAULT_KEY` and before anything rewrites data in a newer format (server list, credential move into the
@@ -358,6 +376,7 @@ All notable changes to Whiskers are documented here. The format follows
   to Whiskers (it dropped them before), so `docker compose run --rm serverwatch --restore-backup …` and
   `--migrate-to-postgres` work in the image, after the same VPN bring-up as a normal start. Tests now catch a model
   change without a migration, and a migration shipped for only one of the two databases.
+
 - R1-33: **A backup of a PostgreSQL instance now holds the database.** The self-backup takes a `pg_dump` of the
   database together with the files, so one archive is one recovery point for sign-in accounts, scheduled tasks,
   webhooks, audit and settings alike. Before a restore is committed, Whiskers takes the pre-restore safety backup and
@@ -382,6 +401,7 @@ All notable changes to Whiskers are documented here. The format follows
   because a search path put them in another schema) fails instead of claiming the database. A restore commits only
   when the dump was read to its end without an error. On PostgreSQL the readiness check shows whether the client tools
   are usable and new enough to restore.
+
 - R1-36: **A container action counts only when the container shows it.** After a start, stop, restart, remove,
   update or rollback — and after a single-container deployment from the Deploy page — the container is read back; one
   that is not running (or still running, still there, killed for lack of memory) makes the action **failed** — on the
@@ -396,6 +416,7 @@ All notable changes to Whiskers are documented here. The format follows
   back is not tried again until a newer one appears. The snapshot rule applies to automatic updates: an update from
   the Dashboard or the `update_container` tool still runs after a failed snapshot and says so. With rollback on, an update whose snapshot could not be taken is not run; without a usable vault no
   snapshot can exist, and the update still runs without a way back (as since R1-31).
+
 - R1-35: **Settings files survive a power loss and say when they were damaged.** Every settings store (roles, whitelist,
   vault, servers, permissions, guardrails, triggers, …) is written to a flushed temporary file and renamed into place,
   keeping the version before as `<file>.bak`; the CVE and image-update state, the agent and app settings, the chat
@@ -408,6 +429,7 @@ All notable changes to Whiskers are documented here. The format follows
   `mcp-permissions.json` keep no previous version while they still hold a legacy plaintext key. A restore removes the
   previous versions of what it replaces. **Operators:** to reset a store (e.g. delete `roles.json` to seed the admin
   again) delete `<file>.bak` too — a store with only its previous version is recovered from it.
+
 - R1-32: **A restore writes only what a backup may hold, and only after checking it.** A self-backup archive may
   contain only Whiskers' own stores and directories (one list, `SelfBackupLayout`, used for packing and restoring);
   an archive with backups, restore state, database journals, temp files, a vault key, duplicate, conflicting or
@@ -423,6 +445,7 @@ All notable changes to Whiskers are documented here. The format follows
   is refused while one is committed and waiting for the restart. **Breaking:**
   with `VAULT_KEY` set an unencrypted archive is no longer restored (it cannot be checked for changes); restore it on
   an instance without `VAULT_KEY`, or keep using the encrypted backups made since the key was set.
+
 - R1-31: **Webhook secrets, rollback snapshots and the sign-in key ring are encrypted.** The inbound webhooks' signing
   secrets and the rollback snapshots (a container's full configuration, its environment variables included) are
   stored in the database encrypted with a key derived from the vault's, and so is each key of the data-protection key
@@ -431,6 +454,7 @@ All notable changes to Whiskers are documented here. The format follows
   snapshots and key files are encrypted in place at the first start with a usable vault; nobody is signed out.
   **Changing or losing `VAULT_KEY`** now also signs everybody out and leaves webhooks and snapshots unreadable until
   the right key is back (see SECURITY.md). A readiness line counts what is still in plaintext.
+
 - R1-30: **Notification and AI credentials are kept in the vault.** The SMTP password, the Matrix, Telegram and ntfy
   tokens, the ntfy topic, the Mattermost, Discord, Slack and custom-webhook URLs, the custom webhook's signing secret,
   and the API keys of the AI chat and the agent are now stored encrypted in the vault; app-settings.json and
@@ -441,6 +465,7 @@ All notable changes to Whiskers are documented here. The format follows
   the vault at the first start with a usable vault, like the cloud and DNS keys; until then a save of those settings is
   refused. A second readiness line lists any credential still in plaintext. Credentials set by environment variables
   still work and are not moved.
+
 - R1-29: **Cloud API keys and the DNS token are kept in the vault.** A server's cloud API key (Hetzner, Hostinger) and
   the DNS provider token are now stored encrypted in the vault; servers.json and app-settings.json only name the vault
   key. Saving one needs a usable vault — with no `VAULT_KEY`, or a wrong one, the save is refused instead of writing
@@ -452,6 +477,7 @@ All notable changes to Whiskers are documented here. The format follows
   key from the vault. The production-readiness card now reports where these credentials actually are and no longer
   claims that every secret is encrypted: notification, chat and AI credentials and webhook secrets are still plaintext
   (R1-30, R1-31). A token set by the environment (`Dns__ApiToken`) still works and is not moved.
+
 - R1-28: **A wrong `VAULT_KEY` no longer touches the vault.** `vault.json` now carries a key check; at start the key
   must open it (or, on a vault written before, one of its entries). A wrong key, a tampered check or entries without a
   salt lock the vault: no secret is read, written, deleted or migrated and the file stays exactly as it was. Settings
@@ -467,6 +493,7 @@ All notable changes to Whiskers are documented here. The format follows
   the right key, stop Whiskers, put `vault.json.legacy-cbc.bak` (or the newest `vault.json.legacy-cbc.<time>-<n>.bak`)
   back as `vault.json`, set the right key and start again. Delete the copy once the converted secrets read correctly —
   it holds the old unauthenticated ciphertext and is part of every self-backup.
+
 - R1-25: **Logs and outbound notifications carry no secrets.** Every logger now writes through a redacting logger
   factory, in front of all providers (console, debug, event log): the message, each structured value, the message template, scopes and the full
   exception text are redacted before they reach it, and an entry that cannot be redacted is replaced by
@@ -482,6 +509,7 @@ All notable changes to Whiskers are documented here. The format follows
   redacted on save, whoever writes them. A failed channel test (also from the Settings page) names no URL; the in-app bell shows redacted text too; a failed manual CVE scan or an unreadable
   restore marker writes its error to stderr redacted. The audit-log fallback (database down) logs the entry redacted
   like the row.
+
 - R1-24: **No persistent sink keeps a secret.** Every free-text column of the audit log, the MCP/agent call history,
   approvals, policy decisions and scheduled-task results is redacted on save by a database interceptor, whoever wrote
   the row (bulk updates excepted; they only copy redacted values or fixed texts). The agent transcript now redacts
@@ -501,9 +529,11 @@ All notable changes to Whiskers are documented here. The format follows
   cut at 1 MB — and a tool output cut for the agent (8000 characters) or by `execute_command` (50 000) — now ends at
   its last complete line or word (one long line without any is dropped), as do log lines shortened for a search
   result or an alert, so no half-cut credential is stored. Rows written before this version stay as they are.
+
 - R1-23 follow-up: an unreadable checkpoint file and a pending VAULT_KEY adoption are logged as what they are (not as
   tampering); the page counts every finding, also above the display cap; export scratch files left by a crash are
   removed by the next export.
+
 - R1-23: **The audit trail is tamper-evident, retained on purpose and Admin-only.** Every written version of an audit
   row becomes a link of one SHA-256 hash chain, in the same transaction as the write (ADR-0006). Every minute and at
   shutdown the chain's end is signed with HMAC-SHA-256 under a key derived from `VAULT_KEY`, in the database and in
@@ -532,9 +562,11 @@ All notable changes to Whiskers are documented here. The format follows
   once. **Changing** `VAULT_KEY` makes earlier checkpoint signatures invalid. To start over with a fresh database in
   the same data directory, move `audit-checkpoint.json` aside first — otherwise the new database is not sealed and
   its trail reports the old end as cut off.
+
 - R1-22 follow-up: a webhook switched off automatically writes its own `webhook.suspended` row with the version
   before and after; a restore refused by archive validation is a Denied event; flags named after a secret
   (`HasToken`) stay readable; the configuration pages' Admin gates are checked to record their refusals.
+
 - R1-22: **Configuration, sign-ins and backup downloads are audited.** A configuration or policy write — whitelist,
   roles, MCP keys and tool switches, guardrails and presets, AI triggers, agent settings, Settings sections, servers,
   registries, Git-deploy apps — is one gateway event that carries what changed: the section's version before and
@@ -624,6 +656,7 @@ All notable changes to Whiskers are documented here. The format follows
   database from before this release as `github`.
   **Upgrade notes:** a new table and column, created on start. A CI job that read the action's output from the
   webhook response gets a run id instead; the result is in the webhook log.
+
 - R1-18: **One operation id runs at most once.** Every mutation claims its operation id in the new `Operations` table
   (paired SQLite/PostgreSQL migrations, copied by the SQLite → PostgreSQL migrator) right before it runs, and the claim
   records how it ended. A retry under the same id — concurrent, after it ran (also after it failed), or after a
@@ -640,6 +673,7 @@ All notable changes to Whiskers are documented here. The format follows
   its own and keeps the link (`parentOperationId` in the audit row, `ParentId` in the journal). A journal that cannot
   be written refuses the mutation. The SQLite → PostgreSQL migrator rewrites an operation's `AuditId` to its audit
   row's new id. **Upgrade notes:** a new table, created on start; nothing to migrate by hand.
+
 - R1-17: **Web-terminal sessions go through the Mutation Gateway and are audited.** Opening a shell in a container
   (`terminal.container_open`) or on a host (`terminal.host_open`) is an Admin, root-equivalent capability decided like
   every other mutation: the kill switch opens nothing, a shell in Whiskers' own control plane needs an explicit Admin
@@ -652,6 +686,7 @@ All notable changes to Whiskers are documented here. The format follows
   shell on Whiskers' own host. **Upgrade notes:** a terminal open is refused while the kill switch is on; running
   terminals end when it goes on or when their owner loses Admin; a terminal into a control-plane container
   (`whiskers`, `socket-proxy`, …) needs an Admin approval and is opened again after it.
+
 - R1-16: **Whiskers protects its own control plane, and free text no longer slips past protected resources.** A
   built-in list — containers named `whiskers*`, `serverwatch*`, `socket-proxy*`, `docker-socket-proxy*`,
   `ghostunnel*`, `step-ca*`, `nginx-proxy-manager*` and those in `WHISKERS_SELF_CONTAINERS`, plus the data
@@ -732,6 +767,7 @@ All notable changes to Whiskers are documented here. The format follows
   own pattern stays refused for everyone, as before, wherever in the call it is named — and while the policy lists
   patterns of its own, free text that cannot be analysed is refused for everyone too (it could name one). The data
   volume is recognised under a compose project's prefix as well (`prod_serverwatch-data`).
+
 - R1-15: **who may decide an approval, until when, and for how long a chat's approval lives.** Approving and
   rejecting follow the same rules: the approver holds the action's effective level (Viewers decide nothing, and the
   chat now passes the approver's current role), and nobody decides their own non-interactive request — direct MCP,
@@ -752,6 +788,7 @@ All notable changes to Whiskers are documented here. The format follows
   add `RequesterIds` and `SelfApproved` to `Approvals`. **Upgrade note:** a pending approval raised before the
   upgrade records no requester and is cancelled at startup — the caller asks again; approved, unused ones keep their
   grant.
+
 - Tests: the full-app boot tests that switch modules off ("lean boot") or set `Auth:Disabled` now really boot that
   configuration. Program reads those settings while the builder is set up, before a test's in-memory configuration
   is layered in, so these tests had been booting every module (and the real authentication setup) while reporting
@@ -760,6 +797,7 @@ All notable changes to Whiskers are documented here. The format follows
   (`BootSettings.AssertBoot`, an inherited flag fails it too), lean boots switch default-off modules off explicitly
   (`BootSettings.OnlyCore`), and `BootMatrixTests` compares against module sets written out per case. The only product
   change: `ModuleCatalog.All()` is internal instead of private, for that check.
+
 - R1-14: **approvals are durable and fully bound.** Every approval is written to the new `Approvals` table (additive
   migrations for SQLite and PostgreSQL; the SQLite → PostgreSQL migrator copies it) before it is shown, decided or
   used, so a restart no longer loses a decision or lets an approval run twice, and the history on the Approvals page
@@ -773,6 +811,7 @@ All notable changes to Whiskers are documented here. The format follows
   open approve-then-retry approvals and unused grants, while a pending agent-chat approval is cancelled (its chat
   session ended with the restart) — ask the agent again. To go back, start the previous image: it ignores the new
   table.
+
 - R1-13: **AI triggers are read-only unless an Admin grants them writes** (PC-D6, PC-D7). A trigger may change
   something only when an Admin lists both the **capabilities** it may perform and the **targets** (names or ids, `*`
   and `?` as wildcards) it may act on; saving such a grant makes that Admin the trigger's **owner**. The run then
@@ -798,6 +837,7 @@ All notable changes to Whiskers are documented here. The format follows
   owner. Operations that also touch other resources need those granted too. Nothing in `ai-triggers.json`
   needs to be edited by hand; to go back, start the previous image (it ignores the new fields, and its triggers
   fall back to `MaxLevel=write`).
+
 - R1-12: every policy decision of the Mutation Gateway is **persisted before anything acts on it** (new tables
   `PolicyDecisions` and `PolicySnapshots`, additive migrations for SQLite and PostgreSQL; the SQLite → PostgreSQL
   migrator copies both). A record holds the principal, surface, capability and required level, the resolved target,
@@ -895,9 +935,11 @@ All notable changes to Whiskers are documented here. The format follows
   lookup of what the caller typed. A protected container attached to a network that is removed, or connected to /
   disconnected from one, and a workload's current controller are matched against protected patterns
   (`TargetResolutionTests`).
+
 - R1-06: AutoUpdate no longer turns the server id `local` into "the default server": a container listed on `local` is
   decided and recreated on `local`, also when another server is the default. Webhooks decide (Test button) and run
   on the same server and container (`WebhookTargets`).
+
 - R1-06: a tool that takes a `serverId` always receives the server the gateway decided on, also when the caller left
   it out (a missing server is the default server to the gateway, but some tools read it as `local`). AutoPatch, the
   Docker workload provider and the Networks, Scheduled tasks, Volume backups, App Store and Webhooks pages no longer
@@ -907,11 +949,13 @@ All notable changes to Whiskers are documented here. The format follows
 - R1-05 review: the two refusals the effective requirement adds (underlying capability switched off, requirement
   not determinable) are shown in the user's language on the pages; covered end to end through the real gateway,
   approval gate and store (`SchedulerApprovalEndToEndTests`).
+
 - R1-05 review: interactive approvals (agent sessions) are raised at the operation's effective requirement, and the
   approval gate refuses to reuse an approval raised below it, so an Operator can no longer approve a scheduled custom
   command, retention or self-backup. The scheduler requirement resolver reads `taskType` in every form the tool
   accepts (name or number) and fails closed to Admin otherwise, reads `maxBackups` like the tool (`"0"` is no
   retention), and applies stricter or disabled settings of the underlying capability from Settings → MCP.
+
 - `scheduler.delete` is Write on every surface: the Scheduled tasks page now takes the level from the capability
   catalog (it required Admin). Deleting a task is not root-equivalent; creating, updating and running stay gated by
   the task's effective requirement.
@@ -949,22 +993,27 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   multi-line value, and a file using `include` / `extends` from another file can no longer be deployed through
   Whiskers. `COMPOSE_FILE` in a webhook directory's `.env` is honoured as before; in `/opt/deployments/<project>`
   (editor, App Store, MCP) the written file is used instead.
+
 - **R1-06: unknown or ambiguous targets are refused.** A call naming a server, network, cloud server or task that
   does not exist, or a name that fits more than one (two servers called "web", a network id prefix shared by two
   networks, two tasks with the same name), is refused before anything runs; use the id. A server id that differs
   from the stored one only in case is resolved to the stored id.
+
 - **R1-06: an MCP or agent call without `serverId` acts on the default server, for every tool that takes a
   server.** Some tools
   (`set_container_env`, database backups, …) used to read a missing server as `local` while the gateway decided on
   the default server; they now receive the default server's id. Pass `serverId` where you mean `local`.
+
 - **R1-06: a scheduled task saved without a server acts on the server with the id `local`**, for its gates as well
   as for its execution (the execution always did; the decision used the default server). Set the server explicitly
   where `local` is not the intended machine.
+
 - **R1-06: a webhook saved without a server acts on the server with the id `local`.** Restart and rebuild webhooks
   used the default server before, compose-deploy webhooks used `local`; now all four actions use `local`. If your
   `local` server is not the machine such a webhook should act on (or you have no server with that id), set the
   webhook's server explicitly. A webhook whose container id prefix matches more than one container no longer acts
   on the first match; it fails with "Ambiguous".
+
 - **R1-05: one capability level table; several MCP tools now require Admin.** The capability catalog
   (`CapabilityCatalog`) is now the single source of the level of every mutating capability; MCP's
   `DefaultToolLevels` takes its mutating entries from it. Where the UI and MCP disagreed, the stricter level
@@ -996,15 +1045,19 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     holds every row). Pass `maxBackups=0` to keep a **volume** backup task at Write. The Scheduled tasks page sends
     the same arguments and asks the same resolver for "Run now". Retention is read with the executor's own rule (`TaskExecutor.RetentionOf`), the one the
     Scheduled tasks page already uses for "Run now".
+
 - **Deploying from the UI now requires Admin** (was Operator): the deploy form, the compose editor and the app store.
   A compose file can mount `/` or run privileged, which is root on the host. The MCP deploy tools already
   required Admin.
+
 - **The first-run wizard asks for a one-time setup token.** It is printed by the installer and written to
   `/app/data/setup-token.txt` (mode 0600), or preset with `WHISKERS_SETUP_TOKEN`. Instances that already have
   an admin are not affected.
+
 - **`AUTH_DISABLED=true` now only serves the trusted network.** Allowed are loopback, RFC1918, CGNAT/Tailscale
   and IPv6 ULA clients, with an IP or `localhost` as host name and no cross-site `Origin`. Behind a reverse
   proxy with a host name, add it via `Auth__DisabledAllowedHosts__0=…`.
+
 - **MCP and agent mutations run through the Mutation Gateway** (ADR-0005 step 2.1). What changes for callers:
   - A tool switched off in Settings → MCP, or raised to a stricter level there, now applies to web users, the
     agent and AI triggers too, not only to API keys.
@@ -1022,6 +1075,7 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - A mutating tool that answers with an error text (container not found, command exit code ≠ 0, failed backup …)
     now returns that text with `isError: true` over MCP, and the agent sees it as a failed call. The gateway row
     records it as `Failed`.
+
 - **UI actions run through the Mutation Gateway** (ADR-0005 step 2.2, PC-D1). What changes for people using the web UI:
   - The **read-only kill switch** and **protected resources** now apply to UI actions too. With the default preset
     the Whiskers container itself (`whiskers*`) can no longer be stopped, restarted, updated or removed from the
@@ -1046,6 +1100,7 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     `false`) is recorded as `Failed` in the gateway row, not `Executed`.
   - The gateway row no longer stores free-text arguments (SQL text, commands, file content); only their length.
   - No approval is asked for a person's own click; tool allow/deny lists and argument patterns stay agent rules.
+
 - **Scheduled tasks, AutoUpdate and AutoPatch run on their owner's authority** (ADR-0005 step 2.3, PC-D6). What
   changes:
   - A new task records who created it (the signed-in user, or `key:<id>` for an MCP key; for the agent, the user or
@@ -1091,13 +1146,17 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - The kill switch and protected resources apply to scheduled runs, AutoUpdate and AutoPatch. With the default
     preset a scheduled backup of a `whiskers*` / `serverwatch*` volume or a restart of the Whiskers container is
     refused; remove the pattern from the active preset if you rely on it.
+
 - **Arbitrary SQL needs Admin everywhere** (PC-D3): the database query in the container page and the
   `execute_query` MCP tool were Operator / write.
+
 - **Container shells need Admin** (PC-D2): `/terminal/{server}/{container}` and the terminal tab in the container
   page were Operator.
+
 - **"Run now" needs Admin for a custom-command task, a self-backup task and any backup task with retention**
   (`maxBackups`): retention deletes old backups, which is decided as `volume.backup_delete` / `db.backup_delete` /
   `selfbackup.delete`. Restart, cleanup and backup tasks without retention stay Operator.
+
 - **Unattended items need an owner and are suspended when it loses its authority** (R1-04, PC-D6, INV-04):
   - `Automation:RequireOwner` now defaults to `true`: a scheduled task or AutoUpdate without an owner is refused.
     Take such items over in Scheduled Tasks, or keep the grace period with `Automation__RequireOwner=false`.
@@ -1125,6 +1184,7 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     lists, forbidden arguments). With the default preset such a task's writes are refused; an Admin who takes it
     over makes it a task of their own.
   - Taking an item over records the previous and the new owner's authority in the audit row.
+
 - **Principals have stable ids** (R1-03, INV-01/06):
   - Owners of scheduled tasks, AutoPatch and AutoUpdate are now recorded as `user:<email>` or `key:<key id>`. The
     database migration `PrincipalIdsForTaskOwners` (which also adds `ScheduledTasks.CreatedVia`: who created the task,
@@ -1135,6 +1195,7 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   - The MCP call log (Agent History) records callers as `key:<key id>` / `user:<email>` / `anonymous` (was the key
     name); audit rows of API-key calls name `key:<key id>`. The gateway audit `Details.principal` adds the session and
     the kind of the principal acted for.
+
 - **The guardrail policy fails closed** (R1-02, INV-25):
   - A forbidden-argument pattern that is not a valid regex now **refuses every call** (it was ignored). Fix or
     remove the pattern in Guardrails; saving a configuration with an invalid pattern is refused.
@@ -1145,6 +1206,7 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
     The file is not overwritten and a copy is kept as `guardrails.json.unreadable-<timestamp>`. An old
     single-policy file (from before presets) is still migrated into a "Standard" preset; fields it lacks get the
     restrictive default.
+
 - **Guardrails and approvals no longer switch off with the Agent module.** With `Features:agent:Enabled=false`,
   direct MCP calls are still checked against the active guardrail preset, a `Confirm` raises an approval, and the
   Guardrails and Approvals pages stay in the menu.
@@ -1152,39 +1214,53 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 ### Security
 - **Agent-created tasks ran with a person's authority, and a deleted local account kept its tasks running**
   (known items 6/7, PC-D6). See the upgrade note.
+
 - **Identities were rebuilt from display names** (TA-31, C-12, INV-01/06): every AI trigger shared one identity, and
   renaming an API key split it into two in the logs. Principals now carry typed ids end to end.
+
 - **Guardrail policy errors allowed the call, and the live policy could be changed without saving** (TA-32/33,
   C-09/15, INV-25/28). See the upgrade note. The store now hands out copies only, and a save becomes live only
   after it was written: a failed write leaves the previous policy active.
+
 - **Unattended runs had no owner and were never re-checked** (TA-04, INV-04, B-10). Scheduled tasks, AutoUpdate and
   AutoPatch now run through the Mutation Gateway as an automation principal acting on behalf of their owner, whose
   authority is read again on every run. A task created by a key that was later deleted no longer keeps running
   with root on the host.
+
 - **UI actions bypassed the kill switch and protected resources** (TA-26, INV-20/21, PC-D1). Every UI call to a
   mutating capability now goes through the Mutation Gateway.
+
 - **Root-equivalent actions at Operator** (INV-19): container shells, arbitrary SQL and running custom commands now
   need Admin (TA-43, B-10).
+
 - **The tool switch and stricter tool levels applied to API keys only** (TA-10, INV-15). They now apply to every
   caller.
+
 - **`AllowedTools` could widen a key beyond its level** (TA-34, INV-16). The level is now checked first.
+
 - **Protected resources are also matched against the resolved container** for MCP and agent mutations: a unique
   id prefix of a protected container no longer slips past the rule (part of TA-09; commands and SQL text are not
   covered yet).
+
 - **Disabling the Agent module removed the guardrails from direct MCP calls** (TA-27, INV-26). The guardrail
   engine, its store, the approval store and the direct-MCP guard are core now; the MCP filter refuses every call if
   they are missing.
+
 - **Critical — Operator could gain host root through the UI deploy** (TA-01). UI deploys need Admin now. App-store
   template values may no longer contain line breaks or control characters, which could inject YAML.
+
 - **First-run setup could be claimed by whoever reached the port first** (TA-02). It now requires a one-time
   token. Removing or demoting the last Admin is refused at the service boundary, so setup can no longer be
   re-opened that way.
+
 - **Local login had no brute-force protection** (TA-03). Five wrong passwords lock the account for 15 minutes,
   login POSTs are rate-limited to 10 per minute per client, and unknown accounts cost the same hashing time as
   real ones.
+
 - **`AUTH_DISABLED` made every network client an Admin** (TA-11). The trusted-network, Host and Origin checks above
   apply. With auth enabled, a cookie carrying a synthetic identity (`AuthDisabled`, `AgentSynthetic`) is now
   rejected; before, anyone holding the DataProtection keys could forge an Admin cookie that skipped the whitelist.
+
 - **The Trivy image is pinned by digest in the code default too** (TA-14). An operator-configured image without
   a digest now logs a warning.
 
@@ -1193,16 +1269,21 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
   AutoPatch through the gateway on their owner's authority. Owners are shown and taken over in Scheduled Tasks and
   in Settings → Automation owners (`automation-owners.json` in the data directory). The bypass baseline shrinks from
   29 to 23 entries.
+
 - **Mutation Gateway, step 2.2 (ADR-0005).** `IUiMutationRunner` runs a page's action through the gateway as the
   signed-in user. Sixteen pages use it; the bypass baseline shrinks from 75 to 29 entries.
+
 - **Mutation Gateway, step 2.1 (ADR-0005).** Every MCP tool and agent tool call that maps to a capability runs
   through the gateway: tool switch and level, container target resolution, guardrail policy, approval, audit
   intent, deadline, audit outcome. A shared approval gate binds an approval to the operation and the arguments
   hash and uses it once — only after the audit intent is written, so a refused attempt does not spend it, and
   concurrent identical calls share one approval. The agent session pauses on the same (stricter stored) level and
   tool switch as the gateway. The bypass baseline shrinks from 104 to 75 entries.
+
 - **Mutation Gateway, step 2.0 (ADR-0005).** `IMutationGateway` with a capability catalog of every mutating action, a decide → audit intent → execute → verify → audit outcome pipeline that refuses on any doubt (unknown capability, missing level, policy error, audit not writable), and an architecture test that lists every call to a mutating service outside the gateway in `docs/v1/mutation-bypass-baseline.txt` (104 today; the list may only shrink). No entry point uses the gateway yet, so permissions and behaviour are unchanged.
+
 - **Scope guard in report mode.** Mutating service interfaces are wrapped at startup; a mutation that runs outside the gateway still runs, and the first one per capability is logged at Information (`ran outside the Mutation Gateway (report mode)`). Expect these lines until the surfaces are migrated.
+
 - `server.json` for the official MCP Registry (`io.github.LupusMalusDeviant/whiskers`, OCI image on ghcr.io,
   Streamable HTTP at `/mcp` with a Bearer key). The image carries the matching
   `io.modelcontextprotocol.server.name` label, which the registry checks before it accepts `mcp-publisher publish`.
@@ -1212,10 +1293,13 @@ v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1
 ### Fixed
 - Tests: no test empties the SQLite connection pools of other tests any more (`ClearAllPools`); each clears only
   its own database files. This removes the random "cannot start a transaction within a transaction" failures.
+
 - A refused container update on the Dashboard no longer overwrites the saved rollback point; the snapshot is taken
   only once the update has been allowed.
+
 - The installer no longer recommends `Auth__Disabled=true` for first sign-in. It prints the setup token and
   points to `VAULT_KEY`.
+
 - The README renders completely on catalogues that drop raw HTML and relative paths (LobeHub): the header is
   Markdown, images and links are absolute, and the quick start shows the MCP client config for a self-hosted
   instance (`http://localhost:5100/mcp` with a Bearer key).

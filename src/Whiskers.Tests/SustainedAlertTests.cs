@@ -212,6 +212,7 @@ public sealed class SustainedAlertTests : IDisposable
         public double HostCpu { get; set; } = 20;
         public required ServerConfig Server { get; init; }
         public required FakeServerConfig Config { get; init; }
+        public required Whiskers.Services.Observability.SelfMetrics.SelfMetrics SelfMetrics { get; init; }
 
         /// <summary>Removes the server from the configuration, as the Servers page does.</summary>
         public void RemoveServer() => Config.GetServers().Clear();
@@ -301,6 +302,7 @@ public sealed class SustainedAlertTests : IDisposable
         };
         configure?.Invoke(alert);
         var clock = new ManualTime(new DateTimeOffset(start ?? T0));
+        var selfMetrics = new Whiskers.Services.Observability.SelfMetrics.SelfMetrics();
         var interval = new EffectiveInterval<MetricsSettings>(() => intervalSeconds, "Metrics:CollectionIntervalSeconds", 5,
             86_400, TimeSpan.FromSeconds(1), NullLogger.Instance);
         var collector = new MetricsCollectorService(sp,
@@ -308,8 +310,8 @@ public sealed class SustainedAlertTests : IDisposable
             new HostLoadEvaluator(), new ApiLatencyEvaluator(), new RollingBaseline(),
             new StaticOptionsMonitor<MetricsSettings>(new MetricsSettings()),
             NullLogger<MetricsCollectorService>.Instance,
-            new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(), interval, time: clock);
-        rig = new Rig { Server = server, Config = config, Collector = collector, Clock = clock, Notifications = notifications, Alert = alert, Interval = TimeSpan.FromSeconds(intervalSeconds) };
+            selfMetrics, interval, time: clock);
+        rig = new Rig { Server = server, Config = config, Collector = collector, Clock = clock, Notifications = notifications, Alert = alert, Interval = TimeSpan.FromSeconds(intervalSeconds), SelfMetrics = selfMetrics };
         return rig;
     }
 
@@ -600,6 +602,142 @@ public sealed class SustainedAlertTests : IDisposable
             Assert.Contains("its server was removed from the configuration", closed.ImageInfo);
             Assert.Equal("local", closed.ServerId);
             AssertEveryRaiseIsClosedInOrder(rig.Events, kind);
+        }
+    }
+
+    [Fact]
+    public async Task A_server_that_was_removed_has_its_api_latency_and_baseline_raises_closed()
+    {
+        // Follow-up (2026-11-03, review R1-56 MINOR-2): host_api_slow and the baseline alerts stayed open for good — their
+        // trackers were never asked again once the server was gone.
+        var rig = NewRig();
+        rig.HostCpu = 99;                                                 // the learned normal is past the threshold at once
+        for (var i = 0; i < 20; i++) rig.SelfMetrics.RecordApiCall("local", TimeSpan.FromMilliseconds(10));
+        for (var i = 0; i < 5; i++) rig.SelfMetrics.RecordApiCall("local", TimeSpan.FromMilliseconds(1000));
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(12));                // both raised at 10
+        Assert.Single(OfType(rig.Events, NotificationEventTypes.HostApiSlow));
+        Assert.Single(OfType(rig.Events, NotificationEventTypes.HostCpuBaselineDrifted));
+        rig.RemoveServer();
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(13));
+
+        foreach (var kind in new[] { NotificationEventTypes.HostApiSlow, NotificationEventTypes.HostCpuBaselineDrifted })
+        {
+            var closed = Assert.Single(OfType(rig.Events, NotificationEventTypes.Recovered(kind)));
+            Assert.True(closed.RecoveryUnconfirmed);
+            Assert.Equal(T0.AddMinutes(12), closed.Timestamp);
+            Assert.Contains("its server was removed from the configuration", closed.ImageInfo);
+            Assert.Equal("local", closed.ServerId);
+            AssertEveryRaiseIsClosedInOrder(rig.Events, kind);
+        }
+
+        // Closed once: the state is dropped with the close.
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(15));
+        Assert.Single(OfType(rig.Events, NotificationEventTypes.Recovered(NotificationEventTypes.HostApiSlow)));
+        Assert.Single(OfType(rig.Events, NotificationEventTypes.Recovered(NotificationEventTypes.HostCpuBaselineDrifted)));
+    }
+
+    [Fact]
+    public async Task The_container_alert_of_a_removed_server_is_closed_naming_the_removal()
+    {
+        // Follow-up (2026-11-03, review R1-56 NIT-5): it said "no longer running on Badwolf", as if the container stopped.
+        var rig = NewRig();
+        rig.Cpu = 97;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(5));                 // high_cpu at 3
+        rig.RemoveServer();
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(6));
+
+        var closed = Assert.Single(OfType(rig.Events, "high_cpu_recovered"));
+        Assert.True(closed.RecoveryUnconfirmed);
+        Assert.Contains("the server of container web (Badwolf) was removed from the configuration", closed.ImageInfo);
+        Assert.DoesNotContain("no longer running", closed.ImageInfo);
+    }
+
+    [Fact]
+    public async Task A_metrics_gap_open_at_a_restart_is_not_raised_again_and_is_closed_once_readings_are_back()
+    {
+        // Follow-up (2026-11-03, review R1-56 MINOR-1): the gap state lived only in memory — after a restart a stats call
+        // that still failed raised a second metrics_gap, the first one never closed.
+        var file = Path.Combine(Path.GetTempPath(), $"sw-r156-breaches-{Guid.NewGuid():N}.json");
+        try
+        {
+            var before = NewRig(breachFile: file);
+            await before.RunUntilAsync(TimeSpan.FromMinutes(1));
+            before.StatsFail = true;
+            await before.RunUntilAsync(TimeSpan.FromMinutes(6));
+            Assert.Single(OfType(before.Events, NotificationEventTypes.MetricsGap));
+
+            var after = NewRig(breachFile: file, start: T0.AddMinutes(7));
+            after.StatsFail = true;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(15));
+            Assert.Empty(OfType(after.Events, NotificationEventTypes.MetricsGap));
+            after.StatsFail = false;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(17));
+
+            Assert.Empty(OfType(after.Events, NotificationEventTypes.MetricsGap));
+            var back = Assert.Single(OfType(after.Events, NotificationEventTypes.Recovered(NotificationEventTypes.MetricsGap)));
+            Assert.Equal(T0.AddMinutes(15), back.Timestamp);
+            Assert.False(back.RecoveryUnconfirmed);
+            Assert.Contains("Readings of container web are back", back.ImageInfo);
+            Assert.Equal(("c1", "web"), (back.ContainerId, back.ContainerName));
+        }
+        finally
+        {
+            try { File.Delete(file); File.Delete(file + ".bak"); } catch { /* best effort */ }
+        }
+    }
+
+    [Fact]
+    public async Task A_restored_container_gap_survives_a_listing_that_fails_in_the_first_cycle_after_the_restart()
+    {
+        // Follow-up (2026-11-03): the container of a kept gap is of a known server, so a failed first listing keeps the gap
+        // open (it is not closed as "no longer running") and the readings that come back close it as a confirmed recovery.
+        var file = Path.Combine(Path.GetTempPath(), $"sw-r156-breaches-{Guid.NewGuid():N}.json");
+        try
+        {
+            var before = NewRig(breachFile: file);
+            await before.RunUntilAsync(TimeSpan.FromMinutes(1));
+            before.StatsFail = true;
+            await before.RunUntilAsync(TimeSpan.FromMinutes(6));
+
+            var after = NewRig(breachFile: file, start: T0.AddMinutes(7));
+            after.ListingFails = true;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(7.5));
+            after.ListingFails = false;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(10));
+
+            var back = Assert.Single(OfType(after.Events, NotificationEventTypes.Recovered(NotificationEventTypes.MetricsGap)));
+            Assert.Equal(T0.AddMinutes(7.5), back.Timestamp);
+            Assert.False(back.RecoveryUnconfirmed);
+            Assert.Empty(OfType(after.Events, NotificationEventTypes.MetricsGap));
+        }
+        finally
+        {
+            try { File.Delete(file); File.Delete(file + ".bak"); } catch { /* best effort */ }
+        }
+    }
+
+    [Fact]
+    public async Task A_breach_file_written_before_the_gaps_were_kept_is_still_read()
+    {
+        // Follow-up (2026-11-03): the gap list is additive — a file without it is read, its breaches kept, no gap restored.
+        var file = Path.Combine(Path.GetTempPath(), $"sw-r156-breaches-{Guid.NewGuid():N}.json");
+        try
+        {
+            await File.WriteAllTextAsync(file,
+                """{"Thresholds":[{"Series":"c1","Kind":"high_cpu","ServerName":"web","Since":"2026-11-03T11:50:00Z","Reported":"2026-11-03T11:53:00Z","ReportedValue":97,"Peak":97,"LastEnded":null}],"HostLoad":[],"Containers":[{"Id":"c1","ServerId":"local","ServerName":"Badwolf","Name":"web"}]}""");
+            var loaded = await new AlertBreachStore(file).LoadAsync();
+            Assert.Single(loaded.Thresholds);
+            Assert.Empty(loaded.Gaps ?? []);
+
+            var rig = NewRig(breachFile: file);
+            rig.Cpu = 97;
+            await rig.RunUntilAsync(TimeSpan.FromMinutes(5));
+            Assert.Empty(OfType(rig.Events, NotificationEventTypes.HighCpu));   // resumed, not raised again
+            Assert.Empty(OfType(rig.Events, NotificationEventTypes.MetricsGap));
+        }
+        finally
+        {
+            try { File.Delete(file); File.Delete(file + ".bak"); } catch { /* best effort */ }
         }
     }
 
