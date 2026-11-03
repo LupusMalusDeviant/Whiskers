@@ -1,6 +1,18 @@
-# Release pipeline (outOfTheBox W2): on a `v*` tag, build the multi-arch image, gate it through a Trivy
-# scan BEFORE anything is published (the tool that scans CVEs must not ship Criticals), push to GHCR, then
-# cut a GitHub Release with the compose files, install.sh, checksums and an SBOM attached.
+# Release pipeline (outOfTheBox W2, hardened in R1-45). On a `v*` tag:
+#
+#   prepare        validate the tag (X.Y.Z), check out the tag commit, match csproj + chart versions,
+#                  refuse early if the version is already published
+#   test           the full CI suite (ci.yml via workflow_call) on the tag commit
+#   build          build amd64 and arm64 ONCE each and stage them in GHCR untagged, by digest
+#   scan           Trivy gate on both staged digests (any CRITICAL fails; exceptions only via .trivyignore)
+#   publish-image  tag exactly the scanned digests (no rebuild), verify, cosign-sign; accepts an X.Y.Z that
+#                  already holds exactly these digests, so "Re-run failed jobs" can finish a broken run
+#   publish-chart  push the Helm chart for the same version
+#   github-release per-arch SBOMs, compose files, installer, checksums
+#   move-tags      last: move X.Y and latest, decided from the releases published at that moment
+#
+# Every action is pinned to a full commit SHA (the comment names the release); Dependabot keeps them current.
+# Permissions are granted per job; the workflow itself holds none.
 name: release
 
 on:
@@ -10,176 +22,490 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Version tag to build (e.g. v0.12.0). Manual runs do not push :latest."
+        description: "Version tag to release (e.g. v0.16.0). Start the run FROM that tag (\"Use workflow from\" = the tag); any other ref is refused."
         required: true
 
-permissions:
-  contents: write   # create the GitHub Release
-  packages: write   # push to GHCR
-  id-token: write   # keyless cosign signing via the GitHub OIDC token (Sigstore)
+permissions: {}
+
+# One release at a time: the "not yet published" checks and the pushes must not interleave with another run.
+# GitHub keeps at most ONE pending run per group: a third run cancels the older pending one (shown as
+# "cancelled"); start that tag again by hand (see deploy/README.md).
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 env:
   # GHCR requires a lowercase image path; the org is LupusMalusDeviant.
   IMAGE: ghcr.io/lupusmalusdeviant/whiskers
+  CHART_REPO: oci://ghcr.io/lupusmalusdeviant/charts
+  CHART: oci://ghcr.io/lupusmalusdeviant/charts/whiskers
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      ver: ${{ steps.verify.outputs.ver }}
+      minor: ${{ steps.verify.outputs.minor }}
+      sha: ${{ steps.verify.outputs.sha }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      # Resolve the version once. A pushed tag uses itself; a manual run uses the input. `latest` only moves
-      # on a real tag push (never on a manual/dispatch build, so testing can't clobber the stable tag).
-      - name: Resolve version
-        id: ver
+      # A pushed tag releases itself. A manual run must be started from the tag it names, so the label, the
+      # code and the workflow definition (and with it the cosign signing identity) are the same commit.
+      - name: Validate the release tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RAW="${{ github.event.inputs.tag }}"; PUSH_LATEST=false
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+            if [ "$GITHUB_REF" != "refs/tags/${TAG}" ]; then
+              echo "::error::A manual release must be started from the tag it releases (Use workflow from: ${TAG}); this run is on ${GITHUB_REF}."
+              exit 1
+            fi
           else
-            RAW="${GITHUB_REF_NAME}"; PUSH_LATEST=true
+            TAG="$GITHUB_REF_NAME"
+            if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+              echo "::error::release runs only for tags"; exit 1
+            fi
           fi
-          VER="${RAW#v}"                                  # strip leading v
-          MINOR="$(printf '%s' "$VER" | cut -d. -f1-2)"   # X.Y
-          echo "raw=$RAW"        >> "$GITHUB_OUTPUT"
-          echo "ver=$VER"        >> "$GITHUB_OUTPUT"
-          echo "minor=$MINOR"    >> "$GITHUB_OUTPUT"
-          echo "push_latest=$PUSH_LATEST" >> "$GITHUB_OUTPUT"
+          if ! printf '%s' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::'${TAG}' is not a release tag of the form vX.Y.Z"; exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify tag commit and versions
+        id: verify
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if [ "$(git rev-parse HEAD)" != "$SHA" ] || [ "$GITHUB_SHA" != "$SHA" ]; then
+            echo "::error::checked-out commit, run commit (${GITHUB_SHA}) and tag commit (${SHA}) differ"; exit 1
+          fi
+          VER="${TAG#v}"
+          CSPROJ_VER="$(sed -n 's#.*<Version>\([^<]*\)</Version>.*#\1#p' src/Whiskers/Whiskers.csproj | head -n1)"
+          CHART_VER="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' deploy/helm/whiskers/Chart.yaml)"
+          CHART_APP="$(sed -n 's/^appVersion:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' deploy/helm/whiskers/Chart.yaml)"
+          for pair in "Whiskers.csproj <Version>=${CSPROJ_VER}" "Chart.yaml version=${CHART_VER}" "Chart.yaml appVersion=${CHART_APP}"; do
+            if [ "${pair#*=}" != "$VER" ]; then
+              echo "::error::${pair%%=*} is '${pair#*=}', the tag says ${VER}"; exit 1
+            fi
+          done
+          MINOR="$(printf '%s' "$VER" | cut -d. -f1-2)"
+          {
+            echo "sha=${SHA}"
+            echo "ver=${VER}"
+            echo "minor=${MINOR}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Fail fast before an hour of building. The publish jobs check again right before they push.
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to GHCR (helm)
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
+      - name: Refuse an already-published version
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VER: ${{ steps.verify.outputs.ver }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/assert-not-published.sh image "${IMAGE}:${VER}"
+          bash .github/scripts/assert-not-published.sh chart "${CHART}" "${VER}"
+          bash .github/scripts/assert-not-published.sh release "${TAG}"
+
+  # The same suite as CI (restore, build, tests incl. PostgreSQL, DI boot gate), on the tag commit.
+  test:
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  # Build each architecture once and stage it in GHCR by digest only (no tag). Nothing is built after this job:
+  # the scan and the publish steps all work on these digests.
+  build:
+    needs: [prepare, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # stage the untagged per-arch images by digest
+    outputs:
+      amd64_index: ${{ steps.amd64.outputs.digest }}
+      arm64_index: ${{ steps.arm64.outputs.digest }}
+      amd64_image: ${{ steps.resolve.outputs.amd64_image }}
+      arm64_image: ${{ steps.resolve.outputs.arm64_image }}
+    steps:
+      - name: Checkout the tag commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Set up QEMU (arm64 emulation)
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 1) Build a single-arch (amd64) image locally and hold it — do NOT push yet.
-      - name: Build amd64 image (for the scan gate)
-        uses: docker/build-push-action@v7
+      - name: Build amd64 (staged by digest)
+        id: amd64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           # Always fetch the base images: their ASP.NET Core runtime carries the server-side SignalR and Kestrel fixes.
           pull: true
           platforms: linux/amd64
-          load: true
-          tags: ${{ env.IMAGE }}:scan-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # 2) GATE: scan the built image; fail the whole run on any CRITICAL so nothing gets published.
-      - name: Trivy scan (gate — fail on CRITICAL)
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ env.IMAGE }}:scan-${{ github.sha }}
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          severity: CRITICAL
-          vuln-type: os,library
-
-      # 3) Only now (scan passed) build the multi-arch image and push it with the release tags.
-      - name: Build + push multi-arch image
-        id: push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          pull: true
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.ver.outputs.ver }}
-            ${{ env.IMAGE }}:${{ steps.ver.outputs.minor }}
-            ${{ steps.ver.outputs.push_latest == 'true' && format('{0}:latest', env.IMAGE) || '' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=release-amd64
+          cache-to: type=gha,scope=release-amd64,mode=max
           provenance: true
           sbom: true
 
-      # 3b) Keyless-sign the pushed image by digest (Sigstore/cosign). No private key to manage: the
-      #     signature is bound to this workflow's GitHub OIDC identity and logged in the Rekor
-      #     transparency log. Anyone can verify provenance (see README "Verifying the image").
+      - name: Build arm64 (staged by digest)
+        id: arm64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          pull: true
+          platforms: linux/arm64
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=release-arm64
+          cache-to: type=gha,scope=release-arm64,mode=max
+          provenance: true
+          sbom: true
+
+      # The build digest is an index (image + attestations). The scan needs the image manifest itself.
+      - name: Resolve the per-arch image digests
+        id: resolve
+        env:
+          AMD64_INDEX: ${{ steps.amd64.outputs.digest }}
+          ARM64_INDEX: ${{ steps.arm64.outputs.digest }}
+        run: |
+          set -euo pipefail
+          image_digest() { # <index-or-manifest digest> <arch>
+            local raw
+            raw="$(docker buildx imagetools inspect --raw "${IMAGE}@$1")"
+            if printf '%s' "$raw" | jq -e '.manifests' >/dev/null; then
+              printf '%s' "$raw" | jq -er --arg a "$2" \
+                '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a)]
+                 | if length == 1 then .[0].digest else error("expected exactly one linux/\($a) manifest") end'
+            else
+              printf '%s' "$1"
+            fi
+          }
+          # Assign first (set -e aborts here on a failed lookup), then write: an empty output must never leave the job.
+          AMD64_IMAGE="$(image_digest "$AMD64_INDEX" amd64)"
+          ARM64_IMAGE="$(image_digest "$ARM64_INDEX" arm64)"
+          for d in "$AMD64_IMAGE" "$ARM64_IMAGE"; do
+            if ! printf '%s' "$d" | grep -Eq '^sha256:[0-9a-f]{64}$'; then echo "::error::unexpected digest '${d}'"; exit 1; fi
+          done
+          echo "amd64_image=${AMD64_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "arm64_image=${ARM64_IMAGE}" >> "$GITHUB_OUTPUT"
+
+  # GATE: scan both staged images by digest; any CRITICAL fails the run before anything is tagged.
+  # There is no blanket `ignore-unfixed`: an unfixed CRITICAL fails too, unless it is recorded with a reason and
+  # an expiry date in .trivyignore (see the policy in that file).
+  scan:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read    # pull the staged digests
+    steps:
+      - name: Checkout the tag commit (for .trivyignore)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trivy scan amd64 (gate, fail on CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: remote
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ needs.build.outputs.amd64_image }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          vuln-type: os,library
+          trivyignores: .trivyignore
+
+      - name: Trivy scan arm64 (gate, fail on CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: remote
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ needs.build.outputs.arm64_image }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          vuln-type: os,library
+          trivyignores: .trivyignore
+
+  # Tag exactly the scanned digests. `X.Y.Z` is immutable (refused if it exists); the moving tags `X.Y` and `latest`
+  # are moved by the last job, move-tags.
+  publish-image:
+    needs: [prepare, test, build, scan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # tag the image in GHCR, store the signature
+      id-token: write   # keyless cosign signing via the GitHub OIDC token (Sigstore)
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - name: Checkout the tag commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A version that exists with other content is refused. One that already holds exactly the scanned digests
+      # is the same run being finished ("Re-run failed jobs" after e.g. a Sigstore outage): it is not re-tagged,
+      # and the signing step below is idempotent.
+      - name: Refuse an already-published image version (unless it is this run's content)
+        id: existing
+        env:
+          VER: ${{ needs.prepare.outputs.ver }}
+          AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}
+          ARM64_IMAGE: ${{ needs.build.outputs.arm64_image }}
+        run: bash .github/scripts/assert-not-published.sh image-matching "${IMAGE}:${VER}" "${AMD64_IMAGE}" "${ARM64_IMAGE}"
+
+      - name: Tag the scanned digests and verify
+        id: publish
+        env:
+          VER: ${{ needs.prepare.outputs.ver }}
+          STATE: ${{ steps.existing.outputs.state }}
+          AMD64_INDEX: ${{ needs.build.outputs.amd64_index }}
+          ARM64_INDEX: ${{ needs.build.outputs.arm64_index }}
+          AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}
+          ARM64_IMAGE: ${{ needs.build.outputs.arm64_image }}
+        run: |
+          set -euo pipefail
+          # Merge the two staged per-arch indexes (with their attestations) into one multi-arch index.
+          # This only references the existing manifests by digest; nothing is rebuilt.
+          if [ "$STATE" = "absent" ]; then
+            docker buildx imagetools create -t "${IMAGE}:${VER}" "${IMAGE}@${AMD64_INDEX}" "${IMAGE}@${ARM64_INDEX}"
+          elif [ "$STATE" != "identical" ]; then
+            echo "::error::unexpected existence state '${STATE}'"; exit 1
+          fi
+          RAW="$(docker buildx imagetools inspect --raw "${IMAGE}:${VER}")"
+          for pair in "amd64=${AMD64_IMAGE}" "arm64=${ARM64_IMAGE}"; do
+            GOT="$(printf '%s' "$RAW" | jq -r --arg a "${pair%%=*}" '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest] | join(",")')"
+            if [ "$GOT" != "${pair#*=}" ]; then
+              echo "::error::${IMAGE}:${VER} linux/${pair%%=*} is '${GOT}', the scanned digest is ${pair#*=}"; exit 1
+            fi
+          done
+          OTHER="$(printf '%s' "$RAW" | jq '[.manifests[] | select(.platform.os != "unknown")] | length')"
+          if [ "$OTHER" != "2" ]; then echo "::error::unexpected platforms in ${IMAGE}:${VER}"; exit 1; fi
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${VER}" --format '{{json .Manifest}}' | jq -er .digest)"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "published ${IMAGE}:${VER} = ${DIGEST} (amd64 ${AMD64_IMAGE}, arm64 ${ARM64_IMAGE})"
+
+      # Keyless-sign the published index by digest (Sigstore/cosign). The signature is bound to this workflow's
+      # GitHub OIDC identity (release.yml@refs/tags/vX.Y.Z) and logged in Rekor. See README "Verifying the image".
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
       - name: Sign the image (keyless)
         env:
-          DIGEST: ${{ steps.push.outputs.digest }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
-      # 4) A standalone SBOM artifact (syft) for the release assets, in addition to the attestation above.
-      - name: Generate SBOM (SPDX)
-        uses: anchore/sbom-action@v0
+  # Helm chart as an OCI artifact (kubernetesImplement Track A.3), from the tag commit. Runs after the image so
+  # the chart's default tag always points at an image that exists.
+  publish-chart:
+    needs: [prepare, test, scan, publish-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push the chart to GHCR
+    steps:
+      - name: Checkout the tag commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          image: ${{ env.IMAGE }}:${{ steps.ver.outputs.ver }}
-          format: spdx-json
-          output-file: whiskers-${{ steps.ver.outputs.ver }}.sbom.spdx.json
+          ref: ${{ needs.prepare.outputs.sha }}
 
-      # 5) Assemble the release assets: a version-pinned image-based compose, the hardened compose, the
-      #    installer, and checksums over all of them.
+      - name: Log in to GHCR (helm)
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      - name: Refuse an already-published chart version
+        env:
+          VER: ${{ needs.prepare.outputs.ver }}
+        run: bash .github/scripts/assert-not-published.sh chart "${CHART}" "${VER}"
+
+      - name: Lint, package and push the chart
+        env:
+          VER: ${{ needs.prepare.outputs.ver }}
+        run: |
+          set -euo pipefail
+          helm lint deploy/helm/whiskers
+          helm package deploy/helm/whiskers --version "$VER" --app-version "$VER" -d dist-chart
+          helm push "dist-chart/whiskers-${VER}.tgz" "${CHART_REPO}"
+
+  # GitHub Release with the compose files, install.sh, checksums and an SBOM of the published image.
+  github-release:
+    needs: [prepare, test, build, scan, publish-image, publish-chart]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the GitHub Release
+      packages: read    # read the published image for the SBOM
+    steps:
+      - name: Checkout the tag commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Refuse an already-published GitHub release
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/assert-not-published.sh release "${TAG}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Standalone SBOMs (syft), one per architecture, of exactly the scanned and published image manifests (an
+      # SBOM of the multi-arch index would only describe the runner's platform). In addition to the attestations.
+      - name: Generate SBOM amd64 (SPDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE }}@${{ needs.build.outputs.amd64_image }}
+          format: spdx-json
+          output-file: whiskers-${{ needs.prepare.outputs.ver }}-linux-amd64.sbom.spdx.json
+      - name: Generate SBOM arm64 (SPDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE }}@${{ needs.build.outputs.arm64_image }}
+          format: spdx-json
+          output-file: whiskers-${{ needs.prepare.outputs.ver }}-linux-arm64.sbom.spdx.json
+
+      # Assemble the release assets: a version-pinned image-based compose, the hardened compose, the installer,
+      # and checksums over all of them.
       - name: Assemble release assets
+        env:
+          VER: ${{ needs.prepare.outputs.ver }}
         run: |
           set -euo pipefail
           mkdir -p dist
           # Ship the standard-profile compose as an IMAGE-based, version-pinned file: take the repo's
           # (build-based, dev-oriented) docker-compose.yml and swap `build: .` for the published image so a
           # user who just downloads it can `docker compose up -d` without the source tree.
-          sed -E "s#^( *)build: \.#\1image: ${IMAGE}:${{ steps.ver.outputs.ver }}#" \
-            docker-compose.yml > dist/docker-compose.yml
-          grep -q "image: ${IMAGE}:${{ steps.ver.outputs.ver }}" dist/docker-compose.yml \
+          sed -E "s#^( *)build: \.#\1image: ${IMAGE}:${VER}#" docker-compose.yml > dist/docker-compose.yml
+          grep -q "image: ${IMAGE}:${VER}" dist/docker-compose.yml \
             || { echo "ERROR: compose image-pin substitution failed"; exit 1; }
           # Same image-pin for the hardened profile (its `build: .` → the published image).
-          sed -E "s#^( *)build: \.#\1image: ${IMAGE}:${{ steps.ver.outputs.ver }}#" \
-            docker-compose.hardened.yml > dist/docker-compose.hardened.yml
+          sed -E "s#^( *)build: \.#\1image: ${IMAGE}:${VER}#" docker-compose.hardened.yml > dist/docker-compose.hardened.yml
           cp deploy/install.sh dist/install.sh
-          cp whiskers-${{ steps.ver.outputs.ver }}.sbom.spdx.json dist/
+          cp "whiskers-${VER}-linux-amd64.sbom.spdx.json" "whiskers-${VER}-linux-arm64.sbom.spdx.json" dist/
           ( cd dist && sha256sum * > checksums.txt )
           echo "assets:"; ls -l dist
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          name: Whiskers ${{ steps.ver.outputs.raw }}
-          tag_name: ${{ steps.ver.outputs.raw }}
+          name: Whiskers ${{ needs.prepare.outputs.tag }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ needs.prepare.outputs.sha }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             dist/docker-compose.yml
             dist/docker-compose.hardened.yml
             dist/install.sh
             dist/checksums.txt
-            dist/whiskers-${{ steps.ver.outputs.ver }}.sbom.spdx.json
+            dist/whiskers-${{ needs.prepare.outputs.ver }}-linux-amd64.sbom.spdx.json
+            dist/whiskers-${{ needs.prepare.outputs.ver }}-linux-arm64.sbom.spdx.json
 
-  # Helm chart as an OCI artifact (kubernetesImplement Track A.3): version + appVersion are stamped
-  # from the tag, then pushed to ghcr.io/lupusmalusdeviant/charts/whiskers. Runs AFTER the image
-  # release so the chart's default tag always points at an image that exists.
-  helm:
+  # The moving tags last, once this version's GitHub release exists. Decided and moved in a job of their own, so every
+  # "Re-run failed jobs" — also one that only had to finish the GitHub release — decides them again from the releases
+  # published at that moment: a version finished after a later hotfix still takes `latest` back.
+  move-tags:
+    needs: [prepare, test, build, scan, publish-image, publish-chart, github-release]
     runs-on: ubuntu-latest
-    needs: release
+    permissions:
+      contents: read    # list the published GitHub releases
+      packages: write   # move X.Y and latest in GHCR
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RAW="${{ github.event.inputs.tag }}"
-          else
-            RAW="${GITHUB_REF_NAME}"
-          fi
-          echo "ver=${RAW#v}" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to GHCR (helm)
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-      - name: Lint, package and push the chart
+      - name: Move the X.Y (and latest) tags to the published digest
+        env:
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+          MINOR: ${{ needs.prepare.outputs.minor }}
+          VER: ${{ needs.prepare.outputs.ver }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          VER="${{ steps.ver.outputs.ver }}"
-          helm lint deploy/helm/whiskers
-          helm package deploy/helm/whiskers --version "$VER" --app-version "$VER" -d dist-chart
-          helm push "dist-chart/whiskers-$VER.tgz" oci://ghcr.io/lupusmalusdeviant/charts
+          # The moving tags only follow the highest PUBLISHED release (GitHub releases, which the job before this one
+          # creates), not the highest git tag: a tag whose release failed never holds them back, and a hotfix for an older
+          # line never moves them back. Decided here, right before the move, not when the run started: a re-run of an
+          # older failed release ("Re-run failed jobs") must not move X.Y or latest back past a version published since.
+          PUBLISHED="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName')"
+          ALL="$(printf '%s\n%s\n' "$PUBLISHED" "v${VER}" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)"
+          LINE_TOP="$(printf '%s\n' "$ALL" | grep -E "^v${MINOR%%.*}\\.${MINOR#*.}\\." | tail -n1 || true)"
+          TOP="$(printf '%s\n' "$ALL" | tail -n1)"
+          TAGS=()
+          if [ "$LINE_TOP" = "v${VER}" ]; then TAGS+=("${IMAGE}:${MINOR}"); else echo "${MINOR} stays at ${LINE_TOP}"; fi
+          if [ "$TOP" = "v${VER}" ]; then TAGS+=("${IMAGE}:latest"); else echo "latest stays at ${TOP}"; fi
+          for t in ${TAGS[@]+"${TAGS[@]}"}; do
+            docker buildx imagetools create -t "$t" "${IMAGE}@${DIGEST}"
+            GOT="$(docker buildx imagetools inspect "$t" --format '{{json .Manifest}}' | jq -er .digest)"
+            if [ "$GOT" != "$DIGEST" ]; then echo "::error::${t} points to ${GOT}, expected ${DIGEST}"; exit 1; fi
+            echo "${t} -> ${DIGEST}"
+          done

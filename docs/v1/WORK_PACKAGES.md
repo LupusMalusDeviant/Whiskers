@@ -756,10 +756,14 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `ReleaseWorkflowTests` verifies full action SHA pins, least-privilege job permissions and shell-safe input handling.
-- [ ] Release image/chart come from the validated tag commit; existing immutable version artifacts cannot be silently replaced.
-- [ ] Tests gate publication; both architectures are checked, and the published digests are the checked digests.
-- [ ] Scan exceptions are recorded rather than hidden by an undocumented `ignore-unfixed` policy.
+- [x] `ReleaseWorkflowTests` verifies full action SHA pins, least-privilege job permissions and shell-safe input handling.
+- [x] Release image/chart come from the validated tag commit; existing immutable version artifacts cannot be silently replaced.
+- [x] Tests gate publication; both architectures are checked, and the published digests are the checked digests.
+- [x] Scan exceptions are recorded rather than hidden by an undocumented `ignore-unfixed` policy.
+
+> Verified from source by `ReleaseWorkflowTests` (workflow structure, with negative tests). The workflow itself has
+> not run yet: the first real proof is the next `v*` tag. Branch/tag protection and who may push tags are
+> repository settings and outside this package.
 
 **Out of scope:** Claims about GitHub repository settings that cannot be established from source.
 

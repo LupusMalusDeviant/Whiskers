@@ -11,14 +11,16 @@ on:
     paths: ["deploy/helm/**"]
   workflow_dispatch: {}
 
-permissions:
-  contents: read
+# R1-45: nothing at workflow level; each job asks for what it needs. Actions are pinned to full commit SHAs.
+permissions: {}
 
 jobs:
   lint-template:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: helm lint
         run: helm lint deploy/helm/whiskers
@@ -67,11 +69,13 @@ jobs:
   kind-smoke:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Create kind cluster
-        uses: helm/kind-action@v1
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
 
       - name: Install chart and wait for readiness
         run: |

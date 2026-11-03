@@ -6,6 +6,26 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-45: **A release can only ship what was tested and scanned, and never replaces a published version.** Every
+  GitHub Action in the CI, chart and release workflows is pinned to a full commit SHA, and each job holds only the
+  permissions it needs. A release now runs the full test suite on the tag commit first, builds amd64 and arm64
+  once each, scans **both** with Trivy by digest and publishes exactly those digests (verified, then cosign-signed)
+  — nothing is rebuilt after the scan. The tag must match the version in `Whiskers.csproj` and `Chart.yaml`. An
+  existing `X.Y.Z` image, chart or GitHub release is never overwritten; the run fails instead, also when it cannot
+  tell whether the version exists. `X.Y` and `latest` still move; they only follow the highest *published*
+  release (of the line, or overall), decided in a last job after the GitHub release exists, so a hotfix for an older line or a re-run of an older failed release no longer moves them back, a failed higher tag does not hold them back, and a version finished later takes them back.
+  The scan no longer skips CRITICAL findings without a fix: such a finding fails the release unless it is recorded
+  in `.trivyignore` with a reason and an expiry date. Each release now carries one SBOM per architecture
+  (`whiskers-X.Y.Z-linux-amd64.sbom.spdx.json`, `…-linux-arm64…`) instead of a single one that only described amd64.
+  **For release operators:** a manual run must be started from the tag itself (Actions → release → "Use workflow
+  from" = the tag); a run from `main` is refused, and it only helps while nothing of that version is published. If a
+  run fails after publishing started (for example signing during a Sigstore outage), use **Re-run failed jobs**:
+  the image step accepts an `X.Y.Z` that already holds exactly the run's scanned digests and finishes signing and
+  tagging; a new run would be refused. If the GitHub release was created but its assets failed, delete that release
+  first. To re-release a version with other content, bump the version and tag again. Only one release runs at a
+  time; a pending release run can be cancelled by GitHub when two more tags arrive, so start it again by hand.
+  Untagged per-architecture images from each run stay in the GHCR package (staged by digest).
+
 - R1-41: **A timeout inside a background loop no longer stops Whiskers.** Nine background loops (health, scheduler,
   AutoUpdate, certificates, log alerts, log hygiene, scan supervisor, self-metrics, action outcomes) treated every
   cancellation as "Whiskers is stopping", so a dependency's own timeout — an HTTP client timing out is a
