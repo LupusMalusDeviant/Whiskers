@@ -39,7 +39,8 @@ key_to_file() {
 # configuration names are also read behind the DOTNET_ / ASPNETCORE_ prefixes, in the order Whiskers' configuration
 # lets them win (a bare name, then DOTNET_, then ASPNETCORE_ — measured on the real builder in SecretEnvironmentTests).
 # What this script cannot see: a value given on Whiskers' command line ("$@", e.g. --Vpn:Provider=…) or in the data
-# directory's JSON layers, which both win over the environment. Only the exact spelling is moved: a variant in other
+# directory's JSON layers, which both win over the environment, nor one in the appsettings files (appsettings.json,
+# appsettings.<Environment>.json), which win over the prefixed names. Only the exact spelling is moved: a variant in other
 # letter case still reaches Whiskers' environment block, where Whiskers drops it from what its own children inherit.
 unset ws_ts_legacy_key ws_ts_key ws_nb_key ws_ts_keyfile ws_nb_keyfile ws_cfg_provider ws_provider ws_mirror ws_in_app ws_prefix
 ws_ts_legacy_key=${TAILSCALE_AUTHKEY:-}
@@ -124,6 +125,10 @@ start_app() {
 # or it runs on the host / a sidecar for "none"), and not when Whiskers' own provider is tailscale or netbird.
 if [ -n "${VPN_PROVIDER:-}" ] || [ -n "$ws_in_app" ]; then
     echo "[entrypoint] VPN provider '${ws_provider:-none}' — VPN handled in-app or outside the container, skipping legacy bring-up."
+    # TAILSCALE_AUTHKEY drives only the legacy bring-up: skipped, the key is unused — said, by name only, never the value.
+    if [ -n "$ws_ts_legacy_key" ]; then
+        echo "[entrypoint] WARNING: TAILSCALE_AUTHKEY is set but the legacy bring-up is skipped (VPN provider '${ws_provider:-none}') — it is not used. For the in-app provider give the key as Vpn__Tailscale__AuthKey or Vpn__Tailscale__AuthKeyFile." >&2
+    fi
     start_app "$@"
 fi
 

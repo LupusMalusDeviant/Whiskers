@@ -55,11 +55,15 @@ All notable changes to Whiskers are documented here. The format follows
   `--auth-key=file:…`, removes the file right after — also when the script ends early — passes a stop signal during the
   call on (exit 143) instead of starting Whiskers, and prints `ERROR: tailscale up failed …` instead of swallowing a
   failure. The data directory there follows `WHISKERS_DATA_DIR` (default `/app/data`, as before). This path is still the
-  host operator's container start and is not recorded by the gateway. **Upgrade:** with `VPN_PROVIDER=tailscale` or
-  `netbird`, **the VPN is not brought up after the upgrade until an admin takes "VPN bring-up" over** in Settings →
+  host operator's container start and is not recorded by the gateway. **Upgrade:** when Whiskers' provider is
+  `tailscale` or `netbird` — `Vpn__Provider` (also `DOTNET_Vpn__Provider` / `ASPNETCORE_Vpn__Provider`) or, without it,
+  `VPN_PROVIDER` — **the VPN is not brought up after the upgrade until an admin takes "VPN bring-up" over** in Settings →
   Automation owners and Whiskers is restarted (the panel says "not run, no owner"; the log says why). If the Whiskers
   UI is reachable only over that mesh, open it over the host's LAN address for the takeover, or run the mesh on the
-  host (`VPN_PROVIDER=none`) until then. A Tailscale node that relied on
+  host (`VPN_PROVIDER=none`) until then. This now includes a container started with `Vpn__Provider=tailscale` (bare or
+  prefixed) and `TAILSCALE_AUTHKEY` but no `VPN_PROVIDER`, which the legacy entrypoint used to bring up: the legacy
+  path is skipped there and `TAILSCALE_AUTHKEY` is no longer used (the entrypoint says so by name) — move the key to
+  `Vpn__Tailscale__AuthKey`, better `Vpn__Tailscale__AuthKeyFile` (`TAILSCALE_AUTHKEY_FILE` in compose). A Tailscale node that relied on
   `TS_AUTHKEY` and never logged in now does so with the key. New optional `VPN_FAIL_STARTUP_ON_ERROR`
   (`Vpn__FailStartupOnError`, default `false`): `true` stops a start whose bring-up does not succeed — set it only after
   the takeover, or every start stops. **Recovery** when it locks you out (the owner later lost the Admin role or the

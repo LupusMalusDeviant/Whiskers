@@ -24,7 +24,11 @@ of a baked-in VPN daemon, which is a prerequisite for a future distroless/chisel
 
 ## Behavior / migration
 
-- Default `Vpn:Provider` is **none**, so existing deployments are unchanged. **Exactly one side brings the VPN up**
+- Default `Vpn:Provider` is **none**, so a deployment that sets no provider is unchanged (legacy entrypoint bring-up,
+  or none). A deployment whose provider is `tailscale`/`netbird` (`Vpn__Provider`, also prefixed, or `VPN_PROVIDER`)
+  now needs the owner takeover below; with `Vpn__Provider` set but no `VPN_PROVIDER`, the legacy bring-up that used to
+  run as well is skipped and its `TAILSCALE_AUTHKEY` is unused (warned by name) — give the key as
+  `Vpn__Tailscale__AuthKey` / `…AuthKeyFile`. **Exactly one side brings the VPN up**
   (R1-43, `entrypoint.sh`):
 
   | `VPN_PROVIDER` ↓ / Whiskers' `Vpn__Provider` → | unset | `none` | `tailscale` / `netbird` |

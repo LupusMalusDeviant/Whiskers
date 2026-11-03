@@ -344,8 +344,17 @@ public class VpnSecretHandlingTests : IDisposable
         Assert.Contains("if [ -z \"$ws_cfg_provider\" ] && [ -n \"${VPN_PROVIDER:-}\" ]; then", lines);
         Assert.Contains("Vpn__Provider=$VPN_PROVIDER", lines);
         Assert.Contains("tailscale|netbird) ws_in_app=1 ;;", lines);
+        // Round 4 (m1): when the legacy path is skipped, a TAILSCALE_AUTHKEY it would have used is named, not echoed.
+        var legacyKeyWarning = lines.FindIndex(l =>
+            l.StartsWith("echo \"[entrypoint] WARNING: TAILSCALE_AUTHKEY is set but the legacy bring-up is skipped", StringComparison.Ordinal));
+        Assert.True(legacyKeyWarning > 0 && lines[legacyKeyWarning - 1] == "if [ -n \"$ws_ts_legacy_key\" ]; then",
+            "the skip warns about an unused TAILSCALE_AUTHKEY");
+        Assert.DoesNotContain("$ws_ts_legacy_key", lines[legacyKeyWarning]);
         var skip = lines.FindIndex(l => l == "if [ -n \"${VPN_PROVIDER:-}\" ] || [ -n \"$ws_in_app\" ]; then");
-        Assert.True(skip >= 0 && lines[skip + 2] == "start_app \"$@\"", "the legacy skip starts the app");
+        Assert.True(skip >= 0, "the legacy skip exists");
+        var skipEnd = lines.FindIndex(skip, l => l == "start_app \"$@\"");
+        Assert.True(skipEnd > skip && skipEnd < lines.FindIndex(l => l.StartsWith("tailscaled --state", StringComparison.Ordinal)),
+            "the legacy skip starts the app before tailscaled could start");
         Assert.True(skip < lines.FindIndex(l => l.StartsWith("tailscaled --state", StringComparison.Ordinal)));
         Assert.Contains("printf '%s' \"$1\" > \"$kf_dir/key\"", lines);   // key_to_file itself
         // The CLI gets a file, and nothing else hands a key over.
@@ -390,6 +399,8 @@ public class VpnSecretHandlingTests : IDisposable
         });
         psi.ArgumentList.Add(EntrypointPath);
         psi.Environment.Remove("VPN_PROVIDER");
+        // Only what a test sets decides the provider: none inherited from the test process, bare or prefixed.
+        foreach (var prefix in new[] { "" }.Concat(SecretEnvironment.ConfigurationPrefixes)) psi.Environment.Remove(prefix + "Vpn__Provider");
         psi.Environment["PATH"] = bin + ":" + (Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin");
         psi.Environment["WHISKERS_DATA_DIR"] = Path.Combine(_dir, "data-" + Path.GetFileName(bin));
         psi.Environment["WHISKERS_SECRET_DIR"] = secrets;
@@ -549,6 +560,8 @@ public class VpnSecretHandlingTests : IDisposable
         Assert.Contains("a Tailscale auth key (Vpn__Tailscale__AuthKey, possibly prefixed) is set but the VPN provider is 'netbird'", stderr);
         Assert.False(File.Exists(Path.Combine(record, "tailscaled-env")), "the legacy bring-up must not run next to the in-app provider");
         Assert.False(File.Exists(Path.Combine(record, "tailscale-env")), "no ungoverned tailscale up");
+        // Round 4 (m1): the unused legacy key is reported by name — never by value (checked below).
+        Assert.Contains("WARNING: TAILSCALE_AUTHKEY is set but the legacy bring-up is skipped (VPN provider 'netbird')", stderr);
         AssertNoKey(stdout + stderr, TailscaleKey);
         AssertNoKey(stdout + stderr, NetbirdKey);
     }
@@ -577,10 +590,7 @@ public class VpnSecretHandlingTests : IDisposable
         if (vpnProvider.Length > 0) env["VPN_PROVIDER"] = vpnProvider;
         if (configProvider.Length > 0) env["Vpn__Provider"] = configProvider;
 
-        var psi = Entrypoint(bin, secrets, env);
-        psi.Environment.Remove("Vpn__Provider");                  // only what the row sets
-        if (configProvider.Length > 0) psi.Environment["Vpn__Provider"] = configProvider;
-        var (code, _, stderr) = await RunAsync(psi);
+        var (code, _, stderr) = await RunAsync(Entrypoint(bin, secrets, env));   // Entrypoint drops inherited providers
         Assert.True(code == 0, $"entrypoint failed: {stderr}");
 
         var legacyRan = File.Exists(Path.Combine(record, "tailscaled-env"));
