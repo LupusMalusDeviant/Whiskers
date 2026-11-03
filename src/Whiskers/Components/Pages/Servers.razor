@@ -590,6 +590,20 @@
 
     private async Task<Whiskers.Models.ServerConfig> PersistServerRecordAsync()
     {
+        // R1-42 (INV-41): host, user and port become ssh operands. The executor, tunnel and terminal refuse an unsafe
+        // value anyway; refusing it here says so while the dialog is still open.
+        if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH)
+        {
+            _form.SshHost = string.IsNullOrWhiteSpace(_form.SshHost) ? _form.SshHost : _form.SshHost.Trim();
+            _form.SshUser = string.IsNullOrWhiteSpace(_form.SshUser) ? _form.SshUser : _form.SshUser.Trim();
+            if (!string.IsNullOrWhiteSpace(_form.SshHost) && !Whiskers.Utils.CommandOperands.IsSafeHost(_form.SshHost))
+                throw new InvalidOperationException(L["Servers_Error_SshHostInvalid"].Value);
+            if (!string.IsNullOrWhiteSpace(_form.SshUser) && !Whiskers.Utils.CommandOperands.IsSafeSshUser(_form.SshUser))
+                throw new InvalidOperationException(L["Servers_Error_SshUserInvalid"].Value);
+            if (!Whiskers.Utils.CommandOperands.IsValidPort(_form.SshPort))
+                throw new InvalidOperationException(L["Servers_Error_SshPortInvalid"].Value);
+        }
+
         // Kubernetes cluster (Track B.2): the kubeconfig goes into the VAULT (encrypted, never on
         // disk); servers.json only carries the selectors. Vault is a hard requirement here.
         if (_form.ConnectionType == Whiskers.Models.ConnectionType.Kubernetes)
@@ -612,6 +626,10 @@
                 var id = _editingServer?.Id ?? _form.Id;
                 var vaultKey = $"{Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigVaultKey(id)}:{Guid.NewGuid():N}";
                 var kubeconfig = _kubeconfigYaml.Trim();
+                // R1-42: no exec plugins, auth providers or file references — refused before it reaches the vault (the
+                // client cache refuses it again when it builds a client).
+                if (Whiskers.Services.Workloads.Kubernetes.KubeconfigPolicy.AdmissionViolations(kubeconfig) is { Count: > 0 } refused)
+                    throw new InvalidOperationException(L["Servers_Error_KubeconfigRefused", string.Join("; ", refused)].Value);
                 await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
                     _ => Vault.SetSecretAsync(vaultKey, kubeconfig));
                 _newKubeconfigKey = vaultKey;

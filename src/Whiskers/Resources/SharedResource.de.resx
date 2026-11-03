@@ -2429,6 +2429,18 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Error_KubeconfigMissing" xml:space="preserve">
     <value>Bitte ein kubeconfig einfügen.</value>
   </data>
+  <data name="Servers_Error_KubeconfigRefused" xml:space="preserve">
+    <value>Dieses kubeconfig wird abgelehnt: {0}. Whiskers startet keine Credential-Plugins (exec, auth-provider) und liest keine Dateien, die ein kubeconfig nennt. Bitte ein in sich geschlossenes kubeconfig mit eingebettetem Token oder client-certificate-data/client-key-data einfügen, z. B. für einen ServiceAccount.</value>
+  </data>
+  <data name="Servers_Error_SshHostInvalid" xml:space="preserve">
+    <value>Der SSH-Host muss ein Hostname oder eine IP-Adresse sein (Buchstaben, Ziffern, Punkte und innere Bindestriche; er darf nicht mit „-“ beginnen).</value>
+  </data>
+  <data name="Servers_Error_SshUserInvalid" xml:space="preserve">
+    <value>Der SSH-Benutzer darf nur Buchstaben, Ziffern und . _ - enthalten und nicht mit „-“ oder „.“ beginnen (höchstens 64 Zeichen).</value>
+  </data>
+  <data name="Servers_Error_SshPortInvalid" xml:space="preserve">
+    <value>Der SSH-Port muss eine Zahl von 1 bis 65535 sein.</value>
+  </data>
   <data name="AddFirewallRuleDialog_Button_Cancel" xml:space="preserve">
     <value>Abbrechen</value>
   </data>

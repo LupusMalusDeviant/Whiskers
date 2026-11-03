@@ -6,6 +6,27 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-42: **Values that end up on a command line can no longer pose as options, and kubeconfigs run no programs.**
+  Quoting a value only protects it from the shell; a Git branch like `--upload-pack=…` or an SSH user like
+  `-oProxyCommand=…` still reached git or ssh as an option. Whiskers now checks these values with one shared rule
+  wherever the command is built — not only on the page — and puts them after `--` where the program allows it. A Git
+  deployment's branch must be a plain branch name (it starts with a letter or digit and uses only letters, digits and
+  `. _ / -`, no `..`); this is checked on save, also for `create_git_deploy_app`, and again before a deployment runs. An
+  SSH server's host must be a host name or IP address, its user may use only letters, digits and `. _ -` and must not
+  start with `-` or `.`, and its port must be 1–65535 — checked when the server is saved and before any SSH command,
+  tunnel or terminal starts. Nginx site names must start with a letter or digit and must not contain `..`; a container
+  terminal refuses a container id that is not one. **Kubeconfigs:** the Kubernetes client Whiskers uses starts an
+  `exec` credential plugin as soon as it reads the kubeconfig, so Whiskers now accepts only self-contained kubeconfigs:
+  one with an `exec` plugin, an `auth-provider` (OIDC, GCP, Azure) or a file path (`client-certificate`, `client-key`,
+  `certificate-authority`) is refused, for any user or cluster in it; there is no setting to allow it. **Upgrade:** a
+  Kubernetes server saved with such a kubeconfig stops connecting with "Kubeconfig refused: …" — paste a kubeconfig with
+  an inline token or `client-certificate-data`/`client-key-data` (for example for a ServiceAccount, see
+  `deploy/k8s/whiskers-agent-rbac.yaml`). A Git deployment app saved with a branch outside the rule fails its next
+  deployment before anything runs on the server — save it with the branch's plain name. An SSH server whose stored
+  host or user breaks the rule stops answering with an "Invalid SSH host/user" error until it is corrected on the
+  Servers page. Existing checkouts update with `git fetch` of the branch's full ref and `git checkout -B`; nothing to
+  do on the servers.
+
 - R1-40: **A notification that fails is retried, and an important one is not lost.** Notification channels used to
   swallow their own errors, so the retry never saw a failure. Now a failed Slack, Discord, Mattermost, Matrix,
   Telegram, ntfy, e-mail or webhook delivery is tried a second time; every attempt ends after 20 s at the latest, and an

@@ -191,6 +191,40 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
         Assert.Equal(key, KubernetesClientCache.KubeconfigKeyOf(_servers.GetServer(server.Id)!));
     }
 
+    [Fact]
+    public async Task A_kubeconfig_with_an_exec_plugin_is_refused_before_it_reaches_the_vault()
+    {
+        // R1-42: the page answers early; KubernetesClientCache refuses it again when it builds a client.
+        var page = Render<Servers>();
+        var server = new ServerConfig { Name = "k8s", ConnectionType = ConnectionType.Kubernetes };
+        Set(page, "_form", server);
+        Set(page, "_kubeconfigYaml", KubeconfigExecutionTests.ExecKubeconfig("/usr/bin/true", []));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Persist(page));
+
+        Assert.Empty(_vault.Keys);
+        Assert.Null(_servers.GetServer(server.Id));
+    }
+
+    [Theory]
+    [InlineData("-oProxyCommand=touch /tmp/pwned", "host.example.com", 22)]
+    [InlineData("root", "-oProxyCommand=touch /tmp/pwned", 22)]
+    [InlineData("root", "host.example.com", 0)]
+    public async Task An_unsafe_ssh_target_is_refused_before_the_server_is_saved(string user, string host, int port)
+    {
+        // R1-42: the executor, tunnel and terminal refuse it anyway; the page says so while the dialog is open.
+        var page = Render<Servers>();
+        var server = new ServerConfig
+        {
+            Name = "edge", ConnectionType = ConnectionType.SSH, SshUser = user, SshHost = host, SshPort = port,
+        };
+        Set(page, "_form", server);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Persist(page));
+
+        Assert.Null(_servers.GetServer(server.Id));
+    }
+
     private static Task Persist(IRenderedComponent<Servers> page)
     {
         var method = typeof(Servers).GetMethod("PersistServerCoreAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;

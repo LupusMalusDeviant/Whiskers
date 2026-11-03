@@ -5,7 +5,11 @@ namespace Whiskers.Services.GitDeploy;
 
 /// <summary>Pure command builders for the git-deploy flow (F5), unit-tested with string assertions
 /// (project rule: everything that turns strings into shell commands gets command-building tests).
-/// Every user-controlled value is single-quoted via <see cref="ShellUtils.Quote"/>; the access token
+/// Every user-controlled value is single-quoted via <see cref="ShellUtils.Quote"/> against the shell AND checked by
+/// <see cref="CommandOperands"/> against option injection (R1-42) — quoting alone would hand git a token like
+/// <c>--upload-pack=…</c> that it parses as an option. Positional operands never stand where git reads options:
+/// refs are spelled in full (<c>+refs/heads/…</c>, <c>refs/remotes/origin/…</c>), the branch of a clone is an
+/// attached option value (<c>--branch=…</c>) and the repository follows <c>--</c>. The access token
 /// travels base64-encoded into a 0600 file and is served to git via GIT_ASKPASS — it never appears
 /// in a command line or process list.</summary>
 public static class GitDeployCommands
@@ -33,16 +37,25 @@ public static class GitDeployCommands
     }
 
     /// <summary>Fresh clone or fast update to the branch tip — idempotent: an existing checkout is
-    /// fetched + hard-reset (a deploy workspace has no local edits worth keeping).</summary>
+    /// fetched + hard-reset (a deploy workspace has no local edits worth keeping). The branch must pass
+    /// <see cref="CommandOperands.IsSafeGitRef"/> and the repository must be an <c>https://</c> URL; anything else
+    /// throws before a command exists.</summary>
     public static string CloneOrUpdateCommand(string appId, string repoUrl, string branch, bool withToken)
     {
+        CommandOperands.RequireGitRef(branch);
+        if (string.IsNullOrEmpty(repoUrl) || !repoUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            throw new UnsafeOperandException("repository URL", repoUrl, "only https:// repository URLs are supported");
         var dir = WorkDir(appId);
         var env = withToken ? $"GIT_ASKPASS={dir}/.whiskers/askpass.sh GIT_TERMINAL_PROMPT=0 " : "GIT_TERMINAL_PROMPT=0 ";
         var repo = ShellUtils.Quote(repoUrl);
         var br = ShellUtils.Quote(branch);
+        // Fully spelled refs: an operand that starts with "+refs/" or "refs/" can never be read as an option.
+        var fetchSpec = ShellUtils.Quote($"+refs/heads/{branch}:refs/remotes/origin/{branch}");
+        var tracking = ShellUtils.Quote($"refs/remotes/origin/{branch}");
+        var branchOption = ShellUtils.Quote($"--branch={branch}");
         return $"mkdir -p {dir} && cd {dir} && " +
-               $"if [ -d repo/.git ]; then cd repo && {env}git fetch origin {br} && git checkout -q {br} && git reset --hard origin/{ShellUtils.Quote(branch)}; " +
-               $"else rm -rf repo && {env}git clone --branch {br} --single-branch {repo} repo; fi";
+               $"if [ -d repo/.git ]; then cd repo && {env}git fetch origin {fetchSpec} && git checkout -q -f -B {br} {tracking} && git reset --hard {tracking}; " +
+               $"else rm -rf repo && {env}git clone {branchOption} --single-branch -- {repo} repo; fi";
     }
 
     public static string CurrentShaCommand(string appId) =>

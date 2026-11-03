@@ -28,7 +28,8 @@ public class DatabaseService : IDatabaseService
     private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainer(
         string containerId, string[] cmd, string? serverId = null, TimeSpan? timeout = null)
     {
-        var dockerCmd = "docker exec " + ShellUtils.Quote(containerId) + " " +
+        // The container is an operand of docker (R1-42): checked, and after "--" so it is never read as an option.
+        var dockerCmd = "docker exec -- " + ShellUtils.Quote(CommandOperands.RequireContainerRef(containerId)) + " " +
                         string.Join(' ', cmd.Select(ShellUtils.Quote));
         var r = await _hostExec.ExecuteAsync(serverId ?? "local", dockerCmd, timeout ?? TimeSpan.FromSeconds(30));
         return (r.Output, r.Error, r.ExitCode);
