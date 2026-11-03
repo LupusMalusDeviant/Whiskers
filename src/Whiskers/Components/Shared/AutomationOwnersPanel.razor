@@ -3,6 +3,7 @@
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IOptionsMonitor<Whiskers.Configuration.AutoPatchSettings> AutoPatchOptions
 @inject IOptionsMonitor<AutomationOptions> AutomationOptions
+@inject Whiskers.Services.Vpn.IVpnBootstrapState VpnBootstrap
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IStringLocalizer<SharedResource> L
@@ -48,6 +49,22 @@
                 {
                     <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AutomationOwners_AutoPatchConfigOff"]</MudText>
                 }
+                @if (feature.Id == IAutomationOwnerStore.VpnBootstrap)
+                {
+                    @* R1-43: the bring-up runs once per start, so a takeover takes effect at the next start. *@
+                    var vpnRun = VpnBootstrap.Last;
+                    @if (vpnRun.Status == Whiskers.Services.Vpn.VpnBootstrapStatus.NotManaged)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AutomationOwners_VpnNotManaged"]</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Color="@(vpnRun.Ok || vpnRun.Status == Whiskers.Services.Vpn.VpnBootstrapStatus.Pending ? Color.Secondary : Color.Error)">
+                            @L["AutomationOwners_VpnLastRun", L[$"AutomationOwners_VpnStatus_{vpnRun.Status}"].Value, vpnRun.Message]
+                        </MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L["AutomationOwners_VpnNextStart"]</MudText>
+                    }
+                }
             </div>
             @if (_role >= AppRole.Admin && (string.IsNullOrWhiteSpace(_email) || entry?.OwnerId != PrincipalIds.User(_email)))
             {
@@ -71,6 +88,7 @@
     [
         new(IAutomationOwnerStore.AutoPatch, "AutomationOwners_AutoPatch", "AutomationOwners_NoOwner_AutoPatch"),
         new(IAutomationOwnerStore.AutoUpdate, "AutomationOwners_AutoUpdate", "AutomationOwners_NoOwner_AutoUpdate"),
+        new(IAutomationOwnerStore.VpnBootstrap, "AutomationOwners_VpnBootstrap", "AutomationOwners_NoOwner_VpnBootstrap"),
     ];
 
     private AppRole _role = AppRole.Viewer;

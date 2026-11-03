@@ -136,12 +136,12 @@ non-unique provider ToolCallId · C-19 per-session rate limits only, unbounded p
 fail-open rights check / fixed-key deputy · C-21 transcripts not fully redacted · C-22 approval notifications lack
 context · C-24 `SaveMcpPermissions` has no in-method Admin check · D-12 SecretRedactor coverage, not applied at logging
 layer · D-13 `VAULT_KEY` env-only, no `_FILE`, no strength check · D-15 SQLite→Postgres migrator not transactional (fixed in R1-34: one transaction across metrics and Identity) ·
-E-03 nginx site-name regex allows `..`/leading `-` (fixed in R1-42: shared `CommandOperands` site-name rule) · E-08 VPN args concatenated into one `Arguments` string ·
+E-03 nginx site-name regex allows `..`/leading `-` (fixed in R1-42: shared `CommandOperands` site-name rule) · E-08 VPN args concatenated into one `Arguments` string (fixed in R1-43: `ArgumentList` elements, hostname and URLs validated by `VpnArguments`) ·
 E-09 kubeconfig `exec` plugins may run on host (verified and fixed in R1-42: the client runs them while building its configuration; `KubeconfigPolicy` refuses exec, auth-provider and file references) · F-16 shutdown semantics of mutating background
 work (fixed in R1-39: bounded shutdown drain of scheduler/AutoUpdate/AutoPatch work, open task runs and running
 journal operations reconciled as interrupted at start, AutoPatch nightly state persisted, 60 s container grace) · F-17 no structured logs / correlation IDs / tracing (fixed in R1-53 except tracing: JSON console logs by configuration, `X-Request-Id` → `HttpRequestId` scope linked to the operation id, audit completeness on `/metrics`, `docs/operations/observability.md`) · F-19 Dependabot misses 3 of 5 projects and compose/Helm
 images, no lock files, no SDK pin · F-20 Helm tailscale `:latest`, emptyDir state · F-21 Tailscale auth key in argv
-under `pid: host` · F-22 legacy AiChat client without cancellation · F-23 release Trivy gate scans amd64/CRITICAL only.
+under `pid: host` (fixed in R1-43: the entrypoint and the in-app providers hand the key over as a 0600 file, `--auth-key=file:` / `--setup-key-file=`, removed after the call; the entrypoint unsets it before the app starts) · F-22 legacy AiChat client without cancellation · F-23 release Trivy gate scans amd64/CRITICAL only.
 
 ## 6. Mutation surface (summary)
 

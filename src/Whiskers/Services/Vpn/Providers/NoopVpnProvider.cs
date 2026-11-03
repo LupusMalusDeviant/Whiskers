@@ -7,11 +7,15 @@ namespace Whiskers.Services.Vpn.Providers;
 /// </summary>
 public class NoopVpnProvider : IVpnProvider
 {
-    public string Id => "none";
+    /// <summary>The id of the "managed outside the container" provider.</summary>
+    public const string ProviderId = "none";
+
+    public string Id => ProviderId;
     public string DisplayName => "Kein (Host/Sidecar)";
 
     public Task<bool> IsAvailableAsync(CancellationToken ct = default) => Task.FromResult(true);
-    public Task EnsureUpAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public Task<VpnBringUpResult> EnsureUpAsync(CancellationToken ct = default) =>
+        Task.FromResult(new VpnBringUpResult(VpnBringUpState.HostManaged, "The VPN is managed outside the container."));
     public Task<VpnStatus> GetStatusAsync(CancellationToken ct = default) =>
         Task.FromResult(VpnStatus.Disconnected("VPN außerhalb des Containers verwaltet (Host/Sidecar)"));
     public Task DownAsync(CancellationToken ct = default) => Task.CompletedTask;

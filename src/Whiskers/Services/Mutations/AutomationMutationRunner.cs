@@ -215,6 +215,15 @@ public interface IAutomationMutationRunner
     /// level below <paramref name="capabilityId"/> — or <c>null</c> when the owner still holds it. A refusal for
     /// this reason suspends the item (PC-D6); a refusal by policy (kill switch, protected resource) does not.</summary>
     string? LostAuthority(AutomationActor actor, string capabilityId) => null;
+
+    /// <summary>Records a run the item refused itself before asking the gateway — no owner, a blocked owner file, a
+    /// setting that cannot run (R1-43) — as the gateway's Denied event for <paramref name="capabilityId"/>, so the
+    /// attempt is on record exactly once. Nothing runs. An item without an owner is recorded with <c>read</c>,
+    /// never with the grace period's level.</summary>
+    Task<MutationOutcome<object?>> RefuseAsync(AutomationActor actor, string capabilityId, object arguments,
+        string reason, CancellationToken ct = default) =>
+        Task.FromResult(new MutationOutcome<object?>(actor.OperationId ?? "", MutationStatus.Denied, null, reason,
+            VerificationStatus.NotRun));
 }
 
 public sealed class AutomationMutationRunner : IAutomationMutationRunner
@@ -264,6 +273,24 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             await action(token);
             return true;
         }, ct);
+    }
+
+    public Task<MutationOutcome<object?>> RefuseAsync(AutomationActor actor, string capabilityId, object arguments,
+        string reason, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentException.ThrowIfNullOrWhiteSpace(capabilityId);
+        ArgumentNullException.ThrowIfNull(arguments);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        var args = UiMutationRunner.ToArguments(arguments);
+        var capability = _catalog.Find(capabilityId);
+        var target = capability is null ? new MutationTarget("unknown", "") : MutationTargets.FromArguments(capability, args);
+        var principal = string.IsNullOrWhiteSpace(actor.OwnerId)
+            ? new MutationPrincipal(MutationPrincipalKind.Automation, "unowned:" + actor.RunnerId,
+                $"{actor.DisplayName} (no owner)", McpPermissionLevels.Read)
+            : PrincipalOf(actor, capability);
+        return _gateway.RefuseAsync(new MutationRequest(capabilityId, principal, MutationSurface.Automation, target, args,
+            OperationId: actor.OperationId), reason, ct);
     }
 
     public string? LostAuthority(AutomationActor actor, string capabilityId)

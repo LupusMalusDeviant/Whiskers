@@ -82,6 +82,9 @@ services:
       - Vpn__Tailscale__LoginServer=${TAILSCALE_LOGIN_SERVER:-}
       - Vpn__Netbird__SetupKey=${NETBIRD_SETUP_KEY:-}
       - Vpn__Netbird__ManagementUrl=${NETBIRD_MANAGEMENT_URL:-}
+      # R1-43: the in-app bring-up runs on the authority of the admin who took it over (Settings -> Automation owners).
+      # true = a start whose bring-up does not succeed stops; set it only after that takeover.
+      - Vpn__FailStartupOnError=${VPN_FAIL_STARTUP_ON_ERROR:-false}
       # Image search marketplaces (Docker Hub + GHCR on by default; Harbor opt-in via URL)
       - ImageSearch__Harbor__BaseUrl=${HARBOR_URL:-}
       - ImageSearch__Harbor__Username=${HARBOR_USERNAME:-}

@@ -287,6 +287,128 @@ public class OptionInjectionTests
         Assert.Single(host.Commands);
     }
 
+    // ---- VPN CLIs (R1-43, E-08) ------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Vpn_process_arguments_are_separate_argv_elements_never_one_joined_string()
+    {
+        string[] args = ["--socket=/var/run/ts dir/sock", "up", "--hostname=a b", "-x", "--login-server=https://h/?a=b c"];
+        var psi = Whiskers.Services.Vpn.VpnProcessRunner.StartInfo("tailscale", args);
+
+        Assert.Equal(args, psi.ArgumentList);
+        Assert.Equal("", psi.Arguments);   // nothing for the runtime to split again
+    }
+
+    [Theory]
+    [InlineData("-evil")]
+    [InlineData("--login-server=https://evil.example")]
+    [InlineData("--auth-key=file:/etc/shadow")]
+    [InlineData("edge node")]
+    [InlineData("host=x")]
+    [InlineData("a;b")]
+    [InlineData("node\n--accept-dns")]
+    [InlineData("fe80::1")]
+    public async Task A_vpn_hostname_that_could_be_an_option_or_split_is_refused_before_any_cli_runs(string hostname)
+    {
+        var runner = new VpnSecretHandlingTests.RecordingVpnRunner();
+        var tailscale = new Whiskers.Services.Vpn.Providers.TailscaleVpnProvider(
+            VpnSecretHandlingTests.Settings(s => s.Hostname = hostname),
+            new VpnSecretHandlingTests.ListLogger<Whiskers.Services.Vpn.Providers.TailscaleVpnProvider>(), runner, () => false);
+        var netbird = new Whiskers.Services.Vpn.Providers.NetbirdVpnProvider(
+            VpnSecretHandlingTests.Settings(s => { s.Provider = "netbird"; s.Hostname = hostname; }),
+            new VpnSecretHandlingTests.ListLogger<Whiskers.Services.Vpn.Providers.NetbirdVpnProvider>(), runner);
+
+        Assert.Equal(Whiskers.Services.Vpn.VpnBringUpState.InvalidSetting, (await tailscale.EnsureUpAsync()).State);
+        Assert.Equal(Whiskers.Services.Vpn.VpnBringUpState.InvalidSetting, (await netbird.EnsureUpAsync()).State);
+        Assert.Empty(runner.Calls);
+        Assert.Empty(runner.Detached);
+    }
+
+    [Theory]
+    [InlineData("-https://evil.example")]
+    [InlineData("--auth-key=x")]
+    [InlineData("https://user:secret@headscale.example.com")]
+    [InlineData("ftp://headscale.example.com")]
+    [InlineData("https://headscale.example.com/ --accept-dns")]
+    [InlineData("headscale.example.com")]
+    [InlineData("file:/etc/passwd")]
+    public async Task A_control_url_that_is_not_a_plain_http_url_is_refused_before_any_cli_runs(string url)
+    {
+        var runner = new VpnSecretHandlingTests.RecordingVpnRunner();
+        var tailscale = new Whiskers.Services.Vpn.Providers.TailscaleVpnProvider(
+            VpnSecretHandlingTests.Settings(s => s.Tailscale.LoginServer = url),
+            new VpnSecretHandlingTests.ListLogger<Whiskers.Services.Vpn.Providers.TailscaleVpnProvider>(), runner, () => false);
+        var netbird = new Whiskers.Services.Vpn.Providers.NetbirdVpnProvider(
+            VpnSecretHandlingTests.Settings(s => { s.Provider = "netbird"; s.Netbird.ManagementUrl = url; }),
+            new VpnSecretHandlingTests.ListLogger<Whiskers.Services.Vpn.Providers.NetbirdVpnProvider>(), runner);
+
+        var refused = await tailscale.EnsureUpAsync();
+        Assert.Equal(Whiskers.Services.Vpn.VpnBringUpState.InvalidSetting, refused.State);
+        Assert.DoesNotContain("secret", refused.Message);   // a URL's user info can be a password: never echoed
+        Assert.Equal(Whiskers.Services.Vpn.VpnBringUpState.InvalidSetting, (await netbird.EnsureUpAsync()).State);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public async Task Tailscale_gets_hostname_and_login_server_each_as_one_argv_element()
+    {
+        const string loginServer = "https://headscale.example.com/base?tenant=a=b";
+        var runner = new VpnSecretHandlingTests.RecordingVpnRunner();
+        var provider = new Whiskers.Services.Vpn.Providers.TailscaleVpnProvider(
+            VpnSecretHandlingTests.Settings(s =>
+            {
+                s.Hostname = "edge-node.example";
+                s.Tailscale.LoginServer = loginServer;
+                s.Tailscale.Socket = "/var/run/ts dir/tailscaled.sock";
+            }),
+            new VpnSecretHandlingTests.ListLogger<Whiskers.Services.Vpn.Providers.TailscaleVpnProvider>(), runner, () => false);
+
+        Assert.True((await provider.EnsureUpAsync()).Success);
+
+        Assert.Equal(
+            ["--socket=/var/run/ts dir/tailscaled.sock", "up", "--hostname=edge-node.example", "--accept-routes",
+                "--login-server=" + loginServer],
+            runner.Up.Args);
+    }
+
+    [Fact]
+    public async Task Tailscaled_gets_state_and_socket_each_as_one_argv_element()
+    {
+        var runner = new VpnSecretHandlingTests.RecordingVpnRunner { DaemonRunning = false };
+        var stateDir = Path.Combine(Path.GetTempPath(), "ts state " + Guid.NewGuid().ToString("N"));
+        var socket = Path.Combine(stateDir, "sock dir", "tailscaled.sock");
+        try
+        {
+            var provider = new Whiskers.Services.Vpn.Providers.TailscaleVpnProvider(
+                VpnSecretHandlingTests.Settings(s => { s.Tailscale.StateDir = stateDir; s.Tailscale.Socket = socket; }),
+                new VpnSecretHandlingTests.ListLogger<Whiskers.Services.Vpn.Providers.TailscaleVpnProvider>(), runner, () => false);
+
+            await provider.EnsureUpAsync();
+
+            var (file, args) = Assert.Single(runner.Detached);
+            Assert.Equal("tailscaled", file);
+            Assert.Equal(["--state=" + Path.Combine(stateDir, "tailscaled.state"), "--socket=" + socket], args);
+        }
+        finally
+        {
+            if (Directory.Exists(stateDir)) Directory.Delete(stateDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Netbird_gets_management_url_and_hostname_each_as_one_argv_element()
+    {
+        const string url = "https://netbird.example.com:33073/?x=-y";
+        var runner = new VpnSecretHandlingTests.RecordingVpnRunner();
+        var provider = new Whiskers.Services.Vpn.Providers.NetbirdVpnProvider(
+            VpnSecretHandlingTests.Settings(s => { s.Provider = "netbird"; s.Hostname = "nb-1"; s.Netbird.ManagementUrl = url; }),
+            new VpnSecretHandlingTests.ListLogger<Whiskers.Services.Vpn.Providers.NetbirdVpnProvider>(), runner);
+
+        Assert.True((await provider.EnsureUpAsync()).Success);
+
+        Assert.Equal(["up", "--management-url=" + url, "--hostname=nb-1"], runner.Up.Args);
+    }
+
     /// <summary>Records every host command and answers each with <see cref="Output"/>.</summary>
     private sealed class RecordingHost : IHostCommandExecutor
     {

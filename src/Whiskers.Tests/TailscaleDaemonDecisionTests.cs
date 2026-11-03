@@ -16,7 +16,7 @@ public class TailscaleDaemonDecisionTests
     [InlineData(0, """{"Version":"1.80"}""", false)]              // JSON, but not a status answer
     public void Daemon_responds_only_on_a_real_status_answer(int exitCode, string stdout, bool expected)
     {
-        Assert.Equal(expected, TailscaleVpnProvider.DaemonResponds(new VpnProcessRunner.Result(exitCode, stdout, "")));
+        Assert.Equal(expected, TailscaleVpnProvider.DaemonResponds(new VpnProcessResult(exitCode, stdout, "")));
     }
 
     [Theory]

@@ -728,10 +728,18 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `VpnMutationTests` proves bootstrap changes use a real recorded system/owner authority, policy and audit.
-- [ ] `OptionInjectionTests` verifies separate argv elements for hostname/server URLs.
-- [ ] `VpnSecretHandlingTests` proves auth keys never appear in argv/logs and secret files have restrictive permissions.
-- [ ] Startup failure is explicit; no synthetic Admin or implicit confirmation is introduced.
+- [x] `VpnMutationTests` proves bootstrap changes use a real recorded system/owner authority, policy and audit.
+- [x] `OptionInjectionTests` verifies separate argv elements for hostname/server URLs.
+- [x] `VpnSecretHandlingTests` proves auth keys never appear in argv/logs and secret files have restrictive permissions.
+- [x] Startup failure is explicit; no synthetic Admin or implicit confirmation is introduced.
+
+> Implemented (2026-11-03): the bring-up runs as `vpn.bootstrap` (Admin) through `IAutomationMutationRunner` on the
+> owner an admin records in Settings → Automation owners (`IAutomationOwnerStore.VpnBootstrap`); no owner, a blocked
+> entry or a refusal → nothing runs, one Denied event (`IAutomationMutationRunner.RefuseAsync`), an error and the
+> status in Settings; `Vpn:FailStartupOnError` stops the start. Keys go as a 0600 file (`tailscale up
+> --auth-key=file:`, `netbird up --setup-key-file=`; the `tailscale` CLI does not read `TS_AUTHKEY`). The file-mode
+> tests and the entrypoint run with fake binaries are Linux-only (skipped on Windows, run on CI). The legacy
+> entrypoint bring-up stays outside the gateway (host operator's start); the transport trust policy is unchanged.
 
 **Out of scope:** Altering accepted transport trust policy without approval.
 

@@ -22,7 +22,8 @@ public sealed record AutomationOwnerEntry(string OwnerId, DateTime ConfirmedAt, 
 
 /// <summary>
 /// Owners of the fleet-wide automation features that have no item of their own to store one on (PC-D6):
-/// <see cref="AutoPatch"/> and <see cref="AutoUpdate"/>. An admin takes a feature over in Settings; from then on
+/// <see cref="AutoPatch"/>, <see cref="AutoUpdate"/> and the <see cref="VpnBootstrap">VPN bring-up</see>. An admin takes
+/// a feature over in Settings; from then on
 /// every cycle runs on that admin's authority, re-checked per run. Scheduled tasks keep their owner on the task.
 /// </summary>
 public interface IAutomationOwnerStore
@@ -30,8 +31,12 @@ public interface IAutomationOwnerStore
     public const string AutoPatch = "autopatch";
     public const string AutoUpdate = "autoupdate";
 
+    /// <summary>The in-app VPN bring-up at start (R1-43, S-07): it starts the VPN daemon and joins the mesh on the
+    /// authority of the admin who took it over; without one it does not run.</summary>
+    public const string VpnBootstrap = "vpnbootstrap";
+
     /// <summary>The features this store keeps an owner for.</summary>
-    public static readonly IReadOnlyList<string> Features = [AutoPatch, AutoUpdate];
+    public static readonly IReadOnlyList<string> Features = [AutoPatch, AutoUpdate, VpnBootstrap];
 
     /// <summary>The feature's owner; <c>null</c> when it has none or is <see cref="IsBlocked">blocked</see>.</summary>
     AutomationOwnerEntry? Get(string feature);
@@ -209,8 +214,8 @@ public sealed class AutomationOwnerStore : IAutomationOwnerStore
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or NotSupportedException)
         {
             // Fail closed: AutoPatch and AutoUpdate stay blocked until an admin takes each of them over again.
-            _logger.LogError(ex, "Automation owners could not be read from {Path}; AutoPatch and AutoUpdate will not run " +
-                                 "until an admin takes each of them over in Settings", _path);
+            _logger.LogError(ex, "Automation owners could not be read from {Path}; AutoPatch, AutoUpdate and the VPN " +
+                                 "bring-up will not run until an admin takes each of them over in Settings", _path);
             _loadFailed = true;
             return IAutomationOwnerStore.Features.ToDictionary(f => f,
                 _ => new AutomationOwnerEntry("", DateTime.UtcNow, Blocked: true), StringComparer.Ordinal);

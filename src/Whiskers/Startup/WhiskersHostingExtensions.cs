@@ -346,6 +346,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnProvider, Whiskers.Services.Vpn.Providers.NetbirdVpnProvider>();
         builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnProvider, Whiskers.Services.Vpn.Providers.NoopVpnProvider>();
         builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnService, Whiskers.Services.Vpn.VpnService>();
+        // R1-43: the bring-up runs through the gateway on the recorded owner's authority; its result is shown in Settings.
+        builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnBootstrapState, Whiskers.Services.Vpn.VpnBootstrapState>();
         builder.Services.AddHostedService<Whiskers.Services.Vpn.VpnBootstrapHostedService>();
 
         // Audit log

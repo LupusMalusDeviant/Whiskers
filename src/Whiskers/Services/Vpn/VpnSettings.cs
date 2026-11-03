@@ -15,6 +15,14 @@ public class VpnSettings
     /// <summary>Hostname to register on the mesh. Falls back to the container hostname.</summary>
     public string? Hostname { get; set; }
 
+    /// <summary>
+    /// R1-43: <c>true</c> stops the start when the in-app bring-up does not succeed (no owner, refused, failed) —
+    /// for a deployment that must not run without its mesh. Default <c>false</c>: the failure is logged as an error,
+    /// audited and shown in Settings, and Whiskers starts so an admin can fix it. Set it only after an admin has taken
+    /// the VPN bring-up over: without an owner the start would always stop.
+    /// </summary>
+    public bool FailStartupOnError { get; set; }
+
     /// <summary>Accept subnet routes advertised by peers.</summary>
     public bool AcceptRoutes { get; set; } = true;
 
