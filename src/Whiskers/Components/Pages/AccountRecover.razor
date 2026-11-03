@@ -5,6 +5,7 @@
 @inject IConfiguration Config
 @inject NavigationManager Nav
 @inject IStringLocalizer<SharedResource> L
+@inject IServiceProvider ServiceProvider
 
 @* R1-49: a person with a one-time recovery code (from an Admin's reset or invitation, or from the host operator's
    `--recover-local-account`) sets a new password here. The code cannot sign in by itself; only this page accepts it, so
@@ -55,6 +56,11 @@
     private bool _busy;
     private bool _done;
 
+    /// <summary>The shortest time an answer of this page takes.</summary>
+    public static readonly TimeSpan MinimumDuration = TimeSpan.FromSeconds(1);
+
+    private TimeProvider Clock => ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+
     protected override void OnInitialized()
     {
         // Without real authentication there are no local sign-ins to recover.
@@ -70,9 +76,13 @@
             return;
         }
         _busy = true;
+        // Every answer takes at least this long, whatever the outcome — a floor, not an extra wait, so the time does not
+        // tell a refusal from a success or one refusal from another. The service limits the attempts themselves.
+        var floor = Task.Delay(MinimumDuration, Clock);
         try
         {
             var result = await Accounts.RedeemRecoveryCodeAsync(_email, _code, _new);
+            await floor;
             if (result.Success)
             {
                 _done = true;
@@ -81,11 +91,10 @@
             }
             var text = L[$"LocalAccounts_Error_{result.Error}"];
             _error = text.ResourceNotFound ? result.Error : text.Value;
-            // A refused attempt slows this page down; the code's entropy and the account lockout do the rest.
-            if (result.Error == LocalAccountErrors.InvalidCode) await Task.Delay(TimeSpan.FromSeconds(1));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            await floor;
             _error = L["LocalAccounts_Error_failed", ex.GetType().Name].Value;
         }
         finally { _busy = false; }

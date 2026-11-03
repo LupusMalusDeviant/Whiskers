@@ -37,7 +37,9 @@ recovery without a temporary password, and a published MFA posture (WORK_PACKAGE
 `LocalAccountErrors` (`not_authorized`, `session_invalid`, `not_found`, `already_exists`, `invalid_email`,
 `role_conflict`, `own_account`, `last_admin`, `wrong_password`, `locked_out`, `password_policy`, `invalid_code`,
 `store_unavailable`, `conflict`, `auth_disabled`). `IRecoveryAttemptLimiter` (singleton) and `IClientAddress`
-(scoped, the circuit's client address) back the redemption's limit. Gateway target kind `account`, id argument `account` (the email); `account.create`
+(scoped, the circuit's client address) back the redemption's limit. The circuit's address comes from its hub
+connection: `ClientAddressHubFilter` (a global, read-only hub filter) exposes the calling connection's address during
+each hub call, and `CircuitClientAddress` (a `CircuitHandler`, created inside the hub call that starts the circuit) keeps it for the circuit. Gateway target kind `account`, id argument `account` (the email); `account.create`
 also records `role`. Verification: `NotVerifiable` (own account store).
 
 Host CLI: `dotnet Whiskers.dll --recover-local-account <email>` — exit codes `0` issued, `2` usage, `3` no such local
@@ -72,9 +74,13 @@ UI: `/account` (*My account*), `/account/recover` (anonymous), Settings panel *L
    themselves — for another Admin's address too, including a Google/OIDC Admin whose address gets a local account.
    Audited (`account.password_reset` / `account.create`); the owner notices their password stopped working.
 8. The kill switch stops neither the recovery-code redemption nor the host CLI (both restore a person's own access).
-9. With `AUTH_DISABLED`, adding, resetting and deleting accounts are refused (`auth_disabled`, fail closed).
-10. Recovery-page limits: 10 attempts per client address per minute, 10 per account per 15 minutes, enforced in the
-    service (the page runs in a Blazor circuit, outside `/login-local`'s HTTP limiter; the protected pipeline stays
-    unchanged). Unknown client addresses share one bucket.
+9. With `AUTH_DISABLED`, adding, resetting and deleting accounts — and redeeming a code — are refused
+   (`auth_disabled`, fail closed). The host CLI still issues codes; they are redeemable once authentication is on.
+10. Recovery-page limits: 10 attempts per client per minute (an IPv4 address, or an IPv6 /64), 10 per account per 15
+    minutes, enforced in the service (the page runs in a Blazor circuit, outside `/login-local`'s HTTP limiter; the
+    protected pipeline stays unchanged). The client address is the circuit's hub connection's (WebSockets and long
+    polling), as the forwarded-headers middleware resolved it. Unknown client addresses share one bucket; each table
+    holds at most 4096 keys, beyond which new keys share one overflow bucket (fail closed). Every answer of the page
+    takes at least one second. Operators should narrow `ForwardedHeaders:TrustedNetworks` to the real proxy.
 11. Demotion of the only Admin who can sign in is guarded only by the role store's explicit-Admin rule (TA-02); not
     extended in R1-49.

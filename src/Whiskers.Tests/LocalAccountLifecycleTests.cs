@@ -639,6 +639,164 @@ public sealed class LocalAccountLifecycleTests
         public Task RemoveRoleAsync(string email) => inner.RemoveRoleAsync(email);
     }
 
+    // ------------------------------------------------------------------------------------------------ review round 2
+
+    [Fact]
+    public async Task An_admin_change_whose_circuit_closed_while_it_waited_does_not_keep_the_account_lock()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.AddUserAsync(Ops, AppRole.Admin);
+        // A circuit closed while its change waited for the lock: its context is disposed when the change gets the lock.
+        var gone = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        gone.Dispose();
+        // Each one must get the lock (the one before released it) and fail; none may wait forever.
+        await Assert.ThrowsAnyAsync<ObjectDisposedException>(() => Bounded(gone.Accounts.CreateAsync("x@local.test", AppRole.Viewer)));
+        await Assert.ThrowsAnyAsync<ObjectDisposedException>(() => Bounded(gone.Accounts.ResetPasswordAsync(Ops)));
+        await Assert.ThrowsAnyAsync<ObjectDisposedException>(() => Bounded(gone.Accounts.DeleteAsync(Ops)));
+
+        // The next Admin change still gets the lock.
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        Assert.True((await Bounded(admin.Accounts.ResetPasswordAsync(Ops))).Success);
+
+        static async Task<T> Bounded<T>(Task<T> task)
+        {
+            Assert.Same(task, await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(10))));   // not stuck on the lock
+            return await task;
+        }
+    }
+
+    [Fact]
+    public async Task A_redemption_whose_save_throws_records_its_outcome_and_the_code_stays_usable()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.AddUserAsync(Ops, AppRole.Operator);
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        var code = (await admin.Accounts.ResetPasswordAsync(Ops)).RecoveryCode!;
+
+        using (var broken = world.As(LocalAccountWorld.Anonymous,
+                   users: sp => ActivatorUtilities.CreateInstance<ThrowingStampUsers>(sp)))
+            await Assert.ThrowsAsync<IOException>(() =>
+                broken.Accounts.RedeemRecoveryCodeAsync(Ops, code, LocalAccountWorld.NewPassword));
+
+        // The "redeemed" row is followed by its outcome.
+        var rows = world.Audit.Rows.Where(r => r.Action is LocalAccountService.RecoveryRedeemedAction
+            or LocalAccountService.RecoveryRefusedAction).ToList();
+        Assert.Equal([true, false], rows.Select(r => r.Success));
+        Assert.Contains("reason=failed", rows[1].Details);
+        Assert.False(await world.PasswordWorksAsync(Ops, LocalAccountWorld.NewPassword));
+        using var anonymous = world.As(LocalAccountWorld.Anonymous);
+        Assert.True((await anonymous.Accounts.RedeemRecoveryCodeAsync(Ops, code, LocalAccountWorld.NewPassword)).Success);
+    }
+
+    [Fact]
+    public async Task Only_the_role_stores_last_admin_refusal_reads_as_last_admin()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.AddUserAsync(Ops, AppRole.Operator);
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root),
+            new RemoveThrows(world.Roles, new InvalidOperationException("the role file is read-only")));
+
+        // Any other failure of the role store is a failure, not "last Admin" — and nothing was deleted.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => admin.Accounts.DeleteAsync(Ops));
+        Assert.NotNull(await world.FindAsync(Ops));
+        Assert.Equal(AppRole.Operator, world.Roles.GetRole(Ops));
+        // (The role store's own refusal — the target is the one explicit Admin left — stays "last Admin":
+        // A_demotion_in_the_role_panel_during_a_deletion_leaves_an_admin_and_the_account.)
+    }
+
+    [Fact]
+    public async Task With_authentication_disabled_a_host_issued_code_is_not_redeemed()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync(authDisabled: true);
+        await world.AddUserAsync(Ops, AppRole.Operator);
+        var output = new StringWriter();
+        Assert.Equal(0, await LocalAccountRecoveryCli.RunAsync(world.Services, [Ops], output));
+        var code = Regex.Match(output.ToString(), "([2-9A-HJ-NP-Z]{4}-){5}[2-9A-HJ-NP-Z]{4}").Value;
+        Assert.NotEmpty(code);
+        var hashes = world.Hasher.Verifications;
+
+        using var anonymous = world.As(LocalAccountWorld.Anonymous);
+        Assert.Equal(LocalAccountErrors.AuthDisabled,
+            (await anonymous.Accounts.RedeemRecoveryCodeAsync(Ops, code, LocalAccountWorld.NewPassword)).Error);
+
+        Assert.Equal(hashes, world.Hasher.Verifications);
+        Assert.False(await world.PasswordWorksAsync(Ops, LocalAccountWorld.NewPassword));
+        Assert.DoesNotContain(world.Audit.Rows, r => r.Action == LocalAccountService.RecoveryRedeemedAction);
+    }
+
+    [Fact]
+    public void A_client_is_its_ipv4_address_or_its_ipv6_64_and_anything_else_is_unknown()
+    {
+        Assert.Equal("203.0.113.5", RecoveryAttemptLimiter.ClientKey("203.0.113.5"));
+        Assert.Equal("203.0.113.5", RecoveryAttemptLimiter.ClientKey("::ffff:203.0.113.5"));
+        Assert.Equal(RecoveryAttemptLimiter.ClientKey("2001:db8:1:2::1"), RecoveryAttemptLimiter.ClientKey("2001:db8:1:2:ffff:ee:dd:9"));
+        Assert.NotEqual(RecoveryAttemptLimiter.ClientKey("2001:db8:1:2::1"), RecoveryAttemptLimiter.ClientKey("2001:db8:1:3::1"));
+        Assert.Equal(RecoveryAttemptLimiter.UnknownClient, RecoveryAttemptLimiter.ClientKey(null));
+        Assert.Equal(RecoveryAttemptLimiter.UnknownClient, RecoveryAttemptLimiter.ClientKey("not-an-address"));
+    }
+
+    [Fact]
+    public void Rotating_ipv6_addresses_within_one_64_shares_one_client_budget()
+    {
+        var limiter = new RecoveryAttemptLimiter(new ManualClock(DateTimeOffset.Parse("2026-11-03T10:00:00Z")));
+        for (var i = 0; i < RecoveryAttemptLimiter.ClientLimit; i++)
+            Assert.True(limiter.TryAcquire($"2001:db8:1:2::{i + 1:x}", $"a{i}@local.test").Allowed);
+
+        Assert.False(limiter.TryAcquire("2001:db8:1:2:abcd::77", "fresh@local.test").Allowed);
+        Assert.True(limiter.TryAcquire("2001:db8:1:3::1", "fresh@local.test").Allowed);
+    }
+
+    [Fact]
+    public void A_full_limiter_puts_new_clients_and_accounts_into_one_overflow_bucket_and_sweeps_once_per_window()
+    {
+        var clock = new ManualClock(DateTimeOffset.Parse("2026-11-03T10:00:00Z"));
+        var limiter = new RecoveryAttemptLimiter(clock, capacity: 4);
+        for (var i = 0; i < 4; i++) Assert.True(limiter.TryAcquire($"192.0.2.{i}", $"a{i}@local.test").Allowed);
+
+        // Table full: every new client shares one bucket of ten, however many addresses it rotates through.
+        for (var i = 0; i < RecoveryAttemptLimiter.ClientLimit; i++)
+            Assert.True(limiter.TryAcquire($"198.51.100.{i}", $"a{i % 4}@local.test").Allowed);
+        Assert.False(limiter.TryAcquire("198.51.100.200", "a0@local.test").Allowed);
+        Assert.True(limiter.TryAcquire("192.0.2.1", "a1@local.test").Allowed);   // a known client keeps its own
+        var footprint = limiter.Footprint;
+        Assert.Equal(5, footprint.Clients);                // four clients and the overflow bucket, no more
+        Assert.Equal(1, footprint.ClientSweeps);           // one sweep in the window, not one per new client
+
+        // New accounts too: they share one account budget.
+        for (var i = 0; i < RecoveryAttemptLimiter.AccountLimit; i++)
+            limiter.TryAcquire("192.0.2.3", $"new{i}@local.test");
+        Assert.True(limiter.Footprint.Accounts <= 5);
+
+        // After the window the expired keys go and a new client has its own budget again.
+        clock.Advance(RecoveryAttemptLimiter.AccountWindow);
+        Assert.True(limiter.TryAcquire("198.51.100.250", "late@local.test").Allowed);
+        Assert.True(limiter.Footprint.Clients <= 4);
+    }
+
+    /// <summary>Identity's user manager whose final save fails with something other than a database conflict.</summary>
+    private sealed class ThrowingStampUsers(IUserStore<AppUser> store, Microsoft.Extensions.Options.IOptions<IdentityOptions> options,
+        IPasswordHasher<AppUser> hasher, IEnumerable<IUserValidator<AppUser>> userValidators,
+        IEnumerable<IPasswordValidator<AppUser>> passwordValidators, ILookupNormalizer normalizer, IdentityErrorDescriber errors,
+        IServiceProvider services, ILogger<UserManager<AppUser>> logger)
+        : UserManager<AppUser>(store, options, hasher, userValidators, passwordValidators, normalizer, errors, services, logger)
+    {
+        public override Task<IdentityResult> UpdateSecurityStampAsync(AppUser user) => throw new IOException("the disk is gone");
+    }
+
+    /// <summary>The real role store, except that removing a role fails with <paramref name="failure"/>.</summary>
+    private sealed class RemoveThrows(IRoleService inner, Exception failure) : IRoleService
+    {
+        public Task InitializeAsync(CancellationToken ct = default) => inner.InitializeAsync(ct);
+        public AppRole GetRole(string? email) => inner.GetRole(email);
+        public bool HasRole(string? email, AppRole requiredRole) => inner.HasRole(email, requiredRole);
+        public bool HasAnyRoles() => inner.HasAnyRoles();
+        public bool HasExplicitRole(string? email) => inner.HasExplicitRole(email);
+        public UserRoleData GetRoleData() => inner.GetRoleData();
+        public Task SaveRoleDataAsync(UserRoleData data) => inner.SaveRoleDataAsync(data);
+        public Task SetRoleAsync(string email, AppRole role) => inner.SetRoleAsync(email, role);
+        public Task RemoveRoleAsync(string email) => Task.FromException(failure);
+    }
+
     // ------------------------------------------------------------------------------------------------ wire
 
     [Fact]
@@ -867,11 +1025,13 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     public static ClaimsPrincipal Federated(string email) => new(new ClaimsIdentity(
         [new Claim(ClaimTypes.Email, email), new Claim(ClaimTypes.Name, email)], "Google"));
 
-    public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7")
+    public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7",
+        Func<IServiceProvider, UserManager<AppUser>>? users = null)
     {
         var scope = _sp.CreateScope();
         var user = new SessionUser(Validator, principal);
-        var accounts = new LocalAccountService(scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
+        var accounts = new LocalAccountService(
+            users?.Invoke(scope.ServiceProvider) ?? scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
             scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, _time,
             scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>());
         return new Acting(scope, accounts, new UiMutationRunner(Gateway, new CapabilityCatalog(), user), user);

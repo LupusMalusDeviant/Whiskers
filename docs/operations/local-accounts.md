@@ -31,7 +31,7 @@ Set by ASP.NET Identity's options in Whiskers (not configurable in 1.0):
 | Character classes | at least one upper-case letter, one lower-case letter, one digit and one symbol |
 | Lockout | 5 wrong passwords (or wrong current passwords, or wrong recovery codes for an account that has a code) lock the account for 15 minutes |
 | Sign-in rate limit | 10 sign-in attempts (`/login-local`) per minute per client address (HTTP rate limiter) |
-| Recovery-page limit | 10 recovery-code attempts (`/account/recover`) per minute per client address, and 10 per account per 15 minutes from all clients together (enforced by Whiskers itself: the page runs in a live connection the HTTP limiter does not see) |
+| Recovery-page limit | 10 recovery-code attempts (`/account/recover`) per minute per client (an IPv4 address, or an IPv6 /64), and 10 per account per 15 minutes from all clients together (enforced by Whiskers itself: the page runs in a live connection the HTTP limiter does not see); every answer of the page takes at least one second |
 
 Passwords and recovery codes are hashed with ASP.NET Identity's password hasher (PBKDF2); Whiskers stores neither in
 readable form and never writes them to a log or the audit trail — not even a prefix.
@@ -74,12 +74,28 @@ A wrong code counts towards the lockout like a wrong password — but only for a
 for an account with an ordinary password does not lock it. Unknown email, wrong, used or expired code, a locked account
 and a throttled attempt all get the same answer. Attempts beyond the recovery-page limit check nothing; the first one of
 a client in each minute is audited (`auth.recovery_refused`, `reason=rate_limited`), the rest only counted in the log.
-Where the client address cannot be determined, those clients share one limit. A successful redemption is audited
-before the password is set; if the audit row cannot be written, nothing is set.
+A successful redemption is audited before the password is set; if the audit row cannot be written, nothing is set.
+
+**Which address the limit sees.** The client address is the one of the page's live connection (WebSockets or long
+polling — both work), as the forwarded-headers handling resolved it. The per-client limit becomes **shared** — many
+people counted as one client — when:
+
+- your reverse proxy is **not** in `ForwardedHeaders:TrustedNetworks`: every visitor then has the proxy's address
+  (the sign-in limit of `/login-local` has the same problem);
+- the address cannot be determined at all: those clients share one bucket (`unknown`);
+- Whiskers remembers 4096 clients and 4096 accounts at most: beyond that, while the older entries have not expired,
+  every new address (or account) shares one overflow bucket. Under a flood of new addresses recovery may then be
+  refused for a few minutes; the limit is never lifted.
+
+**Narrow `ForwardedHeaders:TrustedNetworks` to your real proxy.** The default trusts loopback, all private (RFC 1918)
+networks and the Tailscale range, so any client on your LAN can send its own `X-Forwarded-For` and pose as many clients.
+The per-account limit and the lockout still hold, but the per-client limit and the bounded audit trail of refusals
+do not. Example: `ForwardedHeaders__TrustedNetworks__0=172.18.0.2/32` for a single proxy container.
 
 The recovery page and the host CLI are not stopped by the kill switch (a person recovering their own access is not
-a write to managed infrastructure). Adding, resetting and deleting accounts are refused while `AUTH_DISABLED` is set:
-every client is the synthetic Admin then.
+a write to managed infrastructure). Adding, resetting and deleting accounts — and redeeming a code — are refused while
+`AUTH_DISABLED` is set: every client is the synthetic Admin then, and there is no local sign-in to recover. A code
+issued on the host meanwhile can be redeemed once authentication is on again (within its 24 hours).
 
 An Admin who resets another account (another Admin included) or adds one receives its code and could use it
 themselves — by design, as with any Admin-issued credential; the reset is audited and the owner notices that their

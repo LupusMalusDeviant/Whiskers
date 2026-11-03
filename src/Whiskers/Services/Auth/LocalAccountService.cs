@@ -130,9 +130,11 @@ public sealed class LocalAccountService : ILocalAccountService
         if (!Enum.IsDefined(role)) return LocalAccountResult.Refused(LocalAccountErrors.RoleConflict);
 
         await AdminGate.WaitAsync(ct);
-        _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
         try
         {
+            // Inside the try: the context of a circuit closed while it waited is disposed, and Clear() throws — the
+            // gate is released all the same.
+            _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
             if ((await AccountAdminAsync()).Error is { } refused) return LocalAccountResult.Refused(refused);
             if (await _users.FindByEmailAsync(email) is not null) return LocalAccountResult.Refused(LocalAccountErrors.AlreadyExists);
             // An email that already holds a different explicit role (a Google/OIDC user) is not silently changed:
@@ -188,9 +190,11 @@ public sealed class LocalAccountService : ILocalAccountService
     {
         email = (email ?? "").Trim();
         await AdminGate.WaitAsync(ct);
-        _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
         try
         {
+            // Inside the try: the context of a circuit closed while it waited is disposed, and Clear() throws — the
+            // gate is released all the same.
+            _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
             var (actor, refused) = await AccountAdminAsync();
             if (refused is not null) return LocalAccountResult.Refused(refused);
             if (SameEmail(actor, email)) return LocalAccountResult.Refused(LocalAccountErrors.OwnAccount);
@@ -209,9 +213,11 @@ public sealed class LocalAccountService : ILocalAccountService
     {
         email = (email ?? "").Trim();
         await AdminGate.WaitAsync(ct);
-        _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
         try
         {
+            // Inside the try: the context of a circuit closed while it waited is disposed, and Clear() throws — the
+            // gate is released all the same.
+            _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
             // Re-checked under the lock: an Admin whose own account went a moment ago decides nothing.
             var (actor, refused) = await AccountAdminAsync();
             if (refused is not null) return LocalAccountResult.Refused(refused);
@@ -230,7 +236,12 @@ public sealed class LocalAccountService : ILocalAccountService
             {
                 var role = _roles.GetRole(target);
                 try { await _roles.RemoveRoleAsync(target); }
-                catch (InvalidOperationException) { return LocalAccountResult.Refused(LocalAccountErrors.LastAdmin); }
+                // Only the role store's last-Admin refusal (TA-02) reads as "last Admin": the target is then the one
+                // explicit Admin left. Any other failure is a failure and goes on.
+                catch (InvalidOperationException) when (IsLastExplicitAdmin(target))
+                {
+                    return LocalAccountResult.Refused(LocalAccountErrors.LastAdmin);
+                }
                 removedRole = role;
             }
 
@@ -273,6 +284,14 @@ public sealed class LocalAccountService : ILocalAccountService
         return false;
     }
 
+    /// <summary>Whether <paramref name="email"/> is an explicit Admin and no other explicit Admin is left — the case the
+    /// role store refuses to remove (TA-02).</summary>
+    private bool IsLastExplicitAdmin(string email)
+    {
+        var admins = _roles.GetRoleData().Roles.Where(r => r.Role == AppRole.Admin).ToList();
+        return admins.Any(r => SameEmail(r.Email, email)) && admins.All(r => SameEmail(r.Email, email));
+    }
+
     /// <summary>Puts back a role removed for a deletion that then failed: the account still exists and keeps its role.</summary>
     private async Task RestoreRoleAsync(string email, AppRole? role)
     {
@@ -305,6 +324,8 @@ public sealed class LocalAccountService : ILocalAccountService
     {
         email = (email ?? "").Trim();
         var normalizedCode = RecoveryCodes.Normalize(code);
+        // Without real authentication there is no local sign-in a new password could be for (the page leaves too).
+        if (_authDisabled) return LocalAccountResult.Refused(LocalAccountErrors.AuthDisabled);
 
         // The per-client and per-account limit comes first: a refused attempt reads nothing and hashes nothing. Only the
         // first throttled attempt of a client in a window is audited; the storm is logged as a count (bounded rows).
@@ -369,19 +390,27 @@ public sealed class LocalAccountService : ILocalAccountService
 
         // One save: the code is used up, the password set, the lockout cleared and the stamp changed. The account's
         // concurrency stamp makes a second use of the same code at the same moment fail.
-        _db.UserTokens.Remove(row);
-        user.PasswordHash = _users.PasswordHasher.HashPassword(user, newPassword!);
-        user.AccessFailedCount = 0;
-        user.LockoutEnd = null;
         IdentityResult saved;
         try
         {
+            _db.UserTokens.Remove(row);
+            user.PasswordHash = _users.PasswordHasher.HashPassword(user, newPassword!);
+            user.AccessFailedCount = 0;
+            user.LockoutEnd = null;
             saved = await _users.UpdateSecurityStampAsync(user);
         }
-        catch (Exception ex) when (ex is DbUpdateException)
+        catch (DbUpdateException)
         {
             _db.ChangeTracker.Clear();
             saved = IdentityResult.Failed(new IdentityErrorDescriber().ConcurrencyFailure());
+        }
+        catch
+        {
+            // Whatever else went wrong: the row above announced a change, so its outcome follows before the error
+            // goes on — and nothing of this attempt stays pending in the context.
+            try { _db.ChangeTracker.Clear(); } catch (ObjectDisposedException) { /* the scope is gone with it */ }
+            await RefusedAsync(account, "failed");
+            throw;
         }
         if (!saved.Succeeded)
         {
