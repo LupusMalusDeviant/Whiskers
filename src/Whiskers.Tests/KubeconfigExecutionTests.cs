@@ -230,10 +230,21 @@ public sealed class KubeconfigExecutionTests : IDisposable
             """);
     }
 
-    /// <summary>An exec plugin that leaves a file behind when it runs (sh on Linux, cmd on Windows).</summary>
-    private string MarkerExecKubeconfig() => OperatingSystem.IsWindows()
-        ? ExecKubeconfig("cmd", ["/c", $"echo x> {_marker}"])
-        : ExecKubeconfig("/bin/sh", ["-c", $"echo x > '{_marker}'"]);
+    /// <summary>An exec plugin that leaves a file behind when it runs (a script on Linux, cmd on Windows).
+    ///
+    /// <para>Not <c>sh -c "…"</c> on Linux: the client joins the args with spaces into one command line, which .NET splits
+    /// again, so <c>sh</c> would get <c>-c echo</c> and the redirect as separate words and never write the marker. An
+    /// executable script with no args has nothing to split.</para></summary>
+    private string MarkerExecKubeconfig()
+    {
+        if (OperatingSystem.IsWindows())
+            return ExecKubeconfig("cmd", ["/c", $"echo x> {_marker}"]);
+
+        var script = Path.Combine(_dir, "plugin.sh");
+        File.WriteAllText(script, $"#!/bin/sh\necho x > '{_marker}'\n");
+        File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return ExecKubeconfig(script, []);
+    }
 
     private static string Kubeconfig(string userBlock, string cluster = "insecure-skip-tls-verify: true") => $"""
         apiVersion: v1
