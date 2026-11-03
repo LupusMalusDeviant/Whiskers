@@ -558,8 +558,16 @@ internal static class WorkflowPolicy
             if (!prepareRuns.Contains(required)) violations.Add($"the prepare job does not verify '{required}'");
         if (!Regex.IsMatch(prepareRuns, @"CSPROJ_VER=") || !Regex.IsMatch(prepareRuns, @"CHART_VER="))
             violations.Add("the prepare job does not compare the tag with the csproj and chart versions");
-        if (!prepareRuns.Contains("gh release list") || prepareRuns.Contains("git tag -l"))
-            violations.Add("`latest` is not decided from the published releases");
+        // The moving tags are decided from the published releases right where they move (review round 3: a decision
+        // taken in prepare is replayed by "Re-run failed jobs" and could move them back past a later release).
+        var moveRuns = jobs.TryGetValue("publish-image", out var publishImage)
+            ? string.Join("\n", Steps(publishImage).Select(s => Scalar(Child(s, "run"))).OfType<string>()
+                .Where(r => r.Contains("imagetools create -t \"$t\"")))
+            : "";
+        if (!moveRuns.Contains("gh release list") || moveRuns.Contains("git tag -l"))
+            violations.Add("`latest` and X.Y are not decided from the published releases in the step that moves them");
+        if (prepareRuns.Contains("push_latest"))
+            violations.Add("`latest` is decided when the run starts, so a re-run can move it back");
 
         return violations;
     }

@@ -12,8 +12,8 @@ All notable changes to Whiskers are documented here. The format follows
   once each, scans **both** with Trivy by digest and publishes exactly those digests (verified, then cosign-signed)
   — nothing is rebuilt after the scan. The tag must match the version in `Whiskers.csproj` and `Chart.yaml`. An
   existing `X.Y.Z` image, chart or GitHub release is never overwritten; the run fails instead, also when it cannot
-  tell whether the version exists. `X.Y` and `latest` still move; `latest` only follows the highest *published*
-  release, so a hotfix for an older line no longer moves it back and a failed higher tag does not hold it back.
+  tell whether the version exists. `X.Y` and `latest` still move; they only follow the highest *published*
+  release (of the line, or overall), decided right before they move, so a hotfix for an older line or a re-run of an older failed release no longer moves them back and a failed higher tag does not hold them back.
   The scan no longer skips CRITICAL findings without a fix: such a finding fails the release unless it is recorded
   in `.trivyignore` with a reason and an expiry date. Each release now carries one SBOM per architecture
   (`whiskers-X.Y.Z-linux-amd64.sbom.spdx.json`, `…-linux-arm64…`) instead of a single one that only described amd64.

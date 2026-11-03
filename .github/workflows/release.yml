@@ -50,7 +50,6 @@ jobs:
       ver: ${{ steps.verify.outputs.ver }}
       minor: ${{ steps.verify.outputs.minor }}
       sha: ${{ steps.verify.outputs.sha }}
-      push_latest: ${{ steps.verify.outputs.push_latest }}
     steps:
       # A pushed tag releases itself. A manual run must be started from the tag it names, so the label, the
       # code and the workflow definition (and with it the cosign signing identity) are the same commit.
@@ -88,7 +87,6 @@ jobs:
         id: verify
         env:
           TAG: ${{ steps.tag.outputs.tag }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
@@ -104,19 +102,11 @@ jobs:
               echo "::error::${pair%%=*} is '${pair#*=}', the tag says ${VER}"; exit 1
             fi
           done
-          # `latest` (moving) only follows the highest PUBLISHED release (GitHub releases, which this workflow
-          # creates last), not the highest git tag: a tag whose release failed never holds `latest` back, and a
-          # hotfix for an older line never moves it back.
-          PUBLISHED="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName')"
-          HIGHEST="$(printf '%s\n%s\n' "$PUBLISHED" "$TAG" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
-          PUSH_LATEST=false
-          if [ "$HIGHEST" = "$TAG" ]; then PUSH_LATEST=true; fi
           MINOR="$(printf '%s' "$VER" | cut -d. -f1-2)"
           {
             echo "sha=${SHA}"
             echo "ver=${VER}"
             echo "minor=${MINOR}"
-            echo "push_latest=${PUSH_LATEST}"
           } >> "$GITHUB_OUTPUT"
 
       # Fail fast before an hour of building. The publish jobs check again right before they push.
@@ -365,11 +355,21 @@ jobs:
         env:
           DIGEST: ${{ steps.publish.outputs.digest }}
           MINOR: ${{ needs.prepare.outputs.minor }}
-          PUSH_LATEST: ${{ needs.prepare.outputs.push_latest }}
+          VER: ${{ needs.prepare.outputs.ver }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAGS=("${IMAGE}:${MINOR}")
-          if [ "$PUSH_LATEST" = "true" ]; then TAGS+=("${IMAGE}:latest"); fi
+          # The moving tags only follow the highest PUBLISHED release (GitHub releases, which this workflow creates
+          # last), not the highest git tag: a tag whose release failed never holds them back, and a hotfix for an older
+          # line never moves them back. Decided here, right before the move, not when the run started: a re-run of an
+          # older failed release ("Re-run failed jobs") must not move X.Y or latest back past a version published since.
+          PUBLISHED="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName')"
+          ALL="$(printf '%s\n%s\n' "$PUBLISHED" "v${VER}" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)"
+          LINE_TOP="$(printf '%s\n' "$ALL" | grep -E "^v${MINOR%%.*}\\.${MINOR#*.}\\." | tail -n1 || true)"
+          TOP="$(printf '%s\n' "$ALL" | tail -n1)"
+          TAGS=()
+          if [ "$LINE_TOP" = "v${VER}" ]; then TAGS+=("${IMAGE}:${MINOR}"); else echo "${MINOR} stays at ${LINE_TOP}"; fi
+          if [ "$TOP" = "v${VER}" ]; then TAGS+=("${IMAGE}:latest"); else echo "latest stays at ${TOP}"; fi
           for t in "${TAGS[@]}"; do
             docker buildx imagetools create -t "$t" "${IMAGE}@${DIGEST}"
             GOT="$(docker buildx imagetools inspect "$t" --format '{{json .Manifest}}' | jq -er .digest)"
