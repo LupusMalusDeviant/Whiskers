@@ -51,10 +51,14 @@ public sealed class QuietHoursSummarizer(
                 if (quietHours.IsActive(window.Key.RuleId, window.Key.WindowKey, now)) continue;
                 var rows = window.ToList();
                 var evt = Summary(rows, now);
-                var key = KeyOf(window.Key.RuleId, window.Key.WindowKey);
+                var key = KeyOf(rows);
                 var targets = _channels.Where(c => c.Targets.Count > 0).ToList();
+                var refused = 0;
                 foreach (var channel in targets)
-                    await outbox.AddOnceAsync(channel.Name, evt, key + "|" + channel.Name, now);
+                    if (!await outbox.AddOnceAsync(channel.Name, evt, key + "|" + channel.Name, now)) refused++;
+                if (refused > 0)
+                    logger.LogInformation("Quiet-hours summary {Key} was already queued or delivered for {Refused} channels; not added again",
+                        key, refused);
                 done.AddRange(rows.Select(r => r.Id));
                 made.Add((rows[0].RuleName, window.Key.WindowKey, rows.Sum(r => r.Count), targets.Count));
             }
@@ -79,8 +83,18 @@ public sealed class QuietHoursSummarizer(
         }
     }
 
-    /// <summary>The idempotency key of a window's summary.</summary>
-    internal static string KeyOf(string ruleId, string windowKey) => $"quiet-hours|{ruleId}|{windowKey}";
+    /// <summary>The idempotency key of one summary: the rule, the window and the exact set it summarizes (each row's id and
+    /// count). A pass repeated after a stop before the rows were marked sees the same rows and is refused; a window that
+    /// was re-opened or extended after its summary (the rule was changed) holds new rows, which make a new set and so a
+    /// summary of their own — never one the outbox refuses as already sent, which would lose them (review MAJOR-1).</summary>
+    internal static string KeyOf(IReadOnlyList<QuietHoursSuppressionEntity> rows)
+    {
+        var set = string.Join("\n", rows.OrderBy(r => r.Id, StringComparer.Ordinal)
+            .Select(r => string.Create(CultureInfo.InvariantCulture, $"{r.Id}\t{r.Count}")));
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(set)))[..16]
+            .ToLowerInvariant();
+        return $"quiet-hours|{rows[0].RuleId}|{rows[0].WindowKey}|{hash}";
+    }
 
     /// <summary>The summary of one window: per target what was held, oldest first, and how many further events were held
     /// than the text lists.</summary>
@@ -119,7 +133,7 @@ public sealed class QuietHoursSummarizer(
             Timestamp = now,
             // The same for every channel and attempt (R1-40) and safe in a URL path (Matrix's transaction id).
             DeliveryId = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                Encoding.UTF8.GetBytes(KeyOf(rows[0].RuleId, rows[0].WindowKey))))[..32].ToLowerInvariant(),
+                Encoding.UTF8.GetBytes(KeyOf(rows))))[..32].ToLowerInvariant(),
         };
     }
 }

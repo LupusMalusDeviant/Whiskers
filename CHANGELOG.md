@@ -14,9 +14,14 @@ All notable changes to Whiskers are documented here. The format follows
   `high_disk_recovered` once the value stayed five minutes below the threshold minus 5 points (a value hovering just
   under the threshold neither closes nor reopens it). A series without readings for longer than three collection
   intervals (at least three minutes) — a container whose stats call fails, a host whose node_exporter is down, a `df`
-  that no longer answers — is no longer only a log warning: it raises one `metrics_gap` (naming the alerts it leaves
-  unconfirmed) and a `metrics_gap_recovered` when readings are back, and an open breach starts again from the new
-  readings instead of being bridged. Raises, recoveries, gaps and the quiet-hours summary bypass the per-channel
+  that stopped answering, a server whose container listing keeps failing (one gap for its containers) — is no longer
+  only a log warning: it raises one `metrics_gap` (naming the alerts it leaves unconfirmed) and a
+  `metrics_gap_recovered` when readings are back, and an open breach starts again from the new readings instead of
+  being bridged. A collection cycle that was itself held up past the tolerance is said once per server with an alert it
+  resets, not once per series; a paused server and a `df` that never answered since the start raise no gap. A listing
+  that fails for a cycle no longer drops a container's breach. Open threshold alerts survive a restart of Whiskers
+  (`alert-breaches.json`): a breach raised before the restart is closed with its recovery afterwards and not raised a
+  second time. Raises, recoveries, gaps and the quiet-hours summary bypass the per-channel
   throttle, like reachability and certificate events. **Quiet hours** (Settings → *Quiet hours*, Admin only, a gated,
   audited configuration write): daily windows in an explicit IANA time zone (`Europe/Berlin`, `UTC`; a Windows zone name
   or an unknown zone is refused on save), global or for chosen event types, crossing midnight, on the local wall clock
@@ -42,7 +47,12 @@ All notable changes to Whiskers are documented here. The format follows
   channel accepted a summary but before the outbox recorded that, the summary is sent again after the restart (Slack,
   Discord, ntfy, Telegram, e-mail and generic webhooks cannot deduplicate it; Matrix does, by its transaction id).
   `notification-outbox.json` now also remembers the keys of summaries for seven days; an older release reading the file
-  ignores them.
+  ignores them. A window that is in effect again after its summary (its end moved later) gets a second summary of what
+  it held since. (7) The new file `alert-breaches.json` in the data directory holds the open threshold alerts; it is
+  local to the install and not part of a self-backup. Open API-latency and rolling-baseline findings are not kept: a
+  restart during one of them raises it again if it goes on, as before. (8) A container that stops or is removed during
+  a breach gets no `*_recovered`: its stop is reported by the health monitor. (9) A host whose `df` has not answered
+  since the start (no command channel) gets one log line instead of a `metrics_gap`.
 
 - R1-55: **Metric history keeps its peaks and goes back 30 days and further.** Container and server samples are no
   longer only kept raw and deleted after one retention window: closed windows roll up into three tiers — 10 minutes,

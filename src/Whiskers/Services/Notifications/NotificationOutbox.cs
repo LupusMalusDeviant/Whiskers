@@ -116,6 +116,8 @@ public sealed class NotificationOutbox : INotificationOutbox
 
     private readonly JsonFileStore<OutboxFile>? _file;
     private readonly ILogger<NotificationOutbox> _logger;
+    // R1-56 (review NIT-11): when a key left the outbox and when old keys are forgotten — on the injected clock.
+    private readonly TimeProvider _time;
     private readonly object _sync = new();
     private readonly SemaphoreSlim _io = new(1, 1);
     private readonly SemaphoreSlim _work = new(0, int.MaxValue);
@@ -129,15 +131,16 @@ public sealed class NotificationOutbox : INotificationOutbox
     private bool _dirty, _writing, _unreadable;
     private long _redelivered, _exhausted, _dropped;
 
-    public NotificationOutbox(DataPathOptions paths, ILogger<NotificationOutbox> logger)
-        : this(Store(paths.NotificationOutboxJson), logger) { }
+    public NotificationOutbox(DataPathOptions paths, ILogger<NotificationOutbox> logger, TimeProvider? time = null)
+        : this(Store(paths.NotificationOutboxJson), logger, time) { }
 
     /// <summary>The outbox file's store: a file that parses but is no outbox (a <c>null</c> entry, an entry without its
     /// event, channel or id) is treated as corrupt — preserved aside, its previous generation used — never loaded.</summary>
     internal static JsonFileStore<OutboxFile> Store(string path) => new(path, problem: OutboxFile.Problem);
 
-    internal NotificationOutbox(JsonFileStore<OutboxFile>? file, ILogger<NotificationOutbox> logger)
+    internal NotificationOutbox(JsonFileStore<OutboxFile>? file, ILogger<NotificationOutbox> logger, TimeProvider? time = null)
     {
+        _time = time ?? TimeProvider.System;
         _file = file;
         _logger = logger;
         if (file is null) _entries = [];
@@ -202,7 +205,7 @@ public sealed class NotificationOutbox : INotificationOutbox
     /// <summary>Remembers the key of an entry that leaves the outbox. Under <see cref="_sync"/>.</summary>
     private void Left(NotificationOutboxEntry entry)
     {
-        if (entry.Key is { } key) _completed[key] = DateTime.UtcNow;
+        if (entry.Key is { } key) _completed[key] = _time.GetUtcNow().UtcDateTime;
     }
 
     public Task<IReadOnlyList<NotificationOutboxEntry>> DueAsync(DateTime now)
@@ -290,7 +293,7 @@ public sealed class NotificationOutbox : INotificationOutbox
             lock (_sync)
             {
                 if (!_dirty) return true;
-                ForgetOldKeys(DateTime.UtcNow);
+                ForgetOldKeys(_time.GetUtcNow().UtcDateTime);
                 snapshot = new OutboxFile
                 {
                     Entries = _entries!.Select(e => e.Clone()).ToList(),

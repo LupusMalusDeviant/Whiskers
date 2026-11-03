@@ -131,6 +131,9 @@ public sealed class QuietHoursService : IQuietHoursService, IDisposable
         {
             var settings = _configuration.GetSection(QuietHoursSettings.SectionName).Get<QuietHoursSettings>() ?? new();
             var valid = new List<QuietHoursRule>();
+            if (settings.Rules.Count > QuietHoursSettings.MaxRules)
+                _logger.LogWarning("Quiet hours hold {Count} rules; only the first {Max} are used — the notifications of the others are delivered",
+                    settings.Rules.Count, QuietHoursSettings.MaxRules);
             foreach (var rule in settings.Rules.Take(QuietHoursSettings.MaxRules))
             {
                 var normalized = Normalized(rule.Clone());

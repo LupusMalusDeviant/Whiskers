@@ -11,7 +11,7 @@ namespace Whiskers.Services.Metrics.HostLoad;
 ///
 /// <para>One <c>metrics_gap</c> finding per series once its readings have been missing for longer than the tolerance, and
 /// one <c>metrics_gap_recovered</c> when they are back. A gap only noticed when the next reading arrives (the loop itself
-/// was held up) is still reported, once, as a <c>metrics_gap</c> that says it is over. Advances on the time of the
+/// was held up) is not one of the series: the collector reports it once per held-up cycle. Advances on the time of the
 /// reading, like the breach tracker. Safe to call from parallel tasks.</para>
 /// </summary>
 public sealed class SeriesGapTracker
@@ -43,12 +43,10 @@ public sealed class SeriesGapTracker
                 return new HostLoadFinding(atUtc, seriesId, name, NotificationEventTypes.MetricsGap, FindingKind.Cleared,
                     $"Readings of {what} are back after {BreachTracker.Describe(gap)} without any.", 0, 0, gap);
 
-            // A gap nobody could report while it lasted: the loop itself was held up. Said once, now.
-            if (gap > tolerance)
-                return new HostLoadFinding(atUtc, seriesId, name, NotificationEventTypes.MetricsGap, FindingKind.Raised,
-                    $"There were no readings of {what} for {BreachTracker.Describe(gap)} (tolerance " +
-                    $"{BreachTracker.Describe(tolerance)}); they are back now. An alert open before the gap was reset: a " +
-                    "breach is not confirmed across readings that were never taken.", 0, 0, gap);
+            // A gap nobody reported while it lasted is not this series' own: the collection loop was held up (or alerts
+            // were switched off). It is not reported per series — after one slow cycle that would be one message per
+            // container, host and disk at once, past every throttle (review MAJOR-3); the collector reports a held-up
+            // cycle once (MetricsCollectorService) and the scan supervisor a stalled loop.
             return null;
         }
     }

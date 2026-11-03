@@ -1124,7 +1124,11 @@ suspended log scan and of stalled monitoring, the summary itself and a channel t
 pass (`QuietHoursSummarizer`) under the outbox's new idempotency keys (`AddOnceAsync`, keys remembered 7 days in
 `notification-outbox.json`). Tests: `SustainedAlertTests`, `QuietHoursTests`, `NotificationEventTypeArchitectureTests`,
 `QuietHoursPanelTests`, `NotificationThrottlerTests`, `UiMutationGatewayCoverageTests`, `SqliteToPostgresMigratorTests`;
-`HostLoadReplayTests` unchanged and green.
+`HostLoadReplayTests` unchanged and green. Review round 1: a summary key per summarized set (a re-opened window is
+summarized again, never refused); a failed container listing keeps the breach state and is one gap for the server's
+containers; a held-up cycle is said once per server with an open alert, not per series; open threshold and host-load
+breaches survive a restart (`alert-breaches.json`, `IAlertBreachStore`); no gap for a paused server or a `df` that never
+answered.
 
 **Out of scope:** On-call rotation and escalation chains.
 

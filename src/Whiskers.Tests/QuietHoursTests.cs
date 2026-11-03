@@ -442,6 +442,53 @@ public sealed class QuietHoursTests : IDisposable
         Assert.Single(_channel.Sent);
     }
 
+    [Fact]
+    public async Task A_window_extended_after_its_summary_summarizes_what_it_held_since_never_drops_it()
+    {
+        // Review MAJOR-1: the window is summarized at 07:01 local, then an Admin moves the end to 09:00 — the same window
+        // is in effect again. What it holds now is a new set with a summary of its own, not one the outbox refuses.
+        await SaveRulesAsync(Night());
+        await Composite().SendAsync(Alert("high_cpu", "web"));
+        var outbox = Outbox();
+        var summarizer = Summarizer(outbox, null, _channel.WithTarget());
+        await summarizer.SummarizeDueAsync(AfterWindow);
+        await Worker(outbox, _channel).RedeliverDueAsync(AfterWindow, CancellationToken.None);
+        Assert.Contains("web @ Badwolf", Assert.Single(_channel.Sent).ImageInfo);
+
+        var longer = Night();
+        longer.End = "09:00";
+        await SaveRulesAsync(longer);
+        _clock.Now = new DateTimeOffset(AfterWindow.AddMinutes(29));                 // 07:30 local: in the window again
+        await Composite().SendAsync(Alert("high_cpu", "api", AfterWindow.AddMinutes(29)));
+        Assert.Single(_channel.Sent);                                                 // held
+
+        var later = AfterWindow.AddHours(2);                                          // 09:01 local
+        await summarizer.SummarizeDueAsync(later);
+        await Worker(outbox, _channel).RedeliverDueAsync(later, CancellationToken.None);
+        Assert.Equal(2, _channel.Sent.Count);
+        Assert.Contains("api @ Badwolf", _channel.Sent[1].ImageInfo);
+        Assert.NotEqual(_channel.Sent[0].DeliveryId, _channel.Sent[1].DeliveryId);
+        Assert.All(Held(), h => Assert.NotNull(h.SummarizedAt));
+    }
+
+    [Fact]
+    public async Task The_outbox_remembers_a_summary_key_for_seven_days_on_its_injected_clock()
+    {
+        // Review NIT-11: the key bookkeeping read the wall clock while the rest of the outbox took the caller's time.
+        _clock.Now = new DateTimeOffset(AfterWindow);
+        var outbox = new NotificationOutbox(new DataPathOptions(_dir), NullLogger<NotificationOutbox>.Instance, _clock);
+        var summary = new NotificationEvent { EventType = NotificationEventTypes.QuietHoursSummary, ContainerName = "" };
+        Assert.True(await outbox.AddOnceAsync(_channel.Name, summary, "k|Recording", AfterWindow));
+        await Worker(outbox, _channel).RedeliverDueAsync(AfterWindow, CancellationToken.None);
+        Assert.True(await outbox.FlushAsync());
+        Assert.False(await outbox.AddOnceAsync(_channel.Name, summary, "k|Recording", AfterWindow.AddDays(1)));
+
+        _clock.Now = new DateTimeOffset(AfterWindow + NotificationOutbox.KeyMemory + TimeSpan.FromHours(1));
+        await outbox.AddOnceAsync(_channel.Name, summary, "other|Recording", _clock.Now.UtcDateTime);
+        Assert.True(await outbox.FlushAsync());                                    // forgets what is older than the memory
+        Assert.True(await outbox.AddOnceAsync(_channel.Name, summary, "k|Recording", _clock.Now.UtcDateTime));
+    }
+
     // --- the gated write (R1-11, R1-22) -----------------------------------------------------------------------------
 
     private UiMutationRunner Runner(GuardrailPolicy? policy = null)

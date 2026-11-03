@@ -100,6 +100,8 @@ public sealed class DataPathOptions
     public string AutoPatchNightlyJson => P("autopatch-nightly.json");
     /// <summary>Critical notifications a channel could not deliver, kept for redelivery (R1-40).</summary>
     public string NotificationOutboxJson => P("notification-outbox.json");
+    /// <summary>The threshold breaches open when Whiskers stopped, so a restart resumes them (R1-56).</summary>
+    public string AlertBreachesJson => P("alert-breaches.json");
 
     // --- Directories ---
     public string SshKeysDir => P("ssh-keys");

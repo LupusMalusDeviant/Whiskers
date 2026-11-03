@@ -211,9 +211,30 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         var rules = Whiskers.Services.Metrics.HostLoad.BreachRules.Threshold(
             TimeSpan.FromMinutes(Math.Max(1, alertCfg.SustainedMinutes)),
             TimeSpan.FromMinutes(Math.Max(0, alertCfg.CooldownMinutes)), tolerance);
+        // R1-56 (review MAJOR-4): the breaches open before a restart, once, before the first reading judges them.
+        await RestoreBreachesAsync(now);
+        // R1-56 (review MINOR-6): a server whose checks are paused has no readings by design; loops_paused says so.
+        var suspension = scope.ServiceProvider.GetService<Whiskers.Services.Observability.ILoopSuspensionService>();
+        bool Paused(string serverId)
+        {
+            try { return suspension?.IsSuspended(serverId) == true; }
+            catch (Exception ex) { _logger.LogDebug(ex, "Pause state of {ServerId} unknown", serverId); return false; }
+        }
+
+        // R1-56 (review MAJOR-3): a cycle that starts more than the tolerance after the last one was held up — every series
+        // went without readings, none through a fault of its own. Said once, per server with an alert it resets.
+        var heldUp = _lastCycleAt is { } previous && now - previous > tolerance ? now - previous : (TimeSpan?)null;
+        _lastCycleAt = now;
+        if (heldUp is { } held && alertCfg.Enabled)
+            await ReportHeldUpCycleAsync(notify, servers, held, tolerance, ct);
+
         // Container listing still goes through Docker (an inventory call, not a metric); the metric
         // reads below go through IMetricsSource so Prometheus-configured servers bypass SSH.
-        var containers = await docker.ListAllContainersAsync(all: false);
+        // R1-56 (review MAJOR-2): with which servers answered — a server whose listing failed this cycle is not a server
+        // whose containers are gone, and its containers' state is kept.
+        var listing = await docker.ListAllContainersDetailedAsync(false, ct);
+        var containers = listing.Containers;
+        foreach (var c in containers) _containerServer[c.Id] = (c.ServerId, c.ServerName, c.Name);
 
         // Collect container stats in parallel, but bounded so a large fleet can't fan out into
         // hundreds of concurrent stats calls at once.
@@ -273,7 +294,9 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
 
         // Collect server metrics. R1-56: the servers this loop should have a reading of — a host without one (its
         // node_exporter down, the system-info call failing) is a gap of its own, not merely a warning in the log.
-        var expected = servers.Where(s => s.ConnectionType != ConnectionType.Kubernetes).ToList();
+        var expected = servers.Where(s => s.ConnectionType != ConnectionType.Kubernetes && !Paused(s.Id)).ToList();
+        var pausedServers = servers.Where(s => s.ConnectionType != ConnectionType.Kubernetes && Paused(s.Id))
+            .Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
         var readHosts = new HashSet<string>(StringComparer.Ordinal);
         string hostFailure = "the server reported no system information";
         try
@@ -304,11 +327,19 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                     try
                     {
                         if (diskTotal > 0)
+                        {
+                            _diskRead.Add(serverId);
                             await EvaluateServerDiskAsync(serverId, info.ServerName, diskUsed, diskTotal, alertCfg, rules, now, tolerance, notify, ct);
-                        else
+                        }
+                        else if (_diskRead.Contains(serverId))
                             await NotifyFindingAsync(notify, ServerEvent(serverId, info.ServerName), _gaps.Missing(now, DiskSeries(serverId),
                                 info.ServerName, $"the root filesystem of {info.ServerName}", tolerance, "df returned no reading",
                                 OpenAlerts(_thresholds, DiskSeries(serverId))), ct);
+                        // R1-56 (review MINOR-5): a df that never answered since the start (no command channel, a proxy
+                        // that refuses the one-shot container) has no series that stopped — said once in the log, never a gap.
+                        else if (_diskNeverRead.Add(serverId))
+                            _logger.LogInformation("No disk reading for {Server}: df has not answered since the start, so no disk alert " +
+                                "is evaluated for it (a gap is reported only for a df that stopped answering)", info.ServerName);
                     }
                     catch (Exception aex) when (!IsHostStopping(aex, ct)) { _logger.LogDebug(aex, "Disk alert evaluation failed for {ServerId}", serverId); }
                 }
@@ -383,27 +414,157 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                 }
                 catch (Exception aex) when (!IsHostStopping(aex, ct)) { _logger.LogDebug(aex, "Gap evaluation failed for {ServerId}", server.Id); }
             }
+
+            // R1-56 (review MAJOR-2): a server whose container listing failed this cycle. Its containers were not asked for
+            // readings, so their series go without — one gap for the server's containers, not one per container (each is
+            // covered by it), and their breach state is kept, not dropped as if they were gone.
+            var listingFailed = listing.FailedServers
+                .Where(f => !pausedServers.Contains(f.ServerId) && expected.Any(s => s.Id == f.ServerId))
+                .GroupBy(f => f.ServerId).Select(g => g.First()).ToList();
+            foreach (var failure in listingFailed)
+            {
+                try
+                {
+                    var known = KnownContainersOf(failure.ServerId);
+                    foreach (var id in known) _gaps.Covered(now, id);
+                    var open = known.SelectMany(id => OpenAlerts(_thresholds, id).Select(k => $"{k} ({_containerServer[id].Name})")).ToList();
+                    await NotifyFindingAsync(notify, ServerEvent(failure.ServerId, failure.ServerName),
+                        _gaps.Missing(now, ListingSeries(failure.ServerId), failure.ServerName, $"the containers of {failure.ServerName}",
+                            tolerance, "listing its containers failed", open), ct);
+                }
+                catch (Exception aex) when (!IsHostStopping(aex, ct)) { _logger.LogDebug(aex, "Gap evaluation failed for {ServerId}", failure.ServerId); }
+            }
+            // A listing that answered again ends that gap.
+            foreach (var server in expected.Where(s => listing.RespondedServerIds.Contains(s.Id)))
+                if (_gaps.Tracked().Contains(ListingSeries(server.Id)))
+                    await NotifyFindingAsync(notify, ServerEvent(server.Id, server.Name),
+                        _gaps.Seen(now, ListingSeries(server.Id), server.Name, $"the containers of {server.Name}", tolerance), ct);
+
+            // R1-56 (review MINOR-6): a paused server's series wait for its resume without a gap of their own.
+            foreach (var serverId in pausedServers)
+            {
+                _gaps.Covered(now, HostSeries(serverId));
+                _gaps.Covered(now, DiskSeries(serverId));
+                _gaps.Covered(now, ListingSeries(serverId));
+                foreach (var id in KnownContainersOf(serverId)) _gaps.Covered(now, id);
+            }
         }
 
         await db.SaveChangesAsync(ct);
 
         // Bound the in-memory alert-state map: drop per-container entries whose container is gone.
         // "disk:{server}" keys are kept — one per server, stable.
+        // R1-56 (review MAJOR-2): gone means absent from a listing its server answered. A container of a server whose
+        // listing failed (or that is paused) is kept with its open breach, so a transient failure neither forgets a
+        // reported breach nor raises it a second time.
         var liveIds = containers.Select(c => c.Id).ToHashSet();
+        bool Gone(string id) => !liveIds.Contains(id)
+            && (!_containerServer.TryGetValue(id, out var where)
+                || (listing.MayPruneStateFor(where.ServerId) && !pausedServers.Contains(where.ServerId)));
         foreach (var kv in _alert.ToArray())
-            if (!kv.Key.StartsWith("disk:", StringComparison.Ordinal) && !liveIds.Contains(kv.Key))
+            if (!kv.Key.StartsWith("disk:", StringComparison.Ordinal) && Gone(kv.Key))
                 _alert.TryRemove(kv.Key, out _);
-        // R1-56: the same for the breach and gap state — a container that is gone is not a gap.
+        // R1-56: the same for the breach and gap state — a container that is gone is not a gap (its stop is reported by
+        // the health monitor; an open breach of it is not closed with a recovery).
         foreach (var id in _thresholds.Tracked().Concat(_gaps.Tracked()).Distinct().ToList())
             if (!id.StartsWith(DiskPrefix, StringComparison.Ordinal) && !id.StartsWith(HostPrefix, StringComparison.Ordinal)
-                && !liveIds.Contains(id))
+                && !id.StartsWith(ListingPrefix, StringComparison.Ordinal) && Gone(id))
             {
                 _thresholds.Forget(id);
                 _gaps.Forget(id);
             }
+        foreach (var id in _containerServer.Keys.ToList())
+            if (Gone(id)) _containerServer.TryRemove(id, out _);
 
+        await SaveBreachesAsync();
         _logger.LogDebug("Collected metrics for {ContainerCount} containers", metrics.Count);
     }
+
+    private const string ListingPrefix = "containers:";
+    private static string ListingSeries(string serverId) => ListingPrefix + serverId;
+
+    // R1-56 (review MAJOR-2): the server and name of every container seen, so its state outlives a failed listing.
+    private readonly ConcurrentDictionary<string, (string ServerId, string ServerName, string Name)> _containerServer = new(StringComparer.Ordinal);
+    private DateTime? _lastCycleAt;                                          // review MAJOR-3: when the last cycle ran
+    private readonly HashSet<string> _diskRead = new(StringComparer.Ordinal);       // review MINOR-5: df answered once
+    private readonly HashSet<string> _diskNeverRead = new(StringComparer.Ordinal);  // … or was said not to, once
+    private bool _breachesRestored;
+    private string? _savedBreaches;
+
+    private List<string> KnownContainersOf(string serverId) =>
+        _containerServer.Where(kv => kv.Value.ServerId == serverId).Select(kv => kv.Key).ToList();
+
+    /// <summary>R1-56 (review MAJOR-3): one finding per server whose open alerts a held-up cycle resets — not one per series.
+    /// Nothing but a log line when no alert was open: the scan supervisor reports a stalled loop.</summary>
+    private async Task ReportHeldUpCycleAsync(INotificationService notify, IEnumerable<Whiskers.Models.ServerConfig> servers,
+        TimeSpan held, TimeSpan tolerance, CancellationToken ct)
+    {
+        _logger.LogWarning("Metrics collection was held up: {Held} without a cycle (tolerance {Tolerance}); open alerts are reset",
+            held, tolerance);
+        string? ServerOf(string series) =>
+            series.StartsWith(DiskPrefix, StringComparison.Ordinal) ? series[DiskPrefix.Length..]
+            : _containerServer.TryGetValue(series, out var where) ? where.ServerId : null;
+        var open = _thresholds.OpenFindings()
+            .Select(f => (Server: ServerOf(f.ServerId), Alert: $"{f.Kind} ({f.ServerName})"))
+            .Concat(_hostLoad.OpenFindings().Select(f => (Server: (string?)f.ServerId, Alert: $"{f.Kind} ({f.ServerName})")))
+            .Where(x => x.Server is not null)
+            .GroupBy(x => x.Server!);
+        var names = servers.ToDictionary(s => s.Id, s => s.Name, StringComparer.Ordinal);
+        var now = Now();
+        foreach (var group in open)
+        {
+            var name = names.GetValueOrDefault(group.Key, group.Key);
+            await NotifyFindingAsync(notify, ServerEvent(group.Key, name), new Whiskers.Services.Metrics.HostLoad.HostLoadFinding(
+                now, group.Key, name, NotificationEventTypes.MetricsGap, Whiskers.Services.Metrics.HostLoad.FindingKind.Cleared,
+                $"Metrics collection was held up: no readings of {name} for {Whiskers.Services.Metrics.HostLoad.BreachTracker.Describe(held)} " +
+                $"(tolerance {Whiskers.Services.Metrics.HostLoad.BreachTracker.Describe(tolerance)}); readings are back. Alerts open " +
+                $"before are reset and raised again only once new readings confirm them: {string.Join(", ", group.Select(x => x.Alert))}.",
+                0, 0, held), ct);
+        }
+    }
+
+    /// <summary>R1-56 (review MAJOR-4): takes over the breaches open when Whiskers last stopped. A file that cannot be read
+    /// is logged and ignored — the alerts are then raised again if the breach goes on (delivered rather than lost).</summary>
+    private async Task RestoreBreachesAsync(DateTime now)
+    {
+        if (_breachesRestored) return;
+        _breachesRestored = true;
+        if (_services.GetService<IAlertBreachStore>() is not { } store) return;
+        try
+        {
+            var saved = await store.LoadAsync();
+            _thresholds.Restore(saved.Thresholds, now);
+            _hostLoad.Restore(saved.HostLoad, now);
+            _savedBreaches = Serialize(saved);
+            var open = saved.Thresholds.Concat(saved.HostLoad).Count(s => s.Reported is not null);
+            if (open > 0) _logger.LogInformation("Resumed {Open} threshold alerts that were open when Whiskers stopped", open);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The open threshold alerts of the last run cannot be read; an alert still going on is raised again");
+        }
+    }
+
+    /// <summary>R1-56 (review MAJOR-4): writes the open breaches when they changed. A failed write is logged; the next cycle
+    /// tries again.</summary>
+    private async Task SaveBreachesAsync()
+    {
+        if (_services.GetService<IAlertBreachStore>() is not { } store) return;
+        var state = new AlertBreachFile { Thresholds = [.. _thresholds.Snapshot()], HostLoad = [.. _hostLoad.Snapshot()] };
+        var json = Serialize(state);
+        if (json == _savedBreaches) return;
+        try
+        {
+            await store.SaveAsync(state);
+            _savedBreaches = json;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The open threshold alerts could not be saved; a restart now would raise them again");
+        }
+    }
+
+    private static string Serialize(AlertBreachFile state) => System.Text.Json.JsonSerializer.Serialize(state);
 
     private const string DiskPrefix = "disk:", HostPrefix = "host:";
     private static string DiskSeries(string serverId) => DiskPrefix + serverId;

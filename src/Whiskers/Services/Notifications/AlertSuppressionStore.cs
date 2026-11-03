@@ -99,6 +99,9 @@ public sealed class AlertSuppressionStore(IServiceProvider services) : IAlertSup
         Func<IReadOnlyList<QuietHoursSuppressionEntity>, CancellationToken, Task<IReadOnlyCollection<string>>> summarize,
         DateTime at, CancellationToken ct = default)
     {
+        // Held for the whole pass, including the summarizer's outbox write: no event may be added to a window between its
+        // summary and the mark. A hold that waits past the producer's deadline meanwhile is delivered instead of held
+        // (CompositeNotificationService.HeldAsync) — deliberately fail-open (review NIT-11).
         await _write.WaitAsync(ct);
         try
         {

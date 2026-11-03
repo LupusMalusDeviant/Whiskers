@@ -162,6 +162,12 @@ public sealed class HostLoadEvaluator
     /// close stops being read long before anyone works out why.</summary>
     public IReadOnlyList<OpenFinding> OpenFindings() => _tracker.OpenFindings();
 
+    /// <summary>R1-56 (review MAJOR-4): the open host breaches to keep across a restart (<see cref="BreachTracker.Snapshot"/>).</summary>
+    public IReadOnlyList<BreachState> Snapshot() => _tracker.Snapshot();
+
+    /// <summary>R1-56 (review MAJOR-4): resumes the host breaches saved before a restart (<see cref="BreachTracker.Restore"/>).</summary>
+    public void Restore(IEnumerable<BreachState> states, DateTime atUtc) => _tracker.Restore(states, atUtc);
+
     /// <summary>The CPU threshold this evaluator is using. Exposed so the rolling baseline can compare its
     /// learned mean against the SAME number rather than keeping its own copy — two definitions of "too high"
     /// would eventually disagree, and the drift guard would then be measuring against a limit nobody

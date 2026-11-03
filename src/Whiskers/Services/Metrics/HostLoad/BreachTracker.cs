@@ -45,6 +45,18 @@ public sealed record BreachRules(
         new(sustained, PercentClearMargin, DefaultClearedFor, double.PositiveInfinity, gapTolerance, minimumGap);
 }
 
+/// <summary>R1-56: one series' breach as it is kept across a restart (<see cref="BreachTracker.Snapshot"/>).</summary>
+/// <param name="Series">The series id (a container id, <c>disk:&lt;server&gt;</c>, a server id).</param>
+/// <param name="Kind">The breach kind (<c>high_cpu</c>, …).</param>
+/// <param name="ServerName">The name the findings carry.</param>
+/// <param name="Since">When the value went over the line (null when no breach is open).</param>
+/// <param name="Reported">When it was raised (null when no breach is open).</param>
+/// <param name="ReportedValue">The value it was raised with.</param>
+/// <param name="Peak">The highest value of the open breach.</param>
+/// <param name="LastEnded">When the last reported breach ended, for the minimum gap.</param>
+public sealed record BreachState(string Series, string Kind, string ServerName, DateTime? Since, DateTime? Reported,
+    double ReportedValue, double Peak, DateTime? LastEnded);
+
 /// <summary>
 /// "This value is over the line" → at most one open finding, escalated when it worsens, closed when it
 /// really recovers (Plan-0004 WP5).
@@ -210,6 +222,51 @@ public sealed class BreachTracker
     public IReadOnlyCollection<string> Tracked()
     {
         lock (_sync) return _serverNames.Keys.ToList();
+    }
+
+    /// <summary>R1-56 (review MAJOR-4): what must survive a restart — every breach that was reported and not yet closed, and
+    /// when the last reported breach of a series ended (the minimum gap). A breach still being confirmed is not kept: it was
+    /// never said, and confirming it again from new readings loses nothing.</summary>
+    public IReadOnlyList<BreachState> Snapshot()
+    {
+        lock (_sync)
+            return _breaches
+                .Where(kv => kv.Value.Reported is not null || kv.Value.LastEnded is not null)
+                .Select(kv =>
+                {
+                    var parts = kv.Key.Split('|', 2);
+                    var b = kv.Value;
+                    return b.Reported is null
+                        ? new BreachState(parts[0], parts[1], _serverNames.GetValueOrDefault(parts[0], parts[0]), null, null, 0, 0, b.LastEnded)
+                        : new BreachState(parts[0], parts[1], _serverNames.GetValueOrDefault(parts[0], parts[0]),
+                            b.Since, b.Reported, b.ReportedValue, b.Peak, b.LastEnded);
+                })
+                .OrderBy(s => s.Series, StringComparer.Ordinal).ThenBy(s => s.Kind, StringComparer.Ordinal)
+                .ToList();
+    }
+
+    /// <summary>R1-56 (review MAJOR-4): takes over the state <see cref="Snapshot"/> saved before a restart, at
+    /// <paramref name="atUtc"/>. A reported breach stays open — it is not raised a second time while the value stays over
+    /// the line, and it is closed with its recovery once readings show one — and its gap tolerance counts from now: the
+    /// time Whiskers was not running is not a gap of the series. An entry of a kind that is no breach kind is skipped.</summary>
+    public void Restore(IEnumerable<BreachState> states, DateTime atUtc)
+    {
+        lock (_sync)
+            foreach (var s in states)
+            {
+                if (string.IsNullOrEmpty(s.Series) || s.Series.Contains('|')
+                    || !Whiskers.Services.Notifications.NotificationEventTypes.RecoverableKinds.Contains(s.Kind)) continue;
+                _breaches[$"{s.Series}|{s.Kind}"] = new Breach
+                {
+                    Since = s.Reported is null ? null : s.Since ?? s.Reported,
+                    Reported = s.Reported,
+                    ReportedValue = s.ReportedValue,
+                    Peak = s.Peak,
+                    LastAt = s.Reported is null ? null : atUtc,
+                    LastEnded = s.LastEnded,
+                };
+                _serverNames[s.Series] = s.ServerName;
+            }
     }
 
     /// <summary>Findings that were raised and never closed, oldest first (Plan-0004 WP5.4).</summary>

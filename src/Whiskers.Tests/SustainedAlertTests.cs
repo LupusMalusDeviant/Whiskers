@@ -204,6 +204,9 @@ public sealed class SustainedAlertTests : IDisposable
         public bool StatsFail { get; set; }
         public bool HostMissing { get; set; }
         public double DiskPercent { get; set; } = 40;
+        public bool DfFails { get; set; }
+        public bool ListingFails { get; set; }
+        public bool Paused { get; set; }
         public TimeSpan Interval { get; init; }
 
         public List<NotificationEvent> Events
@@ -223,7 +226,7 @@ public sealed class SustainedAlertTests : IDisposable
     }
 
     private Rig NewRig(int intervalSeconds = 30, int sustainedMinutes = 3, int cooldownMinutes = 15,
-        Action<MetricAlertSettings>? configure = null)
+        Action<MetricAlertSettings>? configure = null, string? breachFile = null, DateTime? start = null)
     {
         Rig? rig = null;
         var container = new ContainerInfo { Id = "c1", Name = "web", Image = "nginx", ServerId = "local", ServerName = "Badwolf" };
@@ -234,8 +237,21 @@ public sealed class SustainedAlertTests : IDisposable
         services.AddSingleton(Proxy<IDockerService>.Create((m, _) => m.Name switch
         {
             nameof(IDockerService.ListAllContainersAsync) => Task.FromResult<IList<ContainerInfo>>([container]),
+            // The listing as the collector reads it: a failed server answers with no containers and is named as failed.
+            nameof(IDockerService.ListAllContainersDetailedAsync) => Task.FromResult(rig!.ListingFails || rig.Paused
+                ? new FleetContainerListing
+                {
+                    FailedServers = [new FleetServerFailure("local", "Badwolf", rig.Paused ? "paused" : "timed out", NotAsked: rig.Paused)],
+                }
+                : new FleetContainerListing { Containers = [container], RespondedServerIds = new HashSet<string> { "local" } }),
             _ => null,
         }));
+        services.AddSingleton(Proxy<Whiskers.Services.Observability.ILoopSuspensionService>.Create((m, _) => m.Name switch
+        {
+            nameof(Whiskers.Services.Observability.ILoopSuspensionService.IsSuspended) => rig!.Paused,
+            _ => null,
+        }));
+        if (breachFile is not null) services.AddSingleton<IAlertBreachStore>(new AlertBreachStore(breachFile));
         services.AddSingleton(Proxy<IMetricsSource>.Create((m, _) => m.Name switch
         {
             nameof(IMetricsSource.GetContainerStatsAsync) => rig!.StatsFail
@@ -251,7 +267,7 @@ public sealed class SustainedAlertTests : IDisposable
             _ => null,
         }));
         services.AddSingleton(Proxy<Whiskers.Services.Server.IHostCommandExecutor>.Create((_, _) =>
-            Task.FromResult(new Whiskers.Services.Server.CommandResult
+            Task.FromResult(rig!.DfFails ? new Whiskers.Services.Server.CommandResult { ExitCode = 1 } : new Whiskers.Services.Server.CommandResult
             {
                 Output = $"/dev/sda1 1000 {(long)(rig!.DiskPercent * 10)} 0 0% /",
             })));
@@ -266,7 +282,7 @@ public sealed class SustainedAlertTests : IDisposable
             SustainedMinutes = sustainedMinutes, CooldownMinutes = cooldownMinutes,
         };
         configure?.Invoke(alert);
-        var clock = new ManualTime(new DateTimeOffset(T0));
+        var clock = new ManualTime(new DateTimeOffset(start ?? T0));
         var interval = new EffectiveInterval<MetricsSettings>(() => intervalSeconds, "Metrics:CollectionIntervalSeconds", 5,
             86_400, TimeSpan.FromSeconds(1), NullLogger.Instance);
         var collector = new MetricsCollectorService(sp,
@@ -399,6 +415,173 @@ public sealed class SustainedAlertTests : IDisposable
         Assert.True(anomalies.Count >= 2, $"expected repeated anomalies, got {anomalies.Count}");
         Assert.All(anomalies.Zip(anomalies.Skip(1)), p => Assert.True(p.Second.Timestamp - p.First.Timestamp >= TimeSpan.FromMinutes(5)));
         Assert.DoesNotContain(rig.Events, e => e.EventType.StartsWith("metric_anomaly_", StringComparison.Ordinal));
+    }
+
+    // --- review round 1 ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_listing_that_fails_for_one_cycle_neither_forgets_nor_raises_the_breach_again()
+    {
+        // MAJOR-2: one 8-second listing timeout during an open breach dropped its state — no recovery ever, and a second
+        // raise of the same breach once it was confirmed again.
+        var rig = NewRig();
+        rig.Cpu = 97;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(5));                 // high_cpu at 3 min
+        rig.ListingFails = true;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(5.5));               // one cycle
+        rig.ListingFails = false;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(20));
+        rig.Cpu = 20;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(30));
+
+        Assert.Equal(T0.AddMinutes(3), Assert.Single(OfType(rig.Events, NotificationEventTypes.HighCpu)).Timestamp);
+        Assert.Single(OfType(rig.Events, "high_cpu_recovered"));
+        Assert.Empty(OfType(rig.Events, NotificationEventTypes.MetricsGap));
+    }
+
+    [Fact]
+    public async Task A_listing_that_keeps_failing_is_one_gap_for_the_servers_containers()
+    {
+        var rig = NewRig();
+        rig.Cpu = 97;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(5));
+        rig.ListingFails = true;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(12));
+        rig.ListingFails = false;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(14));
+
+        var gap = Assert.Single(OfType(rig.Events, NotificationEventTypes.MetricsGap));
+        Assert.Equal(("local", T0.AddMinutes(8.5)), (gap.ServerId, gap.Timestamp));   // the last listing at 4:30 + more than 3 min
+        Assert.Contains("the containers of Badwolf", gap.ImageInfo);
+        Assert.Contains("listing its containers failed", gap.ImageInfo);
+        Assert.Contains("high_cpu (web)", gap.ImageInfo);
+        Assert.Equal(T0.AddMinutes(12), Assert.Single(OfType(rig.Events, "metrics_gap_recovered")).Timestamp);
+    }
+
+    [Fact]
+    public async Task A_held_up_cycle_is_one_message_per_server_with_an_open_alert_not_one_per_series()
+    {
+        // MAJOR-3: one cycle ten minutes late used to raise a metrics_gap for the container, the host and its disk at once
+        // — per series, past every throttle.
+        var rig = NewRig();
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(2));
+        rig.Clock.Now += TimeSpan.FromMinutes(10);                         // nothing open: a log line only
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(14));
+        Assert.Empty(rig.Events);
+
+        rig.Cpu = 97;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(20));                 // high_cpu at 17:30
+        rig.Clock.Now += TimeSpan.FromMinutes(10);
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(31));
+
+        Assert.Empty(OfType(rig.Events, NotificationEventTypes.MetricsGap));
+        var held = Assert.Single(OfType(rig.Events, "metrics_gap_recovered"));
+        Assert.Equal(("local", "Badwolf"), (held.ServerId, held.ServerName));
+        Assert.Contains("Metrics collection was held up", held.ImageInfo);
+        Assert.Contains("high_cpu (web)", held.ImageInfo);
+    }
+
+    [Fact]
+    public async Task A_restart_during_a_breach_resumes_it_closes_it_once_and_never_raises_it_twice()
+    {
+        // MAJOR-4: the breach state lived only in memory — after a restart the raise was never closed, and a lasting
+        // breach was raised a second time as if it were new.
+        var file = Path.Combine(Path.GetTempPath(), $"sw-r156-breaches-{Guid.NewGuid():N}.json");
+        try
+        {
+            var before = NewRig(breachFile: file);
+            before.Cpu = 97;
+            await before.RunUntilAsync(TimeSpan.FromMinutes(5));
+            Assert.Single(OfType(before.Events, NotificationEventTypes.HighCpu));
+
+            // Whiskers is back a minute later: a new collector over the same file.
+            var after = NewRig(breachFile: file, start: T0.AddMinutes(6));
+            after.Cpu = 97;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(30));
+            after.Cpu = 20;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(40));
+
+            Assert.Empty(OfType(after.Events, NotificationEventTypes.HighCpu));
+            var cleared = Assert.Single(OfType(after.Events, "high_cpu_recovered"));
+            Assert.Equal(T0.AddMinutes(35), cleared.Timestamp);
+            Assert.Empty(OfType(after.Events, NotificationEventTypes.MetricsGap));
+        }
+        finally
+        {
+            try { File.Delete(file); File.Delete(file + ".bak"); } catch { /* best effort */ }
+        }
+    }
+
+    [Fact]
+    public void A_restored_breach_is_closed_by_readings_and_a_gap_after_the_restart_still_resets_it()
+    {
+        var tracker = Tracker();
+        var raised = Drive(tracker, Every(TimeSpan.FromSeconds(30), TimeSpan.Zero, TimeSpan.FromMinutes(5), 95));
+        Assert.Single(raised);
+        var saved = tracker.Snapshot();
+        Assert.Equal(("c1", NotificationEventTypes.HighCpu), (Assert.Single(saved).Series, saved[0].Kind));
+
+        var restored = Tracker();
+        restored.Restore(saved, T0.AddMinutes(20));                        // a 15-minute downtime is not a gap of the series
+        var after = Drive(restored, [.. Every(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(20), TimeSpan.FromMinutes(30), 95),
+            .. Every(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(40), 40)]);
+        Assert.Equal(FindingKind.Cleared, Assert.Single(after).What);
+
+        // A kind that is no breach kind, or a malformed series, is not taken over.
+        var strict = Tracker();
+        strict.Restore([saved[0] with { Kind = "server_unreachable" }, saved[0] with { Series = "a|b" }], T0);
+        Assert.Empty(strict.Snapshot());
+    }
+
+    [Fact]
+    public async Task A_df_that_never_answered_is_no_gap_but_one_that_stopped_answering_is()
+    {
+        // MINOR-5: a host without a command channel got a permanent metrics_gap after every start.
+        var never = NewRig();
+        never.DfFails = true;
+        await never.RunUntilAsync(TimeSpan.FromMinutes(15));
+        Assert.Empty(never.Events);
+
+        var stopped = NewRig();
+        await stopped.RunUntilAsync(TimeSpan.FromMinutes(2));
+        stopped.DfFails = true;
+        await stopped.RunUntilAsync(TimeSpan.FromMinutes(10));
+        var gap = Assert.Single(OfType(stopped.Events, NotificationEventTypes.MetricsGap));
+        Assert.Contains("df returned no reading", gap.ImageInfo);
+    }
+
+    [Fact]
+    public async Task A_paused_server_is_no_metrics_gap_while_paused_or_on_resume()
+    {
+        // MINOR-6: loops_paused already says nothing is checked there; a metrics_gap on top of it was noise.
+        var rig = NewRig();
+        rig.Cpu = 97;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(5));
+        rig.Paused = true;
+        rig.HostMissing = true;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(30));
+        Assert.Empty(OfType(rig.Events, NotificationEventTypes.MetricsGap));
+
+        rig.Paused = false;
+        rig.HostMissing = false;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(31));
+        Assert.Empty(OfType(rig.Events, "metrics_gap_recovered"));
+        Assert.Single(OfType(rig.Events, NotificationEventTypes.HighCpu));
+    }
+
+    [Fact]
+    public void A_breach_held_by_the_minimum_gap_that_ends_before_the_gap_passes_is_never_raised()
+    {
+        // MINOR-9: "raised once that gap has passed, if it is still going on" — and not at all when it is not.
+        var tracker = Tracker();
+        var first = Drive(tracker, [.. Every(TimeSpan.FromSeconds(30), TimeSpan.Zero, TimeSpan.FromMinutes(5), 95),
+            .. Every(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(11), 40)]);
+        Assert.Equal([FindingKind.Raised, FindingKind.Cleared], first.Select(f => f.What));
+
+        // Breach 2 runs 11–17 min (reportable at 14, held until 20) and is over before then.
+        var second = Drive(tracker, [.. Every(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(11), TimeSpan.FromMinutes(17), 95),
+            .. Every(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(17), TimeSpan.FromMinutes(40), 40)]);
+        Assert.Empty(second);
     }
 
     // --- transitions bypass the per-channel throttle ----------------------------------------------------------------

@@ -323,6 +323,9 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Metrics.IDockerMetricsSource, DockerMetricsSource>();
         builder.Services.AddSingleton<Whiskers.Services.Metrics.IPrometheusMetricsSource, PrometheusMetricsSource>();
         builder.Services.AddSingleton<IMetricsSource, MetricsSourceDispatcher>();
+        // R1-56 (review MAJOR-4): the open threshold breaches, kept across a restart.
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.IAlertBreachStore>(sp =>
+            new Whiskers.Services.Metrics.AlertBreachStore(sp.GetRequiredService<DataPathOptions>().AlertBreachesJson));
         builder.Services.AddHostedService<MetricsCollectorService>();
 
         // Database service

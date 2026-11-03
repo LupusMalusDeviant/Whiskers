@@ -5363,9 +5363,6 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="NotificationsLog_Type_MetricsGap" xml:space="preserve">
     <value>Keine Messwerte</value>
   </data>
-  <data name="NotificationsLog_Type_QuietHoursSummary" xml:space="preserve">
-    <value>Zusammenfassung der Ruhezeit</value>
-  </data>
   <data name="NotificationsLog_Type_Recovered" xml:space="preserve">
     <value>{0}: wieder normal</value>
   </data>

@@ -5363,9 +5363,6 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="NotificationsLog_Type_MetricsGap" xml:space="preserve">
     <value>No readings</value>
   </data>
-  <data name="NotificationsLog_Type_QuietHoursSummary" xml:space="preserve">
-    <value>Quiet-hours summary</value>
-  </data>
   <data name="NotificationsLog_Type_Recovered" xml:space="preserve">
     <value>{0}: recovered</value>
   </data>

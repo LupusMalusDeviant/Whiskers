@@ -31,7 +31,9 @@ public sealed class NotificationEventTypeArchitectureTests
     [Fact]
     public void Every_event_type_a_producer_writes_is_drawn_from_the_registry()
     {
-        var offenders = Offenders(SourceFiles().Select(f => (f, File.ReadAllText(f))).ToList());
+        var files = SourceFiles().ToList();
+        Assert.True(files.Count > 100, $"Only {files.Count} source files found — the analysis would pass vacuously.");   // review NIT-10
+        var offenders = Offenders(files.Select(f => (f, File.ReadAllText(f))).ToList());
 
         Assert.True(offenders.Count == 0,
             "EventType values not drawn from NotificationEventTypes (use a constant, LogAlert(…) or Recovered(…)): " +
@@ -52,6 +54,11 @@ public sealed class NotificationEventTypeArchitectureTests
             "class A { void Announce(string type) { var e = new NotificationEvent { EventType = type }; } " +
             "void N() { Announce(NotificationEventTypes.LoopsPaused); Announce(\"loops_gone\"); } }")]));
         Assert.NotEmpty(Offenders([("a.cs", "class A { void M() { var t = \"x\"; evt.EventType = t; } }")]));
+        // Review NIT-10: a compound assignment, and a literal passed by name to a followed method.
+        Assert.NotEmpty(Offenders([("a.cs", "class A { void M() { evt.EventType += NotificationEventTypes.Stopped; } }")]));
+        Assert.NotEmpty(Offenders([("a.cs",
+            "class A { void Announce(string name, string type) { var e = new NotificationEvent { EventType = type }; } " +
+            "void N() { Announce(type: \"loops_gone\", name: NotificationEventTypes.LoopsPaused); } }")]));
         // And what it accepts.
         Assert.Empty(Offenders([("a.cs",
             "class A { void Announce(string type) { var e = new NotificationEvent { EventType = type }; } " +
@@ -146,7 +153,6 @@ public sealed class NotificationEventTypeArchitectureTests
         foreach (var root in roots)
             foreach (var assignment in root.DescendantNodes().OfType<AssignmentExpressionSyntax>())
             {
-                if (!assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)) continue;
                 var name = assignment.Left switch
                 {
                     IdentifierNameSyntax id => id.Identifier.ValueText,
@@ -154,6 +160,13 @@ public sealed class NotificationEventTypeArchitectureTests
                     _ => null,
                 };
                 if (name != "EventType") continue;
+                if (!assignment.IsKind(SyntaxKind.SimpleAssignmentExpression))
+                {
+                    // Review NIT-10: += or ??= builds or keeps a value the analysis cannot follow.
+                    var at = assignment.GetLocation().GetLineSpan();
+                    offenders.Add($"{Path.GetFileName(at.Path)}:{at.StartLinePosition.Line + 1}: {assignment} (compound assignment)");
+                    continue;
+                }
                 if (Problem(assignment.Right, invocations, depth: 0) is { } problem)
                 {
                     var line = assignment.GetLocation().GetLineSpan();
@@ -187,12 +200,17 @@ public sealed class NotificationEventTypeArchitectureTests
                      || c.SyntaxTree == method.SyntaxTree)).ToList();
             if (calls.Count == 0) return $"{text} (parameter of {method.Identifier.ValueText}, never called)";
             foreach (var call in calls)
-                if (Problem(call.ArgumentList.Arguments[parameter.i].Expression, invocations, depth + 1) is { } inner)
+                if (Problem(ArgumentFor(call, parameter.pp.Identifier.ValueText, parameter.i).Expression, invocations, depth + 1) is { } inner)
                     return $"{text} ← {method.Identifier.ValueText}({inner})";
             return null;
         }
         return text;
     }
+
+    /// <summary>The argument a call passes for a parameter: by name when it is named (review NIT-10), else by position.</summary>
+    private static ArgumentSyntax ArgumentFor(InvocationExpressionSyntax call, string parameter, int position) =>
+        call.ArgumentList.Arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.ValueText == parameter)
+        ?? call.ArgumentList.Arguments[position];
 
     private static IEnumerable<string> SourceFiles()
     {
