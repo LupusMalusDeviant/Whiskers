@@ -122,6 +122,7 @@ public class CompositeNotificationService : INotificationService
         copy.ImageName = SinkRedaction.Text(evt.ImageName) ?? "";
         copy.ImageInfo = SinkRedaction.Text(evt.ImageInfo);
         copy.ServerName = SinkRedaction.Text(evt.ServerName);
+        copy.DeliveryId ??= Guid.NewGuid().ToString("N");   // R1-40: the same for every retry and redelivery
         return copy;
     }
 

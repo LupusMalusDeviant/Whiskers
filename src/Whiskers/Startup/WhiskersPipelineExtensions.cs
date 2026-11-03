@@ -803,6 +803,9 @@ public static class WhiskersPipelineExtensions
             sb.AppendLine($"whiskers_self_notification_outbox_total{{result=\"redelivered\"}} {o.Redelivered}");
             sb.AppendLine($"whiskers_self_notification_outbox_total{{result=\"exhausted\"}} {o.Exhausted}");
             sb.AppendLine($"whiskers_self_notification_outbox_total{{result=\"dropped\"}} {o.Dropped}");
+            sb.AppendLine("# HELP whiskers_self_notification_outbox_unsaved 1 while a change of the outbox is not on disk yet (file unavailable or its last write failed); retried every pass");
+            sb.AppendLine("# TYPE whiskers_self_notification_outbox_unsaved gauge");
+            sb.AppendLine($"whiskers_self_notification_outbox_unsaved {(o.Unsaved ? 1 : 0)}");
         }
 
         if (circuit is not null)

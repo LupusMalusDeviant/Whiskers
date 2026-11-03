@@ -24,7 +24,7 @@ public class DiscordNotificationService : IDiscordNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.WebhookUrl)) return false;
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
+        if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
         var (title, severity) = NotificationFormatter.Describe(evt);
         await PostAsync(c, title, NotificationFormatter.Detail(evt), severity, ct);
         _throttler.Record(evt);

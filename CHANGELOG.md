@@ -13,7 +13,7 @@ All notable changes to Whiskers are documented here. The format follows
   that send the alert. An alert an admin must not miss (an error such as a stopped or unhealthy container, an approval
   waiting for a person, a suspended or interrupted automation) that a channel still could not take is kept in
   `notification-outbox.json` and sent to that channel again — also after a restart — after 1, 2, 4 … minutes (at most
-  an hour apart), for up to 8 more tries within 24 hours. At most 200 are kept; the oldest is dropped when it is full.
+  an hour apart), for up to 8 more tries within 24 hours; a redelivery is not held back by the channel's throttle, and a Matrix message is not posted twice when its first answer was lost. At most 200 are kept; the oldest is dropped when it is full. Keeping one never makes the sender wait for the disk; the file is written in the background, and a file that cannot be read for the moment is read again later instead of being overwritten.
   Giving up is logged with the channel and the reason (never a webhook URL or token) and shown in `/metrics`
   (`whiskers_self_notification_outbox_pending`, `whiskers_self_notification_outbox_total`,
   `whiskers_self_notification_failed_total`). The outbox is not restored from a self-backup. AI triggers are started

@@ -11,41 +11,61 @@ public sealed class NotificationOutboxEntry
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     /// <summary>The channel's <see cref="INotificationChannel.Name"/>; only that channel gets it again.</summary>
     public string Channel { get; set; } = "";
-    /// <summary>The event as the channels got it: already redacted (INV-51).</summary>
+    /// <summary>The event as the channels got it: already redacted (INV-51), with its <see cref="NotificationEvent.DeliveryId"/>.</summary>
     public NotificationEvent Event { get; set; } = new();
     public int Attempts { get; set; }
     public DateTime FirstFailedAt { get; set; }
     public DateTime NextAttemptAt { get; set; }
     /// <summary>The last failure: exception type and redacted message, never a URL or token.</summary>
     public string? LastError { get; set; }
+
+    internal NotificationOutboxEntry Clone()
+    {
+        var copy = (NotificationOutboxEntry)MemberwiseClone();
+        copy.Event = Event.Copy();
+        return copy;
+    }
 }
 
-/// <summary>What the outbox holds and has given up on since the start, for the metrics.</summary>
-public sealed record NotificationOutboxStatus(int Pending, long Redelivered, long Exhausted, long Dropped);
+/// <summary>What the outbox holds and has given up on since the start, for the metrics. <paramref name="Unsaved"/>: a
+/// change is not on disk yet (the file is unavailable, or its last write failed); it is retried every pass.</summary>
+public sealed record NotificationOutboxStatus(int Pending, long Redelivered, long Exhausted, long Dropped, bool Unsaved = false);
 
 /// <summary>
 /// The bounded, durable outbox of critical notifications (R1-40, F-08): an event a channel still failed after the
 /// composite's retries is kept in <c>notification-outbox.json</c> and redelivered to that channel by
-/// <see cref="NotificationOutboxWorker"/> — also after a restart — with growing waits, until it is delivered, the
-/// channel has nothing to send any more (switched off, throttled), or it is exhausted
-/// (<see cref="NotificationOutbox.MaxAttempts"/> redeliveries or <see cref="NotificationOutbox.MaxAge"/>). At most
-/// <see cref="NotificationOutbox.MaxEntries"/> are kept; a full outbox drops its oldest entry. Giving up is logged and
-/// counted, never silent.
+/// <see cref="NotificationOutboxWorker"/> — also after a restart — with growing waits, until it is delivered, its channel
+/// is switched off or removed, or it is exhausted (<see cref="NotificationOutbox.MaxAttempts"/> redeliveries or
+/// <see cref="NotificationOutbox.MaxAge"/>). At most <see cref="NotificationOutbox.MaxEntries"/> are kept; a full outbox
+/// drops its oldest entry. Giving up is logged and counted, never silent.
+///
+/// <para>Every change is made in memory, at once and without I/O, so a producer is never held up by the disk; the worker
+/// writes it in <see cref="FlushAsync"/>. A change the file could not take stays pending and is written by the next
+/// pass. A file that cannot be read for the moment is read again later — nothing is written over it meanwhile.</para>
 /// </summary>
 public interface INotificationOutbox
 {
-    /// <summary>Keeps <paramref name="evt"/> for redelivery to <paramref name="channel"/>.</summary>
+    /// <summary>Keeps <paramref name="evt"/> for redelivery to <paramref name="channel"/>. In memory, without waiting
+    /// for the disk.</summary>
     Task AddAsync(string channel, NotificationEvent evt, Exception failure, DateTime now);
 
-    /// <summary>The entries due at <paramref name="now"/>, oldest first.</summary>
+    /// <summary>The entries due at <paramref name="now"/>, oldest first. An entry past <see cref="NotificationOutbox.MaxAge"/>
+    /// is given up on here, before it is sent.</summary>
     Task<IReadOnlyList<NotificationOutboxEntry>> DueAsync(DateTime now);
 
-    /// <summary>The entry leaves the outbox: <paramref name="delivered"/> when it was sent, otherwise it has nothing to
-    /// deliver any more (its channel switched off or removed, the event throttled).</summary>
-    Task CompleteAsync(string id, bool delivered);
+    /// <summary>The entry leaves the outbox: <paramref name="delivered"/> when it was sent, otherwise
+    /// <paramref name="reason"/> says why it is dropped (its channel switched off or removed); a drop is counted.</summary>
+    Task CompleteAsync(string id, bool delivered, string? reason = null);
 
     /// <summary>Another redelivery failed. Returns <c>true</c> when the entry is exhausted and was removed.</summary>
     Task<bool> FailedAsync(string id, Exception failure, DateTime now);
+
+    /// <summary>Reads the file if it was not read yet and writes what changed since the last successful write. Returns
+    /// <c>false</c> when something could not be read or written; it is retried by the next call.</summary>
+    Task<bool> FlushAsync(CancellationToken ct = default);
+
+    /// <summary>Waits until something was added or <paramref name="max"/> passed.</summary>
+    Task WaitForWorkAsync(TimeSpan max, CancellationToken ct);
 
     NotificationOutboxStatus Status { get; }
 }
@@ -60,8 +80,13 @@ public sealed class NotificationOutbox : INotificationOutbox
 
     private readonly JsonFileStore<OutboxFile>? _file;
     private readonly ILogger<NotificationOutbox> _logger;
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _sync = new();
+    private readonly SemaphoreSlim _io = new(1, 1);
+    private readonly SemaphoreSlim _work = new(0, int.MaxValue);
+    // Null until the file was read: entries added before that wait in _incoming and are merged when it is.
     private List<NotificationOutboxEntry>? _entries;
+    private readonly List<NotificationOutboxEntry> _incoming = [];
+    private bool _dirty;
     private long _redelivered, _exhausted, _dropped;
 
     public NotificationOutbox(DataPathOptions paths, ILogger<NotificationOutbox> logger)
@@ -71,29 +96,30 @@ public sealed class NotificationOutbox : INotificationOutbox
     {
         _file = file;
         _logger = logger;
+        if (file is null) _entries = [];
     }
 
     /// <summary>Kept in memory only (tests).</summary>
     internal static NotificationOutbox InMemory(ILogger<NotificationOutbox> logger) => new((JsonFileStore<OutboxFile>?)null, logger);
 
-    public NotificationOutboxStatus Status => new(Volatile.Read(ref _entries)?.Count ?? 0,
-        Interlocked.Read(ref _redelivered), Interlocked.Read(ref _exhausted), Interlocked.Read(ref _dropped));
-
-    public async Task AddAsync(string channel, NotificationEvent evt, Exception failure, DateTime now)
+    public NotificationOutboxStatus Status
     {
-        await _gate.WaitAsync();
-        try
+        get
         {
-            var entries = await EntriesAsync();
-            while (entries.Count >= MaxEntries)
-            {
-                var oldest = entries[0];
-                entries.RemoveAt(0);
-                Interlocked.Increment(ref _dropped);
-                _logger.LogError("Notification outbox full ({Max}): dropped the oldest undelivered {EventType} for {Channel}",
-                    MaxEntries, oldest.Event.EventType, oldest.Channel);
-            }
-            entries.Add(new NotificationOutboxEntry
+            lock (_sync)
+                return new((_entries?.Count ?? 0) + _incoming.Count, Interlocked.Read(ref _redelivered),
+                    Interlocked.Read(ref _exhausted), Interlocked.Read(ref _dropped), _dirty && _file is not null);
+        }
+    }
+
+    public Task AddAsync(string channel, NotificationEvent evt, Exception failure, DateTime now)
+    {
+        lock (_sync)
+        {
+            var target = _entries ?? _incoming;
+            while ((_entries?.Count ?? 0) + _incoming.Count >= MaxEntries)
+                Drop(_entries is { Count: > 0 } ? _entries : _incoming, 0, "the outbox is full");
+            target.Add(new NotificationOutboxEntry
             {
                 Channel = channel,
                 Event = evt.Copy(),
@@ -102,61 +128,156 @@ public sealed class NotificationOutbox : INotificationOutbox
                 NextAttemptAt = now + WaitAfter(1),
                 LastError = Describe(failure),
             });
-            await SaveAsync(entries);
+            _dirty = true;
         }
-        finally { _gate.Release(); }
+        _work.Release();
+        return Task.CompletedTask;
     }
 
-    public async Task<IReadOnlyList<NotificationOutboxEntry>> DueAsync(DateTime now)
+    public Task<IReadOnlyList<NotificationOutboxEntry>> DueAsync(DateTime now)
     {
-        await _gate.WaitAsync();
-        try
+        lock (_sync)
         {
-            return (await EntriesAsync()).Where(e => e.NextAttemptAt <= now).ToList();
+            if (_entries is null) return Task.FromResult<IReadOnlyList<NotificationOutboxEntry>>([]);
+            // Too old to be of use: given up on before it is sent (a stale approval request, an alert from yesterday).
+            foreach (var old in _entries.Where(e => now - e.FirstFailedAt >= MaxAge).ToList())
+            {
+                _entries.Remove(old);
+                Exhausted(old, "it is older than " + MaxAge.TotalHours + " h");
+            }
+            return Task.FromResult<IReadOnlyList<NotificationOutboxEntry>>(
+                _entries.Where(e => e.NextAttemptAt <= now).Select(e => e.Clone()).ToList());
         }
-        finally { _gate.Release(); }
     }
 
-    public async Task CompleteAsync(string id, bool delivered)
+    public Task CompleteAsync(string id, bool delivered, string? reason = null)
     {
-        await _gate.WaitAsync();
-        try
+        lock (_sync)
         {
-            var entries = await EntriesAsync();
-            if (entries.RemoveAll(e => e.Id == id) == 0) return;
-            if (delivered) Interlocked.Increment(ref _redelivered);
-            await SaveAsync(entries);
+            var index = _entries?.FindIndex(e => e.Id == id) ?? -1;
+            if (index < 0) return Task.CompletedTask;
+            if (delivered)
+            {
+                _entries!.RemoveAt(index);
+                Interlocked.Increment(ref _redelivered);
+                _dirty = true;
+            }
+            else Drop(_entries!, index, reason ?? "it has nothing to deliver any more");
         }
-        finally { _gate.Release(); }
+        return Task.CompletedTask;
     }
 
-    public async Task<bool> FailedAsync(string id, Exception failure, DateTime now)
+    public Task<bool> FailedAsync(string id, Exception failure, DateTime now)
     {
-        await _gate.WaitAsync();
-        try
+        lock (_sync)
         {
-            var entries = await EntriesAsync();
-            var entry = entries.FirstOrDefault(e => e.Id == id);
-            if (entry is null) return false;
+            var entry = _entries?.FirstOrDefault(e => e.Id == id);
+            if (entry is null) return Task.FromResult(false);
             entry.Attempts++;
             entry.LastError = Describe(failure);
+            _dirty = true;
             var exhausted = entry.Attempts >= MaxAttempts || now - entry.FirstFailedAt >= MaxAge;
             if (exhausted)
             {
-                entries.Remove(entry);
-                Interlocked.Increment(ref _exhausted);
-                _logger.LogError("Notification {EventType} could not be delivered to {Channel}: gave up after {Attempts} " +
-                                 "redeliveries since {First:u} (last error: {Error})",
-                    entry.Event.EventType, entry.Channel, entry.Attempts, entry.FirstFailedAt, entry.LastError);
+                _entries!.Remove(entry);
+                Exhausted(entry, $"after {entry.Attempts} redeliveries");
             }
-            else
-            {
-                entry.NextAttemptAt = now + WaitAfter(entry.Attempts + 1);
-            }
-            await SaveAsync(entries);
-            return exhausted;
+            else entry.NextAttemptAt = now + WaitAfter(entry.Attempts + 1);
+            return Task.FromResult(exhausted);
         }
-        finally { _gate.Release(); }
+    }
+
+    public async Task<bool> FlushAsync(CancellationToken ct = default)
+    {
+        if (_file is null) return true;
+        await _io.WaitAsync(ct);
+        try
+        {
+            bool loaded;
+            lock (_sync) loaded = _entries is not null;
+            if (!loaded && !await LoadAsync()) return false;
+
+            OutboxFile snapshot;
+            lock (_sync)
+            {
+                if (!_dirty) return true;
+                snapshot = new OutboxFile { Entries = _entries!.Select(e => e.Clone()).ToList() };
+                _dirty = false;
+            }
+            try
+            {
+                await _file.SaveAsync(snapshot);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Still in memory and still to be written: the next pass tries again. Lost only if Whiskers stops first.
+                lock (_sync) _dirty = true;
+                _logger.LogError("The notification outbox could not be saved; it is retried ({Error})", Describe(ex));
+                return false;
+            }
+        }
+        finally { _io.Release(); }
+    }
+
+    public async Task WaitForWorkAsync(TimeSpan max, CancellationToken ct)
+    {
+        if (await _work.WaitAsync(max, ct))
+            while (_work.CurrentCount > 0 && _work.Wait(0)) { }   // one pass serves every addition so far
+    }
+
+    /// <summary>Reads the file once. A file that cannot be read <i>now</i> (permissions, a lock, a volume away) is read
+    /// again by the next pass and is never written over meanwhile; a file that is corrupt with no readable previous
+    /// generation has been preserved by the store and is replaced.</summary>
+    private async Task<bool> LoadAsync()
+    {
+        List<NotificationOutboxEntry> loaded;
+        try
+        {
+            loaded = (await _file!.LoadAsync()).Entries ?? [];
+        }
+        catch (JsonStoreCorruptException ex)
+        {
+            _logger.LogError("The notification outbox is corrupt and has no readable previous generation; its undelivered " +
+                             "notifications are lost. {Detail}", ex.Message);
+            loaded = [];
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("The notification outbox cannot be read right now; it is read again on the next pass ({Error})",
+                Describe(ex));
+            return false;
+        }
+
+        lock (_sync)
+        {
+            var merged = loaded.Concat(_incoming).OrderBy(e => e.FirstFailedAt).ToList();
+            _incoming.Clear();
+            _entries = merged;
+            // Bounded also when the file was larger (edited, or written by a later version with a higher bound).
+            while (_entries.Count > MaxEntries) Drop(_entries, 0, "the outbox is full");
+            _dirty = true;
+        }
+        return true;
+    }
+
+    /// <summary>Removes and counts one entry that leaves undelivered; said, never silent. Under <see cref="_sync"/>.</summary>
+    private void Drop(List<NotificationOutboxEntry> from, int index, string reason)
+    {
+        var entry = from[index];
+        from.RemoveAt(index);
+        _dirty = true;
+        Interlocked.Increment(ref _dropped);
+        _logger.LogError("Undelivered {EventType} for {Channel} dropped: {Reason}", entry.Event.EventType, entry.Channel, reason);
+    }
+
+    private void Exhausted(NotificationOutboxEntry entry, string why)
+    {
+        _dirty = true;
+        Interlocked.Increment(ref _exhausted);
+        _logger.LogError("Notification {EventType} could not be delivered to {Channel}: gave up {Why}, first failed " +
+                         "{First:u} (last error: {Error})", entry.Event.EventType, entry.Channel, why, entry.FirstFailedAt,
+            entry.LastError);
     }
 
     /// <summary>1, 2, 4, … minutes, at most an hour.</summary>
@@ -169,43 +290,6 @@ public sealed class NotificationOutbox : INotificationOutbox
         var message = SinkRedaction.Text(failure.Message) ?? "";
         if (message.Length > 300) message = message[..300] + "…";
         return $"{failure.GetType().Name}: {message}";
-    }
-
-    private async Task<List<NotificationOutboxEntry>> EntriesAsync()
-    {
-        if (_entries is not null) return _entries;
-        List<NotificationOutboxEntry> loaded = [];
-        if (_file is not null)
-        {
-            try
-            {
-                loaded = (await _file.LoadAsync()).Entries ?? [];
-            }
-            catch (Exception ex)
-            {
-                // Unreadable without a usable previous generation: the entries are lost, which is said, and new ones
-                // are kept from here on.
-                _logger.LogError(ex, "The notification outbox could not be read; its undelivered notifications are lost");
-            }
-        }
-        // Bounded also when the file was larger (edited, or written by a later version with a higher bound).
-        if (loaded.Count > MaxEntries) loaded = loaded.OrderBy(e => e.FirstFailedAt).TakeLast(MaxEntries).ToList();
-        Volatile.Write(ref _entries, loaded.OrderBy(e => e.FirstFailedAt).ToList());
-        return _entries!;
-    }
-
-    private async Task SaveAsync(List<NotificationOutboxEntry> entries)
-    {
-        if (_file is null) return;
-        try
-        {
-            await _file.SaveAsync(new OutboxFile { Entries = entries });
-        }
-        catch (Exception ex)
-        {
-            // Kept in memory: redelivered while this process runs, lost only if it stops first.
-            _logger.LogError(ex, "The notification outbox could not be saved");
-        }
     }
 
     /// <summary>The file's shape.</summary>

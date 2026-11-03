@@ -31,11 +31,11 @@ public class MatrixNotificationService : IMatrixNotificationService
             string.IsNullOrWhiteSpace(config.AccessToken) || string.IsNullOrWhiteSpace(config.RoomId))
             return false;
 
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes))
+        if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes))
             return false;
 
         var (plain, html) = FormatMessage(evt);
-        await SendMatrixMessage(config, plain, html, ct);
+        await SendMatrixMessage(config, plain, html, ct, evt.DeliveryId);
 
         _throttler.Record(evt);
         _logger.LogInformation("Matrix notification sent: {EventType} for {Container}",
@@ -56,9 +56,11 @@ public class MatrixNotificationService : IMatrixNotificationService
     }
 
     private async Task SendMatrixMessage(MatrixSettings config, string plainText, string htmlText,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? deliveryId = null)
     {
-        var txnId = Guid.NewGuid().ToString("N");
+        // R1-40: the event's delivery id as the transaction id, so a retry of a request the homeserver accepted (its answer
+        // lost) is recognised as the same message and not posted twice. Only [A-Za-z0-9] reaches the path.
+        var txnId = deliveryId is { Length: > 0 } id && id.All(char.IsAsciiLetterOrDigit) ? "whiskers" + id : Guid.NewGuid().ToString("N");
         var roomId = Uri.EscapeDataString(config.RoomId);
         var url = $"{config.HomeserverUrl.TrimEnd('/')}/_matrix/client/v3/rooms/{roomId}/send/m.room.message/{txnId}";
 

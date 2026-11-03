@@ -28,7 +28,7 @@ public class WebhookNotificationService : IWebhookNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.Url)) return false;
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
+        if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
         await PostAsync(c, evt, ct);
         _throttler.Record(evt);
         _logger.LogInformation("Webhook notification sent: {EventType}", evt.EventType);

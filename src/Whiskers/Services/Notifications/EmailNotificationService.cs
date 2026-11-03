@@ -19,8 +19,9 @@ public class EmailNotificationService : IEmailNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
-    /// <summary>R1-40: the longest one SMTP conversation (connect, TLS, auth, send) may take: both <c>SmtpClient.Timeout</c>
-    /// (an <c>SmtpException</c>) and a cancellation (a <c>TimeoutException</c>) enforce it, whichever fires first.</summary>
+    /// <summary>R1-40: the longest one SMTP conversation (connect, TLS, auth, send) may take. The cancellation linked to
+    /// the caller's token is what enforces it (a <c>TimeoutException</c>); <c>SmtpClient.Timeout</c> is set to it as well
+    /// and, depending on the runtime, can end the send first (an <c>SmtpException</c>).</summary>
     internal static readonly TimeSpan DefaultSmtpDeadline = TimeSpan.FromSeconds(30);
 
     /// <summary>The deadline in force (tests shorten it).</summary>
@@ -30,7 +31,7 @@ public class EmailNotificationService : IEmailNotificationService
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.Host) || string.IsNullOrWhiteSpace(c.To)) return false;
-        if (_throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
+        if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
         var (title, _) = NotificationFormatter.Describe(evt);
         await SendMailAsync(c, $"[Whiskers] {title}", NotificationFormatter.PlainText(evt), ct);
         _throttler.Record(evt);
