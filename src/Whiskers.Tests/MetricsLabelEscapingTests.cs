@@ -13,8 +13,8 @@ public class MetricsLabelEscapingTests
     [InlineData("say \"hi\"", "say \\\"hi\\\"")]
     [InlineData(@"C:\data", @"C:\\data")]
     [InlineData("a\nb", "a\\nb")]
-    [InlineData("a\r\nb", "a\\nb")]
-    [InlineData("a\rb", "a\\nb")]
+    [InlineData("a\r\nb", "a\r\\nb")]
+    [InlineData("a\rb", "a\rb")]
     [InlineData("", "")]
     [InlineData(null, "")]
     public void A_label_value_is_escaped(string? value, string expected)
@@ -36,6 +36,14 @@ public class MetricsLabelEscapingTests
             if (line[i] == '"') unescapedQuotes++;
         }
         Assert.Equal(2, unescapedQuotes);
+    }
+
+    [Fact]
+    public void Distinct_names_stay_distinct_labels()
+    {
+        string[] names = ["a\rb", "a\nb", "a\r\nb", "a\\nb", "a\\\nb"];
+        Assert.Equal(names.Length, names.Select(PrometheusText.Label).Distinct().Count());
+        Assert.All(names.Select(PrometheusText.Label), l => Assert.DoesNotContain('\n', l));
     }
 
     [Theory]

@@ -244,7 +244,11 @@ internal sealed class FakeDocker : IDockerService
     public Task<Whiskers.Services.ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null)
         => Task.FromResult<Whiskers.Services.ImageUpdate.ImageContract?>(null);
 
-    public Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null) => throw new NotSupportedException();
+    /// <summary>What <see cref="GetImageDigestAsync"/> answers (R1-41: a test can hold it to model a slow read).</summary>
+    public Func<string, Task<string?>>? Digest { get; set; }
+
+    public Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null)
+        => Digest?.Invoke(imageRef) ?? throw new NotSupportedException();
     public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null) =>
         Act("recreate", containerId, serverId, Task.FromResult("recreated-" + containerId));

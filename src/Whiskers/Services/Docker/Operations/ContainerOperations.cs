@@ -43,14 +43,20 @@ internal sealed class ContainerOperations
     private async Task<DockerClient> GetClient(string? serverId)
         => await _connectionManager.GetClientAsync(serverId);
 
-    public async Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default)
+    public Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default)
+        => ListContainersAsync(all, serverId, ct, callerToken: default);
+
+    /// <summary><paramref name="ct"/> bounds the request (a server deadline); <paramref name="callerToken"/> is the
+    /// caller's own cancellation, which is not held against the server (R1-41).</summary>
+    private async Task<IList<ContainerInfo>> ListContainersAsync(bool all, string? serverId, CancellationToken ct,
+        CancellationToken callerToken)
     {
         var server = serverId != null
             ? _serverConfigService.GetServer(serverId)
             : _serverConfigService.GetDefaultServer();
 
         var containers = await _connectionManager.ExecuteAsync(serverId, c =>
-            c.Containers.ListContainersAsync(new ContainersListParameters { All = all }, ct));
+            c.Containers.ListContainersAsync(new ContainersListParameters { All = all }, ct), callerToken: callerToken);
 
         return containers.Select(c => ToContainerInfo(c, server?.Id ?? "local", server?.Name ?? "Local")).ToList();
     }
@@ -141,7 +147,7 @@ internal sealed class ContainerOperations
                     // site: 20 of the 24 sites do not pass through a shared path at all, so a probe placed
                     // there would measure whatever happened to be instrumented rather than the host.
                     var started = System.Diagnostics.Stopwatch.GetTimestamp();
-                    var listing = new ServerListing(server, await ListContainersAsync(all, server.Id, timeout.Token), null);
+                    var listing = new ServerListing(server, await ListContainersAsync(all, server.Id, timeout.Token, ct), null);
                     _selfMetrics.RecordApiCall(server.Id, System.Diagnostics.Stopwatch.GetElapsedTime(started));
                     return listing;
                 }
@@ -162,6 +168,8 @@ internal sealed class ContainerOperations
         });
 
         var results = await Task.WhenAll(tasks);
+        // A caller that cancelled gets a cancellation, never a listing in which its cancellation looks like silent servers.
+        ct.ThrowIfCancellationRequested();
         return new FleetContainerListing
         {
             Containers = results.SelectMany(r => r.Containers).ToList(),

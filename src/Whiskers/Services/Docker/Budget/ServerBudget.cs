@@ -107,7 +107,9 @@ public sealed class ServerBudget : IServerBudget
         // A deadline that expired after the call spent longer queued than running is a statement about this
         // budget, not about the server. Handing the caller a plain timeout here is what let the circuit
         // breaker blame six healthy servers at once for our own backlog.
+        // R1-41: never for a call its caller cancelled — that is neither the budget's nor the server's doing.
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException
+                                   && !ct.IsCancellationRequested
                                    && Stopwatch.GetElapsedTime(startedAt) < TimeSpan.FromMilliseconds(waitMs))
         {
             Interlocked.Increment(ref lanes.SaturationFailures);

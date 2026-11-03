@@ -15,12 +15,16 @@ All notable changes to Whiskers are documented here. The format follows
   stays visible (no global "ignore"). Loop intervals are checked at start: `HealthMonitor:CheckIntervalSeconds` and
   `Metrics:CollectionIntervalSeconds` 5 s to a day, `ImageUpdate:CheckIntervalHours` and
   `CveMonitor:CheckIntervalHours` 1 to 168 h — a value outside that is a clear configuration error at start
-  instead of a loop without a pause or a crash hours later; the Settings page uses the same limits. **Breaking for
+  instead of a loop without a pause or a crash hours later; the Settings page uses the same limits and saving a value
+  outside them is refused. A value that becomes invalid while Whiskers runs (the file edited) does not stop a loop: it
+  keeps its last valid interval and logs a warning. **Breaking for
   a configuration with such a value: Whiskers does not start until it is fixed.** `/metrics` escapes label values
-  (quotes, backslashes, line breaks) and keeps an error comment on one line, so a container, image or server name
+  (quotes, backslashes, line feeds — nothing else, so distinct names stay distinct) and keeps an error comment on one line, so a container, image or server name
   can no longer break the exposition or forge a series. The AutoPatch planning, the image-update check and the
   advisor chat's context pass their cancellation to the Docker fleet listing and the image inspect (new
-  `IDockerService` overloads), so the preview deadline, a stop and closing the chat reach them.
+  `IDockerService` overloads), so the preview deadline, a stop and closing the chat reach them — also while they wait for a connection or a free slot —
+  and a cancelled caller is never counted against the server (the circuit breaker stays closed). The image-update check
+  stops with the host instead of finishing in the background, and changes nothing after the stop.
 
 - R1-40: **A notification that fails is retried, and an important one is not lost.** Notification channels used to
   swallow their own errors, so the retry never saw a failure. Now a failed Slack, Discord, Mattermost, Matrix,

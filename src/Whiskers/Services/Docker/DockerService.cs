@@ -61,6 +61,9 @@ public class DockerService : IDockerService
     public Task<IList<ContainerInfo>> ListAllContainersAsync(bool all, CancellationToken ct)
         => _containers.ListAllContainersAsync(all, ct);
 
+    public Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId, CancellationToken ct)
+        => _images.GetImageContractAsync(imageRef, serverId, ct);
+
     public Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null)
         => _containers.GetContainerAsync(id, serverId);
 

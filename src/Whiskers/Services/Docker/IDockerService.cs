@@ -44,8 +44,10 @@ public interface IDockerService
     /// anything (GAP-6). Null when the image cannot be inspected.</summary>
     Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null);
 
-    /// <summary>R1-41: <see cref="GetImageContractAsync(string, string?)"/> for a caller that can be cancelled. The inspect
-    /// itself is shared between concurrent callers, so a cancellation ends this caller's wait, not the shared call.</summary>
+    /// <summary>R1-41: <see cref="GetImageContractAsync(string, string?)"/> for a caller that can be cancelled: the
+    /// cancellation reaches the inspect and the wait for a budget slot, and is not held against the server (the default
+    /// implementation only stops waiting). The inspect is not shared: a background caller whose identical inspect is already running gets <c>null</c> (the budget's
+    /// single-flight drops the duplicate), an interactive caller runs its own.</summary>
     Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId, CancellationToken ct)
         => GetImageContractAsync(imageRef, serverId).WaitAsync(ct);
     [MutatingOperation("container.update")]

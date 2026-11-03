@@ -50,9 +50,9 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
         {
             try
             {
-                // WaitAsync bounds the cycle to shutdown: registry/Docker digest calls carry no token, so
-                // abandon an in-flight check on stop instead of blocking the host's shutdown window.
-                await CheckAllImagesAsync(ct).WaitAsync(ct);
+                // R1-41: the cycle is owned to its end — every wait inside it observes the stop, and after a stop it
+                // changes no state and sends nothing, so nothing of it runs on after the host stopped.
+                await CheckAllImagesAsync(ct);
             }
             catch (Exception ex) when (!IsHostStopping(ex, ct))
             {
@@ -102,6 +102,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 try
                 {
                     var info = await CheckSingleImageAsync(docker, container, ct);
+                    ct.ThrowIfCancellationRequested();
                     if (info != null)
                     {
                         // Read the prior state BEFORE overwriting, so we only notify when an update FIRST
@@ -119,6 +120,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
             });
 
             await Task.WhenAll(tasks);
+            ct.ThrowIfCancellationRequested();
 
             _store.LastCheckAt = DateTime.UtcNow;
 
@@ -127,6 +129,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
             {
                 foreach (var update in newUpdates)
                 {
+                    ct.ThrowIfCancellationRequested();
                     try
                     {
                         await notification.SendAsync(new NotificationEvent
@@ -148,6 +151,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
             // Broadcast to UI
             await hubContext.Clients.All.SendAsync("ImageUpdatesChanged", ct);
 
+            ct.ThrowIfCancellationRequested();
             await _store.SaveAsync();
 
             // Coverage, not just a count. "21 containers" used to be printed whether the fleet had 21 or 46,
@@ -174,7 +178,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                     "{Pending} update(s) known ({New} new this cycle)",
                     containers.Count, expected.Count, pending, newUpdates.Count);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogError(ex, "Image update check failed");
         }
@@ -224,7 +228,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
         try
         {
             var configured = LooksLikeImageId(container.Image)
-                ? await docker.GetConfiguredImageAsync(container.Id, container.ServerId)
+                ? await docker.GetConfiguredImageAsync(container.Id, container.ServerId).WaitAsync(ct)
                 : null;
             var (image, localRef) = ResolveCheckRefs(container.Image, configured, container.ImageId);
 
@@ -234,10 +238,10 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 return null;
 
             // Local digest of the image the container RUNS, not of whatever the tag points at now.
-            var localDigest = await docker.GetImageDigestAsync(localRef, container.ServerId);
+            var localDigest = await docker.GetImageDigestAsync(localRef, container.ServerId).WaitAsync(ct);
 
             // Get remote digest
-            var remoteDigest = await _registry.GetRemoteDigestAsync(image);
+            var remoteDigest = await _registry.GetRemoteDigestAsync(image).WaitAsync(ct);
 
             if (localDigest == null || remoteDigest == null)
             {
@@ -269,7 +273,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 ServerId = container.ServerId
             };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogDebug(ex, "Failed to check image for container {Name}", container.Name);
             return null;
