@@ -71,6 +71,13 @@ public static class RecoveryCodes
         var expires = nowUtc + Lifetime;
         var value = Protect(users.PasswordHasher, user, code, expires);
         var row = await FindAsync(db, user.Id, ct);
+        // A code row this context still tracks but the database no longer has (used up elsewhere) must not collide
+        // with the new one.
+        if (row is null)
+            foreach (var stale in db.ChangeTracker.Entries<IdentityUserToken<string>>()
+                         .Where(e => e.Entity.UserId == user.Id && e.Entity.LoginProvider == TokenProvider
+                                     && e.Entity.Name == TokenName).ToList())
+                stale.State = EntityState.Detached;
         if (row is null)
             db.UserTokens.Add(new IdentityUserToken<string>
             {

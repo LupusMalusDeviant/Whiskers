@@ -59,6 +59,7 @@ public static class LocalAccountRecoveryCli
         var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
         var audit = scope.ServiceProvider.GetRequiredService<IAuditLogService>();
         var time = scope.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+        string? announced = null;   // the account an issued-row was written for, until its outcome is known
         try
         {
             var user = await users.FindByEmailAsync(email);
@@ -77,6 +78,7 @@ public static class LocalAccountRecoveryCli
                 await output.WriteLineAsync("The audit log could not be written. Nothing was changed.");
                 return 1;
             }
+            announced = account;
 
             var (result, code, expires) = await RecoveryCodes.IssueAsync(users, db, user, time.GetUtcNow(), ct);
             if (!result.Succeeded || code is null)
@@ -86,6 +88,7 @@ public static class LocalAccountRecoveryCli
                 await output.WriteLineAsync("The recovery code could not be saved (the account changed at the same time). Nothing was changed; run the command again.");
                 return 1;
             }
+            announced = null;   // issued: the row stands
 
             await output.WriteLineAsync($"Recovery code for {account} (shown once, valid until {expires:yyyy-MM-dd HH:mm} UTC):");
             await output.WriteLineAsync();
@@ -97,6 +100,10 @@ public static class LocalAccountRecoveryCli
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // The row written before announced a code that was not issued: its outcome follows (best effort).
+            if (announced is not null)
+                await audit.TryLogAsync(Actor, "system", IssuedAction, AuthAuditLog.Target, announced, announced,
+                    $"the recovery code could not be saved ({ex.GetType().Name}); nothing was changed", success: false);
             // The type only: a message may carry a connection string.
             await output.WriteLineAsync($"The local account store could not be used ({ex.GetType().Name}). Nothing was changed.");
             return 1;

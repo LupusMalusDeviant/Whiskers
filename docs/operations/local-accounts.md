@@ -7,7 +7,7 @@ or compromised password is recovered, and what Whiskers does **not** offer for t
 ## The MFA posture (read this first)
 
 **Local accounts have no second factor in Whiskers 1.0.** A correct password alone signs in. What protects them is the
-password policy, the account lockout and the per-client rate limit (below), and that every credential change ends the
+password policy, the account lockout and the rate limits of the sign-in and recovery pages (below), and that every credential change ends the
 account's sessions at once.
 
 For production, and for any instance reachable from the internet:
@@ -29,8 +29,9 @@ Set by ASP.NET Identity's options in Whiskers (not configurable in 1.0):
 |---|---|
 | Minimum length | 12 characters |
 | Character classes | at least one upper-case letter, one lower-case letter, one digit and one symbol |
-| Lockout | 5 wrong passwords (or wrong current passwords, or wrong recovery codes) lock the account for 15 minutes |
-| Rate limit | 10 sign-in attempts per minute per client address |
+| Lockout | 5 wrong passwords (or wrong current passwords, or wrong recovery codes for an account that has a code) lock the account for 15 minutes |
+| Sign-in rate limit | 10 sign-in attempts (`/login-local`) per minute per client address (HTTP rate limiter) |
+| Recovery-page limit | 10 recovery-code attempts (`/account/recover`) per minute per client address, and 10 per account per 15 minutes from all clients together (enforced by Whiskers itself: the page runs in a live connection the HTTP limiter does not see) |
 
 Passwords and recovery codes are hashed with ASP.NET Identity's password hasher (PBKDF2); Whiskers stores neither in
 readable form and never writes them to a log or the audit trail — not even a prefix.
@@ -69,8 +70,20 @@ all produce a **one-time recovery code**:
 - the reset removes the old password at once, so a compromised password stops working before the owner has picked a
   new one.
 
-A wrong code counts towards the lockout like a wrong password. Unknown email, wrong, used or expired code and a locked
-account all get the same answer.
+A wrong code counts towards the lockout like a wrong password — but only for an account that has a code: trying codes
+for an account with an ordinary password does not lock it. Unknown email, wrong, used or expired code, a locked account
+and a throttled attempt all get the same answer. Attempts beyond the recovery-page limit check nothing; the first one of
+a client in each minute is audited (`auth.recovery_refused`, `reason=rate_limited`), the rest only counted in the log.
+Where the client address cannot be determined, those clients share one limit. A successful redemption is audited
+before the password is set; if the audit row cannot be written, nothing is set.
+
+The recovery page and the host CLI are not stopped by the kill switch (a person recovering their own access is not
+a write to managed infrastructure). Adding, resetting and deleting accounts are refused while `AUTH_DISABLED` is set:
+every client is the synthetic Admin then.
+
+An Admin who resets another account (another Admin included) or adds one receives its code and could use it
+themselves — by design, as with any Admin-issued credential; the reset is audited and the owner notices that their
+password no longer works.
 
 Hand the code over a trusted channel (in person, a password manager share, a phone call) — not in the same email
 thread as the address of your Whiskers instance.
@@ -102,13 +115,17 @@ keys (PRODUCT_CONTRACT §5.2). The command gives that person nothing new; it onl
 
 ## The last Admin
 
-Whiskers keeps at least one Admin who can sign in:
+Whiskers guards the last Admin as follows:
 
-- *User roles* refuses to demote or remove the last explicit Admin (since TA-02).
+- *User roles* refuses to demote or remove the last **explicit** Admin entry (since TA-02). It counts entries, not
+  whether their owner can sign in: with another explicit Admin that cannot sign in (no account yet, or waiting for a
+  recovery code), the only Admin who can sign in may still be demoted there. The host CLI then restores access.
 - *Local accounts* refuses to delete an Admin when no other Admin can sign in: another Admin counts only with a local
   account that has a password, or — without a local account — as a Google/OIDC user Whiskers has seen signing in. An
   Admin still waiting for a recovery code does not count.
-- Admin changes are serialised: two Admins deleting each other at the same moment leave one of them.
+- Admin changes are serialised: two Admins deleting each other at the same moment leave one of them. A deletion removes
+  the role first, so a demotion on *User roles* at the same moment makes the role store refuse it before anything
+  changed.
 - You cannot delete or reset your own account here; another Admin does that.
 
 Deleting an account also removes its explicit role entry, so a Google/OIDC sign-in with the same address does not

@@ -5507,6 +5507,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="LocalAccounts_Error_conflict" xml:space="preserve">
     <value>The account changed at the same time. Reload and try again.</value>
   </data>
+  <data name="LocalAccounts_Error_auth_disabled" xml:space="preserve">
+    <value>Authentication is disabled (AUTH_DISABLED): local accounts are not added, reset or deleted until it is enabled again.</value>
+  </data>
   <data name="Account_PageTitle" xml:space="preserve">
     <value>My account - Whiskers</value>
   </data>

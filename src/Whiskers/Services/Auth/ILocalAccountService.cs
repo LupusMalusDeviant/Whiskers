@@ -46,8 +46,11 @@ public interface ILocalAccountService
     Task<LocalAccountResult> DeleteAsync(string email, CancellationToken ct = default);
 
     /// <summary>Anonymous: sets a new password with a recovery code. A wrong, used or expired code, an unknown email and
-    /// a locked account all give the same answer; a wrong code counts towards the lockout. Not a gateway call: there is
-    /// no signed-in principal (like a sign-in); every outcome is audited.</summary>
+    /// a locked account all give the same answer; a wrong code counts towards the lockout (trying a code for an account
+    /// that has none does not). Attempts are limited per client address and per account
+    /// (<see cref="IRecoveryAttemptLimiter"/>), since the page runs in a circuit the sign-in's HTTP limiter does not see.
+    /// Not a gateway call: there is no signed-in principal (like a sign-in). A success is audited before the password is
+    /// set (no row, no change); refusals are audited, a throttled storm once per client and window.</summary>
     Task<LocalAccountResult> RedeemRecoveryCodeAsync(string email, string code, string newPassword, CancellationToken ct = default);
 }
 
@@ -106,5 +109,8 @@ public static class LocalAccountErrors
     /// <summary>The recovery code, the email or the account state did not allow the change — deliberately one answer.</summary>
     public const string InvalidCode = "invalid_code";
     public const string StoreUnavailable = "store_unavailable";
+    /// <summary>Accounts are not added, reset or deleted while authentication is disabled (every client is the
+    /// synthetic Admin then; fail closed).</summary>
+    public const string AuthDisabled = "auth_disabled";
     public const string Conflict = "conflict";
 }

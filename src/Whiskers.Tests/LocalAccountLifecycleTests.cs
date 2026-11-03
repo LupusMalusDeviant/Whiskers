@@ -216,7 +216,7 @@ public sealed class LocalAccountLifecycleTests
     }
 
     [Fact]
-    public async Task The_last_admin_who_can_sign_in_cannot_be_deleted_or_demoted()
+    public async Task The_last_admin_who_can_sign_in_cannot_be_deleted_and_the_last_explicit_admin_cannot_be_demoted()
     {
         await using var world = await LocalAccountWorld.CreateAsync();
         // Admin by role, but nothing to sign in with: an email without a local account (local sign-in only) and an
@@ -427,6 +427,218 @@ public sealed class LocalAccountLifecycleTests
         Assert.Contains("new@local.test", world.Sink.Text);
     }
 
+    // ------------------------------------------------------------------------------------------------ review round 1
+
+    [Fact]
+    public async Task The_recovery_page_is_limited_per_client_and_per_account_and_audits_a_storm_once()
+    {
+        var clock = new ManualClock(DateTimeOffset.Parse("2026-11-03T10:00:00Z"));
+        await using var world = await LocalAccountWorld.CreateAsync(time: clock);
+        await world.AddUserAsync(Ops, AppRole.Operator);
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        var code = (await admin.Accounts.ResetPasswordAsync(Ops)).RecoveryCode!;
+
+        // Per client: ten attempts a minute, whatever they name; the eleventh is refused even with the right code.
+        using (var noisy = world.As(LocalAccountWorld.Anonymous, client: "203.0.113.9"))
+        {
+            for (var i = 0; i < RecoveryAttemptLimiter.ClientLimit; i++)
+                Assert.Equal(LocalAccountErrors.InvalidCode,
+                    (await noisy.Accounts.RedeemRecoveryCodeAsync($"nobody{i}@local.test", code, LocalAccountWorld.NewPassword)).Error);
+            var hashesBefore = world.Hasher.Verifications;
+            for (var i = 0; i < 5; i++)
+                Assert.Equal(LocalAccountErrors.InvalidCode,
+                    (await noisy.Accounts.RedeemRecoveryCodeAsync(Ops, code, LocalAccountWorld.NewPassword)).Error);
+            Assert.Equal(hashesBefore, world.Hasher.Verifications);   // a throttled attempt checks nothing
+        }
+        Assert.False(await world.PasswordWorksAsync(Ops, LocalAccountWorld.NewPassword));
+        // Five throttled attempts, one audit row.
+        Assert.Single(world.Audit.Rows, r => r.Details?.Contains("reason=rate_limited") == true);
+
+        // Another client still gets through.
+        using (var other = world.As(LocalAccountWorld.Anonymous, client: "203.0.113.10"))
+            Assert.True((await other.Accounts.RedeemRecoveryCodeAsync(Ops, code, LocalAccountWorld.NewPassword)).Success);
+
+        // Per account: ten attempts in 15 minutes, from whichever clients; the next one is refused even from a fresh
+        // client with the right code. (Ops has no code now, so these tries do not lock it.)
+        for (var i = 0; i < RecoveryAttemptLimiter.AccountLimit - 1; i++)   // one was used above
+        {
+            using var client = world.As(LocalAccountWorld.Anonymous, client: $"192.0.2.{i}");
+            await client.Accounts.RedeemRecoveryCodeAsync(Ops, RecoveryCodes.Generate(), "irrelevant-Pass-1");
+        }
+        Assert.Equal(0, await world.FailedCountAsync(Ops));
+        var second = (await admin.Accounts.ResetPasswordAsync(Ops)).RecoveryCode!;
+        using (var fresh = world.As(LocalAccountWorld.Anonymous, client: "192.0.2.200"))
+        {
+            Assert.Equal(LocalAccountErrors.InvalidCode,
+                (await fresh.Accounts.RedeemRecoveryCodeAsync(Ops, second, LocalAccountWorld.NewPassword + "x")).Error);
+            clock.Advance(RecoveryAttemptLimiter.AccountWindow);
+            Assert.True((await fresh.Accounts.RedeemRecoveryCodeAsync(Ops, second, LocalAccountWorld.NewPassword + "x")).Success);
+        }
+    }
+
+    [Fact]
+    public async Task Trying_codes_for_an_account_without_one_does_not_lock_it()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.AddUserAsync(Viewer, AppRole.Viewer);
+        for (var i = 0; i < 8; i++)
+        {
+            using var client = world.As(LocalAccountWorld.Anonymous, client: $"192.0.2.{i}");
+            Assert.Equal(LocalAccountErrors.InvalidCode,
+                (await client.Accounts.RedeemRecoveryCodeAsync(Viewer, RecoveryCodes.Generate(), LocalAccountWorld.NewPassword)).Error);
+        }
+        Assert.Equal(0, await world.FailedCountAsync(Viewer));
+        using var self = world.As(await world.SessionOfAsync(Viewer));
+        Assert.True((await self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword)).Success);
+    }
+
+    [Fact]
+    public async Task A_correct_code_is_refused_while_the_account_is_locked_and_costs_the_same_hash_work()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.AddUserAsync(Ops, AppRole.Operator);
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        var code = (await admin.Accounts.ResetPasswordAsync(Ops)).RecoveryCode!;
+        using var anonymous = world.As(LocalAccountWorld.Anonymous);
+        for (var i = 0; i < 5; i++)
+            await anonymous.Accounts.RedeemRecoveryCodeAsync(Ops, RecoveryCodes.Generate(), LocalAccountWorld.NewPassword);
+
+        var before = world.Hasher.Verifications;
+        var locked = await anonymous.Accounts.RedeemRecoveryCodeAsync(Ops, code, LocalAccountWorld.NewPassword);
+
+        Assert.Equal(LocalAccountErrors.InvalidCode, locked.Error);
+        Assert.Equal(before + 1, world.Hasher.Verifications);   // as much hashing as an unknown email or a wrong code
+        Assert.False(await world.PasswordWorksAsync(Ops, LocalAccountWorld.NewPassword));
+        Assert.Contains(world.Audit.Rows, r => r.Details?.Contains("reason=locked_out") == true);
+    }
+
+    [Fact]
+    public async Task One_code_redeemed_twice_at_the_same_moment_sets_one_password()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.AddUserAsync(Ops, AppRole.Operator);
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        var code = (await admin.Accounts.ResetPasswordAsync(Ops)).RecoveryCode!;
+        using var first = world.As(LocalAccountWorld.Anonymous, client: "192.0.2.1");
+        using var second = world.As(LocalAccountWorld.Anonymous, client: "192.0.2.2");
+        using var start = new ManualResetEventSlim();
+
+        var one = Task.Run(() => { start.Wait(); return first.Accounts.RedeemRecoveryCodeAsync(Ops, code, "First-Password-12"); });
+        var two = Task.Run(() => { start.Wait(); return second.Accounts.RedeemRecoveryCodeAsync(Ops, code, "Second-Password-34"); });
+        start.Set();
+        var results = await Task.WhenAll(one, two);
+
+        Assert.Equal(1, results.Count(r => r.Success));
+        var winner = results[0].Success ? "First-Password-12" : "Second-Password-34";
+        Assert.True(await world.PasswordWorksAsync(Ops, winner));
+        Assert.False(await world.PasswordWorksAsync(Ops, winner == "First-Password-12" ? "Second-Password-34" : "First-Password-12"));
+    }
+
+    [Fact]
+    public async Task A_redemption_that_cannot_be_audited_sets_nothing()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.AddUserAsync(Ops, AppRole.Operator);
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        var code = (await admin.Accounts.ResetPasswordAsync(Ops)).RecoveryCode!;
+        using var anonymous = world.As(LocalAccountWorld.Anonymous);
+
+        world.Audit.Down = true;
+        Assert.Equal(LocalAccountErrors.StoreUnavailable,
+            (await anonymous.Accounts.RedeemRecoveryCodeAsync(Ops, code, LocalAccountWorld.NewPassword)).Error);
+        Assert.False(await world.PasswordWorksAsync(Ops, LocalAccountWorld.NewPassword));
+
+        world.Audit.Down = false;   // the code is still good
+        Assert.True((await anonymous.Accounts.RedeemRecoveryCodeAsync(Ops, code, LocalAccountWorld.NewPassword)).Success);
+        Assert.Single(world.Audit.Rows, r => r.Action == LocalAccountService.RecoveryRedeemedAction);
+    }
+
+    [Fact]
+    public async Task With_authentication_disabled_no_account_is_added_reset_or_deleted()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync(authDisabled: true);
+        await world.AddUserAsync(Ops, AppRole.Admin);
+        var lanAdmin = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Email, "local@localhost"), new Claim(ClaimTypes.Name, "local")], AuthConstants.AuthDisabledScheme));
+        using var lan = world.As(lanAdmin);
+        Assert.Equal(AppRole.Admin, await lan.User.GetRoleAsync());
+
+        Assert.Equal(LocalAccountErrors.AuthDisabled, (await lan.Accounts.CreateAsync("x@local.test", AppRole.Admin)).Error);
+        Assert.Equal(LocalAccountErrors.AuthDisabled, (await lan.Accounts.ResetPasswordAsync(Ops)).Error);
+        Assert.Equal(LocalAccountErrors.AuthDisabled, (await lan.Accounts.DeleteAsync(LocalAccountWorld.Root)).Error);
+        Assert.Null(await world.FindAsync("x@local.test"));
+        Assert.True(await world.PasswordWorksAsync(Ops, LocalAccountWorld.Password));
+        Assert.NotNull(await world.FindAsync(LocalAccountWorld.Root));
+    }
+
+    [Fact]
+    public async Task A_host_recovery_whose_save_throws_records_that_nothing_was_issued()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.AddUserAsync(Ops, AppRole.Admin);
+        await world.DropTableAsync("AspNetUserTokens");
+
+        var output = new StringWriter();
+        Assert.Equal(1, await LocalAccountRecoveryCli.RunAsync(world.Services, [Ops], output));
+
+        var rows = world.Audit.Rows.Where(r => r.Action == LocalAccountRecoveryCli.IssuedAction).ToList();
+        Assert.Equal([true, false], rows.Select(r => r.Success));
+        Assert.True(await world.PasswordWorksAsync(Ops, LocalAccountWorld.Password));
+    }
+
+    [Fact]
+    public async Task An_account_whose_code_cannot_be_issued_is_not_left_half_created()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.DropTableAsync("AspNetUserTokens");
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+
+        await Assert.ThrowsAnyAsync<Exception>(() => admin.Accounts.CreateAsync("new@local.test", AppRole.Viewer));
+
+        Assert.Null(await world.FindAsync("new@local.test"));
+        Assert.False(world.Roles.HasExplicitRole("new@local.test"));
+    }
+
+    [Fact]
+    public async Task A_demotion_in_the_role_panel_during_a_deletion_leaves_an_admin_and_the_account()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync(seedRoot: false);
+        await world.AddUserAsync("a@local.test", AppRole.Admin);
+        await world.AddUserAsync("b@local.test", AppRole.Admin);
+        // A deletes B. Right after A's last-Admin check, B demotes A on the User roles panel (the role store does not
+        // take the account lock; B is still an explicit Admin, so the role store allows it).
+        var roles = new HookedRoles(world.Roles, () => world.Roles.SetRoleAsync("a@local.test", AppRole.Operator));
+        using var a = world.As(await world.SessionOfAsync("a@local.test"), roles);
+
+        var result = await a.Accounts.DeleteAsync("b@local.test");
+
+        Assert.Equal(LocalAccountErrors.LastAdmin, result.Error);
+        Assert.NotNull(await world.FindAsync("b@local.test"));          // nothing changed
+        Assert.Equal(AppRole.Admin, world.Roles.GetRole("b@local.test"));
+        Assert.True(await world.PasswordWorksAsync("b@local.test", LocalAccountWorld.Password));
+    }
+
+    /// <summary>The real role store; the first read of the whole role list (the last-Admin check) runs
+    /// <paramref name="once"/> right after it.</summary>
+    private sealed class HookedRoles(IRoleService inner, Func<Task> once) : IRoleService
+    {
+        private int _fired;
+        public Task InitializeAsync(CancellationToken ct = default) => inner.InitializeAsync(ct);
+        public AppRole GetRole(string? email) => inner.GetRole(email);
+        public bool HasRole(string? email, AppRole requiredRole) => inner.HasRole(email, requiredRole);
+        public bool HasAnyRoles() => inner.HasAnyRoles();
+        public bool HasExplicitRole(string? email) => inner.HasExplicitRole(email);
+        public UserRoleData GetRoleData()
+        {
+            var data = inner.GetRoleData();
+            if (Interlocked.Exchange(ref _fired, 1) == 0) once().GetAwaiter().GetResult();
+            return data;
+        }
+        public Task SaveRoleDataAsync(UserRoleData data) => inner.SaveRoleDataAsync(data);
+        public Task SetRoleAsync(string email, AppRole role) => inner.SetRoleAsync(email, role);
+        public Task RemoveRoleAsync(string email) => inner.RemoveRoleAsync(email);
+    }
+
     // ------------------------------------------------------------------------------------------------ wire
 
     [Fact]
@@ -551,11 +763,17 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     public RecordingSink Sink { get; } = new();
     public NotificationDeliveryTests.ListLoggerProvider Logs { get; }
     public MutationGateway Gateway { get; }
+    public IConfiguration Configuration { get; }
+    public RecoveryAttemptLimiter Limiter { get; }
+    public CountingHasher Hasher { get; }
 
     private LocalAccountWorld(string dir, ServiceProvider sp, RoleService roles, WhitelistService whitelist,
         IConfiguration configuration, DataPathOptions paths, RecordingAuditLog audit,
-        NotificationDeliveryTests.ListLoggerProvider logs, GuardrailPolicy policy, TimeProvider time)
+        NotificationDeliveryTests.ListLoggerProvider logs, GuardrailPolicy policy, TimeProvider time, CountingHasher hasher)
     {
+        Configuration = configuration;
+        Hasher = hasher;
+        Limiter = new RecoveryAttemptLimiter(time);
         _dir = dir;
         _sp = sp;
         _time = time;
@@ -572,19 +790,22 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     }
 
     public static async Task<LocalAccountWorld> CreateAsync(bool seedRoot = true, GuardrailPolicy? policy = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null, bool authDisabled = false)
     {
         var dir = Path.Combine(Path.GetTempPath(), $"sw-r149-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         var paths = new DataPathOptions(dir);
         var settings = new Dictionary<string, string?>();
         if (seedRoot) settings["WHISKERS_ADMIN_EMAIL"] = Root;
+        if (authDisabled) settings["Auth:Disabled"] = "true";
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         var logs = new NotificationDeliveryTests.ListLoggerProvider();
         var audit = new RecordingAuditLog();
+        var hasher = new CountingHasher();
 
         var services = new ServiceCollection();
         services.AddLogging(b => b.AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
+        services.AddSingleton<IPasswordHasher<AppUser>>(hasher);   // Identity takes it (TryAdd)
         services.AddDbContext<WhiskersIdentityDbContext>(o => o.UseSqlite($"Data Source={Path.Combine(dir, "id.db")}"));
         // The production options (WhiskersAuthenticationExtensions): 12 characters and Identity's character classes,
         // five failures lock for 15 minutes.
@@ -608,7 +829,7 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         var whitelist = new WhitelistService(configuration, roles, NullLogger<WhitelistService>.Instance, paths);
         await whitelist.InitializeAsync();
         var world = new LocalAccountWorld(dir, sp, roles, whitelist, configuration, paths, audit, logs,
-            policy ?? GuardrailPolicy.SafeDefault(), time ?? TimeProvider.System);
+            policy ?? GuardrailPolicy.SafeDefault(), time ?? TimeProvider.System, hasher);
         if (seedRoot) await world.AddUserAsync(Root, role: null);   // the seeded Admin (role from WHISKERS_ADMIN_EMAIL)
         return world;
     }
@@ -646,12 +867,12 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     public static ClaimsPrincipal Federated(string email) => new(new ClaimsIdentity(
         [new Claim(ClaimTypes.Email, email), new Claim(ClaimTypes.Name, email)], "Google"));
 
-    public Acting As(ClaimsPrincipal principal, IRoleService? roles = null)
+    public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7")
     {
         var scope = _sp.CreateScope();
         var user = new SessionUser(Validator, principal);
         var accounts = new LocalAccountService(scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
-            scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, _time,
+            scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, _time,
             scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>());
         return new Acting(scope, accounts, new UiMutationRunner(Gateway, new CapabilityCatalog(), user), user);
     }
@@ -707,6 +928,32 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         SessionUser User) : IDisposable
     {
         public void Dispose() => Scope.Dispose();
+    }
+
+    /// <summary>Identity's password hasher, counting the verifications (each is one PBKDF2 run).</summary>
+    internal sealed class CountingHasher : IPasswordHasher<AppUser>
+    {
+        private readonly PasswordHasher<AppUser> _inner = new();
+        private int _verifications;
+        public int Verifications => Volatile.Read(ref _verifications);
+        public string HashPassword(AppUser user, string password) => _inner.HashPassword(user, password);
+        public PasswordVerificationResult VerifyHashedPassword(AppUser user, string hashedPassword, string providedPassword)
+        {
+            Interlocked.Increment(ref _verifications);
+            return _inner.VerifyHashedPassword(user, hashedPassword, providedPassword);
+        }
+    }
+
+    internal sealed class FixedClient(string? address) : IClientAddress
+    {
+        public string? Address => address;
+    }
+
+    public async Task DropTableAsync(string table)
+    {
+        using var scope = _sp.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database
+            .ExecuteSqlRawAsync("DROP TABLE \"" + table + "\"");
     }
 
     /// <summary>The current user of a circuit, checked through the real session validator on every call (R1-26).</summary>

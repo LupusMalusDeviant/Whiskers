@@ -266,6 +266,10 @@ public static class WhiskersHostingExtensions
         builder.Services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, Whiskers.Services.Auth.CurrentUserService>();
         // R1-49: local-account lifecycle (own password, Admin add/reset/delete, recovery codes) on ASP.NET Identity.
         builder.Services.AddScoped<Whiskers.Services.Auth.ILocalAccountService, Whiskers.Services.Auth.LocalAccountService>();
+        // The recovery page runs in a circuit, outside the sign-in's HTTP rate limiter: the service limits per client
+        // address (read once per circuit) and per account.
+        builder.Services.AddSingleton<Whiskers.Services.Auth.IRecoveryAttemptLimiter, Whiskers.Services.Auth.RecoveryAttemptLimiter>();
+        builder.Services.AddScoped<Whiskers.Services.Auth.IClientAddress, Whiskers.Services.Auth.HttpClientAddress>();
         // R1-26 (INV-09): one session check for the cookie (every request), the circuit (every 30 s) and the
         // current-user resolver (every UI mutation); the circuit's authentication state re-checks itself.
         builder.Services.AddSingleton<Whiskers.Services.Auth.ISessionValidator, Whiskers.Services.Auth.SessionValidator>();

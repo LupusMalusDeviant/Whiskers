@@ -1,7 +1,9 @@
 @using Whiskers.Services.Auth
+@using Microsoft.Extensions.DependencyInjection
 @inject ILocalAccountService Accounts
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IConfiguration Configuration
+@inject IServiceProvider ServiceProvider
 @inject ISnackbar Snackbar
 @inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
@@ -89,6 +91,9 @@
 }
 
 @code {
+    /// <summary>The clock the service uses when one is registered (tests), the system clock otherwise.</summary>
+    private TimeProvider Clock => ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+
     private bool _isAdmin;
     private bool _authDisabled;
     private bool _busy;
@@ -126,7 +131,7 @@
     {
         LocalAccountState.Active => L["LocalAccounts_State_Active"].Value,
         LocalAccountState.LockedOut => L["LocalAccounts_State_LockedOut"].Value,
-        LocalAccountState.RecoveryPending when a.RecoveryExpiresUtc is { } until && until > DateTimeOffset.UtcNow =>
+        LocalAccountState.RecoveryPending when a.RecoveryExpiresUtc is { } until && until > Clock.GetUtcNow() =>
             L["LocalAccounts_State_RecoveryPending", until.ToString("yyyy-MM-dd HH:mm")].Value,
         _ => L["LocalAccounts_State_NoCredential"].Value,
     };

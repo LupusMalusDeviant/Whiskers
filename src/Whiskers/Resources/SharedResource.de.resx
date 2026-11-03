@@ -5507,6 +5507,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="LocalAccounts_Error_conflict" xml:space="preserve">
     <value>Das Konto wurde gleichzeitig geändert. Lade neu und versuche es noch einmal.</value>
   </data>
+  <data name="LocalAccounts_Error_auth_disabled" xml:space="preserve">
+    <value>Die Anmeldung ist abgeschaltet (AUTH_DISABLED): Lokale Konten werden erst wieder angelegt, zurückgesetzt oder gelöscht, wenn sie eingeschaltet ist.</value>
+  </data>
   <data name="Account_PageTitle" xml:space="preserve">
     <value>Mein Konto - Whiskers</value>
   </data>

@@ -36,7 +36,8 @@ recovery without a temporary password, and a published MFA posture (WORK_PACKAGE
 `LocalAccountResult(Success, Error)` with `PolicyErrors`, `RecoveryCode`, `RecoveryExpiresUtc`; `Error` ∈
 `LocalAccountErrors` (`not_authorized`, `session_invalid`, `not_found`, `already_exists`, `invalid_email`,
 `role_conflict`, `own_account`, `last_admin`, `wrong_password`, `locked_out`, `password_policy`, `invalid_code`,
-`store_unavailable`, `conflict`). Gateway target kind `account`, id argument `account` (the email); `account.create`
+`store_unavailable`, `conflict`, `auth_disabled`). `IRecoveryAttemptLimiter` (singleton) and `IClientAddress`
+(scoped, the circuit's client address) back the redemption's limit. Gateway target kind `account`, id argument `account` (the email); `account.create`
 also records `role`. Verification: `NotVerifiable` (own account store).
 
 Host CLI: `dotnet Whiskers.dll --recover-local-account <email>` — exit codes `0` issued, `2` usage, `3` no such local
@@ -67,3 +68,13 @@ UI: `/account` (*My account*), `/account/recover` (anonymous), Settings panel *L
 4. Self-service password change at read level is allowed while the kill switch is on.
 5. Deleting an account removes its explicit role (a federated user with the same address loses it too).
 6. No local TOTP (out of scope unless selected).
+7. Admin impersonation by design: an Admin who resets or adds an account receives its code and could redeem it
+   themselves — for another Admin's address too, including a Google/OIDC Admin whose address gets a local account.
+   Audited (`account.password_reset` / `account.create`); the owner notices their password stopped working.
+8. The kill switch stops neither the recovery-code redemption nor the host CLI (both restore a person's own access).
+9. With `AUTH_DISABLED`, adding, resetting and deleting accounts are refused (`auth_disabled`, fail closed).
+10. Recovery-page limits: 10 attempts per client address per minute, 10 per account per 15 minutes, enforced in the
+    service (the page runs in a Blazor circuit, outside `/login-local`'s HTTP limiter; the protected pipeline stays
+    unchanged). Unknown client addresses share one bucket.
+11. Demotion of the only Admin who can sign in is guarded only by the role store's explicit-Admin rule (TA-02); not
+    extended in R1-49.

@@ -20,7 +20,11 @@ All notable changes to Whiskers are documented here. The format follows
   not count), and nobody deletes or resets their own account there. Deleting an account also removes its explicit
   role. New audited capabilities `account.password_change` (read level, own account only — also allowed while the kill
   switch is on), `account.create`, `account.password_reset`, `account.delete` (Admin); new audit actions
-  `auth.recovery_issued`, `auth.recovery_redeemed`, `auth.recovery_refused`. Passwords and codes use ASP.NET Identity's
+  `auth.recovery_issued`, `auth.recovery_redeemed`, `auth.recovery_refused`. `/account/recover` is limited to 10
+  attempts per client address per minute and 10 per account per 15 minutes (throttled attempts check nothing and are
+  audited once per client and minute); trying codes for an account that has none does not lock it; a successful
+  redemption is audited before the password is set. Adding, resetting and deleting accounts are refused while
+  `AUTH_DISABLED` is set. Passwords and codes use ASP.NET Identity's
   hashing; no password, hash or code reaches a log or the audit trail. **MFA posture:** local accounts have **no second
   factor** in 1.0 — for production, sign in through your identity provider (OIDC) with MFA and keep local accounts as a
   break-glass fallback ([docs/operations/local-accounts.md](docs/operations/local-accounts.md)).

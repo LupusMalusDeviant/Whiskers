@@ -31,13 +31,24 @@ public sealed class LocalAccountService : ILocalAccountService
     private readonly ICurrentUserService _user;
     private readonly IOwnerAccounts _owners;
     private readonly IAuditLogService _audit;
+    private readonly IRecoveryAttemptLimiter _limiter;
+    private readonly string _client;
+    private readonly bool _authDisabled;
     private readonly TimeProvider _time;
     private readonly ILogger<LocalAccountService>? _logger;
 
     public LocalAccountService(UserManager<AppUser> users, WhiskersIdentityDbContext db, IRoleService roles,
-        ICurrentUserService user, IOwnerAccounts owners, IAuditLogService audit, TimeProvider? time = null,
+        ICurrentUserService user, IOwnerAccounts owners, IAuditLogService audit, IRecoveryAttemptLimiter limiter,
+        IClientAddress client, IConfiguration configuration, TimeProvider? time = null,
         ILogger<LocalAccountService>? logger = null)
     {
+        _limiter = limiter ?? throw new ArgumentNullException(nameof(limiter));
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(configuration);
+        // Read now: in a circuit the service is created with the page, while the circuit's connection request is current.
+        _client = client.Address ?? "unknown";
+        // With AUTH_DISABLED every LAN client is the synthetic Admin: it must not mint real credentials (fail closed).
+        _authDisabled = configuration.GetValue<bool>("Auth:Disabled");
         _users = users ?? throw new ArgumentNullException(nameof(users));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _roles = roles ?? throw new ArgumentNullException(nameof(roles));
@@ -88,6 +99,7 @@ public sealed class LocalAccountService : ILocalAccountService
     {
         var (email, error) = await SelfAsync();
         if (error is not null) return LocalAccountResult.Refused(error);
+        _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
         var user = await _users.FindByEmailAsync(email);
         if (user is null) return LocalAccountResult.Refused(LocalAccountErrors.NotFound);
         if (await _users.IsLockedOutAsync(user)) return LocalAccountResult.Refused(LocalAccountErrors.LockedOut);
@@ -118,9 +130,10 @@ public sealed class LocalAccountService : ILocalAccountService
         if (!Enum.IsDefined(role)) return LocalAccountResult.Refused(LocalAccountErrors.RoleConflict);
 
         await AdminGate.WaitAsync(ct);
+        _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
         try
         {
-            if ((await AdminAsync()).Error is { } refused) return LocalAccountResult.Refused(refused);
+            if ((await AccountAdminAsync()).Error is { } refused) return LocalAccountResult.Refused(refused);
             if (await _users.FindByEmailAsync(email) is not null) return LocalAccountResult.Refused(LocalAccountErrors.AlreadyExists);
             // An email that already holds a different explicit role (a Google/OIDC user) is not silently changed:
             // its role is managed in the role list.
@@ -136,7 +149,19 @@ public sealed class LocalAccountService : ILocalAccountService
                         ? LocalAccountErrors.InvalidEmail
                         : LocalAccountErrors.Conflict);
 
-            var (issued, code, expires) = await RecoveryCodes.IssueAsync(_users, _db, user, _time.GetUtcNow(), ct);
+            IdentityResult issued;
+            string? code;
+            DateTimeOffset expires;
+            try
+            {
+                (issued, code, expires) = await RecoveryCodes.IssueAsync(_users, _db, user, _time.GetUtcNow(), ct);
+            }
+            catch
+            {
+                // No half-created account without role or credential stays behind (it would block a retry).
+                await DeleteQuietlyAsync(email);
+                throw;
+            }
             if (!issued.Succeeded || code is null)
             {
                 await DeleteQuietlyAsync(email);
@@ -163,9 +188,10 @@ public sealed class LocalAccountService : ILocalAccountService
     {
         email = (email ?? "").Trim();
         await AdminGate.WaitAsync(ct);
+        _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
         try
         {
-            var (actor, refused) = await AdminAsync();
+            var (actor, refused) = await AccountAdminAsync();
             if (refused is not null) return LocalAccountResult.Refused(refused);
             if (SameEmail(actor, email)) return LocalAccountResult.Refused(LocalAccountErrors.OwnAccount);
             var user = await _users.FindByEmailAsync(email);
@@ -183,10 +209,11 @@ public sealed class LocalAccountService : ILocalAccountService
     {
         email = (email ?? "").Trim();
         await AdminGate.WaitAsync(ct);
+        _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
         try
         {
             // Re-checked under the lock: an Admin whose own account went a moment ago decides nothing.
-            var (actor, refused) = await AdminAsync();
+            var (actor, refused) = await AccountAdminAsync();
             if (refused is not null) return LocalAccountResult.Refused(refused);
             if (SameEmail(actor, email)) return LocalAccountResult.Refused(LocalAccountErrors.OwnAccount);
             var user = await _users.FindByEmailAsync(email);
@@ -195,11 +222,30 @@ public sealed class LocalAccountService : ILocalAccountService
             if (_roles.GetRole(target) == AppRole.Admin && !await AnotherUsableAdminAsync(target, ct))
                 return LocalAccountResult.Refused(LocalAccountErrors.LastAdmin);
 
-            var deleted = await _users.DeleteAsync(user);
-            if (!deleted.Succeeded) return LocalAccountResult.Refused(LocalAccountErrors.Conflict);
-            // The account is gone; so is the role it held, so a Google/OIDC sign-in with the same address does not
-            // inherit it. The role store keeps its own last-Admin rule.
-            if (_roles.HasExplicitRole(target)) await _roles.RemoveRoleAsync(target);
+            // The role goes first, so a Google/OIDC sign-in with the same address does not inherit it — and so the role
+            // store's own last-Admin rule (it does not take this lock: the User roles panel may have demoted the other
+            // Admin a moment ago) refuses before anything has changed.
+            AppRole? removedRole = null;
+            if (_roles.HasExplicitRole(target))
+            {
+                var role = _roles.GetRole(target);
+                try { await _roles.RemoveRoleAsync(target); }
+                catch (InvalidOperationException) { return LocalAccountResult.Refused(LocalAccountErrors.LastAdmin); }
+                removedRole = role;
+            }
+
+            IdentityResult deleted;
+            try { deleted = await _users.DeleteAsync(user); }
+            catch
+            {
+                await RestoreRoleAsync(target, removedRole);
+                throw;
+            }
+            if (!deleted.Succeeded)
+            {
+                await RestoreRoleAsync(target, removedRole);
+                return LocalAccountResult.Refused(LocalAccountErrors.Conflict);
+            }
             _logger?.LogInformation("Local account {Email} was deleted", target);
             return LocalAccountResult.Ok();
         }
@@ -227,6 +273,18 @@ public sealed class LocalAccountService : ILocalAccountService
         return false;
     }
 
+    /// <summary>Puts back a role removed for a deletion that then failed: the account still exists and keeps its role.</summary>
+    private async Task RestoreRoleAsync(string email, AppRole? role)
+    {
+        if (role is not { } r) return;
+        try { await _roles.SetRoleAsync(email, r); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError("The role of local account {Email} could not be restored after a failed deletion ({Error})",
+                email, ex.GetType().Name);
+        }
+    }
+
     private async Task DeleteQuietlyAsync(string email)
     {
         try
@@ -247,6 +305,21 @@ public sealed class LocalAccountService : ILocalAccountService
     {
         email = (email ?? "").Trim();
         var normalizedCode = RecoveryCodes.Normalize(code);
+
+        // The per-client and per-account limit comes first: a refused attempt reads nothing and hashes nothing. Only the
+        // first throttled attempt of a client in a window is audited; the storm is logged as a count (bounded rows).
+        var attempt = _limiter.TryAcquire(_client, email);
+        if (!attempt.Allowed)
+        {
+            if (attempt.RefusedInWindow == 1)
+                return await RefusedAsync(null, "rate_limited");
+            if ((attempt.RefusedInWindow & (attempt.RefusedInWindow - 1)) == 0)
+                _logger?.LogWarning("{Count} recovery-code attempts of one client were throttled in the current window",
+                    attempt.RefusedInWindow);
+            return LocalAccountResult.Refused(LocalAccountErrors.InvalidCode);
+        }
+
+        _db.ChangeTracker.Clear();   // read the account as it is now, not as this scope last saw it
         var user = email.Length == 0 ? null : await _users.FindByEmailAsync(email);
         if (user is null)
         {
@@ -254,13 +327,18 @@ public sealed class LocalAccountService : ILocalAccountService
             BurnHash(normalizedCode);
             return await RefusedAsync(null, "unknown_account");
         }
-        if (await _users.IsLockedOutAsync(user)) return await RefusedAsync(user.Email, "locked_out");
+        if (await _users.IsLockedOutAsync(user))
+        {
+            BurnHash(normalizedCode);
+            return await RefusedAsync(user.Email, "locked_out");
+        }
 
         var row = await RecoveryCodes.FindAsync(_db, user.Id, ct);
         if (row is null || !RecoveryCodes.TryRead(row.Value, out var expires, out var hash))
         {
+            // No code to guess: not counted against the account, or anyone could lock out an account that has a
+            // password by trying codes for it.
             BurnHash(normalizedCode);
-            await _users.AccessFailedAsync(user);
             return await RefusedAsync(user.Email, "no_code");
         }
         var verified = _users.PasswordHasher.VerifyHashedPassword(user, hash, normalizedCode);
@@ -279,6 +357,15 @@ public sealed class LocalAccountService : ILocalAccountService
             if (!check.Succeeded) errors.AddRange(check.Errors);
         }
         if (errors.Count > 0) return Policy(IdentityResult.Failed([.. errors]));
+
+        // The record first: a password set anonymously that the trail does not show is not set.
+        var account = user.Email ?? email;
+        if (!await _audit.TryLogAsync(account, "web", RecoveryRedeemedAction, AuthAuditLog.Target, account, account,
+                "a new password is set with a recovery code", success: true))
+        {
+            _logger?.LogError("A recovery-code redemption was refused: its audit row could not be written");
+            return LocalAccountResult.Refused(LocalAccountErrors.StoreUnavailable);
+        }
 
         // One save: the code is used up, the password set, the lockout cleared and the stamp changed. The account's
         // concurrency stamp makes a second use of the same code at the same moment fail.
@@ -299,10 +386,9 @@ public sealed class LocalAccountService : ILocalAccountService
         if (!saved.Succeeded)
         {
             _db.ChangeTracker.Clear();
-            return await RefusedAsync(user.Email, "conflict");
+            // The row above announced a change that did not happen: its outcome follows.
+            return await RefusedAsync(account, "conflict");
         }
-        await _audit.TryLogAsync(user.Email ?? email, "web", RecoveryRedeemedAction, AuthAuditLog.Target, user.Email ?? email,
-            user.Email ?? email, "a new password was set with a recovery code", success: true);
         _logger?.LogInformation("Local account {Email} set a new password with a recovery code", user.Email);
         return LocalAccountResult.Ok();
     }
@@ -322,6 +408,10 @@ public sealed class LocalAccountService : ILocalAccountService
     }
 
     // ------------------------------------------------------------------------------------------------ helpers
+
+    /// <summary>The caller as an Admin who may change accounts: refused while authentication is disabled.</summary>
+    private async Task<(string? Email, string? Error)> AccountAdminAsync() =>
+        _authDisabled ? (null, LocalAccountErrors.AuthDisabled) : await AdminAsync();
 
     /// <summary>The caller as an Admin, with the session checked now.</summary>
     private async Task<(string? Email, string? Error)> AdminAsync()
