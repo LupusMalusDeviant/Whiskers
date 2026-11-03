@@ -8,10 +8,11 @@ namespace Whiskers.Startup;
 
 /// <summary>The authentication wiring — cookie session + optional Google/OIDC providers, or full bypass for
 /// trusted LAN-only deployments. Isolated from the rest of the composition root because it is the
-/// security-sensitive protected layer (docs/ARCHITECTURE.md, ADR-0002): the fail-open whitelist re-check, the provider
-/// events, and the cookie policy are moved here <b>verbatim</b> from Program.cs — same branches, same order,
-/// same semantics. Only the location changed; the middleware ORDER that enforces auth lives in
-/// <see cref="WhiskersPipelineExtensions"/> and is likewise unchanged.</summary>
+/// security-sensitive protected layer (docs/ARCHITECTURE.md, ADR-0002): the provider events and the cookie policy were
+/// moved here verbatim from Program.cs. One deliberate change since (user-approved 2026-11-03, R1-26): the cookie's
+/// per-request check is no longer the fail-open whitelist re-check but the fail-closed session check
+/// (<c>SessionCookieValidation</c> → <c>ISessionValidator</c>). The middleware ORDER that enforces auth lives in
+/// <see cref="WhiskersPipelineExtensions"/> and is unchanged.</summary>
 public static class WhiskersAuthenticationExtensions
 {
     public static void AddWhiskersAuthentication(this WebApplicationBuilder builder)
@@ -54,47 +55,10 @@ public static class WhiskersAuthenticationExtensions
                     options.LogoutPath = "/logout";
                     options.ExpireTimeSpan = TimeSpan.FromHours(24);
 
-                    // Re-check the whitelist on every request, not just at login, so an email that has been
-                    // removed from a NON-empty whitelist loses access on its next request instead of riding
-                    // out its 24h cookie. FAIL-OPEN by design: the synthetic AuthDisabled principal is exempt,
-                    // and an empty/disabled whitelist or any error allows through — matching WhitelistService's
-                    // "empty ⇒ allow all" semantics. The only new rejection is an email explicitly dropped from
-                    // a populated whitelist.
-                    options.Events.OnValidatePrincipal = context =>
-                    {
-                        try
-                        {
-                            // Synthetic identities are minted in-process (Auth:Disabled middleware, agent tool
-                            // execution) and must never arrive in a cookie. With auth enabled, one that does was
-                            // forged by someone holding the DataProtection keys — it would otherwise be trusted
-                            // as Admin and skip the whitelist (audit TA-11). Reject it.
-                            var authType = context.Principal?.Identity?.AuthenticationType;
-                            if (authType is Whiskers.Services.Auth.AuthConstants.AuthDisabledScheme
-                                or Whiskers.Services.Auth.AuthConstants.AgentSyntheticScheme)
-                            {
-                                context.RejectPrincipal();
-                                return context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                            }
-
-                            var email = context.Principal?.FindFirstValue(ClaimTypes.Email);
-                            // No email ⇒ leave as-is; the login flow already decided this principal was OK.
-                            if (string.IsNullOrEmpty(email))
-                                return Task.CompletedTask;
-
-                            var whitelist = context.HttpContext.RequestServices.GetRequiredService<Whiskers.Services.Auth.IWhitelistService>();
-                            // IsEmailAllowed returns true when the whitelist is empty/disabled (fail-open).
-                            if (!whitelist.IsEmailAllowed(email))
-                            {
-                                context.RejectPrincipal();
-                                return context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                            }
-                        }
-                        catch
-                        {
-                            // Fail-open: a transient error must never lock out a legitimate user.
-                        }
-                        return Task.CompletedTask;
-                    };
+                    // R1-26 (INV-03/09, approved 2026-11-03): every request re-checks the session — synthetic
+                    // identities (TA-11), a deleted or changed local account and its security stamp, the whitelist —
+                    // and FAILS CLOSED: an error rejects the cookie. See SessionCookieValidation / ISessionValidator.
+                    options.Events.OnValidatePrincipal = Whiskers.Services.Auth.SessionCookieValidation.ValidateAsync;
                 });
 
             if (!string.IsNullOrWhiteSpace(googleClientId))

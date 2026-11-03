@@ -23,6 +23,7 @@ public sealed class AgentSession : IAgentSession
     private readonly ICapabilityOverrides? _overrides;
     private readonly IGuardrailStore? _guardrailStore;
     private readonly IAgentToolRegistry _registry;
+    private readonly IAgentAuthority? _authority;
     private readonly AgentSettings _settings;
     private readonly string _systemPrompt;
 
@@ -39,9 +40,10 @@ public sealed class AgentSession : IAgentSession
         AgentContext context, IAgentLlmProvider provider, IAgentToolCatalog catalog,
         IAgentToolInvoker invoker, IAgentGuardrailEngine guardrails, IAgentToolRegistry registry,
         AgentSettings settings, string systemPrompt, IReadOnlyList<AgentMessage>? seedHistory = null,
-        IGuardrailStore? guardrailStore = null, ICapabilityOverrides? overrides = null)
+        IGuardrailStore? guardrailStore = null, ICapabilityOverrides? overrides = null, IAgentAuthority? authority = null)
     {
         _context = context;
+        _authority = authority;
         _overrides = overrides;
         _provider = provider;
         _catalog = catalog;
@@ -92,7 +94,15 @@ public sealed class AgentSession : IAgentSession
         AddHistory(new AgentMessage(AgentRole.User, userMessage,
             ImageBase64: string.IsNullOrEmpty(imageBase64) ? null : imageBase64,
             ImageMediaType: imageMediaType ?? "image/png"));
-        var tools = _catalog.GetVisibleTools(_context);
+        // R1-26 (INV-08): a run whose key or user was revoked takes no further step, not even a provider round trip.
+        var (started, revokedAtStart) = Live();
+        if (revokedAtStart is not null)
+        {
+            State = AgentRunState.Error;
+            yield return new AgentEvent.Failed($"Stopped: {revokedAtStart}");
+            yield break;
+        }
+        var tools = _catalog.GetVisibleTools(_context with { Principal = started.Principal });
         var maxIterations = Math.Max(1, _settings.MaxToolIterations);
 
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -139,11 +149,18 @@ public sealed class AgentSession : IAgentSession
                     // An ended run (the chat was closed or cleared) takes no further step, not even the next call of
                     // this turn (INV-36).
                     if (ct.IsCancellationRequested) yield break;
-                    var decision = Evaluate(call);
+                    // R1-26 (INV-08): the authority is re-read for every call; a revoked key or user ends the run here.
+                    var (live, revoked) = Live();
+                    if (revoked is not null)
+                    {
+                        foreach (var ev in Revoked(answered, call, revoked)) yield return ev;
+                        yield break;
+                    }
+                    var decision = Evaluate(call, live);
                     // INV-22 (R1-12): a block or an approval request rests on a decision the gateway recorded, so the
                     // approval names it and the block is on record. An allowed call is decided and recorded when it runs.
                     if (decision.Verdict != GuardrailVerdict.Allow)
-                        decision = await RecordedAsync(call, decision, ct);
+                        decision = await RecordedAsync(call, decision, live, ct);
                     yield return new AgentEvent.ToolProposed(call, decision);
 
                     if (decision.Verdict == GuardrailVerdict.Deny)
@@ -191,7 +208,16 @@ public sealed class AgentSession : IAgentSession
                         continue;
                     }
 
-                    var result = await _invoker.InvokeAsync(call, LiveContext, ct);
+                    // After an approval wait, re-read once more right before the call: the wait can be long, and a key
+                    // revoked meanwhile must not ride on the approval. Without a wait the last check ran a moment ago, before
+                    // the ToolProposed event (a slow event consumer widens that gap; a revocation then stops the next call).
+                    if (decision.Verdict == GuardrailVerdict.Confirm) (live, revoked) = Live();
+                    if (revoked is not null)
+                    {
+                        foreach (var ev in Revoked(answered, call, revoked)) yield return ev;
+                        yield break;
+                    }
+                    var result = await _invoker.InvokeAsync(call, live, ct);
                     _actionCount++;
                     yield return RecordResult(answered, call, result);
                 }
@@ -224,16 +250,36 @@ public sealed class AgentSession : IAgentSession
         : Whiskers.Services.Mutations.EffectivePolicy.Of(_context.Pinned, _guardrailStore).Policy;
     private AgentContext LiveContext => _context with { Policy = LivePolicy };
 
+    /// <summary>The context for the next step (R1-26): the live policy and the principal as it stands now, or the
+    /// reason the run's authority was revoked. Without an <see cref="IAgentAuthority"/> (tests) the started principal.</summary>
+    private (AgentContext Context, string? Revoked) Live()
+    {
+        var context = LiveContext;
+        if (_authority is null) return (context, null);
+        var now = _authority.Current(_context.Principal);
+        return (context with { Principal = now.Principal }, now.RevokedReason);
+    }
+
+    /// <summary>The events of a call refused because the run's authority was revoked; the run ends after them.</summary>
+    private IEnumerable<AgentEvent> Revoked(ISet<AgentToolCall> answered, AgentToolCall call, string reason)
+    {
+        var decision = new GuardrailDecision(GuardrailVerdict.Deny, reason, new[] { "authority-revoked" });
+        State = AgentRunState.Error;
+        yield return new AgentEvent.ToolProposed(call, decision);
+        yield return RecordResult(answered, call, new AgentToolResult(call.Id, $"Blockiert: {reason}", true, decision));
+        yield return new AgentEvent.Failed($"Stopped: {reason}");
+    }
+
     /// <summary>The gateway's recorded decision for a call the session is about to block or pause on. It is the one
     /// authority: what the session pauses or blocks on is exactly the recorded verdict, so an approval or a block
     /// always names the decision that produced it — an Allow simply runs (and is decided again when it does). A
     /// gateway that cannot decide (no mutation, test doubles) leaves the session's own verdict.</summary>
-    private async Task<GuardrailDecision> RecordedAsync(AgentToolCall call, GuardrailDecision local, CancellationToken ct)
+    private async Task<GuardrailDecision> RecordedAsync(AgentToolCall call, GuardrailDecision local, AgentContext live, CancellationToken ct)
     {
         GuardrailDecision? recorded;
         try
         {
-            recorded = await _invoker.DecideAsync(call, LiveContext, ct);
+            recorded = await _invoker.DecideAsync(call, live, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -243,7 +289,7 @@ public sealed class AgentSession : IAgentSession
         return recorded ?? local;
     }
 
-    private GuardrailDecision Evaluate(AgentToolCall call)
+    private GuardrailDecision Evaluate(AgentToolCall call, AgentContext live)
     {
         if (!_registry.Tools.TryGetValue(call.Name, out var entry))
             return new GuardrailDecision(GuardrailVerdict.Allow,
@@ -271,6 +317,6 @@ public sealed class AgentSession : IAgentSession
         }
 
         var args = AgentArgumentBinder.ParseArguments(call.ArgumentsJson);
-        return _guardrails.Evaluate(new GuardrailRequest(entry.Name, level, args, LiveContext));
+        return _guardrails.Evaluate(new GuardrailRequest(entry.Name, level, args, live));
     }
 }

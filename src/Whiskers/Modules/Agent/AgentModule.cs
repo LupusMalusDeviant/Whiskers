@@ -79,6 +79,8 @@ public sealed class AgentModule : IWhiskersModule
             Whiskers.Services.Agent.Approvals.ApprovalCoordinator>();
         services.AddSingleton<Whiskers.Services.Agent.Chat.IChatWidgetParser,
             Whiskers.Services.Agent.Chat.ChatWidgetParser>();
+        // R1-26 (INV-08): every tool call of a running session re-reads the key or user that started it.
+        services.AddSingleton<Whiskers.Services.Agent.IAgentAuthority, Whiskers.Services.Agent.AgentAuthority>();
         services.AddSingleton<Whiskers.Services.Agent.IAgentService,
             Whiskers.Services.Agent.AgentService>();
         services.AddSingleton<Whiskers.Services.Agent.IClaudeCodeRuntime,

@@ -6,6 +6,35 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-26: **Revoked sessions and keys stop acting.** Deleting a local account, changing its security stamp, removing a
+  user from the whitelist or lowering their role no longer waits for the 24-hour cookie to expire. The cookie is
+  re-checked on **every request** (the synthetic identities as before, the local account by id with the same email and
+  the security stamp it was issued with, the whitelist); a check that fails — also one that cannot read the account
+  store — **rejects the cookie and removes it** (fail closed; before, any error let the request through and a cookie
+  without an email was not checked). The role is not part of the cookie and is read per request, so a lowered role is
+  in force on the next request. A Blazor circuit checks its session when it connects and every 30 seconds; a revoked
+  session, or a role lower than the highest one the circuit has held (also after a promotion and a demotion), turns
+  the circuit anonymous (the sign-in page is
+  shown, a page no longer acts on the role it cached); a raised role keeps it. Every UI mutation re-checks the session
+  through the current-user resolver and a revoked one is refused by the Mutation Gateway and recorded, whatever role
+  the page cached; so does every role lookup a page makes (no reuse) and every approval decision (a revoked session
+  decides nothing, a lowered role decides at that role). An open `/hubs/containers` connection re-checks its session on
+  every call and is swept every 15 seconds (it receives server broadcasts without calling anything), and is closed and
+  audited (surface `hub`) when it
+  is revoked. Terminals keep ending within 15 seconds (R1-17). A running agent session (`instruct_agent`, the agent
+  chat) re-reads the key or user that started it before **every** tool call: a disabled or deleted key, or a user
+  whose account was deleted or who may no longer sign in, stops the run at its next call — the call already running
+  finishes; a lowered key level or narrowed tool list applies to the next call. Every revocation is audited as
+  `auth.session_revoked` (surface `cookie`, `circuit` or `hub`, the reason only — never a cookie, claim value or stamp), at
+  most once per minute for the same account, surface and reason (a replayed cookie cannot flood the audit queue). A
+  local account without a security stamp gets one at sign-in (a sign-in that cannot store it is refused,
+  `no_security_stamp`).
+  **Upgrade notes:** (1) **Users signed in with a local password are signed out once** after the upgrade: their cookie
+  was issued without the security stamp it is now tied to; they sign in again. Google/OIDC sessions stay signed in.
+  (2) With a database that cannot be read, local-password sessions are refused until it is back (previously they went
+  on). (3) No configuration change, no database change. Password change/reset and a "sign out everywhere" action are
+  R1-49 and use this mechanism (a new security stamp ends every session of the account).
+
 - R1-41/R1-53/R1-54/R1-55/R1-56 follow-up: **open alerts are closed once, also across a restart and a removed
   server.** A `metrics_gap` that was open when Whiskers stopped is now kept in `alert-breaches.json` (a new optional
   `Gaps` list; a file written before is still read): after the restart it is not raised a second time while readings

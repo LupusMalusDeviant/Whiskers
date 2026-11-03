@@ -21,7 +21,7 @@ An append-only **audit trail** of privileged actions, who did what, when, and th
 
 - **One event per mutation (R1-20):** MCP tools take `IToolAuditLog`, not `IAuditLogService`, so a tool call through the gateway is exactly one audit event — the gateway's — carrying the tool's own details.
 - **Gateway writes are different:** the Mutation Gateway writes through its own `AuditLogMutationSink` ([`../Mutations/`](../Mutations/)), which writes the intent *before* execution and **throws** on a failed write, so the mutation is refused (PC-D5).
-- **Sign-ins and downloads (R1-22):** `auth.login`, `auth.login_failed`, `auth.logout` are written by
+- **Sign-ins and downloads (R1-22):** `auth.login`, `auth.login_failed`, `auth.logout` (and, since R1-26, `auth.session_revoked`) are written by
   [`../Auth/AuthAuditLog.cs`](../Auth/AuthAuditLog.cs); `selfbackup.download` by the download endpoint, fail-closed
   through `TryLogAsync` — one row per request, so a browser resuming a large archive with range requests writes
   several. A queued sign-in row keeps the time it happened (`TryLogAtAsync`).

@@ -5366,4 +5366,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="NotificationsLog_Type_Recovered" xml:space="preserve">
     <value>{0}: beendet</value>
   </data>
+  <data name="Session_Revoked_Refusal" xml:space="preserve">
+    <value>Deine Sitzung wurde beendet. Bitte melde dich erneut an.</value>
+  </data>
 </root>

@@ -462,10 +462,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `SessionRevocationTests` exercises local deletion, whitelist removal and role demotion through cookies, Blazor circuits and terminals within 60 seconds.
-- [ ] `KillSwitchTests.Revoked_key_stops_the_next_inflight_agent_tool_call` passes.
-- [ ] Security-relevant revalidation failures deny access.
-- [ ] Mutating handlers revalidate authority rather than trusting a cached page role.
+- [x] `SessionRevocationTests` exercises local deletion, whitelist removal and role demotion through cookies, Blazor circuits and terminals within 60 seconds.
+- [x] `KillSwitchTests.Revoked_key_stops_the_next_inflight_agent_tool_call` passes.
+- [x] Security-relevant revalidation failures deny access.
+- [x] Mutating handlers revalidate authority rather than trusting a cached page role.
 
 **Out of scope:** Federated identity migration and password-management UI.
 

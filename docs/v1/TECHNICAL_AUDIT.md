@@ -91,7 +91,7 @@ The area reports contain 111 findings: A 18, B 20, C 24, D 17, E 9, F 23. After 
 
 | ID | Category | Finding | Sources |
 |---|---|---|---|
-| TA-19 | Security | No session revocation: sliding 24h persistent cookies, no security stamp; Blazor circuits and terminals never re-check role or whitelist | A-05, B-17 |
+| TA-19 | Security | No session revocation: sliding 24h persistent cookies, no security stamp; Blazor circuits and terminals never re-check role or whitelist. **Fixed in R1-26:** the cookie is re-checked on every request (local account, security stamp, whitelist; fail closed), circuits every 30 s, UI mutations on every call, running agent sessions before every tool call; terminals since R1-17 (`SessionRevocationTests`, `KillSwitchTests.Revoked_key_stops_the_next_inflight_agent_tool_call`). | A-05, B-17 |
 | TA-20 | Security | Identity is keyed on the email claim only; OIDC email claim is configurable and `email_verified` is unchecked | A-06 |
 | TA-21 | Security | Webhooks: no replay protection (no timestamp/delivery ID), ID-enumeration oracle, no rate limit, long work inside the HTTP request, no per-target serialization | A-07, B-14, F-06, E-07 |
 | TA-22 | Security | Viewer can delete all notifications, start fleet-wide CVE scans, reject any approval | A-09 |

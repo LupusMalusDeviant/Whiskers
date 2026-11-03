@@ -5366,4 +5366,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="NotificationsLog_Type_Recovered" xml:space="preserve">
     <value>{0}: closed</value>
   </data>
+  <data name="Session_Revoked_Refusal" xml:space="preserve">
+    <value>Your session has ended. Sign in again.</value>
+  </data>
 </root>
