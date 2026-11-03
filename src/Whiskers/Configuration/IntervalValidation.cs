@@ -162,6 +162,7 @@ public sealed class IntervalGuard(string key, int min, int max, ILogger logger)
 {
     private int? _lastValid;
     private int? _warnedFor;
+    private bool _warnedUnreadable;
 
     public int Get(int configured)
     {
@@ -169,6 +170,7 @@ public sealed class IntervalGuard(string key, int min, int max, ILogger logger)
         {
             _lastValid = configured;
             _warnedFor = null;
+            _warnedUnreadable = false;
             return configured;
         }
         var used = _lastValid ?? Math.Clamp(configured, min, max);
@@ -176,6 +178,20 @@ public sealed class IntervalGuard(string key, int min, int max, ILogger logger)
         {
             _warnedFor = configured;
             logger.LogWarning("{Key} is {Value}, outside {Min}–{Max}; keeping {Used} until it is fixed", key, configured, min, max, used);
+        }
+        return used;
+    }
+
+    /// <summary>R1-41 (review round 8): the configured value could not be read at all — a hand edit that does not bind
+    /// (<c>"30s"</c>, <c>1.5</c>) makes the options reload throw. Same rule as a value out of range: keep the last valid
+    /// interval (at first the minimum) and warn once, so the loop neither dies nor spins.</summary>
+    public int Unreadable(Exception error)
+    {
+        var used = _lastValid ?? min;
+        if (!_warnedUnreadable)
+        {
+            _warnedUnreadable = true;
+            logger.LogWarning("{Key} cannot be read ({Error}); keeping {Used} until it is fixed", key, error.Message, used);
         }
         return used;
     }
@@ -213,7 +229,12 @@ public sealed class EffectiveInterval<T> where T : class
     {
         get
         {
-            var configured = _read();
+            int configured;
+            try { configured = _read(); }
+            catch (Exception ex)
+            {
+                lock (_lock) return _guard.Unreadable(ex);
+            }
             lock (_lock) return _guard.Get(configured);
         }
     }

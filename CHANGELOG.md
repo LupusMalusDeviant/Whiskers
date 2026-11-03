@@ -18,7 +18,7 @@ All notable changes to Whiskers are documented here. The format follows
   logged and the nearest limit is used (a 2-second health check runs every 5 s, a 2000-hour image check every 720 h),
   so a configuration that ran before keeps running. The Settings page uses the same limits, and saving a value outside
   them is refused with a message. All four loops use the value actually in effect, and a value that becomes invalid
-  while Whiskers runs (the file edited) does not stop a loop: it keeps its last valid interval and logs a warning.
+  while Whiskers runs (the file edited, also to something that is not a whole number) does not stop a loop: it keeps its last valid interval and logs a warning.
   **Breaking only for zero or a negative interval:** such a value — which made a loop spin or stopped Whiskers before —
   now stops the start with an error naming the key. *Upgrade/recovery:* a value saved on the Settings page lives in
   `app-settings.json` in the data directory (`WHISKERS_DATA_DIR`, by default `/app/data`, the `serverwatch-data`

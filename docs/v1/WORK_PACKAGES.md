@@ -697,6 +697,8 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] Review round 4: a fleet listing that runs out in Whiskers' own budget queue is `NotAsked` and never counts toward `server_unreachable`; a log fetch that runs out there keeps its window (`log_fetch_saturation`); a `RunAsync` without a loop passes the ratchet only for an allow-listed one-shot service; one warning per out-of-range interval instead of two.
 - [x] Review round 5: only a listing that ran out while still queued is `NotAsked`; one that was sent and then cut short by the deadline asked the server and counts as its timeout.
 - [x] Review round 6: the same rule for the log read — a fetch that was sent and then cut short is the host's timeout (window moves on, unreadable streak grows); only one still queued keeps its window. Saturation log wording follows `Ran`; F-16 notes the AutoUpdate part as resolved.
+- [x] Review round 7: the Operations README row for `ContainerLifecycleOperations.cs` is its own row again; the NotAsked text names the time actually queued.
+- [x] Review round 8: an interval that does not bind after a hand edit keeps the last valid one (one warning) instead of ending the loop; the ratchet also fails a typed catch in the loop that leaves it on anything but the host's stop.
 
 **Out of scope:** Full tracing infrastructure.
 

@@ -429,6 +429,10 @@ public class BackgroundServiceFailureTests
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { }")));
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) { break; }\ncatch (Exception ex) { }")));
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) when (!ct.IsCancellationRequested) { break; }\ncatch (Exception ex) { }")));
+        // Review round 8: a typed catch that leaves the loop, next to a recovering one.
+        Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (TimeoutException) { return; }\ncatch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.NotNull(VerdictOf(InLoop("try { await Fetch(ct); } catch (HttpRequestException) { break; }\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.Null(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\ntry { await Task.Delay(Pause, ct); } catch (OperationCanceledException) { break; }")));   // the pause may break
     }
 
     [Theory]
@@ -469,6 +473,39 @@ public class BackgroundServiceFailureTests
         // One warning for the value, not one from the start check and another from the guard (review round 4).
         Assert.Single(logs.Lines, l => l.Contains("HealthMonitor:CheckIntervalSeconds"));
         await host.StopAsync();
+    }
+
+    [Fact]
+    public void A_reloaded_interval_that_does_not_bind_keeps_the_last_valid_one()
+    {
+        // Review round 8: a hand edit such as "30s" makes the options reload throw from CurrentValue. The loop reads the
+        // interval outside its try, so that must not escape: the last valid value stays, with one warning.
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["HealthMonitor:CheckIntervalSeconds"] = "45" }).Build();
+        var logs = new NotificationDeliveryTests.ListLoggerProvider();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(logs);
+        services.AddOptions<HealthMonitorSettings>().Bind(config.GetSection("HealthMonitor"))
+            .ValidateInterval(s => s.CheckIntervalSeconds, "HealthMonitor:CheckIntervalSeconds",
+                IntervalValidation.MinHealthSeconds, IntervalValidation.MaxHealthSeconds, TimeSpan.FromSeconds(1));
+        using var sp = services.BuildServiceProvider();
+        var effective = sp.GetRequiredService<EffectiveInterval<HealthMonitorSettings>>();
+        Assert.Equal(TimeSpan.FromSeconds(45), effective.Interval);
+
+        // The options monitor rebinds already inside the reload callback, so the binder error surfaces there too (in the
+        // app on the file watcher's thread); what matters here is the loop's read afterwards.
+        config["HealthMonitor:CheckIntervalSeconds"] = "30s";
+        Assert.ThrowsAny<Exception>(() => config.Reload());
+        Assert.ThrowsAny<Exception>(() => sp.GetRequiredService<IOptionsMonitor<HealthMonitorSettings>>().CurrentValue);
+
+        Assert.Equal(TimeSpan.FromSeconds(45), effective.Interval);
+        Assert.Equal(TimeSpan.FromSeconds(45), effective.Interval);
+        Assert.Single(logs.Lines, l => l.Contains("cannot be read"));
+
+        config["HealthMonitor:CheckIntervalSeconds"] = "90";             // fixed: applies without a restart
+        config.Reload();
+        Assert.Equal(TimeSpan.FromSeconds(90), effective.Interval);
     }
 
     [Theory]
@@ -586,6 +623,13 @@ public class BackgroundServiceFailureTests
         if (loops.Count == 0 && !oneShot)
             return "RunAsync has no loop the ratchet can see; a loop in a helper is not checked — keep the loop in RunAsync " +
                    "or, for a service that runs once by design, add it to OneShotServices";
+        // Review round 8: any catch in the outermost loop body that leaves the loop must do so only on the host's stop. A
+        // `catch (TimeoutException) { return; }` there would end the loop on exactly a dependency's timeout.
+        foreach (var l in loops)
+            foreach (var c in Outside<CatchClauseSyntax>(LoopBody(l))
+                         .Where(c => !c.Ancestors().TakeWhile(a => a != l).OfType<StatementSyntax>().Any(IsLoop)))
+                if (Terminates(c.Block) && !LeavesOnlyOnTheStop(c, token))
+                    return "a catch in the loop leaves it on something other than the host's stop";
         var candidates = loops.Count > 0
             ? loops.SelectMany(l => Outside<TryStatementSyntax>(LoopBody(l))
                 .Where(t => !t.Ancestors().TakeWhile(a => a != l).OfType<StatementSyntax>().Any(IsLoop)))
@@ -594,6 +638,12 @@ public class BackgroundServiceFailureTests
             ? null
             : "no catch inside the loop that recovers from a failed cycle and lets the loop go on";
     }
+
+    /// <summary>A catch whose block may leave the loop is fine only when it is reached on the host's stop: filtered on the
+    /// stopping token (or <c>IsHostStopping</c>), or the loop's own pause.</summary>
+    private static bool LeavesOnlyOnTheStop(CatchClauseSyntax c, string token) =>
+        (c.Filter is not null && AsksTheStoppingToken(c.Filter.FilterExpression, token, c))
+        || (IsCancellationType(c) && IsThePause(c, token));
 
     /// <summary>A catch that ends the loop on something other than the host's stop.</summary>
     private static string? Problem(CatchClauseSyntax c, string token)
