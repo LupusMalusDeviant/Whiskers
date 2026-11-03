@@ -323,9 +323,30 @@ public class VpnSecretHandlingTests : IDisposable
                             @"^Vpn__\w+File=\$\(key_to_file ""\$ws_\w+_key""\)$"),
                 $"A key's value is used outside a test, the printf builtin or key_to_file: {line}");
         Assert.DoesNotContain(lines, l => l.StartsWith("export ws_", StringComparison.Ordinal));
-        // m1: the provider is the one Whiskers resolves (Vpn__Provider, then behind its prefixes), VPN_PROVIDER last.
-        Assert.Contains("ws_app_provider=${Vpn__Provider:-${ASPNETCORE_Vpn__Provider:-${DOTNET_Vpn__Provider:-${VPN_PROVIDER:-}}}}", lines);
-        Assert.Contains("ws_provider=$(printf '%s' \"$ws_app_provider\" | tr '[:upper:]' '[:lower:]')", lines);
+        // Round 3 (m1): keys, key files and the provider are resolved in the order the configuration lets the sources
+        // win — bare, then SecretEnvironment.ConfigurationPrefixes in order (verified against the real builder in
+        // SecretEnvironmentTests).
+        static string Chain(string name) =>
+            "${" + name + ":-" + string.Concat(SecretEnvironment.ConfigurationPrefixes.Select(p => "${" + p + name + ":-"))
+            + new string('}', SecretEnvironment.ConfigurationPrefixes.Count + 1);
+        Assert.Contains("ws_ts_key=" + Chain("Vpn__Tailscale__AuthKey"), lines);
+        Assert.Contains("ws_nb_key=" + Chain("Vpn__Netbird__SetupKey"), lines);
+        Assert.Contains("ws_ts_keyfile=" + Chain("Vpn__Tailscale__AuthKeyFile"), lines);
+        Assert.Contains("ws_nb_keyfile=" + Chain("Vpn__Netbird__SetupKeyFile"), lines);
+        Assert.Contains("ws_cfg_provider=" + Chain("Vpn__Provider"), lines);
+        Assert.Contains("ws_provider=$(printf '%s' \"$ws_cfg_provider\" | tr '[:upper:]' '[:lower:]')", lines);
+        // Round 3 NIT n1: an inherited ws_* variable keeps its export flag on assignment — they are unset first.
+        var unsetWs = lines.FindIndex(l => l.StartsWith("unset ws_ts_legacy_key ws_ts_key ws_nb_key ", StringComparison.Ordinal));
+        Assert.True(unsetWs >= 0 && unsetWs < lines.FindIndex(l => l.StartsWith("ws_ts_legacy_key=", StringComparison.Ordinal)),
+            "the shell copies are unset before they are assigned");
+        // Round 3 (m2): VPN_PROVIDER alone becomes Whiskers' provider; the legacy bring-up is skipped when VPN_PROVIDER
+        // is set or Whiskers' provider is tailscale/netbird — before tailscaled could start.
+        Assert.Contains("if [ -z \"$ws_cfg_provider\" ] && [ -n \"${VPN_PROVIDER:-}\" ]; then", lines);
+        Assert.Contains("Vpn__Provider=$VPN_PROVIDER", lines);
+        Assert.Contains("tailscale|netbird) ws_in_app=1 ;;", lines);
+        var skip = lines.FindIndex(l => l == "if [ -n \"${VPN_PROVIDER:-}\" ] || [ -n \"$ws_in_app\" ]; then");
+        Assert.True(skip >= 0 && lines[skip + 2] == "start_app \"$@\"", "the legacy skip starts the app");
+        Assert.True(skip < lines.FindIndex(l => l.StartsWith("tailscaled --state", StringComparison.Ordinal)));
         Assert.Contains("printf '%s' \"$1\" > \"$kf_dir/key\"", lines);   // key_to_file itself
         // The CLI gets a file, and nothing else hands a key over.
         Assert.Contains(lines, l => l.StartsWith("tailscale up --auth-key=\"file:", StringComparison.Ordinal));
@@ -498,8 +519,9 @@ public class VpnSecretHandlingTests : IDisposable
         AssertNoKey(stdout + stderr, TailscaleKey);
     }
 
-    /// <summary>Round 2 (m1): the provider is resolved as Whiskers resolves it — <c>Vpn__Provider</c> (also behind the
-    /// configuration prefixes) before its compose mirror <c>VPN_PROVIDER</c> — and so is the key.</summary>
+    /// <summary>Rounds 2 and 3 (m1): the provider and the keys are resolved as Whiskers resolves them — the bare name,
+    /// then <c>DOTNET_</c>, then <c>ASPNETCORE_</c> — and a provider set only in the configuration (no VPN_PROVIDER, a
+    /// k8s / docker run shape) keeps the legacy bring-up from running as well (m2).</summary>
     [SkippableFact]
     public async Task The_entrypoint_follows_the_configured_provider_when_VPN_PROVIDER_is_not_set()
     {
@@ -509,22 +531,67 @@ public class VpnSecretHandlingTests : IDisposable
 
         var (code, stdout, stderr) = await RunAsync(Entrypoint(bin, secrets, new Dictionary<string, string>
         {
-            ["ASPNETCORE_Vpn__Provider"] = "tailscale",              // no VPN_PROVIDER: a k8s / docker run shape
-            ["ASPNETCORE_Vpn__Tailscale__AuthKey"] = TailscaleKey,
-            ["Vpn__Netbird__SetupKey"] = NetbirdKey,                 // no provider reads it: dropped, and said so
+            ["DOTNET_Vpn__Provider"] = "netbird",                    // wins over ASPNETCORE_, as in Whiskers
+            ["ASPNETCORE_Vpn__Provider"] = "tailscale",
+            ["ASPNETCORE_Vpn__Netbird__SetupKey"] = NetbirdKey,
+            ["Vpn__Tailscale__AuthKey"] = TailscaleKey,              // no provider reads it: dropped, and said so
+            ["TAILSCALE_AUTHKEY"] = TailscaleKey,                    // would drive the legacy tailscale up — must not run
         }));
         Assert.True(code == 0, $"entrypoint failed: {stderr}");
 
         var appEnv = File.ReadAllText(Path.Combine(record, "env"));
         AssertNoKey(appEnv, TailscaleKey);
         AssertNoKey(appEnv, NetbirdKey);
-        Assert.Contains("Vpn__Tailscale__AuthKeyFile=" + secrets, appEnv);
+        Assert.Contains("Vpn__Netbird__SetupKeyFile=" + secrets, appEnv);
+        Assert.DoesNotContain("Vpn__Tailscale__AuthKeyFile=", appEnv);
         Assert.Equal("600", File.ReadAllText(Path.Combine(record, "appmode")).Trim());
-        Assert.Equal(TailscaleKey, File.ReadAllText(Path.Combine(record, "appcontent")));
-        Assert.Contains("Vpn__Netbird__SetupKey is set but the VPN provider is 'tailscale'", stderr);
-        AssertNoKey(File.ReadAllText(Path.Combine(record, "tailscaled-env")), TailscaleKey);
+        Assert.Equal(NetbirdKey, File.ReadAllText(Path.Combine(record, "appcontent")));
+        Assert.Contains("a Tailscale auth key (Vpn__Tailscale__AuthKey, possibly prefixed) is set but the VPN provider is 'netbird'", stderr);
+        Assert.False(File.Exists(Path.Combine(record, "tailscaled-env")), "the legacy bring-up must not run next to the in-app provider");
+        Assert.False(File.Exists(Path.Combine(record, "tailscale-env")), "no ungoverned tailscale up");
         AssertNoKey(stdout + stderr, TailscaleKey);
         AssertNoKey(stdout + stderr, NetbirdKey);
+    }
+
+    /// <summary>Round 3 (m2): who brings the VPN up, for every combination of <c>VPN_PROVIDER</c> and
+    /// <c>Vpn__Provider</c> ("" = unset). Never both; nobody only where a provider explicitly says <c>none</c> while
+    /// VPN_PROVIDER is set (the VPN runs on the host). The compose shape (Vpn__Provider=${VPN_PROVIDER:-none}) is the
+    /// diagonal plus ("", "none"), which stays on the legacy path.</summary>
+    [SkippableTheory]
+    [InlineData("", "", true, false)]
+    [InlineData("", "none", true, false)]                // compose with VPN_PROVIDER unset
+    [InlineData("", "tailscale", false, true)]
+    [InlineData("none", "", false, false)]
+    [InlineData("none", "none", false, false)]
+    [InlineData("none", "tailscale", false, true)]
+    [InlineData("tailscale", "", false, true)]           // VPN_PROVIDER alone is handed to Whiskers as Vpn__Provider
+    [InlineData("tailscale", "none", false, false)]      // conflict: Whiskers says none, warned on the console
+    [InlineData("tailscale", "tailscale", false, true)]
+    [InlineData("", "Netbird", false, true)]
+    public async Task Exactly_one_side_brings_the_vpn_up(string vpnProvider, string configProvider, bool legacy, bool inApp)
+    {
+        Skip.If(OperatingSystem.IsWindows(), "the entrypoint is POSIX sh");
+        var (bin, secrets, record) = EntrypointDirs($"matrix-{vpnProvider}-{configProvider}");
+        WriteScript(Path.Combine(bin, "tailscale"), "exit 0");
+        var env = new Dictionary<string, string>();
+        if (vpnProvider.Length > 0) env["VPN_PROVIDER"] = vpnProvider;
+        if (configProvider.Length > 0) env["Vpn__Provider"] = configProvider;
+
+        var psi = Entrypoint(bin, secrets, env);
+        psi.Environment.Remove("Vpn__Provider");                  // only what the row sets
+        if (configProvider.Length > 0) psi.Environment["Vpn__Provider"] = configProvider;
+        var (code, _, stderr) = await RunAsync(psi);
+        Assert.True(code == 0, $"entrypoint failed: {stderr}");
+
+        var legacyRan = File.Exists(Path.Combine(record, "tailscaled-env"));
+        var appProvider = File.ReadAllLines(Path.Combine(record, "env"))
+            .FirstOrDefault(l => l.StartsWith("Vpn__Provider=", StringComparison.Ordinal))?["Vpn__Provider=".Length..] ?? "";
+        var inAppRuns = appProvider.ToLowerInvariant() is "tailscale" or "netbird";
+        Assert.Equal(legacy, legacyRan);
+        Assert.Equal(inApp, inAppRuns);
+        Assert.False(legacyRan && inAppRuns, "both sides brought the VPN up");
+        if (vpnProvider.Length > 0 && configProvider.Length > 0 && !vpnProvider.Equals(configProvider, StringComparison.OrdinalIgnoreCase))
+            Assert.Contains("differs from Vpn__Provider", stderr);
     }
 
     [SkippableFact]
@@ -557,7 +624,7 @@ public class VpnSecretHandlingTests : IDisposable
         AssertNoKey(appEnv, TailscaleKey);
         AssertNoKey(appEnv, NetbirdKey);
         Assert.Equal(["unrelated"], Directory.GetDirectories(secrets).Select(Path.GetFileName));
-        Assert.Contains("Vpn__Tailscale__AuthKey is set but the VPN provider is 'none'", stderr);
+        Assert.Contains("(Vpn__Tailscale__AuthKey, possibly prefixed) is set but the VPN provider is 'none'", stderr);
     }
 
     [SkippableFact]

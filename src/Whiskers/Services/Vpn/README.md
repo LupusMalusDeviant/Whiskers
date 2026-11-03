@@ -24,9 +24,20 @@ of a baked-in VPN daemon, which is a prerequisite for a future distroless/chisel
 
 ## Behavior / migration
 
-- Default `Vpn:Provider` is **none**, so existing deployments are unchanged. `entrypoint.sh` only runs
-  its legacy Tailscale bring-up when the `VPN_PROVIDER` env var is **unset**; setting `VPN_PROVIDER`
-  (mirror of `Vpn__Provider`) makes the shell defer to the in-app provider.
+- Default `Vpn:Provider` is **none**, so existing deployments are unchanged. **Exactly one side brings the VPN up**
+  (R1-43, `entrypoint.sh`):
+
+  | `VPN_PROVIDER` ↓ / Whiskers' `Vpn__Provider` → | unset | `none` | `tailscale` / `netbird` |
+  |---|---|---|---|
+  | unset | legacy bring-up | legacy bring-up (compose default) | in-app |
+  | `none` | nobody (VPN on the host) | nobody | in-app (warned: differs) |
+  | `tailscale` / `netbird` | in-app (`VPN_PROVIDER` is handed over as `Vpn__Provider`) | nobody (warned: differs) | in-app |
+
+  Whiskers' provider is the bare `Vpn__Provider`, then `DOTNET_Vpn__Provider`, then `ASPNETCORE_Vpn__Provider` — the
+  order in which the configuration lets them win (`SecretEnvironmentTests` measures it on the real builder). The
+  script cannot see a provider given on Whiskers' command line or in the data directory's JSON layers; set it in the
+  environment. docker-compose sets `Vpn__Provider=${VPN_PROVIDER:-none}`, so compose stays on the diagonal and on
+  "unset / none". `VpnSecretHandlingTests.Exactly_one_side_brings_the_vpn_up` runs this table against the script.
 - **In-app provider (R1-43):** the bring-up needs an owner. After an upgrade an admin takes "VPN bring-up" over in
   Settings → Automation owners; it runs at the next start. Without one the VPN is not brought up (status "not run,
   no owner", a Denied audit event). `Vpn:FailStartupOnError=true` (`VPN_FAIL_STARTUP_ON_ERROR`) makes such a start
@@ -44,10 +55,11 @@ of a baked-in VPN daemon, which is a prerequisite for a future distroless/chisel
   (`whiskers-vpnkey.*` under `WHISKERS_SECRET_DIR`, else `/dev/shm`, else `TMPDIR`; it stays there while the container
   runs and is removed at the next start), passes `Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile` instead and
   drops every key variable (`Vpn__…`, `TAILSCALE_AUTHKEY`, `NETBIRD_SETUP_KEY`, `TS_AUTHKEY`, `NB_SETUP_KEY`, each also
-  behind `ASPNETCORE_` / `DOTNET_`) before it starts its first process — the values live on in unexported shell
-  variables — so neither the app nor the legacy `tailscaled` (which runs as long as the container) inherits one. The
-  provider is resolved as Whiskers resolves it: `Vpn__Provider` (then `ASPNETCORE_…`, `DOTNET_…`), else `VPN_PROVIDER`;
-  a key no provider will read is dropped with a console warning. The script moves only the **exact spelling** of these
+  behind `DOTNET_` / `ASPNETCORE_`) before it starts its first process — the values live on in unexported shell
+  variables, which are unset first so an inherited one cannot keep an export flag — so neither the app nor the legacy
+  `tailscaled` (which runs as long as the container) inherits one. Keys are resolved in the same order as the provider
+  (bare, `DOTNET_`, `ASPNETCORE_`); a key no provider will read is dropped with a console warning (expected on a compose
+  start with `VPN_PROVIDER` unset and `TAILSCALE_AUTHKEY` in `.env`). The script moves only the **exact spelling** of these
   names: a variant in other letter case (`VPN__TAILSCALE__AUTHKEY`) reaches Whiskers' start environment, from where
   Whiskers drops it as below. Whiskers itself drops them (any case, also behind the configuration prefixes
   `ASPNETCORE_` / `DOTNET_`, which `SecretEnvironmentTests` derives from the real builder) from its environment after
@@ -58,7 +70,7 @@ of a baked-in VPN daemon, which is a prerequisite for a future distroless/chisel
   as an environment variable stays visible in `docker inspect` and in Docker's container record; and when Whiskers is
   started **without** `entrypoint.sh` with the key in its environment, `/proc/<whiskers-pid>/environ` keeps showing the
   start-time block whatever the process does later — use the file variant there.
-- The legacy entrypoint bring-up (`VPN_PROVIDER` unset) is the host operator's container start: it is not decided or
+- The legacy entrypoint bring-up (`VPN_PROVIDER` unset, Whiskers' provider not `tailscale`/`netbird`) is the host operator's container start: it is not decided or
   audited by the gateway. It reads `TAILSCALE_AUTHKEY` only — which docker-compose does not set (it passes the `.env`
   value as `Vpn__Tailscale__AuthKey`), so it applies to `docker run -e TAILSCALE_AUTHKEY=…`. A failed `tailscale up` is
   printed as an `ERROR` line instead of being swallowed (Whiskers still starts); the key file is removed also on an

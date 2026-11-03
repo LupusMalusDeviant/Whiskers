@@ -27,8 +27,11 @@ public static class SecretEnvironment
     /// <summary>The prefixes under which the configuration also reads environment variables: <c>WebApplication.CreateBuilder</c>
     /// adds the unprefixed set plus <c>ASPNETCORE_</c> and <c>DOTNET_</c> (the prefix is dropped, so
     /// <c>ASPNETCORE_Vpn__Tailscale__AuthKey</c> becomes <c>Vpn:Tailscale:AuthKey</c>). <c>SecretEnvironmentTests</c> derives
-    /// the prefixes from the builder's real environment sources and fails when one is missing here.</summary>
-    public static readonly IReadOnlyList<string> ConfigurationPrefixes = ["ASPNETCORE_", "DOTNET_"];
+    /// the prefixes from the builder's real environment sources and fails when one is missing here. Listed in the order
+    /// the configuration lets them win — a bare name beats both, then <c>DOTNET_</c> (added after <c>ASPNETCORE_</c>, so
+    /// it overrides it); <c>entrypoint.sh</c> resolves the keys and the provider in the same order, and the tests verify
+    /// the order against the real builder and pin the script to it.</summary>
+    public static readonly IReadOnlyList<string> ConfigurationPrefixes = ["DOTNET_", "ASPNETCORE_"];
 
     /// <summary>True when <paramref name="name"/> is one of <see cref="Names"/>, also behind one of the
     /// <see cref="ConfigurationPrefixes"/> (compared without case, like the names).</summary>

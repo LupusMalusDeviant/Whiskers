@@ -34,18 +34,22 @@ key_to_file() {
 # Every key name leaves the exported environment before this script runs its first external command (rm, tr, mktemp,
 # tailscaled, tailscale up …): an exported variable is inherited by each of them, and the long-lived tailscaled would
 # carry it in /proc/<pid>/environ for the container's lifetime. The values the script needs are kept in shell
-# variables that are not exported (assigning to a name that was not exported does not export it); the configuration
-# names are also read behind the ASPNETCORE_ / DOTNET_ prefixes, as Whiskers' configuration reads them (a bare name
-# wins, then ASPNETCORE_, then DOTNET_). Only the exact spelling is moved: a variant in other letter case still
-# reaches Whiskers' environment block, where Whiskers drops it from what its own children inherit.
+# variables that are not exported (assigning to a name that was not exported does not export it — so a variable of
+# that name inherited from the container's environment is unset first, which also drops its export flag); the
+# configuration names are also read behind the DOTNET_ / ASPNETCORE_ prefixes, in the order Whiskers' configuration
+# lets them win (a bare name, then DOTNET_, then ASPNETCORE_ — measured on the real builder in SecretEnvironmentTests).
+# What this script cannot see: a value given on Whiskers' command line ("$@", e.g. --Vpn:Provider=…) or in the data
+# directory's JSON layers, which both win over the environment. Only the exact spelling is moved: a variant in other
+# letter case still reaches Whiskers' environment block, where Whiskers drops it from what its own children inherit.
+unset ws_ts_legacy_key ws_ts_key ws_nb_key ws_ts_keyfile ws_nb_keyfile ws_cfg_provider ws_provider ws_mirror ws_in_app ws_prefix
 ws_ts_legacy_key=${TAILSCALE_AUTHKEY:-}
-ws_ts_key=${Vpn__Tailscale__AuthKey:-${ASPNETCORE_Vpn__Tailscale__AuthKey:-${DOTNET_Vpn__Tailscale__AuthKey:-}}}
-ws_nb_key=${Vpn__Netbird__SetupKey:-${ASPNETCORE_Vpn__Netbird__SetupKey:-${DOTNET_Vpn__Netbird__SetupKey:-}}}
-ws_ts_keyfile=${Vpn__Tailscale__AuthKeyFile:-${ASPNETCORE_Vpn__Tailscale__AuthKeyFile:-${DOTNET_Vpn__Tailscale__AuthKeyFile:-}}}
-ws_nb_keyfile=${Vpn__Netbird__SetupKeyFile:-${ASPNETCORE_Vpn__Netbird__SetupKeyFile:-${DOTNET_Vpn__Netbird__SetupKeyFile:-}}}
-# The provider the application will use (Vpn:Provider, same precedence), else its compose mirror VPN_PROVIDER.
-ws_app_provider=${Vpn__Provider:-${ASPNETCORE_Vpn__Provider:-${DOTNET_Vpn__Provider:-${VPN_PROVIDER:-}}}}
-for ws_prefix in "" ASPNETCORE_ DOTNET_; do
+ws_ts_key=${Vpn__Tailscale__AuthKey:-${DOTNET_Vpn__Tailscale__AuthKey:-${ASPNETCORE_Vpn__Tailscale__AuthKey:-}}}
+ws_nb_key=${Vpn__Netbird__SetupKey:-${DOTNET_Vpn__Netbird__SetupKey:-${ASPNETCORE_Vpn__Netbird__SetupKey:-}}}
+ws_ts_keyfile=${Vpn__Tailscale__AuthKeyFile:-${DOTNET_Vpn__Tailscale__AuthKeyFile:-${ASPNETCORE_Vpn__Tailscale__AuthKeyFile:-}}}
+ws_nb_keyfile=${Vpn__Netbird__SetupKeyFile:-${DOTNET_Vpn__Netbird__SetupKeyFile:-${ASPNETCORE_Vpn__Netbird__SetupKeyFile:-}}}
+# The provider the application is configured with (Vpn:Provider, same precedence).
+ws_cfg_provider=${Vpn__Provider:-${DOTNET_Vpn__Provider:-${ASPNETCORE_Vpn__Provider:-}}}
+for ws_prefix in "" DOTNET_ ASPNETCORE_; do
     unset "${ws_prefix}TAILSCALE_AUTHKEY" "${ws_prefix}NETBIRD_SETUP_KEY" "${ws_prefix}TS_AUTHKEY" "${ws_prefix}NB_SETUP_KEY" \
         "${ws_prefix}Vpn__Tailscale__AuthKey" "${ws_prefix}Vpn__Netbird__SetupKey"
 done
@@ -66,7 +70,27 @@ else
     remove_stale_keys "${TMPDIR:-/tmp}"
 fi
 
-ws_provider=$(printf '%s' "$ws_app_provider" | tr '[:upper:]' '[:lower:]')
+# Who brings the VPN up — never both, never neither unless the provider says none (R1-43):
+#   in-app (Whiskers, governed) when Whiskers' provider is tailscale or netbird;
+#   the legacy bring-up below   when VPN_PROVIDER is unset and Whiskers' provider is not tailscale/netbird;
+#   nobody                      when VPN_PROVIDER is set and Whiskers' provider is none (the VPN runs on the host).
+# VPN_PROVIDER is the compose mirror of Vpn__Provider (docker-compose.yml sets Vpn__Provider=${VPN_PROVIDER:-none}, so
+# compose with VPN_PROVIDER unset stays on the legacy path). Set without any Vpn__Provider in the environment, it is
+# handed to Whiskers as Vpn__Provider, so this script and Whiskers decide on the same provider.
+if [ -z "$ws_cfg_provider" ] && [ -n "${VPN_PROVIDER:-}" ]; then
+    ws_cfg_provider=$VPN_PROVIDER
+    Vpn__Provider=$VPN_PROVIDER
+    export Vpn__Provider
+fi
+ws_provider=$(printf '%s' "$ws_cfg_provider" | tr '[:upper:]' '[:lower:]')
+ws_mirror=$(printf '%s' "${VPN_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')
+if [ -n "$ws_mirror" ] && [ "$ws_mirror" != "$ws_provider" ]; then
+    echo "[entrypoint] WARNING: VPN_PROVIDER='$ws_mirror' differs from Vpn__Provider='$ws_provider' — Whiskers uses '$ws_provider'; the legacy bring-up is skipped because VPN_PROVIDER is set." >&2
+fi
+case "$ws_provider" in
+    tailscale|netbird) ws_in_app=1 ;;
+    *) ws_in_app= ;;
+esac
 # Only the in-app provider of that name reads a key; a file named explicitly wins. A key no provider will read is
 # dropped — said on the console, so a provider set only where this script cannot see it (appsettings) is noticed.
 if [ -n "$ws_ts_key" ]; then
@@ -74,7 +98,7 @@ if [ -n "$ws_ts_key" ]; then
         Vpn__Tailscale__AuthKeyFile=$(key_to_file "$ws_ts_key")
         export Vpn__Tailscale__AuthKeyFile
     elif [ "$ws_provider" != "tailscale" ]; then
-        echo "[entrypoint] WARNING: Vpn__Tailscale__AuthKey is set but the VPN provider is '${ws_provider:-unset}' — the key is dropped. Set Vpn__Provider=tailscale (or VPN_PROVIDER) to use it." >&2
+        echo "[entrypoint] WARNING: a Tailscale auth key (Vpn__Tailscale__AuthKey, possibly prefixed) is set but the VPN provider is '${ws_provider:-unset}' — the key is dropped. Set Vpn__Provider=tailscale (or VPN_PROVIDER) to use it." >&2
     fi
 fi
 if [ -n "$ws_nb_key" ]; then
@@ -82,7 +106,7 @@ if [ -n "$ws_nb_key" ]; then
         Vpn__Netbird__SetupKeyFile=$(key_to_file "$ws_nb_key")
         export Vpn__Netbird__SetupKeyFile
     elif [ "$ws_provider" != "netbird" ]; then
-        echo "[entrypoint] WARNING: Vpn__Netbird__SetupKey is set but the VPN provider is '${ws_provider:-unset}' — the key is dropped. Set Vpn__Provider=netbird (or VPN_PROVIDER) to use it." >&2
+        echo "[entrypoint] WARNING: a NetBird setup key (Vpn__Netbird__SetupKey, possibly prefixed) is set but the VPN provider is '${ws_provider:-unset}' — the key is dropped. Set Vpn__Provider=netbird (or VPN_PROVIDER) to use it." >&2
     fi
 fi
 ws_ts_key=
@@ -96,12 +120,10 @@ start_app() {
     exec dotnet Whiskers.dll "$@"
 }
 
-# VPN bring-up is being moved behind the in-app IVpnProvider abstraction (Services/Vpn).
-# When VPN_PROVIDER is set (Vpn__Provider), the app manages the VPN (or it runs on the host /
-# a sidecar for "none"), so this shell skips its legacy Tailscale bring-up. With VPN_PROVIDER
-# unset, existing deployments keep their current behavior unchanged.
-if [ -n "${VPN_PROVIDER:-}" ]; then
-    echo "[entrypoint] VPN_PROVIDER='$VPN_PROVIDER' set — VPN handled in-app, skipping legacy bring-up."
+# The legacy bring-up runs only where the table above says so: not when VPN_PROVIDER is set (the app manages the VPN,
+# or it runs on the host / a sidecar for "none"), and not when Whiskers' own provider is tailscale or netbird.
+if [ -n "${VPN_PROVIDER:-}" ] || [ -n "$ws_in_app" ]; then
+    echo "[entrypoint] VPN provider '${ws_provider:-none}' — VPN handled in-app or outside the container, skipping legacy bring-up."
     start_app "$@"
 fi
 
@@ -113,7 +135,7 @@ if [ -e /sys/class/net/tailscale0 ] && [ "${VPN_FORCE_LEGACY_TAILSCALE:-}" != "1
     start_app "$@"
 fi
 
-# --- Legacy Tailscale bring-up (used when VPN_PROVIDER is unset) ---
+# --- Legacy Tailscale bring-up (VPN_PROVIDER unset and Whiskers' provider not tailscale/netbird) ---
 # This path is the host operator's container start, outside the app: it is not decided or audited by Whiskers'
 # Mutation Gateway (the in-app provider is, R1-43). Start Tailscale daemon in background (state persisted in the
 # data directory, WHISKERS_DATA_DIR, default /app/data).

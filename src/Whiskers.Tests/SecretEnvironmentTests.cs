@@ -134,9 +134,43 @@ public class SecretEnvironmentTests : IDisposable
         {
             var text = File.ReadAllText(file);
             var calls = CountOf(text, "Process.Start(");
-            var withStartInfo = System.Text.RegularExpressions.Regex.Matches(text, @"Process\.Start\(\s*[A-Za-z_]\w*\s*\)").Count;
+            // Round 3 NIT n2: a single variable is not enough (Process.Start(url) builds its own start info) — the file
+            // must declare that name as a ProcessStartInfo (`var x = new ProcessStartInfo` or `ProcessStartInfo x`).
+            var withStartInfo = System.Text.RegularExpressions.Regex.Matches(text, @"Process\.Start\(\s*([A-Za-z_]\w*)\s*\)")
+                .Count(m =>
+                {
+                    var name = System.Text.RegularExpressions.Regex.Escape(m.Groups[1].Value);
+                    return System.Text.RegularExpressions.Regex.IsMatch(text, @"\bvar\s+" + name + @"\s*=\s*(SecretEnvironment\.Scrub\()?new\s+ProcessStartInfo\b")
+                           || System.Text.RegularExpressions.Regex.IsMatch(text, @"\bProcessStartInfo\??\s+" + name + @"\b");
+                });
             Assert.True(calls == withStartInfo,
                 $"{Path.GetRelativePath(root, file)} calls Process.Start with something other than a ProcessStartInfo variable.");
+        }
+    }
+
+    /// <summary>Round 3 (m1): which source wins when the same key is set bare and behind each prefix — measured on the
+    /// builder Program.cs uses. <see cref="SecretEnvironment.ConfigurationPrefixes"/> lists them winner first, and
+    /// <c>entrypoint.sh</c> resolves in that order (pinned in <c>VpnSecretHandlingTests</c>).</summary>
+    [Fact]
+    public void The_prefix_order_is_the_order_in_which_the_configuration_lets_them_win()
+    {
+        const string probe = "WhiskersR143PrecedenceProbe";
+        string[] order = ["", .. SecretEnvironment.ConfigurationPrefixes];   // winner first
+        try
+        {
+            // Each run sets the names from position i onward: the configuration must see the value of position i.
+            for (var i = 0; i < order.Length; i++)
+            {
+                foreach (var prefix in order) Environment.SetEnvironmentVariable(prefix + probe, null);
+                for (var j = i; j < order.Length; j++)
+                    Environment.SetEnvironmentVariable(order[j] + probe, "from-" + (order[j].Length == 0 ? "bare" : order[j]));
+                var seen = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder().Configuration[probe];
+                Assert.Equal("from-" + (order[i].Length == 0 ? "bare" : order[i]), seen);
+            }
+        }
+        finally
+        {
+            foreach (var prefix in order) Environment.SetEnvironmentVariable(prefix + probe, null);
         }
     }
 

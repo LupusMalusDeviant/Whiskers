@@ -72,7 +72,8 @@ services:
       - Agent__ClaudeCode__McpUrl=${AGENT_CLAUDE_CODE_MCP_URL:-http://localhost:8080/mcp}
       - Agent__ClaudeCode__McpKey=${AGENT_CLAUDE_CODE_MCP_KEY:-}
       # Mesh VPN: unset = legacy entrypoint Tailscale bring-up; set to none|tailscale|netbird to use
-      # the in-app provider. VPN_PROVIDER must mirror Vpn__Provider so entrypoint.sh defers correctly.
+      # the in-app provider. VPN_PROVIDER must mirror Vpn__Provider: entrypoint.sh runs exactly one side
+      # (rule table in src/Whiskers/Services/Vpn/README.md).
       # If the host already has tailscale0 (host networking), the legacy bring-up is skipped on its own;
       # VPN_FORCE_LEGACY_TAILSCALE=1 overrides that check.
       - VPN_PROVIDER=${VPN_PROVIDER:-}

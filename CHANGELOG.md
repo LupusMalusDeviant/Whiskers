@@ -29,8 +29,18 @@ All notable changes to Whiskers are documented here. The format follows
   `WHISKERS_SECRET_DIR`) and hands Whiskers only its path (`Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`),
   and drops every key variable — also behind the `ASPNETCORE_` / `DOTNET_` prefixes the configuration reads — before
   it starts its first process, so neither the app nor the long-lived `tailscaled` of the legacy path inherits one. It
-  takes the provider from `Vpn__Provider` (also prefixed) before `VPN_PROVIDER`, as Whiskers does, and warns on the
-  console when it drops a key no provider will read. Whiskers drops them (also prefixed) from its own environment after
+  takes the provider and the keys in the order Whiskers' configuration lets them win (the bare name, then `DOTNET_`,
+  then `ASPNETCORE_`; `VPN_PROVIDER` only when no `Vpn__Provider` is set, and then it is handed to Whiskers as
+  `Vpn__Provider` so both decide alike), and warns on the console when it drops a key no provider will read — expected
+  on a compose start with `VPN_PROVIDER` unset and `TAILSCALE_AUTHKEY` in `.env` (compose passes it as
+  `Vpn__Tailscale__AuthKey`, which only the in-app provider reads) — and when `VPN_PROVIDER` and `Vpn__Provider` differ.
+  **Exactly one side brings the VPN up:** the in-app provider when Whiskers' provider is `tailscale`/`netbird`; the
+  legacy entrypoint bring-up only when `VPN_PROVIDER` is unset and Whiskers' provider is not `tailscale`/`netbird`
+  (before, `Vpn__Provider=tailscale` without `VPN_PROVIDER` — a `docker run`/k8s shape — ran both, the legacy
+  `tailscale up` ungoverned; and `VPN_PROVIDER=tailscale` without `Vpn__Provider` ran neither); nobody when
+  `VPN_PROVIDER` is set and the provider is `none`. Compose is unchanged (it sets `Vpn__Provider=${VPN_PROVIDER:-none}`).
+  A provider given on Whiskers' command line or in the data directory's JSON layers is not visible to the script.
+  Whiskers drops them (also prefixed) from its own environment after
   reading its configuration and removes them from the environment of every process it starts. Only the exact spelling
   is moved by the script: a name in other letter case still reaches Whiskers' own start environment. **New, preferred:**
   `TAILSCALE_AUTHKEY_FILE` / `NETBIRD_SETUP_KEY_FILE` (`Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`) —
