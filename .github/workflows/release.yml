@@ -9,6 +9,7 @@
 #                  already holds exactly these digests, so "Re-run failed jobs" can finish a broken run
 #   publish-chart  push the Helm chart for the same version
 #   github-release per-arch SBOMs, compose files, installer, checksums
+#   move-tags      last: move X.Y and latest, decided from the releases published at that moment
 #
 # Every action is pinned to a full commit SHA (the comment names the release); Dependabot keeps them current.
 # Permissions are granted per job; the workflow itself holds none.
@@ -273,8 +274,8 @@ jobs:
           vuln-type: os,library
           trivyignores: .trivyignore
 
-  # Tag exactly the scanned digests. `X.Y.Z` is immutable (refused if it exists); `X.Y` and `latest` are moving
-  # tags by design and follow the newest release of their line.
+  # Tag exactly the scanned digests. `X.Y.Z` is immutable (refused if it exists); the moving tags `X.Y` and `latest`
+  # are moved by the last job, move-tags.
   publish-image:
     needs: [prepare, test, build, scan]
     runs-on: ubuntu-latest
@@ -302,7 +303,7 @@ jobs:
 
       # A version that exists with other content is refused. One that already holds exactly the scanned digests
       # is the same run being finished ("Re-run failed jobs" after e.g. a Sigstore outage): it is not re-tagged,
-      # and the signing and moving-tag steps below are idempotent.
+      # and the signing step below is idempotent.
       - name: Refuse an already-published image version (unless it is this run's content)
         id: existing
         env:
@@ -502,7 +503,7 @@ jobs:
           TAGS=()
           if [ "$LINE_TOP" = "v${VER}" ]; then TAGS+=("${IMAGE}:${MINOR}"); else echo "${MINOR} stays at ${LINE_TOP}"; fi
           if [ "$TOP" = "v${VER}" ]; then TAGS+=("${IMAGE}:latest"); else echo "latest stays at ${TOP}"; fi
-          for t in "${TAGS[@]}"; do
+          for t in ${TAGS[@]+"${TAGS[@]}"}; do
             docker buildx imagetools create -t "$t" "${IMAGE}@${DIGEST}"
             GOT="$(docker buildx imagetools inspect "$t" --format '{{json .Manifest}}' | jq -er .digest)"
             if [ "$GOT" != "$DIGEST" ]; then echo "::error::${t} points to ${GOT}, expected ${DIGEST}"; exit 1; fi

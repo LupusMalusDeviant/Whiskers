@@ -167,6 +167,9 @@ public class ReleaseWorkflowTests
     [InlineData("          ref: refs/tags/${{ steps.tag.outputs.tag }}", "          ref: ${{ github.ref }}")]
     [InlineData("if [ \"$GITHUB_REF\" != \"refs/tags/${TAG}\" ]; then", "if false; then")] // dispatch from any ref
     [InlineData("CSPROJ_VER=", "IGNORED_VER=")] // tag no longer compared with the csproj version
+    [InlineData("      packages: write   # move X.Y and latest in GHCR\n    steps:",
+                "      packages: write   # move X.Y and latest in GHCR\n    env:\n      PUSH_LATEST: ${{ needs.prepare.outputs.push_latest }}\n    steps:")] // a frozen decision at job level
+    [InlineData("--limit 1000 --exclude-drafts --exclude-pre-releases --json tagName", "--limit 1000 --exclude-pre-releases --json tagName")] // a draft holds latest back
     [InlineData("    needs: [prepare, test, build, scan, publish-image, publish-chart, github-release]\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read    # list",
                 "    needs: [prepare, test, build, scan, publish-image, publish-chart]\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read    # list")] // tags move before the GitHub release exists
     [InlineData("          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          # The moving tags",
@@ -576,19 +579,18 @@ internal static class WorkflowPolicy
         {
             var (moveJob, moveStep) = moveSteps[0];
             var moveRun = Scalar(Child(moveStep, "run"))!;
-            if (!moveRun.Contains("gh release list") || moveRun.Contains("git tag -l"))
+            if (!moveRun.Contains("gh release list") || !moveRun.Contains("--exclude-drafts") || !moveRun.Contains("--exclude-pre-releases")
+                || moveRun.Contains("git tag -l"))
                 violations.Add("`latest` and X.Y are not decided from the published releases in the step that moves them");
             var release = JobsUsing(jobs, "softprops/action-gh-release@").FirstOrDefault() ?? "github-release";
             if (!Needs(jobs[moveJob]).Contains(release))
                 violations.Add($"X.Y and latest move in '{moveJob}', which does not wait for the GitHub release ('{release}')");
-            // Only the version, its line and the published digest may come from earlier jobs — not a decision.
-            var inputs = Child(moveStep, "env") is YamlMappingNode env
-                ? env.Children.Values.Select(Scalar).OfType<string>()
-                    .SelectMany(v => Regex.Matches(v, @"needs\.([\w-]+)\.outputs\.([\w-]+)").Select(m => $"{m.Groups[1].Value}.{m.Groups[2].Value}"))
-                    .ToList()
-                : [];
+            // Only the version, its line and the published digest may come from earlier jobs — not a decision. The whole
+            // job is searched (job env, every step's env, with and run), so a decision handed in another way is caught too.
+            var inputs = Regex.Matches(JobText(jobs[moveJob]), @"needs\.([\w-]+)\.outputs\.([\w-]+)")
+                .Select(m => $"{m.Groups[1].Value}.{m.Groups[2].Value}").Distinct();
             foreach (var input in inputs.Except(["prepare.ver", "prepare.minor", "publish-image.digest"]))
-                violations.Add($"the move step takes '{input}' from an earlier job, so a re-run replays it");
+                violations.Add($"the move job takes '{input}' from an earlier job, so a re-run replays it");
         }
 
         return violations;
@@ -747,6 +749,15 @@ internal static class WorkflowPolicy
         => node is YamlMappingNode m && m.Children.TryGetValue(new YamlScalarNode(key), out var v) ? v : null;
 
     private static string? Scalar(YamlNode? node) => (node as YamlScalarNode)?.Value;
+
+    /// <summary>Every scalar in a job, keys and values, joined: what a text search over the job should see.</summary>
+    private static string JobText(YamlNode node) => node switch
+    {
+        YamlScalarNode s => s.Value ?? "",
+        YamlMappingNode m => string.Join("\n", m.Children.SelectMany(c => new[] { JobText(c.Key), JobText(c.Value) })),
+        YamlSequenceNode q => string.Join("\n", q.Children.Select(JobText)),
+        _ => "",
+    };
 
     private static IEnumerable<(string Id, YamlMappingNode Job)> Jobs(YamlMappingNode root)
         => (Child(root, "jobs") as YamlMappingNode)?.Children
