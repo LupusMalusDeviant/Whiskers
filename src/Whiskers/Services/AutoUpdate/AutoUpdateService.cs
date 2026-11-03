@@ -313,7 +313,9 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 catch (Exception nex) { _logger.LogWarning(nex, "Auto-update failure notification failed for {Container}", container.Name); }
             }
 
-            await db.SaveChangesAsync(ct);
+            // Not cancellable: an attempt that ended — also one that finished after the drain budget, while Whiskers stops —
+            // is recorded with its result, never left open to be reported as interrupted at the next start.
+            await db.SaveChangesAsync(CancellationToken.None);
         }
     }
 

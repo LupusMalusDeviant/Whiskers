@@ -187,6 +187,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
                       ?? (ct.IsCancellationRequested ? NightCancelled : null);
         if (state.Error is { } error && LastCycle is { } last && last.StartedAt >= now && last.Error is null)
             LastCycle = last with { Error = error };
+        // A night that did not run says why now, as it does after a restart (LoadNightlyAsync).
+        if (refused is not null && (LastCycle is null || LastCycle.StartedAt < now))
+            LastCycle = new(now, state.CompletedAt, state.DryRun, [], [], state.Error);
         await SaveNightlyAsync(state);
     }
 

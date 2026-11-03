@@ -151,6 +151,7 @@ public sealed class MutationShutdownTests : IDisposable
         Assert.Equal(InterruptedWorkReconciler.InterruptedResult, task.LastResult);
         var note = Assert.Single(notifications.Events);
         Assert.Equal("operations_interrupted", note.EventType);
+        Assert.Equal("Warning", Whiskers.Services.Notifications.NotificationFormatter.Describe(note).Severity);
         Assert.Contains("t1", note.ImageInfo);
         Assert.Equal(1, executor.Ran.Count);                  // nothing ran it again
 
@@ -263,6 +264,7 @@ public sealed class MutationShutdownTests : IDisposable
         await first.LoadNightlyAsync();
         Assert.True(AutoPatchService.IsDue(settings, night, first.LastNightlyRun));
         await first.RunNightlyRecordedAsync(CancellationToken.None);
+        Assert.StartsWith("Not run", first.LastCycle!.Error);       // why it did nothing, already before a restart
 
         var restarted = AutoPatchTests.NewService(new AutoPatchTests.RecordingRunner(), new CveFindingsStore(persistPath: AutoPatchTests.TempPath()),
             settings, new MemoryAutomationOwners(), () => night.AddMinutes(5), new AutoPatchNightlyStore(paths), Drain());

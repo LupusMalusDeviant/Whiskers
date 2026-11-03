@@ -26,7 +26,7 @@ All notable changes to Whiskers are documented here. The format follows
 - R1-39: **A stop lets running work finish; what a hard stop cuts off is reported, not repeated.** (Adds the nullable
   `ProcessInstance` column to `TaskRunHistory` and `UpdateHistory`; additive migration, applied at start.) When Whiskers
   stops, no scheduled task, AutoUpdate or AutoPatch container is started any more, and what is already running gets
-  up to 30 s to finish (the host's shutdown budget is now 45 s; Compose `stop_grace_period` and Helm
+  up to 30 s to finish (the host's shutdown budget is now 45 s; Compose `stop_grace_period` (also in the file the installer writes) and Helm
   `terminationGracePeriodSeconds` are 60 s so the container is not killed first). A task that falls due during the
   stop stays due and runs once after the restart; "Run now" is refused while Whiskers stops or while the task already
   runs. Every scheduled run is on record before it starts (in the same save that consumes its occurrence); a run that a

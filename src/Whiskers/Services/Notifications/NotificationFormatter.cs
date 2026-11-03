@@ -50,6 +50,7 @@ public static class NotificationFormatter
         "log_scan_resumed" => ("Log scan resumed for this container", "Info"),
         "server_throttled" => ("Whiskers paused its own calls to this server", "Warning"),
         "server_throttling_ended" => ("Whiskers resumed calls to this server", "Info"),
+        "operations_interrupted" => ("Work was cut off by a stop: check its targets", "Warning"),
         _ when e.EventType.StartsWith("log_alert", StringComparison.Ordinal) => ("Log alert / error in log", "Warning"),
         _ => (e.EventType, "Info"),
     };

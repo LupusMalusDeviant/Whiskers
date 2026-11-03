@@ -204,6 +204,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         catch (Exception ex)
         {
             _logger.LogError(ex, "Scheduled task {TaskId} failed", taskId);
+            await TryCloseFailedRunAsync(runId, ex);
         }
         finally
         {
@@ -224,7 +225,26 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         ProcessInstance = Whiskers.Services.Mutations.ProcessIdentity.Current,
     };
 
-    /// <summary>Records the end of a run opened by <see cref="OpenRunAsync"/>, together with the tracked task's
+    /// <summary>A run whose record could not be finished normally (the database failed while it was read or closed) is
+    /// closed as failed, best effort and in a scope of its own — it was not cut off by a stop, so the next start must not
+    /// report it as interrupted. A second failure is only logged.</summary>
+    private async Task TryCloseFailedRunAsync(long runId, Exception failure)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var run = await db.TaskRunHistory.FirstOrDefaultAsync(r => r.Id == runId);
+            if (run is null || run.CompletedAt is not null) return;
+            await CloseRunAsync(db, runId, false, $"The run's result could not be recorded: {failure.Message}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The failed run {RunId} could not be closed; the next start reports it as interrupted", runId);
+        }
+    }
+
+    /// <summary>Records the end of a run opened by <see cref="NewRun"/>, together with the tracked task's
     /// result. Not cancellable: a run that ended is recorded as such, also while Whiskers is stopping.</summary>
     private static async Task CloseRunAsync(MetricsDbContext db, long runId, bool success, string output)
     {
@@ -348,6 +368,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         using var draining = _drain.TryEnter($"scheduled task '{task.Name}' (run now)");
         if (draining is null) return (false, ShuttingDownResult);
         if (!_running.TryAdd(task.TaskId, 0)) return (false, AlreadyRunningResult);
+        long? runId = null;
         try
         {
             // On record before it runs, together with its start: a run a stop cuts off is reported as interrupted at
@@ -358,12 +379,19 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
             db.TaskRunHistory.Add(run);
             await db.SaveChangesAsync();
 
+            runId = run.Id;
+
             var (success, output) = await _executor.ExecuteAsync(task);
 
             task.LastResult = success ? output : $"FEHLER: {output}";
             task.LastSuccess = success;
             await CloseRunAsync(db, run.Id, success, output);
             return (success, output);
+        }
+        catch (Exception ex) when (runId is { } opened)
+        {
+            await TryCloseFailedRunAsync(opened, ex);
+            throw;
         }
         finally
         {
