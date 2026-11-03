@@ -135,14 +135,30 @@ public class ReleaseWorkflowTests
     [InlineData("TAG=\"$INPUT_TAG\"", "TAG=\"${{ inputs.tag }}\"")]
     [InlineData("TAG=\"$INPUT_TAG\"", "TAG=\"${{ github.event.inputs.tag }}\"")]
     [InlineData("TAG=\"$INPUT_TAG\"", "TAG=\"${{github.event.head_commit.message}}\"")]
-    public void An_interpolated_input_in_a_script_is_caught(string from, string to)
+    [InlineData("TAG=\"$INPUT_TAG\"", "TAG=\"${{ github.ref_name }}\"")]
+    [InlineData("helm lint deploy/helm/whiskers", "helm lint deploy/helm/whiskers --version ${{ needs.prepare.outputs.ver }}")]
+    public void An_interpolated_expression_in_a_script_is_caught(string from, string to)
         => Assert.NotEmpty(WorkflowPolicy.UnsafeRunInterpolations(Mutate(Workflow("release.yml"), from, to)));
+
+    [Theory]
+    [InlineData("ci.yml")]
+    [InlineData("chart-ci.yml")]
+    [InlineData("release.yml")]
+    public void No_step_output_is_written_from_an_unchecked_command_substitution(string file)
+        => Assert.Empty(WorkflowPolicy.SwallowedOutputFailures(Workflow(file)));
+
+    [Fact]
+    public void A_step_output_written_from_a_command_substitution_is_caught()
+        => Assert.NotEmpty(WorkflowPolicy.SwallowedOutputFailures(Mutate(Workflow("release.yml"),
+            "echo \"amd64_image=${AMD64_IMAGE}\" >> \"$GITHUB_OUTPUT\"",
+            "echo \"amd64_image=$(image_digest \"$AMD64_INDEX\" amd64)\" >> \"$GITHUB_OUTPUT\"")));
 
     [Theory]
     [InlineData("    needs: [prepare, test, build, scan]", "    needs: [prepare, build, scan]")]         // publish-image without tests
     [InlineData("    needs: [prepare, test, build, scan]", "    needs: [prepare, test, build]")]         // publish-image without scan
     [InlineData("    needs: [prepare, test, scan, publish-image]", "    needs: [prepare, test, publish-image]")]
-    [InlineData("    needs: [prepare, test, scan, publish-image, publish-chart]", "    needs: [prepare, scan, publish-image, publish-chart]")]
+    [InlineData("    needs: [prepare, test, build, scan, publish-image, publish-chart]", "    needs: [prepare, build, scan, publish-image, publish-chart]")]
+    [InlineData("PUBLISHED=\"$(gh release list", "PUBLISHED=\"$(git tag -l 'v*'; true) #")] // latest from git tags, not published releases
     [InlineData("    needs: [prepare, test]\n    runs-on", "    needs: [prepare]\n    runs-on")]       // build before tests
     [InlineData("      ref: ${{ needs.prepare.outputs.sha }}\n\n  # Build each", "      ref: ${{ github.sha }}\n\n  # Build each")] // tests on another commit
     [InlineData("      - name: Checkout the tag commit\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ needs.prepare.outputs.sha }}\n\n      - name: Set up QEMU",
@@ -190,9 +206,15 @@ public class ReleaseWorkflowTests
     }
 
     [Theory]
-    [InlineData("run: bash .github/scripts/assert-not-published.sh image \"${IMAGE}:${VER}\"", "run: echo skipped")]
+    [InlineData("run: bash .github/scripts/assert-not-published.sh image-matching \"${IMAGE}:${VER}\" \"${AMD64_IMAGE}\" \"${ARM64_IMAGE}\"", "run: echo skipped")]
+    [InlineData("run: bash .github/scripts/assert-not-published.sh image-matching \"${IMAGE}:${VER}\" \"${AMD64_IMAGE}\" \"${ARM64_IMAGE}\"", "run: bash .github/scripts/assert-not-published.sh image-matching \"${IMAGE}:${VER}\" \"${AMD64_INDEX}\" \"${ARM64_IMAGE}\"")]
     [InlineData("run: bash .github/scripts/assert-not-published.sh chart \"${CHART}\" \"${VER}\"", "run: echo skipped")]
     [InlineData("run: bash .github/scripts/assert-not-published.sh release \"${TAG}\"", "run: echo skipped")]
+    [InlineData("if [ \"$STATE\" = \"absent\" ]; then", "if true; then")]                       // re-tags an existing version
+    [InlineData("          STATE: ${{ steps.existing.outputs.state }}\n", "")]                  // state of the check not used
+    [InlineData("bash .github/scripts/assert-not-published.sh image \"${IMAGE}:${VER}\"\n", "true\n")] // prepare no longer strict
+    [InlineData("bash .github/scripts/assert-not-published.sh image \"${IMAGE}:${VER}\"\n",
+                "bash .github/scripts/assert-not-published.sh image-matching \"${IMAGE}:${VER}\" x y\n")] // fresh run accepts an existing version
     public void A_missing_existence_check_is_caught(string from, string to)
         => Assert.NotEmpty(WorkflowPolicy.ImmutabilityViolations(Mutate(Workflow("release.yml"), from, to)));
 
@@ -227,6 +249,126 @@ public class ReleaseWorkflowTests
         Assert.Empty(WorkflowPolicy.TrivyIgnoreViolations(withEntry));
     }
 
+    // ---- assert-not-published.sh, run against stub docker/helm/gh ------------------------------------------------
+
+    private const string Amd = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    private const string Arm = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    private const string Att = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+
+    private static string Index(params (string Os, string Arch, string Digest)[] manifests)
+        => "{\"manifests\":[" + string.Join(",", manifests.Select(m =>
+            $"{{\"digest\":\"{m.Digest}\",\"platform\":{{\"os\":\"{m.Os}\",\"architecture\":\"{m.Arch}\"}}}}")) + "]}";
+
+    public static TheoryData<string, int, string, string, int, string?> ScriptCases() => new()
+    {
+        // kind, stub exit code, stub stderr, stub --raw output, expected exit code, expected stdout fragment
+        { "image", 0, "", "", 1, null },                                                          // exists
+        { "image", 1, "ERROR: ghcr.io/o/whiskers:9.9.9: not found", "", 0, "not published yet" },  // registry: absent
+        { "image", 1, "ERROR: manifest unknown", "", 0, "not published yet" },
+        { "image", 1, "denied: permission_denied: read_package", "", 1, null },                  // auth error
+        { "image", 127, "docker: command not found", "", 1, null },                             // tool missing
+        { "image", 1, "error getting credentials - err: exec: \"docker-credential-x\": executable file not found in $PATH", "", 1, null },
+        { "image", 1, "Get \"https://ghcr.io/v2/\": dial tcp: lookup ghcr.io: no such host", "", 1, null }, // outage
+        { "chart", 0, "", "", 1, null },
+        { "chart", 1, "Error: ghcr.io/o/charts/whiskers:9.9.9: not found", "", 0, "not published yet" },
+        { "chart", 1, "Error: unexpected status from HEAD request: 500", "", 1, null },
+        { "release", 0, "", "", 1, null },
+        { "release", 1, "release not found", "", 0, "not published yet" },
+        { "release", 1, "HTTP 401: Bad credentials", "", 1, null },
+        { "release", 126, "gh: Permission denied", "", 1, null },
+        // image-matching: absent, identical (attestations ignored), different content, extra platform, broken probe
+        { "image-matching", 1, "ERROR: ghcr.io/o/whiskers:9.9.9: not found", "", 0, "state=absent" },
+        { "image-matching", 0, "", Index(("linux", "amd64", Amd), ("linux", "arm64", Arm), ("unknown", "unknown", Att)), 0, "state=identical" },
+        { "image-matching", 0, "", Index(("linux", "arm64", Arm), ("linux", "amd64", Amd)), 0, "state=identical" },
+        { "image-matching", 0, "", Index(("linux", "amd64", Amd), ("linux", "arm64", Att)), 1, null },
+        { "image-matching", 0, "", Index(("linux", "amd64", Amd)), 1, null },
+        { "image-matching", 0, "", Index(("linux", "amd64", Amd), ("linux", "arm64", Arm), ("linux", "riscv64", Att)), 1, null },
+        { "image-matching", 127, "docker: command not found", "", 1, null },
+    };
+
+    [SkippableTheory]
+    [MemberData(nameof(ScriptCases))]
+    public void The_existence_check_fails_closed(string kind, int stubExit, string stubStderr, string stubRaw, int expectedExit, string? expectedOutput)
+    {
+        var bash = FindBash();
+        Skip.If(bash is null, "no bash available to run .github/scripts/assert-not-published.sh");
+        if (kind == "image-matching")
+            Skip.If(RunBash(bash!, ["-c", "command -v jq"], new Dictionary<string, string?>()).Exit != 0, "jq is not installed");
+
+        var stubDir = Directory.CreateTempSubdirectory("whiskers-stub-");
+        try
+        {
+            const string stub = "#!/bin/bash\nfor a in \"$@\"; do if [ \"$a\" = \"--raw\" ]; then printf '%s' \"$STUB_RAW\"; exit 0; fi; done\nprintf '%s\\n' \"$STUB_OUT\" >&2\nexit \"$STUB_RC\"\n";
+            foreach (var tool in new[] { "docker", "helm", "gh" })
+            {
+                var path = Path.Combine(stubDir.FullName, tool);
+                File.WriteAllText(path, stub);
+                if (!OperatingSystem.IsWindows())
+                    File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            string[] args = kind switch
+            {
+                "image" => ["ghcr.io/o/whiskers:9.9.9"],
+                "chart" => ["oci://ghcr.io/o/charts/whiskers", "9.9.9"],
+                "release" => ["v9.9.9"],
+                _ => ["ghcr.io/o/whiskers:9.9.9", Amd, Arm],
+            };
+            var script = Path.Combine(RepoRoot(), ".github", "scripts", "assert-not-published.sh").Replace('\\', '/');
+            var env = new Dictionary<string, string?>
+            {
+                ["PATH"] = stubDir.FullName + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"),
+                ["STUB_RC"] = stubExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["STUB_OUT"] = stubStderr,
+                ["STUB_RAW"] = stubRaw,
+                ["GITHUB_REPOSITORY"] = "o/r",
+                ["GITHUB_OUTPUT"] = null, // never write into the real step output when this runs inside CI
+            };
+            var (exit, output) = RunBash(bash!, [script, kind, .. args], env);
+
+            Assert.True(expectedExit == exit, $"exit {exit}, expected {expectedExit}; output:\n{output}");
+            if (expectedOutput is not null) Assert.Contains(expectedOutput, output);
+        }
+        finally
+        {
+            stubDir.Delete(recursive: true);
+        }
+    }
+
+    private static string? FindBash()
+    {
+        if (!OperatingSystem.IsWindows()) return File.Exists("/bin/bash") ? "/bin/bash" : null;
+        // Git for Windows; System32\bash.exe would be WSL, which does not see these paths.
+        foreach (var root in new[] { Environment.GetEnvironmentVariable("ProgramFiles"), Environment.GetEnvironmentVariable("ProgramW6432") })
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            var candidate = Path.Combine(root, "Git", "bin", "bash.exe");
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    private static (int Exit, string Output) RunBash(string bash, string[] args, Dictionary<string, string?> env)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(bash)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        foreach (var (key, value) in env)
+        {
+            if (value is null) psi.Environment.Remove(key);
+            else psi.Environment[key] = value;
+        }
+        using var process = System.Diagnostics.Process.Start(psi)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(30_000)) { process.Kill(entireProcessTree: true); throw new TimeoutException("bash did not finish"); }
+        return (process.ExitCode, stdout.Result + stderr.Result);
+    }
+
     // ---- helpers -----------------------------------------------------------------------------------------------
 
     private static string Mutate(string text, string from, string to)
@@ -257,7 +399,8 @@ internal static class WorkflowPolicy
     private static readonly Regex FullShaPin = new(@"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$", RegexOptions.CultureInvariant);
     private static readonly Regex UsesLine = new(@"^\s*(?:-\s+)?uses:\s*(?<value>\S+)(?<rest>.*)$", RegexOptions.CultureInvariant);
     private static readonly Regex VersionComment = new(@"^\s+#\s*v\d+(\.\d+)*\s*$", RegexOptions.CultureInvariant);
-    private static readonly Regex UnsafeExpression = new(@"\$\{\{\s*(inputs\.|github\.event\.|github\.head_ref)", RegexOptions.CultureInvariant);
+    // No expression at all inside a shell script: event data, refs and step/job outputs reach scripts via env: only.
+    private static readonly Regex UnsafeExpression = new(@"\$\{\{[^\n]*?(\}\}|$)", RegexOptions.CultureInvariant | RegexOptions.Multiline);
     private static readonly Regex TrivyIgnoreEntry = new(@"^\S+\s+exp:\d{4}-\d{2}-\d{2}$", RegexOptions.CultureInvariant);
     private static readonly Regex ReasonLine = new(@"^#\s*reason:\s*\S", RegexOptions.CultureInvariant);
 
@@ -338,7 +481,18 @@ internal static class WorkflowPolicy
     public static IReadOnlyList<string> UnsafeRunInterpolations(string yaml)
         => RunScripts(yaml)
             .Where(run => UnsafeExpression.IsMatch(run))
-            .Select(run => $"a run script interpolates an event/input expression directly: {UnsafeExpression.Match(run).Value}")
+            .Select(run => $"a run script interpolates an expression directly (pass it via env:): {UnsafeExpression.Match(run).Value}")
+            .ToList();
+
+    /// <summary>
+    /// <c>echo "x=$(cmd)" &gt;&gt; "$GITHUB_OUTPUT"</c> exits 0 even when <c>cmd</c> fails and writes an empty
+    /// output; the failure then surfaces in a later job. Assign first (set -e aborts), then write.
+    /// </summary>
+    public static IReadOnlyList<string> SwallowedOutputFailures(string yaml)
+        => RunScripts(yaml)
+            .SelectMany(run => run.Split('\n'))
+            .Where(line => line.Contains("$(", StringComparison.Ordinal) && line.Contains("GITHUB_OUTPUT", StringComparison.Ordinal))
+            .Select(line => $"a step output is written from an unchecked command substitution: {line.Trim()}")
             .ToList();
 
     // ---- release gates ----
@@ -404,6 +558,8 @@ internal static class WorkflowPolicy
             if (!prepareRuns.Contains(required)) violations.Add($"the prepare job does not verify '{required}'");
         if (!Regex.IsMatch(prepareRuns, @"CSPROJ_VER=") || !Regex.IsMatch(prepareRuns, @"CHART_VER="))
             violations.Add("the prepare job does not compare the tag with the csproj and chart versions");
+        if (!prepareRuns.Contains("gh release list") || prepareRuns.Contains("git tag -l"))
+            violations.Add("`latest` is not decided from the published releases");
 
         return violations;
     }
@@ -482,13 +638,23 @@ internal static class WorkflowPolicy
     {
         var jobs = Jobs(Parse(releaseYaml)).ToList();
         var violations = new List<string>();
-        (string Kind, Func<YamlMappingNode, bool> IsPush)[] artifacts =
+
+        // A fresh run refuses every existing version strictly, before anything is built.
+        var prepare = jobs.FirstOrDefault(j => j.Id == "prepare").Job;
+        var prepareRuns = prepare is null ? "" : string.Join("\n", Steps(prepare).Select(s => Scalar(Child(s, "run"))).OfType<string>());
+        foreach (var kind in new[] { "image", "chart", "release" })
+            if (!prepareRuns.Contains($"assert-not-published.sh {kind} "))
+                violations.Add($"the prepare job does not strictly refuse an already-published {kind}");
+
+        // Right before each push, the publishing job checks again. The image check accepts only an X.Y.Z that
+        // already holds exactly the scanned digests (finishing a broken run), never other content.
+        (string Kind, string Check, Func<YamlMappingNode, bool> IsPush)[] artifacts =
         [
-            ("image", s => Scalar(Child(s, "run"))?.Contains("imagetools create -t \"${IMAGE}:${VER}\"") == true),
-            ("chart", s => Scalar(Child(s, "run"))?.Contains("helm push") == true),
-            ("release", s => Scalar(Child(s, "uses"))?.StartsWith("softprops/action-gh-release@") == true),
+            ("image", "image-matching", s => Scalar(Child(s, "run"))?.Contains("imagetools create -t \"${IMAGE}:${VER}\"") == true),
+            ("chart", "chart", s => Scalar(Child(s, "run"))?.Contains("helm push") == true),
+            ("release", "release", s => Scalar(Child(s, "uses"))?.StartsWith("softprops/action-gh-release@") == true),
         ];
-        foreach (var (kind, isPush) in artifacts)
+        foreach (var (kind, check, isPush) in artifacts)
         {
             var pushes = jobs.Where(j => Steps(j.Job).Any(isPush)).ToList();
             if (pushes.Count == 0) violations.Add($"no step publishes the {kind}");
@@ -496,12 +662,30 @@ internal static class WorkflowPolicy
             {
                 var steps = Steps(job).ToList();
                 var pushAt = steps.FindIndex(s => isPush(s));
-                var checkAt = steps.FindIndex(s => Scalar(Child(s, "run"))?.Contains($"assert-not-published.sh {kind} ") == true);
-                if (checkAt < 0) violations.Add($"job '{id}' publishes the {kind} without checking that the version does not exist");
-                else if (checkAt > pushAt) violations.Add($"job '{id}' checks the {kind} only after publishing it");
+                var checkAt = steps.FindIndex(s => Scalar(Child(s, "run"))?.Contains($"assert-not-published.sh {check} ") == true);
+                if (checkAt < 0) { violations.Add($"job '{id}' publishes the {kind} without checking that the version does not exist"); continue; }
+                if (checkAt > pushAt) violations.Add($"job '{id}' checks the {kind} only after publishing it");
+                if (kind == "image") violations.AddRange(ImageCheckViolations(id, steps[checkAt], steps[pushAt]));
             }
         }
         return violations;
+    }
+
+    private static IEnumerable<string> ImageCheckViolations(string job, YamlMappingNode check, YamlMappingNode push)
+    {
+        var run = Scalar(Child(check, "run")) ?? "";
+        var env = Child(check, "env");
+        if (!run.Contains("\"${AMD64_IMAGE}\" \"${ARM64_IMAGE}\"")
+            || Scalar(Child(env, "AMD64_IMAGE"))?.Contains(".outputs.amd64_image") != true
+            || Scalar(Child(env, "ARM64_IMAGE"))?.Contains(".outputs.arm64_image") != true)
+            yield return $"job '{job}' does not compare an existing image with the scanned amd64/arm64 digests";
+
+        var checkId = Scalar(Child(check, "id"));
+        var state = Scalar(Child(Child(push, "env"), "STATE")) ?? "";
+        if (checkId is null || !Regex.IsMatch(state, $@"^\$\{{\{{\s*steps\.{Regex.Escape(checkId)}\.outputs\.state\s*\}}\}}$"))
+            yield return $"job '{job}' does not take the result of its existence check into the publish step";
+        if (!Regex.IsMatch(Scalar(Child(push, "run")) ?? "", @"if \[ ""\$STATE"" = ""absent"" \]; then\s*\n\s*docker buildx imagetools create -t"))
+            yield return $"job '{job}' tags X.Y.Z even when the version already exists";
     }
 
     // ---- .trivyignore ----

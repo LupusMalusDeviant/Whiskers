@@ -5,9 +5,10 @@
 #   test           the full CI suite (ci.yml via workflow_call) on the tag commit
 #   build          build amd64 and arm64 ONCE each and stage them in GHCR untagged, by digest
 #   scan           Trivy gate on both staged digests (any CRITICAL fails; exceptions only via .trivyignore)
-#   publish-image  tag exactly the scanned digests (no rebuild), verify, cosign-sign
+#   publish-image  tag exactly the scanned digests (no rebuild), verify, cosign-sign; accepts an X.Y.Z that
+#                  already holds exactly these digests, so "Re-run failed jobs" can finish a broken run
 #   publish-chart  push the Helm chart for the same version
-#   github-release SBOM, compose files, installer, checksums
+#   github-release per-arch SBOMs, compose files, installer, checksums
 #
 # Every action is pinned to a full commit SHA (the comment names the release); Dependabot keeps them current.
 # Permissions are granted per job; the workflow itself holds none.
@@ -26,6 +27,8 @@ on:
 permissions: {}
 
 # One release at a time: the "not yet published" checks and the pushes must not interleave with another run.
+# GitHub keeps at most ONE pending run per group: a third run cancels the older pending one (shown as
+# "cancelled"); start that tag again by hand (see deploy/README.md).
 concurrency:
   group: release
   cancel-in-progress: false
@@ -85,6 +88,7 @@ jobs:
         id: verify
         env:
           TAG: ${{ steps.tag.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
@@ -100,14 +104,18 @@ jobs:
               echo "::error::${pair%%=*} is '${pair#*=}', the tag says ${VER}"; exit 1
             fi
           done
-          # `latest` (moving) only follows the highest release; a hotfix for an older line never moves it back.
-          HIGHEST="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
+          # `latest` (moving) only follows the highest PUBLISHED release (GitHub releases, which this workflow
+          # creates last), not the highest git tag: a tag whose release failed never holds `latest` back, and a
+          # hotfix for an older line never moves it back.
+          PUBLISHED="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName')"
+          HIGHEST="$(printf '%s\n%s\n' "$PUBLISHED" "$TAG" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
           PUSH_LATEST=false
           if [ "$HIGHEST" = "$TAG" ]; then PUSH_LATEST=true; fi
+          MINOR="$(printf '%s' "$VER" | cut -d. -f1-2)"
           {
             echo "sha=${SHA}"
             echo "ver=${VER}"
-            echo "minor=$(printf '%s' "$VER" | cut -d. -f1-2)"
+            echo "minor=${MINOR}"
             echo "push_latest=${PUSH_LATEST}"
           } >> "$GITHUB_OUTPUT"
 
@@ -220,8 +228,14 @@ jobs:
               printf '%s' "$1"
             fi
           }
-          echo "amd64_image=$(image_digest "$AMD64_INDEX" amd64)" >> "$GITHUB_OUTPUT"
-          echo "arm64_image=$(image_digest "$ARM64_INDEX" arm64)" >> "$GITHUB_OUTPUT"
+          # Assign first (set -e aborts here on a failed lookup), then write: an empty output must never leave the job.
+          AMD64_IMAGE="$(image_digest "$AMD64_INDEX" amd64)"
+          ARM64_IMAGE="$(image_digest "$ARM64_INDEX" arm64)"
+          for d in "$AMD64_IMAGE" "$ARM64_IMAGE"; do
+            if ! printf '%s' "$d" | grep -Eq '^sha256:[0-9a-f]{64}$'; then echo "::error::unexpected digest '${d}'"; exit 1; fi
+          done
+          echo "amd64_image=${AMD64_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "arm64_image=${ARM64_IMAGE}" >> "$GITHUB_OUTPUT"
 
   # GATE: scan both staged images by digest; any CRITICAL fails the run before anything is tagged.
   # There is no blanket `ignore-unfixed`: an unfixed CRITICAL fails too, unless it is recorded with a reason and
@@ -296,15 +310,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Refuse an already-published image version
+      # A version that exists with other content is refused. One that already holds exactly the scanned digests
+      # is the same run being finished ("Re-run failed jobs" after e.g. a Sigstore outage): it is not re-tagged,
+      # and the signing and moving-tag steps below are idempotent.
+      - name: Refuse an already-published image version (unless it is this run's content)
+        id: existing
         env:
           VER: ${{ needs.prepare.outputs.ver }}
-        run: bash .github/scripts/assert-not-published.sh image "${IMAGE}:${VER}"
+          AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}
+          ARM64_IMAGE: ${{ needs.build.outputs.arm64_image }}
+        run: bash .github/scripts/assert-not-published.sh image-matching "${IMAGE}:${VER}" "${AMD64_IMAGE}" "${ARM64_IMAGE}"
 
       - name: Tag the scanned digests and verify
         id: publish
         env:
           VER: ${{ needs.prepare.outputs.ver }}
+          STATE: ${{ steps.existing.outputs.state }}
           AMD64_INDEX: ${{ needs.build.outputs.amd64_index }}
           ARM64_INDEX: ${{ needs.build.outputs.arm64_index }}
           AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}
@@ -313,7 +334,11 @@ jobs:
           set -euo pipefail
           # Merge the two staged per-arch indexes (with their attestations) into one multi-arch index.
           # This only references the existing manifests by digest; nothing is rebuilt.
-          docker buildx imagetools create -t "${IMAGE}:${VER}" "${IMAGE}@${AMD64_INDEX}" "${IMAGE}@${ARM64_INDEX}"
+          if [ "$STATE" = "absent" ]; then
+            docker buildx imagetools create -t "${IMAGE}:${VER}" "${IMAGE}@${AMD64_INDEX}" "${IMAGE}@${ARM64_INDEX}"
+          elif [ "$STATE" != "identical" ]; then
+            echo "::error::unexpected existence state '${STATE}'"; exit 1
+          fi
           RAW="$(docker buildx imagetools inspect --raw "${IMAGE}:${VER}")"
           for pair in "amd64=${AMD64_IMAGE}" "arm64=${ARM64_IMAGE}"; do
             GOT="$(printf '%s' "$RAW" | jq -r --arg a "${pair%%=*}" '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest] | join(",")')"
@@ -388,7 +413,7 @@ jobs:
 
   # GitHub Release with the compose files, install.sh, checksums and an SBOM of the published image.
   github-release:
-    needs: [prepare, test, scan, publish-image, publish-chart]
+    needs: [prepare, test, build, scan, publish-image, publish-chart]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # create the GitHub Release
@@ -412,13 +437,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # A standalone SBOM artifact (syft) of the published digest, in addition to the build attestations.
-      - name: Generate SBOM (SPDX)
+      # Standalone SBOMs (syft), one per architecture, of exactly the scanned and published image manifests (an
+      # SBOM of the multi-arch index would only describe the runner's platform). In addition to the attestations.
+      - name: Generate SBOM amd64 (SPDX)
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: ${{ env.IMAGE }}@${{ needs.publish-image.outputs.digest }}
+          image: ${{ env.IMAGE }}@${{ needs.build.outputs.amd64_image }}
           format: spdx-json
-          output-file: whiskers-${{ needs.prepare.outputs.ver }}.sbom.spdx.json
+          output-file: whiskers-${{ needs.prepare.outputs.ver }}-linux-amd64.sbom.spdx.json
+      - name: Generate SBOM arm64 (SPDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE }}@${{ needs.build.outputs.arm64_image }}
+          format: spdx-json
+          output-file: whiskers-${{ needs.prepare.outputs.ver }}-linux-arm64.sbom.spdx.json
 
       # Assemble the release assets: a version-pinned image-based compose, the hardened compose, the installer,
       # and checksums over all of them.
@@ -437,7 +469,7 @@ jobs:
           # Same image-pin for the hardened profile (its `build: .` → the published image).
           sed -E "s#^( *)build: \.#\1image: ${IMAGE}:${VER}#" docker-compose.hardened.yml > dist/docker-compose.hardened.yml
           cp deploy/install.sh dist/install.sh
-          cp "whiskers-${VER}.sbom.spdx.json" dist/
+          cp "whiskers-${VER}-linux-amd64.sbom.spdx.json" "whiskers-${VER}-linux-arm64.sbom.spdx.json" dist/
           ( cd dist && sha256sum * > checksums.txt )
           echo "assets:"; ls -l dist
 
@@ -454,4 +486,5 @@ jobs:
             dist/docker-compose.hardened.yml
             dist/install.sh
             dist/checksums.txt
-            dist/whiskers-${{ needs.prepare.outputs.ver }}.sbom.spdx.json
+            dist/whiskers-${{ needs.prepare.outputs.ver }}-linux-amd64.sbom.spdx.json
+            dist/whiskers-${{ needs.prepare.outputs.ver }}-linux-arm64.sbom.spdx.json

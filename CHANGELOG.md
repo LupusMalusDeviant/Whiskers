@@ -11,13 +11,20 @@ All notable changes to Whiskers are documented here. The format follows
   permissions it needs. A release now runs the full test suite on the tag commit first, builds amd64 and arm64
   once each, scans **both** with Trivy by digest and publishes exactly those digests (verified, then cosign-signed)
   — nothing is rebuilt after the scan. The tag must match the version in `Whiskers.csproj` and `Chart.yaml`. An
-  existing `X.Y.Z` image, chart or GitHub release is never overwritten; the run fails instead. `X.Y` and `latest`
-  still move, and `latest` only follows the highest release, so a hotfix for an older line no longer moves it back.
+  existing `X.Y.Z` image, chart or GitHub release is never overwritten; the run fails instead, also when it cannot
+  tell whether the version exists. `X.Y` and `latest` still move; `latest` only follows the highest *published*
+  release, so a hotfix for an older line no longer moves it back and a failed higher tag does not hold it back.
   The scan no longer skips CRITICAL findings without a fix: such a finding fails the release unless it is recorded
-  in `.trivyignore` with a reason and an expiry date. **For release operators:** a manual run must be started from
-  the tag itself (Actions → release → "Use workflow from" = the tag); a run from `main` is refused. To re-release a
-  version, bump the version and tag again — a published version cannot be replaced. A manual run now also creates
-  the GitHub release. Untagged per-architecture images from each run stay in the GHCR package (staged by digest).
+  in `.trivyignore` with a reason and an expiry date. Each release now carries one SBOM per architecture
+  (`whiskers-X.Y.Z-linux-amd64.sbom.spdx.json`, `…-linux-arm64…`) instead of a single one that only described amd64.
+  **For release operators:** a manual run must be started from the tag itself (Actions → release → "Use workflow
+  from" = the tag); a run from `main` is refused, and it only helps while nothing of that version is published. If a
+  run fails after publishing started (for example signing during a Sigstore outage), use **Re-run failed jobs**:
+  the image step accepts an `X.Y.Z` that already holds exactly the run's scanned digests and finishes signing and
+  tagging; a new run would be refused. If the GitHub release was created but its assets failed, delete that release
+  first. To re-release a version with other content, bump the version and tag again. Only one release runs at a
+  time; a pending release run can be cancelled by GitHub when two more tags arrive, so start it again by hand.
+  Untagged per-architecture images from each run stay in the GHCR package (staged by digest).
 
 - R1-42: **Values that end up on a command line can no longer pose as options, and kubeconfigs run no programs.**
   Quoting a value only protects it from the shell; a Git branch like `--upload-pack=…` or an SSH user like
