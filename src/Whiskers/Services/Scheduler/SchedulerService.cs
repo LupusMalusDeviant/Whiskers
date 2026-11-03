@@ -87,6 +87,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
 
             // Calculate next run
             IDisposable? draining = null;
+            var guarded = false;
             try
             {
                 var nextRun = cron!.GetNextOccurrence(now);
@@ -115,6 +116,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
                     await db.SaveChangesAsync(ct);
                     continue;
                 }
+                guarded = true;
 
                 // The occurrence is consumed and the run is on record in ONE save, before it starts (R1-39): a run
                 // cut off by a stop or a crash stays open and the next start marks it interrupted, never as a success;
@@ -138,7 +140,6 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
                     // record, and the error save does not consume it either.
                     db.Entry(run).State = EntityState.Detached;
                     (task.LastRun, task.NextRun) = (lastRun, dueAt);
-                    _running.TryRemove(task.TaskId, out _);
                     throw;
                 }
 
@@ -146,16 +147,25 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
                 var taskId = task.TaskId;
                 var entry = draining;
                 draining = null;   // the run owns it now
+                guarded = false;   // and the in-flight guard
                 _ = Task.Run(() => RunTaskAsync(taskId, runId, entry), CancellationToken.None);
             }
             catch (Exception ex)
             {
-                draining?.Dispose();
                 _logger.LogError(ex, "Failed to process task {Name}", task.Name);
-                task.LastResult = $"FEHLER: {ex.Message}";
-                task.LastSuccess = false;
-                task.LastRun = DateTime.UtcNow;
-                await db.SaveChangesAsync(ct);
+                try
+                {
+                    // Only the error: nothing ran, so LastRun stays the last real run's (R1-39). Still under the in-flight
+                    // guard, so a "Run now" cannot start in between and have its result overwritten by this one.
+                    task.LastResult = $"FEHLER: {ex.Message}";
+                    task.LastSuccess = false;
+                    await db.SaveChangesAsync(ct);
+                }
+                finally
+                {
+                    if (guarded) _running.TryRemove(task.TaskId, out _);
+                    draining?.Dispose();
+                }
             }
         }
     }
@@ -311,6 +321,12 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         }
     }
 
+    /// <summary>Stable result of <see cref="RunNowAsync"/> while Whiskers stops; the UI shows it translated.</summary>
+    public const string ShuttingDownResult = "Whiskers is shutting down; the task was not started.";
+
+    /// <summary>Stable result of <see cref="RunNowAsync"/> while the task runs; the UI shows it translated.</summary>
+    public const string AlreadyRunningResult = "The task is already running.";
+
     public async Task<(bool Success, string Output)> RunNowAsync(string taskId)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -321,8 +337,8 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         // R1-39: a run by hand is admitted like a scheduled one — not while Whiskers stops, not while the task runs —
         // and the drain waits for it until its result is recorded.
         using var draining = _drain.TryEnter($"scheduled task '{task.Name}' (run now)");
-        if (draining is null) return (false, "Whiskers is shutting down; the task was not started.");
-        if (!_running.TryAdd(task.TaskId, 0)) return (false, "The task is already running.");
+        if (draining is null) return (false, ShuttingDownResult);
+        if (!_running.TryAdd(task.TaskId, 0)) return (false, AlreadyRunningResult);
         try
         {
             // On record before it runs, together with its start: a run a stop cuts off is reported as interrupted at

@@ -119,24 +119,31 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
             .ToListAsync(ct);
         foreach (var run in open)
         {
-            // Conditional on the run still being open: one that ended meanwhile keeps its result.
-            var closed = await db.TaskRunHistory
-                .Where(r => r.Id == run.Id && r.CompletedAt == null)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(r => r.CompletedAt, now)
-                    .SetProperty(r => r.Success, false)
-                    .SetProperty(r => r.Output, (string?)null)
-                    .SetProperty(r => r.Error, InterruptedResult), ct);
-            if (closed == 0) continue;
-            // Its task's last result too — only while that run is still the task's last one (a run is started with
-            // the task's LastRun set to its own start in the same save), so a later run's result is never replaced.
-            var startedAt = run.StartedAt;
-            await db.ScheduledTasks
-                .Where(t => t.TaskId == run.TaskId && t.LastRun == startedAt)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(t => t.LastSuccess, false)
-                    .SetProperty(t => t.LastResult, InterruptedResult), ct);
-            marked.Add($"scheduled task {run.TaskName} (started {run.StartedAt:u})");
+            // One transaction: the run is closed only together with its task's last result. Closed alone, a later start
+            // would no longer see it and the task would keep its previous result.
+            var closed = await InTransactionAsync(db, async () =>
+            {
+                // Conditional on the run still being open: one that ended meanwhile keeps its result.
+                var changed = await db.TaskRunHistory
+                    .Where(r => r.Id == run.Id && r.CompletedAt == null)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(r => r.CompletedAt, now)
+                        .SetProperty(r => r.Success, false)
+                        .SetProperty(r => r.Output, (string?)null)
+                        .SetProperty(r => r.Error, InterruptedResult), ct);
+                if (changed == 0) return false;
+                // Its task's last result too — only while that run is still the task's last one (a run is started
+                // with the task's LastRun set to its own start in the same save), so a later run's result is kept.
+                var startedAt = run.StartedAt;
+                await db.ScheduledTasks
+                    .Where(t => t.TaskId == run.TaskId && t.LastRun == startedAt)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(t => t.LastSuccess, false)
+                        .SetProperty(t => t.LastResult, InterruptedResult), ct);
+                return true;
+            }, () => db.TaskRunHistory.AnyAsync(r => r.Id == run.Id && r.CompletedAt == now && r.Error == InterruptedResult, ct), ct);
+            if (closed)
+                marked.Add($"scheduled task {run.TaskName} (started {run.StartedAt:u})");
         }
 
         // AutoUpdate attempts of an earlier process that never recorded their end.
@@ -148,26 +155,29 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
         {
             // One transaction: the attempt is closed only together with switching its policy off. Closed alone, nothing
             // would keep the next check from starting the same update again.
-            await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var closed = await db.UpdateHistory
-                .Where(h => h.Id == update.Id && h.CompletedAt == null)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(h => h.CompletedAt, now)
-                    .SetProperty(h => h.Success, false)
-                    .SetProperty(h => h.Error, InterruptedResult), ct);
-            if (closed == 0) continue;
-            // Its policy is switched off: the update stays available and would otherwise be started again at the next
-            // check — on a container that may be half replaced. Same scope as the update's own matching (server, then
-            // id or name).
             var (name, id, server) = (update.ContainerName, update.ContainerId, update.ServerId);
-            await db.UpdatePolicies
-                .Where(p => p.AutoUpdate
-                            && (p.ServerId == null || p.ServerId == "" || p.ServerId == server)
-                            && (p.ContainerId == id || p.ContainerName == name))
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(p => p.AutoUpdate, false)
-                    .SetProperty(p => p.LastUpdateResult, InterruptedUpdateResult), ct);
-            await tx.CommitAsync(ct);
+            var closed = await InTransactionAsync(db, async () =>
+            {
+                var changed = await db.UpdateHistory
+                    .Where(h => h.Id == update.Id && h.CompletedAt == null)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(h => h.CompletedAt, now)
+                        .SetProperty(h => h.Success, false)
+                        .SetProperty(h => h.Error, InterruptedResult), ct);
+                if (changed == 0) return false;
+                // Its policy is switched off: the update stays available and would otherwise be started again at the
+                // next check — on a container that may be half replaced. Same scope as the update's own matching
+                // (server, then id or name).
+                await db.UpdatePolicies
+                    .Where(p => p.AutoUpdate
+                                && (p.ServerId == null || p.ServerId == "" || p.ServerId == server)
+                                && (p.ContainerId == id || p.ContainerName == name))
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(p => p.AutoUpdate, false)
+                        .SetProperty(p => p.LastUpdateResult, InterruptedUpdateResult), ct);
+                return true;
+            }, () => db.UpdateHistory.AnyAsync(h => h.Id == update.Id && h.CompletedAt == now && h.Error == InterruptedResult, ct), ct);
+            if (!closed) continue;
             marked.Add($"auto-update of {update.ContainerName} (started {update.StartedAt:u}; AutoUpdate switched off for it)");
         }
 
@@ -192,4 +202,25 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
         }
         return marked;
     }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> in one transaction inside the provider's execution strategy: PostgreSQL is registered
+    /// with <c>EnableRetryOnFailure</c>, which refuses a transaction opened outside it. A retry after a commit whose
+    /// outcome was lost asks <paramref name="committed"/> (this pass's own marks) instead of reporting nothing, so the
+    /// work is neither done twice — every write is conditional — nor dropped from the report.
+    /// </summary>
+    private static Task<bool> InTransactionAsync(MetricsDbContext db, Func<Task<bool>> work, Func<Task<bool>> committed,
+        CancellationToken ct)
+        => db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            var done = await work();
+            if (!done)
+            {
+                await tx.RollbackAsync(ct);
+                return await committed();
+            }
+            await tx.CommitAsync(ct);
+            return true;
+        });
 }

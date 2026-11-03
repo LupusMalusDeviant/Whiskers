@@ -158,6 +158,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         "Not run: the nightly state (autopatch-nightly.json) cannot be read, so it is unknown whether tonight already " +
         "ran. No night runs until the file is fixed or removed.";
 
+    internal const string NightCancelled =
+        "Stopped: the cycle was cancelled (Whiskers was stopping). Containers it had not finished may not be patched.";
+
     internal const string NightNotRecorded =
         "Not run: the start of tonight's cycle could not be saved, so a restart could not tell that it ran. It runs " +
         "again tomorrow night.";
@@ -175,9 +178,15 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             LastCycle = new(now, _utcNow(), state.DryRun, [], [], NightNotRecorded);
             return;
         }
-        await RunNightlyAsync(ct);
+        var refused = await RunNightlyAsync(ct);
         state.CompletedAt = _utcNow();
-        state.Error = LastCycle is { } cycle && cycle.StartedAt >= now ? cycle.Error : null;
+        // A night is recorded clean only when it ran to its end: a cycle error, a refused or failed run, or a stop
+        // (also one that cut off the last container, which leaves no "stopped before" behind) is saved as its reason.
+        state.Error = (LastCycle is { } cycle && cycle.StartedAt >= now ? cycle.Error : null)
+                      ?? refused
+                      ?? (ct.IsCancellationRequested ? NightCancelled : null);
+        if (state.Error is { } error && LastCycle is { } last && last.StartedAt >= now && last.Error is null)
+            LastCycle = last with { Error = error };
         await SaveNightlyAsync(state);
     }
 
@@ -201,21 +210,22 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         " The suspension could not be saved: it holds only until Whiskers restarts — take it over or switch it off now.";
 
     /// <summary>The nightly cycle, on the authority of the admin who took AutoPatch over. Without one it does not run:
-    /// the configuration switch alone is not an owner. Internal for tests.</summary>
-    internal async Task RunNightlyAsync(CancellationToken ct)
+    /// the configuration switch alone is not an owner. Returns why the night did not run through, or null. Internal
+    /// for tests.</summary>
+    internal async Task<string?> RunNightlyAsync(CancellationToken ct)
     {
         if (_owners.IsBlocked(IAutomationOwnerStore.AutoPatch))
         {
             _logger.LogError("Auto-patch owner could not be read; tonight's cycle did not run. Take AutoPatch over " +
                              "again in Settings → Automation owners");
-            return;
+            return "Not run: the AutoPatch owner could not be read.";
         }
         var owner = _owners.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId;
         if (owner is null)
         {
             _logger.LogWarning("Auto-patch is switched on but no admin has taken it over (Settings → Automation); " +
                                "tonight's cycle did not run");
-            return;
+            return "Not run: no admin has taken AutoPatch over.";
         }
 
         var dryRun = _settings.CurrentValue.DryRun;
@@ -227,9 +237,14 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         {
             _logger.LogWarning("Auto-patch cycle refused: {Reason}", outcome.Reason);
             await SuspendIfOwnerLostAsync(actor, "autopatch.run", ct);
+            return $"Not run: refused ({outcome.Reason}).";
         }
-        else if (outcome.Status == MutationStatus.Failed)
+        if (outcome.Status == MutationStatus.Failed)
+        {
             _logger.LogError(outcome.Error, "Auto-patch cycle failed: {Reason}", outcome.Reason);
+            return $"Failed: {outcome.Reason}";
+        }
+        return null;
     }
 
     /// <summary>The owner lost their authority (PC-D6): AutoPatch is suspended until an admin takes it over, and the
@@ -451,6 +466,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             }
         }
 
+        if (ct.IsCancellationRequested && LastCycle!.Error is null && entries.Count > 0)
+            LastCycle = LastCycle with { Error = $"Stopped at {entries[^1].ContainerName}: the cycle was cancelled." };
         LastCycle = LastCycle! with { CompletedAt = _utcNow() };
         _logger.LogInformation("Auto-patch cycle done: {Summary}",
             string.Join(", ", entries.GroupBy(e => e.Kind).Select(g => $"{g.Count()} {g.Key}")));

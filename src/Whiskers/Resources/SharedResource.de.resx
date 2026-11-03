@@ -3953,6 +3953,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_Snackbar_TaskRunning" xml:space="preserve">
     <value>Task '{0}' wird ausgeführt...</value>
   </data>
+  <data name="ScheduledTasksView_Snackbar_ShuttingDown" xml:space="preserve">
+    <value>Whiskers fährt herunter; Task '{0}' wurde nicht gestartet.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_AlreadyRunning" xml:space="preserve">
+    <value>Task '{0}' läuft bereits.</value>
+  </data>
   <data name="ScheduledTasksView_Stat_Active" xml:space="preserve">
     <value>Aktiv</value>
   </data>

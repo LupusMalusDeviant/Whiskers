@@ -3953,6 +3953,12 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="ScheduledTasksView_Snackbar_TaskRunning" xml:space="preserve">
     <value>Running task '{0}'...</value>
   </data>
+  <data name="ScheduledTasksView_Snackbar_ShuttingDown" xml:space="preserve">
+    <value>Whiskers is shutting down; task '{0}' was not started.</value>
+  </data>
+  <data name="ScheduledTasksView_Snackbar_AlreadyRunning" xml:space="preserve">
+    <value>Task '{0}' is already running.</value>
+  </data>
   <data name="ScheduledTasksView_Stat_Active" xml:space="preserve">
     <value>Active</value>
   </data>

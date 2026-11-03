@@ -268,7 +268,7 @@ public sealed class MutationShutdownTests : IDisposable
             settings, new MemoryAutomationOwners(), () => night.AddMinutes(5), new AutoPatchNightlyStore(paths), Drain());
         await restarted.LoadNightlyAsync();
         Assert.False(AutoPatchService.IsDue(settings, night.AddMinutes(5), restarted.LastNightlyRun));   // not twice
-        Assert.Null(restarted.LastCycle);                     // it ended normally
+        Assert.StartsWith("Not run", restarted.LastCycle!.Error);   // why it did nothing, still after the restart
 
         // A night that started and never ended (a forced stop) is shown as interrupted and still not repeated.
         await new AutoPatchNightlyStore(paths).SaveAsync(new AutoPatchNightlyState
@@ -611,8 +611,108 @@ public sealed class MutationShutdownTests : IDisposable
         Assert.False(await AnyRunAsync("t1"));
         var task = await TaskAsync("t1");
         Assert.Equal(due, task.NextRun);                       // still due: it runs at the next tick
+        Assert.Null(task.LastRun);                             // nothing ran: no run time is invented
         Assert.False(task.LastSuccess);                        // the error was recorded
         Assert.StartsWith("FEHLER", task.LastResult);
+
+        // The guard is free again: the next tick runs it.
+        await scheduler.CheckAndRunDueTasks(CancellationToken.None);
+        await executor.Entered.Task.WaitAsync(Wait);
+        executor.Release.SetResult((true, "ok"));
+    }
+
+    [Fact]
+    public async Task Reconciling_works_under_a_retrying_execution_strategy()
+    {
+        // PostgreSQL is registered with EnableRetryOnFailure, which refuses a transaction opened outside the strategy.
+        await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var old = DateTime.UtcNow.AddHours(-1);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.TaskRunHistory.Add(new TaskRunHistoryEntity { TaskId = "t1", TaskName = "t1", StartedAt = old });
+            (await db.ScheduledTasks.SingleAsync(t => t.TaskId == "t1")).LastRun = old;
+            db.UpdatePolicies.Add(new UpdatePolicyEntity { ContainerId = "w1", ContainerName = "web", ServerId = "local", AutoUpdate = true });
+            db.UpdateHistory.Add(new UpdateHistoryEntity
+            {
+                ContainerId = "w1", ContainerName = "web", ServerId = "local", StartedAt = old,
+                Error = AutoUpdateService.InProgressResult,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var services = new ServiceCollection();
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}",
+            sqlite => sqlite.ExecutionStrategy(d => new Retrying(d))));
+        using var retrying = services.BuildServiceProvider();
+        var scopes = retrying.GetRequiredService<IServiceScopeFactory>();
+        var marked = await new InterruptedWorkReconciler(scopes, new DbOperationJournal(scopes), new FakeNotifications(),
+            NullLogger<InterruptedWorkReconciler>.Instance, DateTime.UtcNow).ReconcileAsync();
+
+        Assert.Equal(2, marked.Count);
+        Assert.Equal(InterruptedWorkReconciler.InterruptedResult, (await TaskAsync("t1")).LastResult);
+        using var check = _sp.CreateScope();
+        var after = check.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        Assert.False((await after.UpdatePolicies.SingleAsync()).AutoUpdate);
+    }
+
+    [Fact]
+    public async Task An_interrupted_run_is_closed_only_together_with_its_task_result()
+    {
+        await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var old = DateTime.UtcNow.AddHours(-1);
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.TaskRunHistory.Add(new TaskRunHistoryEntity { TaskId = "t1", TaskName = "t1", StartedAt = old });
+            var task = await db.ScheduledTasks.SingleAsync(t => t.TaskId == "t1");
+            (task.LastRun, task.LastSuccess, task.LastResult) = (old, true, "before");
+            await db.SaveChangesAsync();
+        }
+
+        // The task write fails: the run must stay open, so the next start still repairs the task's result.
+        using (var failing = ProviderWith(new FailingCommands("ScheduledTasks")))
+        {
+            var scopes = failing.GetRequiredService<IServiceScopeFactory>();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => new InterruptedWorkReconciler(scopes,
+                new DbOperationJournal(scopes), new FakeNotifications(), NullLogger<InterruptedWorkReconciler>.Instance,
+                DateTime.UtcNow).ReconcileAsync());
+        }
+        Assert.Null((await RunAsync("t1")).CompletedAt);
+        Assert.Equal("before", (await TaskAsync("t1")).LastResult);
+
+        var notifications = new FakeNotifications();
+        await Reconciler(notifications, DateTime.UtcNow).ReconcileAsync();
+        Assert.Equal(InterruptedWorkReconciler.InterruptedResult, (await RunAsync("t1")).Error);
+        var repaired = await TaskAsync("t1");
+        Assert.Equal(InterruptedWorkReconciler.InterruptedResult, repaired.LastResult);
+        Assert.False(repaired.LastSuccess);
+        Assert.Single(notifications.Events);
+    }
+
+    [Fact]
+    public async Task A_night_cancelled_during_its_last_container_is_reported_after_a_restart()
+    {
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
+        var paths = new DataPathOptions(_dataDir);
+        var settings = new AutoPatchSettings { Enabled = true, DryRun = false };
+        using var stopping = new CancellationTokenSource();
+        // The host stops while the only container is being patched.
+        var runner = new AutoPatchTests.RecordingRunner { AfterPatch = _ => stopping.Cancel() };
+        var service = AutoPatchTests.NewService(runner, cves, settings, owners, () => DateTime.UtcNow,
+            new AutoPatchNightlyStore(paths), Drain(), AutoPatchTests.Compose("a"));
+
+        try { await service.RunNightlyRecordedAsync(stopping.Token); }
+        catch (OperationCanceledException) { /* cut off: recorded without an end */ }
+
+        Assert.Single(runner.Calls);
+        var restarted = AutoPatchTests.NewService(new AutoPatchTests.RecordingRunner(), cves, settings, owners,
+            () => DateTime.UtcNow, new AutoPatchNightlyStore(paths), Drain());
+        await restarted.LoadNightlyAsync();
+        Assert.NotNull(restarted.LastCycle?.Error);            // never a clean night
     }
 
     [Fact]
@@ -656,6 +756,13 @@ public sealed class MutationShutdownTests : IDisposable
             () => DateTime.UtcNow, new AutoPatchNightlyStore(paths), Drain());
         await restarted.LoadNightlyAsync();
         Assert.NotNull(restarted.LastCycle?.Error);            // interrupted or stopped — never a clean night
+    }
+
+    /// <summary>An execution strategy that retries, as PostgreSQL's <c>EnableRetryOnFailure</c> does.</summary>
+    private sealed class Retrying(Microsoft.EntityFrameworkCore.Storage.ExecutionStrategyDependencies dependencies)
+        : Microsoft.EntityFrameworkCore.Storage.ExecutionStrategy(dependencies, maxRetryCount: 3, maxRetryDelay: TimeSpan.FromMilliseconds(10))
+    {
+        protected override bool ShouldRetryOn(Exception exception) => false;
     }
 
     /// <summary>A provider on the same database with one interceptor added.</summary>

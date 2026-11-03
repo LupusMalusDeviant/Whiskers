@@ -547,6 +547,19 @@ else
         {
             (success, output) = (false, ex.Message);
         }
+        // Not started (R1-39): said in the user's language, as a warning — nothing failed.
+        var notStarted = output switch
+        {
+            Whiskers.Services.Scheduler.SchedulerService.ShuttingDownResult => "ScheduledTasksView_Snackbar_ShuttingDown",
+            Whiskers.Services.Scheduler.SchedulerService.AlreadyRunningResult => "ScheduledTasksView_Snackbar_AlreadyRunning",
+            _ => null,
+        };
+        if (!success && notStarted is not null)
+        {
+            Snackbar.Add(L[notStarted, task.Name].Value, Severity.Warning);
+            await LoadData();
+            return;
+        }
         Snackbar.Add(success ? L["ScheduledTasksView_Snackbar_RunSuccess", output].Value : L["ScheduledTasksView_Snackbar_Error", output].Value,
             success ? Severity.Success : Severity.Error);
         await LoadData();
