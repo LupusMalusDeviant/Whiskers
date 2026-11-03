@@ -29,7 +29,11 @@ All notable changes to Whiskers are documented here. The format follows
   `Metrics__AlertHistoryRetentionDays` to keep the old behaviour. (3) The shipped `docker-compose*.yml` set
   `Metrics__RetentionDays` (default 7), so on those installations the raw retention is read-only in the panel; remove
   the line (or `METRICS_RETENTIONDAYS`) to edit it there. (4) `--migrate-to-postgres` copies the tiers; a source from
-  before this release has none and the target rolls its raw samples up on its first start.
+  before this release has none and the target rolls its raw samples up on its first start. (5) If the host clock is
+  set back after windows were rolled up, the roll-up pauses (one warning in the log) until the clock passes its
+  watermark again, nothing below it is pruned meanwhile, and the charts read the finer tiers and raw samples for that
+  stretch. Samples taken in that stretch are not rolled up later: they are kept for the raw retention, then only the
+  windows from before the correction remain in the long view.
 
 - R1-54: **Notifications no longer reach into Whiskers' own network unless an Admin allows it.** Every notification
   channel (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, the outgoing webhook) and the e-mail channel's SMTP host

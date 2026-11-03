@@ -344,12 +344,15 @@
                                                  XValue="@(p => p.Timestamp)"
                                                  YValue="@(p => (decimal)p.Value)"
                                                  Name="CPU %" />
-                                @* R1-55: the true peak of each point, kept through the roll-up tiers. *@
+                                @* R1-55: the true peak of each point, kept through the roll-up tiers — only where points merge samples. *@
+                                @if (cpuHist!.Any(p => p.Samples > 1))
+                                {
                                 <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="cpuHist"
                                                  SeriesType="ApexCharts.SeriesType.Line"
                                                  XValue="@(p => p.Timestamp)"
                                                  YValue="@(p => (decimal)p.Max)"
                                                  Name="@L["Metrics_Series_Peak"]" />
+                                }
                             </ApexCharts.ApexChart>
                         </MudPaper>
                     </MudItem>
@@ -362,11 +365,14 @@
                                                  XValue="@(p => p.Timestamp)"
                                                  YValue="@(p => (decimal)p.Value)"
                                                  Name="@L["Dashboard_Chart_MemorySeries"]" />
+                                @if (memHist!.Any(p => p.Samples > 1))
+                                {
                                 <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="memHist"
                                                  SeriesType="ApexCharts.SeriesType.Line"
                                                  XValue="@(p => p.Timestamp)"
                                                  YValue="@(p => (decimal)p.Max)"
                                                  Name="@L["Metrics_Series_Peak"]" />
+                                }
                             </ApexCharts.ApexChart>
                         </MudPaper>
                     </MudItem>

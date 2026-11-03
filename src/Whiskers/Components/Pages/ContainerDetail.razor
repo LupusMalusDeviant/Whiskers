@@ -174,13 +174,16 @@ else
                                                      XValue="@(p => p.Timestamp)"
                                                      YValue="@(p => (decimal)p.Value)"
                                                      Name="CPU %" />
-                                    @* R1-55: the true peak of each point, kept through the roll-up tiers. *@
+                                    @* R1-55: the true peak of each point, kept through the roll-up tiers — only where points merge samples. *@
+                                    @if (_cpuHistory.Any(p => p.Samples > 1))
+                                    {
                                     <ApexCharts.ApexPointSeries TItem="MetricPoint"
                                                      Items="_cpuHistory"
                                                      SeriesType="ApexCharts.SeriesType.Line"
                                                      XValue="@(p => p.Timestamp)"
                                                      YValue="@(p => (decimal)p.Max)"
                                                      Name="@L["Metrics_Series_Peak"]" />
+                                    }
                                 </ApexCharts.ApexChart>
                             </MudPaper>
                         </MudItem>
@@ -195,12 +198,15 @@ else
                                                      XValue="@(p => p.Timestamp)"
                                                      YValue="@(p => (decimal)p.Value)"
                                                      Name="@L["ContainerDetail_Stats_MemorySeries"]" />
+                                    @if (_memHistory.Any(p => p.Samples > 1))
+                                    {
                                     <ApexCharts.ApexPointSeries TItem="MetricPoint"
                                                      Items="_memHistory"
                                                      SeriesType="ApexCharts.SeriesType.Line"
                                                      XValue="@(p => p.Timestamp)"
                                                      YValue="@(p => (decimal)p.Max)"
                                                      Name="@L["Metrics_Series_Peak"]" />
+                                    }
                                 </ApexCharts.ApexChart>
                             </MudPaper>
                         </MudItem>

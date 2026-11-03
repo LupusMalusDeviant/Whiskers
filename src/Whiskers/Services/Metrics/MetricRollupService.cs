@@ -21,6 +21,13 @@ namespace Whiskers.Services.Metrics;
 /// </summary>
 public sealed class MetricRollupService : IMetricRollupService
 {
+    private readonly ILogger? _logger;
+
+    /// <summary>The kinds whose first tier's watermark is ahead of the clock, already warned about (once per episode).</summary>
+    private readonly HashSet<string> _clockBehind = new(StringComparer.Ordinal);
+
+    public MetricRollupService(ILogger<MetricRollupService>? logger = null) => _logger = logger;
+
     /// <summary>At most this many batches per tier and call: the upgrade's first pass over days of raw data is spread
     /// over several collector cycles instead of holding one up.</summary>
     internal int MaxBatchesPerTier { get; init; } = 8;
@@ -49,7 +56,8 @@ public sealed class MetricRollupService : IMetricRollupService
                 foreach (var tier in MetricTiers.Minutes)
                 {
                     var size = MetricTiers.Size(tier);
-                    DateTime? cut = sourceMark is { } m ? MetricTiers.Floor(m, size) : null;
+                    // Never past the clock either: a finer watermark ahead of it (the clock was set back) closes nothing.
+                    DateTime? cut = sourceMark is { } m ? MetricTiers.Floor(m < now ? m : now, size) : null;
                     var (written, mark, pending) = cut is { } c
                         ? await RollTierAsync(db, kind, source, tier, c, ct)
                         : (0, await MarkAsync(db, kind, tier, ct), false);
@@ -69,6 +77,31 @@ public sealed class MetricRollupService : IMetricRollupService
         return new MetricRollupResult(windows, more);
     }
 
+    /// <summary>R1-55 (review): a first-tier watermark past the newest closed window means the host clock was set back
+    /// after windows were rolled up. The roll-up then waits until the clock passes the watermark again — it never moves a
+    /// watermark back (that would rewrite committed windows); queries read the raw samples for that stretch and retention
+    /// leaves the tier below such a watermark alone. Said once per episode, not every cycle.</summary>
+    private void NoteClock(MetricSeriesKind kind, DateTime? mark, DateTime cut)
+    {
+        lock (_clockBehind)
+        {
+            if (mark is not { } m || m <= cut)
+            {
+                if (_clockBehind.Remove(kind.Name))
+                    _logger?.LogInformation("The clock has passed the {Kind} metric roll-up watermark again; roll-up resumes", kind.Name);
+                return;
+            }
+            if (!_clockBehind.Add(kind.Name)) return;
+        }
+        _logger?.LogWarning(
+            "The {Kind} metric roll-up watermark {Watermark:o} is ahead of the clock ({Now:o}) — the host clock was set back. " +
+            "Roll-up pauses until the clock passes it; charts read the raw samples meanwhile, and raw samples are not pruned " +
+            "while it lasts", kind.Name, mark, cut);
+    }
+
+    /// <summary>Tests only: whether the clock-behind warning is active for a kind.</summary>
+    internal bool ClockBehind(string kind) { lock (_clockBehind) return _clockBehind.Contains(kind); }
+
     private static Task<DateTime?> MarkAsync(MetricsDbContext db, MetricSeriesKind kind, int tier, CancellationToken ct)
     {
         var id = MetricTiers.StateId(kind.Name, tier);
@@ -81,6 +114,7 @@ public sealed class MetricRollupService : IMetricRollupService
     {
         var size = MetricTiers.Size(tier);
         var mark = await MarkAsync(db, kind, tier, ct);
+        if (source == 0) NoteClock(kind, mark, cut);
         DateTime start;
         if (mark is { } m) start = m;
         else
@@ -167,6 +201,9 @@ public sealed class MetricRollupService : IMetricRollupService
                     var successor = marks.TryGetValue(MetricTiers.StateId(kind.Name, levels[i + 1]), out var mark)
                         ? mark : DateTime.MinValue;
                     if (successor < cutoff) cutoff = successor;
+                    // A watermark ahead of the clock (the clock was set back): the samples since then lie behind it but
+                    // were never rolled up, so it says nothing about them — the tier below keeps everything meanwhile.
+                    if (successor > now) cutoff = DateTime.MinValue;
                 }
                 if (cutoff == DateTime.MinValue) continue;
                 removed[$"{kind.Name}/{(tier == 0 ? "raw" : tier.ToString(System.Globalization.CultureInfo.InvariantCulture))}"] =

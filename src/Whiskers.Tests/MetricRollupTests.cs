@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Whiskers.Configuration;
 using Whiskers.Mcp.Tools;
 using Whiskers.Services.Metrics;
@@ -45,7 +46,7 @@ public sealed class MetricRollupTests : IDisposable
     /// <summary>Container c1 on s1, one sample every 30 s from <paramref name="from"/> to <paramref name="to"/> inclusive.
     /// CPU 10 % except the given spikes; memory 50 % of its limit.</summary>
     private static async Task SeedContainerAsync(MetricsDbContext db, DateTime from, DateTime to, Func<DateTime, double>? cpu = null,
-        Func<DateTime, bool>? skip = null)
+        Func<DateTime, bool>? skip = null, string container = "c1")
     {
         var rows = new List<ContainerMetricEntity>();
         for (var t = from; t <= to; t = t.AddSeconds(30))
@@ -53,7 +54,7 @@ public sealed class MetricRollupTests : IDisposable
             if (skip?.Invoke(t) == true) continue;
             rows.Add(new ContainerMetricEntity
             {
-                ContainerId = "c1", ContainerName = "web", ServerId = "s1", Timestamp = t,
+                ContainerId = container, ContainerName = "web", ServerId = "s1", Timestamp = t,
                 CpuPercent = cpu?.Invoke(t) ?? 10, MemoryUsageBytes = 50, MemoryLimitBytes = 100,
             });
         }
@@ -405,5 +406,115 @@ public sealed class MetricRollupTests : IDisposable
         var merged = thin.Single(p => p.Max == 100);
         Assert.Equal(20, merged.Samples);                      // 5 points of weight 1 and 5 of weight 3 …
         Assert.Equal((50 + 10.0 * 19) / 20, merged.Value, 9);   // … one of them 50: weighted, not the mean of the 10 points
+    }
+
+    // ---------------------------------------------------------------- review round 1
+
+    /// <summary>c1: 3 days and 30 minutes, a 2-minute spike of 99 % at day 2 00:10; c2: only since 3 d 00:12, after the
+    /// last closed hour window. Rolled up at <paramref name="now"/>, then pruned with raw and 10-minute retention of one
+    /// day — so the 10-minute windows of 2 d 00:00–00:30 are gone and the hour window 2 d 00:00 is the only one holding
+    /// the spike.</summary>
+    private async Task SeedPrunedPartialWindowAsync(DateTime now)
+    {
+        var spike = T0.AddDays(2).AddMinutes(10);
+        await using var db = Db();
+        await SeedContainerAsync(db, T0, now, t => InSpike(t, spike) ? 99 : 10);
+        await SeedContainerAsync(db, T0.AddDays(3).AddMinutes(12), now, container: "c2");
+        await RollUpAllAsync(db, now);
+        await new MetricRollupService().PruneAsync(db, now,
+            MetricRetention.Default with { RawDays = 1, TenMinuteDays = 1 }, default);
+        Assert.False(await db.ContainerMetricRollups.AnyAsync(r => r.TierMinutes == 10 && r.ContainerId == "c1" && r.WindowStart < T0.AddDays(2).AddMinutes(30)));
+    }
+
+    [Fact]
+    public async Task A_range_starting_inside_a_pruned_partial_window_comes_out_whole_from_the_coarser_tier()
+    {
+        var now = T0.AddDays(3).AddMinutes(30);
+        await SeedPrunedPartialWindowAsync(now);
+
+        // 24 h from 2 d 00:30: the 10-minute tier begins exactly there, mid-hour. The hour window 2 d 00:00 serves the
+        // part before the first whole hour of the 10-minute tier — whole, so with its spike and all its samples.
+        var points = await Query(now).GetContainerCpuHistoryAsync("c1", "s1", TimeSpan.FromHours(24));
+
+        var expected = (int)((now - T0.AddDays(2)).TotalSeconds / 30) + 1;   // every c1 sample from 2 d 00:00 on
+        Assert.Equal(expected, points.Sum(p => p.Samples));
+        Assert.Equal(99, points.Max(p => p.Max));
+
+        await using var db = Db();
+        var segments = await MetricsQueryService.PlanAsync(db, new ContainerSeries(), new SeriesKey("s1", "c1"),
+            now.AddHours(-24), now, 10, default);
+        Assert.Equal([(60, T0.AddDays(2), T0.AddDays(2).AddHours(1)), (10, T0.AddDays(2).AddHours(1), T0.AddDays(3).AddMinutes(30))],
+            segments.Where(s => s.Tier != 0).Select(s => (s.Tier, s.From, s.To)));
+    }
+
+    [Fact]
+    public async Task A_container_newer_than_the_coarser_watermark_is_served_by_the_finer_tier_from_that_watermark()
+    {
+        var now = T0.AddDays(3).AddMinutes(30);
+        await SeedPrunedPartialWindowAsync(now);
+
+        // c2's first 10-minute window (3 d 00:10) rounds up to 3 d 01:00, past the hour tier's watermark (3 d 00:00):
+        // the 10-minute tier serves from the watermark, or c2's first 20 minutes would fall between the tiers.
+        await using (var db = Db())
+        {
+            var segments = await MetricsQueryService.PlanAsync(db, new ContainerSeries(), new SeriesKey("s1", "c2"),
+                now.AddHours(-24), now, 10, default);
+            Assert.Contains(segments, s => s.Tier == 10 && s.From == T0.AddDays(3));
+        }
+
+        var points = await Query(now).GetContainerCpuHistoryAsync("c2", "s1", TimeSpan.FromHours(24));
+        Assert.Equal(37, points.Sum(p => p.Samples));   // 3 d 00:12 … 00:30 every 30 s
+    }
+
+    [Fact]
+    public async Task A_clock_set_back_pauses_the_roll_up_with_one_warning_and_the_chart_keeps_the_data_since()
+    {
+        await using (var db = Db())
+        {
+            await SeedContainerAsync(db, T0, T0.AddHours(2));
+            await RollUpAllAsync(db, T0.AddHours(2).AddMinutes(1));
+            // Rolled up under a clock five hours ahead: its window and watermark lie in the future now.
+            await SeedContainerAsync(db, T0.AddHours(4), T0.AddHours(4).AddMinutes(9.5), _ => 55);
+            db.ContainerMetricRollups.Add(new ContainerMetricRollupEntity { TierMinutes = 10, ServerId = "s1", ContainerId = "c1",
+                ContainerName = "web", WindowStart = T0.AddHours(4), SampleCount = 20, CpuAvg = 55, CpuMax = 55 });
+            (await db.MetricRollupStates.SingleAsync(s => s.Id == "container/10")).RolledUpTo = T0.AddHours(5);
+            await db.SaveChangesAsync();
+            // The clock is corrected: samples since then lie behind that watermark.
+            await SeedContainerAsync(db, T0.AddHours(2).AddSeconds(30), T0.AddHours(2).AddMinutes(30), _ => 33);
+        }
+
+        var now = T0.AddHours(2).AddMinutes(31);
+        var logs = new NotificationDeliveryTests.ListLoggerProvider();
+        using (var factory = Microsoft.Extensions.Logging.LoggerFactory.Create(b => b.AddProvider(logs)))
+        {
+            var service = new MetricRollupService(factory.CreateLogger<MetricRollupService>());
+            await using var db = Db();
+            var before = await db.ContainerMetricRollups.CountAsync();
+            await service.RollUpAsync(db, now, default);
+            await service.RollUpAsync(db, now.AddMinutes(10), default);
+            Assert.Single(logs.Lines, l => l.Contains("ahead of the clock"));
+            Assert.True(service.ClockBehind("container"));
+            Assert.Equal(before, await db.ContainerMetricRollups.CountAsync());   // nothing rewritten, nothing rewound
+        }
+
+        // The 24-hour chart shows the samples since the correction — every raw sample up to now, once.
+        var points = await Query(now).GetContainerCpuHistoryAsync("c1", "s1", TimeSpan.FromHours(24));
+        Assert.Equal(241 + 60, points.Sum(p => p.Samples));
+        Assert.Equal(33, points.Max(p => p.Max));
+        Assert.Equal(33, points[^1].Max);
+    }
+
+    [Fact]
+    public async Task Nothing_below_a_watermark_ahead_of_the_clock_is_pruned()
+    {
+        await using var db = Db();
+        await SeedContainerAsync(db, T0, T0.AddHours(1));
+        await RollUpAllAsync(db, T0.AddHours(1).AddMinutes(1));
+        (await db.MetricRollupStates.SingleAsync(s => s.Id == "container/10")).RolledUpTo = T0.AddDays(10);
+        await db.SaveChangesAsync();
+
+        await new MetricRollupService().PruneAsync(db, T0.AddDays(3), MetricRetention.Default with { RawDays = 1 }, default);
+
+        Assert.Equal(121, await db.ContainerMetrics.CountAsync());
     }
 }

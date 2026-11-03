@@ -4,6 +4,9 @@ public class MetricsSettings
 {
     public const string SectionName = "Metrics";
     public int CollectionIntervalSeconds { get; set; } = 30;
+    /// <summary>R1-55: the raw tier's retention only, and not read from here — <see cref="MetricRetention"/> resolves it
+    /// (with the roll-up tiers' and the alert history's retention) from the configuration layers; a value set in the
+    /// environment or appsettings.json is read-only on the Settings page.</summary>
     public int RetentionDays { get; set; } = 7;
     public bool Enabled { get; set; } = true;
 

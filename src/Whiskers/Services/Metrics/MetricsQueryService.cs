@@ -111,10 +111,23 @@ public class MetricsQueryService : IMetricsQueryService
         var prefix = kind.Name + "/";
         var marks = await db.MetricRollupStates.AsNoTracking().Where(s => s.Id.StartsWith(prefix))
             .ToDictionaryAsync(s => s.Id, s => s.RolledUpTo, ct);
-        // The exclusive end of what a level holds: raw goes up to now (inclusive), a tier up to its watermark.
+        // The exclusive end of what a level serves: raw goes up to now (inclusive), a tier up to its watermark — never
+        // past the finer level's end. A watermark ahead of that (the host clock was set back after windows were rolled
+        // up, so it may even lie in the future) would leave the finer level nothing to serve and the chart empty since
+        // the correction: the finer level then serves from where it is complete instead (its oldest entry, rounded up to
+        // this tier's window), and this tier only what is older — every stretch from one source, no duplicates.
         var end = now.AddTicks(1);
-        DateTime Upper(int i) => i == 0 ? end
-            : marks.TryGetValue(MetricTiers.StateId(kind.Name, levels[i]), out var m) ? m : DateTime.MinValue;
+        var upperOf = new DateTime[levels.Length];
+        upperOf[0] = end;
+        for (var i = 1; i < levels.Length; i++)
+        {
+            var mark = marks.TryGetValue(MetricTiers.StateId(kind.Name, levels[i]), out var m) ? m : DateTime.MinValue;
+            if (mark <= upperOf[i - 1]) { upperOf[i] = mark; continue; }
+            var finerFirst = await kind.FirstOfAsync(db, levels[i - 1], key, ct);
+            var from = finerFirst is { } f ? MetricTiers.Ceiling(f, MetricTiers.Size(levels[i])) : upperOf[i - 1];
+            upperOf[i] = from < upperOf[i - 1] ? from : upperOf[i - 1];
+        }
+        DateTime Upper(int i) => upperOf[i];
 
         var segments = new List<Segment>();
         // Finer than preferred: the recent part, newest last.
@@ -168,7 +181,8 @@ public class MetricsQueryService : IMetricsQueryService
         double sum = 0;
         foreach (var p in points)
         {
-            var bucket = (p.Timestamp - first).Ticks * maxPoints / span;
+            // In double: ticks times the point budget could overflow a long over a long enough range.
+            var bucket = (long)Math.Min(maxPoints - 1, (double)(p.Timestamp - first).Ticks / span * maxPoints);
             if (current is null || bucket != currentBucket)
             {
                 if (current is not null) { current.Value = sum / current.Samples; result.Add(current); }
