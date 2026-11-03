@@ -255,7 +255,7 @@ for you:
 
 - **Self-backup & restore** of Whiskers' own data, the database included (SQLite snapshot or PostgreSQL `pg_dump`) — optionally VAULT_KEY-encrypted (AES-256-GCM), schedulable, crash-safe deferred-swap restore ([backup guide](docs/operations/backup-and-recovery.md)).
 - **Image-update rollback** — a snapshot before each update; one-click revert on the dashboard.
-- **Monitoring & alerting** — historical CPU/RAM/disk metrics, health reports, and notifications (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, Email/SMTP, generic webhook) on unhealthy/stopped/OOM containers, restart loops, sustained-load anomalies, new CVEs and available image updates, with a persistent in-app feed.
+- **Monitoring & alerting** — historical CPU/RAM/disk metrics, health reports, and notifications (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, Email/SMTP, generic webhook) on unhealthy/stopped/OOM containers, restart loops, sustained-load anomalies, new CVEs and available image updates, with a persistent in-app feed. Whiskers' own logs can be JSON, every request carries an `X-Request-Id` that leads to its operation and audit row, and `/metrics` exposes its loop, operation and audit health ([logs, correlation and alerts](docs/operations/observability.md)).
 
 ### Integrations
 
