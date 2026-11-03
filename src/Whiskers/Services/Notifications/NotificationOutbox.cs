@@ -27,8 +27,9 @@ public sealed class NotificationOutboxEntry
     }
 }
 
-/// <summary>What the outbox holds and has given up on since the start, for the metrics. <paramref name="Unsaved"/>: a
-/// change is not on disk yet (the file is unavailable, or its last write failed); it is retried every pass.</summary>
+/// <summary>What the outbox holds and has given up on since the start, for the metrics. <paramref name="Unsaved"/>: the
+/// outbox is not known to be on disk — a change is not written yet (a write is under way, the last one failed) or the
+/// file could not be read yet (its entries are not even counted in <paramref name="Pending"/>); retried every pass.</summary>
 public sealed record NotificationOutboxStatus(int Pending, long Redelivered, long Exhausted, long Dropped, bool Unsaved = false);
 
 /// <summary>
@@ -53,12 +54,19 @@ public interface INotificationOutbox
     /// is given up on here, before it is sent.</summary>
     Task<IReadOnlyList<NotificationOutboxEntry>> DueAsync(DateTime now);
 
+    /// <summary>The entry as it is right now, checked again just before it is sent: <c>null</c> when it left the outbox
+    /// meanwhile (dropped from a full outbox) or is past <see cref="NotificationOutbox.MaxAge"/> at <paramref name="now"/>
+    /// (then given up on here).</summary>
+    Task<NotificationOutboxEntry?> CurrentAsync(string id, DateTime now);
+
     /// <summary>The entry leaves the outbox: <paramref name="delivered"/> when it was sent, otherwise
     /// <paramref name="reason"/> says why it is dropped (its channel switched off or removed); a drop is counted.</summary>
     Task CompleteAsync(string id, bool delivered, string? reason = null);
 
-    /// <summary>Another redelivery failed. Returns <c>true</c> when the entry is exhausted and was removed.</summary>
-    Task<bool> FailedAsync(string id, Exception failure, DateTime now);
+    /// <summary>Another redelivery failed at <paramref name="now"/> (the next wait counts from it). <paramref name="progress"/>:
+    /// the event as the channel left it (the recipients it did reach), kept for the next attempt. Returns <c>true</c>
+    /// when the entry is exhausted and was removed.</summary>
+    Task<bool> FailedAsync(string id, Exception failure, DateTime now, NotificationEvent? progress = null);
 
     /// <summary>Reads the file if it was not read yet and writes what changed since the last successful write. Returns
     /// <c>false</c> when something could not be read or written; it is retried by the next call.</summary>
@@ -86,11 +94,15 @@ public sealed class NotificationOutbox : INotificationOutbox
     // Null until the file was read: entries added before that wait in _incoming and are merged when it is.
     private List<NotificationOutboxEntry>? _entries;
     private readonly List<NotificationOutboxEntry> _incoming = [];
-    private bool _dirty;
+    private bool _dirty, _writing, _unreadable;
     private long _redelivered, _exhausted, _dropped;
 
     public NotificationOutbox(DataPathOptions paths, ILogger<NotificationOutbox> logger)
-        : this(new JsonFileStore<OutboxFile>(paths.NotificationOutboxJson), logger) { }
+        : this(Store(paths.NotificationOutboxJson), logger) { }
+
+    /// <summary>The outbox file's store: a file that parses but is no outbox (a <c>null</c> entry, an entry without its
+    /// event, channel or id) is treated as corrupt — preserved aside, its previous generation used — never loaded.</summary>
+    internal static JsonFileStore<OutboxFile> Store(string path) => new(path, problem: OutboxFile.Problem);
 
     internal NotificationOutbox(JsonFileStore<OutboxFile>? file, ILogger<NotificationOutbox> logger)
     {
@@ -108,7 +120,8 @@ public sealed class NotificationOutbox : INotificationOutbox
         {
             lock (_sync)
                 return new((_entries?.Count ?? 0) + _incoming.Count, Interlocked.Read(ref _redelivered),
-                    Interlocked.Read(ref _exhausted), Interlocked.Read(ref _dropped), _dirty && _file is not null);
+                    Interlocked.Read(ref _exhausted), Interlocked.Read(ref _dropped),
+                    _file is not null && (_dirty || _writing || _unreadable));
         }
     }
 
@@ -150,6 +163,19 @@ public sealed class NotificationOutbox : INotificationOutbox
         }
     }
 
+    public Task<NotificationOutboxEntry?> CurrentAsync(string id, DateTime now)
+    {
+        lock (_sync)
+        {
+            var entry = _entries?.FirstOrDefault(e => e.Id == id);
+            if (entry is null) return Task.FromResult<NotificationOutboxEntry?>(null);
+            if (now - entry.FirstFailedAt < MaxAge) return Task.FromResult<NotificationOutboxEntry?>(entry.Clone());
+            _entries!.Remove(entry);
+            Exhausted(entry, "it is older than " + MaxAge.TotalHours + " h");
+            return Task.FromResult<NotificationOutboxEntry?>(null);
+        }
+    }
+
     public Task CompleteAsync(string id, bool delivered, string? reason = null)
     {
         lock (_sync)
@@ -167,12 +193,17 @@ public sealed class NotificationOutbox : INotificationOutbox
         return Task.CompletedTask;
     }
 
-    public Task<bool> FailedAsync(string id, Exception failure, DateTime now)
+    public Task<bool> FailedAsync(string id, Exception failure, DateTime now, NotificationEvent? progress = null)
     {
         lock (_sync)
         {
             var entry = _entries?.FirstOrDefault(e => e.Id == id);
             if (entry is null) return Task.FromResult(false);
+            if (progress is not null)
+            {
+                entry.Event = progress.Copy();
+                entry.Event.IsRedelivery = false;     // set by the worker for each attempt, not part of the event
+            }
             entry.Attempts++;
             entry.LastError = Describe(failure);
             _dirty = true;
@@ -203,6 +234,7 @@ public sealed class NotificationOutbox : INotificationOutbox
                 if (!_dirty) return true;
                 snapshot = new OutboxFile { Entries = _entries!.Select(e => e.Clone()).ToList() };
                 _dirty = false;
+                _writing = true;                      // unsaved until the write is through
             }
             try
             {
@@ -215,6 +247,10 @@ public sealed class NotificationOutbox : INotificationOutbox
                 lock (_sync) _dirty = true;
                 _logger.LogError("The notification outbox could not be saved; it is retried ({Error})", Describe(ex));
                 return false;
+            }
+            finally
+            {
+                lock (_sync) _writing = false;
             }
         }
         finally { _io.Release(); }
@@ -238,12 +274,14 @@ public sealed class NotificationOutbox : INotificationOutbox
         }
         catch (JsonStoreCorruptException ex)
         {
+            // The unreadable file was preserved aside by the store (the message names the copy); the outbox starts again.
             _logger.LogError("The notification outbox is corrupt and has no readable previous generation; its undelivered " +
                              "notifications are lost. {Detail}", ex.Message);
             loaded = [];
         }
         catch (Exception ex)
         {
+            lock (_sync) _unreadable = true;
             _logger.LogWarning("The notification outbox cannot be read right now; it is read again on the next pass ({Error})",
                 Describe(ex));
             return false;
@@ -251,6 +289,7 @@ public sealed class NotificationOutbox : INotificationOutbox
 
         lock (_sync)
         {
+            _unreadable = false;
             var merged = loaded.Concat(_incoming).OrderBy(e => e.FirstFailedAt).ToList();
             _incoming.Clear();
             _entries = merged;
@@ -284,17 +323,43 @@ public sealed class NotificationOutbox : INotificationOutbox
     internal static TimeSpan WaitAfter(int attempt) =>
         TimeSpan.FromMinutes(Math.Min(MaxWait.TotalMinutes, Math.Pow(2, Math.Max(0, attempt - 1))));
 
-    /// <summary>Type and redacted message of a failure: what an admin needs, without the secrets a provider may echo.</summary>
+    /// <summary>Type and redacted message of a failure: what an admin needs, without the secrets a provider may echo. A URL
+    /// keeps only its scheme and host: a webhook or bot URL carries its credential in the path or query.</summary>
     internal static string Describe(Exception failure)
     {
-        var message = SinkRedaction.Text(failure.Message) ?? "";
+        var message = SinkRedaction.Text(WithoutUrlPaths(failure.Message)) ?? "";
         if (message.Length > 300) message = message[..300] + "…";
         return $"{failure.GetType().Name}: {message}";
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex UrlPath = new(
+        @"\b([a-z][a-z0-9+.-]*://[^/?#\s]+)[/?#][^\s""'<>]*",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    // A pattern that times out withholds the whole message (fail closed).
+    private static string WithoutUrlPaths(string text)
+    {
+        try { return UrlPath.Replace(text, "$1/…"); }
+        catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return SinkRedaction.Withheld(text); }
     }
 
     /// <summary>The file's shape.</summary>
     public sealed class OutboxFile
     {
         public List<NotificationOutboxEntry>? Entries { get; set; } = [];
+
+        /// <summary>What makes a parsed file no outbox; <c>null</c> when it is one.</summary>
+        internal static string? Problem(OutboxFile file)
+        {
+            foreach (var entry in file.Entries ?? [])
+            {
+                if (entry is null) return "The outbox holds an empty entry.";
+                if (entry.Event is null) return "An outbox entry has no event.";
+                if (string.IsNullOrEmpty(entry.Id) || string.IsNullOrEmpty(entry.Channel))
+                    return "An outbox entry has no id or channel.";
+            }
+            return null;
+        }
     }
 }

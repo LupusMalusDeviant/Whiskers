@@ -328,30 +328,204 @@ public sealed class NotificationDeliveryTests : IDisposable
     }
 
     [Fact]
-    public async Task The_outbox_file_and_its_previous_generation_keep_no_secret()
+    public async Task Configured_credentials_reach_no_file_generation_log_or_payload_not_even_as_a_prefix()
     {
-        const string canary = "r140-outbox-canary-secret";
+        // Unique per run, registered as the module registers configured channel credentials.
+        var token = "r140tok" + Guid.NewGuid().ToString("N");
+        var password = "r140pw" + Guid.NewGuid().ToString("N");
+        var url = $"https://hooks.slack.example/services/T01/B01/{token}";
+        KnownSecrets.Register(url);
+        KnownSecrets.Register(password);
+        string[] canaries = [token, password];
+
+        var logs = new ListLoggerProvider();
+        using var factory = LoggerFactory.Create(b => b.AddProvider(logs));
         var paths = new DataPathOptions(_dir);
-        var outbox = new NotificationOutbox(paths, NullLogger<NotificationOutbox>.Instance);
-        var composite = Composite([Slack(new ScriptedHandler(Status(500), Status(500), Status(500), Status(500)))], outbox);
+        var outbox = new NotificationOutbox(paths, factory.CreateLogger<NotificationOutbox>());
+        // The provider echoes the URL and the event's text in its error, with the secret near the 300-character cut.
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> echo = (req, _) =>
+            throw new HttpRequestException($"{new string('x', 270)} POST {req.RequestUri} failed; smtp login {password} refused");
+        var composite = Composite([Slack(new ScriptedHandler(echo, echo, echo, echo), url)], outbox,
+            logger: factory.CreateLogger<CompositeNotificationService>());
 
         await composite.SendAsync(new NotificationEvent
         {
             EventType = "automation_suspended", ContainerName = "AutoUpdate",
-            ImageInfo = $"login to https://deploy:{canary}@registry.example failed, password={canary}",
+            ImageInfo = $"posting to {url} failed; the mail password is {password}",
         });
         Assert.True(await outbox.FlushAsync());
         await composite.SendAsync(new NotificationEvent { EventType = "automation_suspended", ContainerName = "AutoPatch" });
         Assert.True(await outbox.FlushAsync());                 // a second generation: the first is now the .bak
 
-        foreach (var file in new[] { paths.NotificationOutboxJson, paths.NotificationOutboxJson + ".bak" }.Where(File.Exists))
-        {
-            var text = await File.ReadAllTextAsync(file);
-            Assert.DoesNotContain(canary, text);
-            Assert.DoesNotContain("hooks.slack.example", text);
-        }
+        var working = new ScriptedHandler();
+        var worker = new NotificationOutboxWorker([Slack(working, url)], outbox, factory.CreateLogger<NotificationOutboxWorker>(),
+            TimeSpan.FromSeconds(5));
+        await worker.RedeliverDueAsync(DateTime.UtcNow.AddMinutes(2), CancellationToken.None);
+        Assert.Equal(2, working.Requests);
+
         Assert.True(File.Exists(paths.NotificationOutboxJson + ".bak"));
+        var seen = new List<string>(logs.Lines) { working.LastBody };
+        foreach (var file in new[] { paths.NotificationOutboxJson, paths.NotificationOutboxJson + ".bak" })
+            seen.Add(await File.ReadAllTextAsync(file));
+        foreach (var text in seen)
+            foreach (var canary in canaries)
+                Assert.DoesNotContain(canary[..10], text);     // not the value, nor its first characters
+        Assert.Contains(logs.Lines, l => l.Contains("hooks.slack.example", StringComparison.Ordinal)
+                                         && l.Contains("HttpRequestException", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task Each_redelivery_is_on_disk_before_the_next_starts_and_so_is_an_addition()
+    {
+        var path = Path.Combine(_dir, "outbox.json");
+        var outbox = new NotificationOutbox(NotificationOutbox.Store(path), NullLogger<NotificationOutbox>.Instance);
+        var now = DateTime.UtcNow;
+        foreach (var name in new[] { "one", "two", "three" })
+            await outbox.AddAsync("Slack", Stopped(name), new HttpRequestException("500"), now);
+        Assert.True(await outbox.FlushAsync());
+
+        var atTwo = new TaskCompletionSource();
+        var releaseTwo = new TaskCompletionSource();
+        var atThree = new TaskCompletionSource();
+        var releaseThree = new TaskCompletionSource();
+        var handler = new ScriptedHandler(Status(200),
+            async (_, _) => { atTwo.SetResult(); await releaseTwo.Task; return new HttpResponseMessage(HttpStatusCode.OK); },
+            async (_, _) => { atThree.SetResult(); await releaseThree.Task; return new HttpResponseMessage(HttpStatusCode.OK); });
+        var worker = new NotificationOutboxWorker([Slack(handler)], outbox, NullLogger<NotificationOutboxWorker>.Instance,
+            TimeSpan.FromSeconds(30));
+
+        var pass = worker.RedeliverDueAsync(now.AddMinutes(2), CancellationToken.None);
+        await atTwo.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(["two", "three"], await OnDiskAsync(path));          // the first delivery is written already
+        await outbox.AddAsync("Slack", Stopped("new"), new HttpRequestException("500"), now);
+
+        releaseTwo.SetResult();
+        await atThree.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(["three", "new"], await OnDiskAsync(path));          // and the addition, before the third is sent
+
+        releaseThree.SetResult();
+        await pass.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(["new"], await OnDiskAsync(path));
+    }
+
+    [Fact]
+    public async Task An_entry_that_ran_out_of_time_during_the_pass_is_not_sent_and_a_wait_counts_from_the_failure()
+    {
+        var outbox = NotificationOutbox.InMemory(NullLogger<NotificationOutbox>.Instance);
+        var now = DateTime.UtcNow;
+        var clock = now;
+        await outbox.AddAsync("Slack", Stopped("slow"), new HttpRequestException("500"), now - TimeSpan.FromHours(1));
+        await outbox.AddAsync("Slack", Stopped("late"), new HttpRequestException("500"),
+            now - NotificationOutbox.MaxAge + TimeSpan.FromSeconds(5));             // five seconds left when the pass starts
+        var handler = new ScriptedHandler((_, _) =>
+        {
+            clock += TimeSpan.FromSeconds(20);                                      // the first delivery takes 20 s, then fails
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway));
+        });
+        var worker = new NotificationOutboxWorker([Slack(handler)], outbox, NullLogger<NotificationOutboxWorker>.Instance,
+            TimeSpan.FromSeconds(30)) { Clock = () => clock };
+
+        await worker.RedeliverDueAsync(now, CancellationToken.None);
+
+        Assert.Equal(1, handler.Requests);                                         // "late" was too old by its turn
+        Assert.Equal(1, outbox.Status.Exhausted);
+        var failedAt = now + TimeSpan.FromSeconds(20);
+        Assert.Empty(await outbox.DueAsync(failedAt + NotificationOutbox.WaitAfter(2) - TimeSpan.FromSeconds(1)));
+        Assert.Single(await outbox.DueAsync(failedAt + NotificationOutbox.WaitAfter(2)));
+    }
+
+    [Fact]
+    public async Task An_entry_dropped_from_a_full_outbox_during_the_pass_is_not_sent()
+    {
+        var outbox = NotificationOutbox.InMemory(NullLogger<NotificationOutbox>.Instance);
+        var now = DateTime.UtcNow;
+        await outbox.AddAsync("Slack", Stopped("first"), new HttpRequestException("500"), now - TimeSpan.FromHours(2));
+        await outbox.AddAsync("Slack", Stopped("second"), new HttpRequestException("500"), now - TimeSpan.FromHours(1));
+        var atFirst = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var handler = new ScriptedHandler(async (_, _) =>
+        {
+            atFirst.SetResult();
+            await release.Task;
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        var worker = new NotificationOutboxWorker([Slack(handler)], outbox, NullLogger<NotificationOutboxWorker>.Instance,
+            TimeSpan.FromSeconds(30));
+
+        var pass = worker.RedeliverDueAsync(now, CancellationToken.None);
+        await atFirst.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        for (var i = 0; i < NotificationOutbox.MaxEntries; i++)                    // a burst pushes both out
+            await outbox.AddAsync("Slack", Stopped($"burst{i}"), new HttpRequestException("500"), now);
+        release.SetResult();
+        await pass.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1, handler.Requests);                                         // "second" was not sent from its copy
+        Assert.Equal(2, outbox.Status.Dropped);
+        Assert.Equal(0, outbox.Status.Redelivered);                                // "first" was dropped meanwhile
+    }
+
+    [Theory]
+    [InlineData("{\"Entries\":[null]}")]
+    [InlineData("{\"Entries\":[{\"Id\":\"a\",\"Channel\":\"Slack\",\"Event\":null}]}")]
+    [InlineData("{\"Entries\":[{\"Id\":\"\",\"Channel\":\"Slack\",\"Event\":{}}]}")]
+    public async Task A_file_that_parses_but_is_no_outbox_is_preserved_and_the_previous_generation_used(string broken)
+    {
+        var path = Path.Combine(_dir, "outbox.json");
+        var first = new NotificationOutbox(NotificationOutbox.Store(path), NullLogger<NotificationOutbox>.Instance);
+        await first.AddAsync("Slack", Stopped("kept"), new HttpRequestException("500"), DateTime.UtcNow);
+        Assert.True(await first.FlushAsync());
+        Assert.True(await first.FlushAsync());
+        await first.AddAsync("Slack", Stopped("later"), new HttpRequestException("500"), DateTime.UtcNow);
+        Assert.True(await first.FlushAsync());                                   // the .bak holds "kept"
+        await File.WriteAllTextAsync(path, broken);
+
+        var outbox = new NotificationOutbox(NotificationOutbox.Store(path), NullLogger<NotificationOutbox>.Instance);
+        Assert.True(await outbox.FlushAsync());
+
+        Assert.Equal(["kept"], (await outbox.DueAsync(DateTime.UtcNow.AddHours(1))).Select(e => e.Event.ContainerName));
+        Assert.Single(Directory.GetFiles(_dir, "outbox.json.corrupt-*"));        // the broken file is kept for a look
+    }
+
+    [Theory]
+    [InlineData("{\"Entries\":[null]}")]
+    [InlineData("{\"Entries\":[{\"Id\":\"a\",\"Channel\":\"Slack\",\"Event\":null}]}")]
+    public async Task A_broken_file_without_a_previous_generation_does_not_block_new_notifications(string broken)
+    {
+        var path = Path.Combine(_dir, "outbox.json");
+        await File.WriteAllTextAsync(path, broken);
+        var outbox = new NotificationOutbox(NotificationOutbox.Store(path), NullLogger<NotificationOutbox>.Instance);
+        var working = new ScriptedHandler();
+        var worker = new NotificationOutboxWorker([Slack(working)], outbox, NullLogger<NotificationOutboxWorker>.Instance,
+            TimeSpan.FromSeconds(5));
+
+        Assert.True(await outbox.FlushAsync());
+        Assert.Single(Directory.GetFiles(_dir, "outbox.json.corrupt-*"));
+        await outbox.AddAsync("Slack", Stopped("new"), new HttpRequestException("500"), DateTime.UtcNow);
+        await worker.RedeliverDueAsync(DateTime.UtcNow.AddMinutes(2), CancellationToken.None);
+
+        Assert.Equal(1, working.Requests);
+        Assert.Equal(0, outbox.Status.Pending);
+    }
+
+    [Fact]
+    public async Task An_outbox_whose_file_could_not_be_read_yet_reports_itself_unsaved()
+    {
+        var path = Path.Combine(_dir, "outbox.json");
+        await File.WriteAllTextAsync(path, "{\"Entries\":[]}");
+        var outbox = new NotificationOutbox(NotificationOutbox.Store(path), NullLogger<NotificationOutbox>.Instance);
+        using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.False(await outbox.FlushAsync());
+            Assert.Equal(0, outbox.Status.Pending);
+            Assert.True(outbox.Status.Unsaved);                // nothing new arrived, the backlog is still unknown
+        }
+        Assert.True(await outbox.FlushAsync());
+        Assert.False(outbox.Status.Unsaved);
+    }
+
+    private static async Task<List<string>> OnDiskAsync(string path) =>
+        ((await new Whiskers.Services.Persistence.JsonFileStore<NotificationOutbox.OutboxFile>(path).LoadAsync()).Entries ?? [])
+        .Select(e => e.Event.ContainerName).ToList();
 
     // ---- helpers -------------------------------------------------------------------------------------------------
 

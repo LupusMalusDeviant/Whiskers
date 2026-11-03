@@ -19,21 +19,45 @@ public class EmailNotificationService : IEmailNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
-    /// <summary>R1-40: the longest one SMTP conversation (connect, TLS, auth, send) may take. The cancellation linked to
-    /// the caller's token is what enforces it (a <c>TimeoutException</c>); <c>SmtpClient.Timeout</c> is set to it as well
-    /// and, depending on the runtime, can end the send first (an <c>SmtpException</c>).</summary>
+    /// <summary>R1-40: the longest one SMTP conversation (connect, TLS, auth, send, the server's final answer) may take.
+    /// Its end — or the caller's — aborts the connection itself (<c>SmtpClient</c> does not watch the token in every
+    /// phase), and the send is awaited until it has really stopped; <c>SmtpClient.Timeout</c> is set to it as a last
+    /// bound and can end the send first (an <c>SmtpException</c>).</summary>
     internal static readonly TimeSpan DefaultSmtpDeadline = TimeSpan.FromSeconds(30);
 
     /// <summary>The deadline in force (tests shorten it).</summary>
     internal TimeSpan SmtpDeadline { get; init; } = DefaultSmtpDeadline;
 
+    /// <summary>Sends the event to every configured recipient it has not reached yet
+    /// (<see cref="NotificationEvent.DeliveredRecipients"/>). When the server takes some recipients and refuses others,
+    /// the ones it took are recorded on <paramref name="evt"/> before the failure is thrown: a retry or redelivery — also
+    /// after a restart, through the outbox — goes to the others only, never twice to the same inbox.</summary>
     public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var c = _settings.CurrentValue;
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.Host) || string.IsNullOrWhiteSpace(c.To)) return false;
-        if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
-        var (title, _) = NotificationFormatter.Describe(evt);
-        await SendMailAsync(c, $"[Whiskers] {title}", NotificationFormatter.PlainText(evt), ct);
+        if (!evt.IsRedelivery && evt.DeliveredRecipients is null && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes))
+            return false;
+        var reached = new HashSet<string>(evt.DeliveredRecipients ?? [], StringComparer.OrdinalIgnoreCase);
+        var recipients = Recipients(c.To).Where(r => !reached.Contains(r)).ToList();
+        if (recipients.Count > 0)
+        {
+            var (title, _) = NotificationFormatter.Describe(evt);
+            try
+            {
+                await SendMailAsync(c, recipients, $"[Whiskers] {title}", NotificationFormatter.PlainText(evt), ct);
+            }
+            catch (SmtpFailedRecipientException ex)
+            {
+                // Refused all: nothing went out. Refused some: the message went to the others (SmtpClient sends to the
+                // recipients it was given as soon as one is taken).
+                var refused = Refused(ex);
+                var took = recipients.Where(r => !refused.Contains(r)).ToList();
+                if (took.Count > 0 && took.Count < recipients.Count)
+                    evt.DeliveredRecipients = [.. reached, .. took];
+                throw;
+            }
+        }
         _throttler.Record(evt);
         _logger.LogInformation("Email notification sent: {EventType}", evt.EventType);
         return true;
@@ -43,10 +67,26 @@ public class EmailNotificationService : IEmailNotificationService
     {
         var c = _settings.CurrentValue;
         if (string.IsNullOrWhiteSpace(c.Host) || string.IsNullOrWhiteSpace(c.To)) return;
-        await SendMailAsync(c, "[Whiskers] Test", "Benachrichtigungen funktionieren.", CancellationToken.None);
+        await SendMailAsync(c, Recipients(c.To), "[Whiskers] Test", "Benachrichtigungen funktionieren.", CancellationToken.None);
     }
 
-    private async Task SendMailAsync(EmailSettings c, string subject, string body, CancellationToken ct)
+    private static List<string> Recipients(string to) =>
+        to.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(r => new MailAddress(r).Address)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static HashSet<string> Refused(SmtpFailedRecipientException ex)
+    {
+        var failures = ex is SmtpFailedRecipientsException many && many.InnerExceptions.Length > 0
+            ? many.InnerExceptions.Cast<SmtpFailedRecipientException>()
+            : [ex];
+        return failures.Select(f => (f.FailedRecipient ?? "").Trim().Trim('<', '>'))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task SendMailAsync(EmailSettings c, IReadOnlyList<string> recipients, string subject, string body,
+        CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(SmtpDeadline);
@@ -56,8 +96,7 @@ public class EmailNotificationService : IEmailNotificationService
             Subject = subject,
             Body = body,
         };
-        foreach (var to in c.To.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            msg.To.Add(to);
+        foreach (var to in recipients) msg.To.Add(to);
 
         using var client = new SmtpClient(c.Host, c.Port)
         {
@@ -65,13 +104,28 @@ public class EmailNotificationService : IEmailNotificationService
             Credentials = string.IsNullOrWhiteSpace(c.Username) ? null : new NetworkCredential(c.Username, c.Password),
             Timeout = (int)SmtpDeadline.TotalMilliseconds,
         };
+        var send = client.SendMailAsync(msg, deadline.Token);
         try
         {
-            await client.SendMailAsync(msg, deadline.Token);
+            // SmtpClient connects and waits for the server's final answer without looking at the token: the deadline or
+            // the caller's stop closes the connection (Dispose aborts a send in progress), and the send is awaited until
+            // it has ended — never left running behind the next attempt.
+            using (deadline.Token.Register(static state => AbortQuietly((SmtpClient)state!), client))
+                await send;
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (Exception) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
         {
             throw new TimeoutException($"The SMTP server did not complete the send within {SmtpDeadline.TotalSeconds:0} s.");
         }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(ct);
+        }
+    }
+
+    private static void AbortQuietly(SmtpClient client)
+    {
+        try { client.Dispose(); }
+        catch (Exception) { /* the send ends with its own error */ }
     }
 }

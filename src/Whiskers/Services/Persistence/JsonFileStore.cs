@@ -13,6 +13,8 @@ namespace Whiskers.Services.Persistence;
 /// <see cref="JsonStoreRecovery"/> and shown by the readiness check. Without a readable previous generation the load
 /// throws <see cref="JsonStoreCorruptException"/>: never an empty, possibly more permissive, store.</item>
 /// <item>A file that cannot be opened (permissions, a lock) throws as it is: it is not missing.</item>
+/// <item>A store may name a structural check (<c>problem</c>, R1-40): a file that parses but breaks it (a <c>null</c>
+/// entry, a missing required member) is handled exactly like one that cannot be parsed.</item>
 /// <item>A store that may still hold a legacy plaintext secret (<c>holdsPlaintextSecret</c>) keeps no previous
 /// generation of a file that holds one: a secret moved into the vault must not stay behind in the <c>.bak</c>.</item>
 /// </list>
@@ -24,16 +26,19 @@ public class JsonFileStore<T> where T : class, new()
     private readonly string _filePath;
     private readonly SemaphoreSlim _semaphore;
     private readonly Func<T, bool>? _holdsPlaintextSecret;
+    private readonly Func<T, string?>? _problem;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true
     };
 
-    public JsonFileStore(string filePath, Func<T, bool>? holdsPlaintextSecret = null)
+    /// <param name="problem">R1-40: what makes a parsed file unusable (<c>null</c> when it is fine).</param>
+    public JsonFileStore(string filePath, Func<T, bool>? holdsPlaintextSecret = null, Func<T, string?>? problem = null)
     {
         _filePath = filePath;
         _holdsPlaintextSecret = holdsPlaintextSecret;
+        _problem = problem;
         _semaphore = Locks.GetOrAdd(Path.GetFullPath(filePath), _ => new SemaphoreSlim(1, 1));
         var dir = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(dir))
@@ -135,9 +140,12 @@ public class JsonFileStore<T> where T : class, new()
                 throw new IOException($"{path} is a directory, not a file; the store cannot be read.");
     }
 
-    // "null" is no store: read as unreadable rather than as an empty one.
-    private static T Parse(string json)
-        => JsonSerializer.Deserialize<T>(json, JsonOptions) ?? throw new JsonException("The file holds null.");
+    // "null" is no store: read as unreadable rather than as an empty one; so is a file that breaks the store's check.
+    private T Parse(string json)
+    {
+        var parsed = JsonSerializer.Deserialize<T>(json, JsonOptions) ?? throw new JsonException("The file holds null.");
+        return _problem?.Invoke(parsed) is { } problem ? throw new JsonException(problem) : parsed;
+    }
 
     private async Task<T> RecoverAsync(string backup, string preservedAs, Exception cause)
     {

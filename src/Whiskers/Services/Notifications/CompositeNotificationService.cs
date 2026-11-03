@@ -90,7 +90,9 @@ public class CompositeNotificationService : INotificationService
         try { _inApp.Add(evt); } catch (Exception ex) { _logger.LogWarning(ex, "In-app notification failed"); }
         await PersistHistoryAsync(evt);
 
-        var tasks = _channels.Select(c => DeliverAsync(c, evt)).ToList();
+        // Each channel its own copy: what one records about its delivery (the e-mail recipients reached) is kept with
+        // its own outbox entry only.
+        var tasks = _channels.Select(c => DeliverAsync(c, evt.Copy())).ToList();
         // AI-trigger dispatch runs alongside the channels; lazily resolved to avoid a DI cycle. Once, never retried:
         // a second dispatch would start the triggers a second time. Its wait is bounded; the dispatch itself bounds
         // its runs (INV-40).

@@ -28,6 +28,11 @@ public class NotificationEvent
     /// a redelivery is not throttled again.</summary>
     public bool IsRedelivery { get; set; }
 
-    /// <summary>A shallow copy (every member is a value or an immutable string).</summary>
+    /// <summary>R1-40: the e-mail recipients this event already reached (an SMTP server accepted some recipients and
+    /// refused others). A retry or redelivery sends only to the others. Replaced, never changed in place.</summary>
+    public string[]? DeliveredRecipients { get; set; }
+
+    /// <summary>A shallow copy: every member is a value, an immutable string or an array that is replaced, never
+    /// changed in place.</summary>
     public NotificationEvent Copy() => (NotificationEvent)MemberwiseClone();
 }
