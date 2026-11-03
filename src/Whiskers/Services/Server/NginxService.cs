@@ -75,7 +75,7 @@ public class NginxService : INginxService
         ValidateSiteName(siteName);
 
         // Try sites-available first, then sites-enabled
-        var result = await _executor.ExecuteAsync(serverId, $"cat /etc/nginx/sites-available/{siteName} 2>/dev/null || cat /etc/nginx/sites-enabled/{siteName} 2>/dev/null");
+        var result = await _executor.ExecuteAsync(serverId, $"cat {ShellUtils.Quote("/etc/nginx/sites-available/" + siteName)} 2>/dev/null || cat {ShellUtils.Quote("/etc/nginx/sites-enabled/" + siteName)} 2>/dev/null");
 
         if (!result.Success && !string.IsNullOrEmpty(result.Error))
             _logger.LogWarning("Failed to read nginx site config '{SiteName}' on {ServerId}: {Error}", siteName, serverId, result.Error);
@@ -95,7 +95,7 @@ public class NginxService : INginxService
         var destPath = $"/etc/nginx/sites-available/{siteName}";
 
         // Write the file, then test the nginx config, and reload only if the test passes
-        var writeCmd = $"echo '{base64Content}' | base64 -d | tee {destPath} > /dev/null";
+        var writeCmd = $"echo '{base64Content}' | base64 -d | tee {ShellUtils.Quote(destPath)} > /dev/null";
         var writeResult = await _executor.ExecuteAsync(serverId, writeCmd);
 
         if (!writeResult.Success)
@@ -137,7 +137,7 @@ public class NginxService : INginxService
         var availPath = $"/etc/nginx/sites-available/{siteName}";
         var enabledPath = $"/etc/nginx/sites-enabled/{siteName}";
 
-        var linkResult = await _executor.ExecuteAsync(serverId, $"ln -sf {availPath} {enabledPath}");
+        var linkResult = await _executor.ExecuteAsync(serverId, $"ln -sf -- {ShellUtils.Quote(availPath)} {ShellUtils.Quote(enabledPath)}");
         if (!linkResult.Success)
         {
             _logger.LogWarning("Failed to enable nginx site '{SiteName}' on {ServerId}: {Error}", siteName, serverId, linkResult.Error);
@@ -148,7 +148,7 @@ public class NginxService : INginxService
         if (!testResult.Success)
         {
             // Roll back the symlink
-            await _executor.ExecuteAsync(serverId, $"rm -f {enabledPath}");
+            await _executor.ExecuteAsync(serverId, $"rm -f -- {ShellUtils.Quote(enabledPath)}");
             return new CommandResult
             {
                 ExitCode = testResult.ExitCode,
@@ -166,7 +166,7 @@ public class NginxService : INginxService
         ValidateSiteName(siteName);
 
         var enabledPath = $"/etc/nginx/sites-enabled/{siteName}";
-        var removeResult = await _executor.ExecuteAsync(serverId, $"rm -f {enabledPath}");
+        var removeResult = await _executor.ExecuteAsync(serverId, $"rm -f -- {ShellUtils.Quote(enabledPath)}");
 
         if (!removeResult.Success)
         {

@@ -15,26 +15,27 @@ namespace Whiskers.Utils;
 /// </summary>
 public static class CommandOperands
 {
+    // Every pattern ends in \z, never $: in .NET, $ also matches before a final line feed ("main\n").
     // Branch names: a strict subset of `git check-ref-format --branch`. Leading alphanumeric (never `-` or `.`),
     // a conservative charset, and the structural rules checked in IsSafeGitRef.
-    private static readonly Regex GitRefRegex = new(@"^[A-Za-z0-9][A-Za-z0-9._/-]*$", RegexOptions.Compiled);
+    private static readonly Regex GitRefRegex = new(@"^[A-Za-z0-9][A-Za-z0-9._/-]*\z", RegexOptions.Compiled);
 
     // POSIX-portable user names (useradd's default rule, without the trailing `$`): never a leading `-`, no `@`.
-    private static readonly Regex SshUserRegex = new(@"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$", RegexOptions.Compiled);
+    private static readonly Regex SshUserRegex = new(@"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}\z", RegexOptions.Compiled);
 
     // RFC 1123 host names: labels of letters, digits and inner hyphens, so no label (and no name) starts with `-`.
     private static readonly Regex HostNameRegex = new(
-        @"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$",
+        @"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?\z",
         RegexOptions.Compiled);
 
     // IP literals as ssh takes them (IPv4 dotted, IPv6 without brackets or zone id).
-    private static readonly Regex IpLiteralRegex = new(@"^[0-9A-Fa-f.:]+$", RegexOptions.Compiled);
+    private static readonly Regex IpLiteralRegex = new(@"^[0-9A-Fa-f.:]+\z", RegexOptions.Compiled);
 
     // nginx site file names: leading alphanumeric, letters/digits/dot/hyphen/underscore, no `..` (checked separately).
-    private static readonly Regex SiteNameRegex = new(@"^[A-Za-z0-9][A-Za-z0-9._-]*$", RegexOptions.Compiled);
+    private static readonly Regex SiteNameRegex = new(@"^[A-Za-z0-9][A-Za-z0-9._-]*\z", RegexOptions.Compiled);
 
     // Docker container ids and names (Docker's own name rule: [a-zA-Z0-9][a-zA-Z0-9_.-]*).
-    private static readonly Regex ContainerRefRegex = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.Compiled);
+    private static readonly Regex ContainerRefRegex = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*\z", RegexOptions.Compiled);
 
     /// <summary>True for a branch name that git takes as a ref and never as an option: leading alphanumeric, only
     /// <c>A–Z a–z 0–9 . _ / -</c>, no <c>..</c>, <c>//</c> or <c>@{</c>, no component starting with <c>.</c>, not

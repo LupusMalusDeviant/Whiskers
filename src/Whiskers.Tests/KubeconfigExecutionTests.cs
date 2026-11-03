@@ -159,6 +159,39 @@ public sealed class KubeconfigExecutionTests : IDisposable
     }
 
     [Fact]
+    public void An_exec_block_reached_through_a_yaml_alias_never_becomes_a_client()
+    {
+        // The anchor sits on a harmless-looking key; the user takes it by alias. The client's own reader refuses the alias
+        // (21.0.8: AnchorNotFoundException); should an upgrade read it, the policy sees the exec block on the same object.
+        var yaml = """
+            apiVersion: v1
+            kind: Config
+            x-plugin: &plugin
+              exec:
+                apiVersion: client.authentication.k8s.io/v1beta1
+                command: /bin/sh
+            clusters:
+            - name: c
+              cluster:
+                server: https://127.0.0.1:1
+            contexts:
+            - name: x
+              context:
+                cluster: c
+                user: u
+            current-context: x
+            users:
+            - name: u
+              user: *plugin
+            """.Replace("\r\n", "\n");
+
+        // Refused by the policy or not readable at all: either way no client is built from it.
+        Assert.ThrowsAny<Exception>(() => KubeconfigPolicy.ParseAndAdmit(yaml));
+        var (cache, serverId) = CacheWith(yaml);
+        Assert.ThrowsAny<Exception>(() => cache.GetClient(serverId));
+    }
+
+    [Fact]
     public void A_user_without_credentials_and_an_empty_user_list_are_admitted()
     {
         Assert.Single(KubeconfigPolicy.ParseAndAdmit(Kubeconfig("    {}")).Users!);

@@ -114,6 +114,21 @@ public class OptionInjectionTests
             Whiskers.Services.GitDeploy.GitDeployCommands.CloneOrUpdateCommand("app1", "https://example.test/r.git", branch, withToken: false));
     }
 
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r")]
+    [InlineData("\t")]
+    [InlineData("\r\n")]
+    public void No_validator_admits_a_trailing_line_break_or_tab(string tail)
+    {
+        Assert.False(CommandOperands.IsSafeGitRef("main" + tail));
+        Assert.False(CommandOperands.IsSafeSshUser("root" + tail));
+        Assert.False(CommandOperands.IsSafeHost("web.example.com" + tail));
+        Assert.False(CommandOperands.IsSafeHost("10.0.0.1" + tail));
+        Assert.False(CommandOperands.IsSafeSiteName("default" + tail));
+        Assert.False(CommandOperands.IsSafeContainerRef("c0ffee" + tail));
+    }
+
     [Fact]
     public void The_refusal_names_the_field_and_is_an_argument_exception()
     {

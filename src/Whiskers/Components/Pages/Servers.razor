@@ -592,7 +592,9 @@
     {
         // R1-42 (INV-41): host, user and port become ssh operands. The executor, tunnel and terminal refuse an unsafe
         // value anyway; refusing it here says so while the dialog is still open.
-        if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH)
+        // Any server with an SSH host may be reached over ssh (the executor, the Tailscale fallback): checked whenever
+        // one is set, not only for the SSH connection type.
+        if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH || !string.IsNullOrWhiteSpace(_form.SshHost))
         {
             _form.SshHost = string.IsNullOrWhiteSpace(_form.SshHost) ? _form.SshHost : _form.SshHost.Trim();
             _form.SshUser = string.IsNullOrWhiteSpace(_form.SshUser) ? _form.SshUser : _form.SshUser.Trim();
