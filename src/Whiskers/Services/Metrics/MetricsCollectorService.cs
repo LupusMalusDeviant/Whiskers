@@ -55,17 +55,47 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         _selfMetrics = selfMetrics;
     }
 
+    /// <summary>Tests only: the pause before the first cycle.</summary>
+    internal TimeSpan StartupDelay { get; init; } = TimeSpan.FromSeconds(10);
+
+    private MetricsSettings? _lastSettings;
+    private bool _warnedUnreadableSettings;
+
+    /// <summary>R1-41 (review round 9): the section as last read successfully. A hand edit of app-settings.json that
+    /// does not bind (<c>"30s"</c>) makes <c>CurrentValue</c> throw until the file is fixed; read outside the cycle's
+    /// try, that ended the loop and stopped Whiskers. The last valid settings stay in use, with one warning.</summary>
+    private MetricsSettings Settings()
+    {
+        try
+        {
+            var current = _metricsSettings.CurrentValue;
+            _lastSettings = current;
+            _warnedUnreadableSettings = false;
+            return current;
+        }
+        catch (Exception ex) when (_lastSettings is not null)
+        {
+            if (!_warnedUnreadableSettings)
+            {
+                _warnedUnreadableSettings = true;
+                _logger.LogWarning("Metrics settings cannot be read ({Error}); keeping the last valid ones until app-settings.json is fixed",
+                    ex.Message);
+            }
+            return _lastSettings;
+        }
+    }
+
     protected override async Task RunAsync(CancellationToken ct)
     {
-        var startup = _metricsSettings.CurrentValue;
+        var startup = Settings();
         _logger.LogInformation("Metrics collector started (interval: {Interval}s, retention: {Retention}d, enabled: {Enabled})",
             startup.CollectionIntervalSeconds, startup.RetentionDays, startup.Enabled);
-        await Task.Delay(TimeSpan.FromSeconds(10), ct); // startup delay
+        await Task.Delay(StartupDelay, ct);
 
         while (!ct.IsCancellationRequested)
         {
             // Re-read every cycle so reload-on-change settings take effect without a restart.
-            var cfg = _metricsSettings.CurrentValue;
+            var cfg = Settings();
             if (cfg.Enabled)
             {
                 var cycleStart = DateTime.UtcNow;
@@ -86,11 +116,20 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
 
                 // One record per Docker server: the age of the last success is what reveals a collector that
                 // has quietly stopped, since a stalled loop produces no failures either.
-                foreach (var server in SelfMetricsServers())
-                    _selfMetrics.RecordCycle(
-                        Whiskers.Services.Observability.SelfMetrics.SelfMetricsFleetExtensions.Loops.Metrics,
-                        server, DateTime.UtcNow - cycleStart, cycleOk,
-                        interval: _interval.Interval);
+                // The server list is read outside the cycle's try: a failure there (servers.json unreadable) must not
+                // end the loop either (review round 9).
+                try
+                {
+                    foreach (var server in SelfMetricsServers())
+                        _selfMetrics.RecordCycle(
+                            Whiskers.Services.Observability.SelfMetrics.SelfMetricsFleetExtensions.Loops.Metrics,
+                            server, DateTime.UtcNow - cycleStart, cycleOk,
+                            interval: _interval.Interval);
+                }
+                catch (Exception ex) when (!IsHostStopping(ex, ct))
+                {
+                    _logger.LogWarning(ex, "Could not record the metrics cycle");
+                }
             }
 
             // Never a hot loop, never a delay past what Task.Delay takes (R1-41).

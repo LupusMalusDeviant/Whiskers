@@ -174,6 +174,7 @@ public sealed class IntervalGuard(string key, int min, int max, ILogger logger)
             return configured;
         }
         var used = _lastValid ?? Math.Clamp(configured, min, max);
+        _warnedUnreadable = false;
         if (_warnedFor != configured)
         {
             _warnedFor = configured;
@@ -188,6 +189,7 @@ public sealed class IntervalGuard(string key, int min, int max, ILogger logger)
     public int Unreadable(Exception error)
     {
         var used = _lastValid ?? min;
+        _warnedFor = null;
         if (!_warnedUnreadable)
         {
             _warnedUnreadable = true;

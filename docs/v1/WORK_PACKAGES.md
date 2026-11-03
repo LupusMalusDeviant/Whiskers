@@ -699,6 +699,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] Review round 6: the same rule for the log read — a fetch that was sent and then cut short is the host's timeout (window moves on, unreadable streak grows); only one still queued keeps its window. Saturation log wording follows `Ran`; F-16 notes the AutoUpdate part as resolved.
 - [x] Review round 7: the Operations README row for `ContainerLifecycleOperations.cs` is its own row again; the NotAsked text names the time actually queued.
 - [x] Review round 8: an interval that does not bind after a hand edit keeps the last valid one (one warning) instead of ending the loop; the ratchet also fails a typed catch in the loop that leaves it on anything but the host's stop.
+- [x] Review round 9: the metrics loop, which reads its whole section each cycle, keeps its last valid settings when a reload does not bind, and a failure recording its cycle no longer ends it; the ratchet also fails a `return` from a nested loop's catch and accepts a rethrow inside the recovering try.
 
 **Out of scope:** Full tracing infrastructure.
 

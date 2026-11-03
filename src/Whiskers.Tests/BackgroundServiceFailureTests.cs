@@ -429,6 +429,13 @@ public class BackgroundServiceFailureTests
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { }")));
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) { break; }\ncatch (Exception ex) { }")));
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (OperationCanceledException) when (!ct.IsCancellationRequested) { break; }\ncatch (Exception ex) { }")));
+        // Review round 9: a return from a nested loop's catch leaves RunAsync too; a rethrow inside the recovering try does not.
+        Assert.NotNull(VerdictOf(InLoop("try { foreach (var s in Xs) { try { await Run(s, ct); } catch (TimeoutException) { return; } } } " +
+                                        "catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.Null(VerdictOf(InLoop("try { try { await Run(ct); } catch (TimeoutException ex) { Note(ex); throw; } } " +
+                                     "catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.Null(VerdictOf(InLoop("try { foreach (var s in Xs) { try { await Run(s, ct); } catch (TimeoutException) { break; } } } " +
+                                     "catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));   // leaves only the inner loop
         // Review round 8: a typed catch that leaves the loop, next to a recovering one.
         Assert.NotNull(VerdictOf(InLoop("try { await Run(ct); }\ncatch (TimeoutException) { return; }\ncatch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
         Assert.NotNull(VerdictOf(InLoop("try { await Fetch(ct); } catch (HttpRequestException) { break; }\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
@@ -496,7 +503,7 @@ public class BackgroundServiceFailureTests
         // The options monitor rebinds already inside the reload callback, so the binder error surfaces there too (in the
         // app on the file watcher's thread); what matters here is the loop's read afterwards.
         config["HealthMonitor:CheckIntervalSeconds"] = "30s";
-        Assert.ThrowsAny<Exception>(() => config.Reload());
+        try { config.Reload(); } catch { /* the options monitor already rebinds in the reload callback */ }
         Assert.ThrowsAny<Exception>(() => sp.GetRequiredService<IOptionsMonitor<HealthMonitorSettings>>().CurrentValue);
 
         Assert.Equal(TimeSpan.FromSeconds(45), effective.Interval);
@@ -506,6 +513,59 @@ public class BackgroundServiceFailureTests
         config["HealthMonitor:CheckIntervalSeconds"] = "90";             // fixed: applies without a restart
         config.Reload();
         Assert.Equal(TimeSpan.FromSeconds(90), effective.Interval);
+    }
+
+    [Fact]
+    public async Task The_metrics_loop_survives_a_reload_that_does_not_bind()
+    {
+        // Review round 9: the metrics loop read its section directly, outside the cycle's try. A hand edit such as "30s"
+        // ended the loop on its next cycle. It now keeps the last valid settings and goes on.
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Metrics:Enabled"] = "true",
+            ["Metrics:CollectionIntervalSeconds"] = "30",
+        }).Build();
+        var services = new ServiceCollection();
+        services.AddOptions<MetricsSettings>().Bind(config.GetSection("Metrics"));
+        services.AddOptions<MetricAlertSettings>();
+        services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
+            new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }));
+        using var sp = services.BuildServiceProvider();
+        var logs = new NotificationDeliveryTests.ListLoggerProvider();
+        using var loggers = new Microsoft.Extensions.Logging.LoggerFactory([logs]);
+        // One second per cycle; every cycle fails on purpose (no Docker service registered), which is what it logs.
+        var interval = new EffectiveInterval<MetricsSettings>(() => 1, "Metrics:CollectionIntervalSeconds", 1, 10,
+            TimeSpan.FromSeconds(1), Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        var collector = new Whiskers.Services.Metrics.MetricsCollectorService(sp,
+            sp.GetRequiredService<IOptionsMonitor<MetricAlertSettings>>(),
+            new Whiskers.Services.Metrics.HostLoad.HostLoadEvaluator(), new Whiskers.Services.Metrics.HostLoad.ApiLatencyEvaluator(),
+            new Whiskers.Services.Metrics.HostLoad.RollingBaseline(), sp.GetRequiredService<IOptionsMonitor<MetricsSettings>>(),
+            new Microsoft.Extensions.Logging.Logger<Whiskers.Services.Metrics.MetricsCollectorService>(loggers),
+            new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(), interval)
+        {
+            StartupDelay = TimeSpan.Zero,
+            StartupOffsetForTests = TimeSpan.Zero,
+        };
+        int Cycles() => logs.Lines.Count(l => l.StartsWith("Metrics collection failed", StringComparison.Ordinal));
+        async Task WaitFor(Func<bool> done)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (!done() && DateTime.UtcNow < deadline) await Task.Delay(50);
+            Assert.True(done(), "timed out; log: " + string.Join(" / ", logs.Lines));
+        }
+
+        await collector.StartAsync(CancellationToken.None);
+        await WaitFor(() => Cycles() >= 1);
+
+        config["Metrics:CollectionIntervalSeconds"] = "30s";
+        try { config.Reload(); } catch { /* the options monitor already rebinds in the reload callback */ }
+        Assert.ThrowsAny<Exception>(() => sp.GetRequiredService<IOptionsMonitor<MetricsSettings>>().CurrentValue);
+
+        var before = Cycles();
+        await WaitFor(() => Cycles() >= before + 2);
+        Assert.False(collector.ExecuteTask!.IsCompleted, "the loop is still running");
+        Assert.Single(logs.Lines, l => l.Contains("Metrics settings cannot be read"));
+        await collector.StopAsync(CancellationToken.None);
     }
 
     [Theory]
@@ -623,12 +683,12 @@ public class BackgroundServiceFailureTests
         if (loops.Count == 0 && !oneShot)
             return "RunAsync has no loop the ratchet can see; a loop in a helper is not checked — keep the loop in RunAsync " +
                    "or, for a service that runs once by design, add it to OneShotServices";
-        // Review round 8: any catch in the outermost loop body that leaves the loop must do so only on the host's stop. A
-        // `catch (TimeoutException) { return; }` there would end the loop on exactly a dependency's timeout.
+        // Review rounds 8 and 9: any catch in the outermost loop body that leaves the loop must do so only on the host's
+        // stop. A `catch (TimeoutException) { return; }` there would end the loop on exactly a dependency's timeout — also
+        // from inside a nested loop, since a return leaves RunAsync from any depth.
         foreach (var l in loops)
-            foreach (var c in Outside<CatchClauseSyntax>(LoopBody(l))
-                         .Where(c => !c.Ancestors().TakeWhile(a => a != l).OfType<StatementSyntax>().Any(IsLoop)))
-                if (Terminates(c.Block) && !LeavesOnlyOnTheStop(c, token))
+            foreach (var c in Outside<CatchClauseSyntax>(LoopBody(l)))
+                if (LeavesTheLoop(c, l, token))
                     return "a catch in the loop leaves it on something other than the host's stop";
         var candidates = loops.Count > 0
             ? loops.SelectMany(l => Outside<TryStatementSyntax>(LoopBody(l))
@@ -637,6 +697,27 @@ public class BackgroundServiceFailureTests
         return candidates.Any(t => Recovers(t, token))
             ? null
             : "no catch inside the loop that recovers from a failed cycle and lets the loop go on";
+    }
+
+    /// <summary>Whether a catch inside the outermost loop can end that loop: a <c>return</c>, <c>goto</c> or
+    /// <c>yield break</c> always can; a <c>throw</c> unless a recovering try around it (inside the loop) takes it; a
+    /// <c>break</c> unless it only leaves a nested loop or switch. A catch reached only on the host's stop may.</summary>
+    private static bool LeavesTheLoop(CatchClauseSyntax c, StatementSyntax loop, string token)
+    {
+        if (LeavesOnlyOnTheStop(c, token)) return false;
+        var between = c.Ancestors().TakeWhile(a => a != loop).ToList();
+        var inNestedLoop = between.OfType<StatementSyntax>().Any(IsLoop);
+        var recoveredAround = between.OfType<BlockSyntax>()
+            .Any(b => b.Parent is TryStatementSyntax t && t.Block == b && Recovers(t, token));
+        return Outside<SyntaxNode>(c.Block).Any(n => n switch
+        {
+            ReturnStatementSyntax or GotoStatementSyntax => true,
+            YieldStatementSyntax y => y.IsKind(SyntaxKind.YieldBreakStatement),
+            ThrowStatementSyntax or ThrowExpressionSyntax => !recoveredAround,
+            BreakStatementSyntax b => !inNestedLoop && !b.Ancestors().TakeWhile(a => a != c.Block)
+                .Any(a => a is SwitchStatementSyntax || (a is StatementSyntax s && IsLoop(s))),
+            _ => false,
+        });
     }
 
     /// <summary>A catch whose block may leave the loop is fine only when it is reached on the host's stop: filtered on the
