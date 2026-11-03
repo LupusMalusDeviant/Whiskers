@@ -75,6 +75,7 @@ public static class MutationTargets
         "git-deploy-app" => "appId",
         "webhook" => "webhookId",
         "config" => "section",
+        "account" => "account",
         "host" or "server" => "serverId",
         _ => null,
     };

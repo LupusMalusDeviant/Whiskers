@@ -1,0 +1,102 @@
+@page "/account/recover"
+@attribute [AllowAnonymous]
+@layout Whiskers.Components.Layout.MainLayout
+@inject ILocalAccountService Accounts
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
+@inject IServiceProvider ServiceProvider
+
+@* R1-49: a person with a one-time recovery code (from an Admin's reset or invitation, or from the host operator's
+   `--recover-local-account`) sets a new password here. The code cannot sign in by itself; only this page accepts it, so
+   the change on first use is enforced. Every refusal — unknown email, wrong, used or expired code, locked account — is
+   the same message; a wrong code counts towards the account's lockout. Anonymous by design, like the sign-in page. *@
+
+<PageTitle>@L["Recover_PageTitle"]</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center" Style="min-height: 80vh;">
+    <MudPaper Elevation="4" Class="pa-8 mx-auto" Style="width: 100%; max-width: 440px;">
+        <MudText Typo="Typo.h5" Class="mb-2">@L["Recover_Title"]</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Recover_Intro"]</MudText>
+
+        @if (_done)
+        {
+            <MudAlert Severity="Severity.Success" Class="mb-4" id="recover-done">@L["Recover_Done"]</MudAlert>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Href="login">@L["Recover_Button_SignIn"]</MudButton>
+        }
+        else
+        {
+            <MudTextField @bind-Value="_email" Label="@L["Login_Field_Email"]" InputType="InputType.Email"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" id="recover-email" />
+            <MudTextField @bind-Value="_code" Label="@L["Recover_Label_Code"]" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Class="mb-2" id="recover-code" />
+            <MudTextField @bind-Value="_new" Label="@L["Account_Label_New"]" InputType="InputType.Password"
+                          HelperText="@L["LocalAccounts_PasswordPolicy"]" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" id="recover-new" />
+            <MudTextField @bind-Value="_confirm" Label="@L["Account_Label_Confirm"]" InputType="InputType.Password"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="recover-confirm" />
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3" id="recover-error">@_error</MudAlert>
+            }
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="Redeem"
+                       Disabled="@(_busy || string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_code) || string.IsNullOrEmpty(_new))">
+                @L["Recover_Button_Set"]
+            </MudButton>
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-3 d-block">@L["Recover_NoCode"]</MudText>
+        }
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string _email = "";
+    private string _code = "";
+    private string _new = "";
+    private string _confirm = "";
+    private string? _error;
+    private bool _busy;
+    private bool _done;
+
+    /// <summary>The shortest time an answer of this page takes.</summary>
+    public static readonly TimeSpan MinimumDuration = TimeSpan.FromSeconds(1);
+
+    private TimeProvider Clock => ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+
+    protected override void OnInitialized()
+    {
+        // Without real authentication there are no local sign-ins to recover.
+        if (Config.GetValue<bool>("Auth:Disabled")) Nav.NavigateTo("/", forceLoad: false);
+    }
+
+    private async Task Redeem()
+    {
+        _error = null;
+        if (!string.Equals(_new, _confirm, StringComparison.Ordinal))
+        {
+            _error = L["Account_Error_Mismatch"].Value;
+            return;
+        }
+        _busy = true;
+        // Every answer takes at least this long, whatever the outcome — a floor, not an extra wait, so the time does not
+        // tell a refusal from a success or one refusal from another. The service limits the attempts themselves.
+        var floor = Task.Delay(MinimumDuration, Clock);
+        try
+        {
+            var result = await Accounts.RedeemRecoveryCodeAsync(_email, _code, _new);
+            await floor;
+            if (result.Success)
+            {
+                _done = true;
+                _code = _new = _confirm = "";
+                return;
+            }
+            var text = L[$"LocalAccounts_Error_{result.Error}"];
+            _error = text.ResourceNotFound ? result.Error : text.Value;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await floor;
+            _error = L["LocalAccounts_Error_failed", ex.GetType().Name].Value;
+        }
+        finally { _busy = false; }
+    }
+}

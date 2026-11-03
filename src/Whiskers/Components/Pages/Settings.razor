@@ -511,6 +511,11 @@ else
 
     @* Cloud-Provider (Hetzner/Hostinger) credentials are configured per server under "Server". *@
 
+    @* Local accounts (R1-49) *@
+    <MudExpansionPanel Text="@L["LocalAccounts_Panel"]" Icon="@Icons.Material.Filled.People">
+        <LocalAccountsPanel />
+    </MudExpansionPanel>
+
     @* User Roles *@
     <MudExpansionPanel Text="@L["Settings_Panel_UserRoles"]" Icon="@Icons.Material.Filled.AdminPanelSettings">
         <MudGrid>

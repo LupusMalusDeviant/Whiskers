@@ -158,6 +158,7 @@ I read and checked: `Program.cs`, `Startup/WhiskersAuthenticationExtensions.cs`,
 - **Evidence:** `UserManager.CreateAsync` is only called from `SetupStateService.cs:76` and `LocalAdminSeeder.cs:37`. There is no `ChangePasswordAsync`, `ResetPasswordAsync` or `DeleteAsync` anywhere, and no 2FA.
 - **Impact:** A compromised local password cannot be rotated from the product, a second local admin cannot be created, and there is no MFA for an internet-facing control plane that holds root on hosts.
 - **Recommendation:** Add a password-change UI (with stamp-based session invalidation, see A-05), Admin-managed local users, and TOTP 2FA, or document "use OIDC with MFA" as the supported production path.
+- **Status:** Fixed in R1-49 (INV-61), except MFA by decision. `ILocalAccountService` adds the own password change, Admin add/reset/delete through the Mutation Gateway, one-time recovery codes (`/account/recover`) and host recovery (`--recover-local-account`); every change ends the account's sessions through R1-26's security-stamp check. Local accounts get no TOTP in 1.0: "use OIDC with MFA in production" is the documented path (README, SECURITY.md, `docs/operations/local-accounts.md`, Settings, *My account*).
 
 ### A-12 Fail-open whitelist before setup / with no roles: any Google or OIDC account gets Viewer, including the MCP read tools
 - **Severity:** Medium · **Category:** Security · **v1-blocker:** no (closes once setup completes)

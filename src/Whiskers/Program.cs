@@ -26,8 +26,10 @@ if (args is ["--migrate-to-postgres", ..])
 // startup below then migrates the restored DB and rebuilds every cache from the restored files. It throws on
 // an unrecoverable swap (→ process exit → restart retries) rather than booting on half-swapped state.
 // The restore CLI (R1-34) applies nothing: a restore already staged waits for a real start (the CLI refuses a second).
+// The account-recovery CLI (R1-49) runs next to the live instance (`docker compose exec`): it must never apply one.
 var restoreCli = RestoreCli.Requested(args);
-if (!restoreCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
+var recoveryCli = Whiskers.Services.Auth.LocalAccountRecoveryCli.Requested(args);
+if (!restoreCli && !recoveryCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
 
 builder.AddWhiskersConfiguration(dataPaths);   // UI-writable config layers + data-protection keys
 // R1-43: the configuration has read the environment; VPN keys leave it now, so no child process inherits them.
@@ -47,6 +49,14 @@ if (restoreCli)
 {
     return await RestoreCli.RunAsync(app.Services.GetRequiredService<IBackupService>(),
         app.Services.GetService<Whiskers.Services.Vault.IVaultService>(), dataPaths, RestoreCli.Arguments(args), Console.Out);
+}
+
+// R1-49 host-level recovery: `dotnet Whiskers.dll --recover-local-account <email>` issues a one-time recovery code for a
+// local account, prints it to this terminal only and exits without starting the web host.
+if (recoveryCli)
+{
+    return await Whiskers.Services.Auth.LocalAccountRecoveryCli.RunAsync(app.Services,
+        Whiskers.Services.Auth.LocalAccountRecoveryCli.Arguments(args), Console.Out);
 }
 
 app.ConfigureWhiskersHttpPipeline();           // forwarded headers → fixed auth middleware chain → endpoints
