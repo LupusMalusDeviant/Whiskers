@@ -26,13 +26,24 @@ public class VpnSettings
     /// <summary>Accept subnet routes advertised by peers.</summary>
     public bool AcceptRoutes { get; set; } = true;
 
+    /// <summary>Set at start when a configured key file could not be read (R1-43): the bring-up then fails with this
+    /// text instead of running without the key. Never holds the key.</summary>
+    public string? KeyFileProblem { get; set; }
+
+    /// <summary>Set at start when a key file is readable by group or others; logged as a warning.</summary>
+    public string? KeyFileWarning { get; set; }
+
     public TailscaleOptions Tailscale { get; set; } = new();
     public NetbirdOptions Netbird { get; set; } = new();
 
     public class TailscaleOptions
     {
-        /// <summary>Auth key for unattended login (tskey-…). Empty = interactive/manual login.</summary>
+        /// <summary>Auth key for unattended login (tskey-…). Empty = interactive/manual login. Prefer
+        /// <see cref="AuthKeyFile"/>: a value in the environment is readable in <c>/proc/&lt;pid&gt;/environ</c>.</summary>
         public string? AuthKey { get; set; }
+        /// <summary>R1-43: a file holding the auth key (a Docker secret, <c>/run/secrets/…</c>), read once at start;
+        /// it wins over <see cref="AuthKey"/>. Expected mode 0600 or 0400 (a wider one is logged as a warning).</summary>
+        public string? AuthKeyFile { get; set; }
         /// <summary>Persistent tailscaled state directory. Left empty here and filled from
         /// <c>DataPathOptions</c> at startup (PostConfigure in Program.cs); an explicit
         /// <c>Vpn:Tailscale:StateDir</c> setting still wins.</summary>
@@ -44,8 +55,10 @@ public class VpnSettings
 
     public class NetbirdOptions
     {
-        /// <summary>Setup key for unattended enrollment. Empty = interactive/manual.</summary>
+        /// <summary>Setup key for unattended enrollment. Empty = interactive/manual. Prefer <see cref="SetupKeyFile"/>.</summary>
         public string? SetupKey { get; set; }
+        /// <summary>R1-43: a file holding the setup key, read once at start; it wins over <see cref="SetupKey"/>.</summary>
+        public string? SetupKeyFile { get; set; }
         /// <summary>Optional self-hosted management URL, e.g. "https://netbird.example.com:33073".</summary>
         public string? ManagementUrl { get; set; }
         /// <summary>Netbird config file path. Left empty here and filled from <c>DataPathOptions</c>

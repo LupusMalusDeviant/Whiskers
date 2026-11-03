@@ -48,7 +48,10 @@ public sealed class VpnBootstrapState : IVpnBootstrapState
 /// <summary>The bring-up failed and <see cref="VpnSettings.FailStartupOnError"/> is set: Whiskers does not start.</summary>
 public sealed class VpnBootstrapFailedException(VpnBootstrapReport report)
     : InvalidOperationException($"The VPN bring-up did not succeed ({report.Status}): {report.Message} " +
-                                "Whiskers does not start because Vpn:FailStartupOnError is set.")
+                                "Whiskers does not start because Vpn:FailStartupOnError is set. To recover: set " +
+                                "VPN_FAIL_STARTUP_ON_ERROR=false (Vpn__FailStartupOnError), restart, have an admin take " +
+                                "\"VPN bring-up\" over in Settings → Automation owners (or fix the VPN settings), restart, " +
+                                "then set it back to true.")
 {
     public VpnBootstrapReport Report { get; } = report;
 }

@@ -78,6 +78,11 @@ services:
       - VPN_PROVIDER=${VPN_PROVIDER:-}
       - Vpn__Provider=${VPN_PROVIDER:-none}
       - Vpn__Hostname=${VPN_HOSTNAME:-}
+      # R1-43: prefer the *_FILE variants (a file only Whiskers can read, e.g. a Docker secret under /run/secrets/);
+      # a file wins over the value. A value is moved into a private in-memory file by entrypoint.sh before Whiskers
+      # starts, but stays visible in `docker inspect` and in the container's environment as Docker records it.
+      - Vpn__Tailscale__AuthKeyFile=${TAILSCALE_AUTHKEY_FILE:-}
+      - Vpn__Netbird__SetupKeyFile=${NETBIRD_SETUP_KEY_FILE:-}
       - Vpn__Tailscale__AuthKey=${TAILSCALE_AUTHKEY:-}
       - Vpn__Tailscale__LoginServer=${TAILSCALE_LOGIN_SERVER:-}
       - Vpn__Netbird__SetupKey=${NETBIRD_SETUP_KEY:-}

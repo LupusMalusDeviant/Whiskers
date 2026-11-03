@@ -46,6 +46,11 @@ public class NetbirdVpnProvider : IVpnProvider
     public async Task<VpnBringUpResult> EnsureUpAsync(CancellationToken ct = default)
     {
         var nb = _settings.Netbird;
+        if (_settings.KeyFileProblem is { } keyFileProblem)
+        {
+            _logger.LogError("[vpn:netbird] not brought up: {Reason}", keyFileProblem);
+            return new VpnBringUpResult(VpnBringUpState.InvalidSetting, keyFileProblem);
+        }
 
         string? hostname = null;
         string? managementUrl = null;
@@ -89,7 +94,7 @@ public class NetbirdVpnProvider : IVpnProvider
         }
         else
         {
-            using var keyFile = VpnSecretFile.Create(key, _secretParent);
+            using var keyFile = VpnSecretFile.Create(key, _secretParent, _logger);
             args.Add("--setup-key-file=" + keyFile.Path);
             up = await _runner.RunAsync("netbird", args, ct, 60000);
         }

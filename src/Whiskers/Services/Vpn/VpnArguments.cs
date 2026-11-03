@@ -13,7 +13,7 @@ public static class VpnArguments
     public static string RequireHostName(string? value)
     {
         // CommandOperands also admits IPv6 literals; a mesh hostname is a name only.
-        if (!CommandOperands.IsSafeHost(value) || value!.Contains(':') || value.Length > 63 * 4)
+        if (!CommandOperands.IsSafeHost(value) || value!.Contains(':'))
             throw new UnsafeOperandException("VPN hostname", value,
                 "it must be a host name: letters, digits, inner hyphens and dots (no leading '-', no spaces, no '=')");
         return value;

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Whiskers.Services.Vpn;
 using Whiskers.Services.Vpn.Providers;
+using Whiskers.Utils;
 
 namespace Whiskers.Tests;
 
@@ -268,21 +269,42 @@ public class VpnSecretHandlingTests : IDisposable
             .Where(l => l.Length > 0 && !l.StartsWith('#'))
             .ToList();
 
-        // Every line that names the key: the test, the builtin printf into the private file, and the unset.
-        var withKey = lines.Where(l => l.Contains("TAILSCALE_AUTHKEY", StringComparison.Ordinal)).ToList();
-        Assert.Equal(3, withKey.Count);
-        Assert.Contains(withKey, l => l.StartsWith("if [ -n \"${TAILSCALE_AUTHKEY:-}\" ]", StringComparison.Ordinal));
-        Assert.Contains(withKey, l => l.StartsWith("printf '%s' \"$TAILSCALE_AUTHKEY\" > ", StringComparison.Ordinal));
-        Assert.Contains("unset TAILSCALE_AUTHKEY", withKey);
-        // The CLI gets the file, and nothing else hands a key over.
+        // Every line that reads a key's value ("$NAME" / "${NAME"): only a test, the builtin printf into a private file
+        // or the call of the function that does that — never a command that receives it as an argument.
+        string[] names = ["TAILSCALE_AUTHKEY", "Vpn__Tailscale__AuthKey", "Vpn__Netbird__SetupKey", "NETBIRD_SETUP_KEY", "TS_AUTHKEY", "NB_SETUP_KEY"];
+        var reads = lines.Where(l => names.Any(n =>
+            System.Text.RegularExpressions.Regex.IsMatch(l, @"\$\{?" + n + "(?![A-Za-z0-9_])"))).ToList();
+        Assert.NotEmpty(reads);
+        foreach (var line in reads)
+            Assert.True(line.StartsWith("if [ -n \"${", StringComparison.Ordinal)
+                        || line.StartsWith("printf '%s' \"$TAILSCALE_AUTHKEY\" > ", StringComparison.Ordinal)
+                        || System.Text.RegularExpressions.Regex.IsMatch(line,
+                            @"^Vpn__\w+File=\$\(key_to_file ""\$Vpn__\w+""\)$"),
+                $"A key's value is used outside a test, the printf builtin or key_to_file: {line}");
+        Assert.Contains("printf '%s' \"$1\" > \"$kf_dir/key\"", lines);   // key_to_file itself
+        // The CLI gets a file, and nothing else hands a key over.
         Assert.Contains(lines, l => l.StartsWith("tailscale up --auth-key=\"file:", StringComparison.Ordinal));
         Assert.DoesNotContain(lines, l => l.Contains("--authkey", StringComparison.Ordinal));
-        Assert.DoesNotContain(lines, l => l.Contains("TS_AUTHKEY", StringComparison.Ordinal));
-        // The file is private: umask 077 before it is written, its directory removed after the call.
+        Assert.DoesNotContain(lines, l => l.Contains("--setup-key=", StringComparison.Ordinal));
+        // Every way into the application drops the keys and the traps (B1).
+        Assert.Contains("unset TAILSCALE_AUTHKEY NETBIRD_SETUP_KEY TS_AUTHKEY NB_SETUP_KEY", lines);
+        Assert.Contains("unset Vpn__Tailscale__AuthKey", lines);
+        Assert.Contains("unset Vpn__Netbird__SetupKey", lines);
+        Assert.Equal(1, lines.Count(l => l.StartsWith("exec ", StringComparison.Ordinal)));
+        Assert.Contains("exec dotnet Whiskers.dll \"$@\"", lines);
+        Assert.Equal(3, lines.Count(l => l == "start_app \"$@\""));
+        // The legacy file is private: umask 077 before it is written, removed after the call, also on an early exit and
+        // on a stop signal, which is passed on (m4).
         var umask = lines.FindIndex(l => l == "umask 077");
         var write = lines.FindIndex(l => l.StartsWith("printf '%s' \"$TAILSCALE_AUTHKEY\"", StringComparison.Ordinal));
-        var remove = lines.FindIndex(write, l => l == "rm -rf \"$ts_key_dir\"");
+        var remove = lines.FindIndex(Math.Max(write, 0), l => l == "rm -rf \"$ts_key_dir\"");
         Assert.True(umask >= 0 && umask < write && write < remove, "umask 077 → printf → rm -rf in this order");
+        Assert.Contains("trap 'rm -rf \"$ts_key_dir\"' EXIT", lines);
+        Assert.Contains("trap 'rm -rf \"$ts_key_dir\"; exit 143' TERM", lines);
+        Assert.Contains("trap 'rm -rf \"$ts_key_dir\"; exit 130' INT", lines);
+        Assert.Contains("trap 'rm -rf \"$ts_key_dir\"; exit 129' HUP", lines);
+        var traps = lines.FindIndex(l => l.StartsWith("trap 'rm -rf", StringComparison.Ordinal));
+        Assert.True(traps < write, "the cleanup traps are set before the key is written");
     }
 
     [Fact]
@@ -295,6 +317,58 @@ public class VpnSecretHandlingTests : IDisposable
         Assert.DoesNotContain("function ", text);
     }
 
+    /// <summary>The real entrypoint under <c>sh</c>, with <paramref name="bin"/> first on the PATH, its key files in
+    /// <paramref name="secrets"/> and none of the test process's own key variables inherited.</summary>
+    private ProcessStartInfo Entrypoint(string bin, string secrets, IReadOnlyDictionary<string, string> env)
+    {
+        var psi = SecretEnvironment.Scrub(new ProcessStartInfo("sh")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
+        });
+        psi.ArgumentList.Add(EntrypointPath);
+        psi.Environment.Remove("VPN_PROVIDER");
+        psi.Environment["PATH"] = bin + ":" + (Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin");
+        psi.Environment["WHISKERS_DATA_DIR"] = Path.Combine(_dir, "data-" + Path.GetFileName(bin));
+        psi.Environment["WHISKERS_SECRET_DIR"] = secrets;
+        psi.Environment["TMPDIR"] = secrets;
+        psi.Environment["VPN_FORCE_LEGACY_TAILSCALE"] = "1";      // also on a runner that has tailscale0
+        foreach (var (key, value) in env) psi.Environment[key] = value;
+        return psi;
+    }
+
+    private static async Task<(int Code, string Out, string Err)> RunAsync(ProcessStartInfo psi)
+    {
+        using var proc = Process.Start(psi)!;
+        var stdout = proc.StandardOutput.ReadToEndAsync();
+        var stderr = proc.StandardError.ReadToEndAsync();
+        await proc.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
+        return (proc.ExitCode, await stdout, await stderr);
+    }
+
+    private (string Bin, string Secrets, string Record) EntrypointDirs(string name)
+    {
+        var bin = Path.Combine(_dir, "bin-" + name);
+        var secrets = Path.Combine(_dir, "secrets-" + name);
+        var record = Path.Combine(_dir, "record-" + name);
+        Directory.CreateDirectory(bin);
+        Directory.CreateDirectory(secrets);
+        Directory.CreateDirectory(record);
+        WriteScript(Path.Combine(bin, "tailscaled"), "exit 0");
+        // The fake application records its environment and, when it got a key file, that file's mode and content.
+        WriteScript(Path.Combine(bin, "dotnet"), $$"""
+            env > '{{record}}/env'
+            for f in "${Vpn__Tailscale__AuthKeyFile:-}" "${Vpn__Netbird__SetupKeyFile:-}"; do
+                if [ -n "$f" ]; then
+                    stat -c '%a' "$f" >> '{{record}}/appmode'
+                    stat -c '%a' "$(dirname "$f")" >> '{{record}}/appdirmode'
+                    cat "$f" >> '{{record}}/appcontent'
+                fi
+            done
+            exit 0
+            """);
+        return (bin, secrets, record);
+    }
+
     /// <summary>Runs the real entrypoint with fake <c>tailscaled</c>, <c>tailscale</c> and <c>dotnet</c> on the PATH: the
     /// fake <c>tailscale</c> records its argv and the key file's mode and content while it runs; the fake <c>dotnet</c>
     /// records the environment the application would get.</summary>
@@ -302,15 +376,7 @@ public class VpnSecretHandlingTests : IDisposable
     public async Task The_entrypoint_hands_the_key_over_in_a_private_file_and_drops_it_before_the_app_starts()
     {
         Skip.If(OperatingSystem.IsWindows(), "the entrypoint is POSIX sh; Windows has no Unix file modes");
-        var bin = Path.Combine(_dir, "bin");
-        var data = Path.Combine(_dir, "data");
-        var tmp = Path.Combine(_dir, "tmp");
-        var record = Path.Combine(_dir, "record");
-        Directory.CreateDirectory(bin);
-        Directory.CreateDirectory(tmp);
-        Directory.CreateDirectory(record);
-
-        WriteScript(Path.Combine(bin, "tailscaled"), "exit 0");
+        var (bin, secrets, record) = EntrypointDirs("legacy");
         WriteScript(Path.Combine(bin, "tailscale"), $$"""
             if [ "$1" = "up" ]; then
                 for a in "$@"; do printf '%s\n' "$a" >> '{{record}}/args'; done
@@ -328,23 +394,14 @@ public class VpnSecretHandlingTests : IDisposable
             fi
             exit 0
             """);
-        WriteScript(Path.Combine(bin, "dotnet"), $"env > '{record}/env'\nexit 0");
 
-        var psi = new ProcessStartInfo("sh") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        psi.ArgumentList.Add(EntrypointPath);
-        psi.Environment.Remove("VPN_PROVIDER");
-        psi.Environment["PATH"] = bin + ":" + (Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin");
-        psi.Environment["WHISKERS_DATA_DIR"] = data;
-        psi.Environment["TMPDIR"] = tmp;
-        psi.Environment["TAILSCALE_AUTHKEY"] = TailscaleKey;
-        psi.Environment["TAILSCALE_HOSTNAME"] = "edge node";      // a space stays inside one argv element
-        psi.Environment["VPN_FORCE_LEGACY_TAILSCALE"] = "1";      // also on a runner that has tailscale0
-
-        using var proc = Process.Start(psi)!;
-        var stdout = proc.StandardOutput.ReadToEndAsync();
-        var stderr = proc.StandardError.ReadToEndAsync();
-        await proc.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
-        Assert.True(proc.ExitCode == 0, $"entrypoint failed: {await stderr}");
+        var (code, stdout, stderr) = await RunAsync(Entrypoint(bin, secrets, new Dictionary<string, string>
+        {
+            ["TAILSCALE_AUTHKEY"] = TailscaleKey,
+            ["TAILSCALE_HOSTNAME"] = "edge node",                 // a space stays inside one argv element
+            ["Vpn__Tailscale__AuthKey"] = TailscaleKey,           // what compose sets in every mode
+        }));
+        Assert.True(code == 0, $"entrypoint failed: {stderr}");
 
         var args = File.ReadAllLines(Path.Combine(record, "args"));
         var keyPath = File.ReadAllText(Path.Combine(record, "path"));
@@ -353,46 +410,114 @@ public class VpnSecretHandlingTests : IDisposable
         Assert.Equal("600", File.ReadAllText(Path.Combine(record, "mode")).Trim());
         Assert.Equal("700", File.ReadAllText(Path.Combine(record, "dirmode")).Trim());
         Assert.Equal(TailscaleKey, File.ReadAllText(Path.Combine(record, "content")));
-        Assert.StartsWith(tmp, keyPath);
+        Assert.StartsWith(secrets, keyPath);
         Assert.False(File.Exists(keyPath));
-        Assert.Empty(Directory.GetFileSystemEntries(tmp));                       // the key directory is gone
-        Assert.DoesNotContain("TAILSCALE_AUTHKEY=", File.ReadAllText(Path.Combine(record, "env")));   // app env
-        AssertNoKey(await stdout, TailscaleKey);
-        AssertNoKey(await stderr, TailscaleKey);
+        Assert.Empty(Directory.GetFileSystemEntries(secrets));                   // the key directory is gone
+        // The application's environment holds no key under any name — and no key file either: it is not the in-app provider.
+        var appEnv = File.ReadAllText(Path.Combine(record, "env"));
+        AssertNoKey(appEnv, TailscaleKey);
+        Assert.DoesNotContain("AuthKeyFile=", appEnv);
+        AssertNoKey(stdout, TailscaleKey);
+        AssertNoKey(stderr, TailscaleKey);
+    }
+
+    [SkippableFact]
+    public async Task The_entrypoint_moves_the_compose_key_into_a_private_file_for_the_in_app_provider()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "the entrypoint is POSIX sh; Windows has no Unix file modes");
+        var (bin, secrets, record) = EntrypointDirs("inapp");
+        WriteScript(Path.Combine(bin, "tailscale"), "exit 0");
+
+        var (code, stdout, stderr) = await RunAsync(Entrypoint(bin, secrets, new Dictionary<string, string>
+        {
+            ["VPN_PROVIDER"] = "Tailscale",
+            ["Vpn__Tailscale__AuthKey"] = TailscaleKey,
+            ["Vpn__Netbird__SetupKey"] = NetbirdKey,              // not the active provider: dropped, no file
+            ["TAILSCALE_AUTHKEY"] = TailscaleKey,
+        }));
+        Assert.True(code == 0, $"entrypoint failed: {stderr}");
+
+        var appEnv = File.ReadAllText(Path.Combine(record, "env"));
+        AssertNoKey(appEnv, TailscaleKey);
+        AssertNoKey(appEnv, NetbirdKey);
+        Assert.Contains("Vpn__Tailscale__AuthKeyFile=" + secrets, appEnv);
+        Assert.DoesNotContain("Vpn__Netbird__SetupKeyFile=", appEnv);
+        Assert.Equal("600", File.ReadAllText(Path.Combine(record, "appmode")).Trim());
+        Assert.Equal("700", File.ReadAllText(Path.Combine(record, "appdirmode")).Trim());
+        Assert.Equal(TailscaleKey, File.ReadAllText(Path.Combine(record, "appcontent")));
+        AssertNoKey(stdout + stderr, TailscaleKey);
+    }
+
+    [SkippableFact]
+    public async Task The_entrypoint_drops_every_key_variable_on_the_provider_none_path_and_removes_stale_key_dirs()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "the entrypoint is POSIX sh");
+        var (bin, secrets, record) = EntrypointDirs("none");
+        WriteScript(Path.Combine(bin, "tailscale"), "exit 0");
+        // What a crash or a kill left behind: the in-app CLI file, the legacy file, an earlier run's app key file.
+        foreach (var stale in new[] { "whiskers-vpn-0123", "whiskers-ts.abcdef", "whiskers-vpnkey.abcdef" })
+        {
+            Directory.CreateDirectory(Path.Combine(secrets, stale));
+            File.WriteAllText(Path.Combine(secrets, stale, "key"), TailscaleKey);
+        }
+        Directory.CreateDirectory(Path.Combine(secrets, "unrelated"));
+
+        var (code, _, stderr) = await RunAsync(Entrypoint(bin, secrets, new Dictionary<string, string>
+        {
+            ["VPN_PROVIDER"] = "none",
+            ["Vpn__Tailscale__AuthKey"] = TailscaleKey,
+            ["Vpn__Netbird__SetupKey"] = NetbirdKey,
+            ["TAILSCALE_AUTHKEY"] = TailscaleKey,
+            ["NETBIRD_SETUP_KEY"] = NetbirdKey,
+            ["TS_AUTHKEY"] = TailscaleKey,
+            ["NB_SETUP_KEY"] = NetbirdKey,
+        }));
+        Assert.True(code == 0, $"entrypoint failed: {stderr}");
+
+        var appEnv = File.ReadAllText(Path.Combine(record, "env"));
+        AssertNoKey(appEnv, TailscaleKey);
+        AssertNoKey(appEnv, NetbirdKey);
+        Assert.Equal(["unrelated"], Directory.GetDirectories(secrets).Select(Path.GetFileName));
     }
 
     [SkippableFact]
     public async Task The_entrypoint_reports_a_failed_tailscale_up_instead_of_swallowing_it()
     {
         Skip.If(OperatingSystem.IsWindows(), "the entrypoint is POSIX sh");
-        var bin = Path.Combine(_dir, "bin2");
-        var tmp = Path.Combine(_dir, "tmp2");
-        Directory.CreateDirectory(bin);
-        Directory.CreateDirectory(tmp);
-        WriteScript(Path.Combine(bin, "tailscaled"), "exit 0");
+        var (bin, secrets, _) = EntrypointDirs("fail");
         WriteScript(Path.Combine(bin, "tailscale"), "[ \"$1\" = up ] && exit 3\nexit 0");
-        WriteScript(Path.Combine(bin, "dotnet"), "exit 0");
 
-        var psi = new ProcessStartInfo("sh") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        psi.ArgumentList.Add(EntrypointPath);
-        psi.Environment.Remove("VPN_PROVIDER");
-        psi.Environment["PATH"] = bin + ":" + (Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin");
-        psi.Environment["WHISKERS_DATA_DIR"] = Path.Combine(_dir, "data2");
-        psi.Environment["TMPDIR"] = tmp;
-        psi.Environment["TAILSCALE_AUTHKEY"] = TailscaleKey;
-        psi.Environment["VPN_FORCE_LEGACY_TAILSCALE"] = "1";
-
-        using var proc = Process.Start(psi)!;
-        var stdout = proc.StandardOutput.ReadToEndAsync();
-        var stderr = await proc.StandardError.ReadToEndAsync();
-        await proc.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
-        await stdout;
+        var (_, _, stderr) = await RunAsync(Entrypoint(bin, secrets,
+            new Dictionary<string, string> { ["TAILSCALE_AUTHKEY"] = TailscaleKey }));
 
         Assert.Contains("tailscale up failed with exit code 3", stderr);
-        Assert.Empty(Directory.GetFileSystemEntries(tmp));   // the key is removed on failure too
+        Assert.Empty(Directory.GetFileSystemEntries(secrets));   // the key is removed on failure too
         AssertNoKey(stderr, TailscaleKey);
     }
 
+    [SkippableFact]
+    public async Task A_stop_during_tailscale_up_removes_the_key_and_is_passed_on_not_swallowed()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "the entrypoint is POSIX sh; POSIX signals");
+        var (bin, secrets, record) = EntrypointDirs("stop");
+        WriteScript(Path.Combine(bin, "tailscale"), $$"""
+            if [ "$1" = "up" ]; then touch '{{record}}/up-started'; sleep 3; fi
+            exit 0
+            """);
+
+        using var proc = Process.Start(Entrypoint(bin, secrets,
+            new Dictionary<string, string> { ["TAILSCALE_AUTHKEY"] = TailscaleKey }))!;
+        var started = Path.Combine(record, "up-started");
+        for (var i = 0; i < 200 && !File.Exists(started); i++) await Task.Delay(50);
+        Assert.True(File.Exists(started), "tailscale up never started");
+        using (var kill = Process.Start(new ProcessStartInfo("kill", ["-TERM", proc.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)]))!)
+            await kill.WaitForExitAsync();
+        await proc.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token);
+
+        Assert.Equal(143, proc.ExitCode);                                   // the stop is passed on
+        Assert.False(File.Exists(Path.Combine(record, "env")));             // Whiskers was not started after it
+        Assert.Empty(Directory.GetFileSystemEntries(secrets));              // and the key is gone
+    }
     private static void WriteScript(string path, string body)
     {
         File.WriteAllText(path, "#!/bin/sh\n" + body.Replace("\r\n", "\n") + "\n");

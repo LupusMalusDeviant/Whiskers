@@ -29,7 +29,9 @@ public interface IVpnProvider
     /// <summary>Current connection status.</summary>
     Task<VpnStatus> GetStatusAsync(CancellationToken ct = default);
 
-    /// <summary>Disconnect from the mesh (does not necessarily stop the daemon).</summary>
+    /// <summary>Disconnect from the mesh (does not necessarily stop the daemon). It has no caller today; it changes
+    /// the mesh, so it needs a capability of its own (<c>[MutatingOperation]</c> + catalog entry, decided by the
+    /// gateway) before anything calls it (R1-43).</summary>
     Task DownAsync(CancellationToken ct = default);
 }
 

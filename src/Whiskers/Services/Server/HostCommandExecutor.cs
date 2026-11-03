@@ -194,6 +194,7 @@ public class HostCommandExecutor : IHostCommandExecutor
         };
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
+        Whiskers.Utils.SecretEnvironment.Scrub(psi);   // R1-43: no VPN key in a child's environment
         if (env is { } e)
             psi.Environment[e.Key] = e.Value;
 

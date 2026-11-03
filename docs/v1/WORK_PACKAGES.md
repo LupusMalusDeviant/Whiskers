@@ -740,6 +740,11 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > --auth-key=file:`, `netbird up --setup-key-file=`; the `tailscale` CLI does not read `TS_AUTHKEY`). The file-mode
 > tests and the entrypoint run with fake binaries are Linux-only (skipped on Windows, run on CI). The legacy
 > entrypoint bring-up stays outside the gateway (host operator's start); the transport trust policy is unchanged.
+> Review round 1: no child process inherits a key (`SecretEnvironment`: dropped from Whiskers' environment after
+> configuration, scrubbed from every `ProcessStartInfo`, `SecretEnvironmentTests`); the entrypoint turns the compose
+> variables into a 0600 in-memory file and drops every key variable on all ways into the app; key files
+> (`Vpn__Tailscale__AuthKeyFile`, `Vpn__Netbird__SetupKeyFile`) are the preferred delivery; leftovers of a crash are
+> removed at start; the legacy trap removes the key on an early exit and passes a stop on.
 
 **Out of scope:** Altering accepted transport trust policy without approval.
 

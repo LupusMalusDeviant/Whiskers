@@ -45,7 +45,8 @@ public sealed class VpnProcessRunner : IVpnProcessRunner
         };
         foreach (var argument in arguments)
             psi.ArgumentList.Add(argument ?? throw new ArgumentException("An argument is null.", nameof(arguments)));
-        return psi;
+        // Nor through the environment: tailscaled runs as long as Whiskers and would carry an inherited key with it.
+        return Utils.SecretEnvironment.Scrub(psi);
     }
 
     public async Task<VpnProcessResult> RunAsync(string file, IReadOnlyList<string> arguments, CancellationToken ct,

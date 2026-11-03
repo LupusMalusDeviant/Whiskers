@@ -29,10 +29,20 @@ public class VpnBootstrapHostedService : IHostedService
     private readonly IVpnBootstrapState _state;
     private readonly VpnSettings _settings;
     private readonly ILogger<VpnBootstrapHostedService> _logger;
+    private readonly IReadOnlyList<string>? _secretParents;
 
     public VpnBootstrapHostedService(IVpnService vpn, IAutomationMutationRunner automation, IAutomationOwnerStore owners,
         IVpnBootstrapState state, IOptions<VpnSettings> settings, ILogger<VpnBootstrapHostedService> logger)
+        : this(vpn, automation, owners, state, settings, logger, null)
     {
+    }
+
+    /// <summary>For tests: where stale key directories are looked for (default: <see cref="VpnSecretFile.DefaultParents"/>).</summary>
+    internal VpnBootstrapHostedService(IVpnService vpn, IAutomationMutationRunner automation, IAutomationOwnerStore owners,
+        IVpnBootstrapState state, IOptions<VpnSettings> settings, ILogger<VpnBootstrapHostedService> logger,
+        IReadOnlyList<string>? secretParents)
+    {
+        _secretParents = secretParents;
         _vpn = vpn ?? throw new ArgumentNullException(nameof(vpn));
         _automation = automation ?? throw new ArgumentNullException(nameof(automation));
         _owners = owners ?? throw new ArgumentNullException(nameof(owners));
@@ -54,6 +64,10 @@ public class VpnBootstrapHostedService : IHostedService
     /// <summary>One bring-up through the gateway. Internal for tests.</summary>
     internal async Task<VpnBootstrapReport> RunAsync(CancellationToken ct)
     {
+        // A key file a crash or a kill left behind during an earlier start's CLI call (m3): gone before anything else.
+        VpnSecretFile.RemoveStale(_secretParents, _logger);
+        if (_settings.KeyFileWarning is { } keyFileWarning) _logger.LogWarning("[vpn] {Warning}", keyFileWarning);
+
         var provider = _vpn.Active;
         if (provider.Id == NoopVpnProvider.ProviderId)
         {

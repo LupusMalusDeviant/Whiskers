@@ -16,15 +16,31 @@ All notable changes to Whiskers are documented here. The format follows
   over again; the kill switch refuses it. The result of this start is shown in that panel. **The key:** `tailscale up`
   now reads it from `--auth-key=file:<path>` and NetBird from `--setup-key-file=<path>` — a file of mode 0600 in a
   private directory, deleted as soon as the call returns. The earlier hand-over through `TS_AUTHKEY` did not log
-  Tailscale in at all: the `tailscale` CLI does not read that variable (only Tailscale's own container image does). CLI
+  Tailscale in at all: the `tailscale` CLI does not read that variable (upstream `cmd/tailscale/cli/up.go`, read
+  2026-11-03 — only Tailscale's own container start script `containerboot` does). NetBird needs a CLI that has
+  `--setup-key-file` (an older one fails with an unknown-flag error). CLI
   errors are logged and recorded with the key removed, also when the tool echoes part of it. Every argument is passed as
   a separate argv element, and the mesh hostname and the login server / management URL are checked before anything runs
   (a host name; an absolute http(s) URL without user info) — an invalid value fails the bring-up with "Invalid VPN
-  hostname" / "Invalid … URL". **Legacy entrypoint** (`VPN_PROVIDER` unset): `entrypoint.sh` no longer runs
-  `tailscale up --authkey="$TAILSCALE_AUTHKEY"` (readable by every process on the host under `pid: host`); it writes the
-  key with the shell's `printf` builtin into a 0600 file and passes `--auth-key=file:…`, removes the file right after,
-  prints `ERROR: tailscale up failed …` instead of swallowing a failure, and unsets `TAILSCALE_AUTHKEY` before it starts
-  the app. The data directory there follows `WHISKERS_DATA_DIR` (default `/app/data`, as before). This path is still the
+  hostname" / "Invalid … URL". **No key in a child's environment:** docker-compose passes the keys as
+  `Vpn__Tailscale__AuthKey` / `Vpn__Netbird__SetupKey` in every mode, so every process Whiskers started — tailscaled
+  for as long as it runs, ssh, docker, nsenter, shells — inherited them, readable in `/proc/<pid>/environ` under
+  `pid: host`. Now `entrypoint.sh` moves the active provider's key into a 0600 file in memory (`/dev/shm`, or
+  `WHISKERS_SECRET_DIR`) and hands Whiskers only its path (`Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`),
+  and drops every key variable on every way into the app; Whiskers drops them from its own environment after reading
+  its configuration and removes them from the environment of every process it starts. **New, preferred:**
+  `TAILSCALE_AUTHKEY_FILE` / `NETBIRD_SETUP_KEY_FILE` (`Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`) —
+  a file only Whiskers can read, mode 0600 or 0400, e.g. a Docker secret; it wins over the value, is read once at start,
+  a wider mode is logged as a warning and an unreadable or empty file fails the bring-up. The value variant keeps
+  working, but stays visible in `docker inspect`, and when Whiskers is started without `entrypoint.sh` its own
+  `/proc/<pid>/environ` keeps showing it. A key file left by a crash or a kill during `tailscale up` is removed at the
+  next start; key files are no longer flushed to disk. **Legacy entrypoint** (`VPN_PROVIDER` unset; it reads
+  `TAILSCALE_AUTHKEY`, which docker-compose does not set — this applies to `docker run -e TAILSCALE_AUTHKEY=…`):
+  `entrypoint.sh` no longer runs `tailscale up --authkey="$TAILSCALE_AUTHKEY"` (readable by every process on the host
+  under `pid: host`); it writes the key with the shell's `printf` builtin into a 0600 file and passes
+  `--auth-key=file:…`, removes the file right after — also when the script ends early — passes a stop signal during the
+  call on (exit 143) instead of starting Whiskers, and prints `ERROR: tailscale up failed …` instead of swallowing a
+  failure. The data directory there follows `WHISKERS_DATA_DIR` (default `/app/data`, as before). This path is still the
   host operator's container start and is not recorded by the gateway. **Upgrade:** with `VPN_PROVIDER=tailscale` or
   `netbird`, **the VPN is not brought up after the upgrade until an admin takes "VPN bring-up" over** in Settings →
   Automation owners and Whiskers is restarted (the panel says "not run, no owner"; the log says why). If the Whiskers
@@ -32,7 +48,11 @@ All notable changes to Whiskers are documented here. The format follows
   host (`VPN_PROVIDER=none`) until then. A Tailscale node that relied on
   `TS_AUTHKEY` and never logged in now does so with the key. New optional `VPN_FAIL_STARTUP_ON_ERROR`
   (`Vpn__FailStartupOnError`, default `false`): `true` stops a start whose bring-up does not succeed — set it only after
-  the takeover, or every start stops. `VPN_PROVIDER` unset or `none`: nothing to do. Recovery: an unreadable
+  the takeover, or every start stops. **Recovery** when it locks you out (the owner later lost the Admin role or the
+  sign-in, or `automation-owners.json` became unreadable, and the container restarts in a loop): set
+  `VPN_FAIL_STARTUP_ON_ERROR=false`, restart, take "VPN bring-up" over again (or fix the VPN settings), restart, set it
+  back to `true`; the error message names these steps. Recommended: move the keys to `TAILSCALE_AUTHKEY_FILE` /
+  `NETBIRD_SETUP_KEY_FILE`. `VPN_PROVIDER` unset or `none`: nothing to do. Recovery: an unreadable
   `automation-owners.json` now also blocks the VPN bring-up until an admin takes it over. No database change.
 
 - R1-41/R1-53/R1-54/R1-55/R1-56 follow-up: **open alerts are closed once, also across a restart and a removed

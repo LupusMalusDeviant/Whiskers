@@ -150,7 +150,7 @@ public class VpnMutationTests
         var owners = new MemoryOwnerStore();
         var state = new VpnBootstrapState();
         var log = new VpnSecretHandlingTests.ListLogger<VpnBootstrapHostedService>();
-        var service = new VpnBootstrapHostedService(vpn, runner, owners, state, Options.Create(settings), log);
+        var service = new VpnBootstrapHostedService(vpn, runner, owners, state, Options.Create(settings), log, []);
         return new Fixture(service, audit, owners, fake, state, roles, whitelist, log);
     }
 

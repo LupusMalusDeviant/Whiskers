@@ -51,7 +51,13 @@ public class TailscaleVpnProvider : IVpnProvider
     {
         var ts = _settings.Tailscale;
 
-        // 0) Every value that becomes an argument is checked before anything runs.
+        // 0) Every value that becomes an argument is checked before anything runs; a key file that could not be read
+        //    fails the bring-up instead of running without the key.
+        if (_settings.KeyFileProblem is { } keyFileProblem)
+        {
+            _logger.LogError("[vpn:tailscale] not brought up: {Reason}", keyFileProblem);
+            return new VpnBringUpResult(VpnBringUpState.InvalidSetting, keyFileProblem);
+        }
         string hostname;
         string? loginServer = null;
         try
@@ -112,7 +118,7 @@ public class TailscaleVpnProvider : IVpnProvider
         }
         else
         {
-            using var keyFile = VpnSecretFile.Create(key, _secretParent);
+            using var keyFile = VpnSecretFile.Create(key, _secretParent, _logger);
             args.Add("--auth-key=file:" + keyFile.Path);
             up = await _runner.RunAsync("tailscale", args, ct, 60000);
         }

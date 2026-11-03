@@ -30,6 +30,8 @@ var restoreCli = RestoreCli.Requested(args);
 if (!restoreCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
 
 builder.AddWhiskersConfiguration(dataPaths);   // UI-writable config layers + data-protection keys
+// R1-43: the configuration has read the environment; VPN keys leave it now, so no child process inherits them.
+Whiskers.Utils.SecretEnvironment.RemoveFromProcess();
 builder.AddWhiskersModules();                  // Core no-op defaults + module pipeline + MCP tools + nav registry
 builder.AddWhiskersCoreServices(dataPaths);    // Docker, health, metrics, VPN, database, audit, startup initializers
 builder.AddWhiskersAuthentication();           // cookie session + Google/OIDC providers, or LAN bypass (Off-Limits zone)

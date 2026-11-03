@@ -341,6 +341,8 @@ public static class WhiskersHostingExtensions
         {
             if (string.IsNullOrWhiteSpace(s.Tailscale.StateDir)) s.Tailscale.StateDir = dataPaths.TailscaleStateDir;
             if (string.IsNullOrWhiteSpace(s.Netbird.ConfigPath)) s.Netbird.ConfigPath = dataPaths.NetbirdConfigPath;
+            // R1-43: keys delivered as files (Docker secret, or the file entrypoint.sh writes) are read once, here.
+            Whiskers.Services.Vpn.VpnKeyFiles.Apply(s);
         });
         builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnProvider, Whiskers.Services.Vpn.Providers.TailscaleVpnProvider>();
         builder.Services.AddSingleton<Whiskers.Services.Vpn.IVpnProvider, Whiskers.Services.Vpn.Providers.NetbirdVpnProvider>();
