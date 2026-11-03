@@ -181,6 +181,55 @@ public sealed class AutoRollbackTests : IDisposable
     }
 
     [Fact]
+    public async Task A_stop_after_the_verified_recreate_is_recorded_as_the_update_it_was_not_as_a_failure()
+    {
+        // R1-41 follow-up: Whiskers stops while it waits for the health check. The gateway already executed and verified
+        // the recreate; recording that as "FEHLER: The operation was canceled." misreported the container's state.
+        using var stop = new CancellationTokenSource();
+        UpdateThatLaterReads(n =>
+        {
+            if (n == 1) return Task.FromResult(("running", 0, false));
+            stop.Cancel();
+            return Task.FromException<(string, int, bool)>(new OperationCanceledException(stop.Token));
+        });
+        var service = await ServiceAsync(autoRollback: true);
+
+        try { await service.CheckAndUpdateAsync(stop.Token); }
+        catch (OperationCanceledException) { /* the stop may end the cycle after the attempt was recorded */ }
+
+        Assert.DoesNotContain(nameof(IDockerService.RollbackContainerAsync), _docker.Calls);
+        var (history, policy, _) = await ResultAsync();
+        Assert.True(history.Success);
+        Assert.False(history.RolledBack);
+        Assert.Contains("health was not checked", history.Error);
+        Assert.StartsWith("OK", policy.LastUpdateResult);
+        Assert.DoesNotContain("rollback snapshot", history.Error);
+    }
+
+    [Fact]
+    public async Task A_stop_after_the_verified_recreate_still_names_a_missing_way_back()
+    {
+        // R1-41 follow-up review: without a usable vault no snapshot is kept (R1-31); the stop path said nothing of it.
+        using var stop = new CancellationTokenSource();
+        UpdateThatLaterReads(n =>
+        {
+            if (n == 1) return Task.FromResult(("running", 0, false));
+            stop.Cancel();
+            return Task.FromException<(string, int, bool)>(new OperationCanceledException(stop.Token));
+        });
+        var service = await ServiceAsync(autoRollback: true, vault: false);
+
+        try { await service.CheckAndUpdateAsync(stop.Token); }
+        catch (OperationCanceledException) { /* the stop may end the cycle after the attempt was recorded */ }
+
+        var (history, policy, _) = await ResultAsync();
+        Assert.True(history.Success);
+        Assert.Contains("health was not checked", history.Error);
+        Assert.Contains("No rollback snapshot was kept", history.Error);
+        Assert.Contains("no rollback snapshot", policy.LastUpdateResult);
+    }
+
+    [Fact]
     public async Task A_health_check_that_cannot_read_the_state_does_not_roll_a_verified_container_back()
     {
         UpdateThatLaterReads(n => n == 1

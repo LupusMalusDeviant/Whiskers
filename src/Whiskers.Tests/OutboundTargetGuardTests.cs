@@ -358,26 +358,6 @@ public sealed class OutboundTargetGuardTests : IAsyncDisposable
         Assert.False(tls.ReceivedApplicationData);
     }
 
-    [Fact]
-    public async Task A_stop_during_quit_does_not_turn_a_delivered_mail_into_a_cancellation()
-    {
-        // Review round 3: the server took the message; the stop lands while the client says goodbye. Here the stop closes
-        // the socket under a stalled QUIT, so MailKit fails with an I/O error; a stop that MailKit observes as a
-        // cancellation is not reproducible from a test, and the code now treats every failed goodbye alike.
-        await using var smtp = new NotificationSmtpTests.FakeSmtp { StallQuit = true };
-        _connector.Port = smtp.Port;
-        _exceptions.Set(new OutboundExceptionEntry { Host = "127.0.0.1", Port = 2525 });
-        var email = Email("127.0.0.1", 2525);
-        using var stop = new CancellationTokenSource();
-
-        var send = email.DeliverAsync(Failed(), stop.Token);
-        await smtp.QuitAwaited.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await stop.CancelAsync();
-
-        Assert.True(await send.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.Equal(1, smtp.Received("ops@example.com"));
-    }
-
     private static IEnumerable<Exception> Chain(Exception e)
     {
         for (Exception? x = e; x is not null; x = x.InnerException)

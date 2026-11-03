@@ -219,7 +219,9 @@ public class DockerConnectionManager : IDockerConnectionManager
         {
             throw;
         }
-        catch (Exception ex) when (IsConnectionFailure(ex))
+        // Saturation is not a connection failure even when it wraps a TimeoutException (the chain walk below would
+        // otherwise rebuild a healthy tunnel and retry a request that only waited in Whiskers' own queue).
+        catch (Exception ex) when (ex is not Budget.BudgetSaturatedException && IsConnectionFailure(ex))
         {
             var id = serverId
                 ?? _serverConfig.GetDefaultServer()?.Id
@@ -237,11 +239,20 @@ public class DockerConnectionManager : IDockerConnectionManager
                 _circuit.RecordSuccess(id);
                 return retried;
             }
-            catch (Exception retryFailure) when (!callerToken.IsCancellationRequested)
+            // A throw out of this catch is not seen by the saturation catch below: the retry logs its own.
+            catch (Budget.BudgetSaturatedException saturated)
             {
-                // Only the failure AFTER a fresh tunnel counts towards the circuit. The first one is exactly
-                // the transient the retry exists for; counting both would open the circuit twice as fast as
-                // configured and pause a server that is merely reconnecting.
+                LogSaturation(id, saturated);
+                throw;
+            }
+            catch (Exception retryFailure) when (retryFailure is not Budget.DuplicateRequestException
+                                                 and not Budget.BudgetSaturatedException
+                                                 && !callerToken.IsCancellationRequested)
+            {
+                // Only the failure AFTER a fresh tunnel counts towards the circuit — and, as for the first attempt, not
+                // a discarded duplicate or a retry that ran out of time in Whiskers' own queue (R1-41 follow-up). The
+                // first one is exactly the transient the retry exists for; counting both would open the circuit twice
+                // as fast as configured and pause a server that is merely reconnecting.
                 _circuit.RecordFailure(id, retryFailure);
                 throw;
             }
@@ -250,16 +261,7 @@ public class DockerConnectionManager : IDockerConnectionManager
         // about the host, and must not reach the circuit below.
         catch (Budget.BudgetSaturatedException ex)
         {
-            if (ex.Ran == TimeSpan.Zero)
-                _logger.LogWarning(
-                    "Call to {Server} gave up while queued ({Waited:F1}s waiting). This is Whiskers being the " +
-                    "bottleneck — the server was never asked.",
-                    budgetKey, ex.Waited.TotalSeconds);
-            else
-                _logger.LogWarning(
-                    "Call to {Server} ran out of time after a long queue ({Waited:F1}s waiting, {Ran:F1}s running at " +
-                    "the server). The request was sent; most of its time went into Whiskers' own queue.",
-                    budgetKey, ex.Waited.TotalSeconds, ex.Ran.TotalSeconds);
+            LogSaturation(budgetKey, ex);
             throw;
         }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
@@ -270,6 +272,20 @@ public class DockerConnectionManager : IDockerConnectionManager
             _circuit.RecordFailure(budgetKey, ex);
             throw;
         }
+    }
+
+    private void LogSaturation(string server, Budget.BudgetSaturatedException ex)
+    {
+        if (ex.Ran == TimeSpan.Zero)
+            _logger.LogWarning(
+                "Call to {Server} gave up while queued ({Waited:F1}s waiting). This is Whiskers being the " +
+                "bottleneck — the server was never asked.",
+                server, ex.Waited.TotalSeconds);
+        else
+            _logger.LogWarning(
+                "Call to {Server} ran out of time after a long queue ({Waited:F1}s waiting, {Ran:F1}s running at " +
+                "the server). The request was sent; most of its time went into Whiskers' own queue.",
+                server, ex.Waited.TotalSeconds, ex.Ran.TotalSeconds);
     }
 
     /// <summary>True when the exception (or any inner exception) is a transport-level failure that a

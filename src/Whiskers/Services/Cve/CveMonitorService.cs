@@ -74,8 +74,9 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
 
     protected override async Task RunAsync(CancellationToken ct)
     {
-        _logger.LogInformation("CVE monitor started (enabled={Enabled}, interval={Hours}h)",
-            _settings.CurrentValue.Enabled, _settings.CurrentValue.CheckIntervalHours);
+        // The effective interval, read through its guard: no raw options read before the loop, where a hand edit that
+        // does not bind would throw outside any try (R1-41 follow-up).
+        _logger.LogInformation("CVE monitor started (interval={Hours}h)", IntervalHours());
 
         // Initial delay so the app finishes warming up before we hit Docker on every server.
         await Task.Delay(TimeSpan.FromSeconds(45), ct);
