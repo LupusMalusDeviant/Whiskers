@@ -14,4 +14,11 @@ public static class AuthConstants
 
     /// <summary>Claim carrying the resolved MCP permission level (read/write/admin) on a synthetic agent identity.</summary>
     public const string McpLevelClaim = "sw:mcp-level";
+
+    /// <summary>The authentication type of a local username/password sign-in (<c>/login-local</c>).</summary>
+    public const string LocalPasswordScheme = "LocalPassword";
+
+    /// <summary>Claim carrying the local account's security stamp at sign-in (R1-26). ASP.NET Identity's own claim
+    /// type, so a stamp change (password change, R1-49) ends every cookie issued before it. Never logged.</summary>
+    public const string SecurityStampClaim = "AspNet.Identity.SecurityStamp";
 }

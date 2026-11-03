@@ -191,7 +191,7 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-38 | `pause_server_checks` | write | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ | — |
 | M-39 | `resume_server_checks` | write | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ | — |
 | M-40 | `preview_auto_patch` (pulls images) | write | `NotVerifiable` + reason (a preview changes no container, R1-37) | GW ✅ | — |
-| M-41 | `instruct_agent` → agent run | read | per tool | per tool | INV-08 (in-flight run survives key revocation) |
+| M-41 | `instruct_agent` → agent run | read | per tool | per tool | INV-08 (since R1-26 the key or user is re-read before every tool call of the run) |
 | M-42 | `create_git_deploy_app` (`gitdeploy.save`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the stored app back and fails on a mismatch | GW ✅ + details | the approving person becomes the owner, never the key (no person behind the call → `denied`); the token is never echoed or logged; a repository URL with credentials is refused; a name is unique (case-insensitive, checked under the store lock) |
 | M-43 | `set_git_deploy_token` (`gitdeploy.set_token`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads `credentials` back | GW ✅ + details | stale `revision` refused (`conflict`); the approving person becomes the owner (R1-08) |
 | M-44 | `get_git_deploy_app` (contract 0001) | read | — | — | answers `credentials: stored/none`, never the token; a read a policy holds for approval answers `pending_approval` (the approval named in the message; reads have no operation id) |
@@ -207,7 +207,7 @@ reach a model. Every error of the five, the gateway's refusals and a pending app
 | ID | Path | Actor | AuthN | AuthZ | Policy | Approval | Execution | Verification | Audit | Path-specific gaps |
 |---|---|---|---|---|---|---|---|---|---|---|
 | A-01 | Web agent chat | Human → Agent | ✅ cookie | ✅ ceiling + tool switch (INV-15) | ✅ | ✅ self-confirm allowed and recorded unless `RequireSecondApprover` (PC-D4); ends with the chat (R1-15); persisted, and the gateway runs only an approval bound to the operation, arguments, target and policy version (R1-14); the chat's buttons decide only through the recorded approval, under the same rules as the Approvals page | invoker → gateway → tool | ❌ | gateway AL + per tool (as in 7.1) | — (INV-32, 36 closed by R1-15) |
-| A-02 | `instruct_agent` | ApiKey/Human → Agent | ✅ | ✅ ceiling + tool switch | ✅ | Confirm → auto-deny ✅ | invoker → gateway → tool | ❌ | gateway AL + per tool | INV-08 |
+| A-02 | `instruct_agent` | ApiKey/Human → Agent | ✅ | ✅ ceiling + tool switch, re-read before every tool call (R1-26) | ✅ | Confirm → auto-deny ✅ | invoker → gateway → tool | ❌ | gateway AL + per tool | INV-08 ✅ (R1-26) |
 | A-03 | AI trigger | Automation (`trigger:<id>`, own principal per trigger since R1-03) | n/a | ✅ read-only unless an Admin granted capabilities + targets; every trigger has an owner, re-checked before each run and per mutation (nested included), lost authority or no owner → suspended + Admin notified (R1-13); tool switch ✅ | ✅ pinned to the trigger's preset with the global kill switch; missing preset → no run (R1-12) | Confirm → Deny in the gateway, nested mutations included, no approval raised ✅ (R1-13); Allow runs unattended within the grant | invoker → gateway → tool | ❌ | gateway AL + per tool + `agent.run` | INV-04, 06, 27, 40 |
 | A-04 | Claude Code CLI runtime (dead code) | fixed key | ✅ key | ⚠️ fail-open rights check | GR? | approve-then-retry | MCP | ❌ | per tool | remove or fix (C-20); INV-02 |
 
@@ -237,7 +237,8 @@ reach a model. Every error of the five, the gateway's refusals and a pending app
 ### 7.5 Web UI handlers
 
 Common to all U rows: Actor = Human (cookie) · AuthN ✅ · AuthZ = `Require(role)` in the handler, role cached per
-circuit (INV-09), **and** since WP2 step 2.2 the Mutation Gateway for every marked capability (`IUiMutationRunner`):
+circuit (INV-09; since R1-26 the circuit re-checks its session every 30 s and every UI mutation re-checks it, so a
+cached role never authorizes a mutation), **and** since WP2 step 2.2 the Mutation Gateway for every marked capability (`IUiMutationRunner`):
 catalog level, tool switch and stricter stored level (INV-15), container target resolved (INV-57) · Policy ✅ for
 humans under PC-D1: kill switch and protected resources (INV-21, 24) — tool lists, argument patterns and
 confirmation are agent rules and do not apply · Approval n/a for humans under PC-D1, except an Admin's action on a

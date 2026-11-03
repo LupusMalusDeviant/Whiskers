@@ -16,12 +16,15 @@ public sealed record ApprovalResolver(string PrincipalId, string Level, string D
         return new ApprovalResolver(PrincipalIds.User(email), LevelOf(role), email.Trim());
     }
 
-    /// <summary>The current web user, or <c>null</c> when nobody is signed in (no email): such a caller decides nothing.</summary>
+    /// <summary>The current web user, or <c>null</c> when nobody is signed in (no email) or the session no longer holds
+    /// (R1-26: checked afresh, never a role a page cached): such a caller decides nothing.</summary>
     public static async Task<ApprovalResolver?> CurrentAsync(ICurrentUserService currentUser)
     {
         ArgumentNullException.ThrowIfNull(currentUser);
         var email = await currentUser.GetEmailAsync();
-        return string.IsNullOrWhiteSpace(email) ? null : User(email, await currentUser.GetRoleAsync());
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        var session = await currentUser.CheckSessionAsync();
+        return session.Valid ? User(email, session.Role) : null;
     }
 
     public static string LevelOf(AppRole role) => role switch
