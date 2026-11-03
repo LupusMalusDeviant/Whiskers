@@ -13,7 +13,13 @@ Kubernetes assets for connecting a cluster to Whiskers (kubernetesImplement Trac
 Whiskers takes a **pasted kubeconfig** in the server dialog (*Server → hinzufügen → Kubernetes-Cluster*).
 The kubeconfig is stored **encrypted in the Whiskers vault** (requires `VAULT_KEY`), never on disk.
 
-**Option A — quick (existing kubeconfig):** paste your admin/user kubeconfig. Fine for a first
+The kubeconfig must be **self-contained** (R1-42): inline credentials only — `token`, `client-certificate-data` /
+`client-key-data` or `username`/`password`, and `certificate-authority-data`. A kubeconfig with an `exec` credential
+plugin (e.g. `aws eks get-token`, `gke-gcloud-auth-plugin`, `kubelogin`), an `auth-provider` or a file path
+(`client-certificate`, `client-key`, `certificate-authority`) is refused — the Kubernetes client would run that plugin or
+read that file on the Whiskers host. Option B below produces a kubeconfig that fits.
+
+**Option A — quick (existing kubeconfig):** paste your admin/user kubeconfig, if it is self-contained. Fine for a first
 look; prefer Option B for standing access.
 
 **Option B — least privilege (recommended):**

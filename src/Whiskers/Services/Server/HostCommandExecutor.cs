@@ -114,7 +114,6 @@ public class HostCommandExecutor : IHostCommandExecutor
             return new CommandResult { ExitCode = -1, Error = "SSH host is not configured" };
         if (string.IsNullOrWhiteSpace(server.SshUser))
             return new CommandResult { ExitCode = -1, Error = "SSH user is not configured" };
-
         // Bootstrap auth: a transient root/SSH password (one-time onboarding) takes precedence;
         // otherwise the stored key. Password is fed to sshpass via the SSHPASS env var below.
         var usePassword = !string.IsNullOrEmpty(server.SshPassword);
@@ -126,32 +125,13 @@ public class HostCommandExecutor : IHostCommandExecutor
                 return new CommandResult { ExitCode = -1, Error = "SSH key not found for server" };
         }
 
-        try { Directory.CreateDirectory(ControlDir); } catch { /* best effort; ssh falls back to no mux */ }
+        // R1-42 (INV-41, E-02): user, host and port become ssh operands. A user like "-oProxyCommand=…" would make the
+        // destination token an option that runs a command on the Whiskers host, so they are checked before any process.
+        List<string> args;
+        try { args = BuildSshArguments(server, keyPath, command); }
+        catch (UnsafeOperandException ex) { return new CommandResult { ExitCode = -1, Error = ex.Message }; }
 
-        // TOFU host-key verification (HOCH-11 / ADR-0002) — shared policy with tunnel + terminal.
-        var args = new List<string>(SshHostKeyPolicy.Options())
-        {
-            "-o", "ConnectTimeout=10",
-            // Connection multiplexing: the first call opens a master, subsequent calls within
-            // ControlPersist reuse it. %C is a safe hash of host/port/user, so no escaping concerns.
-            "-o", "ControlMaster=auto",
-            "-o", "ControlPersist=60s",
-            "-o", $"ControlPath={Path.Combine(ControlDir, "cm-%C")}",
-            "-p", server.SshPort.ToString(),
-        };
-        if (usePassword)
-        {
-            args.AddRange(new[] { "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1" });
-        }
-        else
-        {
-            args.Add("-i");
-            args.Add(keyPath!);
-        }
-        args.Add($"{server.SshUser}@{server.SshHost}");
-        // The command is a single argv element: ssh forwards it verbatim to the remote login shell,
-        // so a full shell command string (pipes, redirects, &&) works as written.
-        args.Add(command);
+        try { Directory.CreateDirectory(ControlDir); } catch { /* best effort; ssh falls back to no mux */ }
 
         _logger.LogDebug("Executing SSH command on {Host} ({Auth}): {Command}",
             server.SshHost, usePassword ? "password" : "key", SecretRedactor.Redact(command));
@@ -162,6 +142,43 @@ public class HostCommandExecutor : IHostCommandExecutor
                 env: ("SSHPASS", server.SshPassword!), maxOutputChars: maxOutputChars);
 
         return await RunProcessAsync("ssh", args, timeout, ct, maxOutputChars: maxOutputChars);
+    }
+
+    /// <summary>The ssh argument list for one command (R1-42): every option first, then <c>--</c>, then the checked
+    /// <c>user@host</c> destination and the command as one argv element. <paramref name="keyPath"/> null means password
+    /// auth (the password itself never appears here). Throws <see cref="UnsafeOperandException"/> for a user, host or
+    /// port that <see cref="CommandOperands"/> refuses.</summary>
+    internal static List<string> BuildSshArguments(Models.ServerConfig server, string? keyPath, string command)
+    {
+        var destination = CommandOperands.SshDestination(server.SshUser, server.SshHost, server.SshPort);
+
+        // TOFU host-key verification (HOCH-11 / ADR-0002) — shared policy with tunnel + terminal.
+        var args = new List<string>(SshHostKeyPolicy.Options())
+        {
+            "-o", "ConnectTimeout=10",
+            // Connection multiplexing: the first call opens a master, subsequent calls within
+            // ControlPersist reuse it. %C is a safe hash of host/port/user, so no escaping concerns.
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPersist=60s",
+            "-o", $"ControlPath={Path.Combine(ControlDir, "cm-%C")}",
+            "-p", server.SshPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+        if (keyPath is null)
+        {
+            args.AddRange(new[] { "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1" });
+        }
+        else
+        {
+            args.Add("-i");
+            args.Add(keyPath);
+        }
+        // "--" ends ssh's options: the destination and the command are operands whatever they contain.
+        args.Add("--");
+        args.Add(destination);
+        // The command is a single argv element: ssh forwards it verbatim to the remote login shell,
+        // so a full shell command string (pipes, redirects, &&) works as written.
+        args.Add(command);
+        return args;
     }
 
     private async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct,

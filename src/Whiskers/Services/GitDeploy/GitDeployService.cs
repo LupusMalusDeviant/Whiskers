@@ -6,6 +6,7 @@ using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
 using Whiskers.Services.Server;
 using Whiskers.Services.Vault;
+using Whiskers.Utils;
 
 namespace Whiskers.Services.GitDeploy;
 
@@ -96,6 +97,9 @@ public class GitDeployService : IGitDeployService
         if (!Uri.TryCreate(app.RepoUrl.Trim(), UriKind.Absolute, out var repoUri) || repoUri.UserInfo.Length > 0)
             throw new ArgumentException("The repository URL must be a plain https:// URL without credentials; give the token separately.");
         if (string.IsNullOrWhiteSpace(app.Branch)) app.Branch = "main";
+        // The branch becomes an operand of git on the target (R1-42, INV-41): quoting does not stop a value like
+        // `--upload-pack=…` from being read as an option, so only a plain ref name is accepted.
+        app.Branch = CommandOperands.RequireGitRef(app.Branch.Trim());
         if (string.IsNullOrWhiteSpace(app.ComposePath)) app.ComposePath = "docker-compose.yml";
         if (app.ComposePath.StartsWith('/') || app.ComposePath.Contains(".."))
             throw new ArgumentException("Compose path must be relative to the repo root.");
@@ -294,6 +298,8 @@ public class GitDeployService : IGitDeployService
         ArgumentNullException.ThrowIfNull(gate);
         var appId = app.Id;
         ValidateId(appId);
+        // A branch stored before R1-42 (or edited in the file) is checked again before anything runs on the target.
+        CommandOperands.RequireGitRef(app.Branch);
         // The snapshot the deployment was decided on (server, repository, branch, compose path) is what runs; the
         // stored app must still be at its revision (R1-08). Copy it so nobody can change it underneath.
         app = app.Clone();

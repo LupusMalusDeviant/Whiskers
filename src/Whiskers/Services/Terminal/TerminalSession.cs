@@ -37,26 +37,34 @@ public enum TerminalCloseReason
 public sealed record TerminalLaunch(string FileName, IReadOnlyList<string> Arguments)
 {
     /// <summary>A shell in a local container (<c>script</c> gives it a PTY), or on the host itself: Whiskers runs with
-    /// <c>pid: host</c>, so <c>nsenter</c> into PID 1's namespaces is a host shell.</summary>
+    /// <c>pid: host</c>, so <c>nsenter</c> into PID 1's namespaces is a host shell.
+    /// The container id comes from the page's address, so it is checked (R1-42) and follows <c>--</c>.</summary>
     public static TerminalLaunch Local(string shell, string? containerId) => string.IsNullOrEmpty(containerId)
         ? new("nsenter", ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--", shell, "-i", "-l"])
-        : new("docker", ["exec", "-i", containerId, "script", "-qc", $"{shell} -i", "/dev/null"]);
+        : new("docker", ["exec", "-i", "--", CommandOperands.RequireContainerRef(containerId), "script", "-qc", $"{shell} -i", "/dev/null"]);
 
-    /// <summary>A shell on a remote host over SSH (<paramref name="keyPath"/> null: keyless, Tailscale SSH).</summary>
+    /// <summary>A shell on a remote host over SSH (<paramref name="keyPath"/> null: keyless, Tailscale SSH). User, host
+    /// and port are checked (R1-42) and the destination follows <c>--</c>.</summary>
     public static TerminalLaunch Ssh(string host, int port, string user, string? keyPath)
     {
+        var destination = CommandOperands.SshDestination(user, host, port);
         var args = SshBaseArgs(port, keyPath);
-        args.Add($"{user}@{host}");
+        args.Add("--");
+        args.Add(destination);
         return new("ssh", args);
     }
 
     /// <summary>A shell in a container of a remote host: SSH, then <c>docker exec</c>. The remote command is one
-    /// argument quoted for the remote shell, so the container id survives whatever it contains.</summary>
+    /// argument quoted for the remote shell; the container id is checked (R1-42) and follows <c>--</c>, so it is
+    /// neither shell text nor an option of docker.</summary>
     public static TerminalLaunch SshDockerExec(string host, int port, string user, string? keyPath, string containerId)
     {
+        var destination = CommandOperands.SshDestination(user, host, port);
+        CommandOperands.RequireContainerRef(containerId);
         var args = SshBaseArgs(port, keyPath);
-        args.Add($"{user}@{host}");
-        args.Add($"docker exec -it {ShellUtils.Quote(containerId)} /bin/sh -c " +
+        args.Add("--");
+        args.Add(destination);
+        args.Add($"docker exec -it -- {ShellUtils.Quote(containerId)} /bin/sh -c " +
                  ShellUtils.Quote("command -v bash >/dev/null && exec bash -l || exec sh"));
         return new("ssh", args);
     }

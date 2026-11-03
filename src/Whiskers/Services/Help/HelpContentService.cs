@@ -219,7 +219,9 @@ public sealed class HelpContentService : IHelpContentService
                     Unter **Infrastruktur > Server > Hinzufügen** legst du einen Server vom Typ **Kubernetes**
                     an und fügst die **kubeconfig** ein — sie wird **verschlüsselt im Vault** gespeichert,
                     nie im Klartext auf der Platte. Ausgelegt auf **k3s**, funktioniert mit jedem
-                    erreichbaren Cluster.
+                    erreichbaren Cluster. Die kubeconfig muss **in sich geschlossen** sein (eingebettetes Token
+                    oder Client-Zertifikat): eine, die ein Credential-Plugin startet (`exec`, `auth-provider`)
+                    oder eine Datei nennt, wird abgelehnt.
                     """),
                 new("Pods im Dashboard", """
                     Pods erscheinen wie Container im **Dashboard**, gruppiert nach ihrem Besitzer

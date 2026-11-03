@@ -1,5 +1,5 @@
 using System.Text;
-using System.Text.RegularExpressions;
+using Whiskers.Utils;
 
 namespace Whiskers.Services.Server;
 
@@ -15,9 +15,6 @@ public class NginxService : INginxService
 {
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<NginxService> _logger;
-
-    // Only allow safe site names: letters, digits, dots, hyphens, underscores
-    private static readonly Regex SafeSiteNameRegex = new(@"^[a-zA-Z0-9._-]+$", RegexOptions.Compiled);
 
     public NginxService(IHostCommandExecutor executor, ILogger<NginxService> logger)
     {
@@ -41,7 +38,7 @@ public class NginxService : INginxService
 
         foreach (var name in ParseFileList(availableResult.Output))
         {
-            if (!SafeSiteNameRegex.IsMatch(name))
+            if (!CommandOperands.IsSafeSiteName(name))
             {
                 _logger.LogWarning("Skipping nginx site with unsafe name: {Name}", name);
                 continue;
@@ -58,7 +55,7 @@ public class NginxService : INginxService
         // Include any enabled sites that are not in sites-available (e.g., symlinks to other paths)
         foreach (var name in enabledSet)
         {
-            if (!SafeSiteNameRegex.IsMatch(name)) continue;
+            if (!CommandOperands.IsSafeSiteName(name)) continue;
             if (!sites.Any(s => s.Name == name))
             {
                 sites.Add(new NginxSite
@@ -78,7 +75,7 @@ public class NginxService : INginxService
         ValidateSiteName(siteName);
 
         // Try sites-available first, then sites-enabled
-        var result = await _executor.ExecuteAsync(serverId, $"cat /etc/nginx/sites-available/{siteName} 2>/dev/null || cat /etc/nginx/sites-enabled/{siteName} 2>/dev/null");
+        var result = await _executor.ExecuteAsync(serverId, $"cat {ShellUtils.Quote("/etc/nginx/sites-available/" + siteName)} 2>/dev/null || cat {ShellUtils.Quote("/etc/nginx/sites-enabled/" + siteName)} 2>/dev/null");
 
         if (!result.Success && !string.IsNullOrEmpty(result.Error))
             _logger.LogWarning("Failed to read nginx site config '{SiteName}' on {ServerId}: {Error}", siteName, serverId, result.Error);
@@ -98,7 +95,7 @@ public class NginxService : INginxService
         var destPath = $"/etc/nginx/sites-available/{siteName}";
 
         // Write the file, then test the nginx config, and reload only if the test passes
-        var writeCmd = $"echo '{base64Content}' | base64 -d | tee {destPath} > /dev/null";
+        var writeCmd = $"echo '{base64Content}' | base64 -d | tee {ShellUtils.Quote(destPath)} > /dev/null";
         var writeResult = await _executor.ExecuteAsync(serverId, writeCmd);
 
         if (!writeResult.Success)
@@ -140,7 +137,7 @@ public class NginxService : INginxService
         var availPath = $"/etc/nginx/sites-available/{siteName}";
         var enabledPath = $"/etc/nginx/sites-enabled/{siteName}";
 
-        var linkResult = await _executor.ExecuteAsync(serverId, $"ln -sf {availPath} {enabledPath}");
+        var linkResult = await _executor.ExecuteAsync(serverId, $"ln -sf -- {ShellUtils.Quote(availPath)} {ShellUtils.Quote(enabledPath)}");
         if (!linkResult.Success)
         {
             _logger.LogWarning("Failed to enable nginx site '{SiteName}' on {ServerId}: {Error}", siteName, serverId, linkResult.Error);
@@ -151,7 +148,7 @@ public class NginxService : INginxService
         if (!testResult.Success)
         {
             // Roll back the symlink
-            await _executor.ExecuteAsync(serverId, $"rm -f {enabledPath}");
+            await _executor.ExecuteAsync(serverId, $"rm -f -- {ShellUtils.Quote(enabledPath)}");
             return new CommandResult
             {
                 ExitCode = testResult.ExitCode,
@@ -169,7 +166,7 @@ public class NginxService : INginxService
         ValidateSiteName(siteName);
 
         var enabledPath = $"/etc/nginx/sites-enabled/{siteName}";
-        var removeResult = await _executor.ExecuteAsync(serverId, $"rm -f {enabledPath}");
+        var removeResult = await _executor.ExecuteAsync(serverId, $"rm -f -- {ShellUtils.Quote(enabledPath)}");
 
         if (!removeResult.Success)
         {
@@ -196,7 +193,8 @@ public class NginxService : INginxService
         if (string.IsNullOrWhiteSpace(siteName))
             throw new ArgumentException("Site name cannot be null or empty", nameof(siteName));
 
-        if (!SafeSiteNameRegex.IsMatch(siteName))
-            throw new ArgumentException($"Invalid nginx site name '{siteName}'. Only letters, digits, dots, hyphens, and underscores are allowed.", nameof(siteName));
+        // One rule for every site name that reaches a command (R1-42, E-03): a leading letter or digit and no "..",
+        // so the name can neither be read as an option nor leave /etc/nginx/sites-*.
+        CommandOperands.RequireSiteName(siteName);
     }
 }
