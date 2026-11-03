@@ -711,10 +711,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `OptionInjectionTests` rejects option-leading branch/user/host values and invalid ports/site names at execution boundaries.
-- [ ] `GitDeployCommandsTests` verifies validated refs and safe positional argument handling.
-- [ ] `KubeconfigExecutionTests` establishes the installed client’s exec behavior and proves the chosen supported policy.
-- [ ] No unsupported claim that shell quoting alone prevents option injection remains.
+- [x] `OptionInjectionTests` rejects option-leading branch/user/host values and invalid ports/site names at execution boundaries.
+- [x] `GitDeployCommandsTests` verifies validated refs and safe positional argument handling.
+- [x] `KubeconfigExecutionTests` establishes the installed client’s exec behavior and proves the chosen supported policy.
+- [x] No unsupported claim that shell quoting alone prevents option injection remains.
 
 **Out of scope:** Changing mTLS/WireGuard behavior.
 

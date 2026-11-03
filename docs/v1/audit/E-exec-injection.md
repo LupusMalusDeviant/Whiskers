@@ -50,6 +50,10 @@ agent cannot call the `Admin` tools below. `execute_command`, `deploy_app`, `dep
   `SystemdService.SafeServiceNameRegex`. (2) Where a value is a positional argument, insert `--` before it
   (`git fetch origin -- <ref>` is not valid, so validate instead) — the general rule the codebase should adopt:
   *quoting is not argument-safety*. Add a code-building test asserting a `-`-leading value is rejected.
+- **Status:** Fixed in R1-42. `CommandOperands.RequireGitRef` validates the branch on save and before a deployment runs;
+  `GitDeployCommands` uses `--branch=<b>`, `-- <url>` and full refspecs (`+refs/heads/<b>:refs/remotes/origin/<b>`), so
+  no operand stands where git reads options; `ShellUtils.Quote` documents that it is not argument-safety
+  (`GitDeployCommandsTests`, `OptionInjectionTests`).
 
 ### E-02 — SSH user/host/port are never validated → `ssh` option injection (ProxyCommand) and host-key-file selection
 - **Severity:** Medium · **Category:** Security · **v1-blocker:** No (admin-gated)
@@ -66,6 +70,9 @@ agent cannot call the `Admin` tools below. `execute_command`, `deploy_app`, `dep
 - **Recommendation:** Validate `SshUser` (POSIX user name charset, no leading `-`), `SshHost`
   (hostname/IP), and keep `SshPort` as the int it is. Consider inserting the user via `-l <user>` and the host
   as a bare positional after `--`.
+- **Status:** Fixed in R1-42. `CommandOperands.SshDestination` checks user, host and port (1–65535) in
+  `HostCommandExecutor`, `SshTunnelManager` and `TerminalLaunch` before any process starts, and the Servers page
+  refuses them on save; every ssh argument list ends its options with `--` before `user@host` (`OptionInjectionTests`).
 
 ### E-03 — `nginx` site-name regex allows `..` and a leading `-` (unlike the other name validators)
 - **Severity:** Low · **Category:** Security · **v1-blocker:** No
@@ -80,6 +87,8 @@ agent cannot call the `Admin` tools below. `execute_command`, `deploy_app`, `dep
   leading `/…/` path segment. Practical impact is limited (blind, one level), hence Low — but the inconsistency
   is a latent bug and the comment claims `..` is excluded ("only safe site names") when it is not.
 - **Recommendation:** Align the regex with the others: `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` and reject `..`.
+- **Status:** Fixed in R1-42. `NginxService` uses `CommandOperands.IsSafeSiteName` (that regex plus no `..`) for every
+  site name and leaves refused names out of its listing (`OptionInjectionTests`).
 
 ### E-04 — `execute_query` (Write level) grants full DB-superuser SQL incl. DROP and `COPY … TO PROGRAM` (RCE in DB container)
 - **Severity:** Medium · **Category:** Security / Architecture · **v1-blocker:** No (intended, but scope worth a decision)
@@ -166,6 +175,11 @@ agent cannot call the `Admin` tools below. `execute_command`, `deploy_app`, `dep
   whether the binary path is attacker-controlled. Admin-supplied + vault-gated, so Low.
 - **Recommendation:** Verify exec-plugin behaviour of the client library; if honoured, reject kubeconfigs
   containing `exec` auth, or run the kube client with exec disabled.
+- **Status:** Verified and fixed in R1-42. KubernetesClient 21.0.8 starts the `exec` command synchronously inside
+  `BuildConfigFromConfigObject` (before any request), builds an OIDC token provider for `auth-provider: oidc` and reads
+  `client-certificate`/`client-key` paths from the host when the client is created. `KubeconfigPolicy` refuses a
+  kubeconfig with any exec plugin, auth provider or file path (any user or cluster) on save and before every client
+  build; there is no allow-list setting (`KubeconfigExecutionTests`).
 
 ---
 

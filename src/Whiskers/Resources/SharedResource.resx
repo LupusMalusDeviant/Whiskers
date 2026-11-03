@@ -2432,6 +2432,18 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Servers_Error_KubeconfigMissing" xml:space="preserve">
     <value>Please paste a kubeconfig.</value>
   </data>
+  <data name="Servers_Error_KubeconfigRefused" xml:space="preserve">
+    <value>This kubeconfig is refused: {0}. Whiskers runs no credential plugins (exec, auth-provider) and reads no files named in a kubeconfig. Paste a self-contained kubeconfig with an inline token or client-certificate-data/client-key-data, e.g. for a ServiceAccount.</value>
+  </data>
+  <data name="Servers_Error_SshHostInvalid" xml:space="preserve">
+    <value>The SSH host must be a host name or an IP address (letters, digits, dots and inner hyphens; it must not start with "-").</value>
+  </data>
+  <data name="Servers_Error_SshUserInvalid" xml:space="preserve">
+    <value>The SSH user may contain only letters, digits and . _ - and must not start with "-" or "." (at most 64 characters).</value>
+  </data>
+  <data name="Servers_Error_SshPortInvalid" xml:space="preserve">
+    <value>The SSH port must be a number from 1 to 65535.</value>
+  </data>
   <data name="AddFirewallRuleDialog_Button_Cancel" xml:space="preserve">
     <value>Cancel</value>
   </data>

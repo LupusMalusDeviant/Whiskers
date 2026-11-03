@@ -217,6 +217,8 @@ internal static class HelpContentEn
                     Under **Infrastructure > Servers > Add** you create a server of type **Kubernetes**
                     and paste in the **kubeconfig** — it is stored **encrypted in the vault**, never in
                     plain text on disk. Designed for **k3s**, but works with any reachable cluster.
+                    The kubeconfig must be **self-contained** (an inline token or client certificate): one that
+                    starts a credential plugin (`exec`, `auth-provider`) or names a file is refused.
                     """),
                 new("Pods on the Dashboard", """
                     Pods appear like containers on the **Dashboard**, grouped by their owner

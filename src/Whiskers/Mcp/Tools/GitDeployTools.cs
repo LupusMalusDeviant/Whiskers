@@ -68,7 +68,7 @@ public class GitDeployTools
     }
 
     [McpToolLevel(McpPermissionLevels.Admin)]
-    [McpServerTool, Description("Create a Git-deploy application (Brokkr provisioning). Whiskers clones the repository over HTTPS on the target server and runs its compose file. A private repository needs a read-only token (optional here, or later with set_git_deploy_token). An existing name is refused. Answers JSON with the new id and revision; never the token.")]
+    [McpServerTool, Description("Create a Git-deploy application (Brokkr provisioning). Whiskers clones the repository over HTTPS on the target server and runs its compose file. A private repository needs a read-only token (optional here, or later with set_git_deploy_token). An existing name is refused, and so is a branch that is not a plain branch name (leading letter or digit, only letters, digits and . _ / -, no '..'). Answers JSON with the new id and revision; never the token.")]
     public static async Task<string> CreateGitDeployApp(
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
@@ -77,7 +77,7 @@ public class GitDeployTools
         [Description("Unique name of the application")] string name,
         [Description("Repository URL, https:// only")] string repoUrl,
         [Description("Server id the application deploys to")] string serverId,
-        [Description("Branch to deploy (default main)")] string? branch = null,
+        [Description("Branch to deploy (default main). A plain branch name: starts with a letter or digit, only letters, digits and . _ / -, no '..'; anything else is refused as invalid_argument.")] string? branch = null,
         [Description("Compose file path relative to the repository root (default docker-compose.yml)")] string? composePath = null,
         [Description("Read-only repository token for a private repository (optional; never returned)")] string? token = null)
     {

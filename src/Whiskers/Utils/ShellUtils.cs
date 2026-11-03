@@ -6,10 +6,15 @@ namespace Whiskers.Utils;
 public static class ShellUtils
 {
     /// <summary>
-    /// POSIX single-quote a value for safe interpolation into a shell command string.
+    /// POSIX single-quote a value for interpolation into a shell command string.
     /// Wraps in single quotes and escapes embedded single quotes via the '\'' idiom.
     /// Use this whenever a caller-supplied value (package name, image, path, container id)
     /// is spliced into a command that a shell will interpret.
+    /// Quoting only protects against the SHELL (metacharacters, word splitting). It does NOT stop option
+    /// injection: after the shell removes the quotes the program still receives the literal token, and
+    /// <c>'-oProxyCommand=…'</c> or <c>'--upload-pack=…'</c> is parsed as an option. A value that becomes a
+    /// positional operand must also be validated (<see cref="CommandOperands"/>, R1-42) and, where the program
+    /// supports it, placed after <c>--</c>.
     /// </summary>
     public static string Quote(string s) => "'" + (s ?? "").Replace("'", "'\\''") + "'";
 

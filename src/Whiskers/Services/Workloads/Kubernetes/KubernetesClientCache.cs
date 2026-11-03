@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using k8s;
-using k8s.KubeConfigModels;
 using Whiskers.Models;
 using Whiskers.Services.ServerConfig;
 using Whiskers.Services.Vault;
@@ -10,7 +9,8 @@ namespace Whiskers.Services.Workloads.Kubernetes;
 /// <summary>Builds and caches one <see cref="IKubernetes"/> client per Kubernetes server. The
 /// kubeconfig is loaded from the vault (<c>kubeconfig:{serverId}</c>) and parsed IN-MEMORY via
 /// <see cref="KubernetesYaml.Deserialize{T}"/> + BuildConfigFromConfigObject — it is never
-/// written to a file. Vault key name: see <see cref="KubeconfigVaultKey"/>.</summary>
+/// written to a file. Vault key name: see <see cref="KubeconfigVaultKey"/>. Before the builder sees it,
+/// <see cref="KubeconfigPolicy"/> refuses exec plugins, auth providers and file references (R1-42).</summary>
 public sealed class KubernetesClientCache : IKubernetesClientCache, IDisposable
 {
     private readonly IServerConfigService _serverConfig;
@@ -55,7 +55,9 @@ public sealed class KubernetesClientCache : IKubernetesClientCache, IDisposable
     {
         var (server, kubeconfigYaml) = ReadKubeconfig(serverId);
 
-        var kubeConfig = KubernetesYaml.Deserialize<K8SConfiguration>(kubeconfigYaml);
+        // R1-42 (E-09): the client starts an exec plugin while it builds the configuration, so the policy decides on
+        // the parsed object before it reaches the builder — also for a kubeconfig stored before the policy existed.
+        var kubeConfig = KubeconfigPolicy.ParseAndAdmit(kubeconfigYaml);
         var clientConfig = KubernetesClientConfiguration.BuildConfigFromConfigObject(
             kubeConfig, currentContext: string.IsNullOrWhiteSpace(server.KubeContext) ? null : server.KubeContext);
         return new k8s.Kubernetes(clientConfig);

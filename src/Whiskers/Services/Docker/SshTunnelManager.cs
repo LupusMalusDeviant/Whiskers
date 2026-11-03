@@ -110,6 +110,27 @@ public class SshTunnelManager : ISshTunnelManager
     /// (HOCH-11 fixed per user approval 2026-07-11; see ADR-0002).</summary>
     private static Process StartSshProcess(Models.ServerConfig server, string? keyPath, int localPort)
     {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "ssh",
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var arg in BuildTunnelArguments(server, keyPath, localPort))
+            psi.ArgumentList.Add(arg);
+
+        var process = new Process { StartInfo = psi };
+        process.Start();
+        return process;
+    }
+
+    /// <summary>The ssh arguments of a tunnel (R1-42): every option first, then <c>--</c> and the checked
+    /// <c>user@host</c> destination. Throws <see cref="Whiskers.Utils.UnsafeOperandException"/> for a user, host or
+    /// port that <see cref="Whiskers.Utils.CommandOperands"/> refuses — no process is started for it.</summary>
+    internal static List<string> BuildTunnelArguments(Models.ServerConfig server, string? keyPath, int localPort)
+    {
+        var destination = Whiskers.Utils.CommandOperands.SshDestination(server.SshUser, server.SshHost, server.SshPort);
         var args = new List<string>();
         if (!string.IsNullOrEmpty(keyPath))
         {
@@ -121,29 +142,18 @@ public class SshTunnelManager : ISshTunnelManager
         {
             "-N",
             "-L", $"{localPort}:/var/run/docker.sock",
-            $"{server.SshUser}@{server.SshHost}",
-            "-p", server.SshPort.ToString(),
+            "-p", server.SshPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "-o", "BatchMode=yes",
             "-o", "ExitOnForwardFailure=yes",
             "-o", "ServerAliveInterval=15",
             "-o", "ServerAliveCountMax=3",
             "-o", "TCPKeepAlive=yes",
             "-o", "ConnectTimeout=10",
+            // "--" ends ssh's options; the destination is an operand whatever it contains.
+            "--",
+            destination,
         });
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = "ssh",
-            UseShellExecute = false,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
-
-        var process = new Process { StartInfo = psi };
-        process.Start();
-        return process;
+        return args;
     }
 
     public void CloseTunnel(string serverId)
