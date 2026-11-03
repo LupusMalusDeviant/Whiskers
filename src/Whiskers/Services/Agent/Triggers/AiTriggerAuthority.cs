@@ -199,7 +199,7 @@ public sealed class AiTriggerAuthority : IAiTriggerAuthority
             if (_sp?.GetService<INotificationService>() is { } notify)
                 await notify.SendAsync(new NotificationEvent
                 {
-                    EventType = "automation_suspended",
+                    EventType = NotificationEventTypes.AutomationSuspended,
                     ContainerName = trigger.Name,
                     ImageInfo = $"AI trigger \"{trigger.Name}\" was suspended: {lost}. It stays off until an admin switches " +
                                 "it on again in AI triggers, which makes that admin its owner.",

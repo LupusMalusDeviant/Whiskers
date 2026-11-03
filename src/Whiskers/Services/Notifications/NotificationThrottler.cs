@@ -52,8 +52,9 @@ public class NotificationThrottler
 
     // Certificate alerts are deduplicated at the source (one per stage per certificate, persisted), and several
     // certificates on one server reach a stage together — the throttle key would swallow all but the first.
-    private static bool IsTransition(string eventType) =>
-        eventType is "server_unreachable" or "server_recovered" or "certificate_expiring" or "certificate_expired";
+    // R1-56: a breach's raise and its <kind>_recovered, a metrics gap and the quiet-hours summary too — each is said once
+    // by its source, so a throttled recovery would leave the breach open in every channel.
+    private static bool IsTransition(string eventType) => NotificationEventTypes.IsStateTransition(eventType);
 
     private static string KeyFor(NotificationEvent evt) => $"{evt.ServerId}/{evt.ContainerId}";
 }

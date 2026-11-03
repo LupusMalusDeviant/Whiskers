@@ -25,17 +25,20 @@ public sealed class NotificationOutboxWorker : FleetBackgroundService
     /// <summary>The time (tests control it).</summary>
     internal Func<DateTime> Clock { get; init; } = () => DateTime.UtcNow;
 
+    private readonly IQuietHoursSummarizer? _summarizer;
+
     public NotificationOutboxWorker(IEnumerable<INotificationChannel> channels, INotificationOutbox outbox,
-        ILogger<NotificationOutboxWorker> logger)
-        : this(channels, outbox, logger, CompositeNotificationService.AttemptTimeout) { }
+        ILogger<NotificationOutboxWorker> logger, IQuietHoursSummarizer? summarizer = null)
+        : this(channels, outbox, logger, CompositeNotificationService.AttemptTimeout, summarizer) { }
 
     internal NotificationOutboxWorker(IEnumerable<INotificationChannel> channels, INotificationOutbox outbox,
-        ILogger<NotificationOutboxWorker> logger, TimeSpan attemptTimeout)
+        ILogger<NotificationOutboxWorker> logger, TimeSpan attemptTimeout, IQuietHoursSummarizer? summarizer = null)
     {
         _channels = channels.ToList();
         _outbox = outbox;
         _logger = logger;
         _attemptTimeout = attemptTimeout;
+        _summarizer = summarizer;
     }
 
     protected override async Task RunAsync(CancellationToken stoppingToken)
@@ -45,6 +48,8 @@ public sealed class NotificationOutboxWorker : FleetBackgroundService
             try
             {
                 await _outbox.FlushAsync(stoppingToken);
+                // R1-56: the summaries of quiet-hour windows that ended go into the outbox first, so this pass delivers them.
+                await SummarizeAsync(stoppingToken);
                 await RedeliverDueAsync(Clock(), stoppingToken);
                 await _outbox.FlushAsync(stoppingToken);
             }
@@ -58,6 +63,19 @@ public sealed class NotificationOutboxWorker : FleetBackgroundService
         // What changed last is written before the process ends, bounded so a stalled volume cannot hold the stop.
         try { await _outbox.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
         catch (Exception ex) { _logger.LogError("The notification outbox could not be saved at stop ({Error})", NotificationOutbox.Describe(ex)); }
+    }
+
+    /// <summary>R1-56: creates the summaries that are due. A failure is logged and retried by the next pass; it never holds up
+    /// the redeliveries.</summary>
+    private async Task SummarizeAsync(CancellationToken ct)
+    {
+        if (_summarizer is null) return;
+        try { await _summarizer.SummarizeDueAsync(Clock(), ct); }
+        catch (Exception ex) when (!IsHostStopping(ex, ct))
+        {
+            _logger.LogError("Quiet-hours summaries could not be created; the next pass tries again ({Error})",
+                NotificationOutbox.Describe(ex));
+        }
     }
 
     /// <summary>One pass over what is due at <paramref name="now"/>. Internal for tests (which may pass a later

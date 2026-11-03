@@ -609,11 +609,14 @@ public sealed class NotificationDeliveryTests : IDisposable
         public int Requests => Volatile.Read(ref _requests);
         public int Cancelled => Volatile.Read(ref _cancelled);
         public string LastBody { get; private set; } = "";
+        /// <summary>Every request body, in order.</summary>
+        public List<string> Bodies { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Interlocked.Increment(ref _requests);
             LastBody = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
+            lock (Bodies) Bodies.Add(LastBody);
             Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? step;
             lock (_steps) step = _steps.Count > 0 ? _steps.Dequeue() : null;
             try

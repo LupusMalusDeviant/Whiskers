@@ -34,8 +34,7 @@ public class CompositeNotificationService : INotificationService
     internal static readonly TimeSpan Backoff = TimeSpan.FromSeconds(2);
 
     /// <summary>Events an admin must see whatever the target's mute or preferences say.</summary>
-    internal static readonly IReadOnlySet<string> AdministrativeEvents =
-        new HashSet<string>(StringComparer.Ordinal) { "automation_suspended", "automation_refused", "operations_interrupted" };
+    internal static readonly IReadOnlySet<string> AdministrativeEvents = NotificationEventTypes.AdministrativeEvents;
 
     public CompositeNotificationService(
         IEnumerable<INotificationChannel> channels,
@@ -100,6 +99,16 @@ public class CompositeNotificationService : INotificationService
         // Always record in the in-app feed (no external channel needed).
         try { _inApp.Add(evt); } catch (Exception ex) { _logger.LogWarning(ex, "In-app notification failed"); }
         await PersistHistoryAsync(evt, ct);
+
+        // R1-56: quiet hours hold the channels back, nothing else — the in-app feed and AlertHistory above recorded it, and
+        // the AI triggers are dispatched as always (a trigger decides for itself). What was held is recorded durably and
+        // delivered as one summary after the window. The per-container mute above keeps its meaning.
+        if (await HeldAsync(evt, ct))
+        {
+            await DispatchTriggersAsync(evt);
+            ct.ThrowIfCancellationRequested();
+            return;
+        }
 
         // Each channel its own copy: what one records about its delivery (the e-mail recipients reached) is kept with
         // its own outbox entry only. The producer's stop (R1-41) reaches every channel's attempts and retries.
@@ -168,10 +177,10 @@ public class CompositeNotificationService : INotificationService
 
             // A recovery closes the outage it ends, so the history reads as episodes instead of a wall of
             // unresolved rows.
-            if (evt.EventType == "server_recovered" && evt.ServerId is { } sid)
+            if (evt.EventType == NotificationEventTypes.ServerRecovered && evt.ServerId is { } sid)
             {
                 await db.AlertHistory
-                    .Where(a => a.ServerId == sid && a.AlertType == "server_unreachable" && !a.Resolved)
+                    .Where(a => a.ServerId == sid && a.AlertType == NotificationEventTypes.ServerUnreachable && !a.Resolved)
                     .ExecuteUpdateAsync(u => u.SetProperty(a => a.Resolved, true), deadline.Token);
             }
 
@@ -183,14 +192,48 @@ public class CompositeNotificationService : INotificationService
         }
     }
 
+    /// <summary>R1-56: whether quiet hours hold <paramref name="evt"/> back from the channels. Only when a window covers it
+    /// <b>and</b> it was recorded for the summary: a rule that cannot be evaluated or a record that cannot be written
+    /// delivers the event (an alert is never lost to a failed hold), and so does an unknown or never-suppressed type.</summary>
+    private async Task<bool> HeldAsync(NotificationEvent evt, CancellationToken ct)
+    {
+        if (_sp.GetService<IQuietHoursService>() is not { } quietHours
+            || _sp.GetService<IAlertSuppressionStore>() is not { } suppressions) return false;
+        QuietHoursMatch? match;
+        try { match = quietHours.Match(evt); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Quiet hours could not be evaluated for {EventType}; it is delivered ({Error})",
+                evt.EventType, NotificationOutbox.Describe(ex));
+            return false;
+        }
+        if (match is null) return false;
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_attemptTimeout);
+        try
+        {
+            var held = await suppressions.HoldAsync(match, evt, deadline.Token).WaitAsync(deadline.Token);
+            if (held)
+                _logger.LogDebug("Notification {EventType} held by quiet hours {Rule} until the summary", evt.EventType, match.RuleName);
+            return held;
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            _logger.LogWarning("Notification {EventType} could not be held for quiet hours {Rule}; it is delivered ({Error})",
+                evt.EventType, match.RuleName, NotificationOutbox.Describe(ex));
+            return false;
+        }
+    }
+
     /// <summary>Events whose loss matters: administrative ones, errors and approvals waiting for a person. A channel that
     /// still fails them after the retries keeps them in the outbox for redelivery (R1-40).</summary>
     internal static bool IsCritical(NotificationEvent evt) =>
         AdministrativeEvents.Contains(evt.EventType)
-        || evt.EventType == "agent_approval"
+        || evt.EventType == NotificationEventTypes.AgentApproval
         // The end of an outage goes where its start went: an "unreachable" redelivered without its recovery reads as
         // an outage still going on.
-        || evt.EventType == "server_recovered"
+        || evt.EventType == NotificationEventTypes.ServerRecovered
         || NotificationFormatter.Describe(evt).Severity == "Error";
 
     /// <summary>One channel: <see cref="MaxAttempts"/> attempts, each within its deadline. A failure the retries could not

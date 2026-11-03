@@ -18,6 +18,9 @@ public sealed class NotificationOutboxEntry
     public DateTime NextAttemptAt { get; set; }
     /// <summary>The last failure: exception type and redacted message, never a URL or token.</summary>
     public string? LastError { get; set; }
+    /// <summary>R1-56: the idempotency key of an entry created once on purpose (a quiet-hours summary): an entry with a key
+    /// the outbox holds or delivered, dropped or gave up on recently is not created a second time.</summary>
+    public string? Key { get; set; }
 
     internal NotificationOutboxEntry Clone()
     {
@@ -25,6 +28,13 @@ public sealed class NotificationOutboxEntry
         copy.Event = Event.Copy();
         return copy;
     }
+}
+
+/// <summary>R1-56: the key of an entry that left the outbox, and when.</summary>
+public sealed class CompletedKey
+{
+    public string Key { get; set; } = "";
+    public DateTime At { get; set; }
 }
 
 /// <summary>What the outbox holds and has given up on since the start, for the metrics. <paramref name="Unsaved"/>: the
@@ -49,6 +59,15 @@ public interface INotificationOutbox
     /// <summary>Keeps <paramref name="evt"/> for redelivery to <paramref name="channel"/>. In memory, without waiting
     /// for the disk.</summary>
     Task AddAsync(string channel, NotificationEvent evt, Exception failure, DateTime now);
+
+    /// <summary>
+    /// R1-56: keeps <paramref name="evt"/> for a first delivery to <paramref name="channel"/>, due at once — unless an entry
+    /// with <paramref name="key"/> is held, or left the outbox within <see cref="NotificationOutbox.KeyMemory"/> (delivered,
+    /// dropped or given up on). The key is written with the entry, so a caller that adds, flushes and only then records that
+    /// it did (the quiet-hours summary) cannot create the entry twice when it is stopped in between: after the restart the
+    /// same key is refused. Returns whether the entry was added. In memory, without waiting for the disk.
+    /// </summary>
+    Task<bool> AddOnceAsync(string channel, NotificationEvent evt, string key, DateTime now);
 
     /// <summary>The entries due at <paramref name="now"/>, oldest first. An entry past <see cref="NotificationOutbox.MaxAge"/>
     /// is given up on here, before it is sent.</summary>
@@ -86,6 +105,14 @@ public sealed class NotificationOutbox : INotificationOutbox
     internal const int MaxAttempts = 8;
     internal static readonly TimeSpan MaxAge = TimeSpan.FromHours(24);
     private static readonly TimeSpan MaxWait = TimeSpan.FromMinutes(60);
+
+    /// <summary>R1-56: how long the key of an entry that left the outbox is remembered (<see cref="AddOnceAsync"/>), and how
+    /// many keys at most.</summary>
+    internal static readonly TimeSpan KeyMemory = TimeSpan.FromDays(7);
+    internal const int MaxKeys = 2000;
+
+    // R1-56: the keys of entries that left the outbox, with when (written with the file).
+    private readonly Dictionary<string, DateTime> _completed = new(StringComparer.Ordinal);
 
     private readonly JsonFileStore<OutboxFile>? _file;
     private readonly ILogger<NotificationOutbox> _logger;
@@ -150,6 +177,34 @@ public sealed class NotificationOutbox : INotificationOutbox
         return Task.CompletedTask;
     }
 
+    public Task<bool> AddOnceAsync(string channel, NotificationEvent evt, string key, DateTime now)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        lock (_sync)
+        {
+            if (_completed.ContainsKey(key) || Live.Any(e => e.Key == key)) return Task.FromResult(false);
+            while (Live.Count >= MaxEntries) Drop(Live, Victim(Live), "the outbox is full");
+            Live.Add(new NotificationOutboxEntry
+            {
+                Channel = channel,
+                Event = evt.Copy(),
+                Attempts = 0,
+                FirstFailedAt = now,
+                NextAttemptAt = now,                  // a first delivery, not a redelivery: due at once
+                Key = key,
+            });
+            _dirty = true;
+        }
+        _work.Release();
+        return Task.FromResult(true);
+    }
+
+    /// <summary>Remembers the key of an entry that leaves the outbox. Under <see cref="_sync"/>.</summary>
+    private void Left(NotificationOutboxEntry entry)
+    {
+        if (entry.Key is { } key) _completed[key] = DateTime.UtcNow;
+    }
+
     public Task<IReadOnlyList<NotificationOutboxEntry>> DueAsync(DateTime now)
     {
         lock (_sync)
@@ -186,6 +241,7 @@ public sealed class NotificationOutbox : INotificationOutbox
             if (index < 0) return Task.FromResult(false);
             if (delivered)
             {
+                Left(Live[index]);
                 Live.RemoveAt(index);
                 Interlocked.Increment(ref _redelivered);
                 _dirty = true;
@@ -234,7 +290,12 @@ public sealed class NotificationOutbox : INotificationOutbox
             lock (_sync)
             {
                 if (!_dirty) return true;
-                snapshot = new OutboxFile { Entries = _entries!.Select(e => e.Clone()).ToList() };
+                ForgetOldKeys(DateTime.UtcNow);
+                snapshot = new OutboxFile
+                {
+                    Entries = _entries!.Select(e => e.Clone()).ToList(),
+                    Completed = _completed.Select(k => new CompletedKey { Key = k.Key, At = k.Value }).ToList(),
+                };
                 _dirty = false;
                 _writing = true;                      // unsaved until the write is through
             }
@@ -270,9 +331,12 @@ public sealed class NotificationOutbox : INotificationOutbox
     private async Task<bool> LoadAsync()
     {
         List<NotificationOutboxEntry> loaded;
+        List<CompletedKey> completed;
         try
         {
-            loaded = (await _file!.LoadAsync()).Entries ?? [];
+            var file = await _file!.LoadAsync();
+            loaded = file.Entries ?? [];
+            completed = file.Completed ?? [];
         }
         catch (JsonStoreCorruptException ex)
         {
@@ -280,6 +344,7 @@ public sealed class NotificationOutbox : INotificationOutbox
             _logger.LogError("The notification outbox is corrupt and has no readable previous generation; its undelivered " +
                              "notifications are lost. {Detail}", ex.Message);
             loaded = [];
+            completed = [];
         }
         catch (Exception ex)
         {
@@ -300,6 +365,12 @@ public sealed class NotificationOutbox : INotificationOutbox
         {
             _unreadable = false;
             _readFailures = 0;
+            // R1-56: the keys from the file and what left meanwhile; an entry added once before the file was read is
+            // dropped from what came in when the file already holds its key — the same summary created before a restart.
+            foreach (var key in completed.Where(k => !string.IsNullOrEmpty(k.Key)))
+                if (!_completed.TryGetValue(key.Key, out var at) || at < key.At) _completed[key.Key] = key.At;
+            var held = loaded.Where(e => e.Key is not null).Select(e => e.Key!).ToHashSet(StringComparer.Ordinal);
+            _incoming.RemoveAll(e => e.Key is { } k && (held.Contains(k) || completed.Any(c => c.Key == k)));
             var merged = loaded.Concat(_incoming).OrderBy(e => e.FirstFailedAt).ToList();
             _incoming.Clear();
             _entries = merged;
@@ -320,13 +391,25 @@ public sealed class NotificationOutbox : INotificationOutbox
     }
 
     private static bool Protected(NotificationEvent evt) =>
-        evt.EventType == "agent_approval" || CompositeNotificationService.AdministrativeEvents.Contains(evt.EventType);
+        evt.EventType is NotificationEventTypes.AgentApproval or NotificationEventTypes.QuietHoursSummary
+        || CompositeNotificationService.AdministrativeEvents.Contains(evt.EventType);
+
+    /// <summary>Forgets keys older than <see cref="KeyMemory"/>, and the oldest beyond <see cref="MaxKeys"/>. Under
+    /// <see cref="_sync"/>.</summary>
+    private void ForgetOldKeys(DateTime now)
+    {
+        foreach (var old in _completed.Where(k => now - k.Value > KeyMemory).Select(k => k.Key).ToList()) _completed.Remove(old);
+        if (_completed.Count <= MaxKeys) return;
+        foreach (var old in _completed.OrderBy(k => k.Value).Take(_completed.Count - MaxKeys).Select(k => k.Key).ToList())
+            _completed.Remove(old);
+    }
 
     /// <summary>Removes and counts one entry that leaves undelivered; said, never silent. Under <see cref="_sync"/>.</summary>
     private void Drop(List<NotificationOutboxEntry> from, int index, string reason)
     {
         var entry = from[index];
         from.RemoveAt(index);
+        Left(entry);
         _dirty = true;
         Interlocked.Increment(ref _dropped);
         _logger.LogError("Undelivered {EventType} for {Channel} dropped: {Reason}", entry.Event.EventType, entry.Channel, reason);
@@ -334,6 +417,7 @@ public sealed class NotificationOutbox : INotificationOutbox
 
     private void Exhausted(NotificationOutboxEntry entry, string why)
     {
+        Left(entry);
         _dirty = true;
         Interlocked.Increment(ref _exhausted);
         _logger.LogError("Notification {EventType} could not be delivered to {Channel}: gave up {Why}, first failed " +
@@ -370,6 +454,10 @@ public sealed class NotificationOutbox : INotificationOutbox
     public sealed class OutboxFile
     {
         public List<NotificationOutboxEntry>? Entries { get; set; } = [];
+
+        /// <summary>R1-56: the keys of entries that left the outbox recently (<see cref="INotificationOutbox.AddOnceAsync"/>).
+        /// Absent in a file written before R1-56.</summary>
+        public List<CompletedKey>? Completed { get; set; } = [];
 
         /// <summary>What makes a parsed file no outbox; <c>null</c> when it is one.</summary>
         internal static string? Problem(OutboxFile file)

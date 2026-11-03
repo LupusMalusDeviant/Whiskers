@@ -1376,6 +1376,50 @@ namespace Whiskers.Migrations
                     b.ToTable("Notifications");
                 });
 
+            modelBuilder.Entity("Whiskers.Services.Persistence.QuietHoursSuppressionEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("FirstAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ItemsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RuleId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RuleName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("SummarizedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WindowKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SummarizedAt");
+
+                    b.ToTable("QuietHoursSuppressions");
+                });
+
             modelBuilder.Entity("Whiskers.Services.Persistence.ServerMetricEntity", b =>
                 {
                     b.Property<long>("Id")

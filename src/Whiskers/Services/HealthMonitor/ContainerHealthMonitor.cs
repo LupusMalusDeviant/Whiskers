@@ -185,7 +185,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
                     Image = container.Image,
                     ServerId = container.ServerId,
                     ServerName = container.ServerName,
-                    EventType = "unhealthy"
+                    EventType = NotificationEventTypes.Unhealthy
                 });
             }
         }
@@ -205,7 +205,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
                         Image = container.Image,
                         ServerId = container.ServerId,
                         ServerName = container.ServerName,
-                        EventType = "oom_killed"
+                        EventType = NotificationEventTypes.OomKilled
                     });
                 }
                 else if (exitCode != 0)
@@ -217,7 +217,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
                         Image = container.Image,
                         ServerId = container.ServerId,
                         ServerName = container.ServerName,
-                        EventType = "stopped",
+                        EventType = NotificationEventTypes.Stopped,
                         ExitCode = exitCode
                     });
                 }
@@ -241,7 +241,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
                         Image = container.Image,
                         ServerId = container.ServerId,
                         ServerName = container.ServerName,
-                        EventType = "restart_loop",
+                        EventType = NotificationEventTypes.RestartLoop,
                         RestartCount = timestamps.Count,
                         WindowMinutes = _settings.RestartLoopWindowMinutes
                     });

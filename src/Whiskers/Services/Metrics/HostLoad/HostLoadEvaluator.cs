@@ -33,7 +33,7 @@ public sealed record HostLoadFinding(
     /// <summary>The event type this is delivered as. An all-clear must not arrive under the alert's own name:
     /// every channel, filter rule and severity mapping keys off this string, so a closing message labelled
     /// <c>host_cpu_high</c> would be rendered, coloured and escalated as a fresh alarm.</summary>
-    public string EventType => What == FindingKind.Cleared ? Kind + "_recovered" : Kind;
+    public string EventType => What == FindingKind.Cleared ? Whiskers.Services.Notifications.NotificationEventTypes.Recovered(Kind) : Kind;
 
     /// <summary>Warning for a problem, informational for its end.</summary>
     public string Severity => What == FindingKind.Cleared ? "Info" : "Warning";
@@ -76,6 +76,13 @@ public sealed class HostLoadThresholds
     /// have been swallowed.</para></summary>
     public double EscalationStep { get; init; } = 5;
 
+    /// <summary>R1-56: the longest pause between two readings that is still bridged; a longer one resets the breach. Null
+    /// (the default) bridges any gap; the collector passes the documented tolerance for its interval with each sample.</summary>
+    public TimeSpan? GapTolerance { get; init; }
+
+    /// <summary>These thresholds in the one duration model (R1-56).</summary>
+    public BreachRules Rules => new(SustainedFor, ClearMargin, ClearedFor, EscalationStep, GapTolerance);
+
     /// <summary>An open finding this old means the closing path is broken, not that the problem is patient.</summary>
     public static readonly TimeSpan StaleAfter = TimeSpan.FromDays(7);
 }
@@ -109,29 +116,35 @@ public sealed class HostLoadEvaluator
     }
 
     /// <summary>Judges one sample and returns whatever became reportable at that moment. Usually empty.</summary>
-    public IReadOnlyList<HostLoadFinding> Evaluate(HostSample sample)
+    public IReadOnlyList<HostLoadFinding> Evaluate(HostSample sample) => Evaluate(sample, null);
+
+    /// <summary>Judges one sample and returns whatever became reportable at that moment. Usually empty.</summary>
+    /// <param name="gapTolerance">R1-56: the longest pause since the previous sample that is still bridged (the collector
+    /// passes <see cref="BreachRules.GapToleranceFor"/> its interval); null keeps <see cref="HostLoadThresholds.GapTolerance"/>.</param>
+    public IReadOnlyList<HostLoadFinding> Evaluate(HostSample sample, TimeSpan? gapTolerance)
     {
         var findings = new List<HostLoadFinding>();
+        var rules = gapTolerance is null ? _thresholds.Rules : _thresholds.Rules with { GapTolerance = gapTolerance };
 
         Add(findings, _tracker.Consider(
-            sample.AtUtc, sample.ServerId, sample.ServerName, "host_cpu_high",
+            sample.AtUtc, sample.ServerId, sample.ServerName, Whiskers.Services.Notifications.NotificationEventTypes.HostCpuHigh,
             sample.HostCpuPercent, _thresholds.CpuPercent,
             (v, open) => $"{sample.ServerName} has been at {v:F0}% CPU for {BreachTracker.Describe(open)} " +
                          $"(threshold {_thresholds.CpuPercent:F0}%). This is the whole machine, not one container.",
-            v => $"{sample.ServerName} is back to {v:F0}% CPU."));
+            v => $"{sample.ServerName} is back to {v:F0}% CPU.", rules));
 
         Add(findings, _tracker.Consider(
-            sample.AtUtc, sample.ServerId, sample.ServerName, "host_memory_high",
+            sample.AtUtc, sample.ServerId, sample.ServerName, Whiskers.Services.Notifications.NotificationEventTypes.HostMemoryHigh,
             sample.MemoryPercent, _thresholds.MemoryPercent,
             (v, open) => $"{sample.ServerName} has been at {v:F0}% memory for {BreachTracker.Describe(open)} " +
                          $"(threshold {_thresholds.MemoryPercent:F0}%).",
-            v => $"{sample.ServerName} is back to {v:F0}% memory."));
+            v => $"{sample.ServerName} is back to {v:F0}% memory.", rules));
 
         // The specific one. It names the class of cause rather than only the symptom, which is what turns
         // "the server is busy" into "something outside the containers is busy" — the exact fact that took six
         // days to establish by hand.
         Add(findings, _tracker.Consider(
-            sample.AtUtc, sample.ServerId, sample.ServerName, "host_cpu_unexplained",
+            sample.AtUtc, sample.ServerId, sample.ServerName, Whiskers.Services.Notifications.NotificationEventTypes.HostCpuUnexplained,
             sample.UnexplainedCpuPercent, _thresholds.UnexplainedCpuPercent,
             (v, open) => $"{sample.ServerName} is using {sample.HostCpuPercent:F0}% CPU while its containers together " +
                          $"account for only {sample.ContainerCpuPercentOfMachine:F0}% — {v:F0} points unexplained, " +
@@ -139,7 +152,7 @@ public sealed class HostLoadEvaluator
                          "job and a runaway service all look like this. Short-lived containers are missing from the " +
                          "sum, so treat this as a strong hint rather than proof.",
             v => $"{sample.ServerName}: the unexplained load is down to {v:F0} points — its containers account " +
-                 "for what the host is doing again."));
+                 "for what the host is doing again.", rules));
 
         return findings;
     }

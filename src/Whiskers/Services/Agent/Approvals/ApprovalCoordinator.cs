@@ -124,7 +124,7 @@ public sealed class ApprovalCoordinator : IApprovalCoordinator
         {
             await _notify.SendAsync(new NotificationEvent
             {
-                EventType = "agent_approval",
+                EventType = NotificationEventTypes.AgentApproval,
                 ImageInfo = ApprovalDisplay.NotificationText(approval, decision.NotifiedTarget, _publicUrl),
                 CorrelationId = call.CorrelationId,
                 ApprovalId = approval.Id,

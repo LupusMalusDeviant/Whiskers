@@ -94,25 +94,36 @@
 
     private List<string> _eventTypes = new();
 
-    // Localized labels for the event types we know; anything else is shown by its raw id.
+    // Localized labels for the event types we know, keyed by the registry (R1-56); a <kind>_recovered reads as its kind's
+    // label plus "recovered", a type with no label of its own as the registry's title, anything unknown by its raw id.
     private static readonly Dictionary<string, string> TypeLabelKeys = new(StringComparer.Ordinal)
     {
-        ["unhealthy"] = "NotificationsLog_Type_Unhealthy",
-        ["stopped"] = "NotificationsLog_Type_Stopped",
-        ["oom_killed"] = "NotificationsLog_Type_OomKilled",
-        ["restart_loop"] = "NotificationsLog_Type_RestartLoop",
-        ["image_update"] = "NotificationsLog_Type_ImageUpdate",
-        ["cve_finding"] = "NotificationsLog_Type_CveFinding",
-        ["high_cpu"] = "NotificationsLog_Type_HighCpu",
-        ["high_memory"] = "NotificationsLog_Type_HighMemory",
-        ["metric_anomaly"] = "NotificationsLog_Type_MetricAnomaly",
-        ["auto_update_failed"] = "NotificationsLog_Type_AutoUpdateFailed",
-        ["agent_action"] = "NotificationsLog_Type_AgentAction",
-        ["agent_approval"] = "NotificationsLog_Type_AgentApproval",
+        [NotificationEventTypes.Unhealthy] = "NotificationsLog_Type_Unhealthy",
+        [NotificationEventTypes.Stopped] = "NotificationsLog_Type_Stopped",
+        [NotificationEventTypes.OomKilled] = "NotificationsLog_Type_OomKilled",
+        [NotificationEventTypes.RestartLoop] = "NotificationsLog_Type_RestartLoop",
+        [NotificationEventTypes.ImageUpdate] = "NotificationsLog_Type_ImageUpdate",
+        [NotificationEventTypes.CveFinding] = "NotificationsLog_Type_CveFinding",
+        [NotificationEventTypes.HighCpu] = "NotificationsLog_Type_HighCpu",
+        [NotificationEventTypes.HighMemory] = "NotificationsLog_Type_HighMemory",
+        [NotificationEventTypes.HighDisk] = "NotificationsLog_Type_HighDisk",
+        [NotificationEventTypes.MetricsGap] = "NotificationsLog_Type_MetricsGap",
+        [NotificationEventTypes.MetricAnomaly] = "NotificationsLog_Type_MetricAnomaly",
+        [NotificationEventTypes.AutoUpdateFailed] = "NotificationsLog_Type_AutoUpdateFailed",
+        [NotificationEventTypes.AgentAction] = "NotificationsLog_Type_AgentAction",
+        [NotificationEventTypes.AgentApproval] = "NotificationsLog_Type_AgentApproval",
+        [NotificationEventTypes.QuietHoursSummary] = "NotificationsLog_Type_QuietHoursSummary",
     };
 
-    private string TypeLabel(string type) =>
-        TypeLabelKeys.TryGetValue(type, out var key) ? L[key].Value : type;
+    private string TypeLabel(string type)
+    {
+        if (TypeLabelKeys.TryGetValue(type, out var key)) return L[key].Value;
+        if (NotificationEventTypes.IsRecovery(type))
+            return L["NotificationsLog_Type_Recovered", TypeLabel(type[..^NotificationEventTypes.RecoveredSuffix.Length])].Value;
+        return NotificationEventTypes.IsKnown(type)
+            ? NotificationFormatter.Describe(new Whiskers.Models.NotificationEvent { EventType = type }).Title
+            : type;
+    }
 
     protected override async Task OnInitializedAsync()
     {

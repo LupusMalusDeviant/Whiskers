@@ -101,7 +101,7 @@ public sealed class SuspensionReminder : Whiskers.Services.FleetBackgroundServic
         {
             _ = _notifications.SendAsync(new NotificationEvent
             {
-                EventType = "loops_paused_reminder",
+                EventType = NotificationEventTypes.LoopsPausedReminder,
                 ServerId = suspension.ServerId,
                 ServerName = name,
                 ContainerName = name,

@@ -308,6 +308,15 @@ public static class WhiskersHostingExtensions
                 sp.GetRequiredService<Whiskers.Services.Persistence.IAppSettingsStore>(),
                 sp.GetRequiredService<ILogger<Whiskers.Services.Metrics.MetricRetentionService>>(),
                 sp.GetRequiredService<DataPathOptions>().AppSettingsJson));
+        // R1-56: quiet hours (their one, gated write path) and the durable record of what they held back. Core, so the
+        // Settings page has them with the Notifications module switched off; the summaries are made by its outbox worker.
+        builder.Services.AddSingleton<Whiskers.Services.Notifications.IQuietHoursService>(sp =>
+            new Whiskers.Services.Notifications.QuietHoursService(
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<Whiskers.Services.Persistence.IAppSettingsStore>(),
+                sp.GetRequiredService<ILogger<Whiskers.Services.Notifications.QuietHoursService>>(),
+                sp.GetService<TimeProvider>()));
+        builder.Services.AddSingleton<Whiskers.Services.Notifications.IAlertSuppressionStore, Whiskers.Services.Notifications.AlertSuppressionStore>();
         // Metrics source seam: collector reads through IMetricsSource so a server can be switched to a
         // push/scrape TSDB (VictoriaMetrics) instead of SSH/Docker. Docker is the default + fallback.
         builder.Services.AddHttpClient();

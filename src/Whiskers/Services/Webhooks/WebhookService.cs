@@ -886,12 +886,12 @@ public class WebhookService : IWebhookService
             : automation.LostAuthority(actor, capability);
         if (lost is not null && await SuspendAsync(webhook.WebhookId, webhook.Owner, outcome.OperationId))
         {
-            await NotifyAsync(scope, "automation_suspended", webhook,
+            await NotifyAsync(scope, NotificationEventTypes.AutomationSuspended, webhook,
                 $"Webhook \"{webhook.Name}\" was switched off: {lost}. It stays off until an admin takes it over on " +
                 "the Webhooks page and switches it on again.");
             return (false, $"Suspended: {lost}. {reason}", true);
         }
-        await NotifyAsync(scope, "automation_refused", webhook,
+        await NotifyAsync(scope, NotificationEventTypes.AutomationRefused, webhook,
             $"Webhook \"{webhook.Name}\" was called, but its action did not run. {reason}");
         return (false, $"Refused: {reason}", true);
     }

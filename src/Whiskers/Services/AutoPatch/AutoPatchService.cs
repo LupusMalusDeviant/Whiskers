@@ -269,7 +269,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         {
             await _notifications.SendAsync(new NotificationEvent
             {
-                EventType = "automation_suspended",
+                EventType = NotificationEventTypes.AutomationSuspended,
                 ContainerName = "AutoPatch",
                 ImageInfo = $"AutoPatch was suspended: {lost}. It stays off until an admin takes it over in Settings."
                             + (saved ? "" : SuspensionNotSaved),
@@ -538,7 +538,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
                 Image = c.Image,
                 ServerId = c.ServerId,
                 ServerName = c.ServerName,
-                EventType = "auto_update_failed",
+                EventType = NotificationEventTypes.AutoUpdateFailed,
                 ImageInfo = $"Auto-patch: {outcome.Kind} {outcome.Detail}".Trim(),
             });
         }

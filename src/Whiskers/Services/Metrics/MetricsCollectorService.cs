@@ -31,6 +31,13 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     private readonly Whiskers.Services.Metrics.HostLoad.RollingBaseline _baseline;
     private readonly IMetricRetentionService? _retention;
     private readonly IMetricRollupService _rollup;
+    // R1-56: the container and disk threshold alerts in the one duration model (BreachTracker), and the series that stopped
+    // delivering readings. This loop's state, like _alert; the rules come from MetricAlertSettings with every reading.
+    private readonly Whiskers.Services.Metrics.HostLoad.BreachTracker _thresholds = new(new Whiskers.Services.Metrics.HostLoad.HostLoadThresholds());
+    private readonly Whiskers.Services.Metrics.HostLoad.SeriesGapTracker _gaps = new();
+    // R1-56: the injected clock — sample times, cool-downs and the maintenance schedules all read it.
+    private readonly TimeProvider _time;
+    private DateTime Now() => _time.GetUtcNow().UtcDateTime;
     private DateTime _lastPrune;                 // OPT-2: prune at most hourly, not every 30s cycle
     private DateTime _nextRollup;                // R1-55: when the next 10-minute window closes (or now, while catching up)
     private DateTime _lastAuditPrune;            // R1-23: the audit trail daily — each run verifies the whole trail first
@@ -47,8 +54,10 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
         EffectiveInterval<MetricsSettings>? interval = null,
         IMetricRetentionService? retention = null,
-        IMetricRollupService? rollup = null)
+        IMetricRollupService? rollup = null,
+        TimeProvider? time = null)
     {
+        _time = time ?? TimeProvider.System;
         _retention = retention;
         _rollup = rollup ?? new MetricRollupService();
         _interval = interval ?? IntervalValidation.MetricsCollection(metricsSettings, logger);
@@ -125,7 +134,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
             var cfg = Settings();
             if (cfg.Enabled)
             {
-                var cycleStart = DateTime.UtcNow;
+                var cycleStart = Now();
                 var cycleOk = false;
                 try
                 {
@@ -150,7 +159,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                     foreach (var server in SelfMetricsServers())
                         _selfMetrics.RecordCycle(
                             Whiskers.Services.Observability.SelfMetrics.SelfMetricsFleetExtensions.Loops.Metrics,
-                            server, DateTime.UtcNow - cycleStart, cycleOk,
+                            server, Now() - cycleStart, cycleOk,
                             interval: _interval.Interval);
                 }
                 catch (Exception ex) when (!IsHostStopping(ex, ct))
@@ -164,7 +173,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                 // roll-up or prune is logged and the next cycle runs; a failed collection does not hold up retention.
                 try
                 {
-                    await MaintainAsync(DateTime.UtcNow, Retention(), ct);
+                    await MaintainAsync(Now(), Retention(), ct);
                 }
                 catch (Exception ex) when (!IsHostStopping(ex, ct))
                 {
@@ -178,9 +187,9 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         }
     }
 
-    private async Task CollectMetricsAsync(CancellationToken ct)
+    /// <summary>One collection cycle. Internal for tests, which drive it with a fake clock.</summary>
+    internal async Task CollectMetricsAsync(CancellationToken ct)
     {
-        var startedAt = DateTime.UtcNow;
         using var scope = _services.CreateScope();
         var docker = scope.ServiceProvider.GetRequiredService<IDockerService>();
 
@@ -195,7 +204,13 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         var executor = scope.ServiceProvider.GetRequiredService<Whiskers.Services.Server.IHostCommandExecutor>();
         var alertCfg = _alertSettings.CurrentValue;
 
-        var now = DateTime.UtcNow;
+        var now = Now();
+        // R1-56: the tolerance follows the interval (a series sampled hourly cannot have a three-minute tolerance); the
+        // durations of the alerts do not — they are elapsed time.
+        var tolerance = Whiskers.Services.Metrics.HostLoad.BreachRules.GapToleranceFor(_interval.Interval);
+        var rules = Whiskers.Services.Metrics.HostLoad.BreachRules.Threshold(
+            TimeSpan.FromMinutes(Math.Max(1, alertCfg.SustainedMinutes)),
+            TimeSpan.FromMinutes(Math.Max(0, alertCfg.CooldownMinutes)), tolerance);
         // Container listing still goes through Docker (an inventory call, not a metric); the metric
         // reads below go through IMetricsSource so Prometheus-configured servers bypass SSH.
         var containers = await docker.ListAllContainersAsync(all: false);
@@ -213,8 +228,8 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                 {
                     if (alertCfg.Enabled)
                     {
-                        try { await EvaluateAlertsAsync(c, stats, alertCfg, notify); }
-                        catch (Exception aex) { _logger.LogDebug(aex, "Metric alert evaluation failed for {Container}", c.Name); }
+                        try { await EvaluateAlertsAsync(c, stats, alertCfg, rules, now, tolerance, notify, ct); }
+                        catch (Exception aex) when (!IsHostStopping(aex, ct)) { _logger.LogDebug(aex, "Metric alert evaluation failed for {Container}", c.Name); }
                     }
 
                     return new ContainerMetricEntity
@@ -232,10 +247,13 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                         BlockWriteBytes = stats.BlockWriteBytes
                     };
                 }
+                if (alertCfg.Enabled) await ContainerMissingAsync(c, now, tolerance, "the stats call returned no reading", notify, ct);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
             {
                 _logger.LogWarning(ex, "Failed to collect stats for container {ContainerId} on {ServerId}", c.Id, c.ServerId);
+                // R1-56: never only a log line — past the gap tolerance the series is reported as a metrics_gap.
+                if (alertCfg.Enabled) await ContainerMissingAsync(c, now, tolerance, "the stats call failed", notify, ct);
             }
             finally
             {
@@ -253,13 +271,18 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
             db.ContainerMetrics.AddRange(metrics!);
         }
 
-        // Collect server metrics
+        // Collect server metrics. R1-56: the servers this loop should have a reading of — a host without one (its
+        // node_exporter down, the system-info call failing) is a gap of its own, not merely a warning in the log.
+        var expected = servers.Where(s => s.ConnectionType != ConnectionType.Kubernetes).ToList();
+        var readHosts = new HashSet<string>(StringComparer.Ordinal);
+        string hostFailure = "the server reported no system information";
         try
         {
             var serverInfos = await metricsSource.GetAllServerSystemInfoAsync();
             foreach (var (serverId, info) in serverInfos)
             {
                 if (!info.IsReachable) continue;
+                readHosts.Add(serverId);
 
                 // Host root-filesystem usage via df (the metrics sources don't carry disk yet).
                 var (diskUsed, diskTotal) = await GetDiskUsageAsync(executor, serverId, ct);
@@ -276,10 +299,18 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                     DiskTotalBytes = diskTotal,
                 });
 
-                if (alertCfg.Enabled && diskTotal > 0)
+                if (alertCfg.Enabled)
                 {
-                    try { await EvaluateServerDiskAsync(serverId, info.ServerName, diskUsed, diskTotal, alertCfg, notify); }
-                    catch (Exception aex) { _logger.LogDebug(aex, "Disk alert evaluation failed for {ServerId}", serverId); }
+                    try
+                    {
+                        if (diskTotal > 0)
+                            await EvaluateServerDiskAsync(serverId, info.ServerName, diskUsed, diskTotal, alertCfg, rules, now, tolerance, notify, ct);
+                        else
+                            await NotifyFindingAsync(notify, ServerEvent(serverId, info.ServerName), _gaps.Missing(now, DiskSeries(serverId),
+                                info.ServerName, $"the root filesystem of {info.ServerName}", tolerance, "df returned no reading",
+                                OpenAlerts(_thresholds, DiskSeries(serverId))), ct);
+                    }
+                    catch (Exception aex) when (!IsHostStopping(aex, ct)) { _logger.LogDebug(aex, "Disk alert evaluation failed for {ServerId}", serverId); }
                 }
 
                 // Host CPU and memory, and the part of the host load no container accounts for (Plan-0004
@@ -301,7 +332,11 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                             info.MemoryUsedBytes, info.MemoryTotalBytes,
                             info.CpuCount);
 
-                        var findings = _hostLoad.Evaluate(sample).ToList();
+                        var findings = new List<Whiskers.Services.Metrics.HostLoad.HostLoadFinding>();
+                        // R1-56: readings are back — the end of a reported gap, or a gap the loop itself caused.
+                        if (_gaps.Seen(now, HostSeries(serverId), info.ServerName, $"{info.ServerName}'s CPU and memory", tolerance) is { } back)
+                            findings.Add(back);
+                        findings.AddRange(_hostLoad.Evaluate(sample, tolerance));
 
                         // Plan-0004 WP4: how fast the daemon itself is answering. A separate signal from host
                         // CPU on purpose — it sees an overloaded daemon whoever is overloading it, including
@@ -320,30 +355,34 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                             Whiskers.Services.Metrics.HostLoad.HostLoadEvaluator.CpuThresholdOf(_hostLoad)));
 
                         foreach (var finding in findings)
-                        {
-                            _logger.Log(
-                                finding.What == Whiskers.Services.Metrics.HostLoad.FindingKind.Cleared
-                                    ? LogLevel.Information : LogLevel.Warning,
-                                "Host {What} on {Server}: {Summary}",
-                                finding.What, finding.ServerName, finding.Summary);
-                            await notify.SendAsync(new NotificationEvent
-                            {
-                                EventType = finding.EventType,
-                                ServerId = finding.ServerId,
-                                ServerName = finding.ServerName,
-                                ContainerName = finding.ServerName,
-                                ImageInfo = finding.Summary,
-                                Timestamp = finding.AtUtc
-                            });
-                        }
+                            await NotifyFindingAsync(notify, ServerEvent(serverId, info.ServerName), finding, ct);
                     }
-                    catch (Exception aex) { _logger.LogDebug(aex, "Host load evaluation failed for {ServerId}", serverId); }
+                    catch (Exception aex) when (!IsHostStopping(aex, ct)) { _logger.LogDebug(aex, "Host load evaluation failed for {ServerId}", serverId); }
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!IsHostStopping(ex, ct))
         {
             _logger.LogWarning(ex, "Failed to collect server metrics");
+            hostFailure = "reading the servers' system information failed";
+        }
+
+        // R1-56: every expected host without a reading this cycle. Its disk has no reading either; that is part of this
+        // one gap (the disk series is marked as covered, so readings coming back do not report it a second time).
+        if (alertCfg.Enabled)
+        {
+            foreach (var server in expected.Where(s => !readHosts.Contains(s.Id)))
+            {
+                try
+                {
+                    _gaps.Covered(now, DiskSeries(server.Id));
+                    var open = OpenAlerts(_hostLoad.OpenFindings(), server.Id).Concat(OpenAlerts(_thresholds, DiskSeries(server.Id))).ToList();
+                    await NotifyFindingAsync(notify, ServerEvent(server.Id, server.Name),
+                        _gaps.Missing(now, HostSeries(server.Id), server.Name, $"{server.Name}'s CPU, memory and disk", tolerance,
+                            hostFailure, open), ct);
+                }
+                catch (Exception aex) when (!IsHostStopping(aex, ct)) { _logger.LogDebug(aex, "Gap evaluation failed for {ServerId}", server.Id); }
+            }
         }
 
         await db.SaveChangesAsync(ct);
@@ -354,9 +393,65 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         foreach (var kv in _alert.ToArray())
             if (!kv.Key.StartsWith("disk:", StringComparison.Ordinal) && !liveIds.Contains(kv.Key))
                 _alert.TryRemove(kv.Key, out _);
+        // R1-56: the same for the breach and gap state — a container that is gone is not a gap.
+        foreach (var id in _thresholds.Tracked().Concat(_gaps.Tracked()).Distinct().ToList())
+            if (!id.StartsWith(DiskPrefix, StringComparison.Ordinal) && !id.StartsWith(HostPrefix, StringComparison.Ordinal)
+                && !liveIds.Contains(id))
+            {
+                _thresholds.Forget(id);
+                _gaps.Forget(id);
+            }
 
         _logger.LogDebug("Collected metrics for {ContainerCount} containers", metrics.Count);
     }
+
+    private const string DiskPrefix = "disk:", HostPrefix = "host:";
+    private static string DiskSeries(string serverId) => DiskPrefix + serverId;
+    private static string HostSeries(string serverId) => HostPrefix + serverId;
+
+    private static IEnumerable<string> OpenAlerts(IEnumerable<Whiskers.Services.Metrics.HostLoad.OpenFinding> open, string seriesId) =>
+        open.Where(f => f.ServerId == seriesId).Select(f => f.Kind);
+
+    private static IReadOnlyCollection<string> OpenAlerts(Whiskers.Services.Metrics.HostLoad.BreachTracker tracker, string seriesId) =>
+        OpenAlerts(tracker.OpenFindings(), seriesId).ToList();
+
+    private static NotificationEvent ServerEvent(string serverId, string serverName) => new()
+    {
+        ServerId = serverId,
+        ServerName = serverName,
+        ContainerName = serverName,
+    };
+
+    /// <summary>R1-56: one finding, as an event built on <paramref name="template"/> (its target fields). Nothing to send for
+    /// null — the normal case.</summary>
+    private async Task NotifyFindingAsync(INotificationService notify, NotificationEvent template,
+        Whiskers.Services.Metrics.HostLoad.HostLoadFinding? finding, CancellationToken ct)
+    {
+        if (finding is null) return;
+        _logger.Log(
+            finding.What == Whiskers.Services.Metrics.HostLoad.FindingKind.Cleared ? LogLevel.Information : LogLevel.Warning,
+            "{EventType} on {Target}: {Summary}", finding.EventType, finding.ServerName, finding.Summary);
+        var evt = template.Copy();
+        evt.EventType = finding.EventType;
+        evt.ImageInfo = finding.Summary;
+        evt.Timestamp = finding.AtUtc;
+        await notify.SendAsync(evt, ct);
+    }
+
+    private Task ContainerMissingAsync(ContainerInfo c, DateTime now, TimeSpan tolerance, string reason, INotificationService notify,
+        CancellationToken ct) =>
+        NotifyFindingAsync(notify, ContainerEvent(c),
+            _gaps.Missing(now, c.Id, c.Name, $"container {c.Name}", tolerance, reason, OpenAlerts(_thresholds, c.Id)), ct);
+
+    private static NotificationEvent ContainerEvent(ContainerInfo c) => new()
+    {
+        ContainerId = c.Id,
+        ContainerName = c.Name,
+        ServerId = c.ServerId,
+        ServerName = c.ServerName,
+        Image = c.Image,
+        ImageName = c.Image,
+    };
 
     /// <summary>R1-55: rolls up the windows that closed (each 10 minutes, every cycle while an upgrade catches up), applies
     /// the tiers' retention at most hourly, and the audit retention daily (R1-23). A failed roll-up is retried next cycle
@@ -408,31 +503,35 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     }
 
     /// <summary>Per-container threshold (sustained high CPU/RAM) + simple anomaly (rolling z-score).
-    /// Emits NotificationEvents that flow through the pipeline and can drive AI triggers.</summary>
-    private async Task EvaluateAlertsAsync(ContainerInfo c, ContainerStats stats, MetricAlertSettings cfg, INotificationService notify)
+    /// Emits NotificationEvents that flow through the pipeline and can drive AI triggers.
+    ///
+    /// <para>R1-56: <c>high_cpu</c> and <c>high_memory</c> are breaches in the one duration model (<see cref="Whiskers.Services.Metrics.HostLoad.BreachTracker"/>):
+    /// raised once when the readings stayed at or above the threshold for <c>SustainedMinutes</c> of elapsed time, closed
+    /// with <c>&lt;kind&gt;_recovered</c> after five minutes below the threshold minus five points; <c>CooldownMinutes</c> is
+    /// the least gap between two breaches of one series. They no longer re-fire while a breach lasts.
+    /// <c>metric_anomaly</c> is a point-in-time outlier, not a breach: it keeps re-firing after <c>CooldownMinutes</c>.</para></summary>
+    private async Task EvaluateAlertsAsync(ContainerInfo c, ContainerStats stats, MetricAlertSettings cfg,
+        Whiskers.Services.Metrics.HostLoad.BreachRules rules, DateTime now, TimeSpan tolerance, INotificationService notify,
+        CancellationToken ct)
     {
         var st = _alert.GetOrAdd(c.Id, _ => new AlertState());
-        var now = DateTime.UtcNow;
         var cpu = stats.CpuPercent;
         var mem = stats.MemoryLimitBytes > 0 ? stats.MemoryUsageBytes * 100.0 / stats.MemoryLimitBytes : 0;
-        var sustained = Math.Max(1, cfg.SustainedMinutes * 2); // 30s sampling interval
+        var template = ContainerEvent(c);
 
-        // --- Sustained-threshold ---
-        st.CpuOver = cpu >= cfg.CpuPercent ? st.CpuOver + 1 : 0;
-        if (st.CpuOver >= sustained && now >= st.CpuCooldown)
-        {
-            st.CpuOver = 0;
-            st.CpuCooldown = now.AddMinutes(cfg.CooldownMinutes);
-            await Emit(notify, c, "high_cpu", $"CPU {cpu:F0}% seit ≥{cfg.SustainedMinutes} Min (Schwelle {cfg.CpuPercent:F0}%).");
-        }
+        // --- Readings back after a gap (R1-56) ---
+        await NotifyFindingAsync(notify, template, _gaps.Seen(now, c.Id, c.Name, $"container {c.Name}", tolerance), ct);
 
-        st.MemOver = mem >= cfg.MemoryPercent ? st.MemOver + 1 : 0;
-        if (st.MemOver >= sustained && now >= st.MemCooldown)
-        {
-            st.MemOver = 0;
-            st.MemCooldown = now.AddMinutes(cfg.CooldownMinutes);
-            await Emit(notify, c, "high_memory", $"RAM {mem:F0}% des Limits seit ≥{cfg.SustainedMinutes} Min (Schwelle {cfg.MemoryPercent:F0}%).");
-        }
+        // --- Sustained threshold, one raise per breach (R1-56) ---
+        await NotifyFindingAsync(notify, template, _thresholds.Consider(now, c.Id, c.Name, NotificationEventTypes.HighCpu,
+            cpu, cfg.CpuPercent,
+            (v, open) => $"{c.Name}: CPU at {v:F0}% for {Whiskers.Services.Metrics.HostLoad.BreachTracker.Describe(open)} (threshold {cfg.CpuPercent:F0}%).",
+            v => $"{c.Name}: CPU back to {v:F0}%.", rules), ct);
+
+        await NotifyFindingAsync(notify, template, _thresholds.Consider(now, c.Id, c.Name, NotificationEventTypes.HighMemory,
+            mem, cfg.MemoryPercent,
+            (v, open) => $"{c.Name}: memory at {v:F0}% of its limit for {Whiskers.Services.Metrics.HostLoad.BreachTracker.Describe(open)} (threshold {cfg.MemoryPercent:F0}%).",
+            v => $"{c.Name}: memory back to {v:F0}% of its limit.", rules), ct);
 
         // --- Simple anomaly (rolling z-score over previous window) ---
         if (cfg.AnomalyEnabled)
@@ -440,12 +539,12 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
             if (Anomalous(st.CpuWin, cpu, cfg) && now >= st.AnomCooldown)
             {
                 st.AnomCooldown = now.AddMinutes(cfg.CooldownMinutes);
-                await Emit(notify, c, "metric_anomaly", $"CPU-Ausreißer: {cpu:F0}% (Baseline-Mittel der letzten {cfg.AnomalyWindow} Samples deutlich niedriger).");
+                await Emit(notify, c, NotificationEventTypes.MetricAnomaly, $"CPU outlier: {cpu:F0}% (the mean of the last {cfg.AnomalyWindow} samples is clearly lower).", now, ct);
             }
             else if (Anomalous(st.MemWin, mem, cfg) && now >= st.AnomCooldown)
             {
                 st.AnomCooldown = now.AddMinutes(cfg.CooldownMinutes);
-                await Emit(notify, c, "metric_anomaly", $"RAM-Ausreißer: {mem:F0}% (Baseline-Mittel der letzten {cfg.AnomalyWindow} Samples deutlich niedriger).");
+                await Emit(notify, c, NotificationEventTypes.MetricAnomaly, $"Memory outlier: {mem:F0}% (the mean of the last {cfg.AnomalyWindow} samples is clearly lower).", now, ct);
             }
             Push(st.CpuWin, cpu, cfg.AnomalyWindow);
             Push(st.MemWin, mem, cfg.AnomalyWindow);
@@ -467,37 +566,29 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         while (window.Count > max) window.Dequeue();
     }
 
-    private static Task Emit(INotificationService notify, ContainerInfo c, string type, string info) =>
-        notify.SendAsync(new NotificationEvent
-        {
-            EventType = type,
-            ContainerId = c.Id,
-            ContainerName = c.Name,
-            Image = c.Image,
-            ImageName = c.Image,
-            ImageInfo = info,
-        });
+    private static Task Emit(INotificationService notify, ContainerInfo c, string type, string info, DateTime now, CancellationToken ct)
+    {
+        var evt = ContainerEvent(c);
+        evt.EventType = type;
+        evt.ImageInfo = info;
+        evt.Timestamp = now;
+        return notify.SendAsync(evt, ct);
+    }
 
-    /// <summary>Server-level sustained disk-usage threshold (root filesystem) → high_disk event.</summary>
-    private async Task EvaluateServerDiskAsync(string serverId, string serverName, long used, long total, MetricAlertSettings cfg, INotificationService notify)
+    /// <summary>Server-level sustained disk-usage threshold (root filesystem) → <c>high_disk</c>, one raise per breach and a
+    /// <c>high_disk_recovered</c> (R1-56).</summary>
+    private async Task EvaluateServerDiskAsync(string serverId, string serverName, long used, long total, MetricAlertSettings cfg,
+        Whiskers.Services.Metrics.HostLoad.BreachRules rules, DateTime now, TimeSpan tolerance, INotificationService notify,
+        CancellationToken ct)
     {
         var pct = used * 100.0 / total;
-        var st = _alert.GetOrAdd($"disk:{serverId}", _ => new AlertState());
-        var now = DateTime.UtcNow;
-        var sustained = Math.Max(1, cfg.SustainedMinutes * 2); // 30s sampling interval
-
-        st.DiskOver = pct >= cfg.DiskPercent ? st.DiskOver + 1 : 0;
-        if (st.DiskOver >= sustained && now >= st.DiskCooldown)
-        {
-            st.DiskOver = 0;
-            st.DiskCooldown = now.AddMinutes(cfg.CooldownMinutes);
-            await notify.SendAsync(new NotificationEvent
-            {
-                EventType = "high_disk",
-                ContainerName = serverName,
-                ImageInfo = $"Festplatte {pct:F0}% voll auf {serverName} (Schwelle {cfg.DiskPercent:F0}%).",
-            });
-        }
+        var template = ServerEvent(serverId, serverName);
+        await NotifyFindingAsync(notify, template,
+            _gaps.Seen(now, DiskSeries(serverId), serverName, $"the root filesystem of {serverName}", tolerance), ct);
+        await NotifyFindingAsync(notify, template, _thresholds.Consider(now, DiskSeries(serverId), serverName,
+            NotificationEventTypes.HighDisk, pct, cfg.DiskPercent,
+            (v, open) => $"Disk {v:F0}% full on {serverName} for {Whiskers.Services.Metrics.HostLoad.BreachTracker.Describe(open)} (threshold {cfg.DiskPercent:F0}%).",
+            v => $"Disk on {serverName} back to {v:F0}% full.", rules), ct);
     }
 
     /// <summary>Root-filesystem (used, total) bytes via df. Best-effort: returns (0,0) on any failure.</summary>
@@ -516,14 +607,10 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         catch { return (0, 0); }
     }
 
+    /// <summary>The anomaly rule's window and cool-down per container; the threshold alerts keep theirs in the breach
+    /// tracker (R1-56).</summary>
     private sealed class AlertState
     {
-        public int CpuOver;
-        public int MemOver;
-        public int DiskOver;
-        public DateTime CpuCooldown;
-        public DateTime MemCooldown;
-        public DateTime DiskCooldown;
         public DateTime AnomCooldown;
         public readonly Queue<double> CpuWin = new();
         public readonly Queue<double> MemWin = new();

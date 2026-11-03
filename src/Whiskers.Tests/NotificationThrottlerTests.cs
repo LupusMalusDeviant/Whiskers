@@ -43,14 +43,21 @@ public class NotificationThrottlerTests
     public void The_same_event_on_two_servers_is_two_alerts()
     {
         var t = new NotificationThrottler(60);
-        t.Record(new NotificationEvent { ServerId = "a", EventType = "high_disk" });
-        Assert.True(t.IsThrottled(new NotificationEvent { ServerId = "a", EventType = "high_disk" }, 60));
-        Assert.False(t.IsThrottled(new NotificationEvent { ServerId = "b", EventType = "high_disk" }, 60));
+        t.Record(new NotificationEvent { ServerId = "a", EventType = "log_rotation_missing" });
+        Assert.True(t.IsThrottled(new NotificationEvent { ServerId = "a", EventType = "log_rotation_missing" }, 60));
+        Assert.False(t.IsThrottled(new NotificationEvent { ServerId = "b", EventType = "log_rotation_missing" }, 60));
     }
 
     [Theory]
     [InlineData("server_unreachable")]
     [InlineData("server_recovered")]
+    // R1-56: a breach raise and its recovery, a metrics gap and the quiet-hours summary are state transitions too.
+    [InlineData("high_disk")]
+    [InlineData("high_cpu_recovered")]
+    [InlineData("metrics_gap")]
+    [InlineData("metrics_gap_recovered")]
+    [InlineData("host_cpu_high_recovered")]
+    [InlineData("quiet_hours_summary")]
     public void Reachability_transitions_are_never_throttled(string eventType)
     {
         var t = new NotificationThrottler(60);

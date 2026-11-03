@@ -19,6 +19,9 @@ public class NotificationEvent
     public string? CorrelationId { get; set; }
     /// <summary>R1-15: for agent-approval events, the approval to open (the in-app link goes to its card).</summary>
     public string? ApprovalId { get; set; }
+    /// <summary>R1-56: for a <c>cve_finding</c> batch, the highest severity among its findings. Structured rather than read
+    /// from the text: quiet hours never hold a batch holding a Critical finding.</summary>
+    public Whiskers.Models.Cve.CveSeverity? HighestCveSeverity { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     /// <summary>R1-40: one identity per event (shared by its channels), set before the first attempt and kept for every
     /// retry and redelivery, so a channel with idempotent requests (Matrix transaction ids) does not post an event twice when an

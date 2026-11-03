@@ -162,7 +162,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                         ContainerId = container.Id,
                         ContainerName = container.Name,
                         Image = container.Image,
-                        EventType = "auto_update_start"
+                        EventType = NotificationEventTypes.AutoUpdateStart
                     }, ct);
                 }
                 // A stop during the notice ends the cycle before the update starts.
@@ -332,7 +332,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                         ContainerId = container.Id,
                         ContainerName = container.Name,
                         Image = container.Image,
-                        EventType = "auto_update_failed"
+                        EventType = NotificationEventTypes.AutoUpdateFailed
                     });
                 }
                 catch (Exception nex) { _logger.LogWarning(nex, "Auto-update failure notification failed for {Container}", container.Name); }
@@ -355,7 +355,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         {
             await _notifications.SendAsync(new NotificationEvent
             {
-                EventType = "automation_suspended",
+                EventType = NotificationEventTypes.AutomationSuspended,
                 ContainerName = "AutoUpdate",
                 ImageInfo = $"AutoUpdate was suspended: {lost}. It stays off until an admin takes it over in Settings → Automation owners."
                             + (saved ? "" : Whiskers.Services.AutoPatch.AutoPatchService.SuspensionNotSaved),

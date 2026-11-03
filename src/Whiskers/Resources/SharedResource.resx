@@ -2127,7 +2127,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Check interval (seconds)</value>
   </data>
   <data name="Settings_Label_CooldownMinutes" xml:space="preserve">
-    <value>Cooldown (minutes)</value>
+    <value>Minimum gap between breaches (minutes)</value>
   </data>
   <data name="Settings_Label_CpuThreshold" xml:space="preserve">
     <value>CPU threshold (%)</value>
@@ -5290,5 +5290,83 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="MetricRetention_Snackbar_SaveFailed" xml:space="preserve">
     <value>Saving failed: {0}</value>
+  </data>
+  <data name="Settings_Helper_SustainedMinutes" xml:space="preserve">
+    <value>Elapsed time at or above the threshold before the alert is raised; independent of the collection interval.</value>
+  </data>
+  <data name="Settings_Helper_CooldownMinutes" xml:space="preserve">
+    <value>A new breach of the same container or disk is raised no sooner than this after the last one ended. The anomaly alert still repeats after this time.</value>
+  </data>
+  <data name="Settings_MetricAlerts_Semantics" xml:space="preserve">
+    <value>High CPU, memory and disk are raised once per breach and closed with a recovery message once the value stayed five minutes below the threshold minus 5 points; they no longer repeat while the breach lasts. A series without readings for longer than three collection intervals (at least three minutes) is reported as having no readings, and its breach starts again.</value>
+  </data>
+  <data name="QuietHours_Panel" xml:space="preserve">
+    <value>Quiet hours</value>
+  </data>
+  <data name="QuietHours_Intro" xml:space="preserve">
+    <value>During a quiet-hours window notifications are held back from the channels and delivered as one summary when the window ends. The in-app feed, the alert history and AI triggers are never held. Each rule names an IANA time zone; a window whose end is earlier than its start crosses midnight.</value>
+  </data>
+  <data name="QuietHours_NeverHeld" xml:space="preserve">
+    <value>Never held: suspended or refused automation, interrupted operations, disabled webhooks, approval requests, paused-check reminders, suspended log scans, stalled monitoring, failed updates and CVE findings with a Critical severity. A muted container stays muted.</value>
+  </data>
+  <data name="QuietHours_Th_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="QuietHours_Th_Window" xml:space="preserve">
+    <value>Window</value>
+  </data>
+  <data name="QuietHours_Th_Types" xml:space="preserve">
+    <value>Event types</value>
+  </data>
+  <data name="QuietHours_Th_Enabled" xml:space="preserve">
+    <value>Active</value>
+  </data>
+  <data name="QuietHours_None" xml:space="preserve">
+    <value>No quiet hours.</value>
+  </data>
+  <data name="QuietHours_AllTypes" xml:space="preserve">
+    <value>Everything that can be held</value>
+  </data>
+  <data name="QuietHours_Label_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="QuietHours_Label_TimeZone" xml:space="preserve">
+    <value>Time zone (IANA)</value>
+  </data>
+  <data name="QuietHours_Helper_TimeZone" xml:space="preserve">
+    <value>For example Europe/Berlin or UTC</value>
+  </data>
+  <data name="QuietHours_Label_Start" xml:space="preserve">
+    <value>From (HH:mm)</value>
+  </data>
+  <data name="QuietHours_Label_End" xml:space="preserve">
+    <value>Until (HH:mm)</value>
+  </data>
+  <data name="QuietHours_Label_Types" xml:space="preserve">
+    <value>Event types</value>
+  </data>
+  <data name="QuietHours_Helper_Types" xml:space="preserve">
+    <value>Empty: every event that can be held</value>
+  </data>
+  <data name="QuietHours_Button_Save" xml:space="preserve">
+    <value>Save quiet hours</value>
+  </data>
+  <data name="QuietHours_Snackbar_Saved" xml:space="preserve">
+    <value>Quiet hours saved.</value>
+  </data>
+  <data name="QuietHours_Snackbar_SaveFailed" xml:space="preserve">
+    <value>Saving failed: {0}</value>
+  </data>
+  <data name="NotificationsLog_Type_HighDisk" xml:space="preserve">
+    <value>High disk usage</value>
+  </data>
+  <data name="NotificationsLog_Type_MetricsGap" xml:space="preserve">
+    <value>No readings</value>
+  </data>
+  <data name="NotificationsLog_Type_QuietHoursSummary" xml:space="preserve">
+    <value>Quiet-hours summary</value>
+  </data>
+  <data name="NotificationsLog_Type_Recovered" xml:space="preserve">
+    <value>{0}: recovered</value>
   </data>
 </root>

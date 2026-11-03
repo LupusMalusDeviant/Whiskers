@@ -89,7 +89,7 @@ public sealed class ServerCircuitBreaker : IServerCircuitBreaker
         }
 
         _logger.LogInformation("Circuit for server {ServerId} closed — calls resumed", serverId);
-        Announce(serverId, "server_throttling_ended", "Whiskers resumed its calls to this server after it answered again.");
+        Announce(serverId, NotificationEventTypes.ServerThrottlingEnded, "Whiskers resumed its calls to this server after it answered again.");
     }
 
     public void RecordFailure(string serverId, Exception exception)
@@ -136,7 +136,7 @@ public sealed class ServerCircuitBreaker : IServerCircuitBreaker
         var cooldown = Math.Max(1, _settings.CurrentValue.CircuitCooldownSeconds);
         _logger.LogWarning("Circuit for server {ServerId} OPEN after {Failures} consecutive failures — pausing calls for {Cooldown}s",
             serverId, failures, cooldown);
-        Announce(serverId, "server_throttled",
+        Announce(serverId, NotificationEventTypes.ServerThrottled,
             $"{failures} calls in a row failed. Whiskers is pausing its own requests to this server for {cooldown}s " +
             "and will retry with a single probe. This is Whiskers throttling itself — the server is not being checked while it lasts.");
 

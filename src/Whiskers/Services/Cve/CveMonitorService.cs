@@ -368,7 +368,10 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                 ContainerId = $"{target.ServerId}:{target.ContainerId ?? "os"}",
                 ContainerName = label,
                 Image = target.Image ?? "",
-                EventType = "cve_finding",
+                EventType = NotificationEventTypes.CveFinding,
+                // R1-56: structured, so the quiet-hours rule reads it rather than the text; one Critical finding makes
+                // the whole batch unsuppressible.
+                HighestCveSeverity = relevant.Count == 0 ? null : relevant.Max(f => f.Severity),
                 ImageName = $"{relevant.Count} new {(relevant.Count == 1 ? "finding" : "findings")}",
                 ImageInfo = top
             });

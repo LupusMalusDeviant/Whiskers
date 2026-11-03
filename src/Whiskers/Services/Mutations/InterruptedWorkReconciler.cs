@@ -229,7 +229,7 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartup
                         + (marked.Count > MaxNamed ? $"; and {marked.Count - MaxNamed} more (see the log)" : "");
             await _notifications.SendAsync(new NotificationEvent
             {
-                EventType = "operations_interrupted",
+                EventType = NotificationEventTypes.OperationsInterrupted,
                 ContainerName = "Whiskers",
                 ImageInfo = $"Whiskers stopped while {marked.Count} operation(s) ran: {named}. Whether they took " +
                             "effect is unknown and none was run again — check the targets.",

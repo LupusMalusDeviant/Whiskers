@@ -2127,7 +2127,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Prüfintervall (Sekunden)</value>
   </data>
   <data name="Settings_Label_CooldownMinutes" xml:space="preserve">
-    <value>Cooldown (Minuten)</value>
+    <value>Mindestabstand zwischen Überschreitungen (Minuten)</value>
   </data>
   <data name="Settings_Label_CpuThreshold" xml:space="preserve">
     <value>CPU-Schwelle (%)</value>
@@ -5290,5 +5290,83 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="MetricRetention_Snackbar_SaveFailed" xml:space="preserve">
     <value>Speichern fehlgeschlagen: {0}</value>
+  </data>
+  <data name="Settings_Helper_SustainedMinutes" xml:space="preserve">
+    <value>Verstrichene Zeit auf oder über der Schwelle, bevor der Alarm ausgelöst wird; unabhängig vom Erfassungsintervall.</value>
+  </data>
+  <data name="Settings_Helper_CooldownMinutes" xml:space="preserve">
+    <value>Eine neue Überschreitung desselben Containers oder Datenträgers wird frühestens so lange nach dem Ende der letzten gemeldet. Der Anomalie-Alarm wiederholt sich weiterhin nach dieser Zeit.</value>
+  </data>
+  <data name="Settings_MetricAlerts_Semantics" xml:space="preserve">
+    <value>Hohe CPU-, RAM- und Festplattenlast werden einmal pro Überschreitung gemeldet und mit einer Entwarnung geschlossen, sobald der Wert fünf Minuten lang unter der Schwelle minus 5 Punkte lag; während die Überschreitung anhält, wiederholen sie sich nicht mehr. Eine Messreihe ohne Werte über mehr als drei Erfassungsintervalle (mindestens drei Minuten) wird als lückenhaft gemeldet, und ihre Überschreitung beginnt von vorn.</value>
+  </data>
+  <data name="QuietHours_Panel" xml:space="preserve">
+    <value>Ruhezeiten</value>
+  </data>
+  <data name="QuietHours_Intro" xml:space="preserve">
+    <value>Während einer Ruhezeit werden Benachrichtigungen von den Kanälen zurückgehalten und nach dem Ende als eine Zusammenfassung zugestellt. Der In-App-Feed, der Alarmverlauf und KI-Trigger werden nie zurückgehalten. Jede Regel nennt eine IANA-Zeitzone; ein Fenster, dessen Ende vor dem Beginn liegt, reicht über Mitternacht.</value>
+  </data>
+  <data name="QuietHours_NeverHeld" xml:space="preserve">
+    <value>Nie zurückgehalten: ausgesetzte oder verweigerte Automatisierung, unterbrochene Vorgänge, deaktivierte Webhooks, Freigabeanfragen, Erinnerungen an pausierte Prüfungen, ausgesetzte Log-Scans, stillstehende Überwachung, fehlgeschlagene Updates und CVE-Funde mit kritischem Schweregrad. Ein stummgeschalteter Container bleibt stumm.</value>
+  </data>
+  <data name="QuietHours_Th_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="QuietHours_Th_Window" xml:space="preserve">
+    <value>Zeitfenster</value>
+  </data>
+  <data name="QuietHours_Th_Types" xml:space="preserve">
+    <value>Ereignistypen</value>
+  </data>
+  <data name="QuietHours_Th_Enabled" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="QuietHours_None" xml:space="preserve">
+    <value>Keine Ruhezeiten.</value>
+  </data>
+  <data name="QuietHours_AllTypes" xml:space="preserve">
+    <value>Alles Zurückhaltbare</value>
+  </data>
+  <data name="QuietHours_Label_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="QuietHours_Label_TimeZone" xml:space="preserve">
+    <value>Zeitzone (IANA)</value>
+  </data>
+  <data name="QuietHours_Helper_TimeZone" xml:space="preserve">
+    <value>Zum Beispiel Europe/Berlin oder UTC</value>
+  </data>
+  <data name="QuietHours_Label_Start" xml:space="preserve">
+    <value>Von (HH:mm)</value>
+  </data>
+  <data name="QuietHours_Label_End" xml:space="preserve">
+    <value>Bis (HH:mm)</value>
+  </data>
+  <data name="QuietHours_Label_Types" xml:space="preserve">
+    <value>Ereignistypen</value>
+  </data>
+  <data name="QuietHours_Helper_Types" xml:space="preserve">
+    <value>Leer: jedes zurückhaltbare Ereignis</value>
+  </data>
+  <data name="QuietHours_Button_Save" xml:space="preserve">
+    <value>Ruhezeiten speichern</value>
+  </data>
+  <data name="QuietHours_Snackbar_Saved" xml:space="preserve">
+    <value>Ruhezeiten gespeichert.</value>
+  </data>
+  <data name="QuietHours_Snackbar_SaveFailed" xml:space="preserve">
+    <value>Speichern fehlgeschlagen: {0}</value>
+  </data>
+  <data name="NotificationsLog_Type_HighDisk" xml:space="preserve">
+    <value>Hohe Festplattenbelegung</value>
+  </data>
+  <data name="NotificationsLog_Type_MetricsGap" xml:space="preserve">
+    <value>Keine Messwerte</value>
+  </data>
+  <data name="NotificationsLog_Type_QuietHoursSummary" xml:space="preserve">
+    <value>Zusammenfassung der Ruhezeit</value>
+  </data>
+  <data name="NotificationsLog_Type_Recovered" xml:space="preserve">
+    <value>{0}: wieder normal</value>
   </data>
 </root>

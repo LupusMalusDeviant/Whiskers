@@ -261,7 +261,7 @@ public sealed class ApprovalGate : IApprovalGate
             if (_notify is not null)
                 await _notify.SendAsync(new NotificationEvent
                 {
-                    EventType = "agent_approval",
+                    EventType = NotificationEventTypes.AgentApproval,
                     ImageInfo = ApprovalDisplay.NotificationText(approval, subject.NotifiedTarget, _publicUrl),
                     CorrelationId = subject.OperationId,
                     ApprovalId = approval.Id,

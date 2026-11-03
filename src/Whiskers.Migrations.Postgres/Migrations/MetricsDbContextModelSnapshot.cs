@@ -1421,6 +1421,50 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.ToTable("Notifications");
                 });
 
+            modelBuilder.Entity("Whiskers.Services.Persistence.QuietHoursSuppressionEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("FirstAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ItemsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("LastAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RuleId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RuleName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("SummarizedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("WindowKey")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SummarizedAt");
+
+                    b.ToTable("QuietHoursSuppressions");
+                });
+
             modelBuilder.Entity("Whiskers.Services.Persistence.ServerMetricEntity", b =>
                 {
                     b.Property<long>("Id")
