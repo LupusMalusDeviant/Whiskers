@@ -1262,6 +1262,74 @@ namespace Whiskers.Migrations
                     b.ToTable("ContainerMetrics");
                 });
 
+            modelBuilder.Entity("Whiskers.Services.Persistence.ContainerMetricRollupEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContainerId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContainerName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("CpuAvg")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("CpuMax")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MemoryPercentAvg")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MemoryPercentMax")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MemoryUsageBytesAvg")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MemoryUsageBytesMax")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("SampleCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ServerId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TierMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("WindowStart")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TierMinutes", "WindowStart");
+
+                    b.HasIndex("TierMinutes", "ServerId", "ContainerId", "WindowStart")
+                        .IsUnique();
+
+                    b.ToTable("ContainerMetricRollups");
+                });
+
+            modelBuilder.Entity("Whiskers.Services.Persistence.MetricRollupStateEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("RolledUpTo")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("MetricRollupStates");
+                });
+
             modelBuilder.Entity("Whiskers.Services.Persistence.NotificationEntity", b =>
                 {
                     b.Property<long>("Id")
@@ -1347,6 +1415,57 @@ namespace Whiskers.Migrations
                     b.HasIndex("ServerId", "Timestamp");
 
                     b.ToTable("ServerMetrics");
+                });
+
+            modelBuilder.Entity("Whiskers.Services.Persistence.ServerMetricRollupEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("CpuAvg")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("CpuMax")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MemoryPercentAvg")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MemoryPercentMax")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MemoryUsedBytesAvg")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MemoryUsedBytesMax")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("SampleCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ServerId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ServerName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TierMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("WindowStart")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TierMinutes", "WindowStart");
+
+                    b.HasIndex("TierMinutes", "ServerId", "WindowStart")
+                        .IsUnique();
+
+                    b.ToTable("ServerMetricRollups");
                 });
 #pragma warning restore 612, 618
         }

@@ -47,6 +47,9 @@ public class UiMutationGatewayCoverageTests : IDisposable
         // R1-54: the outbound guard's exceptions.
         (typeof(Whiskers.Services.Notifications.IOutboundExceptionService),
             nameof(Whiskers.Services.Notifications.IOutboundExceptionService.SaveAsync), "config.save"),
+        // R1-55: the metric tiers' retention.
+        (typeof(Whiskers.Services.Metrics.IMetricRetentionService),
+            nameof(Whiskers.Services.Metrics.IMetricRetentionService.SaveAsync), "config.save"),
     ];
 
     public static TheoryData<string> Capabilities()
@@ -148,6 +151,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Save", "registry.save"),
         (typeof(Whiskers.Components.Shared.RegistriesPanel), "Delete", "registry.delete"),
         (typeof(Whiskers.Components.Shared.OutboundExceptionsPanel), "Save", "config.save"),
+        (typeof(Whiskers.Components.Shared.MetricRetentionPanel), "Save", "config.save"),
     ];
 
     [Fact]

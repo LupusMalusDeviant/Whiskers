@@ -5249,4 +5249,46 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="OutboundGuard_Snackbar_ScanFailed" xml:space="preserve">
     <value>Die eingerichteten Kanäle konnten nicht geprüft werden.</value>
   </data>
+  <data name="Dashboard_Chart_Period30d" xml:space="preserve">
+    <value>30 Tage</value>
+  </data>
+  <data name="ContainerDetail_Stats_Period30d" xml:space="preserve">
+    <value>30 Tage</value>
+  </data>
+  <data name="Metrics_Series_Peak" xml:space="preserve">
+    <value>Spitze</value>
+  </data>
+  <data name="MetricRetention_Panel" xml:space="preserve">
+    <value>Aufbewahrung der Messwerte</value>
+  </data>
+  <data name="MetricRetention_Intro" xml:space="preserve">
+    <value>Rohwerte werden zu 10-Minuten-, 1-Stunden- und 8-Stunden-Fenstern verdichtet, die Mittelwert und Spitze behalten. Jede Stufe und der Alarmverlauf haben eine eigene Aufbewahrung in Tagen; gelöscht wird nichts, bevor die nächstgröbere Stufe es übernommen hat.</value>
+  </data>
+  <data name="MetricRetention_Label_RawDays" xml:space="preserve">
+    <value>Rohwerte (Tage)</value>
+  </data>
+  <data name="MetricRetention_Label_TenMinuteDays" xml:space="preserve">
+    <value>10-Minuten-Fenster (Tage)</value>
+  </data>
+  <data name="MetricRetention_Label_HourDays" xml:space="preserve">
+    <value>1-Stunden-Fenster (Tage)</value>
+  </data>
+  <data name="MetricRetention_Label_EightHourDays" xml:space="preserve">
+    <value>8-Stunden-Fenster (Tage)</value>
+  </data>
+  <data name="MetricRetention_Label_AlertHistoryDays" xml:space="preserve">
+    <value>Alarmverlauf (Tage)</value>
+  </data>
+  <data name="MetricRetention_ReadOnly" xml:space="preserve">
+    <value>Festgelegt durch {0} — hier nur lesbar</value>
+  </data>
+  <data name="MetricRetention_Button_Save" xml:space="preserve">
+    <value>Aufbewahrung speichern</value>
+  </data>
+  <data name="MetricRetention_Snackbar_Saved" xml:space="preserve">
+    <value>Aufbewahrung der Messwerte gespeichert.</value>
+  </data>
+  <data name="MetricRetention_Snackbar_SaveFailed" xml:space="preserve">
+    <value>Speichern fehlgeschlagen: {0}</value>
+  </data>
 </root>

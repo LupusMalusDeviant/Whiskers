@@ -1,0 +1,67 @@
+@using Whiskers.Configuration
+@using Whiskers.Services.Metrics
+@inject IMetricRetentionService Retention
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+@inject IUiMutationRunner Mutations
+@inject IStringLocalizer<SharedResource> L
+
+@* R1-55: the retention of every metric tier and of the alert history. A value set by the environment or appsettings.json
+   is shown read-only; the others are saved to app-settings.json as a gated, audited config.save (R1-11, R1-22). *@
+
+@if (_isAdmin)
+{
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">@L["MetricRetention_Intro"]</MudText>
+<MudGrid>
+    @foreach (var setting in _settings)
+    {
+        var field = setting.Field.Field;
+        <MudItem xs="12" sm="6" md="4">
+            <MudNumericField T="int" Value="@_values[field]" ValueChanged="@(v => _values[field] = v)"
+                             Label="@L["MetricRetention_Label_" + field]" Min="@MetricRetention.MinDays" Max="@setting.Field.MaxDays"
+                             Disabled="@setting.ReadOnly" Variant="Variant.Outlined" Margin="Margin.Dense"
+                             HelperText="@(setting.ReadOnly ? L["MetricRetention_ReadOnly", setting.Source ?? ""].Value : setting.Field.EnvironmentName)"
+                             id="@("metric-retention-" + field)" />
+        </MudItem>
+    }
+</MudGrid>
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save" Class="mt-3"
+           Disabled="@(_settings.All(s => s.ReadOnly))">@L["MetricRetention_Button_Save"]</MudButton>
+}
+
+@code {
+    private bool _isAdmin;
+    private IReadOnlyList<MetricRetentionSetting> _settings = [];
+    private readonly Dictionary<string, int> _values = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The Settings page is Admin-only; the panel checks again before it shows anything.
+        _isAdmin = await CurrentUser.HasRoleAsync(Whiskers.Models.AppRole.Admin);
+        if (_isAdmin) Load();
+    }
+
+    private void Load()
+    {
+        _settings = Retention.Settings;
+        foreach (var s in _settings) _values[s.Field.Field] = s.Days;
+    }
+
+    private async Task Save()
+    {
+        var values = _settings.Aggregate(Retention.Current, (r, s) => r.With(s.Field.Field, _values[s.Field.Field]));
+        try
+        {
+            await Mutations.RunAsync("config.save", new { section = "metrics-retention" },
+                ct => Retention.SaveAsync(values, ct));
+            Snackbar.Add(L["MetricRetention_Snackbar_Saved"].Value, Severity.Success);
+            Load();
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (ArgumentException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) when (ex is MutationFailedException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Snackbar.Add(L["MetricRetention_Snackbar_SaveFailed", ex.Message].Value, Severity.Error);
+        }
+    }
+}

@@ -5249,4 +5249,46 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="OutboundGuard_Snackbar_ScanFailed" xml:space="preserve">
     <value>The configured channels could not be checked.</value>
   </data>
+  <data name="Dashboard_Chart_Period30d" xml:space="preserve">
+    <value>30 days</value>
+  </data>
+  <data name="ContainerDetail_Stats_Period30d" xml:space="preserve">
+    <value>30 days</value>
+  </data>
+  <data name="Metrics_Series_Peak" xml:space="preserve">
+    <value>Peak</value>
+  </data>
+  <data name="MetricRetention_Panel" xml:space="preserve">
+    <value>Metric retention</value>
+  </data>
+  <data name="MetricRetention_Intro" xml:space="preserve">
+    <value>Raw samples are rolled up into 10-minute, 1-hour and 8-hour windows that keep the average and the peak. Each tier and the alert history have their own retention in days; nothing is deleted before the next coarser tier has taken it over.</value>
+  </data>
+  <data name="MetricRetention_Label_RawDays" xml:space="preserve">
+    <value>Raw samples (days)</value>
+  </data>
+  <data name="MetricRetention_Label_TenMinuteDays" xml:space="preserve">
+    <value>10-minute windows (days)</value>
+  </data>
+  <data name="MetricRetention_Label_HourDays" xml:space="preserve">
+    <value>1-hour windows (days)</value>
+  </data>
+  <data name="MetricRetention_Label_EightHourDays" xml:space="preserve">
+    <value>8-hour windows (days)</value>
+  </data>
+  <data name="MetricRetention_Label_AlertHistoryDays" xml:space="preserve">
+    <value>Alert history (days)</value>
+  </data>
+  <data name="MetricRetention_ReadOnly" xml:space="preserve">
+    <value>Set by {0} — read-only here</value>
+  </data>
+  <data name="MetricRetention_Button_Save" xml:space="preserve">
+    <value>Save retention</value>
+  </data>
+  <data name="MetricRetention_Snackbar_Saved" xml:space="preserve">
+    <value>Metric retention saved.</value>
+  </data>
+  <data name="MetricRetention_Snackbar_SaveFailed" xml:space="preserve">
+    <value>Saving failed: {0}</value>
+  </data>
 </root>

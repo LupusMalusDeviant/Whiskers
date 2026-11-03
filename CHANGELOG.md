@@ -6,6 +6,41 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-55: **Metric history keeps its peaks and goes back 30 days and further.** Container and server samples are no
+  longer only kept raw and deleted after one retention window: closed windows roll up into three tiers — 10 minutes,
+  1 hour and 8 hours — each keeping the sample-weighted average, the true maximum and the sample count per series.
+  A history reads the coarse tiers for its old part and the finer tiers and the raw samples for the recent part, so
+  it has no gaps, ends with the last minutes, and a 2-minute spike still shows as the peak of a 30-day chart (it used
+  to be averaged away). The Dashboard and container charts draw the peak as a second line and offer **30 days**; the
+  `get_server_metrics` / `get_container_metrics` MCP tools accept `30d` and their `max` is now the true maximum (their
+  `avg` is weighted by sample count). Each tier has its own retention and the alert history one of its own (it used
+  to share the raw retention): raw 7 days (as before), 10-minute windows 30 days, 1-hour windows 180 days, 8-hour
+  windows 730 days, alert history 30 days. Nothing is deleted before the next coarser tier has committed the windows
+  built from it — also while that roll-up fails, and across a restart. Retention is now editable under Settings →
+  *Metric retention* (Admin only, a gated, audited configuration write); a value set by the environment
+  (`Metrics__RetentionDays`, `Metrics__Rollup10mRetentionDays`, `Metrics__Rollup1hRetentionDays`,
+  `Metrics__Rollup8hRetentionDays`, `Metrics__AlertHistoryRetentionDays`) or `appsettings.json` wins and is shown
+  read-only. The collector's retention no longer stops when `app-settings.json` holds a `Metrics` value that does not
+  bind, and a first read that fails starts the loop on the defaults instead of not at all.
+  **Upgrade notes:** (1) the migration `MetricRollups` only adds three tables (`ContainerMetricRollups`,
+  `ServerMetricRollups`, `MetricRollupStates`); the existing raw samples stay as they are and readable. In the first
+  minutes after the start they are rolled up once, a few days per collector cycle; until that is done a long chart
+  still reads them raw. (2) The alert history is now kept 30 days instead of the raw retention (7 by default) — set
+  `Metrics__AlertHistoryRetentionDays` to keep the old behaviour. (3) The shipped `docker-compose*.yml` set
+  `Metrics__RetentionDays` (default 7), so on those installations the raw retention is read-only in the panel; remove
+  the line (or `METRICS_RETENTIONDAYS`) to edit it there. (4) `--migrate-to-postgres` copies the tiers; a source from
+  before this release has none and the target rolls its raw samples up on its first start. (5) If the host clock is
+  set back after windows were rolled up, the roll-up pauses (one warning in the log) until the clock passes its
+  watermark again, nothing below it is pruned meanwhile, and the charts read the finer tiers and raw samples for that
+  stretch. Samples taken in that stretch are not rolled up later: they are kept for the raw retention, then only the
+  windows from before the correction remain in the long view. Whiskers never rewinds by itself; to end a long pause,
+  back up, then in one transaction delete that kind's rows of `MetricRollupStates` (`Id` starting `container/` or
+  `server/`) and its tier rows (`ContainerMetricRollups` / `ServerMetricRollups`) with `WindowStart` at or after the
+  current time floored to 10 minutes — the next cycle rebuilds the tiers from the raw samples (see the Metrics README).
+  A deleted window whose raw samples are already pruned is gone for good, and raw samples still stamped with the old
+  clock are merged into the rebuilt windows (their counts overlap). On PostgreSQL quote the identifiers
+  (`"ContainerMetricRollups"`, `"MetricRollupStates"`).
+
 - R1-41/R1-54 follow-up: **a stop at the wrong moment no longer rewrites what happened.** An e-mail the SMTP server
   already took and partially refused now stays a partial refusal, with who was reached, when Whiskers stops while
   saying goodbye — before, the stop turned it into a cancellation and the retry mailed the reached recipients again.
@@ -14,6 +49,7 @@ All notable changes to Whiskers are documented here. The format follows
   and a first attempt that ran out of time there is no longer mistaken for a broken tunnel and sent again.
   The CVE monitor's start log shows the effective interval and no longer reads raw options outside its recovering loop,
   and the background-loop ratchet now also flags work that runs in a loop outside the catch that recovers a cycle.
+
 - R1-53: **One request can be followed from the client to the audit row, and the logs can be JSON.** Every HTTP answer
   now carries an `X-Request-Id`: the client's own when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -`), else
   the W3C trace id of an incoming `traceparent`, else a new one — an unsafe value is replaced, never echoed or logged.

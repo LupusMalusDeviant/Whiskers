@@ -34,8 +34,11 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
     [InlineData("DROP TABLE WebhookDeliveries; DROP TABLE Operations;", "Operations")]                               // before R1-18
     [InlineData("DROP TABLE WebhookDeliveries;", "WebhookDeliveries")]                                               // before R1-10
     [InlineData("DROP TABLE AuditChain; DROP TABLE AuditCheckpoints; DROP TABLE WebhookDeliveries;", "WebhookDeliveries")]  // before R1-10 and R1-23
+    [InlineData("", "MetricRollupStates")]                                                                            // before R1-55
     public async Task A_source_from_an_older_release_migrates_completely(string drop, string absent)
     {
+        // Every release before R1-55 also lacks the roll-up tiers.
+        drop += " DROP TABLE ContainerMetricRollups; DROP TABLE ServerMetricRollups; DROP TABLE MetricRollupStates;";
         // A database migrated by an older release lacks the tables of every release after its own.
         var srcPath = NewDbPath();
         var dstPath = NewDbPath();
@@ -99,7 +102,8 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         {
             src.Webhooks.Add(new WebhookEntity { WebhookId = "hook-legacy-01", Name = "ci", Secret = "s", TargetId = "web-1" });
             await src.SaveChangesAsync();
-            await src.Database.ExecuteSqlRawAsync("DROP TABLE WebhookDeliveries; ALTER TABLE Webhooks DROP COLUMN Provider;");
+            await src.Database.ExecuteSqlRawAsync("DROP TABLE WebhookDeliveries; ALTER TABLE Webhooks DROP COLUMN Provider; " +
+                "DROP TABLE ContainerMetricRollups; DROP TABLE ServerMetricRollups; DROP TABLE MetricRollupStates;");   // nor R1-55's
         }
 
         int rc;
@@ -288,6 +292,12 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
             src.UpdateRollbacks.Add(new UpdateRollbackEntity { Id = 5, ContainerId = "c1", ContainerName = "web", OldImageRef = "sha256:old", CapturedAt = DateTime.UtcNow });
             src.SelfMetricSamples.Add(new SelfMetricSampleEntity { Id = 6, ServerId = "s1" });
             src.ActionOutcomes.Add(new ActionOutcomeEntity { Id = 7, CorrelationId = "corr-1", ServerId = "s1" });
+            // R1-55: the roll-up tiers and their watermarks.
+            src.ContainerMetricRollups.Add(new ContainerMetricRollupEntity { Id = 8, TierMinutes = 60, ServerId = "s1", ContainerId = "c1",
+                WindowStart = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc), SampleCount = 120, CpuAvg = 12, CpuMax = 97 });
+            src.ServerMetricRollups.Add(new ServerMetricRollupEntity { Id = 9, TierMinutes = 480, ServerId = "s1",
+                WindowStart = new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc), SampleCount = 960, CpuMax = 88 });
+            src.MetricRollupStates.Add(new MetricRollupStateEntity { Id = "container/60", RolledUpTo = new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc) });
             await src.SaveChangesAsync();
         }
 
@@ -299,6 +309,10 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         Assert.Equal("sha256:old", (await check.UpdateRollbacks.SingleAsync()).OldImageRef);
         Assert.Equal(1, await check.SelfMetricSamples.CountAsync());
         Assert.Equal("corr-1", (await check.ActionOutcomes.SingleAsync()).CorrelationId);
+        var tier = await check.ContainerMetricRollups.SingleAsync();
+        Assert.Equal((60, 120, 97.0), (tier.TierMinutes, tier.SampleCount, tier.CpuMax));
+        Assert.Equal(88, (await check.ServerMetricRollups.SingleAsync()).CpuMax);
+        Assert.Equal(new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc), (await check.MetricRollupStates.SingleAsync(s => s.Id == "container/60")).RolledUpTo);
     }
 
     [Fact]

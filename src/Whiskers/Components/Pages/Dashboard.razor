@@ -324,6 +324,7 @@
                     <MudSelectItem Value="@("6h")">@L["Dashboard_Chart_Period6h"]</MudSelectItem>
                     <MudSelectItem Value="@("24h")">@L["Dashboard_Chart_Period24h"]</MudSelectItem>
                     <MudSelectItem Value="@("7d")">@L["Dashboard_Chart_Period7d"]</MudSelectItem>
+                    <MudSelectItem Value="@("30d")">@L["Dashboard_Chart_Period30d"]</MudSelectItem>
                 </MudSelect>
             </MudStack>
 
@@ -343,6 +344,15 @@
                                                  XValue="@(p => p.Timestamp)"
                                                  YValue="@(p => (decimal)p.Value)"
                                                  Name="CPU %" />
+                                @* R1-55: the true peak of each point, kept through the roll-up tiers — only where points merge samples. *@
+                                @if (cpuHist!.Any(p => p.Samples > 1))
+                                {
+                                <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="cpuHist"
+                                                 SeriesType="ApexCharts.SeriesType.Line"
+                                                 XValue="@(p => p.Timestamp)"
+                                                 YValue="@(p => (decimal)p.Max)"
+                                                 Name="@L["Metrics_Series_Peak"]" />
+                                }
                             </ApexCharts.ApexChart>
                         </MudPaper>
                     </MudItem>
@@ -355,6 +365,14 @@
                                                  XValue="@(p => p.Timestamp)"
                                                  YValue="@(p => (decimal)p.Value)"
                                                  Name="@L["Dashboard_Chart_MemorySeries"]" />
+                                @if (memHist!.Any(p => p.Samples > 1))
+                                {
+                                <ApexCharts.ApexPointSeries TItem="MetricPoint" Items="memHist"
+                                                 SeriesType="ApexCharts.SeriesType.Line"
+                                                 XValue="@(p => p.Timestamp)"
+                                                 YValue="@(p => (decimal)p.Max)"
+                                                 Name="@L["Metrics_Series_Peak"]" />
+                                }
                             </ApexCharts.ApexChart>
                         </MudPaper>
                     </MudItem>
@@ -1032,14 +1050,7 @@
         }
     }
 
-    private TimeSpan ChartPeriodSpan() => _chartPeriod switch
-    {
-        "1h" => TimeSpan.FromHours(1),
-        "6h" => TimeSpan.FromHours(6),
-        "24h" => TimeSpan.FromHours(24),
-        "7d" => TimeSpan.FromDays(7),
-        _ => TimeSpan.FromHours(1)
-    };
+    private TimeSpan ChartPeriodSpan() => MetricPeriods.Parse(_chartPeriod) ?? TimeSpan.FromHours(1);
 
     private async Task LoadServerHistory(string serverId)
     {
@@ -1072,8 +1083,9 @@
             },
             Theme = new ApexCharts.Theme { Mode = ApexCharts.Mode.Dark },
             Stroke = new ApexCharts.Stroke { Curve = ApexCharts.Curve.Smooth, Width = 2 },
-            Fill = new ApexCharts.Fill { Opacity = new List<double> { 0.15 }, Type = new List<ApexCharts.FillType> { ApexCharts.FillType.Solid } },
-            Colors = new List<string> { color },
+            Fill = new ApexCharts.Fill { Opacity = new List<double> { 0.15, 1 }, Type = new List<ApexCharts.FillType> { ApexCharts.FillType.Solid, ApexCharts.FillType.Solid } },
+            // R1-55: the average as an area, the peak as a line on top.
+            Colors = new List<string> { color, "#FF7043" },
             Xaxis = new ApexCharts.XAxis { Type = ApexCharts.XAxisType.Datetime },
             Yaxis = new List<ApexCharts.YAxis>
             {

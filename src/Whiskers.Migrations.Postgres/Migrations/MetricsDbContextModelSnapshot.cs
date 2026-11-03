@@ -1303,6 +1303,76 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.ToTable("ContainerMetrics");
                 });
 
+            modelBuilder.Entity("Whiskers.Services.Persistence.ContainerMetricRollupEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ContainerId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ContainerName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<double>("CpuAvg")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("CpuMax")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("MemoryPercentAvg")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("MemoryPercentMax")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("MemoryUsageBytesAvg")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("MemoryUsageBytesMax")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("SampleCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ServerId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("TierMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("WindowStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TierMinutes", "WindowStart");
+
+                    b.HasIndex("TierMinutes", "ServerId", "ContainerId", "WindowStart")
+                        .IsUnique();
+
+                    b.ToTable("ContainerMetricRollups");
+                });
+
+            modelBuilder.Entity("Whiskers.Services.Persistence.MetricRollupStateEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("RolledUpTo")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("MetricRollupStates");
+                });
+
             modelBuilder.Entity("Whiskers.Services.Persistence.NotificationEntity", b =>
                 {
                     b.Property<long>("Id")
@@ -1392,6 +1462,59 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.HasIndex("ServerId", "Timestamp");
 
                     b.ToTable("ServerMetrics");
+                });
+
+            modelBuilder.Entity("Whiskers.Services.Persistence.ServerMetricRollupEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<double>("CpuAvg")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("CpuMax")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("MemoryPercentAvg")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("MemoryPercentMax")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("MemoryUsedBytesAvg")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("MemoryUsedBytesMax")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("SampleCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ServerId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ServerName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("TierMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("WindowStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TierMinutes", "WindowStart");
+
+                    b.HasIndex("TierMinutes", "ServerId", "WindowStart")
+                        .IsUnique();
+
+                    b.ToTable("ServerMetricRollups");
                 });
 #pragma warning restore 612, 618
         }
