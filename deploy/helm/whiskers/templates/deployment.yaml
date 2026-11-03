@@ -1,3 +1,4 @@
+{{- include "whiskers.validate" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,6 +50,13 @@ spec:
           env:
             - name: WHISKERS_DATA_DIR
               value: /app/data
+            # R1-46: explicit VPN mode, both names (entrypoint.sh decides on VPN_PROVIDER, Whiskers on Vpn__Provider).
+            # Non-root on a read-only root file system the legacy tailscaled bring-up cannot work, and the in-app
+            # providers are not supported here: nobody brings a VPN up in this container. Mesh = the sidecar below.
+            - name: VPN_PROVIDER
+              value: "none"
+            - name: Vpn__Provider
+              value: "none"
             {{- if not .Values.localDocker.enabled }}
             # V4: no Docker socket in the pod — start without the default "local" server.
             - name: WHISKERS_DISABLE_LOCAL_DOCKER
@@ -121,7 +129,7 @@ spec:
         # Userspace networking: no /dev/net/tun, no NET_ADMIN — good enough for OUTBOUND
         # connections from Whiskers to the mesh-connected fleet.
         - name: tailscale
-          image: {{ .Values.tailscaleSidecar.image }}
+          image: {{ .Values.tailscaleSidecar.image | quote }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -136,8 +144,18 @@ spec:
                 secretKeyRef:
                   name: {{ required "tailscaleSidecar.authKeySecret is required when the sidecar is enabled" .Values.tailscaleSidecar.authKeySecret }}
                   key: authKey
+            # The node's state lives in TS_STATE_DIR (a PVC unless tailscaleSidecar.state.persistent=false). Inside
+            # Kubernetes containerboot would otherwise store it in a Secret named "tailscale" (TS_KUBE_SECRET's
+            # default), which needs RBAC this chart does not grant: an explicitly empty value turns that off.
+            - name: TS_KUBE_SECRET
+              value: ""
             - name: TS_STATE_DIR
               value: /var/lib/tailscale
+            {{- if .Values.tailscaleSidecar.state.persistent }}
+            # Log in with the auth key only when the persisted node is not logged in yet: a restart keeps its identity.
+            - name: TS_AUTH_ONCE
+              value: "true"
+            {{- end }}
           volumeMounts:
             - name: tailscale-state
               mountPath: /var/lib/tailscale
@@ -165,7 +183,13 @@ spec:
         {{- end }}
         {{- if .Values.tailscaleSidecar.enabled }}
         - name: tailscale-state
+          {{- if .Values.tailscaleSidecar.state.persistent }}
+          persistentVolumeClaim:
+            claimName: {{ include "whiskers.tailscaleStateClaim" . }}
+          {{- else }}
+          # Not persistent (tailscaleSidecar.state.persistent=false): a new tailnet node at every restart.
           emptyDir: {}
+          {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

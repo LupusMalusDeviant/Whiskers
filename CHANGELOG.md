@@ -6,6 +6,50 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-46: **The installer and the Helm chart install one pinned release and set up a vault key and the VPN mode
+  explicitly.** **Installer** (`deploy/install.sh`): it installed `ghcr.io/lupusmalusdeviant/whiskers:latest`, so a
+  re-run pulled whatever was newest, without a version, a vault key or a signature check. It now installs one released
+  version — by default the release it belongs to (`WHISKERS_RELEASE`; the release pipeline refuses a tag whose version
+  differs, so the `install.sh` of release X.Y.Z installs X.Y.Z), or `--version X.Y.Z` — and writes that exact image
+  into the compose file. `--version latest`, an `--image` without a tag or digest and the tag `latest` are refused
+  before anything is pulled or written. Before pulling it runs `cosign verify` against the release workflow's identity
+  when cosign is installed (`--verify auto`, default); a bad signature stops it with nothing changed; `--verify require`
+  refuses to install without a verified signature, `--verify off` skips it (said on the console). A new install
+  generates a vault key into `./whiskers/secrets/vault.key` (directory 0700, file 0600, never printed, never on a
+  command line) and hands it to Whiskers as a secret file (`VAULT_KEY_FILE=/run/secrets/whiskers_vault_key`), so the
+  vault and encrypted backups are on from the start; a re-run keeps the key and an empty key file stops it. The output
+  says what to back up — the key and the data, apart from each other and off the host — and links the backup guide.
+  A re-run with a newer release **upgrades**: only the `image:` line of the compose file the installer wrote changes (a
+  copy of the previous file is kept as `docker-compose.yml.bak-<time>`), the wait for `/healthz` covers the pre-upgrade
+  backup and migrations (about 5 minutes), and a **downgrade is refused** (going back is the previous release on the
+  pre-upgrade backup). **Helm chart:** the app container now always gets `VPN_PROVIDER=none` and `Vpn__Provider=none`.
+  Before, neither was set, so `entrypoint.sh` took the legacy path and started `tailscaled` as uid 10001 on a read-only
+  root file system, where it fails (measured on the 0.15.0 image: it starts, logs errors and costs the start two
+  seconds); now nobody brings a VPN up in the pod, and `extraEnv` cannot override these names (also behind `DOTNET_` /
+  `ASPNETCORE_`), `TAILSCALE_AUTHKEY` or `VPN_FORCE_LEGACY_TAILSCALE`. The Tailscale sidecar is pinned
+  (`tailscale/tailscale:v1.104.4` plus its index digest instead of `:latest`; an unpinned or `latest` image is refused)
+  and keeps its node identity on its own PVC (`tailscaleSidecar.state.*`, 128Mi) with `TS_AUTH_ONCE=true`. The sidecar
+  also gets `TS_KUBE_SECRET=""`: inside Kubernetes the Tailscale image stores its state in a Secret named `tailscale`
+  by default (upstream `cmd/containerboot`, read 2026-11-03), which needs RBAC the chart never granted — the node
+  state never went to the old `emptyDir` at `TS_STATE_DIR`. The chart refuses to render (instead of producing a pod stuck in
+  `CreateContainerConfigError`) for `database.provider=postgres` without `database.existingSecret` or
+  `database.connectionString`, a provider other than `sqlite`/`postgres`, and `image.tag=latest`. `NOTES.txt` is
+  English and names the setup token, the backup of key and data, and the upgrade path; the chart README documents
+  installing a pinned chart version with the vault key in a Secret of your own, verifying the image signature, and
+  upgrading. Tests: `InstallerContractTests` (runs the real installer under bash with fake `docker`/`curl`/`cosign`)
+  and `HelmDeploymentTests` (chart structure, the real `entrypoint.sh` under the chart's environment, and `helm
+  template` renders — these need helm and fail on CI without it). `chart-ci.yml`'s negative checks (`! grep …`) did
+  not fail under `set -e`; they now do. No application or database change. **Upgrade notes:** (1) **installer
+  users:** an install made by an older installer (`:latest`) is moved to the pinned release on the next run of a new
+  installer; it gets no vault key automatically — the installer warns and `deploy/README.md` → *Installer* says how to
+  add one. To upgrade later run the newer release's `install.sh` or `install.sh --version X.Y.Z`; there is no
+  `latest` any more. (2) **Helm users:** the sidecar's node state moves to a new PVC, so the first start after the
+  upgrade logs the node in once more with `tailscaleSidecar.authKeySecret` (a reusable or fresh key; afterwards the
+  node keeps its identity — remove the old node in the Tailscale admin console). A `tailscaleSidecar.image` override
+  that is unpinned or `latest`, an `extraEnv` entry naming the VPN mode, and `postgres` without a connection-string
+  Secret now stop `helm upgrade` with a message instead of deploying. With `helm upgrade --reuse-values` the new keys
+  (`tailscaleSidecar.state`) are missing: use your values file or `--reset-then-reuse-values`.
+
 - R1-43: **The VPN bring-up is decided, recorded and owned, and its key never reaches a command line.** With
   `VPN_PROVIDER=tailscale` or `netbird`, Whiskers started the VPN daemon and joined the mesh at every start on no
   one's authority and without an audit record. That bring-up now runs through the same gateway as every other change

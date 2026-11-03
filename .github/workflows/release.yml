@@ -98,7 +98,9 @@ jobs:
           CSPROJ_VER="$(sed -n 's#.*<Version>\([^<]*\)</Version>.*#\1#p' src/Whiskers/Whiskers.csproj | head -n1)"
           CHART_VER="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' deploy/helm/whiskers/Chart.yaml)"
           CHART_APP="$(sed -n 's/^appVersion:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' deploy/helm/whiskers/Chart.yaml)"
-          for pair in "Whiskers.csproj <Version>=${CSPROJ_VER}" "Chart.yaml version=${CHART_VER}" "Chart.yaml appVersion=${CHART_APP}"; do
+          # R1-46: the installer attached to this release installs exactly this release (its default, never latest).
+          INSTALL_VER="$(sed -n 's/^WHISKERS_RELEASE="\([^"]*\)"$/\1/p' deploy/install.sh)"
+          for pair in "Whiskers.csproj <Version>=${CSPROJ_VER}" "Chart.yaml version=${CHART_VER}" "Chart.yaml appVersion=${CHART_APP}" "deploy/install.sh WHISKERS_RELEASE=${INSTALL_VER}"; do
             if [ "${pair#*=}" != "$VER" ]; then
               echo "::error::${pair%%=*} is '${pair#*=}', the tag says ${VER}"; exit 1
             fi

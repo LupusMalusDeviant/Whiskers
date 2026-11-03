@@ -9,7 +9,7 @@
 
 image:
   repository: ghcr.io/lupusmalusdeviant/whiskers
-  # "" = use the chart's appVersion.
+  # "" = use the chart's appVersion (the release this chart was published with). "latest" is refused.
   tag: ""
   pullPolicy: IfNotPresent
 
@@ -26,9 +26,10 @@ persistence:
   existingClaim: ""
 
 database:
-  # sqlite (zero-config, on the PVC) | postgres (external; recommended for bigger fleets).
+  # sqlite (zero-config, on the PVC) | postgres (external; recommended for bigger fleets). Anything else is refused.
   provider: sqlite
-  # Secret with key "connectionString" for postgres. Preferred over inline connectionString.
+  # Secret with key "connectionString" for postgres. Preferred over inline connectionString. postgres needs one of
+  # the two: without either the chart refuses to render.
   existingSecret: ""
   # Inline connection string (postgres only) — the chart puts it into a Secret for you.
   # Prefer existingSecret in anything beyond a lab.
@@ -64,13 +65,30 @@ ingress:
   #        pathType: Prefix
   tls: []
 
+# Mesh VPN (R1-46): the Whiskers container never runs a VPN daemon on Kubernetes. The pod is non-root with a
+# read-only root file system, where the image's legacy Tailscale bring-up cannot work, so the chart always sets
+# VPN_PROVIDER=none and Vpn__Provider=none and entrypoint.sh skips it; the in-app providers (tailscale/netbird) are
+# not supported here. For mesh access use the sidecar below. extraEnv may not override these names (the chart
+# refuses to render).
+#
 # Optional Tailscale sidecar (userspace networking — no NET_ADMIN/devices needed) so Whiskers can
 # reach a mesh-connected fleet. Secret must hold key "authKey" (a tailscale auth key).
 tailscaleSidecar:
   enabled: false
-  image: tailscale/tailscale:latest
+  # Pinned: a release tag plus the multi-arch index digest (tailscale/tailscale v1.104.4). The chart refuses an image
+  # without a tag or digest and the tag "latest". Update both parts together.
+  image: tailscale/tailscale:v1.104.4@sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c
   authKeySecret: ""
   hostname: whiskers
+  # The node's identity (tailscaled state). Persistent by default: on its own PVC, so a restarted pod is the same
+  # tailnet node and the auth key is used once (TS_AUTH_ONCE). persistent=false keeps it in an emptyDir: every
+  # restart registers a new node and needs a reusable (preferably ephemeral) auth key.
+  state:
+    persistent: true
+    size: 128Mi
+    storageClass: ""
+    # Use an existing PVC instead of creating one.
+    existingClaim: ""
 
 # Mount the node's Docker socket into the pod. Almost never what you want on Kubernetes — it ties
 # the pod to one node AND grants root-equivalent control over that node's Docker. Off by default.
@@ -101,7 +119,9 @@ probes:
     periodSeconds: 30
     failureThreshold: 5
 
-# Extra environment variables (name/value pairs), e.g. OIDC settings.
+# Extra environment variables (name/value pairs), e.g. OIDC settings. The VPN mode (VPN_PROVIDER, Vpn__Provider, also
+# behind DOTNET_/ASPNETCORE_), TAILSCALE_AUTHKEY and VPN_FORCE_LEGACY_TAILSCALE are fixed by the chart and refused here.
+# Put secrets in a Secret and use valueFrom, not a value.
 extraEnv: []
 
 nodeSelector: {}

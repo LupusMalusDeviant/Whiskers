@@ -1,25 +1,41 @@
-Whiskers ist installiert.
+Whiskers {{ .Chart.AppVersion }} is installed (image {{ include "whiskers.image" . }}).
 
-1. Auf den Pod warten:
+1. Wait for the pod (the first start of a new release takes a pre-upgrade backup and migrates the database first):
    kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "whiskers.fullname" . }}
 
-2. UI öffnen (ohne Ingress):
+2. Open the UI (without an ingress):
    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "whiskers.fullname" . }} 8080:{{ .Values.service.port }}
-   → http://localhost:8080  (Erststart: Setup-Wizard legt den Admin an)
+   -> http://localhost:8080  (first start: the setup wizard creates the admin account)
 
-3. Setup-Token für den Wizard (nur beim Erststart; first-run setup token):
-   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "whiskers.fullname" . }} -- cat /app/data/setup-token.txt
+3. One-time setup token for the wizard (first start only):
+   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "whiskers.fullname" . }} -c whiskers -- cat /app/data/setup-token.txt
 
+4. Back up, kept apart and off the cluster: the VAULT_KEY (its Secret) and the data (Settings -> Backup & Restore,
+   or a snapshot of the PVC while the pod is stopped). Without the key, the vault and encrypted backups are unreadable.
+
+VPN: this container brings no VPN up (VPN_PROVIDER=none, Vpn__Provider=none).
+{{- if .Values.tailscaleSidecar.enabled }} Mesh access goes through the Tailscale sidecar
+({{ .Values.tailscaleSidecar.image }}).
+{{- if not .Values.tailscaleSidecar.state.persistent }}
+
+WARNING: tailscaleSidecar.state.persistent=false — the sidecar keeps its node state in an emptyDir: every restart
+registers a new tailnet node and needs a reusable auth key.
+{{- end }}
+{{- else }} For mesh access enable tailscaleSidecar.
+{{- end }}
 {{- if not (or .Values.vault.existingSecret .Values.vault.key) }}
 
-HINWEIS: Kein VAULT_KEY gesetzt — der Secret-Vault (kubeconfig-basierte Kubernetes-Server,
-verschlüsselte Backups) ist deaktiviert. values: vault.existingSecret / vault.key.
+NOTE: no VAULT_KEY is set — the secret vault (kubeconfig-based Kubernetes servers, encrypted backups) is off.
+Values: vault.existingSecret / vault.key.
 {{- end }}
 {{- if .Values.localDocker.enabled }}
 
-WARNUNG: localDocker.enabled=true mountet den Docker-Socket des Nodes — root-äquivalenter
-Zugriff auf den Node und Node-Pinning. Nur für Sonderfälle.
+WARNING: localDocker.enabled=true mounts the node's Docker socket — root-equivalent access to the node, and the pod
+is pinned to it. For special cases only.
 {{- end }}
 
-Remote-Docker-Hosts verbindet Whiskers über SSH-Bootstrap-Onboarding oder TCP+mTLS;
-Kubernetes-Cluster über ein kubeconfig (siehe deploy/k8s/README.md im Repo).
+Upgrade: helm upgrade with the chart of the new release (its appVersion is the image tag). Whiskers takes a
+pre-upgrade backup before it migrates; a downgrade is the previous release on that backup (see the chart README).
+
+Remote Docker hosts are connected through SSH-bootstrap onboarding or TCP+mTLS; Kubernetes clusters through a
+kubeconfig (see deploy/k8s/README.md in the repository).
