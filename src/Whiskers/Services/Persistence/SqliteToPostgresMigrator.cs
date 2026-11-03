@@ -72,15 +72,21 @@ public static class SqliteToPostgresMigrator
         "NULL AS \"Verification\", NULL AS \"DurationMs\" FROM \"AuditLog\"";
 
     /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack
-    /// exactly one of these sets — the tables of every release after its own (R1-10: the webhook deliveries; R1-18: the operations; R1-14: the approvals; R1-12: the
-    /// decision tables).</summary>
+    /// exactly one of these sets — the tables of every release after its own (R1-55: the metric roll-up tiers; R1-10: the
+    /// webhook deliveries; R1-18: the operations; R1-14: the approvals; R1-12: the decision tables).</summary>
     internal static readonly IReadOnlyList<HashSet<string>> OlderReleaseTables =
     [
-        new(StringComparer.Ordinal) { "WebhookDeliveries" },
-        new(StringComparer.Ordinal) { "WebhookDeliveries", "Operations" },
-        new(StringComparer.Ordinal) { "WebhookDeliveries", "Operations", "Approvals" },
-        new(StringComparer.Ordinal) { "WebhookDeliveries", "Operations", "Approvals", "PolicyDecisions", "PolicySnapshots" },
+        Older(),
+        Older("WebhookDeliveries"),
+        Older("WebhookDeliveries", "Operations"),
+        Older("WebhookDeliveries", "Operations", "Approvals"),
+        Older("WebhookDeliveries", "Operations", "Approvals", "PolicyDecisions", "PolicySnapshots"),
     ];
+
+    /// <summary>A release before R1-55 lacks its tables too: it has raw samples only — they are copied, and the target
+    /// rolls them up once on its first start, as an upgrade in place would.</summary>
+    private static HashSet<string> Older(params string[] tables) =>
+        new([.. tables, "ContainerMetricRollups", "ServerMetricRollups", "MetricRollupStates"], StringComparer.Ordinal);
 
     /// <summary>Whether the SQLite source has the table at all. Any other provider is assumed to have the full schema.</summary>
     private static async Task<bool> SourceHasTableAsync(MetricsDbContext source, Table table, CancellationToken ct)
@@ -109,6 +115,11 @@ public static class SqliteToPostgresMigrator
         T("ContainerMetrics",  c => c.ContainerMetrics,  e => e.Id = 0),
         T("ServerMetrics",     c => c.ServerMetrics,     e => e.Id = 0),
         T("AlertHistory",      c => c.AlertHistory,      e => e.Id = 0),
+        // R1-55: the roll-up tiers and their watermarks (keyed by tier name, copied as they are) — the long view
+        // after the raw samples are gone.
+        T("ContainerMetricRollups", c => c.ContainerMetricRollups, e => e.Id = 0),
+        T("ServerMetricRollups",    c => c.ServerMetricRollups,    e => e.Id = 0),
+        T("MetricRollupStates",     c => c.MetricRollupStates,     _ => { }),
         // R1-18: an operation names its audit row — the new id of every named row is remembered.
         T("AuditLog",          (c, run) => run.AuditLogWithoutTypedFields
                                    ? c.AuditLog.FromSqlRaw(AuditLogWithoutTypedFieldsSql)

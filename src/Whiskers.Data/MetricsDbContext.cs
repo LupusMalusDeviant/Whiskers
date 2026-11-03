@@ -65,6 +65,16 @@ public class MetricsDbContext : DbContext
     public DbSet<ContainerMetricEntity> ContainerMetrics => Set<ContainerMetricEntity>();
     public DbSet<ServerMetricEntity> ServerMetrics => Set<ServerMetricEntity>();
     public DbSet<AlertHistoryEntity> AlertHistory => Set<AlertHistoryEntity>();
+
+    /// <summary>Closed windows of container samples in the coarser tiers, average and peak per series (R1-55).</summary>
+    public DbSet<ContainerMetricRollupEntity> ContainerMetricRollups => Set<ContainerMetricRollupEntity>();
+
+    /// <summary>Closed windows of server samples in the coarser tiers, average and peak per series (R1-55).</summary>
+    public DbSet<ServerMetricRollupEntity> ServerMetricRollups => Set<ServerMetricRollupEntity>();
+
+    /// <summary>How far each tier is rolled up (R1-55).</summary>
+    public DbSet<MetricRollupStateEntity> MetricRollupStates => Set<MetricRollupStateEntity>();
+
     public DbSet<AuditLogEntity> AuditLog => Set<AuditLogEntity>();
     /// <summary>The audit hash chain and its signed checkpoints (R1-23, ADR-0006).</summary>
     public DbSet<AuditChainEntry> AuditChain => Set<AuditChainEntry>();
@@ -124,6 +134,23 @@ public class MetricsDbContext : DbContext
             e.HasIndex(x => new { x.ServerId, x.Timestamp });
             e.HasIndex(x => x.Timestamp);
         });
+
+        // R1-55: one row per tier, series and window — a roll-up run again for a window replaces, never adds. The
+        // unique index leads with the tier and the series, which is also how a query reads them; the second one serves
+        // retention, which deletes by tier and age.
+        modelBuilder.Entity<ContainerMetricRollupEntity>(e =>
+        {
+            e.HasIndex(x => new { x.TierMinutes, x.ServerId, x.ContainerId, x.WindowStart }).IsUnique();
+            e.HasIndex(x => new { x.TierMinutes, x.WindowStart });
+        });
+
+        modelBuilder.Entity<ServerMetricRollupEntity>(e =>
+        {
+            e.HasIndex(x => new { x.TierMinutes, x.ServerId, x.WindowStart }).IsUnique();
+            e.HasIndex(x => new { x.TierMinutes, x.WindowStart });
+        });
+
+        modelBuilder.Entity<MetricRollupStateEntity>(e => e.HasKey(x => x.Id));
 
         modelBuilder.Entity<AlertHistoryEntity>(e =>
         {

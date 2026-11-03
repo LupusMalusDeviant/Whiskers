@@ -982,30 +982,40 @@ settings, SQLite → PostgreSQL migrator (R1-34's transactional transfer); appro
 
 **Acceptance criteria:**
 
-- [ ] `MetricRollupTests`: raw samples roll up into fixed tiers (for example 10 min / 1 h / 8 h) keeping average,
+- [x] `MetricRollupTests`: raw samples roll up into fixed tiers (for example 10 min / 1 h / 8 h) keeping average,
   maximum and sample count per series. Only closed windows are rolled up; a roll-up interrupted by a restart neither
   loses nor double-counts a window (idempotent per window), and retention never deletes data of any tier (raw or
   rolled up) before every successor window built from it is durably committed — also when a higher-tier roll-up
   fails while retention runs, and across a restart (tested for raw → first tier and first → second tier).
-- [ ] A query covers its whole range without gaps or duplicate timestamps: coarse tiers for the old part, finer tiers
+- [x] A query covers its whole range without gaps or duplicate timestamps: coarse tiers for the old part, finer tiers
   and raw data for the recent part (stitched at window boundaries). Averages that combine windows are weighted by
   sample count; maxima are the true maxima of the original samples. Tests cover uneven sample counts, empty and
   partial windows, tier boundaries and the newest raw tail. Thinning a long range to the chart's point budget keeps
   each point's maximum (no averaging of maxima away): a chart and an MCP query over 30 days show the true peak of a
   2-minute spike and the last minutes of data.
-- [ ] Each tier has its own retention; raw retention can shrink without losing the long view. `AlertHistory`, today
+- [x] Each tier has its own retention; raw retention can shrink without losing the long view. `AlertHistory`, today
   pruned with the same `RetentionDays` (`MetricsCollectorService.cs:275`), keeps a retention of its own and is not
   shortened by a smaller raw retention. Defaults documented.
-- [ ] Retention is configuration-only today (`Configuration/MetricsSettings.cs`, nothing writes it): this package
+- [x] Retention is configuration-only today (`Configuration/MetricsSettings.cs`, nothing writes it): this package
   creates the settings-store write path and its UI, and a value from the environment or `appsettings` stays read-only
   and is shown as such, so R1-11's coverage test has one write path to enumerate.
-- [ ] Retention settings are gated configuration writes (R1-11) with audit (R1-22): Viewer/Operator and a demoted Admin
+- [x] Retention settings are gated configuration writes (R1-11) with audit (R1-22): Viewer/Operator and a demoted Admin
   are refused, the kill switch refuses, an audit failure refuses before the setting is published, and a failed save
   leaves the live settings unchanged. Every new query and results path enforces the existing read role.
-- [ ] The prune block in `MetricsCollectorService` is also touched by R1-23 (audit retention): whichever lands second
+- [x] The prune block in `MetricsCollectorService` is also touched by R1-23 (audit retention): whichever lands second
   rebases onto the other; the package notes the order it was built on.
-- [ ] Additive paired migrations; existing raw data stays readable and is rolled up once on upgrade; the
+- [x] Additive paired migrations; existing raw data stays readable and is rolled up once on upgrade; the
   `--migrate-to-postgres` path copies the tiers.
+
+**Done (R1-55):** Built on R1-23 (already on `main`): the daily audit retention moved unchanged into the collector's
+new maintenance step, next to roll-up and tier retention. Tiers 10 min / 1 h / 8 h in `ContainerMetricRollups` and
+`ServerMetricRollups` with a watermark per tier in `MetricRollupStates` (migration `MetricRollups`, SQLite and
+PostgreSQL, tables only); defaults raw 7 d, 10 min 30 d, 1 h 180 d, 8 h 730 d, alert history 30 d (`MetricRetention`).
+Query: the coarsest tier whose window is at most range / 100 (raw for 1 h and 6 h, 10 min for 24 h, 1 h for 7 d and
+30 d), stitched with the finer tiers and the raw tail. Tests: `MetricRollupTests`, `MetricRetentionSettingsTests`,
+`MetricsCollectorRetentionTests`, `MetricRetentionPanelTests`, `UiMutationGatewayCoverageTests`,
+`SqliteToPostgresMigratorTests`. Read role: no new endpoint — the charts stay on their pages and the MCP tools keep
+their `Read` level and permission check; the write path is the Admin-only gated panel.
 
 **Out of scope:** Whiskers' own self-metrics (`SelfMetricSamples`, pruned by `SelfMetricsRecorder`), which keep their
 retention. Managing the storage of an external time-series database (VictoriaMetrics). Readings Whiskers

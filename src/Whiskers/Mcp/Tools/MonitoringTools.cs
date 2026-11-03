@@ -88,7 +88,7 @@ public class MonitoringTools
         IMetricsQueryService metrics,
         [Description("Container ID")] string containerId,
         [Description("Server ID")] string serverId,
-        [Description("Time period: 1h, 6h, 24h, 7d")] string period = "1h")
+        [Description("Time period: 1h, 6h, 24h, 7d, 30d")] string period = "1h")
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_container_metrics");
         if (denied != null) return denied;
@@ -97,11 +97,9 @@ public class MonitoringTools
         if (string.IsNullOrWhiteSpace(serverId))
             return "Server ID is required.";
 
-        var validPeriods = new[] { "1h", "6h", "24h", "7d" };
-        if (!validPeriods.Contains(period.ToLower()))
-            return $"Invalid period '{period}'. Must be one of: 1h, 6h, 24h, 7d.";
+        if (MetricPeriods.Parse(period) is not { } timespan)
+            return $"Invalid period '{period}'. Must be one of: {string.Join(", ", MetricPeriods.All)}.";
 
-        var timespan = ParsePeriod(period);
         var cpu = await metrics.GetContainerCpuHistoryAsync(containerId, serverId, timespan);
         var mem = await metrics.GetContainerMemoryHistoryAsync(containerId, serverId, timespan);
 
@@ -109,10 +107,10 @@ public class MonitoringTools
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Metrics for container {(containerId.Length >= 12 ? containerId[..12] : containerId)} (last {period}):");
-        sb.AppendLine($"CPU: avg {cpu.Average(p => p.Value):F1}%, max {cpu.Max(p => p.Value):F1}%, min {cpu.Min(p => p.Value):F1}%");
+        sb.AppendLine(Summary("CPU", cpu));
         if (mem.Any())
-            sb.AppendLine($"Memory: avg {mem.Average(p => p.Value):F1}%, max {mem.Max(p => p.Value):F1}%, min {mem.Min(p => p.Value):F1}%");
-        sb.AppendLine($"Data points: {cpu.Count}");
+            sb.AppendLine(Summary("Memory", mem));
+        sb.AppendLine($"Data points: {cpu.Count} ({cpu.Sum(p => p.Samples)} samples)");
         return sb.ToString();
     }
 
@@ -123,18 +121,16 @@ public class MonitoringTools
         IMcpPermissionService permissionService,
         IMetricsQueryService metrics,
         [Description("Server ID")] string serverId,
-        [Description("Time period: 1h, 6h, 24h, 7d")] string period = "1h")
+        [Description("Time period: 1h, 6h, 24h, 7d, 30d")] string period = "1h")
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_server_metrics");
         if (denied != null) return denied;
         if (string.IsNullOrWhiteSpace(serverId))
             return "Server ID is required.";
 
-        var validPeriods = new[] { "1h", "6h", "24h", "7d" };
-        if (!validPeriods.Contains(period.ToLower()))
-            return $"Invalid period '{period}'. Must be one of: 1h, 6h, 24h, 7d.";
+        if (MetricPeriods.Parse(period) is not { } timespan)
+            return $"Invalid period '{period}'. Must be one of: {string.Join(", ", MetricPeriods.All)}.";
 
-        var timespan = ParsePeriod(period);
         var cpu = await metrics.GetServerCpuHistoryAsync(serverId, timespan);
         var mem = await metrics.GetServerMemoryHistoryAsync(serverId, timespan);
 
@@ -142,11 +138,17 @@ public class MonitoringTools
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Server metrics (last {period}):");
-        sb.AppendLine($"CPU: avg {cpu.Average(p => p.Value):F1}%, max {cpu.Max(p => p.Value):F1}%");
+        sb.AppendLine(Summary("CPU", cpu));
         if (mem.Any())
-            sb.AppendLine($"Memory: avg {mem.Average(p => p.Value):F1}%, max {mem.Max(p => p.Value):F1}%");
+            sb.AppendLine(Summary("Memory", mem));
         return sb.ToString();
     }
+
+    /// <summary>R1-55: the average is weighted by the samples behind each point and the maximum is the highest original
+    /// sample (a spike survives the roll-up tiers); the minimum is the lowest point average.</summary>
+    internal static string Summary(string label, IReadOnlyCollection<MetricPoint> points) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"{label}: avg {MetricSummary.Average(points):F1}%, max {MetricSummary.Peak(points):F1}%, min {points.Min(p => p.Value):F1}%");
 
     [McpToolLevel(McpPermissionLevels.Read)]
     [McpServerTool, Description("Get system logs from a server via journalctl. Can filter by service name.")]
@@ -170,13 +172,4 @@ public class MonitoringTools
         var result = await executor.ExecuteAsync(serverId, cmd, TimeSpan.FromSeconds(15));
         return result.Success ? result.Output : $"Error: {result.Error}";
     }
-
-    private static TimeSpan ParsePeriod(string period) => period.ToLower() switch
-    {
-        "1h" => TimeSpan.FromHours(1),
-        "6h" => TimeSpan.FromHours(6),
-        "24h" => TimeSpan.FromHours(24),
-        "7d" => TimeSpan.FromDays(7),
-        _ => TimeSpan.FromHours(1)
-    };
 }

@@ -300,6 +300,14 @@ public static class WhiskersHostingExtensions
         builder.Services.Configure<MetricAlertSettings>(builder.Configuration.GetSection(MetricAlertSettings.SectionName));
         builder.Services.AddSingleton<Whiskers.Services.Persistence.IAppSettingsStore, Whiskers.Services.Persistence.AppSettingsStore>();
         builder.Services.AddSingleton<Whiskers.Services.Metrics.IMetricsQueryService, MetricsQueryService>();
+        // R1-55: tiered roll-up + per-tier retention, and the retention's one (gated) write path.
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.IMetricRollupService, Whiskers.Services.Metrics.MetricRollupService>();
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.IMetricRetentionService>(sp =>
+            new Whiskers.Services.Metrics.MetricRetentionService(
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<Whiskers.Services.Persistence.IAppSettingsStore>(),
+                sp.GetRequiredService<ILogger<Whiskers.Services.Metrics.MetricRetentionService>>(),
+                sp.GetRequiredService<DataPathOptions>().AppSettingsJson));
         // Metrics source seam: collector reads through IMetricsSource so a server can be switched to a
         // push/scrape TSDB (VictoriaMetrics) instead of SSH/Docker. Docker is the default + fallback.
         builder.Services.AddHttpClient();

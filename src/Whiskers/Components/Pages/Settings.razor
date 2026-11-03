@@ -208,6 +208,11 @@ else
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveMetricAlert" Class="mt-2">@L["Settings_Button_Save"]</MudButton>
     </MudExpansionPanel>
 
+    @* R1-55: retention of the metric tiers and the alert history. *@
+    <MudExpansionPanel Text="@L["MetricRetention_Panel"]" Icon="@Icons.Material.Filled.History">
+        <MetricRetentionPanel />
+    </MudExpansionPanel>
+
     @* RoadToSAP Phase 1: hide the Image-Updates settings when the ImageUpdate module is disabled. *@
     @if (ModuleRegistry.IsEnabled("image-updates"))
     {

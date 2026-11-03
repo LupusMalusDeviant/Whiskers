@@ -15,7 +15,8 @@ Strongly-typed settings classes bound from configuration (env vars / `.env` / `a
 | `OidcSettings.cs` | Generic OpenID Connect provider settings. |
 | `DockerSettings.cs` | Docker connection defaults. |
 | `AuditSettings.cs` | Section `Audit` (R1-23): `RetentionDays` for the audit log and MCP call history (default 365, never below 30). |
-| `MetricsSettings.cs` | Metric collection cadence / retention; `ScrapeToken` gates the Prometheus `/metrics` endpoint (disabled when unset). |
+| `MetricsSettings.cs` | Metric collection cadence; `ScrapeToken` gates the Prometheus `/metrics` endpoint (disabled when unset). The retention keys of the same section are read by `MetricRetention` instead. |
+| `MetricRetention.cs` | R1-55: retention per metric tier and of the alert history, in the `Metrics` section — `RetentionDays` (raw, default 7, 1–365), `Rollup10mRetentionDays` (30), `Rollup1hRetentionDays` (180), `Rollup8hRetentionDays` (730), `AlertHistoryRetentionDays` (30); 1–3650 days. A key from the environment (`Metrics__…`) or `appsettings.json` is read-only; the others are edited on the Settings page (gated `config.save`). |
 | `HealthMonitorSettings.cs` | Health-monitor thresholds. |
 | `ImageUpdateSettings.cs` | Image-update check cadence. |
 | `AutoPatchSettings.cs` | Nightly security auto-patching (section `AutoPatch`): on/off, dry run, window hour, severity, limit, exclusions. |

@@ -29,7 +29,10 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     private readonly Whiskers.Services.Metrics.HostLoad.HostLoadEvaluator _hostLoad;
     private readonly Whiskers.Services.Metrics.HostLoad.ApiLatencyEvaluator _apiLatency;
     private readonly Whiskers.Services.Metrics.HostLoad.RollingBaseline _baseline;
+    private readonly IMetricRetentionService? _retention;
+    private readonly IMetricRollupService _rollup;
     private DateTime _lastPrune;                 // OPT-2: prune at most hourly, not every 30s cycle
+    private DateTime _nextRollup;                // R1-55: when the next 10-minute window closes (or now, while catching up)
     private DateTime _lastAuditPrune;            // R1-23: the audit trail daily — each run verifies the whole trail first
     private const int MaxStatsConcurrency = 8;   // OPT-11.2: bound the per-container stats fan-out
 
@@ -42,8 +45,12 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         IOptionsMonitor<MetricsSettings> metricsSettings,
         ILogger<MetricsCollectorService> logger,
         Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
-        EffectiveInterval<MetricsSettings>? interval = null)
+        EffectiveInterval<MetricsSettings>? interval = null,
+        IMetricRetentionService? retention = null,
+        IMetricRollupService? rollup = null)
     {
+        _retention = retention;
+        _rollup = rollup ?? new MetricRollupService();
         _interval = interval ?? IntervalValidation.MetricsCollection(metricsSettings, logger);
         _services = services;
         _alertSettings = alertSettings;
@@ -73,23 +80,43 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
             _warnedUnreadableSettings = false;
             return current;
         }
-        catch (Exception ex) when (_lastSettings is not null)
+        catch (Exception ex)
         {
+            // R1-55 (R1-41 leftover): also when the very first read fails there is something to go on — the defaults —
+            // instead of an exception before the loop has started.
             if (!_warnedUnreadableSettings)
             {
                 _warnedUnreadableSettings = true;
-                _logger.LogWarning("Metrics settings cannot be read ({Error}); keeping the last valid ones until app-settings.json is fixed",
+                _logger.LogWarning(_lastSettings is null
+                        ? "Metrics settings cannot be read ({Error}); using the defaults until app-settings.json is fixed"
+                        : "Metrics settings cannot be read ({Error}); keeping the last valid ones until app-settings.json is fixed",
                     ex.Message);
             }
-            return _lastSettings;
+            return _lastSettings ?? new MetricsSettings();
+        }
+    }
+
+    /// <summary>R1-55: the tiers' retention as the cycle reads it — never throws (the service keeps the last valid one).</summary>
+    private MetricRetention Retention()
+    {
+        try
+        {
+            return (_retention ?? _services.GetService<IMetricRetentionService>())?.Current ?? MetricRetention.Default;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Metric retention cannot be read; the defaults apply to this run");
+            return MetricRetention.Default;
         }
     }
 
     protected override async Task RunAsync(CancellationToken ct)
     {
         var startup = Settings();
-        _logger.LogInformation("Metrics collector started (interval: {Interval}s, retention: {Retention}d, enabled: {Enabled})",
-            startup.CollectionIntervalSeconds, startup.RetentionDays, startup.Enabled);
+        var startupRetention = Retention();
+        _logger.LogInformation("Metrics collector started (interval: {Interval}s, retention raw/10m/1h/8h: {Raw}/{TenMinutes}/{Hour}/{EightHours}d, enabled: {Enabled})",
+            startup.CollectionIntervalSeconds, startupRetention.RawDays, startupRetention.TenMinuteDays,
+            startupRetention.HourDays, startupRetention.EightHourDays, startup.Enabled);
         await Task.Delay(StartupDelay, ct);
 
         while (!ct.IsCancellationRequested)
@@ -129,6 +156,19 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                 catch (Exception ex) when (!IsHostStopping(ex, ct))
                 {
                     _logger.LogWarning(ex, "Could not record the metrics cycle");
+                }
+
+                // R1-55: roll-up and retention, after this cycle's samples are saved (so no later sample can fall into a
+                // window it closes) and on the settings this cycle read — never re-read here, where an unreadable
+                // app-settings.json used to throw every hour and stop every prune (R1-41 leftover). Its own try: a failed
+                // roll-up or prune is logged and the next cycle runs; a failed collection does not hold up retention.
+                try
+                {
+                    await MaintainAsync(DateTime.UtcNow, Retention(), ct);
+                }
+                catch (Exception ex) when (!IsHostStopping(ex, ct))
+                {
+                    _logger.LogError(ex, "Metric roll-up or retention failed; the next cycle tries again");
                 }
             }
 
@@ -308,22 +348,6 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
 
         await db.SaveChangesAsync(ct);
 
-        // Prune old data at most once an hour — the retention windows are days, so pruning on every
-        // 30s cycle just burns ExecuteDelete round-trips for nothing.
-        if (now - _lastPrune > TimeSpan.FromHours(1))
-        {
-            _lastPrune = now;
-            // Retention window is config-driven; floored so a 0/negative value cannot wipe live data.
-            var retentionDays = Math.Max(1, _metricsSettings.CurrentValue.RetentionDays);
-            var cutoff = now.AddDays(-retentionDays);
-            await db.ContainerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
-            await db.ServerMetrics.Where(m => m.Timestamp < cutoff).ExecuteDeleteAsync(ct);
-            await db.AlertHistory.Where(a => a.Timestamp < cutoff).ExecuteDeleteAsync(ct);
-
-        }
-
-        _lastAuditPrune = await PruneAuditIfDueAsync(_services, db, now, _lastAuditPrune, ct, _logger);
-
         // Bound the in-memory alert-state map: drop per-container entries whose container is gone.
         // "disk:{server}" keys are kept — one per server, stable.
         var liveIds = containers.Select(c => c.Id).ToHashSet();
@@ -332,6 +356,47 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                 _alert.TryRemove(kv.Key, out _);
 
         _logger.LogDebug("Collected metrics for {ContainerCount} containers", metrics.Count);
+    }
+
+    /// <summary>R1-55: rolls up the windows that closed (each 10 minutes, every cycle while an upgrade catches up), applies
+    /// the tiers' retention at most hourly, and the audit retention daily (R1-23). A failed roll-up is retried next cycle
+    /// and never holds up retention, which deletes nothing a coarser tier has not taken over anyway.</summary>
+    internal async Task MaintainAsync(DateTime now, MetricRetention retention, CancellationToken ct)
+    {
+        using var scope = _services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+
+        if (now >= _nextRollup)
+        {
+            try
+            {
+                var result = await _rollup.RollUpAsync(db, now, ct);
+                var tenMinutes = MetricTiers.Size(MetricTiers.Minutes[0]);
+                _nextRollup = result.MoreDue ? now : MetricTiers.Floor(now, tenMinutes) + tenMinutes;
+                if (result.Windows > 0) _logger.LogDebug("Rolled up {Windows} metric windows", result.Windows);
+            }
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
+            {
+                _logger.LogError(ex, "Metric roll-up failed; nothing it had not committed is deleted, the next cycle tries again");
+            }
+        }
+
+        // Pruned at most once an hour — the retention windows are days, so pruning on every 30s cycle just burns
+        // ExecuteDelete round-trips for nothing.
+        if (now - _lastPrune > TimeSpan.FromHours(1))
+        {
+            _lastPrune = now;
+            try
+            {
+                await _rollup.PruneAsync(db, now, retention, ct);
+            }
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
+            {
+                _logger.LogError(ex, "Metric retention failed; the next run is in an hour");
+            }
+        }
+
+        _lastAuditPrune = await PruneAuditIfDueAsync(_services, db, now, _lastAuditPrune, ct, _logger);
     }
 
     /// <summary>Per-container threshold (sustained high CPU/RAM) + simple anomaly (rolling z-score).
