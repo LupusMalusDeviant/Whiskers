@@ -883,10 +883,17 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `OperationalCorrelationTests` follows one request through decision, approval, execution and audit using stable IDs.
-- [ ] Structured logs can be enabled through supported configuration.
-- [ ] Document actionable loop-stall, operation-incomplete and audit-failure signals.
-- [ ] Correlation metadata passes R1-25 redaction checks.
+- [x] `OperationalCorrelationTests` follows one request through decision, approval, execution and audit using stable IDs.
+  (`X-Request-Id` → log scope `HttpRequestId`, named in the gateway's decision, refusal and outcome lines; operation id
+  as log scope around the execution and in decision, approval, journal and audit row.)
+- [x] Structured logs can be enabled through supported configuration (`Logging__Console__FormatterName=json`,
+  `…__FormatterOptions__IncludeScopes=true`; the framework's JSON formatter behind the redacting factory).
+- [x] Document actionable loop-stall, operation-incomplete and audit-failure signals
+  (`docs/operations/observability.md`; the audit trail's completeness is now also on `/metrics`:
+  `whiskers_self_audit_events_pending`, `whiskers_self_audit_intents_unsettled`, `whiskers_self_audit_legacy_write_failed`).
+- [x] Correlation metadata passes R1-25 redaction checks (ids through the redacting factory unchanged; a client id
+  outside `A-Z a-z 0-9 . _ -` / 64 characters is replaced, never echoed or logged; acceptance never consults the secret
+  registry — no membership oracle before sign-in — and a secret sent as the id is `***` in every log line).
 
 **Out of scope:** Requiring an external tracing backend for a single-instance installation.
 

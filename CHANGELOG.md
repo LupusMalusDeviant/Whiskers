@@ -8,12 +8,34 @@ All notable changes to Whiskers are documented here. The format follows
 
 - R1-41/R1-54 follow-up: **a stop at the wrong moment no longer rewrites what happened.** An e-mail the SMTP server
   already took and partially refused now stays a partial refusal, with who was reached, when Whiskers stops while
-  saying goodbye — before, the stop turned it into a cancellation and the retry mailed the reached recipients again. An auto-update whose
-  container was replaced and verified is recorded as done when Whiskers stops during the health check that follows,
-  not as a failure. A retry that ran out of time in Whiskers' own queue no longer counts against the server's circuit,
+  saying goodbye — before, the stop turned it into a cancellation and the retry mailed the reached recipients again.
+  An auto-update whose container was replaced and verified is recorded as done when Whiskers stops during the health
+  check that follows, not as a failure. A retry that ran out of time in Whiskers' own queue no longer counts against the server's circuit,
   and a first attempt that ran out of time there is no longer mistaken for a broken tunnel and sent again.
   The CVE monitor's start log shows the effective interval and no longer reads raw options outside its recovering loop,
   and the background-loop ratchet now also flags work that runs in a loop outside the catch that recovers a cycle.
+- R1-53: **One request can be followed from the client to the audit row, and the logs can be JSON.** Every HTTP answer
+  now carries an `X-Request-Id`: the client's own when it is safe (1 to 64 characters of `A-Z a-z 0-9 . _ -`), else
+  the W3C trace id of an incoming `traceparent`, else a new one — an unsafe value is replaced, never echoed or logged.
+  Whether an id is accepted never depends on Whiskers' secrets (that would let anyone probe them before signing in); a
+  secret sent as the id goes back only to its sender and is written as `***` in every log line, like any other value
+  the log redaction catches. The id is the log scope `HttpRequestId`. The Mutation Gateway now writes
+  one line per decision (`Operation … decided …: decision …, request …`), one per refusal or wait for approval and one
+  per outcome (`… Executed: verification …, approval …, audit …, request …`; `Warning` when it failed), and
+  puts the operation id around the whole execution as the log scope `OperationId`, so the lines of the services it
+  calls carry it too. The ids pass the log redaction (R1-25) unchanged; nothing else of the request (headers, path,
+  query, body) is logged for this. Structured logs need no new setting: `Logging__Console__FormatterName=json` and
+  `Logging__Console__FormatterOptions__IncludeScopes=true` write one redacted JSON object per line with the scopes.
+  `/metrics` adds the audit trail's completeness, so far only the `audit` readiness check:
+  `whiskers_self_audit_events_pending`, `whiskers_self_audit_intents_unsettled` and
+  `whiskers_self_audit_legacy_write_failed`. The new guide `docs/operations/observability.md` lists where the logs
+  are, how to follow a request, and the loop-stall, operation-incomplete and audit-failure signals with example
+  alert rules. The correlation middleware is registered first in the pipeline; the forwarded-headers and
+  authentication order behind it is unchanged. No database change. **Upgrade notes:** at the default `Information`
+  level the gateway now logs two to three lines per mutation; raise `Logging__LogLevel__Whiskers.Services.Mutations`
+  to `Warning` to keep only failed outcomes. An `X-Request-Id` a reverse proxy already sets is taken over when it
+  is safe.
+
 - R1-54: **Notifications no longer reach into Whiskers' own network unless an Admin allows it.** Every notification
   channel (Mattermost, Matrix, Telegram, ntfy, Discord, Slack, the outgoing webhook) and the e-mail channel's SMTP host
   now go through one outbound guard: it resolves the name once, refuses it when any answer is a loopback, link-local

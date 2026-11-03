@@ -16,7 +16,8 @@ using Whiskers.Services.Persistence;
 namespace Whiskers.Startup;
 
 /// <summary>The HTTP request pipeline + startup warm-up, moved <b>verbatim</b> from Program.cs. The middleware
-/// ORDER is security-critical (protected layer, docs/ARCHITECTURE.md): forwarded headers first, then the fixed
+/// ORDER is security-critical (protected layer, docs/ARCHITECTURE.md): the request correlation id (R1-53, decides
+/// nothing) ahead of everything, forwarded headers first among the rest, then the fixed
 /// <c>Antiforgery → Authentication → [LAN bypass] → McpBearer → Authorization</c> chain. This method keeps
 /// every <c>Use*</c>/<c>Map*</c> call in the exact same order as before — nothing is reordered, only relocated
 /// (the McpCallLog middleware still sits between the endpoint maps exactly where it did).</summary>
@@ -29,6 +30,10 @@ public static class WhiskersPipelineExtensions
     {
         var configuredPathBase = app.Configuration["PathBase"] ?? "";
         var authDisabled = app.Configuration.GetValue<bool>("Auth:Disabled");
+
+        // R1-53: the request's correlation id (X-Request-Id, log scope HttpRequestId) — added in front of everything,
+        // so it moves nothing below. It reads one header, decides nothing and touches neither scheme nor client IP.
+        app.UseMiddleware<Whiskers.Services.Observability.Correlation.RequestCorrelationMiddleware>();
 
         // Forwarded headers MUST come first so scheme (https) is detected before anything else
         var forwardedHeadersOptions = new ForwardedHeadersOptions
@@ -818,6 +823,23 @@ public static class WhiskersPipelineExtensions
             sb.AppendLine("# HELP whiskers_self_notification_outbox_unsaved 1 while a change of the outbox is not on disk yet (file unavailable or its last write failed); retried every pass");
             sb.AppendLine("# TYPE whiskers_self_notification_outbox_unsaved gauge");
             sb.AppendLine($"whiskers_self_notification_outbox_unsaved {(o.Unsaved ? 1 : 0)}");
+        }
+
+        var audit = services.GetService<Whiskers.Services.Mutations.IAuditRecovery>();
+        if (audit is not null)
+        {
+            // R1-53: the audit trail's completeness (R1-19), so far only the `audit` readiness check — now a number an
+            // alert can watch. No database call; the outbox count is a directory listing.
+            var health = audit.Health;
+            sb.AppendLine("# HELP whiskers_self_audit_events_pending Audit events not written yet: outcomes kept for a retry, refusals in the outbox, and lost events. Above zero for minutes means the audit database is failing.");
+            sb.AppendLine("# TYPE whiskers_self_audit_events_pending gauge");
+            sb.AppendLine($"whiskers_self_audit_events_pending {health.PendingEvents}");
+            sb.AppendLine("# HELP whiskers_self_audit_intents_unsettled Operations whose audit intent has no outcome and that do not run in this process (1 until the first recovery pass): an operation whose result is not on record.");
+            sb.AppendLine("# TYPE whiskers_self_audit_intents_unsettled gauge");
+            sb.AppendLine($"whiskers_self_audit_intents_unsettled {health.UnsettledIntents}");
+            sb.AppendLine("# HELP whiskers_self_audit_legacy_write_failed 1 while a write of the older, non-gateway audit failed in the last hour");
+            sb.AppendLine("# TYPE whiskers_self_audit_legacy_write_failed gauge");
+            sb.AppendLine($"whiskers_self_audit_legacy_write_failed {(health.LegacyWriteFailed ? 1 : 0)}");
         }
 
         if (circuit is not null)
