@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Whiskers.Configuration;
 using Whiskers.Services.Persistence;
 
@@ -21,18 +22,36 @@ public sealed class AutoPatchNightlyState
 /// </summary>
 public interface IAutoPatchNightlyStore
 {
+    /// <summary>The recorded state; an empty one when none was ever written. Throws when the file exists but cannot be
+    /// read — the caller must not take that for "no night ran".</summary>
     Task<AutoPatchNightlyState> LoadAsync();
     Task SaveAsync(AutoPatchNightlyState state);
 }
 
 /// <inheritdoc cref="IAutoPatchNightlyStore"/>
+/// <remarks>Deliberately not a <see cref="JsonFileStore{T}"/>: that one falls back to the previous generation when the
+/// file is damaged, and the previous generation of this file is the night before — loading it would make tonight due
+/// again. Here a damaged file stays an error (fail closed: no night runs until it is fixed or removed), and a write is
+/// published atomically without keeping a previous generation.</remarks>
 public sealed class AutoPatchNightlyStore(DataPathOptions paths) : IAutoPatchNightlyStore
 {
-    private readonly JsonFileStore<AutoPatchNightlyState> _file = new(paths.AutoPatchNightlyJson);
+    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
+    private readonly string _path = paths.AutoPatchNightlyJson;
 
-    public Task<AutoPatchNightlyState> LoadAsync() => _file.LoadAsync();
+    public async Task<AutoPatchNightlyState> LoadAsync()
+    {
+        if (!File.Exists(_path)) return new AutoPatchNightlyState();
+        var text = await File.ReadAllTextAsync(_path);
+        return JsonSerializer.Deserialize<AutoPatchNightlyState>(text, Json)
+               ?? throw new JsonException("The nightly AutoPatch state is empty.");
+    }
 
-    public Task SaveAsync(AutoPatchNightlyState state) => _file.SaveAsync(state);
+    public async Task SaveAsync(AutoPatchNightlyState state)
+    {
+        var dir = Path.GetDirectoryName(_path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        await DurableFile.WriteAllTextAsync(_path, JsonSerializer.Serialize(state, Json), keepPrevious: false);
+    }
 }
 
 /// <summary>Kept in memory only: for code built outside the host (tests).</summary>

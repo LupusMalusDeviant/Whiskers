@@ -123,6 +123,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
                 long runId;
                 var startedAt = DateTime.UtcNow;
                 var run = NewRun(task, startedAt);
+                var (lastRun, dueAt) = (task.LastRun, task.NextRun);
                 try
                 {
                     task.LastRun = startedAt;
@@ -133,7 +134,10 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
                 }
                 catch
                 {
+                    // Nothing of it may be saved later with the error below: the occurrence stays due, no run is on
+                    // record, and the error save does not consume it either.
                     db.Entry(run).State = EntityState.Detached;
+                    (task.LastRun, task.NextRun) = (lastRun, dueAt);
                     _running.TryRemove(task.TaskId, out _);
                     throw;
                 }

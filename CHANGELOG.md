@@ -37,7 +37,8 @@ All notable changes to Whiskers are documented here. The format follows
   under their id stays refused as "outcome unknown" and their audit intent is settled as unknown. Admins get one
   notification (`operations_interrupted`) naming what was cut off, so they can check the targets. The AutoPatch night
   is kept in `autopatch-nightly.json` (not restored from a self-backup): its start must be saved before anything is
-  patched (otherwise the night is skipped), so a restart in the window hour does not run it twice; a night that was cut
+  patched (otherwise the night is skipped) and an unreadable state file stops the nights until it is fixed, so a
+  restart in the window hour does not run it twice; a night that was cut
   off, or ended early, still says so after a restart in the AutoPatch status (`get_auto_patch_status`).
 
 - R1-38: **Nothing waits without end.** An AI provider that sends no response, stops sending in the middle of an

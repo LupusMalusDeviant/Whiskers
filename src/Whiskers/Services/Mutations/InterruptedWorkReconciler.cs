@@ -17,10 +17,11 @@ namespace Whiskers.Services.Mutations;
 /// update policy is switched off: the same update is not tried again until an admin has checked the container and
 /// switches AutoUpdate on again.</item>
 /// </list>
+/// AutoUpdate waits for this pass (<see cref="IStartupReconciliation"/>) before its first check.
 /// One notification names them all, so an admin checks the targets: whether an interrupted update, backup or command
 /// took effect is unknown.
 /// </summary>
-public sealed class InterruptedWorkReconciler : FleetBackgroundService
+public sealed class InterruptedWorkReconciler : FleetBackgroundService, IStartupReconciliation
 {
     /// <summary>The result text of an interrupted task run (also how the history and the task page recognise one).</summary>
     public const string InterruptedResult =
@@ -54,6 +55,10 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService
         _processStart = processStartUtc;
     }
 
+    private readonly TaskCompletionSource _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public Task Completed => _completed.Task;
+
     protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         try
@@ -64,8 +69,12 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService
         catch (Exception ex)
         {
             // Nothing is lost: the rows stay as they are and are classified the same way (outcome unknown) until the
-            // next start tries again.
+            // next start tries again; an open AutoUpdate attempt keeps its container from being updated meanwhile.
             _logger.LogError(ex, "Interrupted work of an earlier run could not be reconciled");
+        }
+        finally
+        {
+            _completed.TrySetResult();
         }
     }
 
@@ -137,6 +146,9 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService
             .ToListAsync(ct);
         foreach (var update in updates)
         {
+            // One transaction: the attempt is closed only together with switching its policy off. Closed alone, nothing
+            // would keep the next check from starting the same update again.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             var closed = await db.UpdateHistory
                 .Where(h => h.Id == update.Id && h.CompletedAt == null)
                 .ExecuteUpdateAsync(s => s
@@ -155,6 +167,7 @@ public sealed class InterruptedWorkReconciler : FleetBackgroundService
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(p => p.AutoUpdate, false)
                     .SetProperty(p => p.LastUpdateResult, InterruptedUpdateResult), ct);
+            await tx.CommitAsync(ct);
             marked.Add($"auto-update of {update.ContainerName} (started {update.StartedAt:u}; AutoUpdate switched off for it)");
         }
 

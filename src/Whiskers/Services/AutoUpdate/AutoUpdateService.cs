@@ -25,6 +25,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
     // R1-31 (INV-52): a snapshot holds the container's environment, so it is stored encrypted with a vault-derived key.
     private readonly Whiskers.Services.Vault.IVaultService? _vault;
     private readonly Whiskers.Services.Mutations.IShutdownDrain _drain;
+    private readonly Whiskers.Services.Mutations.IStartupReconciliation _reconciled;
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
@@ -38,9 +39,11 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         IAutomationOwnerStore owners,
         ILogger<AutoUpdateService> logger,
         Whiskers.Services.Vault.IVaultService? vault = null,
-        Whiskers.Services.Mutations.IShutdownDrain? drain = null)
+        Whiskers.Services.Mutations.IShutdownDrain? drain = null,
+        Whiskers.Services.Mutations.IStartupReconciliation? reconciled = null)
     {
         _vault = vault;
+        _reconciled = reconciled ?? Whiskers.Services.Mutations.NoStartupReconciliation.Instance;
         _drain = drain ?? Whiskers.Services.Mutations.NoShutdownDrain.Instance;
         _automation = automation;
         _owners = owners;
@@ -56,6 +59,8 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
     {
         _logger.LogInformation("Auto-update service started (opt-in only). Check interval: {Interval}m", CheckInterval.TotalMinutes);
         await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+        // R1-39: not before the start-up pass has switched off the policies of updates an earlier process cut off.
+        await _reconciled.Completed.WaitAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {

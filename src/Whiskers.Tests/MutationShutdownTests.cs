@@ -556,6 +556,143 @@ public sealed class MutationShutdownTests : IDisposable
         Assert.False(service.IsRunning);
     }
 
+    [Fact]
+    public async Task An_interrupted_update_is_closed_only_together_with_switching_its_policy_off()
+    {
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.UpdatePolicies.Add(new UpdatePolicyEntity { ContainerId = "w1", ContainerName = "web", ServerId = "local", AutoUpdate = true });
+            db.UpdateHistory.Add(new UpdateHistoryEntity
+            {
+                ContainerId = "w1", ContainerName = "web", ServerId = "local", StartedAt = DateTime.UtcNow.AddMinutes(-5),
+                Error = AutoUpdateService.InProgressResult,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // The policy write fails (a stop, a database error): the attempt must stay open, so nothing re-runs it.
+        using (var failing = ProviderWith(new FailingCommands("UpdatePolicies")))
+        {
+            var scopes = failing.GetRequiredService<IServiceScopeFactory>();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => new InterruptedWorkReconciler(scopes,
+                new DbOperationJournal(scopes), new FakeNotifications(), NullLogger<InterruptedWorkReconciler>.Instance,
+                DateTime.UtcNow).ReconcileAsync());
+        }
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            Assert.Null((await db.UpdateHistory.SingleAsync()).CompletedAt);
+            Assert.True((await db.UpdatePolicies.SingleAsync()).AutoUpdate);
+        }
+
+        // The next pass does both.
+        await Reconciler(new FakeNotifications(), DateTime.UtcNow).ReconcileAsync();
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            Assert.NotNull((await db.UpdateHistory.SingleAsync()).CompletedAt);
+            Assert.False((await db.UpdatePolicies.SingleAsync()).AutoUpdate);
+        }
+    }
+
+    [Fact]
+    public async Task A_run_whose_record_cannot_be_saved_neither_runs_nor_consumes_its_occurrence()
+    {
+        var due = await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var executor = new GatedExecutor();
+        using var failing = ProviderWith(new FailingRunInsert());
+        var scheduler = new SchedulerService(failing.GetRequiredService<IServiceScopeFactory>(), executor, null!,
+            NullLogger<SchedulerService>.Instance, Drain());
+
+        await scheduler.CheckAndRunDueTasks(CancellationToken.None);
+
+        Assert.Empty(executor.Ran);
+        Assert.False(await AnyRunAsync("t1"));
+        var task = await TaskAsync("t1");
+        Assert.Equal(due, task.NextRun);                       // still due: it runs at the next tick
+        Assert.False(task.LastSuccess);                        // the error was recorded
+        Assert.StartsWith("FEHLER", task.LastResult);
+    }
+
+    [Fact]
+    public async Task An_unreadable_nightly_state_runs_no_night_and_keeps_no_older_generation()
+    {
+        var paths = new DataPathOptions(_dataDir);
+        var store = new AutoPatchNightlyStore(paths);
+        await store.SaveAsync(new AutoPatchNightlyState { Day = new DateOnly(2026, 11, 2) });
+        await store.SaveAsync(new AutoPatchNightlyState { Day = new DateOnly(2026, 11, 3), StartedAt = DateTime.UtcNow });
+        Assert.False(File.Exists(paths.AutoPatchNightlyJson + ".bak"));   // no previous night to fall back to
+
+        await File.WriteAllTextAsync(paths.AutoPatchNightlyJson, "{ torn");
+        var service = AutoPatchTests.NewService(new AutoPatchTests.RecordingRunner(),
+            new CveFindingsStore(persistPath: AutoPatchTests.TempPath()), new AutoPatchSettings { Enabled = true },
+            new MemoryAutomationOwners(), () => DateTime.UtcNow, store, Drain());
+
+        await Assert.ThrowsAnyAsync<Exception>(service.LoadNightlyAsync);
+        Assert.Equal(AutoPatchService.NightStateUnreadable, service.LastCycle!.Error);
+    }
+
+    [Fact]
+    public async Task A_night_cancelled_before_its_first_container_is_not_recorded_as_complete()
+    {
+        var cves = new CveFindingsStore(persistPath: AutoPatchTests.TempPath()) { LastScanAt = DateTime.UtcNow };
+        cves.Set(AutoPatchTests.Scan("a", "local", (CveSeverity.Critical, "1")));
+        var owners = new MemoryAutomationOwners();
+        await owners.SetAsync(IAutomationOwnerStore.AutoPatch, "user:admin@example.com");
+        var paths = new DataPathOptions(_dataDir);
+        var settings = new AutoPatchSettings { Enabled = true, DryRun = false };
+        var runner = new AutoPatchTests.RecordingRunner();
+        var service = AutoPatchTests.NewService(runner, cves, settings, owners, () => DateTime.UtcNow,
+            new AutoPatchNightlyStore(paths), Drain(), AutoPatchTests.Compose("a"));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();                                    // the host stops while the night is being planned
+
+        try { await service.RunNightlyRecordedAsync(cancelled.Token); }
+        catch (OperationCanceledException) { /* cut off: recorded without an end */ }
+
+        Assert.Empty(runner.Calls);
+        var restarted = AutoPatchTests.NewService(new AutoPatchTests.RecordingRunner(), cves, settings, owners,
+            () => DateTime.UtcNow, new AutoPatchNightlyStore(paths), Drain());
+        await restarted.LoadNightlyAsync();
+        Assert.NotNull(restarted.LastCycle?.Error);            // interrupted or stopped — never a clean night
+    }
+
+    /// <summary>A provider on the same database with one interceptor added.</summary>
+    private ServiceProvider ProviderWith(Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor interceptor)
+    {
+        var services = new ServiceCollection();
+        services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath}").AddInterceptors(interceptor));
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>Fails every command that writes the named table.</summary>
+    private sealed class FailingCommands(string table) : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> NonQueryExecutingAsync(
+            System.Data.Common.DbCommand command, Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken ct = default)
+            => command.CommandText.Contains($"UPDATE \"{table}\"", StringComparison.Ordinal)
+                ? throw new InvalidOperationException("the database went away")
+                : ValueTask.FromResult(result);
+    }
+
+    /// <summary>Fails the save that would put a run on record, once.</summary>
+    private sealed class FailingRunInsert : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        private int _failed;
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken ct = default)
+        {
+            var adding = eventData.Context!.ChangeTracker.Entries<TaskRunHistoryEntity>().Any(e => e.State == EntityState.Added);
+            if (adding && Interlocked.Exchange(ref _failed, 1) == 0)
+                throw new InvalidOperationException("disk full");
+            return ValueTask.FromResult(result);
+        }
+    }
+
     private SchedulerService Scheduler(ITaskExecutor executor, IShutdownDrain drain) =>
         new(Scopes, executor, null!, NullLogger<SchedulerService>.Instance, drain);
 

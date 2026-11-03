@@ -125,7 +125,17 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     /// that started and never ended was cut off, which the status shows. Internal for tests.</summary>
     internal async Task LoadNightlyAsync()
     {
-        var state = await _nightly.LoadAsync();
+        AutoPatchNightlyState state;
+        try
+        {
+            state = await _nightly.LoadAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Fail closed: an unreadable state could hide that tonight already ran. Nothing runs until it is readable.
+            LastCycle = new(_utcNow(), _utcNow(), _settings.CurrentValue.DryRun, [], [], NightStateUnreadable);
+            throw;
+        }
         _lastNightlyRun = state.Day;
         _nightlyLoaded = true;
         if (state is { StartedAt: { } started, CompletedAt: null })
@@ -143,6 +153,10 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     internal const string InterruptedNight =
         "Interrupted: Whiskers stopped while this nightly cycle ran. Containers it had not reached were not patched; " +
         "it was not run again that night.";
+
+    internal const string NightStateUnreadable =
+        "Not run: the nightly state (autopatch-nightly.json) cannot be read, so it is unknown whether tonight already " +
+        "ran. No night runs until the file is fixed or removed.";
 
     internal const string NightNotRecorded =
         "Not run: the start of tonight's cycle could not be saved, so a restart could not tell that it ran. It runs " +
@@ -383,8 +397,13 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
 
         foreach (var candidate in plan.Candidates)
         {
-            if (ct.IsCancellationRequested) break;
             var c = candidate.Container;
+            if (ct.IsCancellationRequested)
+            {
+                // Said, so a night cut short is not recorded as complete (R1-39).
+                LastCycle = LastCycle! with { Error = $"Stopped before {c.Name}: the cycle was cancelled." };
+                break;
+            }
             // R1-39: once Whiskers is stopping, no further container is started; the one in progress is drained.
             using var draining = _drain.TryEnter($"auto-patch of '{c.Name}'");
             if (draining is null)

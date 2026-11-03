@@ -81,7 +81,9 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<ShutdownDrain>();
         services.AddSingleton<IShutdownDrain>(sp => sp.GetRequiredService<ShutdownDrain>());
         services.AddHostedService(sp => sp.GetRequiredService<ShutdownDrain>());
-        services.AddHostedService<InterruptedWorkReconciler>();
+        services.AddSingleton<InterruptedWorkReconciler>();
+        services.AddSingleton<IStartupReconciliation>(sp => sp.GetRequiredService<InterruptedWorkReconciler>());
+        services.AddHostedService(sp => sp.GetRequiredService<InterruptedWorkReconciler>());
         services.Configure<HostOptions>(o =>
         {
             if (o.ShutdownTimeout < ShutdownDrain.HostTimeout) o.ShutdownTimeout = ShutdownDrain.HostTimeout;
