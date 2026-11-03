@@ -523,6 +523,56 @@ public sealed class KillSwitchTests : IDisposable
         }
     }
 
+    /// <summary>R1-26 (INV-08): a running <c>instruct_agent</c> session used to keep the key's principal snapshot. Now
+    /// the key is re-read before every tool call: the one already running finishes, the next is refused, the run ends.</summary>
+    [Theory]
+    [InlineData("disabled")]
+    [InlineData("deleted")]
+    public async Task Revoked_key_stops_the_next_inflight_agent_tool_call(string how)
+    {
+        var f = KeyOwnedFixture();
+        var authority = new Whiskers.Services.Agent.AgentAuthority(f.Keys,
+            new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts));
+        var invoker = new AgentRunDoubles.Invoker(onCall: calls =>
+        {
+            // The key is revoked while the first call runs.
+            if (calls != 1) return;
+            if (how == "disabled") f.Keys.Data.ApiKeys.Single(k => k.Id == "k1").Enabled = false;
+            else f.Keys.Data.ApiKeys.RemoveAll(k => k.Id == "k1");
+        });
+        var provider = AgentRunDoubles.Provider(AgentRunDoubles.ToolTurn("c1", "c2"), AgentRunDoubles.TextTurn("done"));
+        var session = AgentRunDoubles.Session(AgentRunDoubles.KeyPrincipal("k1"), provider, invoker, authority);
+
+        var events = await AgentRunDoubles.CollectAsync(session);
+
+        Assert.Equal(1, invoker.Calls);                                   // the second call never ran
+        var refused = events.OfType<Whiskers.Models.Agent.AgentEvent.ToolExecuted>().Last();
+        Assert.Equal("c2", refused.Result.ToolCallId);
+        Assert.True(refused.Result.IsError);
+        Assert.Contains(how, refused.Result.Content);
+        Assert.Contains(events, e => e is Whiskers.Models.Agent.AgentEvent.Failed);
+        Assert.Equal(1, provider.Remaining);                              // no further provider round trip
+        Assert.DoesNotContain(events, e => e is Whiskers.Models.Agent.AgentEvent.AssistantDelta { Text: "done" });
+    }
+
+    [Fact]
+    public async Task A_lowered_key_runs_its_next_agent_tool_call_at_the_lower_level()
+    {
+        var f = KeyOwnedFixture();
+        var authority = new Whiskers.Services.Agent.AgentAuthority(f.Keys,
+            new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts));
+        var invoker = new AgentRunDoubles.Invoker(onCall: calls =>
+        {
+            if (calls == 1) f.Keys.Data.ApiKeys.Single(k => k.Id == "k1").PermissionLevel = "read";
+        });
+        var session = AgentRunDoubles.Session(AgentRunDoubles.KeyPrincipal("k1"),
+            AgentRunDoubles.Provider(AgentRunDoubles.ToolTurn("c1", "c2"), AgentRunDoubles.TextTurn("done")), invoker, authority);
+
+        await AgentRunDoubles.CollectAsync(session);
+
+        Assert.Equal(new[] { "admin", "read" }, invoker.Levels);
+    }
+
     public void Dispose()
     {
         _sp.Dispose();

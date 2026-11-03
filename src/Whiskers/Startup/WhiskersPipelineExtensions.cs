@@ -277,6 +277,8 @@ public static class WhiskersPipelineExtensions
                     new Claim(ClaimTypes.Email, user.Email!),
                     new Claim(ClaimTypes.Name, user.Email!),
                     new Claim(ClaimTypes.NameIdentifier, user.Id),
+                    // R1-26: the stamp the session is tied to; the cookie check ends it once the stamp changes.
+                    new Claim(Whiskers.Services.Auth.AuthConstants.SecurityStampClaim, user.SecurityStamp ?? ""),
                 }, authenticationType: "LocalPassword");
                 await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
                     new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = true });

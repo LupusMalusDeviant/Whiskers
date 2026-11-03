@@ -82,7 +82,20 @@ public sealed class UiMutationRunner : IUiMutationRunner
         var target = capability is null
             ? new MutationTarget("unknown", "")
             : MutationTargets.FromArguments(capability, args);
-        var request = new MutationRequest(capabilityId, await PrincipalAsync(), MutationSurface.Ui, target, args);
+        var (principal, session) = await PrincipalAsync();
+        var request = new MutationRequest(capabilityId, principal, MutationSurface.Ui, target, args);
+
+        // R1-26: the session is re-checked for every mutation, never taken from the role the page cached. A revoked
+        // session (deleted account, removed from the whitelist, changed stamp, unreadable store) is refused and the
+        // refusal recorded by the gateway; nothing runs.
+        if (!session.Valid)
+        {
+            var refused = await _gateway.RefuseAsync(request,
+                $"The session is no longer valid ({session.Reason}); sign in again.", ct);
+            var text = _text?["Session_Revoked_Refusal"];
+            throw new MutationRefusedException(text is { ResourceNotFound: false } ? text.Value
+                    : "Your session has ended. Sign in again.", MutationStatus.Denied, refused.OperationId);
+        }
 
         // A service that answers with a failure value instead of throwing is recorded as Failed (MutationResults).
         var outcome = await _gateway.ExecuteAsync(request,
@@ -119,7 +132,7 @@ public sealed class UiMutationRunner : IUiMutationRunner
             var target = capability is null
                 ? new MutationTarget("unknown", "")
                 : MutationTargets.FromArguments(capability, args);
-            await _gateway.RefuseAsync(new MutationRequest(capabilityId, await PrincipalAsync(), MutationSurface.Ui,
+            await _gateway.RefuseAsync(new MutationRequest(capabilityId, (await PrincipalAsync()).Principal, MutationSurface.Ui,
                 target, args), reason, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -152,20 +165,23 @@ public sealed class UiMutationRunner : IUiMutationRunner
         }, ct);
     }
 
-    /// <summary>The signed-in user. The role decides the level; the page's own role check stays in front of it.</summary>
-    private async Task<MutationPrincipal> PrincipalAsync()
+    /// <summary>The signed-in user, with the session re-checked now (R1-26). The current role decides the level; the
+    /// page's own role check stays in front of it. A revoked session holds <c>read</c>.</summary>
+    private async Task<(MutationPrincipal Principal, SessionCheck Session)> PrincipalAsync()
     {
         var email = await _user.GetEmailAsync();
-        var role = await _user.GetRoleAsync();
+        var session = await _user.CheckSessionAsync();
+        var role = session.Valid ? session.Role : AppRole.Viewer;
         var level = role switch
         {
             AppRole.Admin => McpPermissionLevels.Admin,
             AppRole.Operator => McpPermissionLevels.Write,
             _ => McpPermissionLevels.Read,
         };
-        return string.IsNullOrWhiteSpace(email)
+        var principal = string.IsNullOrWhiteSpace(email)
             ? new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.Anonymous, "unknown", level)
             : new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.User(email), email, level);
+        return (principal, session);
     }
 
     /// <summary>An anonymous object (<c>new { containerId, serverId }</c>) → tool-style arguments. Null values are

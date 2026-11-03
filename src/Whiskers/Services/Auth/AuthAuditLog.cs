@@ -16,6 +16,8 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
     public const string LoginAction = "auth.login";
     public const string LoginFailedAction = "auth.login_failed";
     public const string LogoutAction = "auth.logout";
+    /// <summary>A session ended because it no longer passed revalidation (R1-26).</summary>
+    public const string SessionRevokedAction = "auth.session_revoked";
 
     /// <summary>Rows waiting to be written; beyond this a row is dropped (and reported), never waited for.</summary>
     public const int Capacity = 1024;
@@ -58,6 +60,10 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
         if (string.IsNullOrEmpty(email)) return Task.CompletedTask;
         return Enqueue(new Row(email, LogoutAction, context.User.Identity?.AuthenticationType ?? "", Details(context, null), true));
     }
+
+    public Task SessionRevokedAsync(HttpContext? context, string? account, string surface, string reason) =>
+        Enqueue(new Row(string.IsNullOrWhiteSpace(account) ? "anonymous" : account, SessionRevokedAction, surface,
+            context is null ? $"reason={reason}" : Details(context, reason), false));
 
     private Task Enqueue(Row row)
     {

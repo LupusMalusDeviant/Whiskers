@@ -17,6 +17,11 @@ public interface IAuthAuditLog
 
     /// <summary>A sign-out of the current user.</summary>
     Task SignedOutAsync(HttpContext context);
+
+    /// <summary>A session ended by revalidation (R1-26): <paramref name="surface"/> is <c>cookie</c> or <c>circuit</c>,
+    /// <paramref name="reason"/> one of <see cref="SessionRevocationReasons"/>. <paramref name="context"/> is the request
+    /// when there is one (a circuit has none).</summary>
+    Task SessionRevokedAsync(HttpContext? context, string? account, string surface, string reason) => Task.CompletedTask;
 }
 
 /// <summary>Why a sign-in was refused, as recorded in the audit log.</summary>
