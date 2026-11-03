@@ -473,8 +473,26 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                 _thresholds.Forget(id);
                 _gaps.Forget(id);
             }
+        // Review round 2 (NIT-5): the host, disk and listing state of a server that is no longer configured.
+        // Every server still configured, enabled or not: a disabled server keeps its state (re-enabled, its breaches meet the
+        // gap rule and are closed); a removed one has nothing more to say.
+        var configured = scope.ServiceProvider.GetRequiredService<Whiskers.Services.ServerConfig.IServerConfigService>().GetServers()
+            .Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        static string? ServerOfSeries(string id) =>
+            id.StartsWith(DiskPrefix, StringComparison.Ordinal) ? id[DiskPrefix.Length..]
+            : id.StartsWith(HostPrefix, StringComparison.Ordinal) ? id[HostPrefix.Length..]
+            : id.StartsWith(ListingPrefix, StringComparison.Ordinal) ? id[ListingPrefix.Length..]
+            : null;
+        foreach (var id in _thresholds.Tracked().Concat(_gaps.Tracked()).Distinct().ToList())
+            if (ServerOfSeries(id) is { } owner && !configured.Contains(owner))
+            {
+                _thresholds.Forget(id);
+                _gaps.Forget(id);
+            }
+        foreach (var id in _hostLoad.Tracked())
+            if (!configured.Contains(id)) _hostLoad.Forget(id);
         foreach (var id in _containerServer.Keys.ToList())
-            if (Gone(id)) _containerServer.TryRemove(id, out _);
+            if (Gone(id) || !configured.Contains(_containerServer[id].ServerId)) _containerServer.TryRemove(id, out _);
 
         await SaveBreachesAsync();
         _logger.LogDebug("Collected metrics for {ContainerCount} containers", metrics.Count);
@@ -518,7 +536,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                 now, group.Key, name, NotificationEventTypes.MetricsGap, Whiskers.Services.Metrics.HostLoad.FindingKind.Cleared,
                 $"Metrics collection was held up: no readings of {name} for {Whiskers.Services.Metrics.HostLoad.BreachTracker.Describe(held)} " +
                 $"(tolerance {Whiskers.Services.Metrics.HostLoad.BreachTracker.Describe(tolerance)}); readings are back. Alerts open " +
-                $"before are reset and raised again only once new readings confirm them: {string.Join(", ", group.Select(x => x.Alert))}.",
+                $"before are closed (unconfirmed) and raised again only if new readings confirm them: {string.Join(", ", group.Select(x => x.Alert))}.",
                 0, 0, held), ct);
         }
     }
@@ -534,6 +552,15 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
         {
             var saved = await store.LoadAsync();
             _thresholds.Restore(saved.Thresholds, now);
+            // Review round 2 (MINOR-2): the server of each restored container breach, so a listing that fails in the first
+            // cycle keeps it like any other (not forgotten as a container of no known server).
+            foreach (var owner in saved.Containers ?? [])
+                if (!string.IsNullOrEmpty(owner.Id) && !string.IsNullOrEmpty(owner.ServerId))
+                    _containerServer.TryAdd(owner.Id, (owner.ServerId, owner.ServerName ?? owner.ServerId, owner.Name ?? owner.Id));
+            // Review round 2 (MINOR-3): a disk with a restored breach was read before — a df that stopped answering since
+            // is a gap, not "never answered since the start".
+            foreach (var s in saved.Thresholds)
+                if (s.Series.StartsWith(DiskPrefix, StringComparison.Ordinal)) _diskRead.Add(s.Series[DiskPrefix.Length..]);
             _hostLoad.Restore(saved.HostLoad, now);
             _savedBreaches = Serialize(saved);
             var open = saved.Thresholds.Concat(saved.HostLoad).Count(s => s.Reported is not null);
@@ -550,7 +577,16 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
     private async Task SaveBreachesAsync()
     {
         if (_services.GetService<IAlertBreachStore>() is not { } store) return;
-        var state = new AlertBreachFile { Thresholds = [.. _thresholds.Snapshot()], HostLoad = [.. _hostLoad.Snapshot()] };
+        var thresholds = _thresholds.Snapshot();
+        var state = new AlertBreachFile
+        {
+            Thresholds = [.. thresholds],
+            HostLoad = [.. _hostLoad.Snapshot()],
+            Containers = thresholds.Select(s => s.Series).Distinct()
+                .Where(id => _containerServer.ContainsKey(id))
+                .Select(id => new ContainerOwner(id, _containerServer[id].ServerId, _containerServer[id].ServerName, _containerServer[id].Name))
+                .OrderBy(o => o.Id, StringComparer.Ordinal).ToList(),
+        };
         var json = Serialize(state);
         if (json == _savedBreaches) return;
         try

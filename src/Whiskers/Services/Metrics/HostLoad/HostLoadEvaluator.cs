@@ -168,6 +168,12 @@ public sealed class HostLoadEvaluator
     /// <summary>R1-56 (review MAJOR-4): resumes the host breaches saved before a restart (<see cref="BreachTracker.Restore"/>).</summary>
     public void Restore(IEnumerable<BreachState> states, DateTime atUtc) => _tracker.Restore(states, atUtc);
 
+    /// <summary>Review round 2: the servers the host rules hold state for.</summary>
+    public IReadOnlyCollection<string> Tracked() => _tracker.Tracked();
+
+    /// <summary>Review round 2: drops the state of a server that is no longer configured.</summary>
+    public void Forget(string serverId) => _tracker.Forget(serverId);
+
     /// <summary>The CPU threshold this evaluator is using. Exposed so the rolling baseline can compare its
     /// learned mean against the SAME number rather than keeping its own copy — two definitions of "too high"
     /// would eventually disagree, and the drift guard would then be measuring against a limit nobody

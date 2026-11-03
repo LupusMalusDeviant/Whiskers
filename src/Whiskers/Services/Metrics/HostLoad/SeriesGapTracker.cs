@@ -68,7 +68,7 @@ public sealed class SeriesGapTracker
 
             series.Announced = atUtc;
             var open = openAlerts is { Count: > 0 }
-                ? $" Open alerts for it are reset and raised again only once a breach is confirmed by new readings: {string.Join(", ", openAlerts)}."
+                ? $" Open alerts for it are closed (unconfirmed) when readings are back and raised again only if new readings confirm them: {string.Join(", ", openAlerts)}."
                 : "";
             return new HostLoadFinding(atUtc, seriesId, name, NotificationEventTypes.MetricsGap, FindingKind.Raised,
                 $"No readings of {what} for {BreachTracker.Describe(gap)} (tolerance {BreachTracker.Describe(tolerance)})" +

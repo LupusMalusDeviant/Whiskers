@@ -85,6 +85,7 @@ public sealed class BreachTracker
         public double Peak;
         public DateTime? LastAt;             // R1-56: the previous reading, for the gap tolerance
         public DateTime? LastEnded;          // R1-56: when the last reported breach ended, for the minimum gap
+        public bool Resumed;                 // review round 2: taken over from before a restart
     }
 
     private readonly Dictionary<string, Breach> _breaches = new(StringComparer.Ordinal);
@@ -116,48 +117,72 @@ public sealed class BreachTracker
 
             // R1-56: a pause longer than the tolerance is not bridged. The breach starts again from this reading — it
             // cannot have been confirmed across readings that were never taken — and a reported one counts as ended at
-            // the last reading before the gap. The gap itself is reported by the caller (metrics_gap), never silently.
+            // the last reading before the gap. The gap itself is reported by the caller (metrics_gap).
+            // Review round 2 — one rule for every reset of a reported breach (a series gap, a paused server, a failed
+            // listing, alerts switched off and on, a held-up cycle): its raise is always closed, here, with
+            // <kind>_recovered saying the recovery is not confirmed. No raise is ever left open by a reset, and a breach
+            // that goes on is raised again only once new readings confirm it — as a new, closed-before incident.
+            HostLoadFinding? closed = null;
             if (r.GapTolerance is { } tolerance && breach.LastAt is { } last && atUtc - last > tolerance)
             {
-                if (breach.Reported is not null) breach.LastEnded = last;
+                if (breach.Reported is not null)
+                {
+                    breach.LastEnded = last;
+                    closed = new HostLoadFinding(atUtc, serverId, serverName, kind, FindingKind.Cleared,
+                        $"{serverName}: the {kind} alert is closed without a confirmed recovery — no readings for " +
+                        $"{Describe(atUtc - last)} (tolerance {Describe(tolerance)}). It is raised again only if new readings " +
+                        "confirm the breach.", value, threshold, last - (breach.Since ?? last));
+                }
                 Reset(breach);
             }
             breach.LastAt = atUtc;
 
-            if (value < threshold)
-                return BelowThreshold(atUtc, serverId, serverName, kind, value, threshold, breach, describeRecovery, r);
+            var judged = Judge(atUtc, serverId, serverName, kind, value, threshold, breach, describeBreach, describeRecovery, r);
+            if (closed is null) return judged;
+            // One transition per reading: a raise this same reading would make (a zero sustained duration) follows next.
+            if (judged?.What == FindingKind.Raised) breach.Reported = null;
+            return closed;
+        }
+    }
 
-            // Over the line again — any recovery in progress is cancelled.
-            breach.BelowSince = null;
-            breach.Since ??= atUtc;
-            breach.Peak = Math.Max(breach.Peak, value);
+    /// <summary>Judges one reading of a breach whose gap handling is done. Under <see cref="_sync"/>.</summary>
+    private static HostLoadFinding? Judge(
+        DateTime atUtc, string serverId, string serverName, string kind, double value, double threshold, Breach breach,
+        Func<double, TimeSpan, string> describeBreach, Func<double, string> describeRecovery, BreachRules r)
+    {
+        if (value < threshold)
+            return BelowThreshold(atUtc, serverId, serverName, kind, value, threshold, breach, describeRecovery, r);
 
-            var openFor = atUtc - breach.Since.Value;
-            if (openFor < r.SustainedFor) return null;
+        // Over the line again — any recovery in progress is cancelled.
+        breach.BelowSince = null;
+        breach.Since ??= atUtc;
+        breach.Peak = Math.Max(breach.Peak, value);
 
-            if (breach.Reported is null)
-            {
-                // R1-56: the minimum gap between two breaches of one series (CooldownMinutes). Held, not dropped: still
-                // open once the gap has passed, it is raised then.
-                if (breach.LastEnded is { } ended && atUtc - ended < r.MinimumGap) return null;
+        var openFor = atUtc - breach.Since.Value;
+        if (openFor < r.SustainedFor) return null;
 
-                breach.Reported = atUtc;
-                breach.ReportedValue = value;
-                return new HostLoadFinding(
-                    atUtc, serverId, serverName, kind, FindingKind.Raised,
-                    describeBreach(value, openFor), value, threshold, openFor);
-            }
-
-            // Already open. It is only worth saying again if it got materially worse — otherwise the operator
-            // learns nothing they do not already know, and learns to skip the next one.
-            if (value - breach.ReportedValue < r.EscalationStep) return null;
+        if (breach.Reported is null)
+        {
+            // R1-56: the minimum gap between two breaches of one series (CooldownMinutes). Held, not dropped: still
+            // open once the gap has passed, it is raised then.
+            if (breach.LastEnded is { } ended && atUtc - ended < r.MinimumGap) return null;
 
             breach.Reported = atUtc;
             breach.ReportedValue = value;
             return new HostLoadFinding(
-                atUtc, serverId, serverName, kind, FindingKind.Escalated,
-                "Getting worse — " + describeBreach(value, openFor), value, threshold, openFor);
+                atUtc, serverId, serverName, kind, FindingKind.Raised,
+                describeBreach(value, openFor), value, threshold, openFor);
         }
+
+        // Already open. It is only worth saying again if it got materially worse — otherwise the operator
+        // learns nothing they do not already know, and learns to skip the next one.
+        if (value - breach.ReportedValue < r.EscalationStep) return null;
+
+        breach.Reported = atUtc;
+        breach.ReportedValue = value;
+        return new HostLoadFinding(
+            atUtc, serverId, serverName, kind, FindingKind.Escalated,
+            "Getting worse — " + describeBreach(value, openFor), value, threshold, openFor);
     }
 
     private static HostLoadFinding? BelowThreshold(
@@ -177,6 +202,7 @@ public sealed class BreachTracker
         if (atUtc - breach.BelowSince < rules.ClearedFor) return null;
 
         var wasReported = breach.Reported;
+        var resumed = breach.Resumed;
         var openedAt = breach.Since;
         // The breach ended when the value dropped, not when we finished confirming it. Reporting the
         // confirmation window as part of the outage would overstate every incident by five minutes — small,
@@ -194,7 +220,8 @@ public sealed class BreachTracker
         var openFor = openedAt is { } start ? endedAt - start : TimeSpan.Zero;
         return new HostLoadFinding(
             atUtc, serverId, serverName, kind, FindingKind.Cleared,
-            describeRecovery(value) + $" It had been over the threshold for {Describe(openFor)}.",
+            describeRecovery(value) + $" It had been over the threshold for {Describe(openFor)}" +
+            (resumed ? " (resumed across a restart of Whiskers; the time it was not running is included)." : "."),
             value, threshold, openFor);
     }
 
@@ -204,6 +231,7 @@ public sealed class BreachTracker
         breach.Reported = null;
         breach.BelowSince = null;
         breach.Peak = 0;
+        breach.Resumed = false;
     }
 
     /// <summary>R1-56: drops every series of <paramref name="serverId"/> (a container that is gone), so the state stays
@@ -264,6 +292,7 @@ public sealed class BreachTracker
                     Peak = s.Peak,
                     LastAt = s.Reported is null ? null : atUtc,
                     LastEnded = s.LastEnded,
+                    Resumed = s.Reported is not null,
                 };
                 _serverNames[s.Series] = s.ServerName;
             }

@@ -200,6 +200,7 @@ public sealed class SustainedAlertTests : IDisposable
         public required MetricsCollectorService Collector { get; init; }
         public required ManualTime Clock { get; init; }
         public required FakeNotifications Notifications { get; init; }
+        public required MetricAlertSettings Alert { get; init; }
         public double Cpu { get; set; } = 10;
         public bool StatsFail { get; set; }
         public bool HostMissing { get; set; }
@@ -291,7 +292,7 @@ public sealed class SustainedAlertTests : IDisposable
             new StaticOptionsMonitor<MetricsSettings>(new MetricsSettings()),
             NullLogger<MetricsCollectorService>.Instance,
             new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(), interval, time: clock);
-        rig = new Rig { Collector = collector, Clock = clock, Notifications = notifications, Interval = TimeSpan.FromSeconds(intervalSeconds) };
+        rig = new Rig { Collector = collector, Clock = clock, Notifications = notifications, Alert = alert, Interval = TimeSpan.FromSeconds(intervalSeconds) };
         return rig;
     }
 
@@ -354,7 +355,11 @@ public sealed class SustainedAlertTests : IDisposable
         Assert.Equal(T0.AddMinutes(12), Assert.Single(OfType(rig.Events, "metrics_gap_recovered")).Timestamp);
         var raises = OfType(rig.Events, NotificationEventTypes.HighCpu);
         Assert.Equal([T0.AddMinutes(3), T0.AddMinutes(15)], raises.Select(e => e.Timestamp));
-        Assert.Empty(OfType(rig.Events, "high_cpu_recovered"));          // a gap is no recovery
+        // Review round 2: the raise the gap reset is closed when readings are back — said as unconfirmed, never left open.
+        var closed = Assert.Single(OfType(rig.Events, "high_cpu_recovered"));
+        Assert.Equal(T0.AddMinutes(12), closed.Timestamp);
+        Assert.Contains("closed without a confirmed recovery", closed.ImageInfo);
+        AssertEveryRaiseIsClosedInOrder(rig.Events, NotificationEventTypes.HighCpu, expectOpenAtEnd: true);
     }
 
     [Fact]
@@ -526,11 +531,22 @@ public sealed class SustainedAlertTests : IDisposable
         var after = Drive(restored, [.. Every(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(20), TimeSpan.FromMinutes(30), 95),
             .. Every(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(40), 40)]);
         Assert.Equal(FindingKind.Cleared, Assert.Single(after).What);
+        Assert.Contains("resumed across a restart of Whiskers", after[0].Summary);           // review round 2 (NIT-6)
 
         // A kind that is no breach kind, or a malformed series, is not taken over.
         var strict = Tracker();
         strict.Restore([saved[0] with { Kind = "server_unreachable" }, saved[0] with { Series = "a|b" }], T0);
         Assert.Empty(strict.Snapshot());
+    }
+
+    [Fact]
+    public void A_reset_raise_is_closed_first_and_a_breach_reportable_at_once_is_raised_at_the_next_reading()
+    {
+        // Review round 2: one transition per reading — the close of the reset raise, then the new raise, never one lost.
+        var rules = BreachRules.Threshold(TimeSpan.Zero, TimeSpan.Zero, BreachRules.MinimumGapTolerance);
+        var findings = Drive(Tracker(), [(TimeSpan.Zero, 95), (TimeSpan.FromMinutes(10), 95), (TimeSpan.FromMinutes(10.5), 95)], rules);
+        Assert.Equal([FindingKind.Raised, FindingKind.Cleared, FindingKind.Raised], findings.Select(x => x.What));
+        Assert.Equal([T0, T0.AddMinutes(10), T0.AddMinutes(10.5)], findings.Select(x => x.AtUtc));
     }
 
     [Fact]
@@ -564,9 +580,130 @@ public sealed class SustainedAlertTests : IDisposable
 
         rig.Paused = false;
         rig.HostMissing = false;
-        await rig.RunUntilAsync(TimeSpan.FromMinutes(31));
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(40));
+        rig.Cpu = 20;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(50));
         Assert.Empty(OfType(rig.Events, "metrics_gap_recovered"));
-        Assert.Single(OfType(rig.Events, NotificationEventTypes.HighCpu));
+
+        // Review round 2 (MAJOR-1): the pause reset the breach — its raise is closed on resume (unconfirmed), the breach
+        // that goes on is raised again from new readings and closed by its real recovery. No raise is left open.
+        var raises = OfType(rig.Events, NotificationEventTypes.HighCpu);
+        Assert.Equal([T0.AddMinutes(3), T0.AddMinutes(33)], raises.Select(e => e.Timestamp));
+        var closes = OfType(rig.Events, "high_cpu_recovered");
+        Assert.Equal([T0.AddMinutes(30), T0.AddMinutes(45)], closes.Select(e => e.Timestamp));
+        Assert.Contains("closed without a confirmed recovery", closes[0].ImageInfo);
+        AssertEveryRaiseIsClosedInOrder(rig.Events, NotificationEventTypes.HighCpu);
+    }
+
+    /// <summary>Raises and recoveries of <paramref name="kind"/> alternate, starting with a raise; all closed unless
+    /// <paramref name="expectOpenAtEnd"/>.</summary>
+    private static void AssertEveryRaiseIsClosedInOrder(IEnumerable<NotificationEvent> events, string kind, bool expectOpenAtEnd = false)
+    {
+        var sequence = events.Where(e => e.EventType == kind || e.EventType == NotificationEventTypes.Recovered(kind))
+            .Select(e => e.EventType == kind).ToList();
+        for (var i = 0; i < sequence.Count; i++) Assert.Equal(i % 2 == 0, sequence[i]);
+        Assert.Equal(expectOpenAtEnd, sequence.Count % 2 == 1);
+    }
+
+    [Fact]
+    public async Task Alerts_switched_off_and_on_again_close_the_raise_they_reset()
+    {
+        // Review round 2 (MINOR-4): re-enabling the alerts after more than the tolerance reset open breaches silently.
+        var rig = NewRig();
+        rig.Cpu = 97;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(5));
+        rig.Alert.Enabled = false;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(15));
+        rig.Alert.Enabled = true;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(25));
+        rig.Cpu = 20;
+        await rig.RunUntilAsync(TimeSpan.FromMinutes(35));
+
+        var closes = OfType(rig.Events, "high_cpu_recovered");
+        Assert.Equal(T0.AddMinutes(15), closes[0].Timestamp);
+        Assert.Contains("closed without a confirmed recovery", closes[0].ImageInfo);
+        AssertEveryRaiseIsClosedInOrder(rig.Events, NotificationEventTypes.HighCpu);
+    }
+
+    [Fact]
+    public async Task A_restored_container_breach_survives_a_listing_that_fails_in_the_first_cycle_after_the_restart()
+    {
+        // Review round 2 (MINOR-2): the restored container was of no known server and was forgotten at once.
+        var file = Path.Combine(Path.GetTempPath(), $"sw-r156-breaches-{Guid.NewGuid():N}.json");
+        try
+        {
+            var before = NewRig(breachFile: file);
+            before.Cpu = 97;
+            await before.RunUntilAsync(TimeSpan.FromMinutes(5));
+
+            var after = NewRig(breachFile: file, start: T0.AddMinutes(6));
+            after.Cpu = 97;
+            after.ListingFails = true;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(6.5));
+            after.ListingFails = false;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(20));
+            after.Cpu = 20;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(30));
+
+            Assert.Empty(OfType(after.Events, NotificationEventTypes.HighCpu));
+            Assert.Single(OfType(after.Events, "high_cpu_recovered"));
+        }
+        finally
+        {
+            try { File.Delete(file); File.Delete(file + ".bak"); } catch { /* best effort */ }
+        }
+    }
+
+    [Fact]
+    public async Task A_df_that_stops_answering_across_a_restart_is_a_gap_not_a_log_line()
+    {
+        // Review round 2 (MINOR-3): after a restart a broken df counted as "never answered", and a restored high_disk
+        // stayed open without a word.
+        var file = Path.Combine(Path.GetTempPath(), $"sw-r156-breaches-{Guid.NewGuid():N}.json");
+        try
+        {
+            var before = NewRig(breachFile: file);
+            before.DiskPercent = 95;
+            await before.RunUntilAsync(TimeSpan.FromMinutes(5));
+            Assert.Single(OfType(before.Events, NotificationEventTypes.HighDisk));
+
+            var after = NewRig(breachFile: file, start: T0.AddMinutes(6));
+            after.DfFails = true;
+            await after.RunUntilAsync(TimeSpan.FromMinutes(15));
+
+            var gap = Assert.Single(OfType(after.Events, NotificationEventTypes.MetricsGap));
+            Assert.Contains("df returned no reading", gap.ImageInfo);
+            Assert.Contains(NotificationEventTypes.HighDisk, gap.ImageInfo);
+        }
+        finally
+        {
+            try { File.Delete(file); File.Delete(file + ".bak"); } catch { /* best effort */ }
+        }
+    }
+
+    [Fact]
+    public async Task The_kept_state_of_a_server_that_was_removed_is_dropped()
+    {
+        // Review round 2 (NIT-5): it stayed in alert-breaches.json, and in every held-up message, for good.
+        var file = Path.Combine(Path.GetTempPath(), $"sw-r156-breaches-{Guid.NewGuid():N}.json");
+        try
+        {
+            await new AlertBreachStore(file).SaveAsync(new AlertBreachFile
+            {
+                Thresholds = [new BreachState("disk:gone", NotificationEventTypes.HighDisk, "Gone", T0, T0, 95, 95, null)],
+                HostLoad = [new BreachState("gone", NotificationEventTypes.HostCpuHigh, "Gone", T0, T0, 99, 99, null)],
+            });
+            var rig = NewRig(breachFile: file);
+            await rig.RunUntilAsync(TimeSpan.FromMinutes(1));
+
+            var kept = await new AlertBreachStore(file).LoadAsync();
+            Assert.Empty(kept.Thresholds);
+            Assert.Empty(kept.HostLoad);
+        }
+        finally
+        {
+            try { File.Delete(file); File.Delete(file + ".bak"); } catch { /* best effort */ }
+        }
     }
 
     [Fact]

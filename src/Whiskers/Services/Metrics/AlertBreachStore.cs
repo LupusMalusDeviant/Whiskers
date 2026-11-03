@@ -11,7 +11,13 @@ public sealed class AlertBreachFile
 
     /// <summary>Host CPU, memory and unexplained load (<see cref="HostLoadEvaluator"/>).</summary>
     public List<BreachState> HostLoad { get; set; } = [];
+
+    /// <summary>Review round 2: the server of each container with a kept breach, so it is known before the first listing.</summary>
+    public List<ContainerOwner>? Containers { get; set; } = [];
 }
+
+/// <summary>R1-56 (review round 2): which server a container with a kept breach belongs to.</summary>
+public sealed record ContainerOwner(string Id, string ServerId, string? ServerName, string? Name);
 
 /// <summary>
 /// R1-56 (review MAJOR-4): keeps the open threshold breaches across a restart, so a breach that was raised before Whiskers
@@ -32,7 +38,7 @@ public interface IAlertBreachStore
 public sealed class AlertBreachStore(string path) : IAlertBreachStore
 {
     private readonly JsonFileStore<AlertBreachFile> _file = new(path,
-        problem: f => f.Thresholds is null || f.HostLoad is null || f.Thresholds.Concat(f.HostLoad).Any(s => s is null)
+        problem: f => f.Thresholds is null || f.HostLoad is null || f.Thresholds.Concat(f.HostLoad).Any(s => s is null) || (f.Containers ?? []).Any(c => c is null)
             ? "a list of breaches is missing or holds an empty entry" : null);
 
     public Task<AlertBreachFile> LoadAsync() => _file.LoadAsync();
