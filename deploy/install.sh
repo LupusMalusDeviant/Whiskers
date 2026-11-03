@@ -108,7 +108,6 @@ SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 # tag and an optional sha256 digest. Nothing else — the value goes into sed and YAML.
 IMAGE_RE='^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(@sha256:[0-9a-f]{64})?$'
 IPV4_RE='^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$'
-IPV6_RE='^\[[0-9A-Fa-f:.]+\]$'
 
 # True when the reference names a digest, or a tag other than "latest".
 image_pinned() {
@@ -196,7 +195,7 @@ signer_identity() {
 # TARGET is what the compose file names: the image, plus the verified digest once cosign has checked it.
 TARGET="$IMAGE"
 verify_signature() {
-  local official=false out identity digest digests
+  local official=false out identity digest digests releases tag_ver
   case "$IMAGE" in "${REPOSITORY}:"*|"${REPOSITORY}@"*) official=true;; esac
   if [ "$VERIFY" = off ]; then
     warn "Image signature NOT verified (--verify off); the compose file names the tag only."
@@ -229,10 +228,26 @@ verify_signature() {
   case "$IMAGE" in
     *@sha256:*) [ "${IMAGE##*@}" = "$digest" ] || die "cosign verified digest $digest, not the one $IMAGE names." ;;
   esac
+  # The release the signature was made for: the certificate's subject names the release workflow run of tag vX.Y.Z.
+  # This is the target's release also when it is given by digest only (a release tag cannot be read from a digest).
+  releases="$(printf '%s' "$out" | grep -oE '"Subject" *: *"https://github\.com/LupusMalusDeviant/Whiskers/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+"' \
+    | grep -oE '[0-9]+\.[0-9]+\.[0-9]+"$' | tr -d '"' | sort -u || true)"
+  if [ "$(printf '%s\n' "$releases" | grep -c . || true)" = 1 ] && [[ "$releases" =~ $SEMVER_RE ]]; then
+    SIGNED_RELEASE="$releases"
+    tag_ver="$(release_of "$IMAGE")"
+    if [ -n "$tag_ver" ] && [ "$tag_ver" != "$SIGNED_RELEASE" ]; then
+      die "cosign verified a signature of release $SIGNED_RELEASE for $IMAGE — nothing was installed or changed."
+    fi
+  fi
   TARGET="$(without_digest "$IMAGE")@${digest}"
   ok "Signature verified (release workflow, ${identity}); pinned to ${digest}."
 }
+# The release of the image to install: its X.Y.Z tag, or the release its verified signature was made for. Empty when
+# neither tells (a digest or another repository without a verified release signature).
+SIGNED_RELEASE=""
 verify_signature
+TARGET_RELEASE="$(release_of "$IMAGE")"
+[ -z "$TARGET_RELEASE" ] && TARGET_RELEASE="$SIGNED_RELEASE"
 
 # ── input checks (the values go into the compose file) ───────────────────────
 COMPOSE="$DIR/docker-compose.yml"
@@ -242,10 +257,43 @@ if [ ! -f "$COMPOSE" ] && [ "$ASSUME_YES" != true ] && [ -t 0 ]; then
   DATA="$(ask 'Data directory (empty = docker named volume)' "$DATA")"
 fi
 valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
-valid_bind() { [[ "$1" =~ $IPV4_RE ]] || [[ "$1" =~ $IPV6_RE ]]; }
+# An IPv6 address in brackets: 1–4 hex digits per group, eight groups, or fewer with exactly one "::", optionally ending
+# in an IPv4 address (which counts as two groups).
+valid_ipv6() {
+  local a head tail n
+  local -a hg tg
+  [[ "$1" =~ ^\[([0-9A-Fa-f:.]+)\]$ ]] || return 1
+  a="${BASH_REMATCH[1]}"
+  [[ "$a" == *:* ]] || return 1
+  if [[ "$a" =~ ^(.*:)([^:]*\.[^:]*)$ ]]; then
+    head="${BASH_REMATCH[1]}"; tail="${BASH_REMATCH[2]}"
+    [[ "$tail" =~ $IPV4_RE ]] || return 1
+    a="${head}0:0"
+  fi
+  [[ "$a" == *.* ]] && return 1
+  # ":::" needs no own check: one side of the "::" then starts or ends with ":" (refused below).
+  if [[ "$a" == *::* ]]; then
+    head="${a%%::*}"; tail="${a#*::}"
+    [[ "$tail" == *::* ]] && return 1
+  else
+    head="$a"; tail=""
+  fi
+  for part in "$head" "$tail"; do
+    [[ "$part" == :* || "$part" == *: ]] && return 1
+  done
+  IFS=: read -r -a hg <<<"$head"
+  IFS=: read -r -a tg <<<"$tail"
+  for g in "${hg[@]}" "${tg[@]}"; do [[ "$g" =~ ^[0-9A-Fa-f]{1,4}$ ]] || return 1; done
+  n=$(( ${#hg[@]} + ${#tg[@]} ))
+  if [[ "$a" == *::* ]]; then [ "$n" -le 7 ]; else [ "$n" -eq 8 ]; fi
+}
+valid_bind() { [[ "$1" =~ $IPV4_RE ]] || valid_ipv6 "$1"; }
 valid_port "$PORT" || die "Invalid port: '$PORT' (1–65535)"
-valid_bind "$BIND" || die "Invalid bind address: '$BIND' (an IPv4 address such as 127.0.0.1, or [IPv6])"
-case "$DATA" in *$'\n'*|*:*|*'#'*|*'"'*) die "Invalid data directory: '$DATA' (no ':', '#', quotes or line breaks)";; esac
+valid_bind "$BIND" || die "Invalid bind address: '$BIND' (an IPv4 address such as 127.0.0.1, or [IPv6] such as [::1])"
+# The data path goes into the compose file as written: no ':' (volume syntax), '#', quotes, '$' (Compose would
+# substitute a variable and mount another directory) or line breaks.
+valid_data() { case "$1" in *$'\n'*|*:*|*'#'*|*'"'*|*'$'*) return 1;; esac; }
+valid_data "$DATA" || die "Invalid data directory: '$DATA' (no ':', '#', '\$', quotes or line breaks)"
 
 # ── vault key: generated once, 0600, never printed ───────────────────────────
 SECRETS_DIR="$DIR/secrets"
@@ -319,20 +367,26 @@ if [ -f "$COMPOSE" ]; then
     warn "Could not read the host port from $COMPOSE; checking http://${BIND}:${PORT} — adjust if yours differs."
   fi
   CURRENT="$(sed -n 's/^    image: *//p' "$COMPOSE")"
+  # The downgrade guard runs before anything else, also when the compose file already names the target: the data may
+  # have been migrated by a newer release started by hand.
+  TO_VER="$TARGET_RELEASE"
+  FROM_VER="$(installed_release "$CURRENT")"
+  if [ -z "$TO_VER" ]; then
+    die "Cannot tell which release $IMAGE is, so a downgrade cannot be ruled out. Name a release (--version X.Y.Z), or give a digest of ${REPOSITORY} with cosign installed (its signature names the release); for any other image, change the compose file by hand."
+  fi
+  if [ -n "$FROM_VER" ] && version_lt "$TO_VER" "$FROM_VER"; then
+    die "Refusing to downgrade from $FROM_VER to $TO_VER: a newer release may have migrated the database. A downgrade is the older release on the pre-upgrade backup — see $BACKUP_GUIDE"
+  fi
+  if [ -z "$FROM_VER" ]; then
+    # The override covers an unknown INSTALLED release only; the target's release is always known here.
+    if [ "$ALLOW_UNKNOWN_CURRENT" != true ]; then
+      die "Cannot tell which release $CURRENT runs (the target is $TO_VER), so a downgrade cannot be ruled out. Start the existing Whiskers (it records its version at start) and re-run, or — if you know the installed release is not newer than $TO_VER — re-run with --allow-unknown-current."
+    fi
+    warn "Installing $TO_VER without knowing the installed release (--allow-unknown-current)."
+  fi
   if [ "$CURRENT" = "$TARGET" ] || { [ "$TARGET" = "$IMAGE" ] && [ "$(without_digest "$CURRENT")" = "$IMAGE" ]; }; then
     info "Already on $CURRENT — pull + up only."
   else
-    TO_VER="$(release_of "$IMAGE")"
-    FROM_VER="$(installed_release "$CURRENT")"
-    if [ -n "$FROM_VER" ] && [ -n "$TO_VER" ] && version_lt "$TO_VER" "$FROM_VER"; then
-      die "Refusing to downgrade from $FROM_VER to $TO_VER: a newer release may have migrated the database. A downgrade is the older release on the pre-upgrade backup — see $BACKUP_GUIDE"
-    fi
-    if [ -z "$FROM_VER" ] || [ -z "$TO_VER" ]; then
-      if [ "$ALLOW_UNKNOWN_CURRENT" != true ]; then
-        die "Cannot tell which release $CURRENT runs${TO_VER:+ (the target is $TO_VER)}, so a downgrade cannot be ruled out. Start the existing Whiskers (it records its version at start) and re-run, or — if you know the installed release is not newer — re-run with --allow-unknown-current."
-      fi
-      warn "Changing $CURRENT → $TARGET without knowing the installed release (--allow-unknown-current)."
-    fi
     BACKUP_COMPOSE="$COMPOSE.bak-$(date +%Y%m%d%H%M%S)"
     cp -p "$COMPOSE" "$BACKUP_COMPOSE"
     # The rewrite keeps the file's mode and owner: the temporary file starts as a copy (cp -p) and is overwritten in
@@ -354,9 +408,12 @@ else
   # ── data volume mapping ────────────────────────────────────────────────────
   if [ -n "$DATA" ]; then
     mkdir -p "$DATA"
-    DATA_MOUNT="$(cd "$DATA" && pwd):/app/data"
+    DATA_ABS="$(cd "$DATA" && pwd)"
+    # The absolute path too: a relative path below a directory with such a character would bring it back.
+    valid_data "$DATA_ABS" || die "Invalid data directory: '$DATA_ABS' (no ':', '#', '\$', quotes or line breaks)"
+    DATA_MOUNT="${DATA_ABS}:/app/data"
     # Whiskers protects its own data (INV-59): tell it which host directory that is.
-    DATA_ENV="      - WHISKERS_DATA_HOST_DIR=$(cd "$DATA" && pwd)"
+    DATA_ENV="      - WHISKERS_DATA_HOST_DIR=${DATA_ABS}"
   else
     DATA_MOUNT="whiskers-data:/app/data"
     DATA_ENV=""

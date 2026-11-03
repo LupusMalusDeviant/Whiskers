@@ -91,6 +91,8 @@ jobs:
           grep -q "image: \"tailscale/tailscale:v[0-9.]*@sha256:" full.yaml
           grep -A1 "name: TS_KUBE_SECRET$" full.yaml | grep -q 'value: ""'
           grep -q "claimName: test-whiskers-tailscale" full.yaml
+          # The auth key reaches `tailscale up` as a file path, never as a value on its command line.
+          grep -A1 "name: TS_AUTHKEY$" full.yaml | grep -q 'value: "file:/run/secrets/tailscale/authKey"'
           grep -q "ForwardedHeaders__TrustedNetworks__0" full.yaml
           grep -q "docker.sock" full.yaml
           refute grep -q "WHISKERS_DISABLE_LOCAL_DOCKER" full.yaml

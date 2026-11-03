@@ -29,8 +29,8 @@ pipeline accepts only `vX.Y.Z` tags — no pre-releases — and refuses one whos
 release X.Y.Z installs X.Y.Z). `--version X.Y.Z` installs another release. There is no `latest` and no pre-release:
 `--version latest`, `--version 1.0.0-rc.1`, and an `--image` without a tag or digest or with the tag `latest`, are
 refused before anything is pulled or written. `--image` must be a plain image reference (lowercase repository,
-optional `:tag`, optional `@sha256:` digest); `--bind` an IPv4 address or `[IPv6]`; `--port` 1–65535; `--data` a path
-without `:`, `#`, quotes or line breaks — anything else is refused, since these values go into the compose file.
+optional `:tag`, optional `@sha256:` digest); `--bind` an IPv4 address or a well-formed `[IPv6]` address (eight groups of 1–4 hex digits, or fewer with one `::`, optionally ending in IPv4); `--port` 1–65535; `--data` a path
+without `:`, `#`, `$` (Compose would substitute a variable and mount another directory), quotes or line breaks — anything else is refused, since these values go into the compose file.
 
 **Signature.** Before it pulls, the installer runs `cosign verify` when cosign is installed (`--verify auto`, the
 default). For release X.Y.Z it requires a signature from exactly the release workflow run of tag `vX.Y.Z`
@@ -75,7 +75,7 @@ the image's `org.opencontainers.image.version` label. An install made with `:lat
 naming only a digest) is moved to the pinned release only when that tells a release that is not newer than the target.
 When nothing tells — the container is not running, or it is a release from before R1-34 that records no version — the
 installer refuses: start the existing Whiskers and re-run, or, if you know it runs an older release (the version is
-shown in the sidebar), re-run with `--allow-unknown-current`. The override never allows a known downgrade. A compose
+shown in the sidebar), re-run with `--allow-unknown-current`. The override covers only an unknown *installed* release: the target's release must always be known — its `:X.Y.Z` tag, or for a digest-only `--image` the release its verified signature names (the certificate subject `…release.yml@refs/tags/vX.Y.Z`; without cosign such a target is refused on an existing install) — and a known downgrade is never allowed. The check also runs when the compose file already names the target: re-running on data a newer release has migrated is refused before `pull`/`up`. A compose
 file the installer did not write, or one with more than one `image:` line, is left alone (the installer stops and
 says so).
 

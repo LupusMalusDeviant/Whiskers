@@ -13,17 +13,21 @@ On Kubernetes there is no meaningful "local" Docker host: the pod starts with
 ## Install
 
 Always install a released chart **version**: the chart's `appVersion` is the image tag it runs (`image.tag` empty =
-that release; `image.tag=latest` is refused). Keep the vault key in a Secret you create yourself, so it is never
-in your values file, your shell history or the Helm release record:
+that release; `image.tag=latest` is refused). Keep the vault key in a Secret you create yourself, from a private
+file, so it is never in your values file, on a command line (`--from-literal=…` would put it into `kubectl`'s argv,
+readable by every user on the machine while it runs), in your shell history or in the Helm release record:
 
 ```bash
-# The vault key: generate it once, keep a copy off the cluster (password manager). Without it the vault and
-# every encrypted backup are unreadable.
-kubectl create secret generic whiskers-vault --from-literal=vaultKey="$(openssl rand -hex 32)"
+# The vault key: generate it once into a private file (0600; the key goes through a pipe, not an argument).
+( umask 077; openssl rand -hex 32 | tr -d '\n' > vault.key )
+kubectl create secret generic whiskers-vault --from-file=vaultKey=vault.key
+# Copy vault.key to a password manager or offline media NOW — without it the vault and every encrypted backup are
+# unreadable — then remove the local copy:
+shred -u vault.key   # or: rm -f vault.key
 
 # Verify the image signature of the release you install (keyless cosign, see the README "Supply chain"):
 cosign verify ghcr.io/lupusmalusdeviant/whiskers:X.Y.Z \
-  --certificate-identity-regexp '^https://github.com/LupusMalusDeviant/Whiskers/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github\.com/LupusMalusDeviant/Whiskers/\.github/workflows/release\.yml@refs/tags/vX\.Y\.Z$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # From the OCI registry (published by the release pipeline), pinned to that release:
@@ -68,7 +72,7 @@ fresh key); from then on it keeps its identity. If you overrode `tailscaleSideca
 | `database.provider` | `sqlite` | `postgres` needs `database.existingSecret` (key `connectionString`, preferred) or inline `connectionString` — without either the chart refuses to render. Strategy stays Recreate either way (JSON stores remain on the PVC until changeme C7). |
 | `vault.existingSecret` / `key` | unset | Secret key `vaultKey` → `VAULT_KEY`. Strongly recommended — without it the vault, kubeconfig-based K8s servers and encrypted backups are off. |
 | `ingress.enabled` | `false` | See WebSockets below. |
-| `tailscaleSidecar.enabled` | `false` | Userspace tailscaled (no NET_ADMIN / /dev/net/tun) for outbound mesh access; `authKeySecret` key `authKey`. |
+| `tailscaleSidecar.enabled` | `false` | Userspace tailscaled (no NET_ADMIN / /dev/net/tun) for outbound mesh access; `authKeySecret` key `authKey`. The key is mounted as a file (`/run/secrets/tailscale/authKey`, mode 0440, group 10001) and handed over as `TS_AUTHKEY=file:<path>`: the Tailscale image passes `TS_AUTHKEY` on to `tailscale up --authkey=…`, so a literal value would be on that command line — with `file:` only the path is. |
 | `tailscaleSidecar.image` | `tailscale/tailscale:v1.104.4@sha256:…` | Pinned (tag + index digest). No tag/digest or `latest` is refused. |
 | `tailscaleSidecar.state.persistent` / `size` / `existingClaim` | `true` / `128Mi` / unset | The node identity (tailscaled state) on its own PVC, so a restarted pod is the same tailnet node and the auth key is used once (`TS_AUTH_ONCE`). The chart sets `TS_KUBE_SECRET=""`: inside Kubernetes the Tailscale image would otherwise keep its state in a Secret named `tailscale`, which needs RBAC the chart does not grant. `persistent=false` = `emptyDir`: a new node at every restart. |
 | VPN mode (fixed) | `VPN_PROVIDER=none`, `Vpn__Provider=none` | Set on every render (R1-46). The pod is non-root with a read-only root file system, where the image's legacy `tailscaled` bring-up cannot work; the in-app providers (`tailscale`/`netbird`) are not supported in the chart. Mesh access = the sidecar. `extraEnv` cannot override these names (also `DOTNET_`/`ASPNETCORE_`-prefixed, in any letter case and spelled with `:`, e.g. `Vpn:Provider`), `TAILSCALE_AUTHKEY` or `VPN_FORCE_LEGACY_TAILSCALE`. |
@@ -93,7 +97,7 @@ a disposable cluster (kind):
    `VPN provider 'none' … skipping legacy bring-up` and no `tailscaled` line.
 2. With `tailscaleSidecar.enabled=true` and a real `authKeySecret`: the `tailscale` container (uid 10001 from the pod,
    `TS_KUBE_SECRET=""`) starts, logs in, and the node appears in the tailnet; its state is on the
-   `<release>-whiskers-tailscale` PVC.
+   `<release>-whiskers-tailscale` PVC. Check the login command line: `kubectl exec … -c tailscale -- ps -o args` (or `cat /proc/*/cmdline`) shows `--authkey=file:/run/secrets/tailscale/authKey`, never the key.
 3. `kubectl delete pod …` → the new pod is the **same** tailnet node (no second node, no new login with the key).
 4. `helm upgrade` to the next chart version → Ready within the startup budget; the setup token and data survive.
 

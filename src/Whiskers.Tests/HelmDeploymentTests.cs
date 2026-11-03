@@ -72,6 +72,19 @@ public class HelmDeploymentTests : IDisposable
         Assert.Single(Regex.Matches(values, @"(?m)^  image: tailscale/tailscale:v[0-9.]*@sha256:[0-9a-f]{64}$"));
     }
 
+    /// <summary>containerboot passes TS_AUTHKEY to <c>tailscale up --authkey=…</c>: the chart hands over a file path, the
+    /// key itself comes from a Secret volume readable by the pod's group only.</summary>
+    [Fact]
+    public void The_sidecar_auth_key_is_a_file_not_a_value()
+    {
+        var sidecar = SidecarBlock();
+        Assert.Matches(@"- name: TS_AUTHKEY\n\s*value: ""file:/run/secrets/tailscale/authKey""\n", sidecar);
+        Assert.DoesNotContain("secretKeyRef", sidecar);
+        Assert.Matches(@"- name: tailscale-authkey\n\s*mountPath: /run/secrets/tailscale\n\s*readOnly: true\n", sidecar);
+        var volume = Deployment[LineIndex(Deployment, "        - name: tailscale-authkey")..];
+        Assert.Matches(@"^        - name: tailscale-authkey\n\s*secret:\n\s*secretName: \{\{ required ""[^""]+"" \.Values\.tailscaleSidecar\.authKeySecret \}\}\n\s*defaultMode: 0440\n\s*items:\n\s*- key: authKey\n\s*path: authKey\n", volume);
+    }
+
     [Fact]
     public void The_sidecar_state_is_durable_by_default()
     {
@@ -236,6 +249,15 @@ public class HelmDeploymentTests : IDisposable
         Assert.Equal("", Env(sidecar, "TS_KUBE_SECRET"));
         Assert.Equal("true", Env(sidecar, "TS_AUTH_ONCE"));
         Assert.Equal("/var/lib/tailscale", Env(sidecar, "TS_STATE_DIR"));
+        // The key reaches `tailscale up` as a path, never as a value.
+        Assert.Equal("file:/run/secrets/tailscale/authKey", Env(sidecar, "TS_AUTHKEY"));
+        var keyVolume = Volume(docs, "tailscale-authkey");
+        Assert.Equal("ts-auth", Scalar(keyVolume, "secret", "secretName"));
+        Assert.Contains(Scalar(keyVolume, "secret", "defaultMode"), new[] { "0440", "288" });
+        var keyMount = ((YamlSequenceNode)sidecar["volumeMounts"]).Cast<YamlMappingNode>().Single(m => Scalar(m, "name") == "tailscale-authkey");
+        Assert.Equal("/run/secrets/tailscale", Scalar(keyMount, "mountPath"));
+        foreach (var container in ((YamlSequenceNode)PodSpec(docs)["containers"]).Cast<YamlMappingNode>())
+            Assert.DoesNotContain("authKey", EnvSecretKeys(container));
 
         var claim = Scalar(Volume(docs, "tailscale-state"), "persistentVolumeClaim", "claimName");
         Assert.Contains(docs, d => Kind(d) == "PersistentVolumeClaim" && Scalar(d, "metadata", "name") == claim);
@@ -386,6 +408,15 @@ public class HelmDeploymentTests : IDisposable
         => container.Children.TryGetValue(new YamlScalarNode("env"), out var env)
             ? ((YamlSequenceNode)env).Cast<YamlMappingNode>().SingleOrDefault(e => Scalar(e, "name") == name)
             : null;
+
+    /// <summary>The Secret keys a container's env takes values from (valueFrom.secretKeyRef.key).</summary>
+    private static IEnumerable<string> EnvSecretKeys(YamlMappingNode container)
+        => container.Children.TryGetValue(new YamlScalarNode("env"), out var env)
+            ? ((YamlSequenceNode)env).Cast<YamlMappingNode>()
+                .Where(e => e.Children.ContainsKey(new YamlScalarNode("valueFrom"))
+                            && ((YamlMappingNode)e["valueFrom"]).Children.ContainsKey(new YamlScalarNode("secretKeyRef")))
+                .Select(e => Scalar(e, "valueFrom", "secretKeyRef", "key"))
+            : [];
 
     private static string? TryEnv(YamlMappingNode container, string name)
         => EnvEntry(container, name) is { } e && e.Children.TryGetValue(new YamlScalarNode("value"), out var v) ? ((YamlScalarNode)v).Value ?? "" : null;

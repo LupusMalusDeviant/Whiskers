@@ -183,7 +183,9 @@ Run Whiskers **on** a cluster as the control plane for your remote Docker fleet 
 clusters — pods appear next to containers on the dashboard):
 
 ```bash
-kubectl create secret generic whiskers-vault --from-literal=vaultKey="$(openssl rand -hex 32)"  # back it up off the cluster
+( umask 077; openssl rand -hex 32 | tr -d '\n' > vault.key )          # a private key file, never an argument
+kubectl create secret generic whiskers-vault --from-file=vaultKey=vault.key
+# copy vault.key off the cluster (password manager / offline), then: shred -u vault.key
 helm install whiskers oci://ghcr.io/lupusmalusdeviant/charts/whiskers --version X.Y.Z \
   --set vault.existingSecret=whiskers-vault
 kubectl port-forward svc/whiskers 8080:8080   # → http://localhost:8080 (setup wizard)

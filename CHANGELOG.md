@@ -13,7 +13,7 @@ All notable changes to Whiskers are documented here. The format follows
   differs, and accepts only `vX.Y.Z` tags, so the `install.sh` of release X.Y.Z installs X.Y.Z), or `--version X.Y.Z` —
   and writes that exact image into the compose file. `--version latest` or a pre-release, an `--image` without a tag
   or digest, the tag `latest`, an image reference with other characters than a plain reference allows, a bind address
-  that is not an IPv4 address or `[IPv6]`, a port outside 1–65535 and a data path with `:`, `#`, quotes or line breaks
+  that is not an IPv4 address or a well-formed `[IPv6]` address (groups checked, at most one `::`), a port outside 1–65535 and a data path with `:`, `#`, `$` (Compose would substitute it), quotes or line breaks
   are refused before anything is pulled or written. Before pulling it runs `cosign verify` when cosign is installed
   (`--verify auto`, default) and requires a signature from exactly the release workflow run of tag `vX.Y.Z` (an older
   signed image re-tagged as X.Y.Z does not pass); the digest the signature covers is pinned in the compose file
@@ -32,14 +32,14 @@ All notable changes to Whiskers are documented here. The format follows
   backup). The installed release is the newest of the compose file's tag, the version the running Whiskers recorded at
   its last start (`/app/data/.last-started-version`) and the image's version label; when none tells (an install of
   `:latest` whose container is not running or predates R1-34), the change is refused unless `--allow-unknown-current`
-  is given — which never permits a known downgrade. **Helm chart:** the app container now always gets `VPN_PROVIDER=none` and `Vpn__Provider=none`.
+  is given — which covers only an unknown *installed* release, never an unknown target or a known downgrade. The target release is its `X.Y.Z` tag or, for a digest-only `--image`, the release named by its verified signature (a tag and a signature naming different releases stop the install); an unverified digest target is refused on an existing install. The guard runs before the "already on this image" shortcut, so a re-run on data a newer release has migrated is refused before `pull`/`up`. **Helm chart:** the app container now always gets `VPN_PROVIDER=none` and `Vpn__Provider=none`.
   Before, neither was set, so `entrypoint.sh` took the legacy path and started `tailscaled` as uid 10001 on a read-only
   root file system, where it fails (measured on the 0.15.0 image: it starts, logs errors and costs the start two
   seconds); now nobody brings a VPN up in the pod, and `extraEnv` cannot override these names (also behind `DOTNET_` /
   `ASPNETCORE_`, in any letter case, and spelled with `:` such as `Vpn:Provider`, which .NET reads as the same key),
   `TAILSCALE_AUTHKEY` or `VPN_FORCE_LEGACY_TAILSCALE`. The Tailscale sidecar is pinned
   (`tailscale/tailscale:v1.104.4` plus its index digest instead of `:latest`; an unpinned or `latest` image is refused)
-  and keeps its node identity on its own PVC (`tailscaleSidecar.state.*`, 128Mi) with `TS_AUTH_ONCE=true`. The sidecar
+  and keeps its node identity on its own PVC (`tailscaleSidecar.state.*`, 128Mi) with `TS_AUTH_ONCE=true`. Its auth key is mounted from `authKeySecret` as a file (`/run/secrets/tailscale/authKey`, mode 0440, group 10001 via `fsGroup`) and passed as `TS_AUTHKEY=file:<path>`: the image hands `TS_AUTHKEY` on to `tailscale up --authkey=…`, so the literal key from a `secretKeyRef` was on that command line, readable in the process list; the CLI reads the `file:` value itself. The chart README creates the vault Secret with `--from-file` from a private (umask 077) key file instead of `--from-literal` (key in `kubectl`'s argv), with backup and cleanup steps. The sidecar
   also gets `TS_KUBE_SECRET=""`: inside Kubernetes the Tailscale image stores its state in a Secret named `tailscale`
   by default (upstream `cmd/containerboot`, read 2026-11-03), which needs RBAC the chart never granted — the node
   state never went to the old `emptyDir` at `TS_STATE_DIR`. The chart refuses to render (instead of producing a pod stuck in
@@ -62,7 +62,9 @@ All notable changes to Whiskers are documented here. The format follows
   node keeps its identity — remove the old node in the Tailscale admin console). A `tailscaleSidecar.image` override
   that is unpinned or `latest`, an `extraEnv` entry naming the VPN mode, and `postgres` without a connection-string
   Secret now stop `helm upgrade` with a message instead of deploying. With `helm upgrade --reuse-values` the new keys
-  (`tailscaleSidecar.state`) are missing: use your values file or `--reset-then-reuse-values`.
+  (`tailscaleSidecar.state`) are missing: use your values file or `--reset-then-reuse-values`. The sidecar now reads
+  its auth key from a mounted file: the Secret named by `tailscaleSidecar.authKeySecret` must keep the key `authKey`
+  (unchanged); nothing else to do.
 
 - R1-43: **The VPN bring-up is decided, recorded and owned, and its key never reaches a command line.** With
   `VPN_PROVIDER=tailscale` or `netbird`, Whiskers started the VPN daemon and joined the mesh at every start on no

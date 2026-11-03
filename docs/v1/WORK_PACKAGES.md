@@ -818,6 +818,11 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > both sides (release `prepare` accepts only `vX.Y.Z`, the installer only X.Y.Z); `extraEnv` names are normalised
 > (`:` → `__`) before the VPN deny-list; chart-ci compares the pinned sidecar digest with the tag's digest; the kind
 > run with the sidecar is a manual checklist in the chart README.
+> Review round 2: the downgrade guard runs before the same-image shortcut; the target release comes from its tag or the
+> verified signature subject (digest-only targets), `--allow-unknown-current` covers only an unknown installed release
+> and an unresolved target is refused; the sidecar gets its auth key as a mounted file (`TS_AUTHKEY=file:…`, Secret
+> volume 0440) instead of a literal value on `tailscale up`'s argv; the vault Secret is created `--from-file` from a
+> private key file; `$` in `--data` is refused; `[IPv6]` binds are validated group by group.
 
 **Out of scope:** Socket-proxy verb changes.
 

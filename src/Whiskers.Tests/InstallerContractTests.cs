@@ -163,6 +163,20 @@ public class InstallerContractTests : IDisposable
     [InlineData("--port", "80x")]
     [InlineData("--data", "/srv/a:/etc")]
     [InlineData("--data", "data#x")]
+    [InlineData("--data", "/srv/whiskers${R146_SUFFIX}")]
+    [InlineData("--data", "data$HOME")]
+    [InlineData("--bind", "[deadbeef]")]
+    [InlineData("--bind", "[::::]")]
+    [InlineData("--bind", "[1.2.3.999]")]
+    [InlineData("--bind", "[1::2::3]")]
+    [InlineData("--bind", "[12345::1]")]
+    [InlineData("--bind", "[1:2:3:4:5:6:7:8:9]")]
+    [InlineData("--bind", "[1:2:3:4:5:6:7]")]
+    [InlineData("--bind", "[1:2:3:4:5:6:7:8:]")]
+    [InlineData("--bind", "[:1:2:3:4:5:6:7:8]")]
+    [InlineData("--bind", "[::ffff:1.2.3.999]")]
+    [InlineData("--bind", "[::g]")]
+    [InlineData("--bind", "::1")]
     public void An_unpinned_or_invalid_choice_is_refused_before_anything_happens(string option, string value)
     {
         var run = Install("--yes", option, value);
@@ -188,6 +202,34 @@ public class InstallerContractTests : IDisposable
         var run = Install("--yes", "--image", image, "--verify", "off");
         Assert.True(run.Exit == 0, run.Output);
         Assert.Contains($"    image: {image}\n", File.ReadAllText(ComposePath));
+    }
+
+    [SkippableTheory]
+    [InlineData("[::]")]
+    [InlineData("[fe80::1]")]
+    [InlineData("[2001:db8:0:0:0:0:0:1]")]
+    [InlineData("[2001:DB8::abcd:1]")]
+    [InlineData("[::ffff:192.168.1.10]")]
+    [InlineData("[1:2:3:4:5:6:1.2.3.4]")]
+    public void A_valid_ipv6_bind_address_is_accepted(string bind)
+    {
+        var run = Install("--yes", "--bind", bind);
+        Assert.True(run.Exit == 0, run.Output);
+        Assert.Contains($"      - \"{bind}:5100:8080\"\n", File.ReadAllText(ComposePath));
+    }
+
+    [SkippableFact]
+    public void A_data_directory_is_mounted_from_its_absolute_path_as_written()
+    {
+        var run = Install("--yes", "--data", "mydata");
+        Assert.True(run.Exit == 0, run.Output);
+        var compose = File.ReadAllText(ComposePath);
+        var mount = Regex.Match(compose, @"(?m)^      - (?<src>\S+):/app/data$");
+        Assert.True(mount.Success, compose);
+        Assert.EndsWith("/work/mydata", mount.Groups["src"].Value);
+        Assert.DoesNotContain("$", mount.Groups["src"].Value); // nothing Compose would substitute
+        Assert.Contains($"      - WHISKERS_DATA_HOST_DIR={mount.Groups["src"].Value}\n", compose);
+        Assert.True(Directory.Exists(Path.Combine(WorkDir, "mydata")));
     }
 
     [SkippableFact]
@@ -262,6 +304,110 @@ public class InstallerContractTests : IDisposable
         var run = Install("--yes", "--version", "1.5.0");
         Assert.NotEqual(0, run.Exit);
         Assert.Contains("Refusing to downgrade from 2.0.0 to 1.5.0", run.Output);
+    }
+
+    /// <summary>The compose file already names the target, but a newer release ran on the data: re-running must not
+    /// start the older image again (no pull, no up).</summary>
+    [SkippableFact]
+    public void The_same_image_is_not_started_again_on_data_of_a_newer_release()
+    {
+        Assert.True(Install("--yes", "--version", "1.0.0").Exit == 0);
+        var compose = File.ReadAllText(ComposePath);
+        _lastStartedVersion = "2.0.0";
+        var run = Install("--yes", "--version", "1.0.0");
+        Assert.NotEqual(0, run.Exit);
+        Assert.Contains("Refusing to downgrade from 2.0.0 to 1.0.0", run.Output);
+        Assert.Equal(compose, File.ReadAllText(ComposePath));
+        Assert.DoesNotContain("compose pull", run.DockerLog);
+        Assert.DoesNotContain("compose up", run.DockerLog);
+    }
+
+    [SkippableTheory]
+    [InlineData("99.0.0", true, null)]                                // label newer than the target → refused
+    [InlineData("0.0.1", false, null)]                               // label older → changed
+    [InlineData("0.0.1", false, "0.10.0")]                           // the recorded version wins when newer…
+    [InlineData("0.0.1", true, "99.0.0")]                            // …and refuses when it is newer than the target
+    public void The_image_label_is_a_fallback_for_the_installed_release(string label, bool refused, string? recorded)
+    {
+        Assert.True(Install("--yes").Exit == 0);
+        var latest = File.ReadAllText(ComposePath).Replace($"{Repository}:{Release()}", $"{Repository}:latest", StringComparison.Ordinal);
+        File.WriteAllText(ComposePath, latest);
+        _imageLabel = label;
+        _lastStartedVersion = recorded ?? "";
+        var run = Install("--yes");
+        if (refused)
+        {
+            Assert.NotEqual(0, run.Exit);
+            Assert.Contains("Refusing to downgrade", run.Output);
+            Assert.Equal(latest, File.ReadAllText(ComposePath));
+        }
+        else
+        {
+            Assert.True(run.Exit == 0, run.Output);
+            Assert.Contains($"    image: {Repository}:{Release()}\n", File.ReadAllText(ComposePath));
+        }
+    }
+
+    /// <summary>A target given by digest only: its release is the one its verified signature names. The override for an
+    /// unknown INSTALLED release never covers an unknown or older TARGET.</summary>
+    [SkippableTheory]
+    [InlineData("99.0.0", true, "pinned")]                       // signed newer release → upgrade
+    [InlineData("0.0.1", true, "Refusing to downgrade")]          // signed older release → refused despite the override
+    [InlineData("0.0.1", false, "Refusing to downgrade")]
+    [InlineData(null, true, "Cannot tell which release")]       // unverified digest → refused despite the override
+    public void A_digest_target_is_compared_by_the_release_its_signature_names(string? signedTag, bool allowUnknown, string expect)
+    {
+        Assert.True(Install("--yes").Exit == 0); // installed: the installer's release (known from the compose tag)
+        var compose = File.ReadAllText(ComposePath);
+        var image = $"{Repository}@{StubDigest}";
+        var args = new List<string> { "--yes", "--image", image };
+        if (allowUnknown) args.Add("--allow-unknown-current");
+        InstallRun run;
+        if (signedTag is null)
+        {
+            args.AddRange(["--verify", "off"]);
+            run = Install([.. args]);
+        }
+        else
+        {
+            _signedTag = signedTag;
+            run = Install(cosignExit: 0, args: [.. args]);
+        }
+
+        if (expect == "pinned")
+        {
+            Assert.True(run.Exit == 0, run.Output);
+            Assert.Contains($"    image: {image}\n", File.ReadAllText(ComposePath));
+        }
+        else
+        {
+            Assert.NotEqual(0, run.Exit);
+            Assert.Contains(expect, run.Output);
+            Assert.Equal(compose, File.ReadAllText(ComposePath));
+            Assert.DoesNotContain("compose pull", run.DockerLog);
+        }
+    }
+
+    [SkippableFact]
+    public void An_unknown_installed_release_with_the_override_still_compares_a_signed_digest_target()
+    {
+        Assert.True(Install("--yes").Exit == 0);
+        File.WriteAllText(ComposePath, File.ReadAllText(ComposePath).Replace($"{Repository}:{Release()}", $"{Repository}:latest", StringComparison.Ordinal));
+        _signedTag = "99.0.0";
+        var run = Install(cosignExit: 0, args: ["--yes", "--image", $"{Repository}@{StubDigest}", "--allow-unknown-current"]);
+        Assert.True(run.Exit == 0, run.Output);
+        Assert.Contains("without knowing the installed release", run.Output);
+        Assert.Contains($"    image: {Repository}@{StubDigest}\n", File.ReadAllText(ComposePath));
+    }
+
+    [SkippableFact]
+    public void A_signature_for_another_release_than_the_tag_stops_the_install()
+    {
+        _signedTag = "0.0.1";
+        var run = Install(cosignExit: 0, args: ["--yes"]);
+        Assert.NotEqual(0, run.Exit);
+        Assert.Contains("verified a signature of release 0.0.1", run.Output);
+        Assert.False(File.Exists(ComposePath));
     }
 
     [SkippableTheory]
@@ -394,6 +540,10 @@ public class InstallerContractTests : IDisposable
     private string _lastStartedVersion = "";
     /// <summary>The digests the fake cosign reports as verified.</summary>
     private string[] _cosignDigests = [StubDigest];
+    /// <summary>The release tag the fake cosign reports in the certificate subject; null = the installer's release.</summary>
+    private string? _signedTag;
+    /// <summary>The image version label the fake <c>docker inspect</c> reports; empty = inspect fails.</summary>
+    private string _imageLabel = "";
 
     private InstallRun Install(params string[] args) => Install(cosignExit: null, args: args);
 
@@ -419,7 +569,7 @@ public class InstallerContractTests : IDisposable
             case "$*" in
               *last-started-version*) if [ -n "$STUB_LAST_VERSION" ]; then printf '%s\n' "$STUB_LAST_VERSION"; exit 0; fi; exit 1;;
               exec*) printf 'TOKEN-FROM-STUB';;
-              inspect*) exit 1;;
+              inspect*) if [ -n "$STUB_LABEL" ]; then printf '%s\n' "$STUB_LABEL"; exit 0; fi; exit 1;;
             esac
             exit 0
             """);
@@ -428,7 +578,10 @@ public class InstallerContractTests : IDisposable
         var cosign = Path.Combine(bin, "cosign");
         if (cosignExit is { } code)
         {
-            var json = string.Join(",", _cosignDigests.Select(d => $"{{\"critical\":{{\"image\":{{\"docker-manifest-digest\":\"{d}\"}}}}}}"));
+            // Shaped like cosign's output: the signed digest, and the certificate subject naming the release workflow run.
+            var subject = $"https://github.com/LupusMalusDeviant/Whiskers/.github/workflows/release.yml@refs/tags/v{_signedTag ?? Release()}";
+            var json = string.Join(",", _cosignDigests.Select(d =>
+                $"{{\"critical\":{{\"image\":{{\"docker-manifest-digest\":\"{d}\"}}}},\"optional\":{{\"Issuer\":\"https://token.actions.githubusercontent.com\",\"Subject\":\"{subject}\"}}}}"));
             DeploymentScripts.WriteExecutable(cosign,
                 $"#!/bin/bash\nprintf 'cosign %s\\n' \"$*\" >> \"$STUB_COSIGN_LOG\"\n" +
                 $"if [ {code} = 0 ]; then printf '%s\\n' '[{json}]'; echo 'Verification for x -- The following checks were performed' >&2; fi\nexit {code}\n");
@@ -447,6 +600,7 @@ public class InstallerContractTests : IDisposable
             ["STUB_COSIGN_LOG"] = DeploymentScripts.ForBash(cosignLog),
             ["STUB_CURL_LOG"] = DeploymentScripts.ForBash(curlLog),
             ["STUB_LAST_VERSION"] = _lastStartedVersion,
+            ["STUB_LABEL"] = _imageLabel,
         };
         foreach (var name in new[] { "WHISKERS_VERSION", "WHISKERS_IMAGE", "WHISKERS_VERIFY", "WHISKERS_PORT", "WHISKERS_BIND",
                      "WHISKERS_DATA", "WHISKERS_DIR", "WHISKERS_YES", "WHISKERS_ALLOW_UNKNOWN_CURRENT" })
