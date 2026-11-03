@@ -164,6 +164,9 @@ public sealed class NotificationSmtpTests : IDisposable
 
         public Func<string, bool> Refuse { get; set; } = _ => false;
         public bool StallFinalAnswer { get; init; }
+        /// <summary>Takes the message, then never answers QUIT.</summary>
+        public bool StallQuit { get; init; }
+        public TaskCompletionSource QuitAwaited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource FinalAnswerAwaited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ClosedByClient { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         /// <summary>The recipients each conversation named (taken or not).</summary>
@@ -232,6 +235,11 @@ public sealed class NotificationSmtpTests : IDisposable
                             lock (_delivered) _delivered.AddRange(taken);
                             await writer.WriteLineAsync("250 queued");
                             break;
+                        case "QUIT" when StallQuit:
+                            QuitAwaited.TrySetResult();
+                            while (await reader.ReadLineAsync(_stop.Token) is not null) { }
+                            ClosedByClient.TrySetResult();
+                            return;
                         case "QUIT": await writer.WriteLineAsync("221 bye"); return;
                         default: await writer.WriteLineAsync("250 ok"); break;
                     }

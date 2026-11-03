@@ -131,9 +131,10 @@ public class EmailNotificationService : IEmailNotificationService
                 if (!string.IsNullOrWhiteSpace(c.Username) && client.Capabilities.HasFlag(SmtpCapabilities.Authentication))
                     await client.AuthenticateAsync(c.Username, c.Password, deadline.Token);
                 await client.SendAsync(msg, deadline.Token);
-                // The server took the message: a failed goodbye changes nothing about that.
+                // The server took the message: a failed goodbye changes nothing about that — not even a stop that lands
+                // during QUIT, which would otherwise report a delivered message as cancelled (R1-54 review round 3).
                 try { await client.DisconnectAsync(quit: true, deadline.Token); }
-                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { }
+                catch (Exception) { /* sent; the connection is closed by the using below */ }
             }
             if (client.Refused.Count > 0)
                 throw new EmailRecipientsRefusedException(client.Refused);
