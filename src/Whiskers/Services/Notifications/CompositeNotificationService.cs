@@ -189,6 +189,15 @@ public class CompositeNotificationService : INotificationService
         if (ok) return;
 
         var failure = last ?? new InvalidOperationException("The delivery failed.");
+        if (OutboundTargetRefusedException.Find(failure) is { } refused)
+        {
+            // R1-54: the outbound guard refused the target. Final for this delivery — not retried, not kept for
+            // redelivery — and visible like every failure: the reason names host, port and address, never a URL path.
+            _logger.LogError("Notification {EventType} to {Provider} was refused ({Error})",
+                evt.EventType, channel.Name, NotificationOutbox.Describe(refused));
+            _sp.GetService<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>()?.Count("notification_failed", "*");
+            return;
+        }
         var critical = IsCritical(evt) && _outbox is not null;
         _logger.LogError("Notification {EventType} to {Provider} failed after {Attempts} attempts ({Error}){Kept}",
             evt.EventType, channel.Name, MaxAttempts, NotificationOutbox.Describe(failure),

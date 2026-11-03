@@ -235,7 +235,9 @@ public static class WhiskersHostingExtensions
         foreach (var httpClientName in new[]
                  {
                      "TelegramNotificationService", "MattermostNotificationService", "DiscordNotificationService",
-                     "SlackNotificationService", "NtfyNotificationService", "WebhookNotificationService", "MatrixNotificationService"
+                     "SlackNotificationService", "NtfyNotificationService", "WebhookNotificationService", "MatrixNotificationService",
+                     // R1-54: the one factory client all channels use since the outbound guard.
+                     Whiskers.Services.Notifications.OutboundHttp.ClientName,
                  })
             builder.Logging.AddFilter($"System.Net.Http.HttpClient.{httpClientName}", Microsoft.Extensions.Logging.LogLevel.Warning);
 

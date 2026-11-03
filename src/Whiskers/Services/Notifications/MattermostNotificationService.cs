@@ -23,6 +23,9 @@ public class MattermostNotificationService : IMattermostNotificationService
         _logger = logger;
     }
 
+    public IReadOnlyList<OutboundEndpoint> Targets =>
+        _settings.CurrentValue is { Enabled: true } c && OutboundEndpoint.FromUrl(c.WebhookUrl) is { } e ? [e] : [];
+
     public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var config = _settings.CurrentValue;

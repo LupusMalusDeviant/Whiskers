@@ -223,6 +223,10 @@ agent cannot call the `Admin` tools below. `execute_command`, `deploy_app`, `dep
   (DnsRecordService.cs:137-167). No user-supplied URL is fetched server-side, so classic SSRF (metadata
   endpoint, internal pivot) is not exposed to a low-privilege caller. The outbound VPN `--login-server`/
   `--management-url` (E-08) are the only partial exception, and admin-set.
+  *Update (R1-54, INV-60):* the notification channels, the outgoing webhook and the SMTP host now go through an
+  outbound guard that refuses loopback, link-local (metadata), private, CGNAT/mesh, ULA and reserved targets on the
+  address actually connected to, with redirects and proxies refused and exact Admin exceptions only. The other
+  admin-configured fetchers named here stay out of scope (follow-up package).
 - **Terminal privilege** — host root shell (`nsenter`) and SSH server shells require `AppRole.Admin`
   (ServerTerminalView.razor:48-52); container exec terminal requires `AppRole.Operator`
   (TerminalView.razor:52-56); hub is `[Authorize]` (ContainerHub.cs:7) and exposes no shell-spawn method.

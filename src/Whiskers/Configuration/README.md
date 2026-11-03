@@ -21,6 +21,7 @@ Strongly-typed settings classes bound from configuration (env vars / `.env` / `a
 | `AutoPatchSettings.cs` | Nightly security auto-patching (section `AutoPatch`): on/off, dry run, window hour, severity, limit, exclusions. |
 | `CveMonitorSettings.cs` | CVE scan cadence. |
 | `MattermostSettings.cs` / `MatrixSettings.cs` | Notification channel settings. |
+| `OutboundGuardSettings.cs` | Section `OutboundGuard` (R1-54, INV-60): `Exceptions` to the notification channels' outbound guard — each an IP literal plus port, or a host name plus port plus its exact `Addresses`. Edited on the Settings page only (gated `config.save`); the denied ranges are fixed in code, not configured. |
 | `TerminalSettings.cs` | Web-terminal settings. |
 | `AiChatSettings.cs` | Read-only advisor chat (provider, model, key). |
 | `AgentSettings.cs` | Acting-agent provider access + system prompt (UI-editable, reload-on-change). |

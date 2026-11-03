@@ -15,7 +15,8 @@ public static class NotificationRetry
     /// Runs <paramref name="action"/> up to <paramref name="maxAttempts"/> times, each attempt cancelled after
     /// <paramref name="attemptTimeout"/> (an attempt that runs out of time fails with a <see cref="TimeoutException"/>),
     /// waiting <paramref name="backoff"/> between attempts. The caller's <paramref name="ct"/> ends the retries: its
-    /// cancellation is reported as an <see cref="OperationCanceledException"/>, not retried.
+    /// cancellation is reported as an <see cref="OperationCanceledException"/>, not retried. A refusal of the outbound
+    /// guard (<see cref="OutboundTargetRefusedException"/>, R1-54) is final and not retried either.
     /// </summary>
     public static async Task<(bool Ok, Exception? Last)> TrySendAsync(Func<CancellationToken, Task> action, int maxAttempts,
         TimeSpan attemptTimeout, TimeSpan backoff, CancellationToken ct = default)
@@ -40,6 +41,11 @@ public static class NotificationRetry
             catch (OperationCanceledException) when (deadline.IsCancellationRequested)
             {
                 last = new TimeoutException($"The attempt did not finish within {attemptTimeout.TotalSeconds:0} s.");
+            }
+            catch (Exception ex) when (OutboundTargetRefusedException.Find(ex) is not null)
+            {
+                // R1-54: the outbound guard refused the target; trying again would be refused again.
+                return (false, ex);
             }
             catch (Exception ex)
             {

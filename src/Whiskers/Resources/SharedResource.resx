@@ -5180,4 +5180,70 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="SelfBackupPanel_Tooltip_FilesOnly" xml:space="preserve">
     <value>This backup holds the files only, not the PostgreSQL database (it was made before database dumps were included). It cannot be restored.</value>
   </data>
+  <data name="OutboundGuard_Panel" xml:space="preserve">
+    <value>Notification targets (outbound guard)</value>
+  </data>
+  <data name="OutboundGuard_Intro" xml:space="preserve">
+    <value>Notification channels and the outgoing webhook never connect to loopback, link-local, private, CGNAT/Tailscale, unique-local or reserved addresses, and they follow no redirects and use no proxy. A channel inside your network (a self-hosted ntfy, Mattermost, Matrix or an SMTP relay) needs an exact exception: an IP address and port, or a host name, port and the exact addresses it may resolve to. Ranges and wildcards are not accepted.</value>
+  </data>
+  <data name="OutboundGuard_Heading_Refused" xml:space="preserve">
+    <value>Configured channels the guard refuses</value>
+  </data>
+  <data name="OutboundGuard_Refused_None" xml:space="preserve">
+    <value>No configured channel is refused.</value>
+  </data>
+  <data name="OutboundGuard_Refused_Hint" xml:space="preserve">
+    <value>These channels deliver nothing until an exception names their address. Only scheme, host and port are shown.</value>
+  </data>
+  <data name="OutboundGuard_Th_Channel" xml:space="preserve">
+    <value>Channel</value>
+  </data>
+  <data name="OutboundGuard_Th_Target" xml:space="preserve">
+    <value>Target</value>
+  </data>
+  <data name="OutboundGuard_Th_Address" xml:space="preserve">
+    <value>Refused address</value>
+  </data>
+  <data name="OutboundGuard_Unresolved" xml:space="preserve">
+    <value>unresolved</value>
+  </data>
+  <data name="OutboundGuard_Button_Recheck" xml:space="preserve">
+    <value>Check again</value>
+  </data>
+  <data name="OutboundGuard_Heading_Exceptions" xml:space="preserve">
+    <value>Exceptions</value>
+  </data>
+  <data name="OutboundGuard_Th_Host" xml:space="preserve">
+    <value>Host or IP address</value>
+  </data>
+  <data name="OutboundGuard_Th_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="OutboundGuard_Th_Addresses" xml:space="preserve">
+    <value>Allowed addresses</value>
+  </data>
+  <data name="OutboundGuard_Exceptions_None" xml:space="preserve">
+    <value>No exceptions.</value>
+  </data>
+  <data name="OutboundGuard_Label_Host" xml:space="preserve">
+    <value>Host or IP address</value>
+  </data>
+  <data name="OutboundGuard_Label_Addresses" xml:space="preserve">
+    <value>Allowed addresses (for a host name)</value>
+  </data>
+  <data name="OutboundGuard_Helper_Addresses" xml:space="preserve">
+    <value>Exact IP addresses, separated by commas</value>
+  </data>
+  <data name="OutboundGuard_Button_Save" xml:space="preserve">
+    <value>Save exceptions</value>
+  </data>
+  <data name="OutboundGuard_Snackbar_Saved" xml:space="preserve">
+    <value>Exceptions saved — they apply from the next delivery on.</value>
+  </data>
+  <data name="OutboundGuard_Snackbar_SaveFailed" xml:space="preserve">
+    <value>The exceptions were not saved: {0}</value>
+  </data>
+  <data name="OutboundGuard_Snackbar_ScanFailed" xml:space="preserve">
+    <value>The configured channels could not be checked.</value>
+  </data>
 </root>

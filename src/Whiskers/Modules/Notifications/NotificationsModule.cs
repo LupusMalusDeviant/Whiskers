@@ -73,29 +73,35 @@ public sealed class NotificationsModule : IWhiskersModule
         services.PostConfigure<EmailSettings>(s => KnownSecrets.Register(s.Password));
         services.PostConfigure<WebhookNotificationSettings>(s => KnownSecrets.Register(s.Url, s.Secret));
 
-        // Notifications (Mattermost + Matrix via composite)
-        services.AddHttpClient<MattermostNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-        services.AddSingleton<MattermostNotificationService>();
+        // R1-54 (INV-60): one outbound guard for every channel. The exceptions (Admin-only, gated) live next to the
+        // channels' settings; the HTTP channels share one guarded handler (no proxy, no redirects, replaced when the
+        // exceptions change), the e-mail channel connects through the guard itself.
+        services.AddSingleton<IOutboundExceptionService, OutboundExceptionService>();
+        services.AddSingleton<IOutboundDnsResolver, SystemOutboundDnsResolver>();
+        services.AddSingleton<IOutboundTargetGuard, OutboundTargetGuard>();
+        services.AddSingleton<IOutboundHttp, OutboundHttp>();
+        services.AddHttpClient(OutboundHttp.ClientName)
+            .ConfigurePrimaryHttpMessageHandler(sp => sp.GetRequiredService<IOutboundHttp>().CreatePrimaryHandler())
+            .ConfigureHttpClient(c => c.Timeout = OutboundHttp.ClientTimeout);
+        services.AddSingleton<IOutboundTargetReport, OutboundTargetReport>();
+        services.AddHostedService<OutboundTargetStartupCheck>();
+
+        // Notifications (Mattermost + Matrix via composite); each HTTP channel gets a client over the guarded handler.
+        services.AddSingleton(Guarded<MattermostNotificationService>);
         services.AddSingleton<Whiskers.Services.Notifications.IMattermostNotificationService>(sp => sp.GetRequiredService<MattermostNotificationService>());
-        services.AddHttpClient<MatrixNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-        services.AddSingleton<MatrixNotificationService>();
+        services.AddSingleton(Guarded<MatrixNotificationService>);
         services.AddSingleton<Whiskers.Services.Notifications.IMatrixNotificationService>(sp => sp.GetRequiredService<MatrixNotificationService>());
         // Additional channels (Telegram, ntfy, Discord, Email, generic webhook) — same composite fan-out.
-        services.AddHttpClient<Whiskers.Services.Notifications.TelegramNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-        services.AddSingleton<Whiskers.Services.Notifications.TelegramNotificationService>();
+        services.AddSingleton(Guarded<Whiskers.Services.Notifications.TelegramNotificationService>);
         services.AddSingleton<Whiskers.Services.Notifications.ITelegramNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.TelegramNotificationService>());
-        services.AddHttpClient<Whiskers.Services.Notifications.NtfyNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-        services.AddSingleton<Whiskers.Services.Notifications.NtfyNotificationService>();
+        services.AddSingleton(Guarded<Whiskers.Services.Notifications.NtfyNotificationService>);
         services.AddSingleton<Whiskers.Services.Notifications.INtfyNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.NtfyNotificationService>());
-        services.AddHttpClient<Whiskers.Services.Notifications.DiscordNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-        services.AddSingleton<Whiskers.Services.Notifications.DiscordNotificationService>();
+        services.AddSingleton(Guarded<Whiskers.Services.Notifications.DiscordNotificationService>);
         services.AddSingleton<Whiskers.Services.Notifications.IDiscordNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.DiscordNotificationService>());
-        services.AddHttpClient<Whiskers.Services.Notifications.SlackNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-        services.AddSingleton<Whiskers.Services.Notifications.SlackNotificationService>();
+        services.AddSingleton(Guarded<Whiskers.Services.Notifications.SlackNotificationService>);
         services.AddSingleton<Whiskers.Services.Notifications.ISlackNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.SlackNotificationService>());
         services.AddSingleton<Whiskers.Services.Notifications.IEmailNotificationService, Whiskers.Services.Notifications.EmailNotificationService>();
-        services.AddHttpClient<Whiskers.Services.Notifications.WebhookNotificationService>().ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(15));
-        services.AddSingleton<Whiskers.Services.Notifications.WebhookNotificationService>();
+        services.AddSingleton(Guarded<Whiskers.Services.Notifications.WebhookNotificationService>);
         services.AddSingleton<Whiskers.Services.Notifications.IWebhookNotificationService>(sp => sp.GetRequiredService<Whiskers.Services.Notifications.WebhookNotificationService>());
         // Expose each channel as INotificationChannel so CompositeNotificationService fans out over the set
         // (changeme C9). Registration order = the test-report order; keep it stable (Mattermost … Webhook).
@@ -115,4 +121,9 @@ public sealed class NotificationsModule : IWhiskersModule
         services.AddHostedService<NotificationOutboxWorker>();
         services.AddSingleton<INotificationService, CompositeNotificationService>();
     }
+
+    /// <summary>An HTTP channel constructed with the factory client over the guarded handler (R1-54) instead of a plain
+    /// one; the factory's request logging stays in front of it.</summary>
+    private static T Guarded<T>(IServiceProvider sp) where T : class =>
+        ActivatorUtilities.CreateInstance<T>(sp, sp.GetRequiredService<IHttpClientFactory>().CreateClient(OutboundHttp.ClientName));
 }

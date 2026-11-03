@@ -59,13 +59,14 @@ public sealed class NotificationDeliveryTests : IDisposable
             {
                 Enabled = true, Host = "127.0.0.1", Port = port, UseSsl = false, From = "whiskers@example.com",
                 To = "ops@example.com",
-            }), NullLogger<EmailNotificationService>.Instance) { SmtpDeadline = TimeSpan.FromMilliseconds(500) };
+            }), OutboundTestDoubles.GuardAllowing("127.0.0.1", port), NullLogger<EmailNotificationService>.Instance)
+            { SmtpDeadline = TimeSpan.FromMilliseconds(500) };
 
-            // Bounded by the cancellation (TimeoutException); SmtpClient.Timeout may end it first (SmtpException).
+            // Bounded by the cancellation; the client's own I/O timeout is set longer and never ends it first.
             var started = DateTime.UtcNow;
             var error = await Assert.ThrowsAnyAsync<Exception>(
                 () => email.DeliverAsync(Stopped(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)));
-            Assert.True(error is TimeoutException or System.Net.Mail.SmtpException, error.ToString());
+            Assert.True(error is TimeoutException, error.ToString());
             Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(5));
 
             // The caller's own cancellation stays a cancellation.
@@ -74,7 +75,7 @@ public sealed class NotificationDeliveryTests : IDisposable
             {
                 Enabled = true, Host = "127.0.0.1", Port = port, UseSsl = false, From = "whiskers@example.com",
                 To = "ops@example.com",
-            }), NullLogger<EmailNotificationService>.Instance);
+            }), OutboundTestDoubles.GuardAllowing("127.0.0.1", port), NullLogger<EmailNotificationService>.Instance);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
                 () => slow.DeliverAsync(Stopped("api"), cts.Token).WaitAsync(TimeSpan.FromSeconds(10)));
         }

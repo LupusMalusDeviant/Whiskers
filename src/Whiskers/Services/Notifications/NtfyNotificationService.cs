@@ -20,6 +20,9 @@ public class NtfyNotificationService : INtfyNotificationService
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
 
+    public IReadOnlyList<OutboundEndpoint> Targets =>
+        _settings.CurrentValue is { Enabled: true } c && OutboundEndpoint.FromUrl(c.ServerUrl) is { } e ? [e] : [];
+
     public async Task<bool> DeliverAsync(NotificationEvent evt, CancellationToken ct)
     {
         var c = _settings.CurrentValue;

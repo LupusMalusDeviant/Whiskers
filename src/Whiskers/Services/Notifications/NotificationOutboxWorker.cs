@@ -102,6 +102,12 @@ public sealed class NotificationOutboxWorker : FleetBackgroundService
         }
         // A stop is no failed attempt — unless the channel got part of the way (recipients reached), which is kept.
         if (ct.IsCancellationRequested && ReferenceEquals(evt.DeliveredRecipients, entry.Event.DeliveredRecipients)) return;
+        // R1-54: a target the outbound guard refuses (one kept before the upgrade, say) is refused on every try.
+        if (OutboundTargetRefusedException.Find(failure) is { } refused)
+        {
+            await _outbox.CompleteAsync(entry.Id, delivered: false, "refused: " + NotificationOutbox.Describe(refused));
+            return;
+        }
         await _outbox.FailedAsync(entry.Id, failure!, now(), evt);
     }
 }

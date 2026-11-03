@@ -1,0 +1,176 @@
+@using Whiskers.Configuration
+@using Whiskers.Services.Notifications
+@inject IOutboundExceptionService Exceptions
+@inject IOutboundTargetReport Report
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+@inject IUiMutationRunner Mutations
+@inject IStringLocalizer<SharedResource> L
+
+@* R1-54 (INV-60): the notification channels' outbound guard. Lists every configured channel it refuses (scheme, host
+   and port only — never a URL path, R1-25) and edits the exact exceptions; each save is a gated, audited config.save. *@
+
+@if (_isAdmin)
+{
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">@L["OutboundGuard_Intro"]</MudText>
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">@L["OutboundGuard_Heading_Refused"]</MudText>
+@if (_refusals is null)
+{
+    <MudProgressLinear Indeterminate="true" Class="mb-3" />
+}
+else if (_refusals.Count == 0)
+{
+    <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3" id="outbound-refusals-none">@L["OutboundGuard_Refused_None"]</MudAlert>
+}
+else
+{
+    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">@L["OutboundGuard_Refused_Hint"]</MudAlert>
+    <MudSimpleTable Dense="true" Elevation="0" Class="mb-3" id="outbound-refusals">
+        <thead><tr><th>@L["OutboundGuard_Th_Channel"]</th><th>@L["OutboundGuard_Th_Target"]</th><th>@L["OutboundGuard_Th_Address"]</th></tr></thead>
+        <tbody>
+            @foreach (var r in _refusals)
+            {
+                <tr>
+                    <td>@r.Channel</td>
+                    <td><code>@r.Target.ToString()</code></td>
+                    <td>
+                        @if (r.Address == OutboundRefusal.Unresolved)
+                        {
+                            <span>@L["OutboundGuard_Unresolved"]</span>
+                        }
+                        else
+                        {
+                            <code>@r.Address</code> <span>(@r.Range)</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+<MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RecheckAsync"
+           Class="mb-3">@L["OutboundGuard_Button_Recheck"]</MudButton>
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">@L["OutboundGuard_Heading_Exceptions"]</MudText>
+<MudSimpleTable Dense="true" Elevation="0" Class="mb-2">
+    <thead><tr><th>@L["OutboundGuard_Th_Host"]</th><th>@L["OutboundGuard_Th_Port"]</th><th>@L["OutboundGuard_Th_Addresses"]</th><th></th></tr></thead>
+    <tbody>
+        @if (_entries.Count == 0)
+        {
+            <tr><td colspan="4">@L["OutboundGuard_Exceptions_None"]</td></tr>
+        }
+        @foreach (var e in _entries)
+        {
+            <tr>
+                <td><code>@e.Host</code></td>
+                <td>@e.Port</td>
+                <td>@(e.Addresses.Count == 0 ? "—" : string.Join(", ", e.Addresses))</td>
+                <td><MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Remove(e))" /></td>
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+<MudGrid>
+    <MudItem xs="12" md="4"><MudTextField @bind-Value="_newHost" Label="@L["OutboundGuard_Label_Host"]" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="ntfy.lan / 10.0.0.5" /></MudItem>
+    <MudItem xs="6" md="2"><MudNumericField @bind-Value="_newPort" Label="Port" Min="1" Max="65535" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+    <MudItem xs="12" md="4"><MudTextField @bind-Value="_newAddresses" Label="@L["OutboundGuard_Label_Addresses"]" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                           HelperText="@L["OutboundGuard_Helper_Addresses"]" /></MudItem>
+    <MudItem xs="6" md="2" Class="d-flex align-center">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="Add"
+                   Disabled="@string.IsNullOrWhiteSpace(_newHost)">@L["Settings_Button_Add"]</MudButton>
+    </MudItem>
+</MudGrid>
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save" Class="mt-3"
+           Disabled="@(!_dirty)">@L["OutboundGuard_Button_Save"]</MudButton>
+}
+
+@code {
+    private bool _isAdmin;
+    private IReadOnlyList<OutboundRefusal>? _refusals;
+    private List<OutboundExceptionEntry> _entries = new();
+    private bool _dirty;
+    private string _newHost = "";
+    private int _newPort = 443;
+    private string _newAddresses = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The Settings page is Admin-only; the panel checks again before it shows anything.
+        _isAdmin = await CurrentUser.HasRoleAsync(Whiskers.Models.AppRole.Admin);
+        if (!_isAdmin) return;
+        LoadEntries();
+        await RecheckAsync();
+    }
+
+    private void LoadEntries()
+    {
+        _entries = Exceptions.Current.Entries.Select(e => e.ToEntry()).ToList();
+        _dirty = false;
+    }
+
+    private async Task RecheckAsync()
+    {
+        _refusals = null;
+        StateHasChanged();
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            _refusals = await Report.ScanAsync(deadline.Token);
+        }
+        catch (Exception)
+        {
+            _refusals = Array.Empty<OutboundRefusal>();
+            Snackbar.Add(L["OutboundGuard_Snackbar_ScanFailed"].Value, Severity.Warning);
+        }
+        StateHasChanged();
+    }
+
+    private void Add()
+    {
+        var entry = new OutboundExceptionEntry
+        {
+            Host = _newHost.Trim(),
+            Port = _newPort,
+            Addresses = (_newAddresses ?? "").Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+        };
+        try
+        {
+            // Checked here already, so a typo is said at once; the save checks the whole list again.
+            OutboundException.Parse(entry);
+        }
+        catch (ArgumentException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return;
+        }
+        _entries.Add(entry);
+        _dirty = true;
+        _newHost = _newAddresses = "";
+    }
+
+    private void Remove(OutboundExceptionEntry entry)
+    {
+        _entries.Remove(entry);
+        _dirty = true;
+    }
+
+    private async Task Save()
+    {
+        var entries = _entries.ToList();
+        try
+        {
+            await Mutations.RunAsync("config.save", new { section = "outbound-exceptions" },
+                ct => Exceptions.SaveAsync(entries, ct));
+            Snackbar.Add(L["OutboundGuard_Snackbar_Saved"].Value, Severity.Success);
+            LoadEntries();
+            await RecheckAsync();
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (ArgumentException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) when (ex is MutationFailedException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Snackbar.Add(L["OutboundGuard_Snackbar_SaveFailed", ex.Message].Value, Severity.Error);
+        }
+    }
+}

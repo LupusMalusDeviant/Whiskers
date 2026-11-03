@@ -1,20 +1,29 @@
-using System.Net;
-using System.Net.Mail;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.Extensions.Options;
+using MimeKit;
 using Whiskers.Configuration;
 using Whiskers.Models;
 
 namespace Whiskers.Services.Notifications;
 
+/// <summary>
+/// The e-mail channel. R1-54: SMTP (MailKit) over a socket the outbound guard opened
+/// (<see cref="IOutboundTargetGuard.ConnectAsync"/>), so a mail host that resolves to loopback, link-local or another
+/// denied address is refused like every HTTP channel; the configured host name stays the TLS target.
+/// </summary>
 public class EmailNotificationService : IEmailNotificationService
 {
     private readonly IOptionsMonitor<EmailSettings> _settings;
+    private readonly IOutboundTargetGuard _guard;
     private readonly NotificationThrottler _throttler;
     private readonly ILogger<EmailNotificationService> _logger;
 
-    public EmailNotificationService(IOptionsMonitor<EmailSettings> settings, ILogger<EmailNotificationService> logger)
+    public EmailNotificationService(IOptionsMonitor<EmailSettings> settings, IOutboundTargetGuard guard,
+        ILogger<EmailNotificationService> logger)
     {
         _settings = settings;
+        _guard = guard;
         _logger = logger;
         _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
     }
@@ -22,13 +31,17 @@ public class EmailNotificationService : IEmailNotificationService
     /// <summary>R1-40: the longest one SMTP conversation (connect, TLS, auth, send, the server's final answer) may take
     /// when nothing shorter applies (the test mail). A delivery is bounded by the composite's attempt deadline (20 s),
     /// which is linked in and ends it first.
-    /// Its end — or the caller's — aborts the connection itself (<c>SmtpClient</c> does not watch the token in every
-    /// phase), and the send is awaited until it has really stopped; <c>SmtpClient.Timeout</c> is set to it as a last
-    /// bound and can end the send first (an <c>SmtpException</c>).</summary>
+    /// Its end — or the caller's — cancels every step and also closes the connection itself, and the send is awaited
+    /// until it has really stopped; the client's own I/O timeout is set a little longer as a last bound.</summary>
     internal static readonly TimeSpan DefaultSmtpDeadline = TimeSpan.FromSeconds(30);
 
     /// <summary>The deadline in force (tests shorten it).</summary>
     internal TimeSpan SmtpDeadline { get; init; } = DefaultSmtpDeadline;
+
+    public IReadOnlyList<OutboundEndpoint> Targets =>
+        _settings.CurrentValue is { Enabled: true } c && !string.IsNullOrWhiteSpace(c.Host)
+            ? [new OutboundEndpoint("smtp", c.Host.Trim().Trim('[', ']'), c.Port)]
+            : [];
 
     /// <summary>Sends the event to every configured recipient it has not reached yet
     /// (<see cref="NotificationEvent.DeliveredRecipients"/>). When the server takes some recipients and refuses others,
@@ -58,12 +71,10 @@ public class EmailNotificationService : IEmailNotificationService
             {
                 await SendMailAsync(c, recipients, $"[Whiskers] {title}", NotificationFormatter.PlainText(evt), ct);
             }
-            catch (SmtpFailedRecipientException ex)
+            catch (EmailRecipientsRefusedException ex)
             {
-                // Refused all: nothing went out. Refused some: the message went to the others (SmtpClient sends to the
-                // recipients it was given as soon as one is taken).
-                var refused = Refused(ex);
-                var took = recipients.Where(r => !refused.Contains(r)).ToList();
+                // Refused all: nothing went out. Refused some: the message went to the others.
+                var took = recipients.Where(r => !ex.Refused.Contains(r)).ToList();
                 if (took.Count > 0 && took.Count < recipients.Count)
                     evt.DeliveredRecipients = [.. reached, .. took];
                 throw;
@@ -83,46 +94,49 @@ public class EmailNotificationService : IEmailNotificationService
 
     private static List<string> Recipients(string to) =>
         to.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(r => new MailAddress(r).Address)
+            .Select(r => new System.Net.Mail.MailAddress(r).Address)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    private static HashSet<string> Refused(SmtpFailedRecipientException ex)
-    {
-        var failures = ex is SmtpFailedRecipientsException many && many.InnerExceptions.Length > 0
-            ? many.InnerExceptions.Cast<SmtpFailedRecipientException>()
-            : [ex];
-        return failures.Select(f => (f.FailedRecipient ?? "").Trim().Trim('<', '>'))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
+    /// <summary>Implicit TLS on 465, STARTTLS (required) otherwise when TLS is on; plain SMTP when it is off — as the
+    /// channel did before R1-54, which knew STARTTLS only.</summary>
+    internal static SecureSocketOptions TlsMode(EmailSettings c) =>
+        !c.UseSsl ? SecureSocketOptions.None
+        : c.Port == 465 ? SecureSocketOptions.SslOnConnect
+        : SecureSocketOptions.StartTls;
 
     private async Task SendMailAsync(EmailSettings c, IReadOnlyList<string> recipients, string subject, string body,
         CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(SmtpDeadline);
-        using var msg = new MailMessage
-        {
-            From = new MailAddress(string.IsNullOrWhiteSpace(c.From) ? c.Username : c.From),
-            Subject = subject,
-            Body = body,
-        };
-        foreach (var to in recipients) msg.To.Add(to);
+        using var msg = new MimeMessage();
+        msg.From.Add(MailboxAddress.Parse(string.IsNullOrWhiteSpace(c.From) ? c.Username : c.From));
+        foreach (var to in recipients) msg.To.Add(MailboxAddress.Parse(to));
+        msg.Subject = subject;
+        msg.Body = new TextPart("plain") { Text = body };
 
-        using var client = new SmtpClient(c.Host, c.Port)
-        {
-            EnableSsl = c.UseSsl,
-            Credentials = string.IsNullOrWhiteSpace(c.Username) ? null : new NetworkCredential(c.Username, c.Password),
-            Timeout = (int)SmtpDeadline.TotalMilliseconds,
-        };
-        var send = client.SendMailAsync(msg, deadline.Token);
+        var host = c.Host.Trim().Trim('[', ']');
+        using var client = new RecipientTrackingSmtpClient { Timeout = (int)(SmtpDeadline + TimeSpan.FromSeconds(5)).TotalMilliseconds };
+        Stream? stream = null;
         try
         {
-            // SmtpClient connects and waits for the server's final answer without looking at the token: the deadline or
-            // the caller's stop closes the connection (Dispose aborts a send in progress), and the send is awaited until
-            // it has ended — never left running behind the next attempt.
-            using (deadline.Token.Register(static state => AbortQuietly((SmtpClient)state!), client))
-                await send;
+            // The guard resolves, judges and connects; MailKit talks SMTP (and TLS, with the configured name) over that
+            // socket. A refusal is thrown here, before a byte is sent.
+            stream = await _guard.ConnectAsync(host, c.Port, deadline.Token);
+            // The deadline or the caller's stop closes the connection too, so no step can outlast it.
+            using (deadline.Token.Register(static s => AbortQuietly((Stream)s!), stream))
+            {
+                await client.ConnectAsync(stream, host, c.Port, TlsMode(c), deadline.Token);
+                if (!string.IsNullOrWhiteSpace(c.Username) && client.Capabilities.HasFlag(SmtpCapabilities.Authentication))
+                    await client.AuthenticateAsync(c.Username, c.Password, deadline.Token);
+                await client.SendAsync(msg, deadline.Token);
+                // The server took the message: a failed goodbye changes nothing about that.
+                try { await client.DisconnectAsync(quit: true, deadline.Token); }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { }
+            }
+            if (client.Refused.Count > 0)
+                throw new EmailRecipientsRefusedException(client.Refused);
         }
         catch (Exception) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested)
         {
@@ -132,11 +146,35 @@ public class EmailNotificationService : IEmailNotificationService
         {
             throw new OperationCanceledException(ct);
         }
+        finally
+        {
+            if (stream is not null) await stream.DisposeAsync();
+        }
     }
 
-    private static void AbortQuietly(SmtpClient client)
+    private static void AbortQuietly(Stream stream)
     {
-        try { client.Dispose(); }
+        try { stream.Dispose(); }
         catch (Exception) { /* the send ends with its own error */ }
     }
+
+    /// <summary>Records each recipient the server refuses instead of giving up on the first, so the message still goes
+    /// to the ones it took (as <c>System.Net.Mail</c> did); none taken is an <see cref="EmailRecipientsRefusedException"/>.</summary>
+    private sealed class RecipientTrackingSmtpClient : SmtpClient
+    {
+        public HashSet<string> Refused { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        protected override void OnRecipientNotAccepted(MimeMessage message, MailboxAddress mailbox, SmtpResponse response) =>
+            Refused.Add(mailbox.Address);
+
+        protected override void OnNoRecipientsAccepted(MimeMessage message) =>
+            throw new EmailRecipientsRefusedException(Refused);
+    }
+}
+
+/// <summary>The SMTP server refused <see cref="Refused"/>; the message went to the other recipients, if any.</summary>
+public sealed class EmailRecipientsRefusedException(IReadOnlyCollection<string> refused)
+    : Exception($"The SMTP server refused {refused.Count} recipient(s).")
+{
+    public IReadOnlySet<string> Refused { get; } = new HashSet<string>(refused, StringComparer.OrdinalIgnoreCase);
 }

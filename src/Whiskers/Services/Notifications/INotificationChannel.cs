@@ -12,6 +12,10 @@ public interface INotificationChannel : INotificationService
     /// "NotificationService" (e.g. "Mattermost"). Never a secret. A channel may override it.</summary>
     string Name => GetType().Name.Replace("NotificationService", "");
 
+    /// <summary>R1-54: where the channel connects while it is enabled and configured — scheme, host and port only, for
+    /// the outbound guard's listing; empty otherwise.</summary>
+    IReadOnlyList<OutboundEndpoint> Targets => [];
+
     /// <summary>
     /// Delivers one event (R1-40). Returns <c>true</c> when it was sent, <c>false</c> when there was nothing to send
     /// (the channel is off or not configured, or the event is throttled). A failed delivery <b>throws</b> — the caller

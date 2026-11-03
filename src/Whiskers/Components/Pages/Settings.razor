@@ -170,6 +170,11 @@ else
             <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send" OnClick="TestChannels">@L["Settings_Button_SendTestNotification"]</MudButton>
         </MudStack>
     </MudExpansionPanel>
+
+    @* R1-54: the channels' outbound guard — refused targets and the exact exceptions. *@
+    <MudExpansionPanel Text="@L["OutboundGuard_Panel"]" Icon="@Icons.Material.Filled.Shield">
+        <OutboundExceptionsPanel />
+    </MudExpansionPanel>
     }
 
     @* Health Monitoring *@
