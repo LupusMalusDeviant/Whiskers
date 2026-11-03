@@ -478,7 +478,7 @@ public static class WhiskersPipelineExtensions
 
                 foreach (var c in containers)
                 {
-                    var labels = $"name=\"{c.Name}\",image=\"{c.Image}\",server=\"{c.ServerName}\",project=\"{c.ComposeProject}\"";
+                    var labels = $"name=\"{PrometheusText.Label(c.Name)}\",image=\"{PrometheusText.Label(c.Image)}\",server=\"{PrometheusText.Label(c.ServerName)}\",project=\"{PrometheusText.Label(c.ComposeProject)}\"";
                     sb.AppendLine($"serverwatch_container_up{{{labels}}} {(c.State == "running" ? 1 : 0)}");
 
                     if (c.LatestStats != null)
@@ -503,7 +503,7 @@ public static class WhiskersPipelineExtensions
             }
             catch (Exception ex)
             {
-                sb.AppendLine($"# ERROR: {ex.Message}");
+                sb.AppendLine($"# ERROR: {PrometheusText.Comment(ex.Message)}");
             }
 
             ctx.Response.ContentType = "text/plain; version=0.0.4; charset=utf-8";
@@ -639,7 +639,7 @@ public static class WhiskersPipelineExtensions
     /// a monitoring outage caused by monitoring.</para></summary>
     private static void AppendSelfMetrics(System.Text.StringBuilder sb, IServiceProvider services)
     {
-        static string Esc(string v) => v.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        static string Esc(string v) => PrometheusText.Label(v);
 
         var loops = services.GetService<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>();
         var budget = services.GetService<Whiskers.Services.Docker.Budget.IServerBudget>();

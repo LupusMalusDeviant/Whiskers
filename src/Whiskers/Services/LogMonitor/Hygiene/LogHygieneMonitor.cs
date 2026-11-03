@@ -62,7 +62,7 @@ public sealed class LogHygieneMonitor : Whiskers.Services.FleetBackgroundService
             {
                 await RunOnceAsync(stoppingToken).WaitAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
                 _logger.LogError(ex, "Log hygiene survey failed");
             }

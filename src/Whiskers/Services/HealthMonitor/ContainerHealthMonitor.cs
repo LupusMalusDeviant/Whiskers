@@ -67,7 +67,7 @@ public class ContainerHealthMonitor : Whiskers.Services.FleetBackgroundService
                 // no cancellation token) is abandoned so the service still stops within the host window.
                 await RunHealthCycleAsync(ct).WaitAsync(ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
             {
                 _logger.LogError(ex, "Health check cycle failed");
             }

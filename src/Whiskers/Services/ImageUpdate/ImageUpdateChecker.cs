@@ -48,9 +48,17 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
 
         while (!ct.IsCancellationRequested)
         {
-            // WaitAsync bounds the cycle to shutdown: registry/Docker digest calls carry no token, so
-            // abandon an in-flight check on stop instead of blocking the host's shutdown window.
-            await CheckAllImagesAsync(ct).WaitAsync(ct);
+            try
+            {
+                // WaitAsync bounds the cycle to shutdown: registry/Docker digest calls carry no token, so
+                // abandon an in-flight check on stop instead of blocking the host's shutdown window.
+                await CheckAllImagesAsync(ct).WaitAsync(ct);
+            }
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
+            {
+                // R1-41: a failed check (a registry timeout included) used to escape the loop and stop the host.
+                _logger.LogError(ex, "Image update check failed");
+            }
             await Task.Delay(TimeSpan.FromHours(_settings.CheckIntervalHours), ct);
         }
     }
@@ -77,7 +85,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
                 Whiskers.Services.Observability.SelfMetrics.SelfMetricsFleetExtensions.Loops.ImageUpdate,
                 allServers);
 
-            var containers = await docker.ListAllContainersAsync(all: false);
+            var containers = await docker.ListAllContainersAsync(false, ct);
 
             foreach (var server in allServers.Where(s => s.ConnectionType != Whiskers.Models.ConnectionType.Kubernetes))
                 _selfMetrics.RecordCycle(

@@ -73,7 +73,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 // is cut off here: a forced stop, reported as interrupted at the next start, never repeated blindly.
                 await CheckAndUpdateAsync(stoppingToken).WaitAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
                 success = false;
                 _logger.LogError(ex, "Auto-update check failed");

@@ -6,6 +6,22 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-41: **A timeout inside a background loop no longer stops Whiskers.** Eight background loops (health, scheduler,
+  AutoUpdate, certificates, log alerts, log hygiene, scan supervisor, self-metrics, action outcomes) treated every
+  cancellation as "Whiskers is stopping", so a dependency's own timeout — an HTTP client timing out is a
+  cancellation too — ended the loop and, with the host's default behaviour, stopped the whole app. Now only a
+  cancellation while the host really stops ends a loop; anything else is one failed cycle, logged, and the next cycle
+  runs. The image-update check catches a failed cycle too. A loop that still dies stops the host as before, so it
+  stays visible (no global "ignore"). Loop intervals are checked at start: `HealthMonitor:CheckIntervalSeconds` and
+  `Metrics:CollectionIntervalSeconds` 5 s to a day, `ImageUpdate:CheckIntervalHours` and
+  `CveMonitor:CheckIntervalHours` 1 to 168 h — a value outside that is a clear configuration error at start
+  instead of a loop without a pause or a crash hours later; the Settings page uses the same limits. **Breaking for
+  a configuration with such a value: Whiskers does not start until it is fixed.** `/metrics` escapes label values
+  (quotes, backslashes, line breaks) and keeps an error comment on one line, so a container, image or server name
+  can no longer break the exposition or forge a series. The AutoPatch planning, the image-update check and the
+  advisor chat's context pass their cancellation to the Docker fleet listing and the image inspect (new
+  `IDockerService` overloads), so the preview deadline, a stop and closing the chat reach them.
+
 - R1-40: **A notification that fails is retried, and an important one is not lost.** Notification channels used to
   swallow their own errors, so the retry never saw a failure. Now a failed Slack, Discord, Mattermost, Matrix,
   Telegram, ntfy, e-mail or webhook delivery is tried a second time; every attempt ends after 20 s at the latest, and an

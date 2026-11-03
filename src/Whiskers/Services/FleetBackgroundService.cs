@@ -73,4 +73,15 @@ public abstract class FleetBackgroundService : BackgroundService
 
     /// <summary>The loop body, exactly as <c>ExecuteAsync</c> would have been written.</summary>
     protected abstract Task RunAsync(CancellationToken stoppingToken);
+
+    /// <summary>
+    /// R1-41 (TA-52): whether <paramref name="ex"/> is the host stopping this loop — a cancellation while
+    /// <paramref name="stoppingToken"/> is cancelled. Only that ends a loop. Every other failure, also a dependency's own
+    /// timeout or cancellation (an <c>HttpClient</c> timeout is a <see cref="TaskCanceledException"/>, a linked deadline
+    /// an <see cref="OperationCanceledException"/>), is a failed cycle: logged, recorded, and the next cycle runs. A loop
+    /// catches with <c>catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))</c>; <c>BackgroundServiceFailureTests</c>
+    /// holds every loop to it.
+    /// </summary>
+    protected internal static bool IsHostStopping(Exception ex, CancellationToken stoppingToken) =>
+        ex is OperationCanceledException && stoppingToken.IsCancellationRequested;
 }

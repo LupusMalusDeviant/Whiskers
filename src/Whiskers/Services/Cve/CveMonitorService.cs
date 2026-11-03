@@ -91,7 +91,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                         await RunOneCycleAsync(ct);
                 }
             }
-            catch (OperationCanceledException) { /* shutdown */ }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "CVE monitor cycle failed");

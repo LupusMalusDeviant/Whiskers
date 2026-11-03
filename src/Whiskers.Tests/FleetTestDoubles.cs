@@ -129,8 +129,14 @@ internal sealed class FakeDocker : IDockerService
         });
     }
 
+    /// <summary>When set, the fleet listing waits for it: a host that does not answer (R1-41).</summary>
+    public TaskCompletionSource? ListingGate { get; set; }
+
     public async Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true)
-        => (await ListAllContainersDetailedAsync(all)).Containers.ToList();
+    {
+        if (ListingGate is { } gate) await gate.Task;
+        return (await ListAllContainersDetailedAsync(all)).Containers.ToList();
+    }
 
     /// <summary>The server a call without a server id lists, like the configured default server.</summary>
     public string DefaultServerId { get; set; } = "local";

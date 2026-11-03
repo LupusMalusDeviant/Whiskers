@@ -38,6 +38,8 @@ public sealed class ImageUpdateModule : IWhiskersModule
         // rotating primary handler so a long-lived resolution doesn't pin a stale DNS answer; IRegistryClient
         // stays the shared-cache singleton, forwarded to the typed client.
         services.Configure<ImageUpdateSettings>(config.GetSection("ImageUpdate"));
+        services.AddOptions<ImageUpdateSettings>().ValidateInterval(s => s.CheckIntervalHours,
+            "ImageUpdate:CheckIntervalHours", IntervalValidation.MinCheckHours, IntervalValidation.MaxCheckHours);   // R1-41
         services.AddSingleton<Whiskers.Services.ImageUpdate.IUpdateRiskService,
                               Whiskers.Services.ImageUpdate.UpdateRiskService>();
         services.AddHttpClient<RegistryClient>()

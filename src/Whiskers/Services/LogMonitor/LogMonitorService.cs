@@ -133,7 +133,7 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
                 // even if some future step forgets to honour the token.
                 await RunScanCycleAsync(stoppingToken).WaitAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
                 _logger.LogError(ex, "Log monitor check failed");
             }

@@ -64,7 +64,7 @@ public sealed class SelfMetricsRecorder : Whiskers.Services.FleetBackgroundServi
             {
                 await SampleAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!IsHostStopping(ex, stoppingToken))
             {
                 _logger.LogWarning(ex, "Could not write the self-metrics sample");
             }

@@ -102,10 +102,18 @@ internal sealed class ContainerOperations
     public async Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true)
         => (await ListAllContainersDetailedAsync(all)).Containers.ToList();
 
+    /// <summary>R1-41: as above, with the caller's cancellation reaching every per-server request; a cancelled caller
+    /// gets an <see cref="OperationCanceledException"/>, not a listing that looks like silent servers.</summary>
+    public async Task<IList<ContainerInfo>> ListAllContainersAsync(bool all, CancellationToken ct)
+        => (await ListAllContainersDetailedAsync(all, ct)).Containers.ToList();
+
     /// <summary>One server's slice of a fleet-wide listing: its containers, or why it stayed silent.</summary>
     private sealed record ServerListing(Models.ServerConfig Server, IList<ContainerInfo> Containers, FleetServerFailure? Failure);
 
-    public async Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all = true)
+    public Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all = true)
+        => ListAllContainersDetailedAsync(all, CancellationToken.None);
+
+    private async Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all, CancellationToken ct)
     {
         // Kubernetes servers are not Docker hosts — their workloads come from the workload seam
         // (Services/Workloads), not from this Docker-only aggregation.
@@ -123,7 +131,8 @@ internal sealed class ContainerOperations
                 // Cancel the request, do not merely stop waiting for it: a Task.WhenAny race leaves the
                 // call running against the daemon, and this runs for every server on every cycle. Same
                 // defect as the log fetch in the 2026-08-26 incident.
-                using var timeout = new CancellationTokenSource(perServerTimeout);
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(perServerTimeout);
                 try
                 {
                     // The API-latency probe (Plan-0004 WP4). This call happens once per server per health
@@ -136,7 +145,7 @@ internal sealed class ContainerOperations
                     _selfMetrics.RecordApiCall(server.Id, System.Diagnostics.Stopwatch.GetElapsedTime(started));
                     return listing;
                 }
-                catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+                catch (OperationCanceledException) when (timeout.IsCancellationRequested && !ct.IsCancellationRequested)
                 {
                     _logger.LogWarning("Listing containers for server {ServerName} aborted after {Timeout}s — skipping (degraded view).",
                         server.Name, perServerTimeout.TotalSeconds);
@@ -144,7 +153,7 @@ internal sealed class ContainerOperations
                         new FleetServerFailure(server.Id, server.Name, $"Timed out after {perServerTimeout.TotalSeconds:0}s"));
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
                 _logger.LogWarning(ex, "Failed to list containers for server {ServerName}", server.Name);
                 return new ServerListing(server, new List<ContainerInfo>(),

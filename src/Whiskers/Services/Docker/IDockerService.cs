@@ -8,6 +8,10 @@ public interface IDockerService
     Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default);
     Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true);
 
+    /// <summary>R1-41: the fleet-wide list for a caller with a deadline or a stop of its own (the AutoPatch planning, the
+    /// advisor chat): its cancellation reaches the per-server requests. The default only stops waiting.</summary>
+    Task<IList<ContainerInfo>> ListAllContainersAsync(bool all, CancellationToken ct) => ListAllContainersAsync(all).WaitAsync(ct);
+
     /// <summary>Fleet-wide list PLUS which servers answered. Callers that keep per-server state across
     /// cycles need that distinction — an unreachable host and an empty host look identical in the plain
     /// list. See <see cref="FleetContainerListing"/>.</summary>
@@ -39,6 +43,11 @@ public interface IDockerService
     /// <summary>What an image declares about how it runs — for measuring update risk before recreating
     /// anything (GAP-6). Null when the image cannot be inspected.</summary>
     Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null);
+
+    /// <summary>R1-41: <see cref="GetImageContractAsync(string, string?)"/> for a caller that can be cancelled. The inspect
+    /// itself is shared between concurrent callers, so a cancellation ends this caller's wait, not the shared call.</summary>
+    Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId, CancellationToken ct)
+        => GetImageContractAsync(imageRef, serverId).WaitAsync(ct);
     [MutatingOperation("container.update")]
     Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null);
     /// <summary>The container's log-driver configuration and log file path, or null when Docker reports
