@@ -187,7 +187,7 @@ public sealed class NotificationDeliveryTests : IDisposable
 
         await worker.RedeliverDueAsync(DateTime.UtcNow.AddHours(1), CancellationToken.None);
 
-        Assert.Equal(0, outbox.Status.Pending);
+        Assert.Equal(new NotificationOutboxStatus(0, 0, 0, 0), outbox.Status);   // gone, but not counted as delivered
     }
 
     [Fact]

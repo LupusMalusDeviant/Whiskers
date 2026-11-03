@@ -40,8 +40,9 @@ public interface INotificationOutbox
     /// <summary>The entries due at <paramref name="now"/>, oldest first.</summary>
     Task<IReadOnlyList<NotificationOutboxEntry>> DueAsync(DateTime now);
 
-    /// <summary>The entry was delivered (or has nothing to deliver any more): it leaves the outbox.</summary>
-    Task CompleteAsync(string id);
+    /// <summary>The entry leaves the outbox: <paramref name="delivered"/> when it was sent, otherwise it has nothing to
+    /// deliver any more (its channel switched off or removed, the event throttled).</summary>
+    Task CompleteAsync(string id, bool delivered);
 
     /// <summary>Another redelivery failed. Returns <c>true</c> when the entry is exhausted and was removed.</summary>
     Task<bool> FailedAsync(string id, Exception failure, DateTime now);
@@ -116,14 +117,14 @@ public sealed class NotificationOutbox : INotificationOutbox
         finally { _gate.Release(); }
     }
 
-    public async Task CompleteAsync(string id)
+    public async Task CompleteAsync(string id, bool delivered)
     {
         await _gate.WaitAsync();
         try
         {
             var entries = await EntriesAsync();
             if (entries.RemoveAll(e => e.Id == id) == 0) return;
-            Interlocked.Increment(ref _redelivered);
+            if (delivered) Interlocked.Increment(ref _redelivered);
             await SaveAsync(entries);
         }
         finally { _gate.Release(); }

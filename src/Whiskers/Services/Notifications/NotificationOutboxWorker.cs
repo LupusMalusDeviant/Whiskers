@@ -55,16 +55,21 @@ public sealed class NotificationOutboxWorker : FleetBackgroundService
             {
                 _logger.LogWarning("Undelivered {EventType} dropped: the channel {Channel} no longer exists",
                     entry.Event.EventType, entry.Channel);
-                await _outbox.CompleteAsync(entry.Id);
+                await _outbox.CompleteAsync(entry.Id, delivered: false);
                 continue;
             }
 
-            var (ok, failure) = await NotificationRetry.TrySendAsync(t => channel.DeliverAsync(entry.Event, t),
+            var sent = false;
+            var (ok, failure) = await NotificationRetry.TrySendAsync(async t => sent = await channel.DeliverAsync(entry.Event, t),
                 maxAttempts: 1, _attemptTimeout, TimeSpan.Zero, ct);
             if (ok)
             {
-                await _outbox.CompleteAsync(entry.Id);
-                _logger.LogInformation("Undelivered {EventType} redelivered to {Channel}", entry.Event.EventType, entry.Channel);
+                await _outbox.CompleteAsync(entry.Id, sent);
+                if (sent)
+                    _logger.LogInformation("Undelivered {EventType} redelivered to {Channel}", entry.Event.EventType, entry.Channel);
+                else
+                    _logger.LogWarning("Undelivered {EventType} dropped: {Channel} has nothing to send any more (switched off, " +
+                                       "or throttled after a newer one of its kind got through)", entry.Event.EventType, entry.Channel);
                 continue;
             }
             if (ct.IsCancellationRequested) return;
