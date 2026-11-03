@@ -494,7 +494,10 @@ public class BackgroundServiceFailureTests
         Assert.Null(VerdictOf(InLoop("try { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\nawait Task.Delay(Pause, ct);")));
         // Follow-up review: `await foreach` / `await using` outside the recovering try.
         Assert.NotNull(VerdictOf(InLoop("await foreach (var x in Stream(ct)) { }\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
-        Assert.NotNull(VerdictOf(InLoop("await using var lease = await Lease(ct);\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        // No await expression in these two: only the statement rule can refuse them.
+        Assert.NotNull(VerdictOf(InLoop("await using var lease = Lease();\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.NotNull(VerdictOf(InLoop("await using (var lease = Lease()) { }\ntry { await Run(ct); } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }")));
+        Assert.Null(VerdictOf(InLoop("try { await using var lease = Lease(); await using (var other = Lease()) { } } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\nawait Task.Delay(Pause, ct);")));
         Assert.Null(VerdictOf(InLoop("try { await foreach (var x in Stream(ct)) { } } catch (Exception ex) when (!IsHostStopping(ex, ct)) { Log(ex); }\nawait Task.Delay(Pause, ct);")));
         // Review round 9: a return from a nested loop's catch leaves RunAsync too; a rethrow inside the recovering try does not.
         Assert.NotNull(VerdictOf(InLoop("try { foreach (var s in Xs) { try { await Run(s, ct); } catch (TimeoutException) { return; } } } " +
@@ -767,7 +770,7 @@ public class BackgroundServiceFailureTests
             // `await using` and `await foreach` await as well, without an await expression.
             foreach (var s in Outside<StatementSyntax>(LoopBody(l)).Where(AwaitsWithoutExpression))
                 if (!InsideRecoveringTry(s, l, token))
-                    return $"`{s.NormalizeWhitespace().ToString().Split('\n')[0]}` runs in the loop outside the catch that recovers from a failed cycle";
+                    return $"`{s.NormalizeWhitespace(eol: "\n").ToString().Split('\n')[0]}` runs in the loop outside the catch that recovers from a failed cycle";
         }
         var candidates = loops.Count > 0
             ? loops.SelectMany(l => Outside<TryStatementSyntax>(LoopBody(l))

@@ -11,7 +11,7 @@ All notable changes to Whiskers are documented here. The format follows
   saying goodbye — before, the stop turned it into a cancellation and the retry mailed the reached recipients again. An auto-update whose
   container was replaced and verified is recorded as done when Whiskers stops during the health check that follows,
   not as a failure. A retry that ran out of time in Whiskers' own queue no longer counts against the server's circuit,
-  and a call that did is no longer mistaken for a broken tunnel and sent again.
+  and a first attempt that ran out of time there is no longer mistaken for a broken tunnel and sent again.
   The CVE monitor's start log shows the effective interval and no longer reads raw options outside its recovering loop,
   and the background-loop ratchet now also flags work that runs in a loop outside the catch that recovers a cycle.
 - R1-54: **Notifications no longer reach into Whiskers' own network unless an Admin allows it.** Every notification
