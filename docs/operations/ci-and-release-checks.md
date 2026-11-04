@@ -82,16 +82,26 @@ Every wait is bounded (`WAIT_SECONDS`, default 300 s — the image's own health-
   highest one **below** the version under test — the release version, or the `<Version>` of `Whiskers.csproj` on a pull
   request. N−1 is never the release under test: the same release without pending migrations is rightly no upgrade, and
   the check fails if it ever were.
-- **`self-test`** proves that nothing these checks print carries a stored value. Container output never reaches the CI
-  log raw: the logs shown when a check fails and the output of the commands the checks stream (compose start, secrets
-  volume, backup staging) pass through `safe_log`, which shows only the header of each log entry — level, category, event
-  id — and withholds every other line (a category with three or more digits or over 120 characters is withheld too). The
-  data tool reports a failure only by the operation and file it hit (`state failed while reading vault.json`), never by
-  an exception's message or stack, and exits non-zero. The self-test plants random values in a probe container's logs,
-  in streamed output and in malformed data (invalid `vault.json`, an `EncryptedValue` that is the planted value itself or
-  of the wrong type, a corrupt `metrics.db`), runs the real exit trap, `run_quiet` and `artifact-data.mjs` on them and
-  fails if any value, its SHA-256 fingerprint or an 8-character prefix of either appears in the output. Both the
-  `artifact` job and the release's `artifact-test` run it before the other checks.
+- **`self-test`** checks the output rule of these checks: the CI log gets **only text the script writes itself** — step
+  names, fixed diagnostics, the arguments it was given, counts. Every command's own stdout and stderr (Docker, compose,
+  curl, the containers, the data tool) goes to private files in a temporary directory removed on exit; no text from a
+  container, a tool, an HTTP body or a log line reaches the CI log, filtered or not. When a check fails, the logs of its
+  containers are summarised as counts per log level (`entries: info=… warn=… …; other lines=…`); a failed readiness
+  check names the HTTP status, not the body; the upgrade line and the backup id in the log are compared with what the
+  script expects (a release version other than N−1's, plain counts that must match the migration histories, a backup
+  that is on the volume) and never reprinted. The data tool reports a failure only by the operation and file it hit
+  (`state failed while reading vault.json`), never by an exception's message or stack, and exits non-zero. The self-test
+  plants random values — hex, letters only, a fingerprint and its 8-character prefix, a 32-digit number — as log
+  categories, event ids, messages, an HTTP body, tool errors (a container that does not start, a failing file command, a
+  data-tool run Docker refuses) and upgrade log lines, drives the real code paths with them in child processes, and fails
+  if any value, its SHA-256 fingerprint or an 8-character prefix of either appears, or if a probe does not end with its
+  expected exit status and fixed diagnostic. On malformed data (invalid `vault.json` or `roles.json`, an
+  `EncryptedValue` that is the planted value itself or of the wrong type, a corrupt `metrics.db`) every command of the
+  data tool — `state`, `seed-vault-legacy`, `seed`, `mutate`, `audit-since`, `audit-present` — runs on its own fixture,
+  which is complete except for the part under test, and must exit non-zero with exactly one fixed error that names the
+  operation that reached the malformed part. Both the `artifact` job and the release's `artifact-test` run it before the
+  other checks. What it proves is bounded by these probes: the output rule holds for every path the script has, but a
+  new path is covered only once a probe drives it.
 
 Run them locally against an image you built (`docker build -t whiskers:local .`):
 

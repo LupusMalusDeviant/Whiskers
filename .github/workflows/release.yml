@@ -313,7 +313,7 @@ jobs:
           docker pull "${IMAGE}@${AMD64_IMAGE}"
           docker tag "${IMAGE}@${AMD64_IMAGE}" "$ARTIFACT"
 
-      # Nothing the checks below print may carry a stored value: planted values must not survive the log filter.
+      # The checks below print only text they write themselves; planted values must not reach this log by any path.
       - name: Disclosure self-test
         run: bash .github/scripts/artifact-checks.sh self-test
 
