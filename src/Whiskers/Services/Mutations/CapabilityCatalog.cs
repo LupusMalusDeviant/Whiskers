@@ -94,6 +94,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("terminal.container_open", A, "container", Root, Short);
         yield return Ui("terminal.host_open", A, "host", Root, Short);
         yield return Ui("image.pull", W, "host", Rev, Long);
+        // R1-48: assessing an update pulls the candidate image on the host — the tag then points at it — so the tool
+        // that was Read is decided as a write on the host it pulls on (it recreates and starts nothing).
+        yield return Tool("image.assess_update", "assess_update_risk", W, "host", Rev, Long);
 
         // Deployments
         yield return Tool("app.deploy", "deploy_app", A, "host", Root, Long);

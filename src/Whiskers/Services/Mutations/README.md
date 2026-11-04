@@ -123,7 +123,8 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `MutationVerifiers.cs` | R1-36/37: the factories of every registered verifier (one per `ReadBack` contract); the app registers them, the tests build the same list. |
 | `VerificationContracts.cs` | R1-37 (INV-43): the verification contract of every catalog capability — `ReadBack` (what is read) or `NotVerifiable` with the reason (Whiskers' own records, arbitrary commands and queries, effects that end where they started, nested-only capabilities). `ReadBackVerificationTests.Every_capability_declares_its_verification_contract` holds the catalog, the contracts and the registered verifiers together. |
 | `ResourceLocks.cs` | R1-10 (INV-42): one lock per resource key for the whole process (a Core singleton). Webhook container actions, webhook compose deployments and Git deployments (from checkout to `up`) all take `Server(serverId)` — no name, id or path identifies a container or a deployment's files throughout (a rebuild changes the id; symlinks, `COMPOSE_FILE`, checkouts), the server does. `ServerKey` resolves a stored id or alias (another case, the display name) to the server's id, as execution does, so every alias is one lock. `Holding(key)` marks the holder's flow: work it starts (a Git deployment a webhook delivery runs) does not wait for its own lock. Reference-counted: a key exists only while it is held or awaited. |
-| `MutationAttributes.cs` | `[MutatingOperation("<area>.<verb>")]` on service-interface methods that change infrastructure; `[MutationHandler]` on classes allowed to call them; `[MutationEntryPoint]` on the runner methods whose lambda argument the architecture test counts as gated. |
+| `MutationAttributes.cs` | `[MutatingOperation("<area>.<verb>")]` on service-interface methods that change infrastructure; `[MutationPrimitive]` (R1-48) on a generic execution method whose capability lies in its arguments (`IHostCommandExecutor.ExecuteMutationAsync`) — it needs an open scope whose capability's execution is a raw host command (`MutationCompositions.RawHostCommands`), and its callers are pinned by `MutationGatewayCoverageTests`; `[MutationHandler("<capability>")]` on a class whose public methods run only inside a decision for that capability (R1-48: it names the capability, and its calls are checked against it — no blanket exemption); `[MutationEntryPoint]` on the runner methods whose lambda argument the architecture test counts as gated. |
+| `MutationCompositions.cs` | R1-48: the explicit table of nested operations — which capabilities a decided operation may run inside its own scope (`app.deploy` → `image.pull` + `container.create`, `compose.deploy` → `app.deploy`, `server.onboard` → `certificate.issue_mtls` + `server.save`, `workload.*` → `container.*`, `image.assess_update` → `image.pull`, vault writes of the stores that keep secrets, `nginx.*` → `nginx.reload`, `dns.record_set` → `dns.record_delete`, `cloud.hard_reset` → `cloud.reboot`, `account.create` / `account.delete` → `config.roles`, …). `Allows(outer, inner)` is the transitive closure. `RawHostCommands` lists the capabilities whose execution is a raw host command — the only scopes the host primitive runs in. The runtime guard and the architecture test both read it; a composed capability is never above the composing one's level (`MutationGatewayCoverageTests`). |
 | `MutationModels.cs` | `Capability`, `CapabilityRisk`, `MutationPrincipal` (incl. `OnBehalfOf`, `AllowedTools`), `MutationSurface`, `MutationTarget`, `MutationRequest` (incl. `AgentOrigin`, R1-15: set by Whiskers from the agent session, it makes a gateway approval for a web-chat call interactive), `MutationOutcome<T>` (incl. `ApprovalId`, `MatchedRules`), `MutationContext`. |
 | `CapabilityCatalog.cs` | `ICapabilityCatalog` — the single table of mutating capabilities and their levels (INV-13, R1-05). `McpPermissionLevels.DefaultToolLevels` takes its mutating entries from it; `RoleFor` maps a level to the UI role pages check (`CapabilityTableConsistencyTests` holds hard-coded page roles to it). R1-49 adds the local-account capabilities (target kind `account`, id argument `account` = the email): `account.create`, `account.password_reset`, `account.delete` (Admin) and `account.password_change` — the one read-level capability (every signed-in user, own account only; the service refuses anyone else's), which the kill switch therefore lets through. |
 | `CapabilityOverrides.cs` | `ICapabilityOverrides` + `McpToolCapabilityOverrides`: the MCP tool's Enabled switch and a stricter stored level (Settings → MCP), applied for **every** principal kind (INV-15). The catalog level is the floor. |
@@ -149,7 +150,7 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `ProcessIdentity.cs` | R1-39: `ProcessIdentity.Current`, a fresh id per Whiskers process, written on every run and update put on record before it starts; the reconciler tells this process's open rows from cut-off ones by it. |
 | `InterruptedWorkReconciler.cs` | R1-39: one pass at start. Journal rows still `Running` under another process become `Interrupted` (conditional on the row as read; a retry stays `OutcomeUnknown`, `AuditRecovery` settles the intent as `Unknown`); task runs without an end of another process — `TaskRunHistory.ProcessInstance` is not this process's `ProcessIdentity.Current`, or is null (written before identities existed); decided by identity, never by the clock — become failed runs with `InterruptedResult` (also the task's last result unless a later run recorded one). Nothing is run again. One `operations_interrupted` notification (administrative, never muted) names up to 20 of them. AutoUpdate attempts without an end (`UpdateHistory.CompletedAt` null) of another process (`UpdateHistory.ProcessInstance`, same rule) become failed updates with `InterruptedResult`, and the matching update policy is switched off (`InterruptedUpdateResult`) until an admin switches it on again. Every update is conditional on the row as read (`ExecuteUpdate`); a task's last result only while its `LastRun` is still that run's start. A `FleetBackgroundService`. An attempt is closed in one transaction with switching its policy off, a task run in one transaction with its task's last result; each transaction runs inside the provider's execution strategy (PostgreSQL's `EnableRetryOnFailure` refuses one opened outside it), and a retry after a lost commit still reports the work. Every mark commits on its own: when a later step fails, what was marked before is still logged and notified, the failure is raised after that, and what stayed open is marked by the next start. As `IStartupReconciliation` (`IStartupReconciliation.cs`) its `Completed` ends after the pass, also a failed one; AutoUpdate waits for it before its first check. |
 | `MutationScope.cs` | The ambient (`AsyncLocal`) scope the gateway opens around a delegate; nested service calls run inside it. `MutationScope.Fail(reason)` lets code that answers with an error text instead of throwing (most MCP tools) mark the operation as failed. `MutationScope.Record(result)` (R1-20, through `IToolAuditLog`) adds what the tool reports about its work — at most ten `MutationDomainResult`s — to the gateway's outcome (`results` in its details, redacted); a reported failure also fails the operation. `Covers(serverId, identities)` says whether this or an enclosing decision saw a resource (target, related resources, argument values) on that server — used by `ComposePlan.EnsureDecided` (R1-07). `PinnedPolicy` and `TriggerId` (R1-13) are inherited by nested scopes. R1-37: `ReadBack(key, value)` tells the capability's verifier what the call really acted on when its arguments do not say it (in memory only, never audited; the gateway hands it over as `MutationContext.ReadBackFacts`) — e.g. `ComposeImpact.ReportProject`, the compose project a plan resolved and the services its files define (a top-level `name:` included; an interpolated name is reported empty and the deployment is then not verifiable). `ApprovedBy` (contract 0001): the person (`user:<email>`) whose approval this run used, this scope only; `AutomationOwners.PersonFor` turns it (or a calling person) into the owner of what the Brokkr provisioning tools set up — never the key. |
-| `MutationScopeGuard.cs` | `MutationScopeProxy<T>` (a `DispatchProxy` around each service interface with marked methods), `IMutationScopeMonitor` and `MutatingMethods`. **Report mode:** a call outside a scope still runs; the first sighting per capability is logged at Information. The guard implements only the guarded interface; `IMutationScopeProxy.Inner` gives the instance behind it (used by `AddInitializable` for startup warm-up). |
+| `MutationScopeGuard.cs` | `MutationScopeProxy<T>` (a `DispatchProxy` around each service interface with marked methods), `IMutationScopeMonitor` and `MutatingMethods`. **Enforced since R1-48:** a marked call needs an open scope whose capability is the call's own or composes it (`MutationScope.Authorizes`, `MutationCompositions`) — and a call that names its server (`string serverId`) and is allowed only through a composition must name the server the composing decision was taken for (an `app.deploy` on A cannot pull on B; a decision without a server target, an operation without a `serverId` parameter and the decided capability itself are not matched by server). A call that omits its `serverId` acts where its operation routes an omitted server, declared once with `[OmittedServer]` (`OmittedServerAttribute.cs`: the configured default, or a fixed id such as `OmittedServer.Local`; implementations with a fixed fallback read it through `OmittedServer.For<T>`, so guard and implementation cannot drift; every guarded operation with an omittable `serverId` must declare it, test-enforced). `IMutationScopeMonitor.ResolveServer` resolves the call's and the decision's server through the registry to canonical ids; an unknown server, an undeclared omission, a missing or failing registry and an unresolvable decision server match nothing (review rounds 2 and 3). Round 4: the guard hands an omitted `serverId` to the implementation as the canonical id it checked (execution is bound to the checked server, a later default change cannot redirect it); only `null` is an omission — an empty or blank `serverId` names no server and is refused with an `ArgumentException` before any decision is looked at (round 5: also for the decided capability itself and for a decision without a server); a primitive needs a scope of a `RawHostCommands` capability. Otherwise `MutationScopeViolationException` is thrown before the call runs and the sighting is logged at Error. A closed scope authorizes nothing: `MutationScope.Current` skips a scope (or a parent) that was disposed, so work that escaped it (`Task.Run`, a timer, fire-and-forget) is refused, and a scope begun there does not nest under the dead one; a nested scope begun from escaped work while the outer one was still open stops being authorized when the outer one closes (fail closed, not atomic), so background work started from code that can run in a decision suppresses the flow (`ExecutionContext.SuppressFlow`, test-enforced in `MutationGatewayCoverageTests`). No capability is only recorded: every one is refused outside a decision (the first-run wizard uses the narrow first-admin methods of the role and whitelist services instead, see below). `MutationScopeMonitor.ReportOnly` exists for tests. The guard implements only the guarded interface; `IMutationScopeProxy.Inner` gives the instance behind it (used by `AddInitializable` for startup warm-up). |
 
 Registration: [`../../Startup/WhiskersMutationGatewayExtensions.cs`](../../Startup/WhiskersMutationGatewayExtensions.cs)
 (`AddGuardrailPolicy`, `AddMutationGateway`, `AddMutationScopeGuard`), called **last** in `Program.cs` so module
@@ -216,10 +217,24 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 
 - **Grace period (opt-in).** With `Automation:RequireOwner=false`, ownerless tasks and an ownerless AutoUpdate run
   with the level of the capability they run until an Admin takes them over. The default is `true` since R1-04.
-- **Gated by convention only:** self-backup tasks (`selfbackup.create` / `selfbackup.prune`) and the DB-backup
-  retention (`db.backup_delete`, a host `rm`) run through the gateway, but their services are not marked, so the
-  architecture test would not catch a new direct call. `UpdateRiskService` (`image.pull`) and
-  `LoopSuspensionService` (`checks.resume`) stay in the baseline.
+- **Self-backup and retention** (R1-48): `IBackupService` create / delete / prune / restore are marked
+  (`selfbackup.*`); the DB-backup retention `rm` runs through the host primitive. The two start-up paths before the
+  gateway exists — the pre-upgrade backup and its pruning (S-09, `UpgradeGuard`) and the command-line restore (S-10,
+  `RestoreCli`) — use narrow unmarked methods (`CreatePreUpgradeBackupAsync`, `DeletePreUpgradeBackupAsync`, which
+  refuses any backup that is not a pre-upgrade one, `BeginHostRestoreAsync`) whose single callers are pinned by
+  `MutationGatewayCoverageTests`. `UpdateRiskService` is its own capability (`image.assess_update`, Write, composing
+  `image.pull`). The automatic lapse of a pause in `LoopSuspensionService` is not `checks.resume`: it removes only
+  the expired entry it read (a newer pause stays), so it acts on nobody's behalf.
+- **The first administrator** (R1-48, maintainer option a): the first-run wizard runs before any person exists the
+  gateway could decide for. It writes through `IWhitelistService.AddFirstAdminAsync` and
+  `IRoleService.SetFirstAdminAsync`, which refuse once any Admin exists — the wizard holds `AccessControlWriteGate`, the
+  one write boundary of all role and whitelist writers, across the check and both writes (at most one of concurrent calls
+  wins, no other writer runs in between) and the Admin is published only after it was saved — are pinned to `SetupStateService` and are audited (`setup.first_admin`, written first;
+  without it nothing is written). `SaveWhitelistAsync`, `SetRoleAsync`, `RemoveRoleAsync` and `SaveRoleDataAsync`
+  are gateway operations only.
+- **CVE scanners** (S-06, designed exemption): `apt-get update` and Trivy's scanner image, throw-away container and
+  cache volume change host caches, not workloads; they are pinned to the CVE monitor (and the update-risk assessment,
+  inside its own decision).
 - **Key-owned items** are evaluated with the full rule set of the key (tool lists, forbidden arguments,
   confirmation). A `Confirm` on the `Automation` surface is a terminal `Denied` in the gateway, before the approval
   gate (R1-01): no one can approve an unattended run, and no approval is raised that a later occurrence of the same
@@ -274,16 +289,20 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   answered as a plain message string is still recorded as `Executed`.
 - **Deadlines** reach a tool through its `CancellationToken` parameter, over MCP and for the agent. A tool that has
   none, or work it starts in the background, is not stopped (INV-40, WP9).
-- **Calls from a tool to another capability** stay in the baseline: `deploy_app` creating a container and pulling an
-  image, `preview_auto_patch` starting a background cycle (`autopatch.run`). The gateway decided on the tool's
-  capability only (the preview's candidates are decided one by one inside the cycle); the background cycle
-  outlives the gateway's deadline and outcome row.
-- **Not yet marked** (so neither the guard nor the architecture test sees them): the generic execution primitives
-  `IHostCommandExecutor` and `IDockerService.RunHostShellAsync`, terminals and server records. The UI actions built
-  on the primitives (container `.env` save + compose up, Artisan migrate/rollback, SQL file import, compose editor
-  and App Store deploys, the webhook **Test** button, server save/remove/onboarding, AI-trigger save, self-backup
-  create/delete/restore) run through the gateway since the step 2.2 review, but only by convention: a new direct
-  call is not caught until the primitives are marked.
+- **Calls from a tool to another capability** are explicit compositions since R1-48 (`MutationCompositions`):
+  `deploy_app` pulling an image and creating a container runs inside `app.deploy`. `preview_auto_patch` is its own
+  capability on `IAutoPatchService.StartPreview` (`autopatch.preview`); the background cycle it starts decides each
+  candidate as `container.update` on the caller's authority and outlives the gateway's deadline and outcome row.
+- **Raw host execution, terminals and server records** (R1-48): writes through the host executor use its primitive
+  `ExecuteMutationAsync` (`execute_command`, `set_container_env`, `deploy_compose`, scheduled commands, cleanup and
+  retention, the container page's `.env` save and Artisan commands, UI and webhook compose deploys);
+  `MutationGatewayCoverageTests` pins exactly these callers, and lists every caller of the plain `ExecuteAsync` in every
+  namespace as a read, the body of a marked operation of its own type, or a private helper of a guarded service. Every
+  write-named interface method is marked or listed with its reason (`Every_write_named_interface_method_is_marked_or_explained`),
+  and no constructor takes the concrete implementation of a guarded interface. Server records
+  (`IServerConfigService` add/update/SSH key → `server.save`, remove/take → `server.remove`), onboarding, webhook
+  management, AI-trigger save, Kubernetes workload actions (the provider from `WorkloadProviderFactory` is guarded),
+  cloud power/snapshot and the Hetzner extensions are marked.
 - **Compose deploys** are planned before anything is written (R1-07, `ComposePlan`): the effective project
   (`-p` > `COMPOSE_PROJECT_NAME` in the `.env` > top-level `name:` > directory name) and every existing container
   `up` recreates, removes as an orphan or collides with by name. The UI (compose editor, App Store, Deploy page,
@@ -362,12 +381,17 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 `MutationGatewayTests` (pipeline), `UiMutationRunnerTests` (UI principal, PC-D1 rules, PC-D3),
 `AutomationMutationRunnerTests` (owner re-check per run, keys, grace period, `RequireOwner`, refused task, owner store), `ToolAuthorizationTests` (tool switch and stricter level for every principal,
 target resolution, session approval, approval used only after the intent, reported tool failures over MCP and for
-the agent), `ApprovalGateTests`, `MutationScopeGuardTests`, `CapabilityCatalogTests`,
-`MutationGatewayBootTests` (real composition root and `AuditLog` table), `GuardrailModuleIndependenceTests` (Agent
-module off) and `MutationBypassArchitectureTests`, which reads method IL and compares every call to a marked method
-outside the gateway with [`docs/v1/mutation-bypass-baseline.txt`](../../../../docs/v1/mutation-bypass-baseline.txt).
-An MCP tool mapped to a capability counts as inside the gateway, because both dispatchers run it there. The baseline
-may only shrink: 104 lines after step 2.0, 75 after step 2.1, 29 after step 2.2, 23 after step 2.3.
+the agent), `ApprovalGateTests`, `MutationScopeGuardTests` (an unscoped call throws in production, compositions,
+escaped and detached scopes), `CapabilityCatalogTests`, `MutationGatewayBootTests` (real composition root and
+`AuditLog` table), `GuardrailModuleIndependenceTests` (Agent module off), `MutationGatewayCoverageTests` (the
+inventory of writes by surface, the primitive's callers, the start-up backup paths) and
+`MutationBypassArchitectureTests`, which reads method IL and requires every call to a marked method to sit in a
+decision that covers it: a UI runner lambda, the type's own marked operation, an MCP tool mapped to a capability, a
+`[MutationHandler]` for a capability, or a private helper whose every caller is one of those — each checked against
+`MutationCompositions`. The baseline file it used to compare against was removed in R1-48 (104 lines after step 2.0,
+75 after 2.1, 29 after 2.2, 23 after 2.3, none since); nothing is allowed by list. `MutationEnforcementBootTests` starts
+the app enforcing in each auth mode (disabled, local, OIDC), checks that nothing at start-up writes outside a decision
+and completes the first-run wizard.
 
 ## Levels and effective requirements (R1-05)
 

@@ -6,7 +6,7 @@ Deploys workloads onto managed hosts, both single containers (from a form: image
 
 | File | Purpose |
 |---|---|
-| `IDeploymentService.cs` / `DeploymentService.cs` | Validates and executes deployments; returns a `DeploymentValidationResult` so the UI can surface problems before anything runs. |
+| `IDeploymentService.cs` / `DeploymentService.cs` | Validates and executes deployments; returns a `DeploymentValidationResult` so the UI can surface problems before anything runs. R1-48: `[OmittedServer]` — an omitted `serverId` goes to Docker unchanged, i.e. the configured default server (what the scope guard matches against). |
 | `ComposeFileParser.cs` | Parses Docker Compose YAML into the structures the deployment service and the Compose editor work with. |
 | `NoopDeploymentService.cs` | Core default `IDeploymentService` for when the **Deployment module** is off. Keeps the Core, mixed `ContainerTools` resolvable; deploy operations **throw** (never fake a deploy), `ValidateCompose` reports invalid. Real service wins by last-registration when on (RoadToSAP Phase 1). |
 

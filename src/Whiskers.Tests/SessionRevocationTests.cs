@@ -49,7 +49,7 @@ public sealed class SessionRevocationTests
             foreach (var email in new[] { deleted, unlisted, demoted, restamped })
             {
                 await CreateLocalUserAsync(factory, email);
-                await roles.SetRoleAsync(email, AppRole.Admin);
+                await GatewayArrange.RunAsync("config.roles", () => roles.SetRoleAsync(email, AppRole.Admin));
             }
 
             var clients = new Dictionary<string, HttpClient>();
@@ -64,7 +64,7 @@ public sealed class SessionRevocationTests
             // An account without a stamp gets one at sign-in and stays signed in (no sign-out loop).
             const string unstamped = "unstamped@local.test";
             await CreateLocalUserAsync(factory, unstamped);
-            await roles.SetRoleAsync(unstamped, AppRole.Admin);
+            await GatewayArrange.RunAsync("config.roles", () => roles.SetRoleAsync(unstamped, AppRole.Admin));
             using (var scope = factory.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>();
@@ -94,17 +94,17 @@ public sealed class SessionRevocationTests
             AssertSignedOut(await AdminProbeAsync(clients[restamped]));
 
             // Role demotion: the cookie carries no role; the very next request holds the lowered one.
-            await roles.SetRoleAsync(demoted, AppRole.Operator);
+            await GatewayArrange.RunAsync("config.roles", () => roles.SetRoleAsync(demoted, AppRole.Operator));
             var refused = await AdminProbeAsync(clients[demoted]);
             Assert.NotEqual(HttpStatusCode.NotFound, refused.StatusCode);
             Assert.DoesNotContain("/login", refused.Headers.Location?.OriginalString ?? "");
 
             // Whitelist removal (everyone else stays listed).
             var whitelist = factory.Services.GetRequiredService<IWhitelistService>();
-            await whitelist.SaveWhitelistAsync(new WhitelistData
+            await GatewayArrange.RunAsync("config.whitelist", () => whitelist.SaveWhitelistAsync(new WhitelistData
             {
                 Enabled = true, Emails = [Email, demoted],
-            });
+            }));
             AssertSignedOut(await AdminProbeAsync(clients[unlisted]));
         });
 
@@ -146,13 +146,13 @@ public sealed class SessionRevocationTests
     public async Task A_raised_role_keeps_the_circuit()
     {
         await using var world = await World.CreateAsync();
-        await world.Roles.SetRoleAsync(World.Ops, AppRole.Operator);
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(World.Ops, AppRole.Operator));
         var clock = new ManualClock(DateTimeOffset.UnixEpoch);
         using var provider = new SessionRevalidatingAuthenticationStateProvider(world.Validator, clock);
         provider.SetAuthenticationState(Task.FromResult(new AuthenticationState(world.OpsCookiePrincipal())));
         await WaitUntilAsync(() => clock.Periods.Count == 1);
 
-        await world.Roles.SetRoleAsync(World.Ops, AppRole.Admin);
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(World.Ops, AppRole.Admin));
         Assert.True(await provider.RevalidateAsync());
         Assert.True((await provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
     }
@@ -163,15 +163,15 @@ public sealed class SessionRevocationTests
         // A page opened after the promotion cached Admin; lowering the role again must end the circuit, even though
         // the new role is still at least the one the circuit started with.
         await using var world = await World.CreateAsync();
-        await world.Roles.SetRoleAsync(World.Ops, AppRole.Viewer);
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(World.Ops, AppRole.Viewer));
         var clock = new ManualClock(DateTimeOffset.UnixEpoch);
         using var provider = new SessionRevalidatingAuthenticationStateProvider(world.Validator, clock);
         provider.SetAuthenticationState(Task.FromResult(new AuthenticationState(world.OpsCookiePrincipal())));
         await WaitUntilAsync(() => clock.Periods.Count == 1);
 
-        await world.Roles.SetRoleAsync(World.Ops, AppRole.Admin);
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(World.Ops, AppRole.Admin));
         Assert.True(await provider.RevalidateAsync());               // promoted: kept
-        await world.Roles.SetRoleAsync(World.Ops, AppRole.Operator);
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(World.Ops, AppRole.Operator));
         Assert.False(await provider.RevalidateAsync());              // below the highest role it held: ended
         Assert.False((await provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
     }
@@ -340,16 +340,16 @@ public sealed class SessionRevocationTests
     public async Task A_promotion_only_a_page_saw_then_a_demotion_ends_the_circuit()
     {
         await using var world = await World.CreateAsync();
-        await world.Roles.SetRoleAsync(World.Ops, AppRole.Viewer);
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(World.Ops, AppRole.Viewer));
         var clock = new ManualClock(DateTimeOffset.UnixEpoch);
         using var provider = new SessionRevalidatingAuthenticationStateProvider(world.Validator, clock);
         provider.SetAuthenticationState(Task.FromResult(new AuthenticationState(world.OpsCookiePrincipal())));
         await WaitUntilAsync(() => clock.Periods.Count == 1);
         var page = new CurrentUserService(provider, world.Roles, world.Validator);
 
-        await world.Roles.SetRoleAsync(World.Ops, AppRole.Admin);
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(World.Ops, AppRole.Admin));
         Assert.Equal(AppRole.Admin, await page.GetRoleAsync());      // only the page saw the promotion
-        await world.Roles.SetRoleAsync(World.Ops, AppRole.Operator);
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(World.Ops, AppRole.Operator));
 
         Assert.False(await provider.RevalidateAsync());
         Assert.False((await provider.GetAuthenticationStateAsync()).User.Identity?.IsAuthenticated);
@@ -605,7 +605,7 @@ public sealed class SessionRevocationTests
             }
             var roles = new RoleService(configuration, NullLogger<RoleService>.Instance, dataPaths: paths);
             await roles.InitializeAsync();
-            await roles.SetRoleAsync(Ops, AppRole.Admin);
+            await GatewayArrange.RunAsync("config.roles", () => roles.SetRoleAsync(Ops, AppRole.Admin));
             var whitelist = new WhitelistService(configuration, roles, NullLogger<WhitelistService>.Instance, paths);
             await whitelist.InitializeAsync();
             return new World(dir, sp, configuration, roles, whitelist, paths);
@@ -635,10 +635,10 @@ public sealed class SessionRevocationTests
                     }
                     break;
                 case Change.WhitelistRemoval:
-                    await Whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = [Root] });
+                    await GatewayArrange.RunAsync("config.whitelist", () => Whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = [Root] }));
                     break;
                 case Change.RoleDemotion:
-                    await Roles.SetRoleAsync(Ops, AppRole.Operator);
+                    await GatewayArrange.RunAsync("config.roles", () => Roles.SetRoleAsync(Ops, AppRole.Operator));
                     break;
             }
         }

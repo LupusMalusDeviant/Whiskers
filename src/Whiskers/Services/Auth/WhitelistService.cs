@@ -13,15 +13,18 @@ public class WhitelistService : IWhitelistService, IInitializable
     private readonly ILogger<WhitelistService> _logger;
     private WhitelistData _cached = new();
     private readonly ReaderWriterLockSlim _lock = new();
-    // R1-22: one writer at a time from capture to diff, so a save's recorded change is the change it made.
-    private readonly SemaphoreSlim _save = new(1, 1);
+    // R1-22: one writer at a time from capture to diff, so a save's recorded change is the change it made. R1-48 review
+    // round 2: the boundary is shared with the roles and the setup wizard (AccessControlWriteGate).
+    private readonly AccessControlWriteGate _gate;
 
-    public WhitelistService(IConfiguration configuration, IRoleService roleService, ILogger<WhitelistService> logger, DataPathOptions? dataPaths = null)
+    public WhitelistService(IConfiguration configuration, IRoleService roleService, ILogger<WhitelistService> logger, DataPathOptions? dataPaths = null,
+        AccessControlWriteGate? writeGate = null)
     {
         _store = new JsonFileStore<WhitelistData>((dataPaths ?? DataPathOptions.Default).WhitelistJson);
         _configuration = configuration;
         _roles = roleService;
         _logger = logger;
+        _gate = writeGate ?? new AccessControlWriteGate();
     }
 
     public int Order => 10;
@@ -112,16 +115,33 @@ public class WhitelistService : IWhitelistService, IInitializable
             Enabled = data.Enabled,
             Emails = new List<string>(data.Emails)
         };
-        await _save.WaitAsync();
-        try
+        using (await _gate.EnterAsync())
         {
             var before = GetWhitelist();
             await _store.SaveAsync(copy);
             SetCache(copy);
             Whiskers.Services.Mutations.ConfigChange.Record("whitelist", before, copy);   // R1-22
         }
-        finally { _save.Release(); }
         _logger.LogInformation("Whitelist updated: {Count} emails, enabled={Enabled}", copy.Emails.Count, copy.Enabled);
+    }
+
+    public async Task AddFirstAdminAsync(string email, AccessControlWriteGate.Lease lease)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        // R1-48 review round 2: the caller holds the boundary every role and whitelist writer takes — no role writer
+        // can establish an Admin after this check, and no whitelist save can run before the wizard's role write.
+        _gate.Demand(lease);
+        // R1-48: closed for good once an administrator exists — from then on only SaveWhitelistAsync, through the gateway.
+        if (_roles.GetRoleData().Roles.Any(r => r.Role == AppRole.Admin))
+            throw new InvalidOperationException("An administrator already exists; the first-admin write is closed.");
+        var current = GetWhitelist();
+        if (current.Emails.Contains(email, StringComparer.OrdinalIgnoreCase)) return;
+        // Only the address is added; Enabled stays as it is (enabling it would lock out unlisted OIDC users).
+        var next = new WhitelistData { Enabled = current.Enabled, Emails = [.. current.Emails, email] };
+        await _store.SaveAsync(next);   // persisted first, published after
+        _gate.Demand(lease);
+        SetCache(next);
+        _logger.LogInformation("Setup wizard added the first administrator to the whitelist");
     }
 
     private void SetCache(WhitelistData data)

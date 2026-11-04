@@ -140,7 +140,6 @@ public class HostingerApiService : IHostingerService
     }
 
     public Task CreateSnapshotAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/snapshot", ct);
-    public Task DeleteSnapshotAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Delete, $"/virtual-machines/{id}/snapshot", ct);
 
     public Task<string> GetMetricsRawAsync(string token, long id, CancellationToken ct = default)
     {

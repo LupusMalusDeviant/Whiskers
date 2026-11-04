@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
 using Whiskers.Services.Server;
 using Whiskers.Utils;
@@ -44,7 +45,7 @@ public class VolumeBackupService : IVolumeBackupService
 
     public async Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null)
     {
-        var sid = serverId ?? "local";
+        var sid = OmittedServer.For<IVolumeBackupService>(serverId);   // the declared fallback the scope guard resolves too
         ValidateName(volumeName, "volume name");
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{volumeName}_{timestamp}.tar.gz";
@@ -172,7 +173,7 @@ public class VolumeBackupService : IVolumeBackupService
 
     public async Task<List<string>> ListVolumesAsync(string? serverId = null)
     {
-        var sid = serverId ?? "local";
+        var sid = OmittedServer.For<IVolumeBackupService>(serverId);   // the declared fallback the scope guard resolves too
         // Use label-aware format to show compose project + service for readability
         var result = await _executor.ExecuteAsync(sid,
             "docker volume ls --format '{{.Name}}'",

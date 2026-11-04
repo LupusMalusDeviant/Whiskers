@@ -28,11 +28,18 @@ public interface ICloudProvider
     Task<CloudServerInfo?> ResolveAsync(Whiskers.Models.ServerConfig sw, string token, CancellationToken ct = default);
 
     // Power/snapshot/metric ops for an already-resolved target. Each returns the exact result message; the
-    // caller (CloudControlService) appends the weak-resolution (IP-match) note exactly where it did before.
+    // caller (CloudControlService) appends the weak-resolution (IP-match) note exactly where it did before. The
+    // changing ones carry the capability of the CloudControlService operation they execute (R1-48), so a provider runs
+    // only inside that decision.
+    [Whiskers.Services.Mutations.MutatingOperation("cloud.power_on")]
     Task<string> PowerOnAsync(CloudServerInfo target, string token, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("cloud.shutdown")]
     Task<string> ShutdownAsync(CloudServerInfo target, string token, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("cloud.reboot")]
     Task<string> RebootAsync(CloudServerInfo target, string token, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("cloud.hard_reset")]
     Task<string> HardResetAsync(CloudServerInfo target, string token, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("cloud.snapshot_create")]
     Task<string> CreateSnapshotAsync(CloudServerInfo target, string token, string? description, CancellationToken ct = default);
     Task<string> MetricsAsync(CloudServerInfo target, string token, string type, CancellationToken ct = default);
 }

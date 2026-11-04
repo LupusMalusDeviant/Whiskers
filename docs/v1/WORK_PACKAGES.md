@@ -849,11 +849,19 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `MutationGatewayCoverageTests` inventories all UI/MCP/background/webhook/terminal writes, including raw host execution, server records, self-backup and retention.
-- [ ] `MutationBypassArchitectureTests` has no baseline allowances; remove the baseline file.
-- [ ] `MutationScopeGuardTests` proves an unscoped mutation throws in production.
-- [ ] Resolve provider/workload wrappers, image pulls, automatic check resumption and nested operations explicitly; do not hide them behind blanket handler exemptions.
-- [ ] An escaped/detached ambient scope cannot authorize unrelated later work.
+- [x] `MutationGatewayCoverageTests` inventories all UI/MCP/background/webhook/terminal writes, including raw host execution, server records, self-backup and retention.
+- [x] `MutationBypassArchitectureTests` has no baseline allowances; remove the baseline file.
+- [x] `MutationScopeGuardTests` proves an unscoped mutation throws in production.
+- [x] Resolve provider/workload wrappers, image pulls, automatic check resumption and nested operations explicitly; do not hide them behind blanket handler exemptions.
+- [x] An escaped/detached ambient scope cannot authorize unrelated later work.
+
+> **Status (R1-48 branch):** the baseline file is removed and nothing is allowed by list; every capability is refused
+> at run time outside a decision. The first-run wizard — the last undecided write — follows the maintainer's option
+> (a): it creates the first administrator through `IWhitelistService.AddFirstAdminAsync` and
+> `IRoleService.SetFirstAdminAsync`, which refuse as soon as any Admin exists, are pinned to `SetupStateService` and
+> are audited (`setup.first_admin`) before anything is written; whitelist and role writes otherwise go through the
+> gateway only. Other designed exemptions with pinned callers: the start-up backup paths (S-09/S-10), the credential
+> migration (R1-29/30) and the CVE scanners' host caches (S-06).
 
 **Out of scope:** Merely setting `Enforce=true` while unmarked paths remain.
 

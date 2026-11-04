@@ -8,7 +8,7 @@ Like Hetzner, credentials are **per Whiskers server**, so the bearer token is su
 
 | File | Purpose |
 |---|---|
-| `IHostingerService.cs` / `HostingerApiService.cs` | Hostinger VPS API client: list/get servers, power actions, snapshots and metrics, token supplied per call. |
+| `IHostingerService.cs` / `HostingerApiService.cs` | Hostinger VPS API client: list/get servers, power actions, snapshots and metrics, token supplied per call. R1-48: start/stop/restart/create-snapshot are marked (`cloud.power_on` / `cloud.shutdown` / `cloud.reboot` / `cloud.snapshot_create`; a hard reset composes the restart) and guarded; the never-called snapshot delete was removed. |
 
 ## Related
 

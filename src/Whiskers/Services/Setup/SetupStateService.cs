@@ -23,13 +23,23 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
     private readonly string? _presetToken;
     private readonly bool _authDisabled;
     private readonly ILogger<SetupStateService> _logger;
+    private readonly Whiskers.Services.AuditLog.IAuditLogService? _audit;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly AccessControlWriteGate _writeGate;
+
+    /// <summary>The audit action of the wizard's first-admin write (R1-48).</summary>
+    public const string FirstAdminAction = "setup.first_admin";
     private volatile bool _complete;
     private volatile string? _token;
 
     public SetupStateService(IRoleService roles, IWhitelistService whitelist, IServiceScopeFactory scopeFactory,
-        ILogger<SetupStateService> logger, DataPathOptions? dataPaths = null, IConfiguration? configuration = null)
+        ILogger<SetupStateService> logger, DataPathOptions? dataPaths = null, IConfiguration? configuration = null,
+        Whiskers.Services.AuditLog.IAuditLogService? audit = null, AccessControlWriteGate? writeGate = null)
     {
+        _audit = audit;
+        // R1-48 review round 2: the boundary the role and whitelist writers share. Without the shared instance the
+        // first-admin writes refuse (their lease would hold another gate) — fail closed.
+        _writeGate = writeGate ?? new AccessControlWriteGate();
         _roles = roles;
         _whitelist = whitelist;
         _scopeFactory = scopeFactory;
@@ -134,6 +144,14 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
             if (!VerifySetupToken(req.SetupToken))
                 return SetupCompletionResult.Failed(new[] { "The setup token is missing or wrong." });
 
+            // R1-48: the first admin is created outside the Mutation Gateway (nobody exists it could authorize yet), on
+            // the setup token's host-level authority — so it is recorded before anything is written, and without its
+            // record nothing is (fail closed, as for a backup download, R1-22).
+            var kind = req.IsLocal ? "local" : "federated";
+            if (_audit is null || !await _audit.TryLogAsync(email, "setup", FirstAdminAction, "auth", email, email,
+                    $"kind={kind}; authority=setup-token", success: true))
+                return SetupCompletionResult.Failed(new[] { "The setup could not be recorded in the audit log; nothing was changed." });
+
             if (req.IsLocal)
             {
                 if (string.IsNullOrEmpty(req.Password))
@@ -150,14 +168,27 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
                 }
             }
 
-            // Write order matters (crash-safety): role FIRST (already admits via the fail-closed path), then the
-            // whitelist email, then the mirror flag LAST — the flag can never precede the authoritative role.
-            await _roles.SetRoleAsync(email, AppRole.Admin);
-            var wl = _whitelist.GetWhitelist();
-            if (!wl.Emails.Contains(email, StringComparer.OrdinalIgnoreCase))
+            // Write order matters (crash-safety): the whitelist email FIRST, then the authoritative Admin role, then the
+            // mirror flag LAST — the flag can never precede the role. R1-48: both writes are the narrow first-admin
+            // methods, which refuse once any Admin exists, so the whitelist goes first (after the role it would be
+            // closed). A crash between the two leaves the address listed and no Admin: setup stays open with the same
+            // token, and the next attempt finds the address already there. Enabled is deliberately NOT flipped
+            // (disabled→enabled would lock out unlisted OIDC users). Review round 2: both writes run under one held
+            // AccessControlWriteGate, the boundary every role and whitelist writer takes — no other writer can add an
+            // Admin after the check or change the whitelist between the two writes.
+            try
             {
-                wl.Emails.Add(email);   // Enabled deliberately NOT flipped (disabled→enabled would lock out unlisted OIDC users)
-                await _whitelist.SaveWhitelistAsync(wl);
+                using var lease = await _writeGate.EnterAsync(ct);
+                await _whitelist.AddFirstAdminAsync(email, lease);
+                await _roles.SetFirstAdminAsync(email, lease);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Setup could not create the first administrator");
+                await _audit.TryLogAsync(email, "setup", FirstAdminAction, "auth", email, email,
+                    $"kind={kind}; authority=setup-token; error={ex.GetType().Name}", success: false);
+                if (AdminRoleExists()) return SetupCompletionResult.AlreadyComplete;
+                throw;
             }
             try { await File.WriteAllTextAsync(_flagPath, DateTime.UtcNow.ToString("O"), ct); }
             catch (Exception ex) { _logger.LogWarning(ex, "Writing setup-complete flag failed (the admin role is authoritative)"); }

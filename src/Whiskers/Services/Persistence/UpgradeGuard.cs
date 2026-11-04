@@ -149,7 +149,7 @@ public sealed class UpgradeGuard : IInitializable
         SelfBackupInfo backup;
         try
         {
-            backup = await _backups.CreateBackupAsync($"{BackupService.PreUpgradeLabelPrefix}{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
+            backup = await _backups.CreatePreUpgradeBackupAsync(ct);
         }
         catch (Exception ex)
         {
@@ -259,7 +259,7 @@ public sealed class UpgradeGuard : IInitializable
                 .Skip(Math.Max(1, keep))
                 .Where(b => b.Id != current);
             foreach (var backup in old)
-                await backups.DeleteBackupAsync(backup.Id, ct);
+                await backups.DeletePreUpgradeBackupAsync(backup.Id, ct);
         }
         catch (Exception ex)
         {

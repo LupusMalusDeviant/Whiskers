@@ -28,6 +28,7 @@ public interface IAiTriggerStore
     /// whose write grant it changes, and of one it switches on again after a suspension or without an owner (a
     /// takeover). Every other trigger keeps its owner. Throws <see cref="AiTriggersChangedException"/> when the
     /// triggers changed since <paramref name="readAtRevision"/>.</summary>
+    [MutatingOperation("aitrigger.save")]
     Task SaveAsync(List<AiTrigger> triggers, AgentPrincipal editor, long readAtRevision);
 
     /// <summary>Switches trigger <paramref name="triggerId"/> off because its owner lost their authority (or it has

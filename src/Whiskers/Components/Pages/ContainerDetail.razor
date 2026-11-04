@@ -1501,7 +1501,7 @@ else
                     // Planned again right before writing: a container that turned up meanwhile was not decided.
                     var current = await ComposePlanner.PlanEnvChangeAsync(_container, sid, _ => envContent);
                     current.EnsureDecided(MutationScope.Current);
-                    var restart = await HostCommandExecutor.ExecuteAsync(sid, current.DeployScript(pull: false),
+                    var restart = await HostCommandExecutor.ExecuteMutationAsync(sid, current.DeployScript(pull: false),
                         TimeSpan.FromMinutes(2));
                     if (!restart.Success) MutationScope.Fail("Writing .env or docker compose up failed.");
                     return restart;
@@ -1740,7 +1740,7 @@ else
             new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database, command, query },
             async _ =>
             {
-                var result = await HostCommandExecutor.ExecuteAsync(sid, dockerCmd, timeout);
+                var result = await HostCommandExecutor.ExecuteMutationAsync(sid, dockerCmd, timeout);
                 if (result.ExitCode != 0) MutationScope.Fail($"Command exited with {result.ExitCode}.");
                 else if (failedWhen?.Invoke(result.Output ?? "") is { } failure) MutationScope.Fail(failure);
                 return result;

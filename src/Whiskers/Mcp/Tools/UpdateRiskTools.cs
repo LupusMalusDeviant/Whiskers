@@ -5,13 +5,15 @@ using ModelContextProtocol.Server;
 using Whiskers.Services.ImageUpdate;
 using Whiskers.Models;
 using Whiskers.Services.Mcp;
+using Whiskers.Services.Mutations;
 
 namespace Whiskers.Mcp.Tools;
 
 [McpServerToolType]
 public class UpdateRiskTools
 {
-    [McpToolLevel(McpPermissionLevels.Read)]
+    // R1-48: it pulls the candidate image (a write on the host, image.assess_update), so it needs Write.
+    [McpToolLevel(McpPermissionLevels.Write)]
     [McpServerTool, Description(
         "Assess what updating one container's image would change, BEFORE recreating anything. Compares what " +
         "the running image and the candidate image declare — entrypoint, user, exposed ports, expected " +
@@ -27,10 +29,11 @@ public class UpdateRiskTools
                      "without it the benefit is reported as unknown, never as zero.")] bool scanCandidate = true)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "assess_update_risk");
-        if (denied != null) return denied;
+        if (denied != null) return MutationScope.Fail(denied);
 
         var report = await assessor.AssessAsync(serverId, container, scanCandidate);
-        return Render(report);
+        // An assessment that could not be made is a failed operation, not an executed one (R1-21).
+        return report.Error is null ? Render(report) : MutationScope.Fail(Render(report));
     }
 
     [McpToolLevel(McpPermissionLevels.Read)]

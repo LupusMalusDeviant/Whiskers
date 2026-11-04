@@ -50,6 +50,8 @@ public static class VerificationContracts
             ["terminal.container_open"] = VerificationContract.None("an interactive shell: what is typed is not recorded."),
             ["terminal.host_open"] = VerificationContract.None("an interactive shell: what is typed is not recorded."),
             ["image.pull"] = VerificationContract.None(NestedOnly),
+            ["image.assess_update"] = VerificationContract.None(
+                "an assessment: the pulled candidate is compared with the running image, and the report is the result."),
             ["workload.start"] = VerificationContract.None(
                 "Kubernetes scales the controller asynchronously; its pods are replaced, not read back by id."),
             ["workload.stop"] = VerificationContract.None(

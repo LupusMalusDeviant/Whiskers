@@ -74,8 +74,6 @@ public static class McpPermissionLevels
     {
         // Read tools
         ["list_containers"] = Read,
-        // GAP-6: reads image metadata and pulls the candidate image; starts and restarts nothing.
-        ["assess_update_risk"] = Read,
         // GAP-7: reads compose labels only.
         ["get_blast_radius"] = Read,
         ["get_container_details"] = Read,
@@ -108,6 +106,8 @@ public static class McpPermissionLevels
         ["update_container"] = Write,
         // Dry run only: pulls candidate images and puts the old tags back, recreates nothing.
         ["preview_auto_patch"] = Write,
+        // GAP-6 / R1-48: pulls the candidate image (image.assess_update); starts and restarts nothing.
+        ["assess_update_risk"] = Write,
         // Admin (not Write): both accept arbitrary host bind-mounts / images, so a container they create
         // can mount the host root = de-facto root on the host. Keep them above the write boundary.
         ["deploy_app"] = Admin,

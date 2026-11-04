@@ -41,7 +41,10 @@ public sealed class LoopSuspensionService : ILoopSuspensionService
 
             // Expired: let it lapse on its own. A pause that has to be revoked by hand is a pause that gets
             // forgotten, and a forgotten pause is an unmonitored server nobody knows about.
-            Resume(serverId);
+            // R1-48: this is not checks.resume. The end was part of the checks.pause decision that set the deadline,
+            // so the lapse takes no new decision; it removes only that very pause (a newer one stays) and resumes
+            // observing, which is the fail-open default of this service.
+            Lapse(serverId, suspension);
             return false;
         }
         catch (Exception ex)
@@ -81,8 +84,18 @@ public sealed class LoopSuspensionService : ILoopSuspensionService
 
     public void Resume(string serverId)
     {
-        if (!_suspended.TryRemove(serverId, out var was)) return;
+        if (_suspended.TryRemove(serverId, out var was)) Announce(serverId, was);
+    }
 
+    /// <summary>The end of a pause whose deadline passed: removes exactly <paramref name="expired"/>, so a pause set
+    /// again meanwhile is kept.</summary>
+    private void Lapse(string serverId, LoopSuspension expired)
+    {
+        if (_suspended.TryRemove(new KeyValuePair<string, LoopSuspension>(serverId, expired))) Announce(serverId, expired);
+    }
+
+    private void Announce(string serverId, LoopSuspension was)
+    {
         var name = ServerName(serverId);
         _logger.LogInformation("Background loops for {Server} resumed", name);
         Announce(NotificationEventTypes.LoopsResumed, serverId, name,

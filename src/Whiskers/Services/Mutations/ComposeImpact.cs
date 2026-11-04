@@ -36,7 +36,7 @@ public static class ComposeImpact
             {
                 var current = await planner.PlanAsync(deployment);
                 current.EnsureDecided(MutationScope.Current);
-                var r = await executor.ExecuteAsync(current.ServerId, current.DeployScript(pull), TimeSpan.FromMinutes(5));
+                var r = await executor.ExecuteMutationAsync(current.ServerId, current.DeployScript(pull), TimeSpan.FromMinutes(5));
                 if (!r.Success) MutationScope.Fail("docker compose failed.");
                 return r;
             }));

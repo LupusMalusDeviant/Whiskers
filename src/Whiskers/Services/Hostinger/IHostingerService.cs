@@ -13,13 +13,17 @@ public interface IHostingerService
     Task<List<HostingerVm>> ListVmsAsync(string token, CancellationToken ct = default);
     Task<HostingerVm?> GetVmAsync(string token, long id, CancellationToken ct = default);
 
+    // R1-48: the provider calls of a decided cloud operation, guarded like IHetznerService's.
+    [Whiskers.Services.Mutations.MutatingOperation("cloud.power_on")]
     Task StartAsync(string token, long id, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("cloud.shutdown")]
     Task StopAsync(string token, long id, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("cloud.reboot")]
     Task RestartAsync(string token, long id, CancellationToken ct = default);
 
     Task<HostingerSnapshot?> GetSnapshotAsync(string token, long id, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.MutatingOperation("cloud.snapshot_create")]
     Task CreateSnapshotAsync(string token, long id, CancellationToken ct = default);
-    Task DeleteSnapshotAsync(string token, long id, CancellationToken ct = default);
 
     /// <summary>Raw metrics JSON (field-level parsing pending live verification of the response shape).</summary>
     Task<string> GetMetricsRawAsync(string token, long id, CancellationToken ct = default);

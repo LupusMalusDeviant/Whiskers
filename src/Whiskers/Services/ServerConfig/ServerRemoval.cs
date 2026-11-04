@@ -9,9 +9,10 @@ namespace Whiskers.Services.ServerConfig;
 /// The execution of <c>server.remove</c> (R1-11): the server record goes first, and only once that is written is a
 /// Kubernetes server's kubeconfig removed from the vault. A failed removal therefore leaves a working server with its
 /// kubeconfig; a failed cleanup leaves at most a secret that no server names. The kubeconfig belongs to the server,
-/// so it is part of the one <c>server.remove</c> decision — never a second decision that could be refused halfway.
+/// so it is part of the one <c>server.remove</c> decision — never a second decision that could be refused halfway
+/// (R1-48: <see cref="MutationCompositions"/> lists <c>server.remove</c> → <c>vault.secret_delete</c>, and nothing else).
 /// </summary>
-[MutationHandler]
+[MutationHandler("server.remove")]
 public static class ServerRemoval
 {
     /// <summary>Removes <paramref name="server"/>; returns false when its kubeconfig or cloud API key could not be removed

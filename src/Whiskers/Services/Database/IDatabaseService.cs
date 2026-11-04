@@ -3,6 +3,9 @@ using Whiskers.Models;
 
 namespace Whiskers.Services.Database;
 
+/// <summary>Database access through a container's own client. An omitted <c>serverId</c> means Whiskers' own host
+/// (<see cref="OmittedServer.Local"/>); the implementation reads that from this declaration, as the scope guard does.</summary>
+[OmittedServer(OmittedServer.Local)]
 public interface IDatabaseService
 {
     [MutatingOperation("db.query")]

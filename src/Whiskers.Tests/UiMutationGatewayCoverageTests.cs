@@ -108,16 +108,14 @@ public class UiMutationGatewayCoverageTests : IDisposable
     [Fact]
     public void No_page_or_component_writes_configuration_past_the_gateway()
     {
-        var baseline = File.ReadAllLines(Path.Combine(McpToolCatalogSnapshotTests.RepositoryRoot(), "docs", "v1",
-            "mutation-bypass-baseline.txt"));
         var capabilities = Writes.Select(w => w.Capability).ToHashSet();
-        var bypasses = baseline
-            .Where(l => !l.StartsWith('#') && l.Contains(" -> "))
+        var bypasses = MutationCallScanner.FindBypasses(typeof(Program).Assembly)
+            .Where(l => l.Contains(" -> "))
             .Where(l => capabilities.Contains(l[(l.IndexOf(" -> ", StringComparison.Ordinal) + 4)..].Trim()))
             .ToList();
 
-        // The first-run wizard alone: it creates the first admin, before anyone exists the gateway could authorize.
-        Assert.Equal(["Whiskers.Services.Setup.SetupStateService -> config.whitelist"], bypasses);
+        // R1-48: none — the first-run wizard uses the narrow first-admin methods, outside the marked writes.
+        Assert.Empty(bypasses);
     }
 
     /// <summary>Every UI handler that writes security configuration, with the capability it runs as.</summary>

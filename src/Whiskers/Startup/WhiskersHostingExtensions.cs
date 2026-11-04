@@ -248,6 +248,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Help.IHelpContentService, Whiskers.Services.Help.HelpContentService>();
 
         // Auth whitelist + roles
+        // R1-48 review round 2: one write boundary for roles, whitelist and the setup wizard's first-admin writes.
+        builder.Services.AddSingleton<Whiskers.Services.Auth.AccessControlWriteGate>();
         builder.Services.AddSingleton<Whiskers.Services.Auth.IWhitelistService, WhitelistService>();
         builder.Services.AddSingleton<Whiskers.Services.Auth.AuthAuditLog>();
         builder.Services.AddSingleton<Whiskers.Services.Auth.IAuthAuditLog>(sp => sp.GetRequiredService<Whiskers.Services.Auth.AuthAuditLog>());

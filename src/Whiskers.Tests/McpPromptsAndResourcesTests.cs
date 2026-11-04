@@ -79,7 +79,7 @@ public class McpPromptsAndResourcesTests
 
             // The permissions resource reports a Read key's own, narrower view — not the admin's.
             var perms = factory.Services.GetRequiredService<IMcpPermissionService>();
-            var readKey = await perms.AddApiKeyAsync("reader", McpPermissionLevels.Read);
+            var readKey = await GatewayArrange.RunAsync("mcp.key_create", () => perms.AddApiKeyAsync("reader", McpPermissionLevels.Read));
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", readKey.Key);
             var keySession = await McpServedSurfaceTests.InitializeAsync(client);
             var mine = await ReadResourceAsync(client, keySession, 24, "whiskers://me/permissions");

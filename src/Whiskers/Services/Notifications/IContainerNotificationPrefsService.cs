@@ -8,5 +8,6 @@ public interface IContainerNotificationPrefsService
     Task InitializeAsync(CancellationToken ct = default);
     ContainerNotifEntry GetPrefs(string containerName);
     bool ShouldNotify(string containerName, string eventType);
+    [Whiskers.Services.Mutations.MutatingOperation("config.save")]
     Task SavePrefsAsync(string containerName, ContainerNotifEntry entry);
 }

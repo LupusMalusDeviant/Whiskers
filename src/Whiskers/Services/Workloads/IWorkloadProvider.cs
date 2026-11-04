@@ -49,12 +49,15 @@ public interface IWorkloadProvider
     Task<ContainerInfo?> GetWorkloadAsync(string id, CancellationToken ct = default);
 
     /// <summary>Docker: start container. Kubernetes: scale the owner back to its previous/1 replica.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("workload.start")]
     Task StartAsync(string id, CancellationToken ct = default);
 
     /// <summary>Docker: stop container. Kubernetes: scale the owner to 0 (bare pods: delete).</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("workload.stop")]
     Task StopAsync(string id, CancellationToken ct = default);
 
     /// <summary>Docker: restart container. Kubernetes: rollout-restart the owner.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("workload.restart")]
     Task RestartAsync(string id, CancellationToken ct = default);
 
     Task<string> GetLogsAsync(string id, int tailLines = 100, DateTime? since = null, CancellationToken ct = default);

@@ -16,8 +16,11 @@ public interface IServerConfigService
     Models.ServerConfig? GetServer(string serverId);
     Models.ServerConfig? GetDefaultServer();
     bool SupportsTerminal(string? serverId);
+    [Whiskers.Services.Mutations.MutatingOperation("server.save")]
     Task AddServerAsync(Models.ServerConfig server);
+    [Whiskers.Services.Mutations.MutatingOperation("server.save")]
     Task UpdateServerAsync(Models.ServerConfig server);
+    [Whiskers.Services.Mutations.MutatingOperation("server.remove")]
     Task RemoveServerAsync(string serverId);
 
     /// <summary>
@@ -26,6 +29,7 @@ public interface IServerConfigService
     /// one an older copy carries. Returns the record that was replaced (null when there was none). The default is
     /// for test doubles; the store does both under its write lock.
     /// </summary>
+    [Whiskers.Services.Mutations.MutatingOperation("server.save")]
     async Task<Models.ServerConfig?> UpdateServerAsync(Models.ServerConfig server, string? newKubeconfigRef)
     {
         var current = GetServer(server.Id);
@@ -38,6 +42,7 @@ public interface IServerConfigService
     /// As <see cref="UpdateServerAsync(Models.ServerConfig, string?)"/>, and decides the cloud API key in the same step
     /// (R1-29, <see cref="CloudKeyChange"/>). The default is for test doubles; the store does it under its write lock.
     /// </summary>
+    [Whiskers.Services.Mutations.MutatingOperation("server.save")]
     async Task<Models.ServerConfig?> UpdateServerAsync(Models.ServerConfig server, string? newKubeconfigRef, CloudKeyChange cloudKey)
     {
         cloudKey.ApplyTo(server, GetServer(server.Id));
@@ -49,29 +54,26 @@ public interface IServerConfigService
     /// reference <paramref name="vaultRef"/> — only while the server still carries exactly <paramref name="plaintext"/>
     /// and no reference. Returns whether it was replaced. The default is for test doubles.
     /// </summary>
-    async Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef)
-    {
-        if (vaultRef != Whiskers.Services.Vault.CredentialRefs.MigratedCloudKey(serverId))
-            throw new ArgumentException("Only the server's migration key is adopted.", nameof(vaultRef));
-        var current = GetServer(serverId);
-        if (current is null || current.CloudKeyRef is not null || current.CloudApiKey != plaintext) return false;
-        var copy = current.Clone();
-        await UpdateServerAsync(copy, newKubeconfigRef: null, CloudKeyChange.Set(vaultRef));
-        return true;
-    }
+    /// <remarks>A designed exemption of INV-38 (R1-29): it runs before the gateway, is not marked, and
+    /// <c>CredentialAdoptionCallersTests</c> pins the migration as its only caller. R1-48: it has no default body,
+    /// because one would have to call the marked <c>server.save</c> write outside a decision.</remarks>
+    Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef);
 
     /// <summary>Removes a server and returns the record that was removed, as stored at that moment (R1-11): its
     /// kubeconfig reference is the one to clean up, not that of an older copy. The default is for test doubles.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("server.remove")]
     async Task<Models.ServerConfig?> TakeServerAsync(string serverId)
     {
         var current = GetServer(serverId);
         await RemoveServerAsync(serverId);
         return current;
     }
+    [Whiskers.Services.Mutations.MutatingOperation("server.save")]
     Task SaveSshKeyAsync(string serverId, string fileName, byte[] keyData);
     string? GetSshKeyPath(Models.ServerConfig server);
 
     /// <summary>Deletes the stored SSH key for a server and clears its key reference — used after a
     /// successful onboarding so no standing bootstrap key remains on disk.</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("server.save")]
     Task DeleteSshKeyAsync(string serverId);
 }
