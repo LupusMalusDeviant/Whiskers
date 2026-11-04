@@ -15,7 +15,7 @@ namespace Whiskers.Services.Mutations;
 /// A guarded operation with a nullable <c>serverId</c> and no declaration matches no decided server when the argument
 /// is omitted (fail closed); <c>MutationGatewayCoverageTests</c> requires a declaration on every such operation.
 /// Omitted means <c>null</c> — at the guard and in <see cref="OmittedServer.For{TService}"/> alike; an empty string names
-/// no server and is refused by the guard (review round 4). The guard hands the implementation the server it checked
+/// no server and is refused by the guard before any decision is looked at (review rounds 4 and 5). The guard hands the implementation the server it checked
 /// (the canonical id), so the routing cannot change between the check and the call.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Interface, Inherited = false)]

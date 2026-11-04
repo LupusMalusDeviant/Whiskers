@@ -181,6 +181,13 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
             var index = ServerArgumentIndex(marked);
             var actsOnServer = index >= 0;
             var named = actsOnServer && args is not null && index < args.Length ? args[index] as string : null;
+            // Review round 5: a server argument is a name or omitted (null) — never empty. An empty or blank one names no
+            // server, whatever decision is open (the capability itself, or one without a server): refused before the
+            // decision is even looked at, so it never reaches an implementation.
+            if (named is not null && string.IsNullOrWhiteSpace(named))
+                throw new ArgumentException(
+                    $"{targetMethod.DeclaringType?.Name}.{targetMethod.Name}: serverId must name a server or be omitted; it was empty.",
+                    "serverId");
             // Review round 3: the omitted server (null — an empty string is a name that resolves to nothing, round 4) is
             // resolved by the operation's own declaration (OmittedServerAttribute), the one its implementation routes by;
             // anything unresolvable matches no decided server.

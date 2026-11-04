@@ -379,9 +379,11 @@ public class MutationScopeGuardTests
             Assert.Equal("pulled x on SERVER-A", await guarded.PullAsync("x", "SERVER-A"));   // ids ignore case
             var refused = await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", "server-b"));
             Assert.Equal("app.deploy", refused.OpenScope);
+            // Review round 5: an empty server names no server — refused before any decision is looked at.
+            await Assert.ThrowsAsync<ArgumentException>(() => guarded.PullAsync("x", ""));
             // Review rounds 2/3: PullAsync declares no omitted-server routing — an omitted server cannot be resolved, so
             // it matches no decided server (fail closed), even though the default here is the decided server.
-            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", ""));
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", null!));
         }
 
         // The decided capability itself is the gateway's own resolved target: not matched again here.
@@ -490,17 +492,32 @@ public class MutationScopeGuardTests
     [Fact]
     public async Task An_empty_server_name_is_no_omission_and_runs_nothing()
     {
-        // Review round 4: on operations that declare where an omitted server goes, "" is not "omitted" — it names no
-        // server, at the guard and in the implementations alike, and is refused.
+        // Review rounds 4/5: "" is not "omitted" — it names no server, at the guard and in the implementations alike. The
+        // guard refuses it before it looks at any decision: composed, the decided capability itself, a decision without
+        // a server, or none at all. Nothing runs.
         var probe = new ServerProbe();
         var guarded = MutationScopeProxy<IServerProbe>.Wrap(probe, WithRegistry(defaultServer: "server-a"));
         var volumesInner = new RecordingVolumes();
         var volumes = MutationScopeProxy<Whiskers.Services.Backup.IVolumeBackupService>.Wrap(volumesInner, WithServers(
             new Whiskers.Models.ServerConfig { Id = "local", Name = "A", IsDefault = true }));
-        using (MutationScope.Begin("app.deploy", "op-r4b", request: DeployOn("server-a", "op-r4b")))
-            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullOnDefaultAsync("x", ""));
-        using (MutationScope.Begin("volume.restore", "op-r4c", request: DeployOn("local", "op-r4c") with { CapabilityId = "volume.restore" }))
-            await Assert.ThrowsAsync<MutationScopeViolationException>(() => volumes.BackupVolumeAsync("data", "app", serverId: ""));
+        foreach (var empty in new[] { "", "  " })
+        {
+            // Composed, in a decision for a server.
+            using (MutationScope.Begin("app.deploy", "op-r4b", request: DeployOn("server-a", "op-r4b")))
+                await Assert.ThrowsAsync<ArgumentException>(() => guarded.PullOnDefaultAsync("x", empty));
+            using (MutationScope.Begin("volume.restore", "op-r4c", request: DeployOn("local", "op-r4c") with { CapabilityId = "volume.restore" }))
+                await Assert.ThrowsAsync<ArgumentException>(() => volumes.BackupVolumeAsync("data", "app", serverId: empty));
+            // The decided capability itself (not matched by server).
+            using (MutationScope.Begin("image.pull", "op-r5a", request: DeployOn("server-a", "op-r5a") with { CapabilityId = "image.pull" }))
+                await Assert.ThrowsAsync<ArgumentException>(() => guarded.PullOnDefaultAsync("x", empty));
+            using (MutationScope.Begin("volume.backup", "op-r5b", request: DeployOn("local", "op-r5b") with { CapabilityId = "volume.backup" }))
+                await Assert.ThrowsAsync<ArgumentException>(() => volumes.BackupVolumeAsync("data", "app", serverId: empty));
+            // A composing decision without a server target.
+            using (MutationScope.Begin("app.deploy", "op-r5c"))
+                await Assert.ThrowsAsync<ArgumentException>(() => guarded.PullOnDefaultAsync("x", empty));
+            using (MutationScope.Begin("volume.restore", "op-r5d"))
+                await Assert.ThrowsAsync<ArgumentException>(() => volumes.BackupVolumeAsync("data", "app", serverId: empty));
+        }
         Assert.Equal(0, probe.Calls);
         Assert.Equal(0, volumesInner.Backups);
         Assert.Equal("", OmittedServer.For<Whiskers.Services.Backup.IVolumeBackupService>(""));   // not the fallback

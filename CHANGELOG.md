@@ -30,7 +30,7 @@ All notable changes to Whiskers are documented here. The format follows
   configured default; volume backups and database access: Whiskers' own host `local`, read by the implementations from the
   same declaration); an unknown server, a missing or failing registry and an unresolvable decision server match nothing
   (a serverless operation is not matched). The omitted server is then passed to the operation as the id that was
-  checked, so a default changed in between cannot redirect it; an empty `serverId` is not an omission and is refused. **Detached work:** a closed scope
+  checked, so a default changed in between cannot redirect it; an empty or blank `serverId` is not an omission and is refused (`ArgumentException`) before any decision is looked at, also for the decided capability itself and for a decision without a server. **Detached work:** a closed scope
   authorizes nothing — work that escaped it (`Task.Run`, a timer, a fire-and-forget continuation) is refused once the
   decision ended, and a decision started there does not nest under the dead one; background work started from code
   that can run inside a decision suppresses the flow (test-enforced). The automatic end of a check pause is no longer
