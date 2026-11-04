@@ -11,7 +11,8 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 | Page | Purpose |
 |---|---|
 | `Dashboard.razor` | The main live dashboard, all containers, health, metrics, update badges. The "stopped" / "unhealthy" stat tiles double as filters (same predicate as their count, combined with the group/tag filter). R1-31: an update without a usable vault keeps no rollback snapshot — the Dashboard says so in a warning and the update goes ahead. R1-55: the usage history offers 1 h to 30 days and draws each point's average and its true peak. |
-| `ContainerDetail.razor` | Deep view of one container: overview, stats, logs, health, terminal, env, and (for DB containers) a database tab. R1-55: the stats charts offer 1 h to 30 days and draw each point's average and its true peak. R1-42: the database tab's `docker exec` checks the container reference from the route (`CommandOperands.RequireContainerRef`) and puts it after `--`. |
+| `ContainerDetail.razor` | Deep view of one container: overview, stats, logs, health, terminal, env, and (for DB containers, Operator+) the database tab rendered by `ContainerDatabasePanel`. R1-55: the stats charts offer 1 h to 30 days and draw each point's average and its true peak. |
+| `ContainerDatabasePanel.razor` | The database tab of `ContainerDetail` (no route of its own): databases, tables and schema, queries and the query builder, migrations, seeds, CSV export and backups. `ContainerDetail` passes the container, the resolved server and the role, and calls `EnsureLoadedAsync` when the tab is first opened. R1-42: its `docker exec` checks the container reference from the route (`CommandOperands.RequireContainerRef`) and puts it after `--`. |
 | `ContainerGraph.razor` | Visual graph of containers and their relationships. |
 | `ContainerDiff.razor` | Compare container configurations. |
 | `HealthReports.razor` | Historical health reports. |
