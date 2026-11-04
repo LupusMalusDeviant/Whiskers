@@ -68,6 +68,9 @@ require() { for tool in "$@"; do command -v "$tool" >/dev/null 2>&1 || fail "req
 # A random value of hex characters (no shell or YAML metacharacters).
 random_hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
 
+# The SHA-256 fingerprint artifact-data.mjs reports for a sensitive value ("sha256:<hex>").
+fingerprint() { printf 'sha256:%s' "$(printf '%s' "$1" | sha256sum | cut -d' ' -f1)"; }
+
 # A sign-in password that meets the Identity policy (upper and lower case, digit, symbol), without shell metacharacters.
 test_password() { printf 'Ci-%s-Pw!' "$(random_hex 12)"; }
 
@@ -219,7 +222,7 @@ hardened() {
 upgrade() {
     local image="$1" previous="$2" data="${RUN_ID}-upgrade-data" secrets="${RUN_ID}-upgrade-secrets"
     local port=18080 base="http://127.0.0.1:18080" password vault seeded changed jar name owner=""
-    require docker curl
+    require docker curl sha256sum
     docker image inspect "$image" >/dev/null 2>&1 || fail "image '$image' is not present locally"
     docker pull -q "$previous" >/dev/null 2>&1 || docker image inspect "$previous" >/dev/null 2>&1 \
         || fail "the previous release '$previous' can neither be pulled nor found locally"
@@ -262,15 +265,22 @@ upgrade() {
     }
     snapshot() { data_tool state > "$WORK/$1.state" || fail "the records of '$1' could not be read"; }
     field() { sed -n "s/^$2=//p" "$WORK/$1.state"; }
+    # A failed comparison names the field and how it differs, never a value: the states hold fingerprints of password
+    # hashes, security stamps and the vault value, and no value of them — not even a fingerprint or a prefix — is logged.
+    mismatch() { # <actual> — "is absent" or "differs"
+        if [ -z "$1" ] || [ "$1" = absent ]; then echo "is absent"; else echo "differs"; fi
+    }
     expect_field() { # <state> <field> <value> <what>
-        [ "$(field "$1" "$2")" = "$3" ] || fail "$4: $2 is '$(field "$1" "$2")', expected '$3'"
+        local actual
+        actual="$(field "$1" "$2")"
+        [ "$actual" = "$3" ] || fail "$4: $2 $(mismatch "$actual") in '$1'"
     }
     expect_same() { # <what> <state> <reference-state> <field>...
-        local what="$1" a="$2" b="$3" f; shift 3
+        local what="$1" a="$2" b="$3" f actual; shift 3
         for f in "$@"; do
             [ -n "$(field "$b" "$f")" ] || fail "$what: the reference state '$b' has no $f"
-            [ "$(field "$a" "$f")" = "$(field "$b" "$f")" ] \
-                || fail "$what: $f is '$(field "$a" "$f")', expected '$(field "$b" "$f")' (as in '$b')"
+            actual="$(field "$a" "$f")"
+            [ "$actual" = "$(field "$b" "$f")" ] || fail "$what: $f $(mismatch "$actual") in '$a' (compared with '$b')"
         done
         echo "ok: $what"
     }
@@ -294,7 +304,7 @@ upgrade() {
     stop
     snapshot n1
     expect_field n1 vault.format gcm "N-1 did not convert the legacy vault entry"
-    expect_field n1 vault.value "$seeded" "the vault entry N-1 encrypted"
+    expect_field n1 vault.value "$(fingerprint "$seeded")" "the vault entry N-1 encrypted"
     expect_field n1 metric 42.5 "the seeded metrics row"
     expect_field n1 role.keeper 0 "the seeded role"
     [ "$(field n1 account.keeper)" != absent ] && [ "$(field n1 account.admin)" != absent ] || fail "an account is missing"
@@ -368,7 +378,7 @@ upgrade() {
     expect_field changed account.keeper absent "the account deleted after the upgrade"
     expect_field changed role.keeper 1 "the role changed after the upgrade"
     expect_field changed metric 7.25 "the metrics row changed after the upgrade"
-    expect_field changed vault.value "$changed" "the vault entry changed after the upgrade"
+    expect_field changed vault.value "$(fingerprint "$changed")" "the vault entry changed after the upgrade"
     start changed "$image"
     sign_in "$base" "$WORK/changed.jar" "$ADMIN_EMAIL" "$password"
     sign_in_refused "$base" "$WORK/changed-keeper.jar" "$KEEPER_EMAIL" "$password"

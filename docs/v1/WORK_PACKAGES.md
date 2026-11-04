@@ -841,16 +841,18 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 > **Status (R1-47 branch):** `EndpointAuthMatrixTests` (every endpoint of the booted app, four callers, handler
 > invocation recorded per endpoint identity; only the content-encoding variants of one static asset are merged, other
-> endpoints sharing a route and method are classified and probed apart; unclassified endpoints fail),
+> endpoints sharing a route and method are classified and probed apart; no endpoint is exempt from the handler proof —
+> the static-asset fallback is probed with a file only it can serve; unclassified endpoints fail),
 > `PostgresIdentityTests` + `DockerRequirement`/`DockerRequirementTests` (a container that does not start throws on
 > CI), the CI step for the Docker-backed suites with a Docker probe, a floor and no skips, and for both runs the required
 > tests of `.github/required-tests/` (`check-test-results.sh --require`; `RequiredTestsManifestTests` keeps the manifests
 > honest), `artifact-checks.sh` (hardened profile; N−1 strictly below the version under test, upgrade and documented
-> recovery proven on the stored records by `artifact-data.mjs`: accounts, role, metrics row and an N−1-encrypted vault
+> recovery proven on the stored records by `artifact-data.mjs` (sensitive values only as SHA-256 fingerprints, never
+> logged): accounts, role, metrics row and an N−1-encrypted vault
 > entry preserved, bootstrap credentials on the first start only, migration histories, a same-release restart as no-op,
 > post-upgrade changes reverted by the recovery, upgrade again) in `ci.yml` `artifact` (built image, Trivy) and release
 > `artifact-test` (staged digest, before `publish-image`), `security.yml` (vulnerable packages, dependency review,
-> gitleaks with fixture exceptions per exact value and file, security analyzers, CodeQL), job time limits everywhere,
+> gitleaks with every exception per rule, exact value and file, security analyzers, CodeQL), job time limits everywhere,
 > all pinned by `ReleaseWorkflowTests`; controls in `docs/operations/ci-and-release-checks.md`.
 > Verified locally: the matrix, the PostgreSQL suites with Docker, the artifact checks against a locally built image and
 > the published 0.14.1 (upgrade) and 0.15.0, gitleaks, the vulnerable-package and analyzer gates. **Only CI proves:** the workflow runs

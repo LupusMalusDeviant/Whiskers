@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.StaticAssets;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Whiskers.Models;
 using Whiskers.Services.Auth;
@@ -67,10 +68,9 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
     /// <param name="Why">What the endpoint is, and why it has this access.</param>
     /// <param name="KnownServerError">A recorded 5xx answer of an allowed call, with the package that owns it. The
     /// handler must still run; the row fails as soon as the answer is no longer a 5xx, so the note cannot go stale.</param>
-    /// <param name="HandlerProbe">False when no request in this test can match the route for an allowed caller (the
-    /// route constraint needs a file that exists outside the static-asset manifest); the challenge is still checked.</param>
+    /// <remarks>There is no opt-out of the handler proof: every allowed call must reach its handler.</remarks>
     public sealed record Rule(Access Access, Challenge Challenge = Challenge.LoginRedirect, string Why = "",
-        string? KnownServerError = null, bool HandlerProbe = true);
+        string? KnownServerError = null);
 
     /// <summary>The classification of every non-static endpoint, keyed by "METHODS pattern" (<see cref="KeyOf"/>).</summary>
     internal static readonly IReadOnlyDictionary<string, Rule> Expected = new Dictionary<string, Rule>(StringComparer.Ordinal)
@@ -85,8 +85,9 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
         ["GET /_framework/opaque-redirect"] = new(Access.SignedIn, Why: "enhanced-navigation redirect helper; behind the fallback policy"),
         // MapStaticAssets serves wwwroot files missing from a *build* manifest (dotnet run, this test host) through a file
         // fallback whose route only matches a file that exists; the published image uses the publish manifest. Behind the
-        // fallback policy either way.
-        ["GET,HEAD {**path:file}"] = new(Access.SignedIn, Why: "static-asset fallback of the build manifest", HandlerProbe: false),
+        // fallback policy. The fixture arranges a real file only this fallback can serve (App.FallbackProbeFile), so its
+        // handler run is proven like every other endpoint's.
+        ["GET,HEAD {**path:file}"] = new(Access.SignedIn, Why: "static-asset fallback of the build manifest"),
 
         // Sign-in and session.
         ["GET /set-culture"] = new(Access.Public, Why: "language cookie, local redirect only"),
@@ -194,6 +195,33 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
             Microsoft.AspNetCore.Routing.Patterns.RoutePatternFactory.Parse("leak.css"), 0,
             new EndpointMetadataCollection(new HttpMethodMetadata(["GET", "HEAD"])), null);
         Assert.Contains(Classify([.. real, fakeAsset], Expected, out _), p => p.Contains("leak.css"));
+    }
+
+    [Fact]
+    public async Task An_anonymous_static_fallback_fails_the_matrix()
+    {
+        // The real fallback is probed with a file that exists only for it (the main matrix requires its handler to run).
+        Assert.Empty(Classify(app.Endpoints, Expected, out var real));
+        var fallbackKey = $"GET,HEAD {App.StaticFallbackPattern}";
+        Assert.Single(real, c => c.Key == fallbackKey);
+
+        // The same app with that one endpoint opened to anonymous callers: the matrix must fail on it.
+        var mutated = new App(anonymousStaticFallback: true);
+        await mutated.InitializeAsync();
+        try
+        {
+            Assert.Empty(Classify(mutated.Endpoints, Expected, out var classified));
+            var fallback = Assert.Single(classified, c => c.Key == fallbackKey);
+            var anonymous = mutated.Callers.Single(c => c.Role is null);
+            var violations = new List<string>();
+            foreach (var method in fallback.ProbeMethods)
+                violations.AddRange(Judge(null, fallback, method, await mutated.ProbeAsync(anonymous, fallback, method)));
+            Assert.Contains(violations, v => v.Contains("must be refused before the handler, but the handler ran", StringComparison.Ordinal));
+        }
+        finally
+        {
+            await mutated.DisposeAsync();
+        }
     }
 
     [Fact]
@@ -375,7 +403,7 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
 
         if (allowed)
         {
-            if (endpoint.Rule.HandlerProbe && !result.Invoked)
+            if (!result.Invoked)
                 yield return $"{what}: allowed, but its handler did not run (HTTP {(int)result.Status}) {result.Error}";
             var serverError = (int)result.Status >= 500;
             if (endpoint.Rule.KnownServerError is { } known)
@@ -422,7 +450,16 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
     {
         private const string Password = "CorrectHorse12!!";
         internal const string ProbeHeader = "X-Endpoint-Matrix-Probe";
+        internal const string StaticFallbackPattern = "{**path:file}";
         private string _dataDir = "";
+
+        private readonly bool _anonymousStaticFallback;
+
+        /// <summary>The app as it is (the class fixture).</summary>
+        public App() { }
+
+        /// <summary>A second app for a negative test, with the static-asset fallback opened to anonymous callers.</summary>
+        internal App(bool anonymousStaticFallback) => _anonymousStaticFallback = anonymousStaticFallback;
         private BootSettings? _settings;
         private WebApplicationFactory<Program>? _factory;
         private readonly HandlerRecorder _recorder = new();
@@ -459,12 +496,16 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
                     });
                     services.Configure<LoggerFilterOptions>(o => o.Rules.Add(new LoggerFilterRule(
                         typeof(HandlerRecorder).FullName, HandlerRecorder.Category, LogLevel.Information, null)));
+                    // The regression the matrix must catch, built into a second app only: the static-asset fallback
+                    // opened to anonymous callers.
+                    if (_anonymousStaticFallback) services.AddSingleton<MatcherPolicy, AnonymousStaticFallback>();
                 });
             });
 
             var anonymous = NewClient();
             Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync("/healthz")).StatusCode);
             Endpoints = _factory.Services.GetRequiredService<EndpointDataSource>().Endpoints;
+            ArrangeFallbackProbeFile();
 
             var roles = _factory.Services.GetRequiredService<IRoleService>();
             var callers = new List<Caller> { new(null, anonymous) };
@@ -487,6 +528,59 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
                 callers.Add(new(role, client));
             }
             Callers = callers;
+        }
+
+        /// <summary>
+        /// The regression for the negative test: when routing selects the static-asset fallback, the endpoint that runs is
+        /// a copy carrying <see cref="Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute"/> — exactly what an
+        /// <c>.AllowAnonymous()</c> on that endpoint would do. Same route, methods, order, display name and handler.
+        /// </summary>
+        private sealed class AnonymousStaticFallback : MatcherPolicy, Microsoft.AspNetCore.Routing.Matching.IEndpointSelectorPolicy
+        {
+            private readonly ConcurrentDictionary<Endpoint, RouteEndpoint> _opened = new();
+
+            public override int Order => 0;
+
+            private static bool IsFallback(Endpoint endpoint) =>
+                endpoint is RouteEndpoint route && route.RoutePattern.RawText == StaticFallbackPattern;
+
+            public bool AppliesToEndpoints(IReadOnlyList<Endpoint> endpoints) => endpoints.Any(IsFallback);
+
+            public Task ApplyAsync(HttpContext httpContext, Microsoft.AspNetCore.Routing.Matching.CandidateSet candidates)
+            {
+                for (var i = 0; i < candidates.Count; i++)
+                {
+                    if (!candidates.IsValidCandidate(i) || !IsFallback(candidates[i].Endpoint)) continue;
+                    var opened = _opened.GetOrAdd(candidates[i].Endpoint, e =>
+                    {
+                        var route = (RouteEndpoint)e;
+                        return new RouteEndpoint(route.RequestDelegate!, route.RoutePattern, route.Order,
+                            new EndpointMetadataCollection([.. route.Metadata, new Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute()]),
+                            route.DisplayName);
+                    });
+                    candidates.ReplaceEndpoint(i, opened, candidates[i].Values);
+                }
+                return Task.CompletedTask;
+            }
+        }
+
+        /// <summary>The file the static-asset fallback (<c>{**path:file}</c>) is probed with: it exists, but in no
+        /// static-asset manifest, so only that fallback can serve it.</summary>
+        internal const string FallbackProbeFile = "matrix-probe.txt";
+
+        /// <summary>
+        /// Makes <see cref="FallbackProbeFile"/> exist for the static-asset fallback alone. The fallback looks the file up
+        /// in the web root's file provider at request time; the static-files middleware took its provider when the
+        /// pipeline was built, so it does not see the file and cannot answer the request before routing. The probe of
+        /// <c>{**path:file}</c> therefore reaches that endpoint's handler — and an allowed caller must see it run.
+        /// </summary>
+        private void ArrangeFallbackProbeFile()
+        {
+            var root = Path.Combine(_dataDir, "fallback-webroot");
+            Directory.CreateDirectory(root);
+            File.WriteAllText(Path.Combine(root, FallbackProbeFile), "endpoint matrix probe");
+            var environment = _factory!.Services.GetRequiredService<IWebHostEnvironment>();
+            environment.WebRootFileProvider = new CompositeFileProvider(environment.WebRootFileProvider, new PhysicalFileProvider(root));
         }
 
         private HttpClient NewClient()
@@ -513,7 +607,7 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
         {
             var probe = Guid.NewGuid().ToString("N");
             var path = "/" + Regex.Replace(endpoint.Pattern.TrimStart('/'), @"\{\*{0,2}([^}:]+)(:[^}]*)?\}",
-                m => m.Groups[2].Value.Contains("file", StringComparison.Ordinal) ? "matrix-probe.txt" : "matrix-probe");
+                m => m.Groups[2].Value.Contains("file", StringComparison.Ordinal) ? FallbackProbeFile : "matrix-probe");
             using var request = new HttpRequestMessage(new HttpMethod(method), path);
             request.Headers.Add(ProbeHeader, probe);
             request.Headers.Accept.ParseAdd("text/html");

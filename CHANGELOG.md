@@ -11,7 +11,8 @@ All notable changes to Whiskers are documented here. The format follows
   data sources (minimal APIs, pages, hubs, Blazor framework endpoints, MCP, probes, static assets) and requests each as
   anonymous, Viewer, Operator and Admin, recording whether the handler actually ran: a refused call never reaches it, an
   allowed one must, and a run counts only for the endpoint that ran, never for another one on the same route; endpoints are
-  merged only as the content-encoding variants of one static asset, and an endpoint without a classification fails the
+  merged only as the content-encoding variants of one static asset, the static-asset fallback is probed with a file only it
+  can serve (a second app with that endpoint opened to anonymous callers must fail the matrix), and an endpoint without a classification fails the
   test until someone decides who may call it. The
   PostgreSQL suites are mandatory on CI: a server that does not start throws there (`DockerRequirement`, enforced for every
   container test by `DockerRequirementTests`), CI runs them as their own step after a Docker probe and refuses any skipped
@@ -24,14 +25,14 @@ All notable changes to Whiskers are documented here. The format follows
   Trivy, starts it with the hardened compose profile (uid 10001, read-only root, no capabilities, health, readiness, the
   anonymous surface, a real sign-in) and upgrades the data of the previous published release below its version with it
   and back the documented way, proven on the stored records (`.github/scripts/artifact-data.mjs` reads the stopped data
-  volume): accounts, a role, a metrics row and a vault entry the previous release encrypted itself survive the upgrade
+  volume and reports sensitive values only as SHA-256 fingerprints, so a failed comparison never logs them): accounts, a role, a metrics row and a vault entry the previous release encrypted itself survive the upgrade
   unchanged with exactly the pending migrations added, bootstrap credentials are given to the first start only, a restart
   of the same release is a no-op, every record changed after the upgrade is back to its old value after
   `--restore-backup latest-pre-upgrade --for-previous-release` with the old migration histories and without the audit
   rows written meanwhile, and the image upgrades the recovered data again; a release runs the same checks against the staged amd64 digest before anything is
   published (`artifact-test`). New `security.yml`: known-vulnerable packages (any severity), dependency review on pull
-  requests, gitleaks over history and tree (`.gitleaks.toml`: no test directory is exempt, each test fixture only as its exact fake
-  value in its exact file), the .NET security analyzers as errors, CodeQL. Every job of
+  requests, gitleaks over history and tree (`.gitleaks.toml`: no directory or line pattern is exempt, each exception — test fixtures,
+  vendored-bundle identifiers, names — only as its exact value in its exact file under its rule), the .NET security analyzers as errors, CodeQL. Every job of
   every workflow is time-limited; `ReleaseWorkflowTests` pins all of it with negative tests. The repository-hosted
   controls (required checks, tag rules, code-scanning merge protection, Dependabot, secret scanning) are documented in
   `docs/operations/ci-and-release-checks.md`. Recorded for R1-50 by the matrix: the Google/OIDC challenge of an

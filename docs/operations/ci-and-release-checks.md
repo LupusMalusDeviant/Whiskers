@@ -36,7 +36,7 @@ staged digest it publishes instead (`artifact-test`, below).
 |---|---|---|
 | `dependency-vulnerabilities` | `dotnet list package --vulnerable --include-transitive` over every project of the solution | any known-vulnerable package (any severity), the check reports problems, or fewer than 5 projects were checked |
 | `dependency-review` (pull requests) | the dependency changes of the pull request (NuGet, Actions, Docker) | the pull request adds a dependency with a known vulnerability (`fail-on-severity: low`) |
-| `secret-scan` | gitleaks 8.30.1 (pinned by digest) over the whole history and the working tree, default rules + `.gitleaks.toml` | any finding outside the exceptions in `.gitleaks.toml`: vendored third-party bundles, two name-only lines, and each test fixture as its exact fake value in its exact file and rule — no test directory is exempt, so a real credential in a test, or a fixture value in another file, fails |
+| `secret-scan` | gitleaks 8.30.1 (pinned by digest) over the whole history and the working tree, default rules + `.gitleaks.toml` | any finding outside the exceptions in `.gitleaks.toml`. Every exception names its rule, its file and the exact value (two identifiers in vendored bundles, two names the rules mistake for credentials, the test fixtures); no directory and no line pattern is exempt, so a real credential in a test, in a vendored bundle or next to an excepted value, or an excepted value in another file, fails |
 | `static-analysis` | the .NET security analyzers (`AnalysisModeSecurity=All`) over the shipped projects, as errors | any security analyzer warning; a reviewed false positive is suppressed at its method with a justification |
 | `codeql` | CodeQL for C# (buildless, `security-extended`), results in code scanning | the analysis cannot run; findings block a merge through the repository's code-scanning rule (see below) |
 
@@ -63,7 +63,8 @@ Every wait is bounded (`WAIT_SECONDS`, default 300 s — the image's own health-
   local sign-in of the seeded administrator, the Admin-only download and the audit export; no restart.
 - **`upgrade <image> <previous>`** proves the upgrade and the way back on the stored records, not on a log line or a
   sign-in alone. `artifact-data.mjs` (a pinned Node image with `node:sqlite`) reads and writes the stopped data volume
-  independently of the app. The previous release creates the data with bootstrap credentials **once**; a second local
+  independently of the app and reports password hashes, security stamps and the vault value only as SHA-256
+  fingerprints; a failed comparison names the field and whether it is absent or differs, never a value. The previous release creates the data with bootstrap credentials **once**; a second local
   account, its role, a metrics row and a legacy vault entry are seeded, and from then on no start gets bootstrap
   credentials, so a lost account cannot be recreated from configuration. The previous release starts again, signs both
   accounts in and encrypts the vault entry itself. The image then upgrades it: a pre-upgrade backup is reported and on the
@@ -105,7 +106,10 @@ data sources. Each must be classified in `EndpointAuthMatrixTests.Expected` (sta
 endpoint fails the test until someone decides who may call it. Endpoints are merged only when proven equivalent — the
 content-encoding variants of one static asset; two other endpoints on the same route and method (told apart by host or
 other selectors) are classified and probed each on its own, keyed `METHODS route [display name]`. A handler run counts
-only for the endpoint that ran (route, methods, order, display name and host), never for another one on the same route. Each endpoint is requested as anonymous, Viewer, Operator
+only for the endpoint that ran (route, methods, order, display name and host), never for another one on the same route.
+No endpoint is exempt from that proof: the static-asset fallback of the build manifest (`{**path:file}`) is probed with a
+file the fixture makes exist for it alone, so an allowed caller must see its handler run, and a second app with only that
+endpoint opened to anonymous callers must fail the matrix (`An_anonymous_static_fallback_fails_the_matrix`). Each endpoint is requested as anonymous, Viewer, Operator
 and Admin; the test records whether the handler actually ran, so a refused call must never reach the handler and an
 allowed one must. Pages are reachable for every signed-in role on purpose — their role checks run inside the handlers
 (INV-17). Two recorded deviations belong to R1-50: the Google/OIDC challenge of a provider that is not configured answers

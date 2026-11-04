@@ -6,9 +6,9 @@
 //                                              must convert it to AES-GCM itself
 //   node artifact-data.mjs seed                a second local account (a copy of the Administrator's password hash), its
 //                                              role in roles.json, and a metrics row
-//   node artifact-data.mjs state               the records as "name=value" lines: migration histories, both accounts,
-//                                              the role, the metrics row, the decrypted vault entry, the audit trail's
-//                                              last id
+//   node artifact-data.mjs state               the records as "name=value" lines: migration histories, both accounts
+//                                              and the decrypted vault entry as SHA-256 fingerprints, the role, the
+//                                              metrics row, the audit trail's last id
 //   node artifact-data.mjs mutate              changes every record in a way the state shows (account deleted, role,
 //                                              metrics value, vault value re-encrypted under the same key)
 //   node artifact-data.mjs audit-since <id>    "id|timestamp|action" of every audit row after <id>
@@ -79,6 +79,10 @@ function sealGcm(key, plain) {
   return "g1:" + Buffer.concat([nonce, cipher.getAuthTag(), body]).toString("base64");
 }
 
+// Sensitive values (password hash, security stamp, the decrypted vault value) never leave this tool: the state carries
+// their SHA-256 only, which is enough to tell equal from different and is what the check compares and could ever print.
+const fingerprint = (value) => "sha256:" + createHash("sha256").update(value, "utf8").digest("hex");
+
 const entryOf = (entries) => entries.find((e) => e[pick(e, "Key")] === VAULT_ENTRY);
 
 function seedVaultLegacy() {
@@ -129,7 +133,7 @@ function state() {
   const found = accounts(d);
   for (const [name, email] of [["admin", ADMIN], ["keeper", KEEPER]]) {
     const u = found.find((x) => x.NormalizedEmail === email.toUpperCase());
-    lines.push(`account.${name}=${u ? `${u.Id}|${u.PasswordHash}|${u.SecurityStamp}` : "absent"}`);
+    lines.push(`account.${name}=${u ? fingerprint(`${u.Id}|${u.PasswordHash}|${u.SecurityStamp}`) : "absent"}`);
   }
   const metric = d.prepare("SELECT CpuPercent FROM ServerMetrics WHERE ServerId = ?").all(METRIC_SERVER);
   lines.push(`metric=${metric.map((m) => m.CpuPercent).join(",") || "absent"}`);
@@ -148,7 +152,7 @@ function state() {
     else {
       let value;
       try { value = openGcm(gcmKey(v), stored); } catch (e) { die(`the vault entry does not open with VAULT_KEY: ${e.message}`); }
-      lines.push("vault.format=gcm", `vault.value=${value}`);
+      lines.push("vault.format=gcm", `vault.value=${fingerprint(value)}`);
     }
   }
   console.log(lines.join("\n"));

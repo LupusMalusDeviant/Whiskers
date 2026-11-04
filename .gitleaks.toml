@@ -1,17 +1,30 @@
 # Secret scanning (R1-47, F-09): gitleaks with its default rules, run by .github/workflows/security.yml on every push and
 # pull request (the commits in the change) and weekly (the whole history and tree).
 #
-# Exceptions are listed here with a reason and stay as narrow as possible. No directory of our own code is exempt: a test
-# fixture is allowed only as that exact fake value in that exact file (condition AND), so a real credential pasted into
-# any test — or the same fake value in another file — still fails the job. Never add a broad pattern to make a real
+# Exceptions are listed here with a reason and stay as narrow as possible. No directory and no line pattern is exempt:
+# every exception names its rule, its file and the exact value (condition AND), so a real credential anywhere — in a
+# test, in a vendored bundle, on a line next to an excepted value — or the same value in another file still fails the job. Never add a broad pattern to make a real
 # finding pass. Rotate a leaked secret first, then remove it from history.
 
 [extend]
 useDefault = true
 
+# Vendored third-party bundles (minified JavaScript, not maintained here): no directory is exempt, only the two
+# identifiers the generic rule mistakes for keys, each in its own bundle (the Whiskers path and the pre-rename ServerWatch
+# path of the history).
 [[allowlists]]
-description = "Vendored third-party bundles (minified JavaScript, not maintained here)"
-paths = ['''(^|/)src/(Whiskers|ServerWatch)/wwwroot/js/vendor/''']
+description = "xterm.js identifier, not a key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^src/(Whiskers|ServerWatch)/wwwroot/js/vendor/xterm\.min\.js$''']
+regexes = ['''^t\.TwoKeyMap=void$''']
+
+[[allowlists]]
+description = "vis-network method name, not a key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^src/(Whiskers|ServerWatch)/wwwroot/js/vendor/vis-network\.min\.js$''']
+regexes = ['''^_getDistanceToBezierEdge2$''']
 
 # Test fixtures: each a deliberately fake value that exercises redaction or secret handling, allowed only in its file.
 # Each names its rule (targetRules): gitleaks 8.30 skips a whole file that matches the path of a global allowlist and
@@ -72,10 +85,17 @@ condition = "AND"
 paths = ['''^src/Whiskers\.Tests/WebhookMutationTests\.cs$''']
 regexes = ['''^a9c42de780fb$''']
 
+# Names, not values: each the exact text one rule mistakes for a credential, only in its file.
 [[allowlists]]
-description = "Names, not values: the notification HTTP client names and the secrets inventory of the audit"
-regexTarget = "line"
-regexes = [
-  '''"TelegramNotificationService", "MattermostNotificationService"''',
-  '''\| OIDC/Google client secrets, Harbor password, Tailscale/NetBird auth keys \|''',
-]
+description = "Notification HTTP client name next to MattermostNotificationService, not a Mattermost token"
+targetRules = ["mattermost-access-token"]
+condition = "AND"
+paths = ['''^src/Whiskers/Startup/WhiskersHostingExtensions\.cs$''', '''^src/ServerWatch/Program\.cs$''']
+regexes = ['''^DiscordNotificationService$''']
+
+[[allowlists]]
+description = "Product names in the secrets inventory of the audit, not a key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^docs/v1/audit/D-secrets-data-backup\.md$''']
+regexes = ['''^Tailscale/NetBird$''']
