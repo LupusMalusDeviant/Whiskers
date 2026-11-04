@@ -137,22 +137,24 @@ Whiskers is **self-hosted**: there is no hosted or cloud endpoint. Your MCP clie
 }
 ```
 
-**Claude Code** — one command:
+The client snippets below read the key from the environment, so it never lands in a config file — export it first
+(`export WHISKERS_MCP_API_KEY=…`, or from your shell profile or secret manager).
+
+**Claude Code** — the single quotes keep `${WHISKERS_MCP_API_KEY}` literal in `.mcp.json`; Claude Code expands it when
+it loads the file:
 
 ```bash
-claude mcp add --transport http whiskers http://localhost:5100/mcp --header "Authorization: Bearer $WHISKERS_MCP_API_KEY"
+claude mcp add --transport http --scope project whiskers http://localhost:5100/mcp --header 'Authorization: Bearer ${WHISKERS_MCP_API_KEY}'
 ```
 
-**Crush** ([charmbracelet/crush](https://github.com/charmbracelet/crush)) — in `./crushrc` (project) or
-`~/.config/crush/crushrc` (global); the key is read from your environment, not written into the file:
+**Crush** ([charmbracelet/crush](https://github.com/charmbracelet/crush)) — add this line to `./crushrc` (project) or
+`~/.config/crush/crushrc` (global); Crush expands `$WHISKERS_MCP_API_KEY` when it loads the config:
 
-```bash
-mcp add whiskers --type http \
-  --url "http://localhost:5100/mcp" \
-  --header Authorization "Bearer $WHISKERS_MCP_API_KEY"
+```
+mcp add whiskers --type http --url "http://localhost:5100/mcp" --header Authorization "Bearer $WHISKERS_MCP_API_KEY"
 ```
 
-Still on the legacy JSON config? The same entry in `crush.json` (headers are shell-expanded at load time):
+Still on the legacy JSON config? The same entry in `crush.json`:
 
 ```json
 {

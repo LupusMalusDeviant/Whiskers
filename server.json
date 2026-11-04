@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.LupusMalusDeviant/whiskers",
   "title": "Whiskers",
-  "description": "Governed Docker/Kubernetes ops for AI agents: scoped keys, guardrails, approvals, audit, mTLS mesh.",
+  "description": "Governed Docker/Kubernetes ops for AI agents: scoped keys, guardrails, human approvals, audit, mTLS.",
   "version": "0.15.0",
   "websiteUrl": "https://whiskers.app.lupusmalus.dev",
   "repository": {
