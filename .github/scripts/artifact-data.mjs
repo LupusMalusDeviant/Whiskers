@@ -30,10 +30,26 @@ const VAULT_ENTRY = "artifact-checks-entry";
 const SEEDED = { cpu: 42.5, role: 0 };   // Viewer
 const CHANGED = { cpu: 7.25, role: 1 };  // Operator
 
+// What the tool is doing right now, as fixed text naming only the file: the one thing an unexpected failure reports.
+let doing = "starting";
+
+// A failure says what failed in fixed words, never a value: messages are written here only from literals and names.
 function die(message) {
   console.error(`artifact-data: ${message}`);
   process.exit(1);
 }
+
+// The boundary of every command: an exception (malformed JSON, a corrupt database, a value that does not decrypt) is
+// reported by the operation and file it hit — not by its message or stack, which can quote the data (JSON.parse cites
+// its input, SQLite the statement).
+function guarded(command, run) {
+  try {
+    run();
+  } catch {
+    die(`${command} failed while ${doing} (details withheld: they can contain stored values)`);
+  }
+}
+process.on("uncaughtException", () => die(`failed while ${doing} (details withheld)`));
 
 function env(name) {
   const value = process.env[name];
@@ -41,9 +57,10 @@ function env(name) {
   return value;
 }
 
-const db = () => new DatabaseSync(`${DATA}/metrics.db`);
-const readJson = (name) => JSON.parse(readFileSync(`${DATA}/${name}`, "utf8"));
+const db = () => { doing = "opening metrics.db"; const d = new DatabaseSync(`${DATA}/metrics.db`); doing = "reading metrics.db"; return d; };
+const readJson = (name) => { doing = `reading ${name}`; return JSON.parse(readFileSync(`${DATA}/${name}`, "utf8")); };
 function writeJson(name, value) {
+  doing = `writing ${name}`;
   const tmp = `${DATA}/.${name}.artifact-checks`;
   writeFileSync(tmp, JSON.stringify(value, null, 2));
   renameSync(tmp, `${DATA}/${name}`);
@@ -151,7 +168,7 @@ function state() {
     if (!stored.startsWith("g1:")) lines.push("vault.format=legacy", "vault.value=(not converted)");
     else {
       let value;
-      try { value = openGcm(gcmKey(v), stored); } catch (e) { die(`the vault entry does not open with VAULT_KEY: ${e.message}`); }
+      try { value = openGcm(gcmKey(v), stored); } catch { die("the vault entry does not open with VAULT_KEY"); }
       lines.push("vault.format=gcm", `vault.value=${fingerprint(value)}`);
     }
   }
@@ -190,12 +207,13 @@ function auditPresent() {
 }
 
 const [command, arg] = process.argv.slice(2);
-switch (command) {
-  case "seed-vault-legacy": seedVaultLegacy(); break;
-  case "seed": seed(); break;
-  case "state": state(); break;
-  case "mutate": mutate(); break;
-  case "audit-since": auditSince(arg ?? die("audit-since <id>")); break;
-  case "audit-present": auditPresent(); break;
-  default: die("usage: seed-vault-legacy | seed | state | mutate | audit-since <id> | audit-present");
-}
+const commands = {
+  "seed-vault-legacy": seedVaultLegacy,
+  seed,
+  state,
+  mutate,
+  "audit-since": () => auditSince(arg ?? die("audit-since <id>")),
+  "audit-present": auditPresent,
+};
+if (!Object.hasOwn(commands, command ?? "")) die("usage: seed-vault-legacy | seed | state | mutate | audit-since <id> | audit-present");
+guarded(command, commands[command]);

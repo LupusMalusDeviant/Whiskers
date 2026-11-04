@@ -850,7 +850,8 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > recovery proven on the stored records by `artifact-data.mjs` (sensitive values only as SHA-256 fingerprints, never
 > logged): accounts, role, metrics row and an N−1-encrypted vault
 > entry preserved, bootstrap credentials on the first start only, migration histories, a same-release restart as no-op,
-> post-upgrade changes reverted by the recovery, upgrade again) in `ci.yml` `artifact` (built image, Trivy) and release
+> post-upgrade changes reverted by the recovery, upgrade again; container output only through the `safe_log` allowlist,
+> data-tool failures by operation and file only, both proven by the disclosure `self-test` with planted values) in `ci.yml` `artifact` (built image, Trivy) and release
 > `artifact-test` (staged digest, before `publish-image`), `security.yml` (vulnerable packages, dependency review,
 > gitleaks with every exception per rule, exact value and file, security analyzers, CodeQL), job time limits everywhere,
 > all pinned by `ReleaseWorkflowTests`; controls in `docs/operations/ci-and-release-checks.md`.

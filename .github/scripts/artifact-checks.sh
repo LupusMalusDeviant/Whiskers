@@ -27,9 +27,14 @@
 #       Prints the image of the highest published release (GitHub releases, no drafts or pre-releases) below <version>,
 #       or the highest one without a version. Needs gh with GH_TOKEN and GITHUB_REPOSITORY.
 #
+#   artifact-checks.sh self-test
+#       Disclosure self-test: plants random values in a probe container's logs, in streamed command output and in
+#       malformed data (vault.json, a vault entry, metrics.db), runs the failure cleanup, run_quiet and the data tool on
+#       them, and fails if any value, its SHA-256 fingerprint or an 8-character prefix of either reaches the output.
+#
 # Every wait is bounded (WAIT_SECONDS, default 300 — the image's own health-check start period); every check that cannot
-# be made fails the run. Containers, volumes and the compose project are removed on exit; their logs are printed when a
-# check failed.
+# be made fails the run. Containers, volumes and the compose project are removed on exit; when a check failed, their logs
+# are shown filtered (safe_log: level, category and event id only).
 set -euo pipefail
 
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
@@ -50,11 +55,38 @@ OK=0
 fail() { echo "::error::$*" >&2; exit 1; }
 step() { echo; echo "=== $*"; }
 
+# Container output never reaches the CI log raw: a release that logs a secret, a password hash, a security stamp or a
+# fingerprint would publish it there. safe_log passes only the header line of each log entry — level, category, event
+# id ("fail: Whiskers.Services.Foo[12]") — and withholds every other line (messages, exceptions, entrypoint output),
+# counting them. A category is shown only when it looks like a type name: one with three or more digits, or longer than
+# 120 characters, is withheld too, so no value can travel in a header-shaped line.
+safe_log() {
+    tr -d '\r' | awk '
+        /^(info|warn|fail|crit|dbug|trce): [A-Za-z_][A-Za-z0-9_.]*\[[0-9]+\]$/ {
+            level = $0; sub(/:.*/, "", level)
+            id = $0; sub(/^.*\[/, "", id); sub(/\]$/, "", id)
+            category = $0; sub(/^[a-z]+: /, "", category); sub(/\[[0-9]+\]$/, "", category)
+            if (category ~ /[0-9][^0-9]*[0-9][^0-9]*[0-9]/ || length(category) > 120) category = "(category withheld)"
+            print level ": " category "[" id "]"
+            next
+        }
+        { withheld++ }
+        END { if (withheld) printf "(%d line(s) withheld: only the level, category and event id of log entries are shown)\n", withheld }'
+}
+
+# Runs a command whose output would otherwise go straight to the CI log, and shows only what safe_log lets through.
+run_quiet() { # <command> [arguments...]
+    local out rc=0
+    out="$("$@" 2>&1)" || rc=$?
+    printf '%s\n' "$out" | safe_log
+    return "$rc"
+}
+
 on_exit() {
     local rc=$?
     if [ "$OK" != 1 ]; then
         for target in "${LOG_TARGETS[@]+"${LOG_TARGETS[@]}"}"; do
-            echo "----- logs: ${target}"; eval "$target" 2>&1 | tail -n 200 || true
+            echo "----- logs (filtered): ${target}"; eval "$target" 2>&1 | tail -n 400 | safe_log || true
         done
     fi
     for ((i=${#CLEANUP[@]}-1; i>=0; i--)); do eval "${CLEANUP[$i]}" >/dev/null 2>&1 || true; done
@@ -78,7 +110,8 @@ test_password() { printf 'Ci-%s-Pw!' "$(random_hex 12)"; }
 make_secrets_volume() { # <volume> <image> <password>
     docker volume create "$1" >/dev/null
     CLEANUP+=("docker volume rm -f $1")
-    docker run --rm --user 0 --entrypoint sh -e PW="$3" -v "$1:/secrets" "$2" \
+    # shellcheck disable=SC2016 # expanded by the container shell, not here
+    run_quiet docker run --rm --user 0 --entrypoint sh -e PW="$3" -v "$1:/secrets" "$2" \
         -c 'umask 022; printf %s "$PW" > /secrets/admin-password; chmod 0444 /secrets/admin-password' \
         || fail "could not write the test secrets with $2"
 }
@@ -184,12 +217,13 @@ hardened() {
         "    name: ${secrets}" > "$override"
     local compose=(docker compose -p "$project" -f docker-compose.hardened.yml -f "$override")
     CLEANUP+=("${compose[*]} down -v --remove-orphans")
-    LOG_TARGETS+=("${compose[*]} logs --no-color")
+    LOG_TARGETS+=("${compose[*]} logs --no-color --no-log-prefix")
     # GOOGLE_ADMIN_EMAIL as .env.example describes it (the first Admin, seeds the whitelist). Left empty, the compose file's
     # GoogleAuth__AllowedEmails__0= seeds a whitelist that holds only an empty address and the local Admin is refused
     # (R1-47 finding, reported; the whitelist logic is outside this package).
-    WHISKERS_ADMIN_EMAIL="$ADMIN_EMAIL" GOOGLE_ADMIN_EMAIL="$ADMIN_EMAIL" WHISKERS_ADMIN_PASSWORD_FILE=/run/whiskers-ci/admin-password \
-        VAULT_KEY="$(random_hex 32)" "${compose[@]}" up -d --no-build
+    run_quiet env WHISKERS_ADMIN_EMAIL="$ADMIN_EMAIL" GOOGLE_ADMIN_EMAIL="$ADMIN_EMAIL" \
+        WHISKERS_ADMIN_PASSWORD_FILE=/run/whiskers-ci/admin-password VAULT_KEY="$(random_hex 32)" \
+        "${compose[@]}" up -d --no-build || fail "the hardened compose project did not start"
 
     app="$("${compose[@]}" ps -q serverwatch)"
     [ -n "$app" ] || fail "the hardened app container was not created"
@@ -385,7 +419,7 @@ upgrade() {
     stop
 
     step "recovery: back to N-1 on the pre-upgrade backup"
-    timeout "$WAIT_SECONDS" docker run --rm "${common[@]}" "$image" --restore-backup latest-pre-upgrade --for-previous-release \
+    run_quiet timeout "$WAIT_SECONDS" docker run --rm "${common[@]}" "$image" --restore-backup latest-pre-upgrade --for-previous-release \
         || fail "staging the pre-upgrade backup failed"
     files 'test -e /data/.restore-pending' || fail "the restore was not staged"
     start recovered "$previous"
@@ -441,9 +475,112 @@ previous_release() {
     printf '%s:%s\n' "$IMAGE_REPO" "$chosen"
 }
 
+# ----------------------------------------------------------------------------------------------------------- self-test
+
+# The values a disclosure probe plants: random, handed to containers only through their environment (never on a
+# command line this script prints), and searched for afterwards in full and as an 8-character prefix.
+probe_values() { # prints: canary, stamp-like value, fingerprint of the canary
+    local canary stamp
+    canary="$(random_hex 16)"
+    stamp="$(random_hex 16 | tr 'a-f' 'A-F')"
+    printf '%s\n%s\n%s\n' "$canary" "$stamp" "$(fingerprint "$canary")"
+}
+
+# A container that prints the probe values in every shape a log can have: log headers with the value as category,
+# message lines, a header with trailing text, entrypoint lines, a bare fingerprint — and one clean header that must pass.
+# shellcheck disable=SC2016 # expanded by the probe container's shell, not here
+probe_script='printf "%s\n" "info: Whiskers.Probe[1]" "      message $C" "$C" "fail: Whiskers.$S[2]" "warn: $C[3]" \
+  "crit: Whiskers.Probe[4] $F" "[entrypoint] $S" "$F" "dbug: Whiskers.${F#sha256:}[5]" "      ${C%????????????????????????}"'
+
+expect_no_disclosure() { # <what> <output-file> <value>...
+    local what="$1" file="$2" value hex form; shift 2
+    for value in "$@"; do
+        hex="${value#sha256:}"
+        for form in "$value" "${value:0:8}" "$hex" "${hex:0:8}"; do
+            if grep -qiF -- "$form" "$file"; then fail "$what: the output holds a planted value, its fingerprint or an 8-character prefix"; fi
+        done
+    done
+    echo "ok: $what — no planted value, prefix or fingerprint in $(wc -l < "$file" | tr -d ' ') line(s) of output"
+}
+
+# Disclosure self-test (R1-47): every path by which these checks put container or tool output into the CI log is run
+# with planted values and searched for them — the failure cleanup's log dump, the streamed output of a command, and the
+# data tool's failures on malformed or corrupt data. The checks themselves run the same code paths.
+self_test() {
+    require docker sha256sum
+    docker pull -q "$NODE_IMAGE" >/dev/null 2>&1 || docker image inspect "$NODE_IMAGE" >/dev/null 2>&1 \
+        || fail "the data tool's image '$NODE_IMAGE' can neither be pulled nor found locally"
+    local values canary stamp print out="$WORK/self-test.out" probe="${RUN_ID}-probe" volume="${RUN_ID}-probe-data"
+    mapfile -t values < <(probe_values)
+    canary="${values[0]}"; stamp="${values[1]}"; print="${values[2]}"
+    local planted=(-e "C=$canary" -e "S=$stamp" -e "F=$print")
+
+    step "self-test: the failure cleanup shows filtered container logs only"
+    docker run --name "$probe" "${planted[@]}" "$NODE_IMAGE" sh -c "$probe_script" >/dev/null 2>&1 || fail "the probe container did not run"
+    CLEANUP+=("docker rm -f $probe")
+    if bash "${BASH_SOURCE[0]}" _probe-cleanup "$probe" > "$out" 2>&1; then fail "the probe of the failure cleanup did not fail"; fi
+    expect_no_disclosure "failure cleanup" "$out" "${values[@]}"
+    grep -qx 'info: Whiskers.Probe\[1\]' "$out" || fail "the failure cleanup did not show the allowlisted log header"
+    grep -q 'line(s) withheld' "$out" || fail "the failure cleanup did not report withheld lines"
+
+    step "self-test: streamed command output is filtered"
+    bash "${BASH_SOURCE[0]}" _probe-stream "${planted[@]}" > "$out" 2>&1 || fail "the probe of streamed output failed"
+    expect_no_disclosure "streamed output" "$out" "${values[@]}"
+    grep -qx 'info: Whiskers.Probe\[1\]' "$out" || fail "the streamed output did not show the allowlisted log header"
+
+    step "self-test: the data tool reports failures on malformed data without their content"
+    docker volume create "$volume" >/dev/null
+    CLEANUP+=("docker volume rm -f $volume")
+    local case
+    # metrics-db: a database file with a valid header and the planted values as its corrupt body.
+    for case in vault-json vault-entry vault-type metrics-db; do
+        docker run --rm --network none -v "$volume:/data" "${planted[@]}" -e "CASE=$case" "$NODE_IMAGE" node -e '
+            const fs = require("fs"); const { C, S, CASE } = process.env;
+            for (const f of fs.readdirSync("/data")) fs.rmSync("/data/" + f, { recursive: true });
+            const db = () => { const { DatabaseSync } = require("node:sqlite"); const d = new DatabaseSync("/data/metrics.db");
+              d.exec("CREATE TABLE \"__EFMigrationsHistory\" (MigrationId TEXT); INSERT INTO \"__EFMigrationsHistory\" VALUES (\x27m1\x27);" +
+                "CREATE TABLE \"__IdentityMigrationsHistory\" (MigrationId TEXT); INSERT INTO \"__IdentityMigrationsHistory\" VALUES (\x27i1\x27);" +
+                "CREATE TABLE AspNetUsers (Id TEXT, NormalizedEmail TEXT, PasswordHash TEXT, SecurityStamp TEXT);" +
+                "CREATE TABLE ServerMetrics (ServerId TEXT, CpuPercent REAL); CREATE TABLE AuditLog (Id INTEGER);"); d.close(); };
+            fs.writeFileSync("/data/roles.json", JSON.stringify({ Roles: [] }));
+            const entry = (value) => JSON.stringify({ KdfSalt: Buffer.from(S).toString("base64"), Entries: [{ Key: "artifact-checks-entry", EncryptedValue: value }] });
+            // vault-json: invalid JSON around the value (the parser quotes the text near the error).
+            if (CASE === "vault-json") { db(); fs.writeFileSync("/data/vault.json", "{\"Entries\": [{\"Key\": \"artifact-checks-entry\", \"EncryptedValue\": x" + C + S + "}]}"); }
+            // vault-entry: an EncryptedValue that is not a sealed value but the planted value itself.
+            if (CASE === "vault-entry") { db(); fs.writeFileSync("/data/vault.json", entry("g1:" + C + S)); }
+            // vault-type: an EncryptedValue of the wrong type, holding the planted value.
+            if (CASE === "vault-type") { db(); fs.writeFileSync("/data/vault.json", entry({ Value: C, Stamp: S })); }
+            if (CASE === "metrics-db") { fs.writeFileSync("/data/metrics.db", Buffer.concat([Buffer.from("SQLite format 3\0"), Buffer.from(C.repeat(64) + S)]));
+              fs.writeFileSync("/data/vault.json", entry("g1:")); }' >/dev/null 2>&1 || fail "the malformed data for '$case' could not be written"
+        for command in state seed-vault-legacy seed mutate; do
+            docker run --rm -i --network none -v "$volume:/data" -e "VAULT_KEY=$stamp" -e "ADMIN_EMAIL=$ADMIN_EMAIL" \
+                -e "MARKER_SEEDED=$canary" -e "MARKER_CHANGED=$canary" "$NODE_IMAGE" \
+                sh -c 'cat > /tmp/artifact-data.mjs && exec node /tmp/artifact-data.mjs "$@"' sh "$command" \
+                < "$SCRIPT_DIR/artifact-data.mjs" >> "$out.$case" 2>&1 || true
+        done
+        expect_no_disclosure "data tool on malformed data ($case)" "$out.$case" "${values[@]}"
+        grep -q '^artifact-data: ' "$out.$case" || fail "the data tool reported no failure for '$case'"
+    done
+    OK=1
+    echo; echo "disclosure self-test passed"
+}
+
+# The two halves the self-test runs as child processes, so that the real exit trap and the real run_quiet do the work.
+probe_cleanup() { # <container>: a check that fails after registering the container's logs, as every check does
+    LOG_TARGETS+=("docker logs $1")
+    fail "disclosure probe: failing on purpose so the cleanup shows the probe container's logs"
+}
+probe_stream() { # <docker run options...>: a command whose output is streamed through run_quiet, as the checks do
+    run_quiet docker run --rm "$@" "$NODE_IMAGE" sh -c "$probe_script" || fail "the streamed probe did not run"
+    OK=1
+}
+
 case "${1:-}" in
     hardened) [ $# -eq 2 ] || fail "usage: $0 hardened <image>"; hardened "$2" ;;
     upgrade) [ $# -eq 3 ] || fail "usage: $0 upgrade <image> <previous-image>"; upgrade "$2" "$3" ;;
     previous-release) [ $# -le 2 ] || fail "usage: $0 previous-release [<version>]"; previous_release "${2:-}" ;;
-    *) fail "usage: $0 hardened <image> | upgrade <image> <previous-image> | previous-release [<version>]" ;;
+    self-test) [ $# -eq 1 ] || fail "usage: $0 self-test"; self_test ;;
+    _probe-cleanup) probe_cleanup "$2" ;;
+    _probe-stream) shift; probe_stream "$@" ;;
+    *) fail "usage: $0 hardened <image> | upgrade <image> <previous-image> | previous-release [<version>] | self-test" ;;
 esac

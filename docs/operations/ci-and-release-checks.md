@@ -82,10 +82,21 @@ Every wait is bounded (`WAIT_SECONDS`, default 300 s — the image's own health-
   highest one **below** the version under test — the release version, or the `<Version>` of `Whiskers.csproj` on a pull
   request. N−1 is never the release under test: the same release without pending migrations is rightly no upgrade, and
   the check fails if it ever were.
+- **`self-test`** proves that nothing these checks print carries a stored value. Container output never reaches the CI
+  log raw: the logs shown when a check fails and the output of the commands the checks stream (compose start, secrets
+  volume, backup staging) pass through `safe_log`, which shows only the header of each log entry — level, category, event
+  id — and withholds every other line (a category with three or more digits or over 120 characters is withheld too). The
+  data tool reports a failure only by the operation and file it hit (`state failed while reading vault.json`), never by
+  an exception's message or stack, and exits non-zero. The self-test plants random values in a probe container's logs,
+  in streamed output and in malformed data (invalid `vault.json`, an `EncryptedValue` that is the planted value itself or
+  of the wrong type, a corrupt `metrics.db`), runs the real exit trap, `run_quiet` and `artifact-data.mjs` on them and
+  fails if any value, its SHA-256 fingerprint or an 8-character prefix of either appears in the output. Both the
+  `artifact` job and the release's `artifact-test` run it before the other checks.
 
 Run them locally against an image you built (`docker build -t whiskers:local .`):
 
 ```bash
+bash .github/scripts/artifact-checks.sh self-test
 bash .github/scripts/artifact-checks.sh hardened whiskers:local
 bash .github/scripts/artifact-checks.sh upgrade whiskers:local ghcr.io/lupusmalusdeviant/whiskers:0.14.1   # a release below <Version>
 ```

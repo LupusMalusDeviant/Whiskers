@@ -70,6 +70,8 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", " --require .github/required-tests/in-process.txt", "")]                                             // the endpoint matrix may vanish behind the floor
     [InlineData("ci.yml", "--require .github/required-tests/docker.txt", "--require .github/required-tests/in-process.txt")]   // the wrong manifest for the run
     [InlineData("ci.yml", "artifact-checks.sh previous-release \"$VER\")", "artifact-checks.sh previous-release)")]             // N-1 may be the release under test
+    [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh self-test", "        run: echo skipped")]             // log disclosure unproven
+    [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh self-test", "        run: echo skipped")]
     [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"", "        run: echo skipped")]
     [InlineData("ci.yml", "          bash .github/scripts/artifact-checks.sh upgrade \"$ARTIFACT\" \"$PREVIOUS\"", "          echo skipped")]
     [InlineData("ci.yml", "      - name: Trivy scan (gate, fail on CRITICAL)\n        uses: aquasecurity", "      - name: Trivy scan (gate, fail on CRITICAL)\n        if: false\n        uses: aquasecurity")]
@@ -878,6 +880,8 @@ internal static class WorkflowPolicy
     private static IEnumerable<string> ArtifactJobViolations(string file, string id, YamlMappingNode job)
     {
         var runs = JobRuns(job);
+        // The log filter and the data tool's failure messages are proven not to disclose planted values.
+        if (!Regex.IsMatch(runs, @"(?m)^\s*bash \.github/scripts/artifact-checks\.sh self-test\s*$")) yield return $"{file} job '{id}' does not run the disclosure self-test";
         if (!Regex.IsMatch(runs, @"artifact-checks\.sh hardened ""\$ARTIFACT""")) yield return $"{file} job '{id}' does not check the hardened profile of $ARTIFACT";
         if (!Regex.IsMatch(runs, @"artifact-checks\.sh upgrade ""\$ARTIFACT"" ""\$PREVIOUS""")) yield return $"{file} job '{id}' does not upgrade N-1 data with $ARTIFACT";
         // N-1 strictly below the release under test: the same release without pending migrations is rightly no upgrade.
