@@ -179,8 +179,10 @@ minimal, disabled-by-default example that documents the whole pattern — copy i
   OAuth/OIDC, SignalR hubs and webhook endpoints.
 - **Layout:** `Components/` (Blazor UI), `Mcp/` + `Mcp/Tools/` (MCP authentication, guardrail filter, tool
   definitions), `Services/` (all business logic), `Hubs/` (SignalR), `Configuration/` (typed settings),
-  `Models/`, `Utils/` (secret redaction, shell quoting); tests in `src/Whiskers.Tests/` (xUnit). Every folder
-  carries a README describing its files.
+  `Models/`, `Modules/` (optional features), `Startup/` (composition root extensions), `Utils/` (secret
+  redaction, shell quoting); entities and DbContexts in `src/Whiskers.Data/`, migrations per provider; tests in
+  `src/Whiskers.Tests/` (xUnit + bUnit). Every folder carries a README describing its files; the
+  [codebase map](CODEBASE_MAP.md) ties them together.
 - **Conventions:** interface-first services registered in DI; null checks / `ArgumentException` at service
   boundaries; in-code comments and XML docs in English; user-facing strings localized (English default,
   German).

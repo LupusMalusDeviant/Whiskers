@@ -558,25 +558,33 @@ Have a request? Open an issue.
 
 ## Project structure
 
-Each source folder carries its own `README.md` describing the files within. High-level map:
+Each source folder carries its own `README.md` describing the files within. For sizes, how a call flows from an MCP
+client, the agent or a page to the host, where state lives and where to start a change, see the
+**[codebase map](docs/CODEBASE_MAP.md)**. High-level layout:
 
 ```
 Whiskers/
 ├── src/
-│   ├── Whiskers/            # the application
-│   │   ├── Components/         # Blazor UI (Pages, Layout, Shared)
-│   │   ├── Configuration/      # strongly-typed settings classes
-│   │   ├── Hubs/               # SignalR hubs (container + terminal streams)
-│   │   ├── Mcp/                # MCP server tools + permission layer
-│   │   ├── Models/             # data models (Agent, Cloud, Cve, Hetzner, Hostinger)
-│   │   ├── Services/           # all business logic (see Services/README.md)
-│   │   ├── Utils/              # small helpers (secret redaction, shell quoting)
-│   │   ├── wwwroot/            # static assets
-│   │   └── Program.cs          # composition root (DI, middleware, MCP, auth)
-│   └── Whiskers.Tests/      # xUnit test suite
-├── deploy/telemetry/           # mesh/mTLS deploy templates (node_exporter, VictoriaMetrics, Tailscale ACL)
-├── docs/ARCHITECTURE.md        # architecture, security-critical areas & change control
-├── docs/product/               # product positioning (see docs/product/POSITIONING.md)
+│   ├── Whiskers/                    # the application
+│   │   ├── Components/              # Blazor UI (Pages, Layout, Shared)
+│   │   ├── Configuration/           # strongly-typed settings classes
+│   │   ├── HealthChecks/            # /healthz and /readyz probes
+│   │   ├── Hubs/                    # SignalR hubs (container + terminal streams)
+│   │   ├── Mcp/                     # MCP server: auth, guardrail filter, Tools/, Prompts/, Resources/
+│   │   ├── Models/                  # data models
+│   │   ├── Modules/                 # optional feature modules + module framework
+│   │   ├── Resources/               # localized UI strings (English, German)
+│   │   ├── Services/                # all business logic (see Services/README.md)
+│   │   ├── Startup/                 # composition root extensions (DI, auth, middleware pipeline)
+│   │   ├── Utils/                   # small helpers (secret redaction, shell quoting)
+│   │   ├── wwwroot/                 # static assets
+│   │   └── Program.cs               # composition root (calls the Startup/ extensions)
+│   ├── Whiskers.Data/               # EF Core entities + DbContexts
+│   ├── Whiskers.Migrations.Sqlite/  # generated migrations, SQLite
+│   ├── Whiskers.Migrations.Postgres/# generated migrations, PostgreSQL
+│   └── Whiskers.Tests/              # xUnit + bUnit test suite
+├── deploy/                          # installer, Helm chart, telemetry and backup templates
+├── docs/                            # architecture, codebase map, ADRs, contracts, operations, product
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md
