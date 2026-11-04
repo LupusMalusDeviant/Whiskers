@@ -1,10 +1,14 @@
 ![Whiskers logo](https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/src/Whiskers/wwwroot/brand.png)
 
-# Whiskers
+# Whiskers — Zero-Trust MCP Control Plane for Docker & Kubernetes
+
+> *"In the dark, predators don't rely on sight. They rely on their whiskers to sense the slightest vibration in the
+> air before striking — or stepping into a trap. **Whiskers** is the tactile sensory layer and zero-trust execution
+> mesh between hallucinating AI agents and your production infrastructure."*
 
 **Controlled infrastructure operations for humans and AI agents.**
 
-Whiskers is a **self-hosted control plane** for Docker hosts and Kubernetes workloads.
+Whiskers is a **self-hosted, zero-trust MCP control plane** for Docker hosts and Kubernetes workloads.
 Instead of handing operators or AI agents unrestricted SSH access, it exposes explicit tools
 governed by **permissions, code-enforced guardrails, approvals and a complete action history**.
 
@@ -24,6 +28,18 @@ governed by **permissions, code-enforced guardrails, approvals and a complete ac
 ---
 
 ## Why Whiskers
+
+The common pattern for a Docker or Kubernetes MCP server is to run it over `stdio` next to the agent and give it the
+raw `/var/run/docker.sock` or a kubeconfig. Whatever the model hallucinates, the socket executes. Whiskers is the
+antidote:
+
+| | Typical Docker/K8s MCP server | Whiskers control plane |
+|---|---|---|
+| **Access** | Raw `docker.sock` or kubeconfig in the agent's process | The agent never touches the socket or the kubeconfig — it calls scoped tools; Whiskers holds the credentials |
+| **Reach** | `stdio`, one host | Streamable HTTP to many hosts over mesh + mTLS, no standing SSH key |
+| **Permissions** | Everything the socket allows | Per key: Read, Write or Admin scope, or an explicit tool list — checked on every call |
+| **Risky actions** | Executed blindly | Guardrails allow, block or pause for human approval; blast-radius and CVE check before an update |
+| **Afterwards** | No record | Tamper-evident, hash-chained audit trail plus Agent History |
 
 AI agents can operate infrastructure — but the usual way to let them is to hand over an SSH key or a
 shell, which grants far more power than any single task needs. Whiskers puts a governed layer in
