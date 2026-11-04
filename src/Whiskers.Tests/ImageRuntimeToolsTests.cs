@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using Whiskers.Services.Mutations;
+using Whiskers.Services.Server;
 using Whiskers.Services.Terminal;
 
 namespace Whiskers.Tests;
@@ -14,9 +16,12 @@ namespace Whiskers.Tests;
 /// <para>The image checks (category <c>ImageRuntime</c>) run against a built image named by <c>WHISKERS_IMAGE</c>:
 /// every shipped tool is present and starts, nothing of the engine (dockerd, containerd, runc) is, and the local
 /// terminal paths work through the image's own binaries — <c>docker exec</c> through the docker CLI against the
-/// mounted socket, and the host shell through <c>nsenter</c> in the privileged full profile. Without
-/// <c>WHISKERS_IMAGE</c> they are skipped; CI's <c>image-runtime</c> job builds the image and sets
-/// <c>WHISKERS_IMAGE_TESTS_REQUIRED=true</c>, which turns a missing image or daemon into a failure.</para>
+/// mounted socket, and the host shell through <c>nsenter</c> in the privileged full profile; a compose deployment
+/// through the production deploy script and local host transport runs its workload on the Docker host and removes it;
+/// the VPN runtime (netfilter, TUN, tailscaled's router) initializes without credentials; every pinned base digest
+/// covers amd64 and arm64; the image boots. Without <c>WHISKERS_IMAGE</c> (or a host without <c>docker compose</c>,
+/// such as Docker Desktop's VM) they are skipped; CI's <c>image-runtime</c> job builds the image on x64 and arm64 and
+/// sets <c>WHISKERS_IMAGE_TESTS_REQUIRED=true</c>, which turns anything missing into a failure.</para>
 /// </summary>
 public class ImageRuntimeToolsTests
 {
@@ -110,6 +115,21 @@ public class ImageRuntimeToolsTests
         Assert.NotEmpty(EngineViolations(real.Replace(original, mutation)));
     }
 
+    [Fact]
+    public void Ci_runs_the_image_tests_on_both_architectures_and_requires_them()
+        => Assert.Empty(CiImageLaneViolations(DeploymentScripts.ReadRepoFile(".github", "workflows", "ci.yml")));
+
+    [Theory]
+    [InlineData("        runner: [ubuntu-latest, ubuntu-24.04-arm]", "        runner: [ubuntu-latest]")]
+    [InlineData("          WHISKERS_IMAGE_TESTS_REQUIRED: \"true\"", "          WHISKERS_IMAGE_TESTS_REQUIRED: \"false\"")]
+    [InlineData("--filter \"Category=ImageRuntime\"", "--filter \"Category=Nothing\"")]
+    public void Image_lane_check_finds_a_missing_architecture_or_an_optional_run(string original, string mutation)
+    {
+        var real = DeploymentScripts.ReadRepoFile(".github", "workflows", "ci.yml");
+        Assert.Contains(original, real);
+        Assert.NotEmpty(CiImageLaneViolations(real.Replace(original, mutation)));
+    }
+
     // ---- image checks -------------------------------------------------------------------------------------------
 
     [SkippableFact]
@@ -173,6 +193,111 @@ public class ImageRuntimeToolsTests
             $"the host shell through nsenter did not run (exit {exit}):\n{stdout}\n{stderr}");
     }
 
+    /// <summary>A compose deployment the way Whiskers runs one on its own host: the production deploy script
+    /// (<see cref="ComposePlan.DeployScript"/>, as used by <c>deploy_compose</c>, the UI and webhooks) through the
+    /// production local transport (<see cref="HostCommandExecutor.LocalShellArguments"/>: <c>nsenter</c> into PID 1),
+    /// started from the built image in the full profile. The workload must run on the host, and the same path
+    /// removes it again.</summary>
+    [SkippableFact]
+    [Trait("Category", "ImageRuntime")]
+    public void Compose_deployment_runs_on_the_host_through_the_image()
+    {
+        var image = ImageUnderTest();
+        var project = $"whiskers-r152-deploy-{Guid.NewGuid():N}"[..34];
+        var dir = $"/tmp/{project}";
+        var file = $"{dir}/compose.yaml";
+        // The workload is the image under test itself (already on the host's daemon: no pull, no registry).
+        var yaml = $"services:\n  probe:\n    image: {image}\n    pull_policy: never\n    entrypoint: [\"sleep\", \"600\"]\n";
+        var plan = new ComposePlan("local", project, dir, [file], [new ComposeFileInput(file, yaml)],
+            EnvFileContent: null, HasEnvFile: false, RemoveOrphans: false, Services: [], Impact: []);
+
+        var (probeExit, probeOut, probeErr) = OnHost(image, "docker compose version");
+        if (probeExit != 0)
+        {
+            var reason = $"the host behind this Docker daemon has no `docker compose` in PID 1's namespaces ({(probeOut + probeErr).Trim()})";
+            if (Required) throw new InvalidOperationException(reason);
+            Skip.If(true, reason);
+        }
+
+        try
+        {
+            var (exit, stdout, stderr) = OnHost(image, plan.DeployScript(pull: false));
+            Assert.True(exit == 0, $"the deploy script failed (exit {exit}):\n{stdout}\n{stderr}");
+            Assert.Equal("running", WorkloadStates(project).Single());
+
+            var (downExit, downOut, downErr) = OnHost(image, plan.Command("down --remove-orphans --timeout 1") + $" && rm -rf {dir}");
+            Assert.True(downExit == 0, $"the cleanup failed (exit {downExit}):\n{downOut}\n{downErr}");
+            Assert.Empty(WorkloadStates(project));
+            Assert.Equal(0, OnHost(image, $"test ! -e {dir}").Exit);
+        }
+        finally
+        {
+            var (_, ids, _) = Docker(["ps", "-aq", "--filter", $"label=com.docker.compose.project={project}"]);
+            foreach (var id in ids.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                Docker(["rm", "-f", id]);
+            Docker(["network", "rm", $"{project}_default"]);
+            OnHost(image, $"rm -rf {dir}");
+        }
+    }
+
+    /// <summary>The VPN runtime of the full profile in a throwaway container — no host network, no credentials:
+    /// the image's <c>iptables</c> changes netfilter, and <c>tailscaled</c> creates its TUN device, sets up its
+    /// router in iptables mode and waits for a login.</summary>
+    [SkippableFact]
+    [Trait("Category", "ImageRuntime")]
+    public void Vpn_runtime_initializes_netfilter_and_the_tun_device()
+    {
+        var image = ImageUnderTest();
+        var script =
+            "set -e; " +
+            "iptables -N WHISKERS_SMOKE; iptables -A WHISKERS_SMOKE -j RETURN; iptables -S WHISKERS_SMOKE | grep -q -- '-j RETURN'; " +
+            "iptables -F WHISKERS_SMOKE; iptables -X WHISKERS_SMOKE; echo netfilter-ok; " +
+            "mkdir -p /tmp/ts; " +
+            "tailscaled --state=mem: --socket=/tmp/ts/s.sock --statedir=/tmp/ts --no-logs-no-support > /tmp/ts/log 2>&1 & " +
+            "st=; for i in $(seq 1 30); do st=$(tailscale --socket=/tmp/ts/s.sock status --json 2>/dev/null | grep -o '\"BackendState\": *\"[A-Za-z]*\"' || true); " +
+            "[ -n \"$st\" ] && break; sleep 1; done; echo \"state:$st\"; " +
+            "[ -e /sys/class/net/tailscale0 ] && echo tun-ok; " +
+            "grep -o 'netfilter running in [a-z]* mode' /tmp/ts/log || true; " +
+            "echo '--- tailscaled log'; cat /tmp/ts/log";
+        var (exit, stdout, stderr) = Docker(["run", "--rm", "--cap-add", "NET_ADMIN", "--device", "/dev/net/tun", "--entrypoint", "sh", image, "-c", script]);
+        var output = stdout + stderr;
+        Assert.True(exit == 0, $"the VPN smoke failed (exit {exit}):\n{output}");
+        Assert.Contains("netfilter-ok", stdout);
+        Assert.Contains("\"BackendState\": \"NeedsLogin\"", stdout);
+        Assert.Contains("tun-ok", stdout);
+        Assert.Contains("netfilter running in iptables mode", stdout);
+    }
+
+    /// <summary>Every pinned base image is a multi-arch index with linux/amd64 and linux/arm64, so both release
+    /// architectures build from the pin (a per-architecture digest would give the arm64 build an amd64 image).</summary>
+    [SkippableFact]
+    [Trait("Category", "ImageRuntime")]
+    public void Every_pinned_base_image_covers_amd64_and_arm64()
+    {
+        RequireDocker();
+        var images = BuildPolicy.BaseImages(DeploymentScripts.ReadRepoFile("Dockerfile"));
+        Assert.NotEmpty(images);
+        var problems = new List<string>();
+        foreach (var image in images)
+        {
+            var (exit, stdout, stderr) = Docker(["buildx", "imagetools", "inspect", "--raw", image]);
+            if (exit != 0) { problems.Add($"{image}: {stderr.Trim()}"); continue; }
+            using var json = System.Text.Json.JsonDocument.Parse(stdout);
+            if (!json.RootElement.TryGetProperty("manifests", out var manifests))
+            {
+                problems.Add($"{image}: the digest is a single-platform manifest, not a multi-arch index");
+                continue;
+            }
+            var platforms = manifests.EnumerateArray()
+                .Where(m => m.TryGetProperty("platform", out _))
+                .Select(m => $"{m.GetProperty("platform").GetProperty("os").GetString()}/{m.GetProperty("platform").GetProperty("architecture").GetString()}")
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var needed in new[] { "linux/amd64", "linux/arm64" })
+                if (!platforms.Contains(needed)) problems.Add($"{image}: no {needed} in the index");
+        }
+        Assert.Empty(problems);
+    }
+
     [SkippableFact]
     [Trait("Category", "ImageRuntime")]
     public void Image_boots_and_answers_its_health_probe()
@@ -204,6 +329,27 @@ public class ImageRuntimeToolsTests
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------------
+
+    internal static IReadOnlyList<string> CiImageLaneViolations(string ciYaml)
+    {
+        var violations = new List<string>();
+        // The job's own text: from its key to the next job key (two-space indent) or the end.
+        var start = Regex.Match(ciYaml, @"^  image-runtime:\s*$", RegexOptions.Multiline);
+        if (!start.Success) return ["ci.yml has no image-runtime job"];
+        var rest = ciYaml[(start.Index + start.Length)..];
+        var next = Regex.Match(rest, @"^  [A-Za-z0-9_-]+:\s*$", RegexOptions.Multiline);
+        var job = next.Success ? rest[..next.Index] : rest;
+
+        var runners = Regex.Match(job, @"^\s+runner:\s*\[(?<list>[^\]]*)\]", RegexOptions.Multiline).Groups["list"].Value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (!runners.Any(r => r is "ubuntu-latest" or "ubuntu-24.04")) violations.Add("the image-runtime matrix has no x64 runner");
+        if (!runners.Any(r => r.EndsWith("-arm", StringComparison.Ordinal))) violations.Add("the image-runtime matrix has no arm64 runner");
+        if (!job.Contains("runs-on: ${{ matrix.runner }}", StringComparison.Ordinal)) violations.Add("the image-runtime job does not run on its matrix");
+        if (!Regex.IsMatch(job, @"WHISKERS_IMAGE_TESTS_REQUIRED:\s*""true""")) violations.Add("the image tests are not required in CI");
+        if (!job.Contains("--filter \"Category=ImageRuntime\"", StringComparison.Ordinal)) violations.Add("the image-runtime job does not run the ImageRuntime tests");
+        if (!job.Contains("docker build", StringComparison.Ordinal)) violations.Add("the image-runtime job does not build the image");
+        return violations;
+    }
 
     internal static IReadOnlyList<string> EngineViolations(string dockerfile)
     {
@@ -238,9 +384,33 @@ public class ImageRuntimeToolsTests
         return result;
     }
 
+    /// <summary><c>WHISKERS_IMAGE_TESTS_REQUIRED=true</c> (CI's image-runtime job): nothing in this category may skip.</summary>
+    private static bool Required =>
+        string.Equals(Environment.GetEnvironmentVariable("WHISKERS_IMAGE_TESTS_REQUIRED"), "true", StringComparison.OrdinalIgnoreCase);
+
+    private static void RequireDocker()
+    {
+        var (exit, _, err) = DeploymentScripts.FindOnPath("docker") is null ? (-1, "", "docker not on PATH") : Docker(["version", "--format", "{{.Server.Version}}"]);
+        if (exit == 0) return;
+        if (Required) throw new InvalidOperationException($"no Docker daemon, but the image runtime tests are required here: {err}");
+        Skip.If(true, $"Docker is not available ({err.Trim()})");
+    }
+
+    /// <summary>A host command exactly as the full profile runs one: from the image, privileged with the host's PID
+    /// namespace, <c>nsenter</c> with <see cref="HostCommandExecutor.LocalShellArguments"/>.</summary>
+    private static (int Exit, string Stdout, string Stderr) OnHost(string image, string command) =>
+        Docker(["run", "--rm", "--privileged", "--pid=host", "--entrypoint", "nsenter", image, .. HostCommandExecutor.LocalShellArguments(command)]);
+
+    /// <summary>The states of the containers of a compose project on the daemon's host.</summary>
+    private static IReadOnlyList<string> WorkloadStates(string project)
+    {
+        var (_, stdout, _) = Docker(["ps", "-a", "--filter", $"label=com.docker.compose.project={project}", "--format", "{{.State}}"]);
+        return stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
     private static string ImageUnderTest()
     {
-        var required = string.Equals(Environment.GetEnvironmentVariable("WHISKERS_IMAGE_TESTS_REQUIRED"), "true", StringComparison.OrdinalIgnoreCase);
+        var required = Required;
         var image = Environment.GetEnvironmentVariable("WHISKERS_IMAGE");
         if (string.IsNullOrWhiteSpace(image))
         {

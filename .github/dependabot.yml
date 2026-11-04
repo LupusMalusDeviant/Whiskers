@@ -3,6 +3,8 @@ version: 2
 #   nuget          every project in Whiskers.slnx (its directory below) — PackageReferences and packages.lock.json
 #   dotnet-sdk     global.json (the SDK version CI and developers build with)
 #   docker         the Dockerfile's base images, pinned as tag@sha256 digest (SDK, ASP.NET runtime, docker CLI)
+#   docker-compose every image named in a compose file of the repository
+#   helm           the Helm chart's images (values.yaml)
 #   github-actions every workflow's actions, pinned to full commit SHAs
 # A Dependabot PR is only mergeable after the CI suite passed on it (ci.yml restores in locked mode, so a lock file that
 # does not match its project fails there).
@@ -35,6 +37,25 @@ updates:
     schedule:
       interval: "weekly"
     labels: ["dependencies", "docker"]
+
+  # Images in the compose files: the profiles at the root (docker-socket-proxy), the PostgreSQL compose and the
+  # telemetry stacks. A directory with a compose file that names an image must be listed (BuildReproducibilityTests).
+  - package-ecosystem: "docker-compose"
+    directories:
+      - "/"
+      - "/deploy"
+      - "/deploy/telemetry/host"
+      - "/deploy/telemetry/victoriametrics"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "docker"]
+
+  # The Helm chart: images in values.yaml (the Tailscale sidecar; Whiskers' own image follows the release).
+  - package-ecosystem: "helm"
+    directory: "/deploy/helm/whiskers"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "helm"]
 
   # GitHub Actions in .github/workflows (pinned to commit SHAs; the comment names the release).
   - package-ecosystem: "github-actions"

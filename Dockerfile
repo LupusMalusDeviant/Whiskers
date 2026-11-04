@@ -44,7 +44,8 @@ LABEL io.modelcontextprotocol.server.name="io.github.LupusMalusDeviant/whiskers"
 #   nsenter (base)      local host shell and host commands (util-linux, part of the base image)
 #   ssh, sshpass        SSH terminal, SSH host commands and the SSH Docker tunnel
 #   tailscale(d)        in-app VPN provider and the legacy entrypoint bring-up; iptables for tailscaled's netfilter
-#                       rules (until R1-52 it came in with docker.io — kept explicitly so the VPN behaves as before)
+#                       rules (also a dependency of the tailscale package; named here because Whiskers relies on
+#                       it — ImageRuntimeToolsTests checks tailscaled comes up in iptables mode)
 #   pg_dump/pg_restore/psql  PostgreSQL self-backup (R1-33)
 #   curl                container HEALTHCHECK
 # Detect base-image distro codename so Tailscale URLs work whether the

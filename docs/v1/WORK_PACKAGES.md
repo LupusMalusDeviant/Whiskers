@@ -936,20 +936,30 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 > own framework package (`Microsoft.AspNetCore.App.Internal.Assets`) into the lock file, and `Whiskers.csproj` now says
 > `RequiresAspNetWebAssets=true` so a restore of the project file alone resolves the same. Every `FROM` is
 > `image:tag@sha256:…` (SDK, ASP.NET runtime, `docker:<v>-cli`); Dependabot covers nuget for every project directory,
-> `dotnet-sdk`, `docker` and `github-actions` (`BuildReproducibilityTests`, each check also against a mutated file).
-> The update process is in `deploy/README.md` ("Pinned build inputs"). The `docker.io` package (dockerd, containerd,
+> `dotnet-sdk`, `docker`, `docker-compose` (every directory with a compose file that names an image: the root
+> profiles' socket-proxy, PostgreSQL, the telemetry stacks), `helm` (the chart's values images: the Tailscale sidecar)
+> and `github-actions`. `BuildReproducibilityTests` finds every compose file and chart in the repository and fails for
+> an image whose directory is not covered or that no update can move (`latest`, no tag, a variable); the pin and
+> SDK checks read the versions from the files, and a simulated coordinated update (all images and the SDK moved
+> together) passes while a one-sided SDK move fails. The update process and the inputs that stay mutable (apt
+> repositories) are in `deploy/README.md` ("Pinned build inputs"). The `docker.io` package (dockerd, containerd,
 > runc) is gone: the image takes the static docker CLI from the pinned `docker-cli` stage — the only in-container
 > `docker` use is the local terminal's `docker exec`; Docker API calls go through Docker.DotNet and `docker compose`
-> runs on the managed host (nsenter/SSH), so no compose plugin is needed — and installs `iptables` explicitly, which
-> `docker.io` used to bring and `tailscaled` uses for its netfilter rules (VPN behaviour unchanged). Image size
-> 1.34 GB → 1.03 GB (local build, uncompressed). `ImageRuntimeToolsTests` pins every process start in the source to a
-> shipped or deliberately external program (netbird, claude) and, against a built image (CI job `image-runtime`),
-> proves the tools are there and start, no engine part is, the local terminal's `docker exec` works through the
-> image's CLI and the full profile's host shell works through its `nsenter`, and the image boots to `/healthz`.
-> The privileged, root full profile is unchanged and stays the documented intent (`docs/container-hardening.md`);
-> the hardened profile is the non-root alternative. Not done here: Dependabot for compose/Helm image references
-> (F-19 remainder), apt packages from the Tailscale and PostgreSQL repositories stay at the repositories' current
-> version (not pinned).
+> runs on the managed host (nsenter/SSH), so no compose plugin is needed. `iptables` (also a dependency of the
+> tailscale package) is named explicitly. Image size 1.34 GB → 1.03 GB (local build, uncompressed).
+> `ImageRuntimeToolsTests` pins every process start in the source to a shipped or deliberately external program
+> (netbird, claude) and, against a built image (CI job `image-runtime`, on x64 and on arm64 runners, required —
+> nothing may skip), proves: the tools are there and start, no engine part is; the local terminal's `docker exec`
+> works through the image's CLI; the full profile's host shell works through its `nsenter`; a compose deployment
+> made with the production deploy script (`ComposePlan.DeployScript`) over the production local transport
+> (`HostCommandExecutor.LocalShellArguments`) runs its workload on the host and the same path removes it; the VPN
+> runtime initializes in a throwaway container without credentials or host network (iptables changes netfilter,
+> `tailscaled` creates `tailscale0`, runs its router in iptables mode and waits for a login); every pinned base digest
+> is a multi-arch index with linux/amd64 and linux/arm64; the image boots to `/healthz`. The privileged, root full
+> profile is unchanged and stays the documented intent (`docs/container-hardening.md`); the hardened profile is the
+> non-root alternative. Not pinned: packages from the Ubuntu, Tailscale and PostgreSQL apt repositories (their
+> current version at build time); the compose files' floating tags (`postgres:17-alpine`, telemetry versions) are
+> covered by Dependabot but not digest-pinned.
 
 **Out of scope:** Mandatory release provenance, covered by R1-45.
 

@@ -11,14 +11,17 @@ All notable changes to Whiskers are documented here. The format follows
   resolved differently from the lock file fails the build. `global.json` pins the SDK exactly (`10.0.402`, no roll
   forward); CI installs it from there and the Dockerfile's SDK image is the same version. Every base image is pinned as
   `image:tag@sha256:…`; Dependabot now covers all five projects (one nuget entry), the SDK (`dotnet-sdk`), the base
-  images (`docker`) and the actions. The image no longer installs `docker.io` (dockerd, containerd, runc): it takes
-  the static docker CLI from a pinned `docker:<version>-cli` stage — inside the container Whiskers only runs
-  `docker exec` for the local web terminal; everything else talks to the Docker API or runs `docker compose` on the
-  managed host — and installs `iptables` explicitly, which the engine package used to bring in and `tailscaled` uses
-  (local build 1.34 GB → 1.03 GB). New CI job `image-runtime` builds the image and runs `ImageRuntimeToolsTests`
-  against it (tools present and starting, no engine, local `docker exec` terminal, `nsenter` host shell, boot to
-  `/healthz`); `BuildReproducibilityTests` guards lock files, locked restores, digest pins and Dependabot coverage. The
-  full profile stays root and privileged by design. **Upgrade notes:** no application, configuration or database
+  images (`docker`), every compose file's images (`docker-compose`), the Helm chart's images (`helm`) and the actions.
+  The image no longer installs `docker.io` (dockerd, containerd, runc): it takes the static docker CLI from a pinned
+  `docker:<version>-cli` stage — inside the container Whiskers only runs `docker exec` for the local web terminal;
+  everything else talks to the Docker API or runs `docker compose` on the managed host — and names `iptables`
+  (tailscaled's netfilter) explicitly (local build 1.34 GB → 1.03 GB). New CI job `image-runtime`, on x64 and arm64
+  runners, builds the image and runs `ImageRuntimeToolsTests` against it (tools present and starting, no engine, local
+  `docker exec` terminal, `nsenter` host shell, a compose deployment through the production deploy script and host
+  transport with cleanup, VPN runtime smoke without credentials, multi-arch base digests, boot to `/healthz`);
+  `build-test` gets a 45-minute limit. `BuildReproducibilityTests` guards lock files, locked restores, digest pins and
+  Dependabot coverage. The full profile stays root and privileged by design. Packages from the apt repositories
+  (Ubuntu, Tailscale, PostgreSQL) are still installed at their current version. **Upgrade notes:** no application, configuration or database
   change. (1) Developers need exactly .NET SDK `10.0.402` (`global.json`); a newer SDK is refused until `global.json`
   is moved. (2) After changing a `PackageReference`, run `dotnet restore Whiskers.slnx --force-evaluate` and commit
   the changed lock files (also `Whiskers.Tests`'s). (3) Moving the SDK means moving `global.json`, the Dockerfile's

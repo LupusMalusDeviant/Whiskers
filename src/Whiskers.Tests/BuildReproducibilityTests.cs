@@ -167,27 +167,93 @@ public class BuildReproducibilityTests
         Assert.NotEmpty(BuildPolicy.DockerfileRestoreViolations(real.Replace(original, mutation), BuildPolicy.SolutionProjects(Repo("Whiskers.slnx"))));
     }
 
+    /// <summary>The Dockerfile's base images as they are today (read, not written down here: an update must not break
+    /// the tests that prove the checks bite).</summary>
+    public static TheoryData<string> BaseImageReferences()
+    {
+        var data = new TheoryData<string>();
+        foreach (var image in BuildPolicy.BaseImages(DeploymentScripts.ReadRepoFile("Dockerfile"))) data.Add(image);
+        return data;
+    }
+
     [Theory]
-    [InlineData("aspnet:10.0.14@sha256:")]
-    [InlineData("sdk:10.0.402@sha256:")]
-    [InlineData("docker:29.9.3-cli@sha256:")]
-    public void Digest_check_finds_an_unpinned_image(string pinned)
+    [MemberData(nameof(BaseImageReferences))]
+    public void Digest_check_finds_an_unpinned_image(string image)
     {
         var real = Repo("Dockerfile");
-        var line = real.Split('\n').Single(l => l.Contains(pinned, StringComparison.Ordinal));
-        var unpinned = Regex.Replace(line, "@sha256:[0-9a-f]{64}", "");
-        Assert.NotEmpty(BuildPolicy.UnpinnedBaseImages(real.Replace(line, unpinned)));
-        // A shortened or tag-less digest is no pin either.
-        Assert.NotEmpty(BuildPolicy.UnpinnedBaseImages(real.Replace(line, Regex.Replace(line, "(@sha256:[0-9a-f]{12})[0-9a-f]+", "$1"))));
+        Assert.Contains(image, real);
+        var digest = image[(image.IndexOf("@sha256:", StringComparison.Ordinal) + 8)..];
+        Assert.NotEmpty(BuildPolicy.UnpinnedBaseImages(real.Replace(image, image.Replace("@sha256:" + digest, ""))));
+        // A shortened digest and a digest without a tag are no pin either.
+        Assert.NotEmpty(BuildPolicy.UnpinnedBaseImages(real.Replace(image, image.Replace(digest, digest[..12]))));
+        var (name, _, _) = BuildPolicy.SplitImage(image);
+        Assert.NotEmpty(BuildPolicy.UnpinnedBaseImages(real.Replace(image, $"{name}@sha256:{digest}")));
     }
 
     [Fact]
-    public void Sdk_pin_check_finds_a_drifting_sdk()
+    public void A_coordinated_update_passes_and_drift_fails()
     {
         var global = Repo("global.json");
         var dockerfile = Repo("Dockerfile");
-        Assert.NotEmpty(BuildPolicy.SdkPinViolations(global.Replace("\"10.0.402\"", "\"10.0.403\""), dockerfile));
+        var sdk = BuildPolicy.GlobalJsonSdk(global);
+        var newSdk = BuildPolicy.NextVersion(sdk);
+
+        // Every base image to a new tag and digest, the SDK image and global.json together — as Dependabot plus the
+        // documented SDK move would: every check still passes.
+        var updated = dockerfile;
+        foreach (var image in BuildPolicy.BaseImages(dockerfile))
+        {
+            var (name, tag, _) = BuildPolicy.SplitImage(image);
+            var newTag = name == "mcr.microsoft.com/dotnet/sdk" ? newSdk : BuildPolicy.NextVersion(tag);
+            updated = updated.Replace(image, $"{name}:{newTag}@sha256:{BuildPolicy.FakeDigest(image)}");
+        }
+        var updatedGlobal = global.Replace($"\"{sdk}\"", $"\"{newSdk}\"");
+        Assert.NotEqual(dockerfile, updated);
+        Assert.NotEqual(global, updatedGlobal);
+        Assert.Empty(BuildPolicy.UnpinnedBaseImages(updated));
+        Assert.Empty(BuildPolicy.SdkPinViolations(updatedGlobal, updated));
+        Assert.Empty(ImageRuntimeToolsTests.EngineViolations(updated));
+
+        // Only one side moved: drift.
+        Assert.NotEmpty(BuildPolicy.SdkPinViolations(updatedGlobal, dockerfile));
+        Assert.NotEmpty(BuildPolicy.SdkPinViolations(global, updated));
         Assert.NotEmpty(BuildPolicy.SdkPinViolations(global.Replace("\"disable\"", "\"latestFeature\""), dockerfile));
+    }
+
+    [Fact]
+    public void Every_compose_and_chart_image_is_covered_by_dependabot()
+    {
+        var (compose, charts) = BuildPolicy.ImageFiles(DeploymentScripts.RepoRoot());
+        Assert.True(compose.Count >= 5, "the compose files were not found");
+        Assert.NotEmpty(charts);
+        Assert.Empty(BuildPolicy.ImageCoverageViolations(Repo(".github", "dependabot.yml"), compose, charts, out var images));
+        // postgres, docker-socket-proxy, node-exporter, victoria-metrics, the tailscale sidecar
+        Assert.True(images >= 5, $"only {images} image references were seen");
+    }
+
+    [Theory]
+    [InlineData("      - \"/deploy/telemetry/host\"\n", "", "node-exporter")]       // a compose directory without coverage
+    [InlineData("      - \"/\"\n      - \"/deploy\"\n", "      - \"/deploy\"\n", "docker-socket-proxy")]
+    [InlineData("package-ecosystem: \"helm\"", "package-ecosystem: \"maven\"", "tailscale")] // the chart uncovered
+    public void Image_coverage_check_finds_an_uncovered_image(string original, string mutation, string expected)
+    {
+        var real = Repo(".github", "dependabot.yml");
+        Assert.Contains(original, real);
+        var (compose, charts) = BuildPolicy.ImageFiles(DeploymentScripts.RepoRoot());
+        Assert.Contains(BuildPolicy.ImageCoverageViolations(real.Replace(original, mutation), compose, charts, out _),
+            v => v.Contains(expected, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("redis:latest")]
+    [InlineData("redis")]
+    [InlineData("${REDIS_IMAGE}")]
+    public void Image_coverage_check_finds_an_image_no_update_can_move(string image)
+    {
+        var (compose, charts) = BuildPolicy.ImageFiles(DeploymentScripts.RepoRoot());
+        var withNew = compose.Append(("deploy/docker-compose.extra.yml", $"services:\n  cache:\n    image: {image}\n")).ToList();
+        Assert.Contains(BuildPolicy.ImageCoverageViolations(Repo(".github", "dependabot.yml"), withNew, charts, out _),
+            v => v.Contains("docker-compose.extra.yml", StringComparison.Ordinal));
     }
 
     private static string Repo(params string[] parts) => DeploymentScripts.ReadRepoFile(parts);
@@ -364,26 +430,141 @@ internal static class BuildPolicy
         return violations;
     }
 
+    /// <summary><c>name[:tag][@sha256:digest]</c> into its parts (empty when absent).</summary>
+    public static (string Name, string Tag, string Digest) SplitImage(string image)
+    {
+        var at = image.IndexOf('@');
+        var digest = at >= 0 ? image[(at + 1)..] : "";
+        var nameTag = at >= 0 ? image[..at] : image;
+        var colon = nameTag.LastIndexOf(':');
+        return colon > nameTag.LastIndexOf('/') ? (nameTag[..colon], nameTag[(colon + 1)..], digest) : (nameTag, "", digest);
+    }
+
+    public static string GlobalJsonSdk(string globalJson)
+    {
+        using var json = JsonDocument.Parse(globalJson);
+        return json.RootElement.GetProperty("sdk").GetProperty("version").GetString()!;
+    }
+
+    /// <summary>The version with its last number raised by one (<c>10.0.402</c> → <c>10.0.403</c>,
+    /// <c>29.9.3-cli</c> → <c>29.9.4-cli</c>).</summary>
+    public static string NextVersion(string version)
+    {
+        var m = Regex.Match(version, @"(\d+)(\D*)$");
+        Assert.True(m.Success, $"no number in '{version}'");
+        return version[..m.Index] + (long.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) + 1) + m.Groups[2].Value;
+    }
+
+    public static string FakeDigest(string seed) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(seed))).ToLowerInvariant();
+
+    // ---- images in compose files and the Helm chart ----
+
+    private static readonly Regex ComposeFileName = new(@"^(docker-)?compose(\.[A-Za-z0-9_-]+)*\.ya?ml$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    /// <summary>Whiskers' own image: versioned by the release itself, not by Dependabot.</summary>
+    private const string OwnImage = "ghcr.io/lupusmalusdeviant/whiskers";
+
+    /// <summary>The repository's compose files and Helm charts (repository-relative paths, forward slashes).</summary>
+    public static (IReadOnlyList<(string Path, string Content)> Compose, IReadOnlyList<(string ChartDir, string Values)> Charts) ImageFiles(string root)
+    {
+        static bool Skipped(string rel) => rel.Split('/').Any(p => p is ".git" or "bin" or "obj" or "node_modules" or ".claude" or "TestResults");
+        var compose = new List<(string, string)>();
+        var charts = new List<(string, string)>();
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
+            if (Skipped(rel)) continue;
+            var name = Path.GetFileName(rel);
+            if (ComposeFileName.IsMatch(name)) compose.Add((rel, File.ReadAllText(file).Replace("\r\n", "\n")));
+            if (name == "Chart.yaml")
+            {
+                var dir = rel[..rel.LastIndexOf('/')];
+                var values = Path.Combine(Path.GetDirectoryName(file)!, "values.yaml");
+                charts.Add((dir, File.Exists(values) ? File.ReadAllText(values).Replace("\r\n", "\n") : ""));
+            }
+        }
+        return (compose, charts);
+    }
+
+    /// <summary>Every image a compose file or chart names can be moved by Dependabot: its directory is covered by
+    /// <c>docker-compose</c> / <c>helm</c>, and the reference has a version tag (not <c>latest</c>, not a variable).</summary>
+    public static IReadOnlyList<string> ImageCoverageViolations(string dependabotYaml,
+        IReadOnlyList<(string Path, string Content)> composeFiles, IReadOnlyList<(string ChartDir, string Values)> charts, out int images)
+    {
+        var violations = new List<string>();
+        var covered = Coverage(dependabotYaml);
+        bool Covers(string ecosystem, string dir) => covered.TryGetValue(ecosystem, out var d) && d.Contains(dir);
+        var count = 0;
+
+        void CheckReference(string where, string image)
+        {
+            count++;
+            var (_, tag, digest) = SplitImage(image);
+            if (image.Contains('$'))
+                violations.Add($"{where}: image '{image}' is a variable — no update can move it");
+            else if (tag.Length == 0 || tag == "latest")
+                violations.Add($"{where}: image '{image}' has no version tag — no update can move it");
+            else if (digest.Length > 0 && !Regex.IsMatch(digest, "^sha256:[0-9a-f]{64}$"))
+                violations.Add($"{where}: image '{image}' has a malformed digest");
+        }
+
+        foreach (var (path, content) in composeFiles)
+        {
+            var dir = path.Contains('/') ? "/" + path[..path.LastIndexOf('/')] : "/";
+            if (Load(content) is YamlMappingNode root && root.Children.TryGetValue(new YamlScalarNode("services"), out var s) && s is YamlMappingNode services)
+                foreach (var (_, service) in services.Children)
+                    if (service is YamlMappingNode svc && Scalar(svc, "image") is { } image)
+                    {
+                        CheckReference(path, image);
+                        if (!Covers("docker-compose", dir)) violations.Add($"{path}: image '{image}' — docker-compose does not cover {dir}");
+                    }
+        }
+
+        foreach (var (chartDir, values) in charts)
+        {
+            var chartCovered = Covers("helm", "/" + chartDir);
+            if (!chartCovered) violations.Add($"{chartDir}: helm does not cover /{chartDir}");
+            if (values.Length == 0) continue;
+            foreach (var (where, image) in ChartImages(Load(values), chartDir + "/values.yaml"))
+            {
+                CheckReference(where, image);
+                if (!chartCovered) violations.Add($"{where}: image '{image}' — helm does not cover /{chartDir}");
+            }
+        }
+        images = count;
+        return violations;
+    }
+
+    private static IEnumerable<(string Where, string Image)> ChartImages(YamlNode node, string path)
+    {
+        if (node is YamlMappingNode map)
+        {
+            foreach (var (k, v) in map.Children)
+            {
+                var key = ((YamlScalarNode)k).Value!;
+                if (key == "image" && v is YamlScalarNode s && !string.IsNullOrEmpty(s.Value))
+                    yield return ($"{path}: {key}", s.Value!);
+                else if (key == "image" && v is YamlMappingNode m && Scalar(m, "repository") is { } repo)
+                {
+                    // Whiskers' own image follows the release (tag "" = the chart's appVersion).
+                    if (repo != OwnImage) yield return ($"{path}: {key}", $"{repo}:{Scalar(m, "tag")}");
+                }
+                else
+                    foreach (var inner in ChartImages(v, path)) yield return inner;
+            }
+        }
+        else if (node is YamlSequenceNode seq)
+            foreach (var item in seq.Children)
+                foreach (var inner in ChartImages(item, path)) yield return inner;
+    }
+
     // ---- Dependabot ----
 
     public static IReadOnlyList<string> DependabotViolations(string dependabotYaml, IReadOnlyList<string> projects)
     {
         var violations = new List<string>();
-        var root = (YamlMappingNode)Load(dependabotYaml);
-        var updates = (YamlSequenceNode)root.Children[new YamlScalarNode("updates")];
-        var covered = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        foreach (var update in updates.Children.OfType<YamlMappingNode>())
-        {
-            var ecosystem = Scalar(update, "package-ecosystem") ?? "";
-            if (!covered.TryGetValue(ecosystem, out var dirs)) covered[ecosystem] = dirs = new HashSet<string>(StringComparer.Ordinal);
-            if (Scalar(update, "directory") is { } dir) dirs.Add(dir.TrimEnd('/') is "" ? "/" : dir.TrimEnd('/'));
-            if (update.Children.TryGetValue(new YamlScalarNode("directories"), out var list) && list is YamlSequenceNode seq)
-                foreach (var d in seq.Children.OfType<YamlScalarNode>())
-                    dirs.Add(d.Value!.TrimEnd('/') is "" ? "/" : d.Value!.TrimEnd('/'));
-            if (!update.Children.ContainsKey(new YamlScalarNode("schedule")))
-                violations.Add($"the {ecosystem} entry has no schedule");
-        }
-
+        var covered = Coverage(dependabotYaml, violations);
         bool Covers(string ecosystem, string dir) => covered.TryGetValue(ecosystem, out var d) && d.Contains(dir);
         foreach (var project in projects)
         {
@@ -394,6 +575,27 @@ internal static class BuildPolicy
         if (!Covers("docker", "/")) violations.Add("docker does not cover / (the Dockerfile's base images)");
         if (!Covers("github-actions", "/")) violations.Add("github-actions does not cover / (.github/workflows)");
         return violations;
+    }
+
+    /// <summary>Ecosystem → the directories its entries cover; an entry without a schedule is reported.</summary>
+    private static Dictionary<string, HashSet<string>> Coverage(string dependabotYaml, List<string>? violations = null)
+    {
+        var root = (YamlMappingNode)Load(dependabotYaml);
+        var updates = (YamlSequenceNode)root.Children[new YamlScalarNode("updates")];
+        var covered = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        static string Normal(string d) => d.TrimEnd('/') is "" ? "/" : d.TrimEnd('/');
+        foreach (var update in updates.Children.OfType<YamlMappingNode>())
+        {
+            var ecosystem = Scalar(update, "package-ecosystem") ?? "";
+            if (!covered.TryGetValue(ecosystem, out var dirs)) covered[ecosystem] = dirs = new HashSet<string>(StringComparer.Ordinal);
+            if (Scalar(update, "directory") is { } dir) dirs.Add(Normal(dir));
+            if (update.Children.TryGetValue(new YamlScalarNode("directories"), out var list) && list is YamlSequenceNode seq)
+                foreach (var d in seq.Children.OfType<YamlScalarNode>())
+                    dirs.Add(Normal(d.Value!));
+            if (!update.Children.ContainsKey(new YamlScalarNode("schedule")))
+                violations?.Add($"the {ecosystem} entry has no schedule");
+        }
+        return covered;
     }
 
     // ---- helpers ----

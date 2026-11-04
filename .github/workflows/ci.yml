@@ -26,6 +26,7 @@ permissions: {}
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -86,10 +87,16 @@ jobs:
           echo "healthz never became ready"; kill $APP_PID; exit 1
 
   # R1-52: the image carries the runtime tools Whiskers starts and nothing of the Docker engine. Built from this commit
-  # and driven through the real terminal and host-shell paths (ImageRuntimeToolsTests, category ImageRuntime). Required
-  # here: a missing image fails these tests instead of skipping them.
+  # and driven through the real terminal, host-shell, compose-deploy and VPN paths (ImageRuntimeToolsTests, category
+  # ImageRuntime). Required here: a missing image, daemon or host compose fails these tests instead of skipping them.
+  # Both release architectures, each on a native runner, so an arm64-only breakage is caught before the merge.
   image-runtime:
-    runs-on: ubuntu-latest
+    name: image-runtime (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     permissions:
       contents: read
