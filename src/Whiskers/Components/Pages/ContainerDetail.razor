@@ -419,7 +419,7 @@ else
         {
             <MudTabPanel Text="@L["ContainerDetail_Tab_Database"]" Icon="@Icons.Material.Filled.Storage">
                 <ContainerDatabasePanel @ref="_dbPanel" Container="@_container" ContainerId="@ContainerId"
-                                        ServerId="@_resolvedServerId" Role="@_role" />
+                                        ServerId="@_resolvedServerId" Role="@_role" State="@_dbState" />
             </MudTabPanel>
         }
 
@@ -532,8 +532,10 @@ else
     private string? _composeWorkingDir;
     private string? _dotEnvError;
 
-    // The database tab lives in ContainerDatabasePanel; loaded when the tab is first opened.
+    // The database tab lives in ContainerDatabasePanel; loaded when the tab is first opened. Its state is held here,
+    // for the life of the page, because MudTabs disposes the panel whenever another tab is active.
     private ContainerDatabasePanel? _dbPanel;
+    private readonly ContainerDatabaseState _dbState = new();
 
     private IEnumerable<KeyValuePair<string, string>> FilteredContainerEnv =>
         string.IsNullOrWhiteSpace(_envSearch)

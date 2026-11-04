@@ -1,7 +1,9 @@
 @* The database tab of the container page (moved out of ContainerDetail.razor unchanged): browse databases,
    tables and schemas, run queries and the query builder, migrations and seeds, CSV export and backups.
    ContainerDetail renders it only for database containers and Operator+, and calls EnsureLoadedAsync when
-   the tab is opened. Every changing command still runs through the mutation gateway (IUiMutationRunner). *@
+   the tab is opened. MudTabs disposes the panel of an inactive tab, so everything the tab holds lives in the
+   ContainerDatabaseState ContainerDetail passes in and survives a tab switch. Every changing command still runs
+   through the mutation gateway (IUiMutationRunner). *@
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -11,475 +13,475 @@
 @inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
 
-    @if (!_dbLoaded)
-    {
-        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
-    }
-    else
-    {
-        @* Header Bar *@
-        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Spacing="2">
-            <MudChip T="string" Color="Color.Info" Size="Size.Small" Style="font-weight: 600;">
-                @Whiskers.Services.Database.DatabaseDetector.GetLabel(_container.DatabaseType)
-            </MudChip>
-            @if (_dbCreds != null)
+@if (!State.DbLoaded)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else
+{
+    @* Header Bar *@
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Spacing="2">
+        <MudChip T="string" Color="Color.Info" Size="Size.Small" Style="font-weight: 600;">
+            @Whiskers.Services.Database.DatabaseDetector.GetLabel(_container.DatabaseType)
+        </MudChip>
+        @if (State.DbCreds != null)
+        {
+            <MudText Typo="Typo.body2" Style="color: var(--sw-text-muted);">
+                <code>@State.DbCreds.User</code>
+            </MudText>
+        }
+        <MudSpacer />
+        @if (State.DbDatabases.Any())
+        {
+            <MudSelect T="string" Value="@State.DbSelectedDatabase" ValueChanged="OnDatabaseChanged"
+                       Label="@L["ContainerDetail_Db_SelectDatabase"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;">
+                @foreach (var db in State.DbDatabases)
+                {
+                    <MudSelectItem Value="@db">@db</MudSelectItem>
+                }
+            </MudSelect>
+        }
+    </MudStack>
+
+    @* Quick Actions Row *@
+    <MudGrid Class="mb-4">
+        @* Backup and seed import are Admin-only in their handlers — don't offer them to anyone else. *@
+        @if (_role >= AppRole.Admin)
+        {
+        <MudItem xs="6" sm="3">
+            <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="BackupDatabase">
+                @if (State.DbBackingUp)
+                {
+                    <MudProgressCircular Size="Size.Medium" Indeterminate="true" Color="Color.Warning" />
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Backup" Color="Color.Warning" Size="Size.Large" />
+                }
+                <div class="sw-stat-label">@L["ContainerDetail_Db_Backup"]</div>
+            </div>
+        </MudItem>
+        }
+        <MudItem xs="6" sm="3">
+            <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowMigrationPanel">
+                <MudIcon Icon="@Icons.Material.Filled.SwapVert" Color="Color.Primary" Size="Size.Large" />
+                <div class="sw-stat-label">@L["ContainerDetail_Db_Migrations"]</div>
+            </div>
+        </MudItem>
+        @if (_role >= AppRole.Admin)
+        {
+        <MudItem xs="6" sm="3">
+            <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowSeedPanel">
+                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Tertiary" Size="Size.Large" />
+                <div class="sw-stat-label">@L["ContainerDetail_Db_SeedImport"]</div>
+            </div>
+        </MudItem>
+        }
+        <MudItem xs="6" sm="3">
+            <div class="sw-stat-card" style="text-align: center;">
+                <div class="sw-stat-value" style="color: var(--sw-accent-blue);">@State.DbTables.Count</div>
+                <div class="sw-stat-label">@L["ContainerDetail_Db_Tables"]</div>
+            </div>
+        </MudItem>
+    </MudGrid>
+
+    @* Visual Query Builder *@
+    <MudPaper Class="pa-4 mb-4" Elevation="0">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="1">
+            <MudIcon Icon="@Icons.Material.Filled.BuildCircle" Style="color: var(--sw-accent-purple);" />
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Query Builder</MudText>
+        </MudStack>
+
+        @* Row 1+2: Action + Table *@
+        <MudStack Row="true" Spacing="2" Class="mb-3" AlignItems="AlignItems.End">
+            <MudSelect T="string" @bind-Value="State.QbAction" Label="@L["ContainerDetail_Db_QbAction"]" Variant="Variant.Outlined"
+                       Dense="true" Style="max-width: 160px;">
+                <MudSelectItem Value="@("SELECT")">SELECT</MudSelectItem>
+                <MudSelectItem Value="@("COUNT")">COUNT</MudSelectItem>
+                <MudSelectItem Value="@("INSERT")">INSERT</MudSelectItem>
+                <MudSelectItem Value="@("UPDATE")">UPDATE</MudSelectItem>
+                <MudSelectItem Value="@("DELETE")">DELETE</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="string" Value="@State.QbTable" ValueChanged="OnQbTableChanged"
+                       Label="@L["ContainerDetail_Db_QbTable"]" Variant="Variant.Outlined" Dense="true" Style="min-width: 200px;">
+                @foreach (var t in State.DbTables)
+                {
+                    <MudSelectItem Value="@t.Name">@t.Name (@t.RowCount)</MudSelectItem>
+                }
+            </MudSelect>
+            @if (State.QbAction == "SELECT")
             {
-                <MudText Typo="Typo.body2" Style="color: var(--sw-text-muted);">
-                    <code>@_dbCreds.User</code>
-                </MudText>
-            }
-            <MudSpacer />
-            @if (_dbDatabases.Any())
-            {
-                <MudSelect T="string" Value="@_dbSelectedDatabase" ValueChanged="OnDatabaseChanged"
-                           Label="@L["ContainerDetail_Db_SelectDatabase"]" Variant="Variant.Outlined" Dense="true" Style="max-width: 200px;">
-                    @foreach (var db in _dbDatabases)
-                    {
-                        <MudSelectItem Value="@db">@db</MudSelectItem>
-                    }
-                </MudSelect>
+                <MudNumericField T="int" @bind-Value="State.QbLimit" Label="LIMIT" Variant="Variant.Outlined"
+                                 Min="1" Max="10000" Style="max-width: 100px;" />
             }
         </MudStack>
 
-        @* Quick Actions Row *@
-        <MudGrid Class="mb-4">
-            @* Backup and seed import are Admin-only in their handlers — don't offer them to anyone else. *@
-            @if (_role >= AppRole.Admin)
-            {
-            <MudItem xs="6" sm="3">
-                <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="BackupDatabase">
-                    @if (_dbBackingUp)
-                    {
-                        <MudProgressCircular Size="Size.Medium" Indeterminate="true" Color="Color.Warning" />
-                    }
-                    else
-                    {
-                        <MudIcon Icon="@Icons.Material.Filled.Backup" Color="Color.Warning" Size="Size.Large" />
-                    }
-                    <div class="sw-stat-label">@L["ContainerDetail_Db_Backup"]</div>
-                </div>
-            </MudItem>
-            }
-            <MudItem xs="6" sm="3">
-                <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowMigrationPanel">
-                    <MudIcon Icon="@Icons.Material.Filled.SwapVert" Color="Color.Primary" Size="Size.Large" />
-                    <div class="sw-stat-label">@L["ContainerDetail_Db_Migrations"]</div>
-                </div>
-            </MudItem>
-            @if (_role >= AppRole.Admin)
-            {
-            <MudItem xs="6" sm="3">
-                <div class="sw-stat-card" style="cursor: pointer; text-align: center;" @onclick="ShowSeedPanel">
-                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Tertiary" Size="Size.Large" />
-                    <div class="sw-stat-label">@L["ContainerDetail_Db_SeedImport"]</div>
-                </div>
-            </MudItem>
-            }
-            <MudItem xs="6" sm="3">
-                <div class="sw-stat-card" style="text-align: center;">
-                    <div class="sw-stat-value" style="color: var(--sw-accent-blue);">@_dbTables.Count</div>
-                    <div class="sw-stat-label">@L["ContainerDetail_Db_Tables"]</div>
-                </div>
-            </MudItem>
-        </MudGrid>
-
-        @* Visual Query Builder *@
-        <MudPaper Class="pa-4 mb-4" Elevation="0">
-            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="1">
-                <MudIcon Icon="@Icons.Material.Filled.BuildCircle" Style="color: var(--sw-accent-purple);" />
-                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Query Builder</MudText>
-            </MudStack>
-
-            @* Row 1+2: Action + Table *@
+        @* Row 3: Context-dependent fields *@
+        @if (State.QbAction == "SELECT" && State.QbTableColumns.Any())
+        {
             <MudStack Row="true" Spacing="2" Class="mb-3" AlignItems="AlignItems.End">
-                <MudSelect T="string" @bind-Value="_qbAction" Label="@L["ContainerDetail_Db_QbAction"]" Variant="Variant.Outlined"
-                           Dense="true" Style="max-width: 160px;">
-                    <MudSelectItem Value="@("SELECT")">SELECT</MudSelectItem>
-                    <MudSelectItem Value="@("COUNT")">COUNT</MudSelectItem>
-                    <MudSelectItem Value="@("INSERT")">INSERT</MudSelectItem>
-                    <MudSelectItem Value="@("UPDATE")">UPDATE</MudSelectItem>
-                    <MudSelectItem Value="@("DELETE")">DELETE</MudSelectItem>
-                </MudSelect>
-                <MudSelect T="string" Value="@_qbTable" ValueChanged="OnQbTableChanged"
-                           Label="@L["ContainerDetail_Db_QbTable"]" Variant="Variant.Outlined" Dense="true" Style="min-width: 200px;">
-                    @foreach (var t in _dbTables)
+                <MudTextField @bind-Value="State.QbColumnsText" Label="@L["ContainerDetail_Db_QbColumns"]"
+                              Variant="Variant.Outlined" Style="min-width: 220px; font-family: 'JetBrains Mono', monospace;"
+                              Placeholder="@(string.Join(", ", State.QbTableColumns.Take(3)) + ", ...")" />
+                <MudTextField @bind-Value="State.QbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
+                              Placeholder="@L["ContainerDetail_Db_QbWhereExampleId"]" Style="flex: 1; font-family: 'JetBrains Mono', monospace;" />
+                <MudSelect T="string" @bind-Value="State.QbOrderBy" Label="ORDER BY" Variant="Variant.Outlined"
+                           Dense="true" Clearable="true" Style="min-width: 160px;">
+                    @foreach (var col in State.QbTableColumns)
                     {
-                        <MudSelectItem Value="@t.Name">@t.Name (@t.RowCount)</MudSelectItem>
+                        <MudSelectItem Value="@col">@col</MudSelectItem>
                     }
                 </MudSelect>
-                @if (_qbAction == "SELECT")
+                @if (!string.IsNullOrEmpty(State.QbOrderBy))
                 {
-                    <MudNumericField T="int" @bind-Value="_qbLimit" Label="LIMIT" Variant="Variant.Outlined"
-                                     Min="1" Max="10000" Style="max-width: 100px;" />
+                    <MudToggleIconButton @bind-Toggled="State.QbOrderDesc"
+                                         Icon="@Icons.Material.Filled.ArrowUpward" ToggledIcon="@Icons.Material.Filled.ArrowDownward"
+                                         title="@(State.QbOrderDesc ? "DESC" : "ASC")" Size="Size.Small" />
                 }
             </MudStack>
-
-            @* Row 3: Context-dependent fields *@
-            @if (_qbAction == "SELECT" && _qbTableColumns.Any())
-            {
-                <MudStack Row="true" Spacing="2" Class="mb-3" AlignItems="AlignItems.End">
-                    <MudTextField @bind-Value="_qbColumnsText" Label="@L["ContainerDetail_Db_QbColumns"]"
-                                  Variant="Variant.Outlined" Style="min-width: 220px; font-family: 'JetBrains Mono', monospace;"
-                                  Placeholder="@(string.Join(", ", _qbTableColumns.Take(3)) + ", ...")" />
-                    <MudTextField @bind-Value="_qbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
-                                  Placeholder="@L["ContainerDetail_Db_QbWhereExampleId"]" Style="flex: 1; font-family: 'JetBrains Mono', monospace;" />
-                    <MudSelect T="string" @bind-Value="_qbOrderBy" Label="ORDER BY" Variant="Variant.Outlined"
-                               Dense="true" Clearable="true" Style="min-width: 160px;">
-                        @foreach (var col in _qbTableColumns)
-                        {
-                            <MudSelectItem Value="@col">@col</MudSelectItem>
-                        }
-                    </MudSelect>
-                    @if (!string.IsNullOrEmpty(_qbOrderBy))
-                    {
-                        <MudToggleIconButton @bind-Toggled="_qbOrderDesc"
-                                             Icon="@Icons.Material.Filled.ArrowUpward" ToggledIcon="@Icons.Material.Filled.ArrowDownward"
-                                             title="@(_qbOrderDesc ? "DESC" : "ASC")" Size="Size.Small" />
-                    }
-                </MudStack>
-            }
-            else if (_qbAction == "COUNT")
-            {
-                <MudTextField @bind-Value="_qbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
-                              Placeholder="@L["ContainerDetail_Db_QbWhereExampleStatus"]" Class="mb-3"
-                              Style="font-family: 'JetBrains Mono', monospace;" />
-            }
-            else if (_qbAction == "INSERT" && _qbTableColumns.Any())
-            {
-                <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">@L["ContainerDetail_Db_QbInsertValues"]</MudText>
-                <MudGrid Class="mb-3">
-                    @for (var i = 0; i < _qbSetFields.Count; i++)
-                    {
-                        var idx = i;
-                        <MudItem xs="6" sm="4" md="3">
-                            <MudTextField Value="@_qbSetFields[idx].Value"
-                                          ValueChanged="@((string v) => { var f = _qbSetFields[idx]; _qbSetFields[idx] = (f.Key, v); })"
-                                          Label="@_qbSetFields[idx].Key" Variant="Variant.Outlined"
-                                          Style="font-family: 'JetBrains Mono', monospace;" />
-                        </MudItem>
-                    }
-                </MudGrid>
-            }
-            else if (_qbAction == "UPDATE" && _qbTableColumns.Any())
-            {
-                <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">@L["ContainerDetail_Db_QbSetValues"]</MudText>
-                <MudGrid Class="mb-2">
-                    @for (var i = 0; i < _qbSetFields.Count; i++)
-                    {
-                        var idx = i;
-                        <MudItem xs="6" sm="4" md="3">
-                            <MudTextField Value="@_qbSetFields[idx].Value"
-                                          ValueChanged="@((string v) => { var f = _qbSetFields[idx]; _qbSetFields[idx] = (f.Key, v); })"
-                                          Label="@_qbSetFields[idx].Key" Variant="Variant.Outlined"
-                                          Style="font-family: 'JetBrains Mono', monospace;" />
-                        </MudItem>
-                    }
-                </MudGrid>
-                <MudTextField @bind-Value="_qbWhere" Label="@L["ContainerDetail_Db_QbWhereRequired"]" Variant="Variant.Outlined"
-                              Placeholder="@L["ContainerDetail_Db_QbWhereExampleId42"]" Class="mb-3"
-                              Style="font-family: 'JetBrains Mono', monospace;" />
-                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
-                    @L["ContainerDetail_Db_QbUpdateWarning"]
-                </MudAlert>
-            }
-            else if (_qbAction == "DELETE")
-            {
-                <MudTextField @bind-Value="_qbWhere" Label="@L["ContainerDetail_Db_QbWhereRequired"]" Variant="Variant.Outlined"
-                              Placeholder="@L["ContainerDetail_Db_QbWhereExampleId42"]" Class="mb-3"
-                              Style="font-family: 'JetBrains Mono', monospace;" />
-                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
-                    @L["ContainerDetail_Db_QbDeleteWarning"]
-                </MudAlert>
-            }
-
-            @* Row 4: Preview + Execute *@
-            @{ var generatedSql = BuildQueryFromBuilder(); }
-            @if (!string.IsNullOrEmpty(generatedSql))
-            {
-                <MudPaper Class="pa-2 mb-3" Elevation="0" Style="background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid var(--sw-glass-border);">
-                    <code style="font-size: 0.8rem; color: var(--sw-accent-purple); word-break: break-all;">@generatedSql</code>
-                </MudPaper>
-            }
-
-            <MudStack Row="true" Spacing="2">
-                <MudButton Variant="Variant.Filled" Color="@(_qbAction is "DELETE" or "UPDATE" ? Color.Error : Color.Primary)"
-                           StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="ExecuteBuilderQuery"
-                           Disabled="@(string.IsNullOrEmpty(_qbTable) || _dbExecuting || ((_qbAction is "DELETE" or "UPDATE") && string.IsNullOrWhiteSpace(_qbWhere)))">
-                    @if (_dbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
-                    @L["ContainerDetail_Db_Execute"]
-                </MudButton>
-                <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.Edit"
-                           OnClick="CopyBuilderToEditor"
-                           Disabled="@(string.IsNullOrEmpty(generatedSql))">
-                    @L["ContainerDetail_Db_OpenInEditor"]
-                </MudButton>
-            </MudStack>
-        </MudPaper>
-
-        @* Migration Panel *@
-        @if (_showMigration)
-        {
-            <MudPaper Class="pa-4 mb-4" Elevation="0">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
-                    <MudIcon Icon="@Icons.Material.Filled.SwapVert" Color="Color.Primary" />
-                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@L["ContainerDetail_Db_Migrations"]</MudText>
-                    <MudSpacer />
-                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
-                                   OnClick="@(() => _showMigration = false)" />
-                </MudStack>
-                <MudStack Row="true" Spacing="2" Class="mb-3">
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                               StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="RunMigration"
-                               Disabled="@(_dbMigrating || _role < AppRole.Admin)">
-                        @if (_dbMigrating) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
-                        @L["ContainerDetail_Db_RunMigration"]
-                    </MudButton>
-                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                               StartIcon="@Icons.Material.Filled.Undo" OnClick="RollbackMigration"
-                               Disabled="@(_dbMigrating || _role < AppRole.Admin)">Rollback</MudButton>
-                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                               StartIcon="@Icons.Material.Filled.List" OnClick="CheckMigrationStatus">Status</MudButton>
-                </MudStack>
-                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-                    <MudButton Variant="Variant.Outlined" Size="Size.Small" HtmlTag="label"
-                               for="migration-upload" StartIcon="@Icons.Material.Filled.Upload">
-                        @(_migrationFileName ?? L["ContainerDetail_Db_UploadSqlFile"].Value)
-                    </MudButton>
-                    <InputFile id="migration-upload" OnChange="OnMigrationFileSelected" style="display:none;"
-                               accept=".sql,.dump" />
-                    @if (_migrationFileName != null)
-                    {
-                        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
-                                   OnClick="ExecuteMigrationFile" Disabled="@(_dbMigrating || _role < AppRole.Admin)"
-                                   StartIcon="@Icons.Material.Filled.PlayArrow">@L["ContainerDetail_Db_ExecuteFile"]</MudButton>
-                    }
-                </MudStack>
-                @if (!string.IsNullOrEmpty(_migrationOutput))
-                {
-                    <MudAlert Severity="@(_migrationSuccess ? Severity.Success : Severity.Error)" Dense="true" Class="mt-3">
-                        <pre style="white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; margin: 0;">@_migrationOutput</pre>
-                    </MudAlert>
-                }
-            </MudPaper>
         }
-
-        @* Seed Panel *@
-        @if (_showSeed)
+        else if (State.QbAction == "COUNT")
         {
-            <MudPaper Class="pa-4 mb-4" Elevation="0">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
-                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Tertiary" />
-                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@L["ContainerDetail_Db_SeedImport"]</MudText>
-                    <MudSpacer />
-                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
-                                   OnClick="@(() => _showSeed = false)" />
-                </MudStack>
-                <MudStack Spacing="2">
-                    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-                        <MudButton Variant="Variant.Outlined" HtmlTag="label" for="seed-upload"
-                                   StartIcon="@Icons.Material.Filled.Upload">
-                            @(_seedFileName ?? L["ContainerDetail_Db_UploadSeedFile"].Value)
-                        </MudButton>
-                        <InputFile id="seed-upload" OnChange="OnSeedFileSelected" style="display:none;"
-                                   accept=".sql,.json,.dump,.gz" />
-                        @if (_seedFileName != null)
-                        {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Info">@_seedFileName</MudChip>
-                            <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small"
-                                       OnClick="ExecuteSeedFile" Disabled="@_dbSeeding"
-                                       StartIcon="@Icons.Material.Filled.PlayArrow">
-                                @if (_dbSeeding) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
-                                @L["ContainerDetail_Db_Import"]
-                            </MudButton>
-                        }
-                    </MudStack>
-                    @if (!string.IsNullOrEmpty(_seedOutput))
-                    {
-                        <MudAlert Severity="@(_seedSuccess ? Severity.Success : Severity.Error)" Dense="true">
-                            <pre style="white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; margin: 0;">@_seedOutput</pre>
-                        </MudAlert>
-                    }
-                </MudStack>
-            </MudPaper>
+            <MudTextField @bind-Value="State.QbWhere" Label="WHERE (optional)" Variant="Variant.Outlined"
+                          Placeholder="@L["ContainerDetail_Db_QbWhereExampleStatus"]" Class="mb-3"
+                          Style="font-family: 'JetBrains Mono', monospace;" />
         }
-
-        @* Tabellen-Browser — Klickbar *@
-        @if (_dbTables.Any())
+        else if (State.QbAction == "INSERT" && State.QbTableColumns.Any())
         {
-            <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight: 600;">@L["ContainerDetail_Db_Tables"]</MudText>
-            <MudGrid Class="mb-4">
-                @foreach (var table in _dbTables)
+            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">@L["ContainerDetail_Db_QbInsertValues"]</MudText>
+            <MudGrid Class="mb-3">
+                @for (var i = 0; i < State.QbSetFields.Count; i++)
                 {
+                    var idx = i;
                     <MudItem xs="6" sm="4" md="3">
-                        <MudPaper Class="pa-3" Elevation="0"
-                                  Style="@($"cursor: pointer; border: 1px solid {(_dbSelectedTable == table.Name ? "var(--sw-accent-blue)" : "var(--sw-glass-border)")}; border-radius: 10px; transition: all 0.2s;")"
-                                  @onclick="@(() => SelectTable(table.Name))">
-                            <MudStack Spacing="1">
-                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                                    <MudIcon Icon="@Icons.Material.Filled.TableChart" Size="Size.Small"
-                                             Style="@($"color: {(_dbSelectedTable == table.Name ? "var(--sw-accent-blue)" : "var(--sw-text-muted)") };")" />
-                                    <MudText Typo="Typo.body2" Style="font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
-                                        @table.Name
-                                    </MudText>
-                                </MudStack>
-                                <MudStack Row="true" Spacing="2">
-                                    <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">
-                                        @L["ContainerDetail_Db_RowCount", table.RowCount]
-                                    </MudText>
-                                    @if (!string.IsNullOrEmpty(table.Size) && table.Size != "0")
-                                    {
-                                        <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">
-                                            @table.Size
-                                        </MudText>
-                                    }
-                                </MudStack>
-                            </MudStack>
-                        </MudPaper>
+                        <MudTextField Value="@State.QbSetFields[idx].Value"
+                                      ValueChanged="@((string v) => { var f = State.QbSetFields[idx]; State.QbSetFields[idx] = (f.Key, v); })"
+                                      Label="@State.QbSetFields[idx].Key" Variant="Variant.Outlined"
+                                      Style="font-family: 'JetBrains Mono', monospace;" />
                     </MudItem>
                 }
             </MudGrid>
         }
-
-        @* Table selected — quick buttons + schema *@
-        @if (_dbSelectedTable != null)
+        else if (State.QbAction == "UPDATE" && State.QbTableColumns.Any())
         {
-            <MudPaper Class="pa-4 mb-4" Elevation="0">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="2">
-                    <MudIcon Icon="@Icons.Material.Filled.TableChart" Color="Color.Primary" />
-                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">
-                        <code>@_dbSelectedTable</code>
-                    </MudText>
-                    <MudSpacer />
-                    <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
-                               StartIcon="@Icons.Material.Filled.Visibility"
-                               OnClick="@(() => QuickQuery($"SELECT * FROM {_dbSelectedTable} LIMIT 50"))">
-                        @L["ContainerDetail_Db_Preview50"]
-                    </MudButton>
-                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                               StartIcon="@Icons.Material.Filled.Tag"
-                               OnClick="@(() => QuickQuery($"SELECT COUNT(*) AS total FROM {_dbSelectedTable}"))">
-                        COUNT
-                    </MudButton>
-                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                               StartIcon="@Icons.Material.Filled.Download"
-                               OnClick="@(() => QuickQuery($"SELECT * FROM {_dbSelectedTable}"))">
-                        @L["ContainerDetail_Db_AllCsv"]
-                    </MudButton>
-                </MudStack>
-
-                @* Schema *@
-                @if (_dbColumns.Any())
+            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--sw-text-secondary);">@L["ContainerDetail_Db_QbSetValues"]</MudText>
+            <MudGrid Class="mb-2">
+                @for (var i = 0; i < State.QbSetFields.Count; i++)
                 {
-                    <MudTable Items="@_dbColumns" Dense="true" Hover="true" Striped="true" Elevation="0">
-                        <HeaderContent>
-                            <MudTh>@L["ContainerDetail_Db_ColColumn"]</MudTh>
-                            <MudTh>@L["ContainerDetail_Db_ColType"]</MudTh>
-                            <MudTh>Nullable</MudTh>
-                            <MudTh>Default</MudTh>
-                            <MudTh Style="width: 50px;"></MudTh>
-                        </HeaderContent>
-                        <RowTemplate>
-                            <MudTd>
-                                <code style="font-weight: 500;">@context.Name</code>
-                                @if (context.PrimaryKey)
-                                {
-                                    <MudIcon Icon="@Icons.Material.Filled.Key" Size="Size.Small" Color="Color.Warning"
-                                             Style="vertical-align: middle; margin-left: 4px;" />
-                                }
-                            </MudTd>
-                            <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="font-family: monospace;">@context.Type</MudChip></MudTd>
-                            <MudTd>
-                                @if (context.Nullable)
-                                {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">NULL</MudChip>
-                                }
-                                else
-                                {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text">NOT NULL</MudChip>
-                                }
-                            </MudTd>
-                            <MudTd><code style="color: var(--sw-text-muted);">@(context.Default ?? "-")</code></MudTd>
-                            <MudTd>
-                                <MudIconButton Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small"
-                                               title="@($"SELECT * FROM {_dbSelectedTable} WHERE {context.Name} = ... LIMIT 50")"
-                                               OnClick="@(() => { _dbQuery = $"SELECT * FROM {_dbSelectedTable} WHERE {context.Name} = '' LIMIT 50"; })" />
-                            </MudTd>
-                        </RowTemplate>
-                    </MudTable>
+                    var idx = i;
+                    <MudItem xs="6" sm="4" md="3">
+                        <MudTextField Value="@State.QbSetFields[idx].Value"
+                                      ValueChanged="@((string v) => { var f = State.QbSetFields[idx]; State.QbSetFields[idx] = (f.Key, v); })"
+                                      Label="@State.QbSetFields[idx].Key" Variant="Variant.Outlined"
+                                      Style="font-family: 'JetBrains Mono', monospace;" />
+                    </MudItem>
                 }
+            </MudGrid>
+            <MudTextField @bind-Value="State.QbWhere" Label="@L["ContainerDetail_Db_QbWhereRequired"]" Variant="Variant.Outlined"
+                          Placeholder="@L["ContainerDetail_Db_QbWhereExampleId42"]" Class="mb-3"
+                          Style="font-family: 'JetBrains Mono', monospace;" />
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                @L["ContainerDetail_Db_QbUpdateWarning"]
+            </MudAlert>
+        }
+        else if (State.QbAction == "DELETE")
+        {
+            <MudTextField @bind-Value="State.QbWhere" Label="@L["ContainerDetail_Db_QbWhereRequired"]" Variant="Variant.Outlined"
+                          Placeholder="@L["ContainerDetail_Db_QbWhereExampleId42"]" Class="mb-3"
+                          Style="font-family: 'JetBrains Mono', monospace;" />
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
+                @L["ContainerDetail_Db_QbDeleteWarning"]
+            </MudAlert>
+        }
+
+        @* Row 4: Preview + Execute *@
+        @{ var generatedSql = BuildQueryFromBuilder(); }
+        @if (!string.IsNullOrEmpty(generatedSql))
+        {
+            <MudPaper Class="pa-2 mb-3" Elevation="0" Style="background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid var(--sw-glass-border);">
+                <code style="font-size: 0.8rem; color: var(--sw-accent-purple); word-break: break-all;">@generatedSql</code>
             </MudPaper>
         }
 
-        @* Query Editor — Collapsible *@
-        <MudExpansionPanels Class="mb-4">
-            <MudExpansionPanel Text="@L["ContainerDetail_Db_QueryEditor"]" Icon="@Icons.Material.Filled.Code"
-                               Expanded="@(_dbResult != null || !string.IsNullOrEmpty(_dbQuery))">
-                <MudTextField @bind-Value="_dbQuery" Label="@L["ContainerDetail_Db_SqlCommand"]" Variant="Variant.Outlined"
-                              Lines="4" Class="mb-2 sw-query-editor"
-                              Placeholder="@(_container.DatabaseType == Whiskers.Models.DatabaseType.Redis ? "GET key" : "SELECT * FROM ... LIMIT 10")" />
-                <MudStack Row="true" Spacing="2">
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ExecuteQuery"
-                               StartIcon="@Icons.Material.Filled.PlayArrow"
-                               Disabled="@(string.IsNullOrWhiteSpace(_dbQuery) || _dbExecuting || _role < AppRole.Admin)">
-                        @if (_dbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                        @L["ContainerDetail_Db_Execute"]
+        <MudStack Row="true" Spacing="2">
+            <MudButton Variant="Variant.Filled" Color="@(State.QbAction is "DELETE" or "UPDATE" ? Color.Error : Color.Primary)"
+                       StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="ExecuteBuilderQuery"
+                       Disabled="@(string.IsNullOrEmpty(State.QbTable) || State.DbExecuting || ((State.QbAction is "DELETE" or "UPDATE") && string.IsNullOrWhiteSpace(State.QbWhere)))">
+                @if (State.DbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
+                @L["ContainerDetail_Db_Execute"]
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Edit"
+                       OnClick="CopyBuilderToEditor"
+                       Disabled="@(string.IsNullOrEmpty(generatedSql))">
+                @L["ContainerDetail_Db_OpenInEditor"]
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+
+    @* Migration Panel *@
+    @if (State.ShowMigration)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.SwapVert" Color="Color.Primary" />
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@L["ContainerDetail_Db_Migrations"]</MudText>
+                <MudSpacer />
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               OnClick="@(() => State.ShowMigration = false)" />
+            </MudStack>
+            <MudStack Row="true" Spacing="2" Class="mb-3">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="RunMigration"
+                           Disabled="@(State.DbMigrating || _role < AppRole.Admin)">
+                    @if (State.DbMigrating) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
+                    @L["ContainerDetail_Db_RunMigration"]
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Undo" OnClick="RollbackMigration"
+                           Disabled="@(State.DbMigrating || _role < AppRole.Admin)">Rollback</MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.List" OnClick="CheckMigrationStatus">Status</MudButton>
+            </MudStack>
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" HtmlTag="label"
+                           for="migration-upload" StartIcon="@Icons.Material.Filled.Upload">
+                    @(State.MigrationFileName ?? L["ContainerDetail_Db_UploadSqlFile"].Value)
+                </MudButton>
+                <InputFile id="migration-upload" OnChange="OnMigrationFileSelected" style="display:none;"
+                           accept=".sql,.dump" />
+                @if (State.MigrationFileName != null)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                               OnClick="ExecuteMigrationFile" Disabled="@(State.DbMigrating || _role < AppRole.Admin)"
+                               StartIcon="@Icons.Material.Filled.PlayArrow">@L["ContainerDetail_Db_ExecuteFile"]</MudButton>
+                }
+            </MudStack>
+            @if (!string.IsNullOrEmpty(State.MigrationOutput))
+            {
+                <MudAlert Severity="@(State.MigrationSuccess ? Severity.Success : Severity.Error)" Dense="true" Class="mt-3">
+                    <pre style="white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; margin: 0;">@State.MigrationOutput</pre>
+                </MudAlert>
+            }
+        </MudPaper>
+    }
+
+    @* Seed Panel *@
+    @if (State.ShowSeed)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Tertiary" />
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@L["ContainerDetail_Db_SeedImport"]</MudText>
+                <MudSpacer />
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               OnClick="@(() => State.ShowSeed = false)" />
+            </MudStack>
+            <MudStack Spacing="2">
+                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                    <MudButton Variant="Variant.Outlined" HtmlTag="label" for="seed-upload"
+                               StartIcon="@Icons.Material.Filled.Upload">
+                        @(State.SeedFileName ?? L["ContainerDetail_Db_UploadSeedFile"].Value)
                     </MudButton>
-                    @if (_dbResult is { Success: true, Columns.Count: > 0 })
+                    <InputFile id="seed-upload" OnChange="OnSeedFileSelected" style="display:none;"
+                               accept=".sql,.json,.dump,.gz" />
+                    @if (State.SeedFileName != null)
                     {
-                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                                   StartIcon="@Icons.Material.Filled.Download"
-                                   OnClick="DownloadCsv">@L["ContainerDetail_Db_DownloadCsv"]</MudButton>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info">@State.SeedFileName</MudChip>
+                        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small"
+                                   OnClick="ExecuteSeedFile" Disabled="@State.DbSeeding"
+                                   StartIcon="@Icons.Material.Filled.PlayArrow">
+                            @if (State.DbSeeding) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" /> }
+                            @L["ContainerDetail_Db_Import"]
+                        </MudButton>
                     }
                 </MudStack>
-            </MudExpansionPanel>
-        </MudExpansionPanels>
+                @if (!string.IsNullOrEmpty(State.SeedOutput))
+                {
+                    <MudAlert Severity="@(State.SeedSuccess ? Severity.Success : Severity.Error)" Dense="true">
+                        <pre style="white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; margin: 0;">@State.SeedOutput</pre>
+                    </MudAlert>
+                }
+            </MudStack>
+        </MudPaper>
+    }
 
-        @* Query Result *@
-        @if (_dbResult != null)
-        {
-            @if (!_dbResult.Success)
+    @* Tabellen-Browser — Klickbar *@
+    @if (State.DbTables.Any())
+    {
+        <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight: 600;">@L["ContainerDetail_Db_Tables"]</MudText>
+        <MudGrid Class="mb-4">
+            @foreach (var table in State.DbTables)
             {
-                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_dbResult.Error</MudAlert>
+                <MudItem xs="6" sm="4" md="3">
+                    <MudPaper Class="pa-3" Elevation="0"
+                              Style="@($"cursor: pointer; border: 1px solid {(State.DbSelectedTable == table.Name ? "var(--sw-accent-blue)" : "var(--sw-glass-border)")}; border-radius: 10px; transition: all 0.2s;")"
+                              @onclick="@(() => SelectTable(table.Name))">
+                        <MudStack Spacing="1">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                                <MudIcon Icon="@Icons.Material.Filled.TableChart" Size="Size.Small"
+                                         Style="@($"color: {(State.DbSelectedTable == table.Name ? "var(--sw-accent-blue)" : "var(--sw-text-muted)") };")" />
+                                <MudText Typo="Typo.body2" Style="font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
+                                    @table.Name
+                                </MudText>
+                            </MudStack>
+                            <MudStack Row="true" Spacing="2">
+                                <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">
+                                    @L["ContainerDetail_Db_RowCount", table.RowCount]
+                                </MudText>
+                                @if (!string.IsNullOrEmpty(table.Size) && table.Size != "0")
+                                {
+                                    <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">
+                                        @table.Size
+                                    </MudText>
+                                }
+                            </MudStack>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
             }
-            else if (_dbResult.Columns.Any())
+        </MudGrid>
+    }
+
+    @* Table selected — quick buttons + schema *@
+    @if (State.DbSelectedTable != null)
+    {
+        <MudPaper Class="pa-4 mb-4" Elevation="0">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.TableChart" Color="Color.Primary" />
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">
+                    <code>@State.DbSelectedTable</code>
+                </MudText>
+                <MudSpacer />
+                <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Visibility"
+                           OnClick="@(() => QuickQuery($"SELECT * FROM {State.DbSelectedTable} LIMIT 50"))">
+                    @L["ContainerDetail_Db_Preview50"]
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Tag"
+                           OnClick="@(() => QuickQuery($"SELECT COUNT(*) AS total FROM {State.DbSelectedTable}"))">
+                    COUNT
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Download"
+                           OnClick="@(() => QuickQuery($"SELECT * FROM {State.DbSelectedTable}"))">
+                    @L["ContainerDetail_Db_AllCsv"]
+                </MudButton>
+            </MudStack>
+
+            @* Schema *@
+            @if (State.DbColumns.Any())
             {
-                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Spacing="2">
-                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
-                        @L["ContainerDetail_Db_RowCount", _dbResult.RowCount]
-                    </MudChip>
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: var(--sw-text-muted);">
-                        @(_dbResult.DurationMs.ToString("F0"))ms
-                    </MudChip>
-                    <MudSpacer />
-                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                               StartIcon="@Icons.Material.Filled.Download"
-                               OnClick="DownloadCsv">CSV</MudButton>
-                </MudStack>
-                <MudTable Items="@_dbResult.Rows" Dense="true" Hover="true" Striped="true"
-                          FixedHeader="true" Height="350px" Elevation="0">
+                <MudTable Items="@State.DbColumns" Dense="true" Hover="true" Striped="true" Elevation="0">
                     <HeaderContent>
-                        @foreach (var col in _dbResult.Columns)
-                        {
-                            <MudTh>@col</MudTh>
-                        }
+                        <MudTh>@L["ContainerDetail_Db_ColColumn"]</MudTh>
+                        <MudTh>@L["ContainerDetail_Db_ColType"]</MudTh>
+                        <MudTh>Nullable</MudTh>
+                        <MudTh>Default</MudTh>
+                        <MudTh Style="width: 50px;"></MudTh>
                     </HeaderContent>
                     <RowTemplate>
-                        @foreach (var cell in context)
-                        {
-                            <MudTd Style="font-family: 'JetBrains Mono', monospace; font-size: 0.8em;">@cell</MudTd>
-                        }
+                        <MudTd>
+                            <code style="font-weight: 500;">@context.Name</code>
+                            @if (context.PrimaryKey)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Key" Size="Size.Small" Color="Color.Warning"
+                                         Style="vertical-align: middle; margin-left: 4px;" />
+                            }
+                        </MudTd>
+                        <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="font-family: monospace;">@context.Type</MudChip></MudTd>
+                        <MudTd>
+                            @if (context.Nullable)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">NULL</MudChip>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text">NOT NULL</MudChip>
+                            }
+                        </MudTd>
+                        <MudTd><code style="color: var(--sw-text-muted);">@(context.Default ?? "-")</code></MudTd>
+                        <MudTd>
+                            <MudIconButton Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small"
+                                           title="@($"SELECT * FROM {State.DbSelectedTable} WHERE {context.Name} = ... LIMIT 50")"
+                                           OnClick="@(() => { State.DbQuery = $"SELECT * FROM {State.DbSelectedTable} WHERE {context.Name} = '' LIMIT 50"; })" />
+                        </MudTd>
                     </RowTemplate>
                 </MudTable>
             }
-            else
-            {
-                <MudAlert Severity="Severity.Success" Dense="true">
-                    @L["ContainerDetail_Db_QueryExecuted", _dbResult.DurationMs.ToString("F0"), _dbResult.RowCount]
-                </MudAlert>
-            }
+        </MudPaper>
+    }
+
+    @* Query Editor — Collapsible *@
+    <MudExpansionPanels Class="mb-4">
+        <MudExpansionPanel Text="@L["ContainerDetail_Db_QueryEditor"]" Icon="@Icons.Material.Filled.Code"
+                           Expanded="@(State.DbResult != null || !string.IsNullOrEmpty(State.DbQuery))">
+            <MudTextField @bind-Value="State.DbQuery" Label="@L["ContainerDetail_Db_SqlCommand"]" Variant="Variant.Outlined"
+                          Lines="4" Class="mb-2 sw-query-editor"
+                          Placeholder="@(_container.DatabaseType == Whiskers.Models.DatabaseType.Redis ? "GET key" : "SELECT * FROM ... LIMIT 10")" />
+            <MudStack Row="true" Spacing="2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ExecuteQuery"
+                           StartIcon="@Icons.Material.Filled.PlayArrow"
+                           Disabled="@(string.IsNullOrWhiteSpace(State.DbQuery) || State.DbExecuting || _role < AppRole.Admin)">
+                    @if (State.DbExecuting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                    @L["ContainerDetail_Db_Execute"]
+                </MudButton>
+                @if (State.DbResult is { Success: true, Columns.Count: > 0 })
+                {
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Download"
+                               OnClick="DownloadCsv">@L["ContainerDetail_Db_DownloadCsv"]</MudButton>
+                }
+            </MudStack>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+
+    @* Query Result *@
+    @if (State.DbResult != null)
+    {
+        @if (!State.DbResult.Success)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@State.DbResult.Error</MudAlert>
+        }
+        else if (State.DbResult.Columns.Any())
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Spacing="2">
+                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
+                    @L["ContainerDetail_Db_RowCount", State.DbResult.RowCount]
+                </MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Style="color: var(--sw-text-muted);">
+                    @(State.DbResult.DurationMs.ToString("F0"))ms
+                </MudChip>
+                <MudSpacer />
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Download"
+                           OnClick="DownloadCsv">CSV</MudButton>
+            </MudStack>
+            <MudTable Items="@State.DbResult.Rows" Dense="true" Hover="true" Striped="true"
+                      FixedHeader="true" Height="350px" Elevation="0">
+                <HeaderContent>
+                    @foreach (var col in State.DbResult.Columns)
+                    {
+                        <MudTh>@col</MudTh>
+                    }
+                </HeaderContent>
+                <RowTemplate>
+                    @foreach (var cell in context)
+                    {
+                        <MudTd Style="font-family: 'JetBrains Mono', monospace; font-size: 0.8em;">@cell</MudTd>
+                    }
+                </RowTemplate>
+            </MudTable>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Success" Dense="true">
+                @L["ContainerDetail_Db_QueryExecuted", State.DbResult.DurationMs.ToString("F0"), State.DbResult.RowCount]
+            </MudAlert>
         }
     }
+}
 
 @code {
     /// <summary>The container this panel works on; ContainerDetail re-renders it on every refresh.</summary>
@@ -488,6 +490,8 @@
     /// <summary>The server the container runs on, as ContainerDetail resolved it (route or discovery).</summary>
     [Parameter] public string? ServerId { get; set; }
     [Parameter] public AppRole Role { get; set; } = AppRole.Viewer;
+    /// <summary>The tab's state, owned by ContainerDetail so it outlives this component (see the header).</summary>
+    [Parameter, EditorRequired] public ContainerDatabaseState State { get; set; } = default!;
 
     // The names the moved code was written against in ContainerDetail.
     private ContainerInfo _container => Container;
@@ -497,7 +501,7 @@
     /// <summary>Loads databases and tables the first time the tab is opened.</summary>
     public async Task EnsureLoadedAsync()
     {
-        if (_dbLoaded) return;
+        if (State.DbLoaded) return;
         await LoadDatabaseInfo();
         StateHasChanged();
     }
@@ -523,63 +527,25 @@
         return false;
     }
 
-    // Database state
-    private bool _dbLoaded;
-    private bool _dbExecuting;
-    private bool _dbBackingUp;
-    private bool _dbMigrating;
-    private bool _dbSeeding;
-    private bool _showMigration;
-    private bool _showSeed;
-    private string _dbQuery = "";
-    private string? _dbSelectedDatabase;
-    private string? _dbSelectedTable;
-    private Whiskers.Models.DatabaseCredentials? _dbCreds;
-    private Whiskers.Models.QueryResult? _dbResult;
-    private List<string> _dbDatabases = new();
-    private List<Whiskers.Models.TableInfo> _dbTables = new();
-    private List<Whiskers.Models.ColumnInfo> _dbColumns = new();
-
-    // Query Builder state
-    private string _qbAction = "SELECT";
-    private string? _qbTable;
-    private List<string> _qbTableColumns = new();
-    private string _qbColumnsText = "";
-    private string _qbWhere = "";
-    private string? _qbOrderBy;
-    private bool _qbOrderDesc;
-    private int _qbLimit = 50;
-    private List<(string Key, string Value)> _qbSetFields = new();
-
-    // Migration/Seed state
-    private string? _migrationFileName;
-    private byte[]? _migrationFileData;
-    private string? _migrationOutput;
-    private bool _migrationSuccess;
-    private string? _seedFileName;
-    private byte[]? _seedFileData;
-    private string? _seedOutput;
-    private bool _seedSuccess;
-
     // === CSV Download ===
 
     private async Task DownloadCsv()
     {
-        if (_dbResult == null || !_dbResult.Columns.Any()) return;
+        if (State.DbResult == null || !State.DbResult.Columns.Any()) return;
 
         var sb = new System.Text.StringBuilder();
 
         // Header
-        sb.AppendLine(string.Join(",", _dbResult.Columns.Select(EscapeCsvField)));
+        sb.AppendLine(string.Join(",", State.DbResult.Columns.Select(EscapeCsvField)));
 
         // Rows — no limit
-        foreach (var row in _dbResult.Rows)
+        foreach (var row in State.DbResult.Rows)
         {
             sb.AppendLine(string.Join(",", row.Select(EscapeCsvField)));
         }
 
         var csv = sb.ToString();
-        var fileName = $"query_{(_dbSelectedDatabase ?? "db")}_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+        var fileName = $"query_{(State.DbSelectedDatabase ?? "db")}_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
 
         // Trigger download via JS
         await JS.InvokeVoidAsync("Whiskers.downloadCsv", fileName, csv);
@@ -601,15 +567,15 @@
         {
             // Get env vars to extract credentials
             var env = await DockerService.GetContainerEnvAsync(ContainerId, _resolvedServerId);
-            _dbCreds = Whiskers.Services.Database.DatabaseDetector.ExtractCredentials(env, _container!.DatabaseType);
-            _dbSelectedDatabase = _dbCreds.Database;
+            State.DbCreds = Whiskers.Services.Database.DatabaseDetector.ExtractCredentials(env, _container!.DatabaseType);
+            State.DbSelectedDatabase = State.DbCreds.Database;
 
             // Load database list
-            _dbDatabases = await DatabaseService.GetDatabasesAsync(ContainerId, _container.DatabaseType, _dbCreds, _resolvedServerId);
+            State.DbDatabases = await DatabaseService.GetDatabasesAsync(ContainerId, _container.DatabaseType, State.DbCreds, _resolvedServerId);
 
             // Load tables for default database
-            if (!string.IsNullOrEmpty(_dbSelectedDatabase))
-                _dbTables = await DatabaseService.GetTablesAsync(ContainerId, _dbSelectedDatabase, _container.DatabaseType, _dbCreds, _resolvedServerId);
+            if (!string.IsNullOrEmpty(State.DbSelectedDatabase))
+                State.DbTables = await DatabaseService.GetTablesAsync(ContainerId, State.DbSelectedDatabase, _container.DatabaseType, State.DbCreds, _resolvedServerId);
         }
         catch (Exception ex)
         {
@@ -617,21 +583,21 @@
         }
         finally
         {
-            _dbLoaded = true;
+            State.DbLoaded = true;
         }
     }
 
     private async Task OnDatabaseChanged(string database)
     {
-        _dbSelectedDatabase = database;
-        _dbTables.Clear();
-        _dbColumns.Clear();
-        _dbSelectedTable = null;
+        State.DbSelectedDatabase = database;
+        State.DbTables.Clear();
+        State.DbColumns.Clear();
+        State.DbSelectedTable = null;
 
-        if (_dbCreds != null && _container != null)
+        if (State.DbCreds != null && _container != null)
         {
-            _dbCreds.Database = database;
-            _dbTables = await DatabaseService.GetTablesAsync(ContainerId, database, _container.DatabaseType, _dbCreds, _resolvedServerId);
+            State.DbCreds.Database = database;
+            State.DbTables = await DatabaseService.GetTablesAsync(ContainerId, database, _container.DatabaseType, State.DbCreds, _resolvedServerId);
         }
     }
 
@@ -642,82 +608,82 @@
 
     private async Task SelectTable(string? tableName)
     {
-        _dbSelectedTable = tableName;
-        _dbColumns.Clear();
-        if (_dbSelectedTable != null && _dbCreds != null && _container != null && _dbSelectedDatabase != null)
+        State.DbSelectedTable = tableName;
+        State.DbColumns.Clear();
+        if (State.DbSelectedTable != null && State.DbCreds != null && _container != null && State.DbSelectedDatabase != null)
         {
-            _dbColumns = await DatabaseService.GetSchemaAsync(ContainerId, _dbSelectedDatabase, _dbSelectedTable, _container.DatabaseType, _dbCreds, _resolvedServerId);
+            State.DbColumns = await DatabaseService.GetSchemaAsync(ContainerId, State.DbSelectedDatabase, State.DbSelectedTable, _container.DatabaseType, State.DbCreds, _resolvedServerId);
         }
     }
 
     private async Task QuickQuery(string query)
     {
-        _dbQuery = query;
+        State.DbQuery = query;
         await ExecuteQuery();
     }
 
-    private void ShowMigrationPanel() { _showMigration = !_showMigration; _showSeed = false; }
-    private void ShowSeedPanel() { _showSeed = !_showSeed; _showMigration = false; }
+    private void ShowMigrationPanel() { State.ShowMigration = !State.ShowMigration; State.ShowSeed = false; }
+    private void ShowSeedPanel() { State.ShowSeed = !State.ShowSeed; State.ShowMigration = false; }
 
     // === Query Builder ===
 
     private async Task OnQbTableChanged(string? table)
     {
-        _qbTable = table;
-        _qbTableColumns.Clear();
-        _qbSetFields.Clear();
-        _qbColumnsText = "";
-        _qbWhere = "";
-        _qbOrderBy = null;
+        State.QbTable = table;
+        State.QbTableColumns.Clear();
+        State.QbSetFields.Clear();
+        State.QbColumnsText = "";
+        State.QbWhere = "";
+        State.QbOrderBy = null;
 
-        if (table != null && _dbCreds != null && _container != null && _dbSelectedDatabase != null)
+        if (table != null && State.DbCreds != null && _container != null && State.DbSelectedDatabase != null)
         {
-            var schema = await DatabaseService.GetSchemaAsync(ContainerId, _dbSelectedDatabase, table, _container.DatabaseType, _dbCreds, _resolvedServerId);
-            _qbTableColumns = schema.Select(c => c.Name).ToList();
-            _qbSetFields = schema.Select(c => (c.Name, "")).ToList();
+            var schema = await DatabaseService.GetSchemaAsync(ContainerId, State.DbSelectedDatabase, table, _container.DatabaseType, State.DbCreds, _resolvedServerId);
+            State.QbTableColumns = schema.Select(c => c.Name).ToList();
+            State.QbSetFields = schema.Select(c => (c.Name, "")).ToList();
         }
     }
 
     private string? BuildQueryFromBuilder()
     {
-        if (string.IsNullOrEmpty(_qbTable)) return null;
+        if (string.IsNullOrEmpty(State.QbTable)) return null;
 
-        var where = !string.IsNullOrWhiteSpace(_qbWhere) ? $" WHERE {_qbWhere}" : "";
-        var orderBy = !string.IsNullOrEmpty(_qbOrderBy) ? $" ORDER BY {_qbOrderBy} {(_qbOrderDesc ? "DESC" : "ASC")}" : "";
+        var where = !string.IsNullOrWhiteSpace(State.QbWhere) ? $" WHERE {State.QbWhere}" : "";
+        var orderBy = !string.IsNullOrEmpty(State.QbOrderBy) ? $" ORDER BY {State.QbOrderBy} {(State.QbOrderDesc ? "DESC" : "ASC")}" : "";
 
-        return _qbAction switch
+        return State.QbAction switch
         {
-            "SELECT" => $"SELECT {(!string.IsNullOrWhiteSpace(_qbColumnsText) ? _qbColumnsText.Trim() : "*")} FROM {_qbTable}{where}{orderBy} LIMIT {_qbLimit}",
-            "COUNT" => $"SELECT COUNT(*) AS total FROM {_qbTable}{where}",
+            "SELECT" => $"SELECT {(!string.IsNullOrWhiteSpace(State.QbColumnsText) ? State.QbColumnsText.Trim() : "*")} FROM {State.QbTable}{where}{orderBy} LIMIT {State.QbLimit}",
+            "COUNT" => $"SELECT COUNT(*) AS total FROM {State.QbTable}{where}",
             "INSERT" => BuildInsertSql(),
             "UPDATE" => BuildUpdateSql(where),
-            "DELETE" => $"DELETE FROM {_qbTable}{where}",
+            "DELETE" => $"DELETE FROM {State.QbTable}{where}",
             _ => null
         };
     }
 
     private string? BuildInsertSql()
     {
-        var filled = _qbSetFields.Where(f => !string.IsNullOrWhiteSpace(f.Value)).ToList();
+        var filled = State.QbSetFields.Where(f => !string.IsNullOrWhiteSpace(f.Value)).ToList();
         if (!filled.Any()) return null;
         var cols = string.Join(", ", filled.Select(f => f.Key));
         var vals = string.Join(", ", filled.Select(f => $"'{f.Value.Replace("'", "''")}'"));
-        return $"INSERT INTO {_qbTable} ({cols}) VALUES ({vals})";
+        return $"INSERT INTO {State.QbTable} ({cols}) VALUES ({vals})";
     }
 
     private string? BuildUpdateSql(string where)
     {
-        var filled = _qbSetFields.Where(f => !string.IsNullOrWhiteSpace(f.Value)).ToList();
+        var filled = State.QbSetFields.Where(f => !string.IsNullOrWhiteSpace(f.Value)).ToList();
         if (!filled.Any()) return null;
         var sets = string.Join(", ", filled.Select(f => $"{f.Key} = '{f.Value.Replace("'", "''")}'"));
-        return $"UPDATE {_qbTable} SET {sets}{where}";
+        return $"UPDATE {State.QbTable} SET {sets}{where}";
     }
 
     private async Task ExecuteBuilderQuery()
     {
         var sql = BuildQueryFromBuilder();
         if (string.IsNullOrEmpty(sql)) return;
-        _dbQuery = sql;
+        State.DbQuery = sql;
         await ExecuteQuery();
     }
 
@@ -725,7 +691,7 @@
     {
         var sql = BuildQueryFromBuilder();
         if (!string.IsNullOrEmpty(sql))
-            _dbQuery = sql;
+            State.DbQuery = sql;
     }
 
     // Run a command in the container via `docker exec` on the HOST shell plane (nsenter/SSH) instead of
@@ -768,13 +734,13 @@
     {
         if (!await RequireAsync(AppRole.Admin, "container.exec",
                 new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId })) return;
-        if (_container == null || _dbCreds == null) return;
+        if (_container == null || State.DbCreds == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Db_RunMigration"].Value,
             L["ContainerDetail_Dialog_RunMigrationMessage"].Value,
             yesText: L["ContainerDetail_Db_Execute"].Value, cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
-        _dbMigrating = true; _migrationOutput = null;
+        State.DbMigrating = true; State.MigrationOutput = null;
         try
         {
             // Try artisan migrate (Laravel)
@@ -782,17 +748,17 @@
                 failedWhen: NoMigrationFramework);
             if (!result.StdOut.Contains("NO_ARTISAN"))
             {
-                _migrationOutput = result.StdOut; _migrationSuccess = result.ExitCode == 0;
+                State.MigrationOutput = result.StdOut; State.MigrationSuccess = result.ExitCode == 0;
             }
             else
             {
                 // Fallback: plain SQL via psql/mysql
-                _migrationOutput = L["ContainerDetail_Db_NoFrameworkUpload"].Value;
-                _migrationSuccess = false;
+                State.MigrationOutput = L["ContainerDetail_Db_NoFrameworkUpload"].Value;
+                State.MigrationSuccess = false;
             }
         }
-        catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
-        finally { _dbMigrating = false; }
+        catch (Exception ex) { State.MigrationOutput = ex.Message; State.MigrationSuccess = false; }
+        finally { State.DbMigrating = false; }
     }
 
     private async Task RollbackMigration()
@@ -805,16 +771,16 @@
             L["ContainerDetail_Dialog_RollbackMessage"].Value,
             yesText: "Rollback", cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
-        _dbMigrating = true; _migrationOutput = null;
+        State.DbMigrating = true; State.MigrationOutput = null;
         try
         {
             var result = await ExecInContainerViaHost("container.exec", new[] { "sh", "-c", "which php && php artisan migrate:rollback --force 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(2),
                 failedWhen: NoMigrationFramework);
-            _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
-            _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
+            State.MigrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
+            State.MigrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
-        catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
-        finally { _dbMigrating = false; }
+        catch (Exception ex) { State.MigrationOutput = ex.Message; State.MigrationSuccess = false; }
+        finally { State.DbMigrating = false; }
     }
 
     /// <summary>The artisan commands answer "NO_ARTISAN" with exit code 0 when there is nothing to migrate with.</summary>
@@ -825,87 +791,87 @@
     {
         if (!Require(AppRole.Operator)) return;
         if (_container == null) return;
-        _dbMigrating = true; _migrationOutput = null;
+        State.DbMigrating = true; State.MigrationOutput = null;
         try
         {
             var result = await ExecInContainerViaHost(null, new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(1));
-            _migrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
-            _migrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
+            State.MigrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
+            State.MigrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
-        catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
-        finally { _dbMigrating = false; }
+        catch (Exception ex) { State.MigrationOutput = ex.Message; State.MigrationSuccess = false; }
+        finally { State.DbMigrating = false; }
     }
 
     private async Task OnMigrationFileSelected(InputFileChangeEventArgs e)
     {
         using var ms = new System.IO.MemoryStream();
         await e.File.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024).CopyToAsync(ms);
-        _migrationFileData = ms.ToArray();
-        _migrationFileName = e.File.Name;
+        State.MigrationFileData = ms.ToArray();
+        State.MigrationFileName = e.File.Name;
     }
 
     private async Task ExecuteMigrationFile()
     {
         if (!await RequireAsync(AppRole.Admin, "db.query",
-                new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database = _dbSelectedDatabase ?? _dbCreds?.Database })) return;
-        if (_migrationFileData == null || _container == null || _dbCreds == null) return;
+                new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database = State.DbSelectedDatabase ?? State.DbCreds?.Database })) return;
+        if (State.MigrationFileData == null || _container == null || State.DbCreds == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_ExecuteSqlFileTitle"].Value,
-            L["ContainerDetail_Dialog_ExecuteSqlFileMessage", _migrationFileName ?? ""].Value,
+            L["ContainerDetail_Dialog_ExecuteSqlFileMessage", State.MigrationFileName ?? ""].Value,
             yesText: L["ContainerDetail_Db_Execute"].Value, cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
-        _dbMigrating = true; _migrationOutput = null;
+        State.DbMigrating = true; State.MigrationOutput = null;
         try
         {
-            var b64 = Convert.ToBase64String(_migrationFileData);
-            var db = _dbSelectedDatabase ?? _dbCreds.Database;
+            var b64 = Convert.ToBase64String(State.MigrationFileData);
+            var db = State.DbSelectedDatabase ?? State.DbCreds.Database;
             var cmd = _container.DatabaseType switch
             {
-                DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} 2>&1",
-                DatabaseType.MySQL => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(_dbCreds.Password)} mysql -u {Quote(_dbCreds.User)} {Quote(db)} 2>&1",
+                DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(State.DbCreds.Password)} psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
+                DatabaseType.MySQL => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(State.DbCreds.Password)} mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
                 _ => "echo 'Not supported'"
             };
             var supported = _container.DatabaseType is DatabaseType.PostgreSQL or DatabaseType.MySQL;
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
-                query: System.Text.Encoding.UTF8.GetString(_migrationFileData), database: db,
+                query: System.Text.Encoding.UTF8.GetString(State.MigrationFileData), database: db,
                 failedWhen: _ => supported ? null : "This database type does not take SQL files here.");
-            _migrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ExecutedSuccess"].Value : result.StdOut;
-            _migrationSuccess = result.ExitCode == 0;
-            if (_migrationSuccess) await LoadDatabaseInfo();
+            State.MigrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ExecutedSuccess"].Value : result.StdOut;
+            State.MigrationSuccess = result.ExitCode == 0;
+            if (State.MigrationSuccess) await LoadDatabaseInfo();
         }
-        catch (Exception ex) { _migrationOutput = ex.Message; _migrationSuccess = false; }
-        finally { _dbMigrating = false; }
+        catch (Exception ex) { State.MigrationOutput = ex.Message; State.MigrationSuccess = false; }
+        finally { State.DbMigrating = false; }
     }
 
     private async Task OnSeedFileSelected(InputFileChangeEventArgs e)
     {
         using var ms = new System.IO.MemoryStream();
         await e.File.OpenReadStream(maxAllowedSize: 100 * 1024 * 1024).CopyToAsync(ms);
-        _seedFileData = ms.ToArray();
-        _seedFileName = e.File.Name;
+        State.SeedFileData = ms.ToArray();
+        State.SeedFileName = e.File.Name;
     }
 
     private async Task ExecuteSeedFile()
     {
         if (!await RequireAsync(AppRole.Admin, "db.query",
-                new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database = _dbSelectedDatabase ?? _dbCreds?.Database })) return;
-        if (_seedFileData == null || _container == null || _dbCreds == null) return;
+                new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database = State.DbSelectedDatabase ?? State.DbCreds?.Database })) return;
+        if (State.SeedFileData == null || _container == null || State.DbCreds == null) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_ImportDataTitle"].Value,
-            L["ContainerDetail_Dialog_ImportDataMessage", _seedFileName ?? ""].Value,
+            L["ContainerDetail_Dialog_ImportDataMessage", State.SeedFileName ?? ""].Value,
             yesText: L["ContainerDetail_Db_Import"].Value, cancelText: L["ContainerDetail_Button_Cancel"].Value);
         if (confirmed != true) return;
-        _dbSeeding = true; _seedOutput = null;
+        State.DbSeeding = true; State.SeedOutput = null;
         try
         {
-            var b64 = Convert.ToBase64String(_seedFileData);
-            var db = _dbSelectedDatabase ?? _dbCreds.Database;
-            var ext = System.IO.Path.GetExtension(_seedFileName)?.ToLower();
+            var b64 = Convert.ToBase64String(State.SeedFileData);
+            var db = State.DbSelectedDatabase ?? State.DbCreds.Database;
+            var ext = System.IO.Path.GetExtension(State.SeedFileName)?.ToLower();
             var cmd = (_container.DatabaseType, ext) switch
             {
-                (DatabaseType.PostgreSQL, ".sql") => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} 2>&1",
-                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && PGPASSWORD={Quote(_dbCreds.Password)} psql -U {Quote(_dbCreds.User)} -d {Quote(db)} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV import: please specify the table name in the query editor'",
-                (DatabaseType.MySQL, ".sql") => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(_dbCreds.Password)} mysql -u {Quote(_dbCreds.User)} {Quote(db)} 2>&1",
+                (DatabaseType.PostgreSQL, ".sql") => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(State.DbCreds.Password)} psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
+                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && PGPASSWORD={Quote(State.DbCreds.Password)} psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV import: please specify the table name in the query editor'",
+                (DatabaseType.MySQL, ".sql") => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(State.DbCreds.Password)} mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
                 (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {Quote(db)} --file /tmp/seed.json 2>&1",
                 _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... file format {ext} is not supported for {_container.DatabaseType} here - use the SQL pipe instead'"
             };
@@ -913,45 +879,45 @@
             var imports = (_container.DatabaseType, ext) is (DatabaseType.PostgreSQL, ".sql") or (DatabaseType.MySQL, ".sql")
                 or (DatabaseType.MongoDB, ".json");
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
-                query: System.Text.Encoding.UTF8.GetString(_seedFileData), database: db,
+                query: System.Text.Encoding.UTF8.GetString(State.SeedFileData), database: db,
                 failedWhen: _ => imports ? null : $"Files of type {ext} are not imported for {_container.DatabaseType}.");
-            _seedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ImportSuccess"].Value : result.StdOut;
-            _seedSuccess = result.ExitCode == 0;
-            if (_seedSuccess) { _dbLoaded = false; await LoadDatabaseInfo(); }
+            State.SeedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ImportSuccess"].Value : result.StdOut;
+            State.SeedSuccess = result.ExitCode == 0;
+            if (State.SeedSuccess) { State.DbLoaded = false; await LoadDatabaseInfo(); }
         }
-        catch (Exception ex) { _seedOutput = ex.Message; _seedSuccess = false; }
-        finally { _dbSeeding = false; }
+        catch (Exception ex) { State.SeedOutput = ex.Message; State.SeedSuccess = false; }
+        finally { State.DbSeeding = false; }
     }
 
     private async Task ExecuteQuery()
     {
         // PC-D3: a free-form query can write, so Admin like the other DB writes.
         if (!await RequireAsync(AppRole.Admin, "db.query",
-                new { containerId = ContainerId, serverId = _resolvedServerId, database = _dbSelectedDatabase ?? _dbCreds?.Database, query = _dbQuery })) return;
-        if (_dbCreds == null)
+                new { containerId = ContainerId, serverId = _resolvedServerId, database = State.DbSelectedDatabase ?? State.DbCreds?.Database, query = State.DbQuery })) return;
+        if (State.DbCreds == null)
         {
             Snackbar.Add(L["ContainerDetail_Db_NoCredentials"].Value, Severity.Warning);
             return;
         }
-        if (string.IsNullOrWhiteSpace(_dbQuery) || _container == null) return;
-        _dbExecuting = true;
-        _dbResult = null;
+        if (string.IsNullOrWhiteSpace(State.DbQuery) || _container == null) return;
+        State.DbExecuting = true;
+        State.DbResult = null;
 
         try
         {
             var creds = new Whiskers.Models.DatabaseCredentials
             {
-                User = _dbCreds.User,
-                Password = _dbCreds.Password,
-                Database = _dbSelectedDatabase ?? _dbCreds.Database
+                User = State.DbCreds.User,
+                Password = State.DbCreds.Password,
+                Database = State.DbSelectedDatabase ?? State.DbCreds.Database
             };
             var containerId = ContainerId;
-            var query = _dbQuery;
+            var query = State.DbQuery;
             var dbType = _container.DatabaseType;
             var sid = _resolvedServerId;
             // The SQL goes to the gateway, which checks it for protected resources (R1-16); the audit keeps only its
             // length, since it can carry credentials (ALTER ROLE … PASSWORD '…').
-            _dbResult = await Mutations.RunAsync("db.query", new { containerId, serverId = sid, database = creds.Database, query },
+            State.DbResult = await Mutations.RunAsync("db.query", new { containerId, serverId = sid, database = creds.Database, query },
                 _ => DatabaseService.ExecuteQueryAsync(containerId, query, dbType, creds, sid));
         }
         catch (MutationRefusedException ex)
@@ -960,27 +926,27 @@
         }
         catch (Exception ex)
         {
-            _dbResult = new Whiskers.Models.QueryResult { Error = ex.Message };
+            State.DbResult = new Whiskers.Models.QueryResult { Error = ex.Message };
         }
         finally
         {
-            _dbExecuting = false;
+            State.DbExecuting = false;
         }
     }
 
     private async Task BackupDatabase()
     {
         if (!await RequireAsync(AppRole.Admin, "db.backup",
-                new { containerId = ContainerId, serverId = _resolvedServerId, database = _dbSelectedDatabase ?? _dbCreds?.Database })) return;
-        if (_dbCreds == null || _container == null) return;
-        _dbBackingUp = true;
+                new { containerId = ContainerId, serverId = _resolvedServerId, database = State.DbSelectedDatabase ?? State.DbCreds?.Database })) return;
+        if (State.DbCreds == null || _container == null) return;
+        State.DbBackingUp = true;
 
         try
         {
-            var db = _dbSelectedDatabase ?? _dbCreds.Database;
+            var db = State.DbSelectedDatabase ?? State.DbCreds.Database;
             var containerId = ContainerId;
             var dbType = _container.DatabaseType;
-            var creds = _dbCreds;
+            var creds = State.DbCreds;
             var sid = _resolvedServerId;
             var (success, filePath, size, error) = await Mutations.RunAsync("db.backup", new { containerId, serverId = sid, database = db },
                 async _ =>
@@ -1005,7 +971,7 @@
         }
         finally
         {
-            _dbBackingUp = false;
+            State.DbBackingUp = false;
         }
     }
 }
