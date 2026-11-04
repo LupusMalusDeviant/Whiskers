@@ -525,7 +525,9 @@ internal static class WorkflowPolicy
         var ci = Parse(ciYaml);
         if (Child(Child(ci, "on"), "workflow_call") is null) violations.Add("ci.yml cannot be called by the release (no workflow_call)");
         var ciJobs = Jobs(ci).ToList();
-        if (!ciJobs.SelectMany(j => Steps(j.Job)).Any(s => Scalar(Child(s, "run"))?.Contains("dotnet test") == true))
+        // R1-52: the image-runtime job's `dotnet test --filter "Category=ImageRuntime"` is not the suite.
+        if (!ciJobs.SelectMany(j => Steps(j.Job)).Any(s => Scalar(Child(s, "run")) is { } run
+                && run.Contains("dotnet test", StringComparison.Ordinal) && !run.Contains("Category=ImageRuntime", StringComparison.Ordinal)))
             violations.Add("ci.yml does not run 'dotnet test'");
         foreach (var (id, job) in ciJobs)
             foreach (var checkout in Steps(job).Where(s => Scalar(Child(s, "uses"))?.StartsWith("actions/checkout@") == true))
