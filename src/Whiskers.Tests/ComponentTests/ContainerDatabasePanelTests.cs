@@ -77,8 +77,9 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
         var state = new ContainerDatabaseState();
         var first = RenderPanel(AppRole.Admin, state);
         await first.InvokeAsync(first.Instance.EnsureLoadedAsync);
-        state.DbSelectedDatabase = "postgres";
-        state.DbQuery = "select 1";
+        state.DbQuery = "select 4711";
+        state.ShowSeed = true;
+        state.SeedFileName = "seed-4711.sql";
         state.DbSeeding = true;
 
         // Another tab becomes active: MudTabs disposes the panel; coming back renders a new one.
@@ -88,10 +89,27 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
 
         Assert.Equal(1, _db.DatabaseListings);
         Assert.Single(_envReads);
-        Assert.Equal("postgres", state.DbSelectedDatabase);
-        Assert.Equal("select 1", state.DbQuery);
-        Assert.True(state.DbSeeding);
+        // What the new panel shows comes from the shared state: the tables, the query, the chosen file, and the
+        // running import's spinner with its button still disabled.
         second.WaitForAssertion(() => Assert.Contains("users", second.Markup));
+        Assert.Contains("select 4711", second.Markup);
+        Assert.Contains("seed-4711.sql", second.Markup);
+        Assert.Contains("mud-progress-circular", second.Markup);
+    }
+
+    [Fact]
+    public async Task An_operation_that_finishes_after_a_tab_switch_re_renders_the_panel_showing_it()
+    {
+        var state = new ContainerDatabaseState { ShowSeed = true, SeedFileName = "seed-4711.sql", DbSeeding = true };
+        var panel = RenderPanel(AppRole.Admin, state);
+        await panel.InvokeAsync(panel.Instance.EnsureLoadedAsync);
+        Assert.Contains("mud-progress-circular", panel.Markup);
+
+        // The handler of the disposed panel finishes into the shared state and says so.
+        state.DbSeeding = false;
+        state.NotifyChanged();
+
+        panel.WaitForAssertion(() => Assert.DoesNotContain("mud-progress-circular", panel.Markup));
     }
 
     [Fact]

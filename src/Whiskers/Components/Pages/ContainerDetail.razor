@@ -11,7 +11,6 @@
 @inject ITerminalSessionManager SessionManager
 @inject IMetricsQueryService MetricsQuery
 @inject IHostCommandExecutor HostCommandExecutor
-@inject Whiskers.Services.Database.IDatabaseService DatabaseService
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
 @inject IUiMutationRunner Mutations
@@ -533,7 +532,8 @@ else
     private string? _dotEnvError;
 
     // The database tab lives in ContainerDatabasePanel; loaded when the tab is first opened. Its state is held here,
-    // for the life of the page, because MudTabs disposes the panel whenever another tab is active.
+    // for the life of the page, because MudTabs disposes the panel whenever another tab is active
+    // (ContainerDatabasePanelTests.A_tab_switch_keeps_the_loaded_data_the_query_and_a_running_import).
     private ContainerDatabasePanel? _dbPanel;
     private readonly ContainerDatabaseState _dbState = new();
 

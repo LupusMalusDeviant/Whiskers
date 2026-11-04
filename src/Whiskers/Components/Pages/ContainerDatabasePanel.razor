@@ -12,6 +12,7 @@
 @inject Whiskers.Services.Database.IDatabaseService DatabaseService
 @inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
+@implements IDisposable
 
 @if (!State.DbLoaded)
 {
@@ -498,6 +499,24 @@ else
     private string? _resolvedServerId => ServerId;
     private AppRole _role => Role;
 
+    // Re-render when an operation started before the last tab switch finishes into the shared state.
+    private ContainerDatabaseState? _subscribed;
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(_subscribed, State)) return;
+        if (_subscribed is not null) _subscribed.Changed -= OnStateChanged;
+        State.Changed += OnStateChanged;
+        _subscribed = State;
+    }
+
+    private void OnStateChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        if (_subscribed is not null) _subscribed.Changed -= OnStateChanged;
+    }
+
     /// <summary>Loads databases and tables the first time the tab is opened.</summary>
     public async Task EnsureLoadedAsync()
     {
@@ -583,7 +602,7 @@ else
         }
         finally
         {
-            State.DbLoaded = true;
+            State.DbLoaded = true; State.NotifyChanged();
         }
     }
 
@@ -758,7 +777,7 @@ else
             }
         }
         catch (Exception ex) { State.MigrationOutput = ex.Message; State.MigrationSuccess = false; }
-        finally { State.DbMigrating = false; }
+        finally { State.DbMigrating = false; State.NotifyChanged(); }
     }
 
     private async Task RollbackMigration()
@@ -780,7 +799,7 @@ else
             State.MigrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
         catch (Exception ex) { State.MigrationOutput = ex.Message; State.MigrationSuccess = false; }
-        finally { State.DbMigrating = false; }
+        finally { State.DbMigrating = false; State.NotifyChanged(); }
     }
 
     /// <summary>The artisan commands answer "NO_ARTISAN" with exit code 0 when there is nothing to migrate with.</summary>
@@ -799,7 +818,7 @@ else
             State.MigrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }
         catch (Exception ex) { State.MigrationOutput = ex.Message; State.MigrationSuccess = false; }
-        finally { State.DbMigrating = false; }
+        finally { State.DbMigrating = false; State.NotifyChanged(); }
     }
 
     private async Task OnMigrationFileSelected(InputFileChangeEventArgs e)
@@ -840,7 +859,7 @@ else
             if (State.MigrationSuccess) await LoadDatabaseInfo();
         }
         catch (Exception ex) { State.MigrationOutput = ex.Message; State.MigrationSuccess = false; }
-        finally { State.DbMigrating = false; }
+        finally { State.DbMigrating = false; State.NotifyChanged(); }
     }
 
     private async Task OnSeedFileSelected(InputFileChangeEventArgs e)
@@ -886,7 +905,7 @@ else
             if (State.SeedSuccess) { State.DbLoaded = false; await LoadDatabaseInfo(); }
         }
         catch (Exception ex) { State.SeedOutput = ex.Message; State.SeedSuccess = false; }
-        finally { State.DbSeeding = false; }
+        finally { State.DbSeeding = false; State.NotifyChanged(); }
     }
 
     private async Task ExecuteQuery()
@@ -930,7 +949,7 @@ else
         }
         finally
         {
-            State.DbExecuting = false;
+            State.DbExecuting = false; State.NotifyChanged();
         }
     }
 
@@ -971,7 +990,7 @@ else
         }
         finally
         {
-            State.DbBackingUp = false;
+            State.DbBackingUp = false; State.NotifyChanged();
         }
     }
 }

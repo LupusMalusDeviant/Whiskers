@@ -7,6 +7,13 @@ namespace Whiskers.Components.Pages;
 /// disabled when the user comes back.</summary>
 public sealed class ContainerDatabaseState
 {
+    /// <summary>Raised when a load or a running operation finishes. A handler started in an earlier panel instance
+    /// (disposed by a tab switch) finishes into this state; the panel showing it now re-renders on this event instead
+    /// of waiting for the page's next refresh.</summary>
+    public event Action? Changed;
+
+    public void NotifyChanged() => Changed?.Invoke();
+
     // Database state
     public bool DbLoaded;
     public bool DbExecuting;
