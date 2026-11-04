@@ -87,9 +87,11 @@ A non-standard `Oidc:EmailClaim` (`preferred_username`, `upn`, …) never binds 
 - The store is **unavailable** — every federated sign-in and session is refused, local sign-in keeps working, the
   readiness check `identity-bindings` reports `Degraded` — when the file cannot be read or parsed, lacks its `version`,
   `bindings` or `pending`, is a directory, or is missing while `identity-bindings.json.bak` exists; and after a save that
-  failed (a full disk), after a start-up prune that did not succeed, and after the file became readable again (repaired
-  or restored) — each time until it has been read and pruned again (retried every 30 seconds, at every federated
-  sign-in and with every role or whitelist change).
+  failed (a full disk), after a start-up prune that did not succeed, and after the file became readable again with other
+  content than before (repaired or restored) — each time until it has been read and pruned again (retried every 30
+  seconds, at every federated sign-in and with every role or whitelist change that adds or removes an address). A file
+  that another program (a backup tool, a virus scanner) held for a moment and that is unchanged afterwards is no repair:
+  the store is available again at the next read, at most a second later.
 - **Every role or whitelist change that adds or removes an address prunes first** — the setup wizard's first
   administrator included. If that prune cannot be done (the file cannot be read, or the save fails), the change is
   refused; once the store can be read and saved again, the change goes through and takes the owed prune with it.
@@ -100,8 +102,15 @@ A non-standard `Oidc:EmailClaim` (`preferred_username`, `upn`, …) never binds 
     again (Google automatically, OIDC after confirmation). Deleting only the current file leaves the store unavailable.
 
   The running instance picks the repaired file up at its next read and becomes available once it has pruned it (within
-  30 seconds, or at the next federated sign-in or role/whitelist change): a restored `.bak` may hold bindings of
-  addresses removed since, and those go before anyone is admitted.
+  30 seconds, or at the next federated sign-in or role/whitelist change that adds or removes an address): a restored
+  `.bak` may hold bindings of addresses removed since, and those go before anyone is admitted. The prune cannot tell
+  whether an address that is an entry again now belongs to the same person: if an address was **given to someone else
+  since** the restored generation was written, its old binding survives the prune — check the `.bak` (or the backup)
+  for such addresses first, and remove their bindings in *Settings → Sign-in identities* after the restore.
+- **Starting without `roles.json` or `whitelist.json`** seeds them from the configuration (`WHISKERS_ADMIN_EMAIL`,
+  `GoogleAuth:AllowedEmails`), and the start-up prune then counts the seeded addresses as entries. Deleting one of these
+  files is a host operator's act like editing it: if `identity-bindings.json` stays, delete it (and its `.bak`) too, or
+  check its bindings of the seeded addresses.
 
 ## Upgrading to R1-27
 

@@ -478,7 +478,7 @@ public class MutationGatewayCoverageTests
         ("IWhitelistService.AddFirstAdminAsync", "first-run wizard, refuses once an Admin exists, pinned to SetupStateService"),
         ("IIdentityBindingStore.RecordPendingAsync", "R1-27: a refused Google/OIDC sign-in records its binding request for a configured address — nobody exists yet the gateway could decide for; it grants nothing, pinned to FederatedAdmission"),
         ("IIdentityBindingStore.RecordSignInAsync", "R1-27: the day of an admitted sign-in on its binding (housekeeping of the admission), pinned to FederatedAdmission"),
-        ("IIdentityBindingStore.PruneOrphansAsync", "R1-27: removes bindings of addresses that stop being entries, inside the decided config.roles / config.whitelist write (and at start); it only takes access away"),
+        ("IIdentityBindingStore.PruneOrphansAsync", "R1-27: removes bindings of addresses that are no entries, before every decided config.roles / config.whitelist write that adds or removes one and the wizard's first-admin writes (the start-up prune goes through RefreshAsync); it only takes access away"),
         ("ILocalAccountService.RedeemRecoveryCodeAsync", "S-12 (R1-49): the holder of a one-time recovery code sets that account's own password on the anonymous /account/recover page — no person exists the gateway could decide for; audited, rate-limited, pinned to AccountRecover"),
         // Execution plumbing beneath a marked operation or the primitive.
         ("IDockerConnectionManager.ExecuteAsync", "the Docker API transport the marked IDockerService operations run on"),

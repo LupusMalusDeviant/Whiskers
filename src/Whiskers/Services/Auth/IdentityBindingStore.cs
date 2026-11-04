@@ -18,16 +18,20 @@ namespace Whiskers.Services.Auth;
 /// holds the <see cref="AccessControlWriteGate"/> (in the process) and an exclusive lock on
 /// <c>identity-bindings.json.lock</c> (across processes), re-reads the file under both, applies its change to what it
 /// read, persists (<see cref="DurableFile"/>: flushed, one rename, the previous generation kept as <c>.bak</c>) and only
-/// then publishes. A reader re-reads the file whenever it changed (time and length; always within two seconds of a
-/// write, below the file system's time resolution), so a confirmation by the CLI reaches the running instance without a
-/// restart, and neither writer overwrites the other's change.</item>
+/// then publishes; after the save it writes a new random revision into the lock file. A reader re-reads the file whenever
+/// it changed — its time and length, the existence of its <c>.bak</c>, or that revision; while the revision cannot be read
+/// (a writer holds the lock) on every read — so a confirmation by the CLI reaches the running instance without a restart,
+/// whatever the file system's time resolution, and neither writer overwrites the other's change. Reads share the file
+/// with a writer's rename; a save is retried briefly while a reader holds it (Windows).</item>
 /// <item><b>No automatic rollback.</b> A current file that is missing while its previous generation exists, cannot be
 /// parsed, is incomplete (version, <c>bindings</c> or <c>pending</c> absent or <c>null</c>) or is a directory makes the
 /// store unavailable; the <c>.bak</c> is never taken over by itself (it may hold a revoked binding). Only a store never
 /// written (neither file) is empty. Recovery is the host operator's explicit act.</item>
-/// <item><b>Unavailable until pruned.</b> A failed save, or a start-up prune that could not be saved, makes the store
-/// unavailable — every federated admission and session refuses, readiness is Degraded — until a re-read and prune
-/// succeed (the next sign-in attempt, the next write, or the retry every 30 s). The records a failed prune had to
+/// <item><b>Unavailable until pruned.</b> A failed save or read, a start-up prune that did not succeed (not saved, the file
+/// unreadable, the lock not taken), and a file readable again with other data than the last good (repaired or restored)
+/// make the store unavailable — every federated admission and session refuses, readiness is Degraded — until a re-read
+/// and prune succeed (the next sign-in attempt, the next write, or the retry every 30 s). After a failed read, reads
+/// that are not a write's try again at most once a second. The records a failed prune had to
 /// remove are removed by the next write whatever the entries are then, so an address configured again meanwhile never
 /// revives the old subject.</item>
 /// </list>
@@ -56,6 +60,10 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
     /// <summary>How often an unavailable store retries its re-read and prune. Tests shorten it.</summary>
     internal TimeSpan RecoveryDelay { get; set; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>After a failed read, how long reads that are not a write's wait before they try again — request threads do
+    /// not queue on a file another program holds (the store stays unavailable meanwhile). Tests shorten it.</summary>
+    internal TimeSpan RetryAfterFailure { get; set; } = TimeSpan.FromSeconds(1);
+
     private FileLock? _heldLock;
 
     /// <summary>How often a save is tried while a reader briefly holds the file (Windows), and how long apart.</summary>
@@ -83,8 +91,13 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
     private FileStamp? _stamp;
     private bool _readOk;
     private bool _loggedUnreadable;
-    // The last read failed: the next successful one is a repair and makes the store wait for a prune.
+    // The last read failed: the next successful one is a repair — and makes the store wait for a prune — when it holds
+    // something else than the last good data (R1-27 review round 3).
     private bool _readFailed;
+    // When the last read failed: reads that do not have to (not a write's) wait RetryAfterFailure before trying again.
+    private DateTimeOffset _failedAt;
+    // The text of the last good data read or saved ("" for no file at all; null before the first good read).
+    private string? _goodText;
     // A save failed (or a start-up prune could not be saved): unavailable until a re-read and prune succeed.
     private volatile bool _degraded;
     // What a failed prune had to remove: removed by the next write whatever the entries are then.
@@ -521,6 +534,10 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
     /// <summary>Re-reads the file when it changed since it was last read (or was written very recently).</summary>
     private void Refresh(bool force = false)
     {
+        if (!force)
+            lock (_state)
+                if (_readFailed && _time.GetUtcNow() - _failedAt < RetryAfterFailure)
+                    return;   // still unavailable; tried again shortly (a write reads at once)
         FileStamp stamp;
         try { stamp = StampNow(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -535,17 +552,24 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
             if (!force && _stamp == stamp && stamp.Revision is not null && !recent) return;
             try
             {
-                _data = Read(stamp);
+                var (data, text) = Read(stamp);
+                _data = data;
                 // A stamp without a revision is not kept: the next read compares again.
                 _stamp = stamp.Revision is null ? null : stamp;
                 if (_readFailed)
                 {
-                    // Readable again (repaired, restored from a .bak): what it holds was never pruned against the entries
-                    // in force now. Available only after a re-read and prune have succeeded (R1-27 review round 2).
                     _readFailed = false;
-                    _degraded = true;
-                    ScheduleRecovery();
+                    // Readable again with other data than the last good (repaired, restored from a .bak, or never read
+                    // before): it was never pruned against the entries in force now — available only after a re-read and
+                    // prune have succeeded (R1-27 review round 2). The same data as before (a scanner held the file for a
+                    // moment) is no repair (round 3); a store already waiting for a prune keeps waiting.
+                    if (!string.Equals(text, _goodText, StringComparison.Ordinal))
+                    {
+                        _degraded = true;
+                        ScheduleRecovery();
+                    }
                 }
+                _goodText = text;
                 _loggedUnreadable = false;
                 _readOk = true;
             }
@@ -566,6 +590,7 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
     {
         _readOk = false;
         _readFailed = true;
+        _failedAt = _time.GetUtcNow();
         ScheduleRecovery();
         if (_loggedUnreadable) return;
         _loggedUnreadable = true;
@@ -575,16 +600,16 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
                           "refused until the file is repaired", ex.GetType().Name);
     }
 
-    /// <summary>The file as it is: empty only when neither it nor its previous generation exists. Never the previous
-    /// generation in its place.</summary>
-    private IdentityBindingFile Read(FileStamp stamp)
+    /// <summary>The file as it is, with its text ("" for no file): empty only when neither it nor its previous generation
+    /// exists. Never the previous generation in its place.</summary>
+    private (IdentityBindingFile Data, string Text) Read(FileStamp stamp)
     {
         if (stamp.Directory) throw new IOException("The identity bindings path is a directory.");
         if (!stamp.Exists)
         {
             if (stamp.PreviousExists)
                 throw new FileNotFoundException("The identity bindings file is missing while its previous generation exists.");
-            return Empty();
+            return (Empty(), "");
         }
         for (var attempt = 1; ; attempt++)
         {
@@ -592,7 +617,8 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
             {
                 using var stream = OpenShared(_path);
                 using var reader = new StreamReader(stream, Encoding.UTF8);
-                return Parse(reader.ReadToEnd());
+                var text = reader.ReadToEnd();
+                return (Parse(text), text);
             }
             catch (IOException) when (attempt < 3 && File.Exists(_path))
             {
@@ -698,20 +724,31 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
     private string? WriteRevision()
     {
         if (_heldLock?.Stream is not { } stream) return null;
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            var revision = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
-            stream.SetLength(0);
-            stream.Position = 0;
-            stream.Write(Encoding.UTF8.GetBytes(revision));
-            stream.Flush(flushToDisk: true);
-            return revision;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return null;   // readers then compare time and length, and re-read while they cannot read the revision
+            try
+            {
+                WriteRevisionForTests?.Invoke();
+                var revision = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+                stream.SetLength(0);
+                stream.Position = 0;
+                stream.Write(Encoding.UTF8.GetBytes(revision));
+                stream.Flush(flushToDisk: true);
+                return revision;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt < 2) continue;   // once more (R1-27 review round 3)
+                // Readers then compare time and length only. The type only: a message may carry a path.
+                _logger?.LogWarning("The identity bindings revision could not be written ({Error}); other processes notice " +
+                                    "this change by the file's time and length only", ex.GetType().Name);
+                return null;
+            }
         }
     }
+
+    /// <summary>Tests only: replaces the revision write's stream operation (one that fails on cue). Null in the app.</summary>
+    internal Action? WriteRevisionForTests { get; set; }
 
     private async Task<FileLock?> TryLockAsync(CancellationToken ct)
     {
@@ -725,9 +762,9 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
 
     private async Task<bool> PersistAsync(IdentityBindingFile next, AccessControlWriteGate.Lease lease)
     {
+        var json = JsonSerializer.Serialize(next, JsonOptions);
         try
         {
-            var json = JsonSerializer.Serialize(next, JsonOptions);
             for (var attempt = 1; ; attempt++)
             {
                 try
@@ -758,6 +795,7 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
         lock (_state)
         {
             _data = Copy(next);    // persisted first, published after
+            _goodText = PersistForTests is null ? json : null;   // a replaced save wrote nothing to compare with
             try { _stamp = revision is null ? null : StampNow(revision); } catch (IOException) { _stamp = null; }
             _readFailed = false;
             _readOk = true;
@@ -781,20 +819,29 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
         using var noFlow = ExecutionContext.SuppressFlow();
         _ = Task.Run(async () =>
         {
+            var gaveUp = false;
             try
             {
-                for (var attempt = 0; attempt < 2880 && NeedsRecovery; attempt++)
+                var attempt = 0;
+                for (; attempt < 2880 && NeedsRecovery; attempt++)
                 {
                     await Task.Delay(RecoveryDelay, _time);
                     try
                     {
                         if (await RecoverAsync(CancellationToken.None)) break;
                     }
-                    catch (ObjectDisposedException) { break; }
+                    catch (ObjectDisposedException) { gaveUp = true; break; }
                     catch (Exception) { /* the next attempt */ }
                 }
+                gaveUp |= attempt >= 2880;
             }
-            finally { Volatile.Write(ref _recovering, 0); }
+            finally
+            {
+                Volatile.Write(ref _recovering, 0);
+                // A ScheduleRecovery that came after the loop's last check found it still running and returned: look
+                // again, so that wake-up is not lost (R1-27 review round 3).
+                if (!gaveUp && NeedsRecovery) ScheduleRecovery();
+            }
         });
     }
 

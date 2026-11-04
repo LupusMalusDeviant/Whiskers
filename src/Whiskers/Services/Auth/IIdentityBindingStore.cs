@@ -21,8 +21,10 @@ namespace Whiskers.Services.Auth;
 /// </summary>
 public interface IIdentityBindingStore
 {
-    /// <summary>False while the file cannot be read or parsed (a directory in its place included), or after a failed save
-    /// until <see cref="RefreshAsync"/> (or a later write) succeeded.</summary>
+    /// <summary>False while the file cannot be read or parsed (a directory in its place included, or missing while its
+    /// <c>.bak</c> exists); and after a failed save, a start-up prune that did not succeed (the lock not taken included),
+    /// or the file becoming readable again with other data than the last good, until <see cref="RefreshAsync"/> (or a
+    /// later write) has re-read and pruned it.</summary>
     bool IsAvailable { get; }
 
     /// <summary>Re-reads the file and prunes the records of addresses that are no longer entries (and those a failed prune

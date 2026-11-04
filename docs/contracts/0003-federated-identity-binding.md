@@ -267,7 +267,9 @@ Accepted by the maintainer after review rounds 1 and 2 of R1-27; they tighten th
   `identity-bindings.json.bak` exists makes the store **unavailable**, like an unreadable file; the store is empty only
   when neither exists. The `.bak` is never taken over automatically (it may hold a revoked binding); a file that is
   readable again after it was unreadable (repaired, restored from the `.bak`) makes the store wait until a re-read and
-  prune have succeeded. Recovery is the host operator's act.
+  prune have succeeded — when it holds other content than the last good data read or saved (review round 3: a file
+  another program held for a moment and left unchanged is no repair; a store already waiting keeps waiting). Recovery
+  is the host operator's act.
 - **(b) Lock file.** Every writer of every process (the running instance and the host CLI) holds an exclusive lock on
   `identity-bindings.json.lock` around its re-read, change and save, and writes a revision into it that readers compare
   (with the file's time and length) to follow changes without a restart. The lock file is not part of the self-backup.
@@ -280,6 +282,15 @@ Accepted by the maintainer after review rounds 1 and 2 of R1-27; they tighten th
 - **(d) Audit log lines.** No application log line of `AuditLogService` names the account of an `auth.*` row (written,
   failed or dropped from the sign-in queue); the identity rows' failure fallback also withholds their details. The
   persisted audit rows keep the account handle.
+
+**Out of scope of (c), reported after review round 3 (for the maintainer to confirm):** the **boot seed** —
+`RoleService` and `WhitelistService` writing `roles.json` / `whitelist.json` from the configuration at a start without
+them — is not pruned against the state before the seed. The start-up prune (order 26) runs after it and counts the
+seeded addresses as entries. Pruning against the pre-seed state would need new members on `IRoleService` /
+`IWhitelistService` and a prune inside their initialisers (the whitelist seeds at order 10, before the bindings store
+loads at 15), and a failed prune would then stop the start — interface and behaviour beyond (c). It matters only when the
+operator deletes a configuration file offline next to a bindings file holding bindings of the seeded addresses; the
+operations guide says to delete or check the bindings in that case.
 
 ## Decisions for the maintainer
 
