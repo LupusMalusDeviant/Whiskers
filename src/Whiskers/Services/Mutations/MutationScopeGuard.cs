@@ -85,7 +85,8 @@ public sealed class MutationScopeMonitor : IMutationScopeMonitor
                 is not Whiskers.Services.ServerConfig.IServerConfigService servers)
                 return null;
             Whiskers.Models.ServerConfig? server;
-            if (!string.IsNullOrEmpty(serverId)) server = servers.GetServer(serverId);
+            if (serverId is not null)                                       // an empty name is no server (round 4)
+                server = serverId.Length == 0 ? null : servers.GetServer(serverId);
             else if (omitted is null) return null;                          // no declared routing: unknown
             else server = omitted.ServerId is { } fixedId ? servers.GetServer(fixedId) : servers.GetDefaultServer();
             return server?.Id;
@@ -133,7 +134,8 @@ public sealed class MutationScopeMonitor : IMutationScopeMonitor
 /// Wraps a service interface that has <see cref="MutatingOperationAttribute"/> or <see cref="MutationPrimitiveAttribute"/>
 /// methods. A marked operation runs only when an open, attached <see cref="MutationScope"/> of this flow decided that
 /// capability or one that composes it (<see cref="MutationScope.Authorizes"/>); a primitive runs only inside an open,
-/// attached scope of a <see cref="MutationCompositions.RawHostCommands"/> capability. Every other call is passed straight through. The wrapper does not change arguments, results or
+/// attached scope of a <see cref="MutationCompositions.RawHostCommands"/> capability. Every other call is passed straight through. The wrapper does not change arguments (except one: an omitted
+/// <c>serverId</c> of a marked call becomes the canonical id the check resolved, review round 4), results or
 /// exceptions of a call it lets through.
 /// </summary>
 public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy where TService : class
@@ -176,12 +178,20 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
         {
             // An omitted server argument is not "no server": the transport falls back to its default server, which is
             // resolved and compared with the decision like a named one (R1-48, review round 2).
-            var actsOnServer = TryGetServerArgument(marked, args, out var named);
-            // Review round 3: the omitted server is resolved by the operation's own declaration (OmittedServerAttribute),
-            // the one its implementation routes by; anything unresolvable matches no decided server.
-            var server = actsOnServer ? _monitor.ResolveServer(named, OmittedServer.Of(marked)) : null;
+            var index = ServerArgumentIndex(marked);
+            var actsOnServer = index >= 0;
+            var named = actsOnServer && args is not null && index < args.Length ? args[index] as string : null;
+            // Review round 3: the omitted server (null — an empty string is a name that resolves to nothing, round 4) is
+            // resolved by the operation's own declaration (OmittedServerAttribute), the one its implementation routes by;
+            // anything unresolvable matches no decided server.
+            var server = actsOnServer ? _monitor.ResolveServer(named, named is null ? OmittedServer.Of(marked) : null) : null;
             Check(capability, targetMethod, MutationScope.Authorizes(capability, actsOnServer, server,
                 id => _monitor.ResolveServer(id)));
+            // Review round 4: execution is bound to the identity that was checked. An omitted server is handed to the
+            // implementation as the canonical id resolved above, so a default changed between this check and the
+            // transport's own lookup cannot redirect the call to another server.
+            if (named is null && server is not null && args is not null && index < args.Length)
+                args[index] = server;
         }
         else if (_primitives.Contains(marked))
             // A raw host command runs only inside a decision whose execution is one (MutationCompositions.RawHostCommands),
@@ -200,21 +210,16 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
         }
     }
 
-    /// <summary>Whether the operation acts on a server — it has a <c>string serverId</c> parameter — and the value the
-    /// call passed (<c>null</c> or empty when omitted, i.e. the default server). An operation without such a parameter
-    /// is serverless (R1-48, review m1 and round 2).</summary>
-    private static bool TryGetServerArgument(MethodInfo method, object?[]? args, out string? serverId)
+    /// <summary>The position of the operation's <c>string serverId</c> parameter, or -1 when it has none (a serverless
+    /// operation, R1-48, review m1 and round 2).</summary>
+    private static int ServerArgumentIndex(MethodInfo method)
     {
-        serverId = null;
         var parameters = method.GetParameters();
         for (var i = 0; i < parameters.Length; i++)
             if (parameters[i].ParameterType == typeof(string)
                 && string.Equals(parameters[i].Name, "serverId", StringComparison.Ordinal))
-            {
-                serverId = args is not null && i < args.Length ? args[i] as string : null;
-                return true;
-            }
-        return false;
+                return i;
+        return -1;
     }
 
     /// <summary>Refuses (enforced) or counts (report mode, tests) a call the open scope did not decide.</summary>

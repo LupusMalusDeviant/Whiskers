@@ -29,7 +29,8 @@ All notable changes to Whiskers are documented here. The format follows
   the server its operation really routes to, declared once with `[OmittedServer]` (Docker and deployments: the
   configured default; volume backups and database access: Whiskers' own host `local`, read by the implementations from the
   same declaration); an unknown server, a missing or failing registry and an unresolvable decision server match nothing
-  (a serverless operation is not matched). **Detached work:** a closed scope
+  (a serverless operation is not matched). The omitted server is then passed to the operation as the id that was
+  checked, so a default changed in between cannot redirect it; an empty `serverId` is not an omission and is refused. **Detached work:** a closed scope
   authorizes nothing — work that escaped it (`Task.Run`, a timer, a fire-and-forget continuation) is refused once the
   decision ended, and a decision started there does not nest under the dead one; background work started from code
   that can run inside a decision suppresses the flow (test-enforced). The automatic end of a check pause is no longer
@@ -53,7 +54,9 @@ All notable changes to Whiskers are documented here. The format follows
   against Whiskers' interfaces: `IBackupService` has three start-up methods (`CreatePreUpgradeBackupAsync`,
   `DeletePreUpgradeBackupAsync`, `BeginHostRestoreAsync`) used only by the upgrade guard and `--restore-backup`;
   `IRoleService.SetFirstAdminAsync` and `IWhitelistService.AddFirstAdminAsync` are new and take an
-  `AccessControlWriteGate.Lease` (a new singleton that `RoleService`, `WhitelistService` and `SetupStateService` must share);`n  `IMutationScopeMonitor.ResolveServer` is new (default: resolves nothing); a guarded operation with an omittable`n  `serverId` must declare `[OmittedServer]` (test-enforced); `IHostingerService.DeleteSnapshotAsync`
+  `AccessControlWriteGate.Lease` (a new singleton that `RoleService`, `WhitelistService` and `SetupStateService` must share);
+  `IMutationScopeMonitor.ResolveServer` is new (default: resolves nothing); a guarded operation with an omittable
+  `serverId` must declare `[OmittedServer]` (test-enforced); `IHostingerService.DeleteSnapshotAsync`
   (never called) is removed; `IServerConfigService.AdoptCloudKeyRefAsync` has no default body any more;
   `WorkloadProviderFactory` needs an `IMutationScopeMonitor`; `CloudControlService` takes the Hetzner extensions only
   from their own registration; `[MutationHandler]` needs a capability. (4) A custom service or test that writes through

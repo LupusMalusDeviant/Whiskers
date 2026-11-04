@@ -469,6 +469,58 @@ public class MutationScopeGuardTests
     }
 
     [Fact]
+    public async Task An_omitted_server_runs_on_the_server_that_was_checked_even_if_the_default_changes_meanwhile()
+    {
+        // Review round 4: app.deploy decided for A, A is the default when the guard checks the omitted pull. A concurrent
+        // settings write makes B the default before the transport looks it up — the pull must still run on A.
+        var a = new Whiskers.Models.ServerConfig { Id = "server-a", Name = "Alpha", IsDefault = true };
+        var b = new Whiskers.Models.ServerConfig { Id = "server-b", Name = "Beta" };
+        var registry = new FakeServerConfig(a, b);
+        var routed = new List<string>();
+        var inner = new RoutingProbe(registry, routed, beforeRouting: () => { a.IsDefault = false; b.IsDefault = true; });
+        var guarded = MutationScopeProxy<IServerProbe>.Wrap(inner, WithRegistryService(registry));
+
+        using (MutationScope.Begin("app.deploy", "op-r4a", request: DeployOn("server-a", "op-r4a")))
+            await guarded.PullOnDefaultAsync("x");
+
+        Assert.Equal(["server-a"], routed);                            // never the new default
+        Assert.Equal("server-b", registry.GetDefaultServer()!.Id);     // the default did change meanwhile
+    }
+
+    [Fact]
+    public async Task An_empty_server_name_is_no_omission_and_runs_nothing()
+    {
+        // Review round 4: on operations that declare where an omitted server goes, "" is not "omitted" — it names no
+        // server, at the guard and in the implementations alike, and is refused.
+        var probe = new ServerProbe();
+        var guarded = MutationScopeProxy<IServerProbe>.Wrap(probe, WithRegistry(defaultServer: "server-a"));
+        var volumesInner = new RecordingVolumes();
+        var volumes = MutationScopeProxy<Whiskers.Services.Backup.IVolumeBackupService>.Wrap(volumesInner, WithServers(
+            new Whiskers.Models.ServerConfig { Id = "local", Name = "A", IsDefault = true }));
+        using (MutationScope.Begin("app.deploy", "op-r4b", request: DeployOn("server-a", "op-r4b")))
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullOnDefaultAsync("x", ""));
+        using (MutationScope.Begin("volume.restore", "op-r4c", request: DeployOn("local", "op-r4c") with { CapabilityId = "volume.restore" }))
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => volumes.BackupVolumeAsync("data", "app", serverId: ""));
+        Assert.Equal(0, probe.Calls);
+        Assert.Equal(0, volumesInner.Backups);
+        Assert.Equal("", OmittedServer.For<Whiskers.Services.Backup.IVolumeBackupService>(""));   // not the fallback
+    }
+
+    // Routes an omitted server like the Docker connection manager: at call time, to the registry's current default.
+    private sealed class RoutingProbe(FakeServerConfig registry, List<string> routed, Action beforeRouting) : IServerProbe
+    {
+        public Task<string> PullAsync(string image, string serverId) => throw new NotSupportedException();
+        public Task<string> CreateAsync() => throw new NotSupportedException();
+        public Task<string> PullOnDefaultAsync(string image, string? serverId = null)
+        {
+            beforeRouting();
+            var server = serverId is null ? registry.GetDefaultServer()! : registry.GetServer(serverId)!;
+            routed.Add(server.Id);
+            return Task.FromResult(server.Id);
+        }
+    }
+
+    [Fact]
     public async Task A_decision_server_that_cannot_be_resolved_is_not_compared_by_its_raw_text()
     {
         // The registry fails for the decision's lookup but resolves the call's default to the same id: the raw text of an
@@ -573,7 +625,7 @@ public class MutationScopeGuardTests
         // The same pull is allowed when the default is the decided server.
         var onA = MutationScopeProxy<IServerProbe>.Wrap(new ServerProbe(), WithRegistry(defaultServer: "server-a"));
         using (MutationScope.Begin("app.deploy", "op-r2b", request: DeployOn("server-a", "op-r2b")))
-            Assert.Equal("pulled x on default", await onA.PullOnDefaultAsync("x"));
+            Assert.Equal("pulled x on server-a", await onA.PullOnDefaultAsync("x"));   // bound to the checked server
     }
 
     [Fact]
