@@ -611,6 +611,55 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Webhooks.WebhookService.StartAsync", "runs on the webhook worker, which StartAsync starts with the flow suppressed: never inside a decision"),
     ];
 
+    /// <summary>Every guarded operation whose <c>serverId</c> may be omitted (nullable or optional).</summary>
+    private static IEnumerable<MethodInfo> GuardedOperationsWithOmittableServer()
+    {
+        var nullability = new NullabilityInfoContext();
+        return typeof(IMutationScopeMonitor).Assembly.GetTypes()
+            .Where(t => t.IsInterface)
+            .SelectMany(t => MutatingMethods.Of(t).Keys.Where(m => m.DeclaringType == t))
+            .Distinct()
+            .Where(m => m.GetParameters().Any(p => p.ParameterType == typeof(string) && p.Name == "serverId"
+                && (p.HasDefaultValue || nullability.Create(p).WriteState == NullabilityState.Nullable)));
+    }
+
+    [Fact]
+    public void Every_guarded_operation_with_an_omittable_server_declares_where_it_acts_then()
+    {
+        // R1-48 review round 3: an omitted serverId is resolved by the operation's own declaration, which its
+        // implementation routes by too — the guard never assumes a default.
+        var undeclared = GuardedOperationsWithOmittableServer()
+            .Where(m => OmittedServer.Of(m) is null)
+            .Select(m => $"{m.DeclaringType!.Name}.{m.Name}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        Assert.True(undeclared.Count == 0, "Declare [OmittedServer] on: " + string.Join(", ", undeclared));
+        Assert.NotEmpty(GuardedOperationsWithOmittableServer());
+    }
+
+    [Fact]
+    public void The_fixed_omitted_server_declarations_are_the_ones_their_implementations_use()
+    {
+        // The host-side services fall back to Whiskers' own host; they read it from their interface's declaration
+        // (OmittedServer.For<T>), so the guard and the implementation cannot drift apart.
+        Assert.Equal(OmittedServer.Local, OmittedServer.For<IVolumeBackupService>(null));
+        Assert.Equal(OmittedServer.Local, OmittedServer.For<Whiskers.Services.Database.IDatabaseService>(null));
+        Assert.Equal("server-b", OmittedServer.For<IVolumeBackupService>("server-b"));
+        Assert.Throws<InvalidOperationException>(() => OmittedServer.For<Whiskers.Services.Docker.IDockerService>(null));
+
+        // The implementations take their fallback from the declaration (no literal of their own).
+        var users = MutationScanner_Callers(m => m.DeclaringType == typeof(OmittedServer) && m.Name == nameof(OmittedServer.For));
+        Assert.Equal([
+                "Whiskers.Services.Backup.VolumeBackupService.BackupVolumeAsync",
+                "Whiskers.Services.Backup.VolumeBackupService.ListVolumesAsync",
+                "Whiskers.Services.Database.DatabaseService.BackupDatabaseAsync",
+                "Whiskers.Services.Database.DatabaseService.ExecInContainer"],
+            users);
+    }
+
+    private static IReadOnlyList<string> MutationScanner_Callers(Func<MethodInfo, bool> match) => MutationCallScanner
+        .Callers(App, match).Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().Order(StringComparer.Ordinal).ToList();
+
     [Fact]
     public void The_account_recovery_paths_have_exactly_their_callers()
     {

@@ -3,6 +3,8 @@ using Whiskers.Models;
 
 namespace Whiskers.Services.Deployment;
 
+/// <summary>App deployments. An omitted <c>serverId</c> is passed on to Docker unchanged and so means the configured default server.</summary>
+[OmittedServer]
 public interface IDeploymentService
 {
     [MutatingOperation("app.deploy")]

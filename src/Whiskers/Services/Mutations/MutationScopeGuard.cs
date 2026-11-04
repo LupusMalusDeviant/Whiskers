@@ -44,12 +44,13 @@ public interface IMutationScopeMonitor
     IReadOnlyList<MutationBypassReport> Snapshot();
 
     /// <summary>
-    /// The canonical id of the server a call acts on (R1-48, review round 2): the named server, or — when the call's
-    /// <c>serverId</c> argument was omitted — the server the transport falls back to (the configured default). Null
-    /// when it cannot be resolved; a composed call then matches no decision taken for a server. Without a server
-    /// registry this resolves nothing for an omitted argument.
+    /// The canonical id (the registry's) of the server a call acts on (R1-48, review rounds 2 and 3): the named server,
+    /// or — when the call's <c>serverId</c> argument was omitted — the server the operation's
+    /// <see cref="OmittedServerAttribute"/> declares (the configured default, or a fixed id). Null when it cannot be
+    /// resolved: an unknown server, an omitted argument without a declaration, no registry, or a failing lookup. A
+    /// composed call then matches no decision taken for a server (fail closed). Without a registry nothing resolves.
     /// </summary>
-    string? ResolveServer(string? serverId) => string.IsNullOrEmpty(serverId) ? null : serverId;
+    string? ResolveServer(string? serverId, OmittedServerAttribute? omitted = null) => null;
 }
 
 public sealed class MutationScopeMonitor : IMutationScopeMonitor
@@ -76,16 +77,18 @@ public sealed class MutationScopeMonitor : IMutationScopeMonitor
     }
 
     /// <inheritdoc />
-    public string? ResolveServer(string? serverId)
+    public string? ResolveServer(string? serverId, OmittedServerAttribute? omitted = null)
     {
-        var omitted = string.IsNullOrEmpty(serverId);
         try
         {
-            var servers = _services?.GetService(typeof(Whiskers.Services.ServerConfig.IServerConfigService))
-                as Whiskers.Services.ServerConfig.IServerConfigService;
-            if (servers is null) return omitted ? null : serverId;
-            var server = omitted ? servers.GetDefaultServer() : servers.GetServer(serverId!);
-            return server?.Id ?? (omitted ? null : serverId);
+            if (_services?.GetService(typeof(Whiskers.Services.ServerConfig.IServerConfigService))
+                is not Whiskers.Services.ServerConfig.IServerConfigService servers)
+                return null;
+            Whiskers.Models.ServerConfig? server;
+            if (!string.IsNullOrEmpty(serverId)) server = servers.GetServer(serverId);
+            else if (omitted is null) return null;                          // no declared routing: unknown
+            else server = omitted.ServerId is { } fixedId ? servers.GetServer(fixedId) : servers.GetDefaultServer();
+            return server?.Id;
         }
         catch (Exception ex)
         {
@@ -174,8 +177,11 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
             // An omitted server argument is not "no server": the transport falls back to its default server, which is
             // resolved and compared with the decision like a named one (R1-48, review round 2).
             var actsOnServer = TryGetServerArgument(marked, args, out var named);
-            var server = actsOnServer ? _monitor.ResolveServer(named) : null;
-            Check(capability, targetMethod, MutationScope.Authorizes(capability, actsOnServer, server, _monitor.ResolveServer));
+            // Review round 3: the omitted server is resolved by the operation's own declaration (OmittedServerAttribute),
+            // the one its implementation routes by; anything unresolvable matches no decided server.
+            var server = actsOnServer ? _monitor.ResolveServer(named, OmittedServer.Of(marked)) : null;
+            Check(capability, targetMethod, MutationScope.Authorizes(capability, actsOnServer, server,
+                id => _monitor.ResolveServer(id)));
         }
         else if (_primitives.Contains(marked))
             // A raw host command runs only inside a decision whose execution is one (MutationCompositions.RawHostCommands),

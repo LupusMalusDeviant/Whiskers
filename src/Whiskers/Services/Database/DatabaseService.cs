@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services.Mutations;
 using Whiskers.Services.Server;
 using Whiskers.Utils;
 
@@ -31,7 +32,7 @@ public class DatabaseService : IDatabaseService
         // The container is an operand of docker (R1-42): checked, and after "--" so it is never read as an option.
         var dockerCmd = "docker exec -- " + ShellUtils.Quote(CommandOperands.RequireContainerRef(containerId)) + " " +
                         string.Join(' ', cmd.Select(ShellUtils.Quote));
-        var r = await _hostExec.ExecuteAsync(serverId ?? "local", dockerCmd, timeout ?? TimeSpan.FromSeconds(30));
+        var r = await _hostExec.ExecuteAsync(OmittedServer.For<IDatabaseService>(serverId), dockerCmd, timeout ?? TimeSpan.FromSeconds(30));
         return (r.Output, r.Error, r.ExitCode);
     }
 
@@ -200,7 +201,7 @@ public class DatabaseService : IDatabaseService
         var containerFile = dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath;
         var hostFileName = dbType == DatabaseType.MongoDB ? $"{fileName}.gz" : fileName;
         var hostPath = $"{_hostBackupDir}/{hostFileName}";
-        var sid = serverId ?? "local";
+        var sid = OmittedServer.For<IDatabaseService>(serverId);   // the declared fallback the scope guard resolves too
 
         await _hostExec.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(_hostBackupDir)}", TimeSpan.FromSeconds(5));
         var cp = await _hostExec.ExecuteAsync(sid,

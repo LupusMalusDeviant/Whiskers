@@ -367,7 +367,7 @@ public class MutationScopeGuardTests
     public async Task A_composed_call_must_act_on_the_server_the_decision_was_taken_for()
     {
         // R1-48 review m1: an app.deploy decided for server A composes image.pull — on A, not on B.
-        var guarded = MutationScopeProxy<IServerProbe>.Wrap(new ServerProbe(), Production());
+        var guarded = MutationScopeProxy<IServerProbe>.Wrap(new ServerProbe(), WithRegistry(defaultServer: "server-a"));
         var request = new MutationRequest("app.deploy",
             new MutationPrincipal(MutationPrincipalKind.Human, "a@x", "a@x", Whiskers.Models.McpPermissionLevels.Admin),
             MutationSurface.Ui, new MutationTarget("host", "server-a", ServerId: "server-a"),
@@ -379,8 +379,8 @@ public class MutationScopeGuardTests
             Assert.Equal("pulled x on SERVER-A", await guarded.PullAsync("x", "SERVER-A"));   // ids ignore case
             var refused = await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", "server-b"));
             Assert.Equal("app.deploy", refused.OpenScope);
-            // R1-48 review round 2: an omitted server is the transport's default — without a registry it cannot be
-            // resolved, so it matches no decided server (fail closed).
+            // Review rounds 2/3: PullAsync declares no omitted-server routing — an omitted server cannot be resolved, so
+            // it matches no decided server (fail closed), even though the default here is the decided server.
             await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", ""));
         }
 
@@ -391,13 +391,162 @@ public class MutationScopeGuardTests
     }
 
     // A monitor whose server registry has server-a and server-b, with <paramref name="defaultServer"/> as the default.
-    private static MutationScopeMonitor WithRegistry(string defaultServer)
+    private static MutationScopeMonitor WithRegistry(string defaultServer) => WithServers(
+        new Whiskers.Models.ServerConfig { Id = "server-a", Name = "Alpha", IsDefault = defaultServer == "server-a" },
+        new Whiskers.Models.ServerConfig { Id = "server-b", Name = "Beta", IsDefault = defaultServer == "server-b" });
+
+    private static MutationScopeMonitor WithServers(params Whiskers.Models.ServerConfig[] servers) =>
+        WithRegistryService(new FakeServerConfig(servers));
+
+    private static MutationScopeMonitor WithRegistryService(Whiskers.Services.ServerConfig.IServerConfigService registry)
     {
         var services = new ServiceCollection();
-        services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
-            new Whiskers.Models.ServerConfig { Id = "server-a", Name = "Alpha", IsDefault = defaultServer == "server-a" },
-            new Whiskers.Models.ServerConfig { Id = "server-b", Name = "Beta", IsDefault = defaultServer == "server-b" }));
+        services.AddSingleton(registry);
         return new MutationScopeMonitor(NullLogger<MutationScopeMonitor>.Instance, services: services.BuildServiceProvider());
+    }
+
+    [Fact]
+    public async Task An_omitted_server_resolves_by_the_operations_own_routing_not_the_docker_default()
+    {
+        // Review round 3: volume.restore decided for B; B is the configured default, Whiskers' own host "local" is A.
+        // The volume service routes an omitted server to "local" (its declared fallback), so the nested safety backup
+        // with serverId: null acts on A — refused before it runs.
+        var inner = new RecordingVolumes();
+        var volumes = MutationScopeProxy<Whiskers.Services.Backup.IVolumeBackupService>.Wrap(inner, WithServers(
+            new Whiskers.Models.ServerConfig { Id = "local", Name = "A" },
+            new Whiskers.Models.ServerConfig { Id = "server-b", Name = "B", IsDefault = true }));
+        var restoreOnB = DeployOn("server-b", "op-r3a") with { CapabilityId = "volume.restore" };
+        using (MutationScope.Begin("volume.restore", "op-r3a", request: restoreOnB))
+        {
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => volumes.BackupVolumeAsync("data", "app", serverId: null));
+            Assert.Equal(0, inner.Backups);
+            await volumes.BackupVolumeAsync("data", "app", serverId: "server-b");   // named: the decided server
+            Assert.Equal(1, inner.Backups);
+        }
+
+        var restoreOnLocal = DeployOn("local", "op-r3b") with { CapabilityId = "volume.restore" };
+        using (MutationScope.Begin("volume.restore", "op-r3b", request: restoreOnLocal))
+            await volumes.BackupVolumeAsync("data", "app", serverId: null);       // omitted = local = the decided server
+        Assert.Equal(2, inner.Backups);
+    }
+
+    [Fact]
+    public async Task Unresolvable_server_identities_match_nothing()
+    {
+        // Review round 3: an unknown name, a missing registry, a failing registry and an unresolvable decision server all
+        // fail closed — nothing runs.
+        var request = DeployOn("ghost", "op-r3c");
+
+        var unknown = new ServerProbe();
+        var guarded = MutationScopeProxy<IServerProbe>.Wrap(unknown, WithRegistry(defaultServer: "server-a"));
+        using (MutationScope.Begin("app.deploy", "op-r3c", request: request))
+        {
+            // Decision and call name the same unknown server: no match.
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", "ghost"));
+            // The decision's server is unresolvable: not even the default server matches it.
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullOnDefaultAsync("x"));
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullAsync("x", "server-a"));
+        }
+        Assert.Equal(0, unknown.Calls);
+
+        var noRegistry = new ServerProbe();
+        var bare = MutationScopeProxy<IServerProbe>.Wrap(noRegistry, Production());
+        using (MutationScope.Begin("app.deploy", "op-r3d", request: DeployOn("server-a", "op-r3d")))
+        {
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => bare.PullAsync("x", "server-a"));
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => bare.PullOnDefaultAsync("x"));
+        }
+        Assert.Equal(0, noRegistry.Calls);
+
+        var failing = new ServerProbe();
+        var broken = MutationScopeProxy<IServerProbe>.Wrap(failing, WithRegistryService(new ThrowingRegistry()));
+        using (MutationScope.Begin("app.deploy", "op-r3e", request: DeployOn("server-a", "op-r3e")))
+        {
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => broken.PullAsync("x", "server-a"));
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => broken.PullOnDefaultAsync("x"));
+        }
+        Assert.Equal(0, failing.Calls);
+    }
+
+    [Fact]
+    public async Task A_decision_server_that_cannot_be_resolved_is_not_compared_by_its_raw_text()
+    {
+        // The registry fails for the decision's lookup but resolves the call's default to the same id: the raw text of an
+        // unresolved decision must not stand in for its identity.
+        var inner = new ServerProbe();
+        var guarded = MutationScopeProxy<IServerProbe>.Wrap(inner, WithRegistryService(new LookupFailsRegistry()));
+        using (MutationScope.Begin("app.deploy", "op-r3f", request: DeployOn("server-a", "op-r3f")))
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.PullOnDefaultAsync("x"));
+        Assert.Equal(0, inner.Calls);
+    }
+
+    // Named lookups fail; the default server (server-a) still resolves.
+    private sealed class LookupFailsRegistry : Whiskers.Services.ServerConfig.IServerConfigService
+    {
+        private static readonly Whiskers.Models.ServerConfig A = new() { Id = "server-a", Name = "Alpha", IsDefault = true };
+        public bool IsInitialized => true;
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public List<Whiskers.Models.ServerConfig> GetServers() => [A];
+        public List<Whiskers.Models.ServerConfig> GetEnabledServers() => [A];
+        public Whiskers.Models.ServerConfig? GetServer(string serverId) => throw new IOException("lookup failed");
+        public Whiskers.Models.ServerConfig? GetDefaultServer() => A;
+        public bool SupportsTerminal(string? serverId) => false;
+        public Task AddServerAsync(Whiskers.Models.ServerConfig server) => throw new NotSupportedException();
+        public Task UpdateServerAsync(Whiskers.Models.ServerConfig server) => throw new NotSupportedException();
+        public Task RemoveServerAsync(string serverId) => throw new NotSupportedException();
+        public Task SaveSshKeyAsync(string serverId, string fileName, byte[] keyData) => throw new NotSupportedException();
+        public string? GetSshKeyPath(Whiskers.Models.ServerConfig server) => null;
+        public Task DeleteSshKeyAsync(string serverId) => throw new NotSupportedException();
+        public Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef) => throw new NotSupportedException();
+    }
+
+    private sealed class ThrowingRegistry : Whiskers.Services.ServerConfig.IServerConfigService
+    {
+        public bool IsInitialized => true;
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public List<Whiskers.Models.ServerConfig> GetServers() => throw new IOException("registry down");
+        public List<Whiskers.Models.ServerConfig> GetEnabledServers() => throw new IOException("registry down");
+        public Whiskers.Models.ServerConfig? GetServer(string serverId) => throw new IOException("registry down");
+        public Whiskers.Models.ServerConfig? GetDefaultServer() => throw new IOException("registry down");
+        public bool SupportsTerminal(string? serverId) => false;
+        public Task AddServerAsync(Whiskers.Models.ServerConfig server) => throw new NotSupportedException();
+        public Task UpdateServerAsync(Whiskers.Models.ServerConfig server) => throw new NotSupportedException();
+        public Task RemoveServerAsync(string serverId) => throw new NotSupportedException();
+        public Task SaveSshKeyAsync(string serverId, string fileName, byte[] keyData) => throw new NotSupportedException();
+        public string? GetSshKeyPath(Whiskers.Models.ServerConfig server) => null;
+        public Task DeleteSshKeyAsync(string serverId) => throw new NotSupportedException();
+        public Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingVolumes : Whiskers.Services.Backup.IVolumeBackupService
+    {
+        public int Backups;
+        public Task<Whiskers.Models.VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null)
+        {
+            Interlocked.Increment(ref Backups);
+            return Task.FromResult(new Whiskers.Models.VolumeBackupEntity());
+        }
+        public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => Task.CompletedTask;
+        public Task<List<Whiskers.Models.VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null) => Task.FromResult(new List<Whiskers.Models.VolumeBackupEntity>());
+        public Task DeleteBackupAsync(string backupId) => Task.CompletedTask;
+        public Task<List<string>> ListVolumesAsync(string? serverId = null) => Task.FromResult(new List<string>());
+    }
+
+    [Fact]
+    public void The_registered_monitor_resolves_through_the_registered_server_registry()
+    {
+        // The production registration gives the monitor the registry (resolved on use).
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
+            new Whiskers.Models.ServerConfig { Id = "server-a", Name = "Alpha", IsDefault = true }));
+        services.AddSingleton<IMutationScopeMonitor, MutationScopeMonitor>();
+        using var provider = services.BuildServiceProvider();
+        var monitor = provider.GetRequiredService<IMutationScopeMonitor>();
+        Assert.Equal("server-a", monitor.ResolveServer(null, new OmittedServerAttribute()));
+        Assert.Equal("server-a", monitor.ResolveServer("ALPHA"));
+        Assert.Null(monitor.ResolveServer("ghost"));
+        Assert.Null(monitor.ResolveServer(null));                     // no declaration: unknown
     }
 
     private static MutationRequest DeployOn(string serverId, string op) => new("app.deploy",
@@ -442,6 +591,7 @@ public class MutationScopeGuardTests
         Task<string> PullAsync(string image, string serverId);
 
         [MutatingOperation("image.pull")]
+        [OmittedServer]
         Task<string> PullOnDefaultAsync(string image, string? serverId = null);
 
         [MutatingOperation("container.create")]

@@ -3,6 +3,9 @@ using Whiskers.Models;
 
 namespace Whiskers.Services.Docker;
 
+/// <summary>Docker on the registered servers. An omitted <c>serverId</c> means the registry's configured default server: the
+/// connection manager routes there (<c>DockerConnectionManager.GetClientAsync</c>), and the scope guard resolves it the same way.</summary>
+[OmittedServer]
 public interface IDockerService
 {
     Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default);

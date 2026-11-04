@@ -3,6 +3,9 @@ using Whiskers.Models;
 
 namespace Whiskers.Services.Backup;
 
+/// <summary>Volume backups on a Docker host. An omitted <c>serverId</c> means Whiskers' own host (<see cref="OmittedServer.Local"/>):
+/// the implementation reads that from this declaration (<see cref="OmittedServer.For{TService}"/>), as the scope guard does.</summary>
+[OmittedServer(OmittedServer.Local)]
 public interface IVolumeBackupService
 {
     [MutatingOperation("volume.backup")]

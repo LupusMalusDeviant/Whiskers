@@ -25,8 +25,11 @@ All notable changes to Whiskers are documented here. The format follows
   guarded now), the AutoPatch runner (`container.update`), cloud power/snapshot with the Hetzner extensions and the
   Hostinger client, DNS provider writes and container notification preferences are marked; every other write-named
   interface method is listed with the reason it is no gateway operation. A nested operation must act on the server its
-  decision was taken for (an `app.deploy` on server A cannot pull on server B); a call that omits its server acts on
-  the transport's default server and is matched against that (a serverless operation is not matched). **Detached work:** a closed scope
+  decision was taken for (an `app.deploy` on server A cannot pull on server B); a call that omits its server is matched against
+  the server its operation really routes to, declared once with `[OmittedServer]` (Docker and deployments: the
+  configured default; volume backups and database access: Whiskers' own host `local`, read by the implementations from the
+  same declaration); an unknown server, a missing or failing registry and an unresolvable decision server match nothing
+  (a serverless operation is not matched). **Detached work:** a closed scope
   authorizes nothing — work that escaped it (`Task.Run`, a timer, a fire-and-forget continuation) is refused once the
   decision ended, and a decision started there does not nest under the dead one; background work started from code
   that can run inside a decision suppresses the flow (test-enforced). The automatic end of a check pause is no longer
@@ -49,7 +52,7 @@ All notable changes to Whiskers are documented here. The format follows
   audit record cannot be written (nothing is changed; try again once the database answers). (3) For code built
   against Whiskers' interfaces: `IBackupService` has three start-up methods (`CreatePreUpgradeBackupAsync`,
   `DeletePreUpgradeBackupAsync`, `BeginHostRestoreAsync`) used only by the upgrade guard and `--restore-backup`;
-  `IRoleService.SetFirstAdminAsync` and `IWhitelistService.AddFirstAdminAsync` are new and take an`n  `AccessControlWriteGate.Lease` (a new singleton that `RoleService`, `WhitelistService` and `SetupStateService` must share);`n  `IMutationScopeMonitor.ResolveServer` is new (default: no registry); `IHostingerService.DeleteSnapshotAsync`
+  `IRoleService.SetFirstAdminAsync` and `IWhitelistService.AddFirstAdminAsync` are new and take an`n  `AccessControlWriteGate.Lease` (a new singleton that `RoleService`, `WhitelistService` and `SetupStateService` must share);`n  `IMutationScopeMonitor.ResolveServer` is new (default: resolves nothing); a guarded operation with an omittable`n  `serverId` must declare `[OmittedServer]` (test-enforced); `IHostingerService.DeleteSnapshotAsync`
   (never called) is removed; `IServerConfigService.AdoptCloudKeyRefAsync` has no default body any more;
   `WorkloadProviderFactory` needs an `IMutationScopeMonitor`; `CloudControlService` takes the Hetzner extensions only
   from their own registration; `[MutationHandler]` needs a capability. (4) A custom service or test that writes through

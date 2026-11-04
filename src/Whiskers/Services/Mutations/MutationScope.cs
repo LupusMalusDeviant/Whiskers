@@ -120,7 +120,8 @@ public sealed class MutationScope : IDisposable
     /// the transport's default server, and <paramref name="server"/> is then that default's canonical id. A
     /// <c>null</c> <paramref name="server"/> on a server operation means the server could not be resolved: a composed
     /// call then matches no decision taken for a server (fail closed). <paramref name="canonical"/> maps the decision's
-    /// server to the same canonical form before the comparison.
+    /// server to the same canonical form before the comparison; when it cannot be resolved (<c>null</c>), the decision matches
+    /// no composed server call either (review round 3).
     /// </summary>
     public static bool Authorizes(string capabilityId, bool actsOnServer, string? server, Func<string, string?>? canonical)
     {
@@ -129,8 +130,10 @@ public sealed class MutationScope : IDisposable
             if (string.Equals(s.CapabilityId, capabilityId, StringComparison.Ordinal)) return true;
             if (!MutationCompositions.Allows(s.CapabilityId, capabilityId)) continue;
             if (!actsOnServer || string.IsNullOrEmpty(s._serverId)) return true;
-            var decided = canonical?.Invoke(s._serverId) ?? s._serverId;
-            if (server is not null && string.Equals(decided, server, StringComparison.OrdinalIgnoreCase)) return true;
+            // Review round 3: an identity that cannot be resolved — the call's or the decision's — matches nothing.
+            var decided = canonical is null ? s._serverId : canonical(s._serverId);
+            if (server is not null && decided is not null && string.Equals(decided, server, StringComparison.OrdinalIgnoreCase))
+                return true;
         }
         return false;
     }
