@@ -808,7 +808,4 @@ public static class ProtectedResourceMatcher
         try { return UnanalyzableSql.IsMatch(text) || (MongoShell.IsMatch(text) && MongoJoined.IsMatch(text)); }
         catch (RegexMatchTimeoutException) { return true; }
     }
-
-    /// <summary>Whether a shell command builds what it acts on at run time.</summary>
-    public static bool IsUnanalyzableShell(string text) => AnalyseShell(text).Unanalyzable;
 }

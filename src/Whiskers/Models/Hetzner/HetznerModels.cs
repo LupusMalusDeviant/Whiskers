@@ -112,26 +112,6 @@ public class HetznerActionError
     [JsonPropertyName("message")] public string? Message { get; set; }
 }
 
-// ─────────────────────────── Firewalls ───────────────────────────
-
-public class HetznerFirewall
-{
-    [JsonPropertyName("id")] public long Id { get; set; }
-    [JsonPropertyName("name")] public string Name { get; set; } = "";
-    [JsonPropertyName("rules")] public List<HetznerFirewallRule> Rules { get; set; } = new();
-    [JsonPropertyName("applied_to")] public List<JsonElement>? AppliedTo { get; set; }
-}
-
-public class HetznerFirewallRule
-{
-    [JsonPropertyName("direction")] public string? Direction { get; set; }
-    [JsonPropertyName("protocol")] public string? Protocol { get; set; }
-    [JsonPropertyName("port")] public string? Port { get; set; }
-    [JsonPropertyName("source_ips")] public List<string>? SourceIps { get; set; }
-    [JsonPropertyName("destination_ips")] public List<string>? DestinationIps { get; set; }
-    [JsonPropertyName("description")] public string? Description { get; set; }
-}
-
 // ─────────────────────────── Metrics ───────────────────────────
 
 public class HetznerMetrics
@@ -169,21 +149,6 @@ public class HetznerTimeSeries
     }
 }
 
-// ─────────────────────────── Pricing ───────────────────────────
-
-public class HetznerPricing
-{
-    [JsonPropertyName("currency")] public string? Currency { get; set; }
-    [JsonPropertyName("vat_rate")] public string? VatRate { get; set; }
-    [JsonPropertyName("traffic")] public string? Traffic { get; set; }
-    [JsonPropertyName("server_backup")] public HetznerBackupPricing? ServerBackup { get; set; }
-}
-
-public class HetznerBackupPricing
-{
-    [JsonPropertyName("percentage")] public string? Percentage { get; set; }
-}
-
 // ─────────────────────────── Response wrappers ───────────────────────────
 
 public class HetznerServersResponse
@@ -213,22 +178,7 @@ public class HetznerImageResponse
     [JsonPropertyName("image")] public HetznerImage? Image { get; set; }
 }
 
-public class HetznerServerTypesResponse
-{
-    [JsonPropertyName("server_types")] public List<HetznerServerType> ServerTypes { get; set; } = new();
-}
-
-public class HetznerFirewallsResponse
-{
-    [JsonPropertyName("firewalls")] public List<HetznerFirewall> Firewalls { get; set; } = new();
-}
-
 public class HetznerMetricsResponse
 {
     [JsonPropertyName("metrics")] public HetznerMetrics? Metrics { get; set; }
-}
-
-public class HetznerPricingResponse
-{
-    [JsonPropertyName("pricing")] public HetznerPricing? Pricing { get; set; }
 }

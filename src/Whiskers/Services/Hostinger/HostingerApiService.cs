@@ -105,39 +105,10 @@ public class HostingerApiService : IHostingerService
         return JsonSerializer.Deserialize<List<HostingerVm>>(el.GetRawText(), JsonOptions) ?? new();
     }
 
-    public async Task<HostingerVm?> GetVmAsync(string token, long id, CancellationToken ct = default)
-    {
-        try
-        {
-            var json = await SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}", ct);
-            if (string.IsNullOrWhiteSpace(json)) return null;
-            using var doc = JsonDocument.Parse(json);
-            return JsonSerializer.Deserialize<HostingerVm>(Unwrap(doc).GetRawText(), JsonOptions);
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            return null;
-        }
-    }
-
     public Task StartAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/start", ct);
     public Task StopAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/stop", ct);
     public Task RestartAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/restart", ct);
 
-    public async Task<HostingerSnapshot?> GetSnapshotAsync(string token, long id, CancellationToken ct = default)
-    {
-        try
-        {
-            var json = await SendRawAsync(token, HttpMethod.Get, $"/virtual-machines/{id}/snapshot", ct);
-            if (string.IsNullOrWhiteSpace(json)) return null;
-            using var doc = JsonDocument.Parse(json);
-            return JsonSerializer.Deserialize<HostingerSnapshot>(Unwrap(doc).GetRawText(), JsonOptions);
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            return null;
-        }
-    }
 
     public Task CreateSnapshotAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/snapshot", ct);
 
