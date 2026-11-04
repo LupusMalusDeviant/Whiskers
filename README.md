@@ -37,12 +37,14 @@ antidote:
 |---|---|---|
 | **Access** | Raw `docker.sock` or kubeconfig in the agent's process | The agent never touches the socket or the kubeconfig (encrypted in the vault) — it calls scoped tools; Kubernetes workloads are operated from the governed UI today, MCP pod tools are on the roadmap |
 | **Reach** | `stdio`, one host | Agent ↔ Whiskers over Streamable HTTP; Whiskers ↔ many hosts over mesh + mTLS — no standing SSH key once a host is onboarded |
-| **Permissions** | Everything the socket allows | Per key: Read, Write or Admin scope, or an explicit tool list — checked on every call |
-| **Risky actions** | Executed as requested | Guardrails (agent module, on by default) allow, deny or pause for human approval; blast-radius and update-risk assessment before an update (`get_blast_radius`, `assess_update_risk`, `plan_safe_update`) |
-| **Afterwards** | Usually no record | Hash-chained audit trail with signed checkpoints (tamper-evident when `VAULT_KEY` is set) plus Agent History |
+| **Permissions** | Everything the socket allows | Per key: Read, Write or Admin scope, optionally narrowed to an explicit tool list — checked on every call |
+| **Risky actions** | Executed as requested | Guardrails (core, always on) allow, deny or pause for human approval; blast-radius and update-risk assessment tools available before an update (`get_blast_radius`, `assess_update_risk`; the `plan_safe_update` prompt chains them) |
+| **Afterwards** | Usually no record | Hash-chained audit trail (checkpoints signed, and the trail tamper-evident, when `VAULT_KEY` is set) plus Agent History |
 
-**Zero-trust here means:** no caller is trusted by default — every call is authenticated per key, scope-checked and
-guardrail-evaluated in code, and every host link is mTLS over a private mesh.
+**Zero-trust here means:** no caller is trusted by default — every call is authenticated (API key or signed-in user),
+scope-checked and guardrail-evaluated in code, and every onboarded host is reached over a private WireGuard mesh, with
+the Docker and host-control planes on mTLS (client certificate, CN-pinned). The opt-in `Auth:Disabled` LAN mode
+switches authentication off.
 
 AI agents can operate infrastructure — but the usual way to let them is to hand over an SSH key or a
 shell, which grants far more power than any single task needs. Whiskers puts a governed layer in
@@ -471,8 +473,8 @@ in a prompt, so no model output can talk its way past it.
 | In-process agent (triggered from the UI **or** via MCP `instruct_agent`) | ✅ capped at the triggering user's / key's scope | ✅ every call; `Confirm` pauses the run until a human approves the exact action + parameters | Agent History |
 
 Approvals are resolved on the *Approvals* page; approving requires at least the level the action needs.
-The guardrail engine is part of the agent module (on by default). With that module switched off there is
-no Approvals page either, and direct calls are bounded by their scope alone.
+The guardrail engine and approvals are core: they also govern direct MCP calls when the agent module is
+switched off.
 
 ---
 
