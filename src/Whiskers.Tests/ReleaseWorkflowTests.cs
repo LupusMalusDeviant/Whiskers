@@ -62,10 +62,14 @@ public class ReleaseWorkflowTests
         => Assert.Empty(WorkflowPolicy.IntegrationGateViolations(Workflow("release.yml"), Workflow("ci.yml"), Workflow("security.yml")));
 
     [Theory]
-    [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/docker.trx 70 --no-skips\n", "")]  // skips of the PostgreSQL suites pass
+    [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/docker.trx 70 --no-skips --require .github/required-tests/docker.txt\n", "")]  // skips of the PostgreSQL suites pass
     [InlineData("ci.yml", "TestResults/docker.trx 70 --no-skips", "TestResults/docker.trx 70")]                                // skipped tests allowed
     [InlineData("ci.yml", "--filter \"Category=RequiresDocker\"", "--filter \"Category=Nothing\"")]                           // the suite never runs
-    [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/in-process.trx 3000\n", "")]        // only "some test passed"
+    [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/in-process.trx 3000 --require .github/required-tests/in-process.txt\n", "")]  // only "some test passed"
+    [InlineData("ci.yml", " --require .github/required-tests/docker.txt", "")]                                                 // the Identity test may vanish behind the floor
+    [InlineData("ci.yml", " --require .github/required-tests/in-process.txt", "")]                                             // the endpoint matrix may vanish behind the floor
+    [InlineData("ci.yml", "--require .github/required-tests/docker.txt", "--require .github/required-tests/in-process.txt")]   // the wrong manifest for the run
+    [InlineData("ci.yml", "artifact-checks.sh previous-release \"$VER\")", "artifact-checks.sh previous-release)")]             // N-1 may be the release under test
     [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"", "        run: echo skipped")]
     [InlineData("ci.yml", "          bash .github/scripts/artifact-checks.sh upgrade \"$ARTIFACT\" \"$PREVIOUS\"", "          echo skipped")]
     [InlineData("ci.yml", "      - name: Trivy scan (gate, fail on CRITICAL)\n        uses: aquasecurity", "      - name: Trivy scan (gate, fail on CRITICAL)\n        if: false\n        uses: aquasecurity")]
@@ -803,17 +807,18 @@ internal static class WorkflowPolicy
             if (Scalar(Child(step, "continue-on-error")) is { } c && !c.Equals("false", StringComparison.OrdinalIgnoreCase))
                 violations.Add($"{file} job '{id}' lets a step fail without failing the job (continue-on-error)");
 
-        // The suite: in-process tests with a floor, Docker-backed tests with a floor and no skips (TA-50, F-13).
+        // The suite: in-process tests with a floor, Docker-backed tests with a floor and no skips (TA-50, F-13), each with
+        // the manifest of its required tests — a floor alone lets one mandatory test vanish behind the others.
         var ciRuns = ci.Values.SelectMany(Steps).Select(s => Scalar(Child(s, "run"))).OfType<string>().ToList();
         if (!ciRuns.Any(r => r.Contains("dotnet test", StringComparison.Ordinal)
                              && r.Contains("--filter \"Category!=RequiresDocker\"", StringComparison.Ordinal)
-                             && Regex.IsMatch(r, @"check-test-results\.sh \S+ [1-9]\d*")))
-            violations.Add("ci.yml does not check the in-process test results against a floor of passed tests");
+                             && Regex.IsMatch(r, @"check-test-results\.sh \S+ [1-9]\d* --require \.github/required-tests/in-process\.txt\n")))
+            violations.Add("ci.yml does not check the in-process test results against a floor and their required tests");
         if (!ciRuns.Any(r => r.Contains("dotnet test", StringComparison.Ordinal)
                              && r.Contains("--filter \"Category=RequiresDocker\"", StringComparison.Ordinal)
                              && r.Contains("docker info", StringComparison.Ordinal)
-                             && Regex.IsMatch(r, @"check-test-results\.sh \S+ [1-9]\d* --no-skips")))
-            violations.Add("ci.yml does not run the Docker-backed suites as mandatory (Docker probe, floor, no skips)");
+                             && Regex.IsMatch(r, @"check-test-results\.sh \S+ [1-9]\d* --no-skips --require \.github/required-tests/docker\.txt\n")))
+            violations.Add("ci.yml does not run the Docker-backed suites as mandatory (Docker probe, floor, no skips, required tests)");
 
         // The artifact on pull requests and pushes: built, Trivy-gated, hardened and N-1 upgrade checks on that image.
         var ciArtifact = ci.Where(j => JobRuns(j.Value).Contains("artifact-checks.sh hardened", StringComparison.Ordinal)).ToList();
@@ -875,7 +880,8 @@ internal static class WorkflowPolicy
         var runs = JobRuns(job);
         if (!Regex.IsMatch(runs, @"artifact-checks\.sh hardened ""\$ARTIFACT""")) yield return $"{file} job '{id}' does not check the hardened profile of $ARTIFACT";
         if (!Regex.IsMatch(runs, @"artifact-checks\.sh upgrade ""\$ARTIFACT"" ""\$PREVIOUS""")) yield return $"{file} job '{id}' does not upgrade N-1 data with $ARTIFACT";
-        if (!runs.Contains("artifact-checks.sh previous-release", StringComparison.Ordinal)) yield return $"{file} job '{id}' does not resolve N-1 from the published releases";
+        // N-1 strictly below the release under test: the same release without pending migrations is rightly no upgrade.
+        if (!Regex.IsMatch(runs, @"artifact-checks\.sh previous-release ""\$VER""")) yield return $"{file} job '{id}' does not resolve N-1 as a published release below the version under test";
         foreach (var step in Steps(job).Where(s => Child(s, "if") is not null))
             yield return $"{file} job '{id}' has a conditional step '{Scalar(Child(step, "name"))}'; every artifact check runs";
     }

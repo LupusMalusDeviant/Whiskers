@@ -7,7 +7,8 @@
 #
 # R1-47: fail closed. The suite runs in two parts, each checked from its TRX file (check-test-results.sh): the in-process
 # tests (a floor of passed tests, nothing failed) and the Docker-backed integration tests — PostgreSQL metrics, Identity,
-# backup/restore — where a missing Docker daemon or database fails the job and not a single test may be skipped. The
+# backup/restore — where a missing Docker daemon or database fails the job and not a single test may be skipped. Both
+# parts also name their mandatory tests (.github/required-tests/): each must be in the run and pass, whatever the floor. The
 # `artifact` job builds the image and checks the deliverable itself (Trivy, hardened profile, N-1 upgrade and recovery);
 # in a release the same checks run against the staged digest instead (release.yml `artifact-test`). Every job is bounded.
 name: ci
@@ -70,7 +71,7 @@ jobs:
           dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
             --filter "Category!=RequiresDocker" --logger "console;verbosity=minimal" \
             --logger "trx;LogFileName=in-process.trx" --results-directory TestResults
-          bash .github/scripts/check-test-results.sh TestResults/in-process.trx 3000
+          bash .github/scripts/check-test-results.sh TestResults/in-process.trx 3000 --require .github/required-tests/in-process.txt
 
       # PostgreSQL metrics, Identity and backup/restore against real servers (Testcontainers). Mandatory: without Docker
       # the tests throw on CI (CI=true), and the check refuses any skipped test in this category.
@@ -81,7 +82,7 @@ jobs:
           dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
             --filter "Category=RequiresDocker" --logger "console;verbosity=minimal" \
             --logger "trx;LogFileName=docker.trx" --results-directory TestResults
-          bash .github/scripts/check-test-results.sh TestResults/docker.trx 70 --no-skips
+          bash .github/scripts/check-test-results.sh TestResults/docker.trx 70 --no-skips --require .github/required-tests/docker.txt
 
       # DI boot gate (project rule): build+tests miss DI-graph regressions — boot the app in
       # Development (ValidateOnBuild/ValidateScopes) against a fresh data dir until /healthz answers.
@@ -154,6 +155,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          PREVIOUS="$(bash .github/scripts/artifact-checks.sh previous-release)"
+          # N-1 is the highest published release BELOW this build's version: the same release is rightly no upgrade.
+          VER="$(sed -n 's:.*<Version>\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)</Version>.*:\1:p' src/Whiskers/Whiskers.csproj | head -n1)"
+          [ -n "$VER" ] || { echo "::error::no <Version> in src/Whiskers/Whiskers.csproj"; exit 1; }
+          PREVIOUS="$(bash .github/scripts/artifact-checks.sh previous-release "$VER")"
           echo "previous release: ${PREVIOUS}"
           bash .github/scripts/artifact-checks.sh upgrade "$ARTIFACT" "$PREVIOUS"

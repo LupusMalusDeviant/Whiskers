@@ -1,8 +1,10 @@
 # Secret scanning (R1-47, F-09): gitleaks with its default rules, run by .github/workflows/security.yml on every push and
 # pull request (the commits in the change) and weekly (the whole history and tree).
 #
-# Exceptions are listed here with a reason and stay as narrow as a path or a line pattern. A finding outside them fails the
-# job; never add a broad pattern to make a real finding pass. Rotate a leaked secret first, then remove it from history.
+# Exceptions are listed here with a reason and stay as narrow as possible. No directory of our own code is exempt: a test
+# fixture is allowed only as that exact fake value in that exact file (condition AND), so a real credential pasted into
+# any test — or the same fake value in another file — still fails the job. Never add a broad pattern to make a real
+# finding pass. Rotate a leaked secret first, then remove it from history.
 
 [extend]
 useDefault = true
@@ -11,9 +13,64 @@ useDefault = true
 description = "Vendored third-party bundles (minified JavaScript, not maintained here)"
 paths = ['''(^|/)src/(Whiskers|ServerWatch)/wwwroot/js/vendor/''']
 
+# Test fixtures: each a deliberately fake value that exercises redaction or secret handling, allowed only in its file.
+# Each names its rule (targetRules): gitleaks 8.30 skips a whole file that matches the path of a global allowlist and
+# ignores condition = "AND" there; a rule-scoped allowlist is checked per finding, so path AND value must both match.
 [[allowlists]]
-description = "Test fixtures: deliberately fake tokens, keys and URLs that exercise redaction and secret handling"
-paths = ['''(^|/)src/(Whiskers|ServerWatch)\.Tests/''']
+description = "Fake basic-auth user in a curl command (audit fail-closed test)"
+targetRules = ["curl-auth-user"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/AuditFailClosedTests\.cs$''']
+regexes = ['''^deploy:hunter6$''']
+
+[[allowlists]]
+description = "Fake basic-auth canary in a curl command (sink redaction test)"
+targetRules = ["curl-auth-user"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/SinkRedactionTests\.cs$''']
+regexes = ['''^deploy:\{Canary\}\{new$''']
+
+[[allowlists]]
+description = "Fake API key (automation mutation runner test)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/AutomationMutationRunnerTests\.cs$''']
+regexes = ['''^Violet47Lantern$''']
+
+[[allowlists]]
+description = "Fake short key (audit logging configuration test)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/AuditLoggingTests\.Config\.cs$''']
+regexes = ['''^0123456789ab$''']
+
+[[allowlists]]
+description = "Fake GitHub token for redaction (git deploy commands test)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/GitDeployCommandsTests\.cs$''']
+regexes = ['''^ghp_secretSECRET123$''']
+
+[[allowlists]]
+description = "Fake 64-hex key (MCP permission service test)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/McpPermissionServiceTests\.cs$''']
+regexes = ['''^0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef$''']
+
+[[allowlists]]
+description = "Fake VPN auth key GUID (VPN secret handling test)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/VpnSecretHandlingTests\.cs$''']
+regexes = ['''^A1B2C3D4-E5F6-4789-9ABC-DEF012345678$''']
+
+[[allowlists]]
+description = "Fake webhook secret (webhook mutation test)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/WebhookMutationTests\.cs$''']
+regexes = ['''^a9c42de780fb$''']
 
 [[allowlists]]
 description = "Names, not values: the notification HTTP client names and the secrets inventory of the audit"

@@ -840,14 +840,20 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] Add bounded CI jobs for dependency vulnerabilities, secret scanning and static analysis; repository-hosted controls are documented separately.
 
 > **Status (R1-47 branch):** `EndpointAuthMatrixTests` (every endpoint of the booted app, four callers, handler
-> invocation recorded; unclassified endpoints fail), `PostgresIdentityTests` + `DockerRequirement`/`DockerRequirementTests`
-> (a container that does not start throws on CI), the CI step for the Docker-backed suites with a Docker probe, a floor
-> and no skips (`check-test-results.sh`), `artifact-checks.sh` (hardened profile; N−1 upgrade, documented recovery and
-> upgrade again) in `ci.yml` `artifact` (built image, Trivy) and release `artifact-test` (staged digest, before
-> `publish-image`), `security.yml` (vulnerable packages, dependency review, gitleaks, security analyzers, CodeQL), job
-> time limits everywhere, all pinned by `ReleaseWorkflowTests`; controls in `docs/operations/ci-and-release-checks.md`.
+> invocation recorded per endpoint identity; only the content-encoding variants of one static asset are merged, other
+> endpoints sharing a route and method are classified and probed apart; unclassified endpoints fail),
+> `PostgresIdentityTests` + `DockerRequirement`/`DockerRequirementTests` (a container that does not start throws on
+> CI), the CI step for the Docker-backed suites with a Docker probe, a floor and no skips, and for both runs the required
+> tests of `.github/required-tests/` (`check-test-results.sh --require`; `RequiredTestsManifestTests` keeps the manifests
+> honest), `artifact-checks.sh` (hardened profile; N−1 strictly below the version under test, upgrade and documented
+> recovery proven on the stored records by `artifact-data.mjs`: accounts, role, metrics row and an N−1-encrypted vault
+> entry preserved, bootstrap credentials on the first start only, migration histories, a same-release restart as no-op,
+> post-upgrade changes reverted by the recovery, upgrade again) in `ci.yml` `artifact` (built image, Trivy) and release
+> `artifact-test` (staged digest, before `publish-image`), `security.yml` (vulnerable packages, dependency review,
+> gitleaks with fixture exceptions per exact value and file, security analyzers, CodeQL), job time limits everywhere,
+> all pinned by `ReleaseWorkflowTests`; controls in `docs/operations/ci-and-release-checks.md`.
 > Verified locally: the matrix, the PostgreSQL suites with Docker, the artifact checks against a locally built image and
-> the published 0.15.0, gitleaks, the vulnerable-package and analyzer gates. **Only CI proves:** the workflow runs
+> the published 0.14.1 (upgrade) and 0.15.0, gitleaks, the vulnerable-package and analyzer gates. **Only CI proves:** the workflow runs
 > themselves (CodeQL, dependency review, the GitHub-hosted runner's Docker and host networking). Recorded for R1-50: the
 > challenge of an unconfigured Google/OIDC provider answers 500; anonymous MCP gets the sign-in redirect, not 401.
 

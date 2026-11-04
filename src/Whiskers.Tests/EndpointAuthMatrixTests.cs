@@ -197,6 +197,51 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
     }
 
     [Fact]
+    public void Two_endpoints_on_one_route_and_method_are_classified_and_probed_apart()
+    {
+        static RouteEndpoint Twin(string name, string host) => new(_ => Task.CompletedTask,
+            Microsoft.AspNetCore.Routing.Patterns.RoutePatternFactory.Parse("/twin"), 0,
+            new EndpointMetadataCollection(new HttpMethodMetadata(["GET"]), new HostAttribute(host)), name);
+        var forAdmins = Twin("twin for admins", "admin.example");
+        var forAll = Twin("twin for everyone", "public.example");
+        var surface = new List<Endpoint>([.. app.Endpoints, forAdmins, forAll]);
+
+        // Classifying one leaves the other unclassified: neither inherits the other's rule.
+        var oneRule = new Dictionary<string, Rule>(Expected, StringComparer.Ordinal) { [DistinctKeyOf(forAdmins)] = new(Access.Admin) };
+        var problems = Classify(surface, oneRule, out var classified);
+        Assert.Contains(problems, p => p.Contains(DistinctKeyOf(forAll), StringComparison.Ordinal));
+        Assert.DoesNotContain(problems, p => p.Contains(DistinctKeyOf(forAdmins), StringComparison.Ordinal));
+        var unit = Assert.Single(classified, c => c.Key == DistinctKeyOf(forAdmins));
+        Assert.Same(forAdmins, Assert.Single(unit.Endpoints));
+
+        // The shared route alone classifies neither of them.
+        var shared = new Dictionary<string, Rule>(Expected, StringComparer.Ordinal) { ["GET /twin"] = new(Access.Public) };
+        problems = Classify(surface, shared, out _);
+        Assert.Contains(problems, p => p.Contains(DistinctKeyOf(forAdmins), StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.Contains(DistinctKeyOf(forAll), StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.Contains("'GET /twin' names no endpoint", StringComparison.Ordinal));
+
+        // Both classified: two units, each probed and judged on its own.
+        var both = new Dictionary<string, Rule>(oneRule, StringComparer.Ordinal) { [DistinctKeyOf(forAll)] = new(Access.Public) };
+        Assert.Empty(Classify(surface, both, out classified));
+        Assert.Equal(2, classified.Count(c => c.Pattern == "/twin"));
+
+        // Two that cannot be told apart at all are reported, never merged.
+        Assert.Contains(Classify([.. app.Endpoints, Twin("twin", "a.example"), Twin("twin", "b.example")], Expected, out _),
+            p => p.Contains("cannot tell them apart", StringComparison.Ordinal));
+
+        // A handler run is attributed to the endpoint that ran, not to its route and method — also when the routing
+        // middleware ran its own object of that endpoint (a data source that builds new objects for each reader).
+        var recorder = new HandlerRecorder();
+        recorder.Record("probe", forAll);
+        Assert.False(recorder.Ran("probe", [forAdmins]));
+        Assert.True(recorder.Ran("probe", [forAll]));
+        Assert.True(recorder.Ran("probe", [Twin("twin for everyone", "public.example")]));
+        Assert.False(recorder.Ran("another probe", [forAll]));
+        Assert.NotEqual(HandlerRecorder.IdentityOf(forAdmins), HandlerRecorder.IdentityOf(forAll));
+    }
+
+    [Fact]
     public async Task Every_endpoint_answers_each_role_as_classified_and_runs_its_handler_only_when_allowed()
     {
         Assert.Empty(Classify(app.Endpoints, Expected, out var classified));
@@ -220,8 +265,11 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
 
     // ------------------------------------------------------------------------------------------------ the rules
 
+    /// <summary>One classified unit of the surface: a single endpoint, or the content-encoding variants of one static
+    /// asset (<see cref="Endpoints"/>, proven equivalent: same route, same method, same asset). A probe of the unit counts
+    /// as "handler ran" only when one of exactly these endpoint objects ran.</summary>
     internal sealed record Classified(string Key, string Pattern, IReadOnlyList<string> ProbeMethods, Rule Rule, bool Static,
-        RouteEndpoint Endpoint);
+        IReadOnlyList<RouteEndpoint> Endpoints);
 
     internal static string KeyOf(RouteEndpoint endpoint)
     {
@@ -230,39 +278,75 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
         return $"{verb} {endpoint.RoutePattern.RawText}";
     }
 
+    /// <summary>The key of an endpoint that shares its route and method with another non-static endpoint (told apart by
+    /// host or other selection metadata): the shared key plus its display name, so each is classified on its own.</summary>
+    internal static string DistinctKeyOf(RouteEndpoint endpoint) => $"{KeyOf(endpoint)} [{endpoint.DisplayName}]";
+
     /// <summary>Matches every endpoint to its rule. Returns one line per unclassified endpoint and per stale rule.</summary>
+    /// <remarks>Endpoints are merged only when they are proven equivalent: static-asset endpoints (each carries a
+    /// <see cref="StaticAssetDescriptor"/>) of one route, method and asset — one per content encoding. Any other endpoint
+    /// that shares a route and method with another is classified and probed on its own (<see cref="DistinctKeyOf"/>).</remarks>
     internal static List<string> Classify(IReadOnlyList<Endpoint> endpoints, IReadOnlyDictionary<string, Rule> expected,
         out List<Classified> classified)
     {
         var problems = new List<string>();
         classified = [];
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var routes = new List<RouteEndpoint>();
         foreach (var endpoint in endpoints)
         {
-            if (endpoint is not RouteEndpoint route)
+            if (endpoint is RouteEndpoint route) routes.Add(route);
+            else problems.Add($"'{endpoint.DisplayName}' is not a route endpoint; the matrix cannot request it");
+        }
+
+        foreach (var group in routes.GroupBy(KeyOf, StringComparer.Ordinal))
+        {
+            var statics = group.Where(r => r.Metadata.GetMetadata<StaticAssetDescriptor>() is not null).ToList();
+            var others = group.Where(r => r.Metadata.GetMetadata<StaticAssetDescriptor>() is null).ToList();
+            var units = new List<(string Key, IReadOnlyList<RouteEndpoint> Endpoints, bool Static)>();
+            if (statics.Count > 0)
             {
-                problems.Add($"'{endpoint.DisplayName}' is not a route endpoint; the matrix cannot request it");
-                continue;
+                // Variants of one asset: at most one plain endpoint, every other one selected by Content-Encoding alone.
+                var descriptors = statics.Select(s => s.Metadata.GetMetadata<StaticAssetDescriptor>()!).ToList();
+                var plain = descriptors.Count(d => d.Selectors.Count == 0);
+                var encodings = descriptors.Where(d => d.Selectors.Count > 0)
+                    .Select(d => d.Selectors.All(s => s.Name == "Content-Encoding") ? string.Join(",", d.Selectors.Select(s => s.Value)) : null)
+                    .ToList();
+                if (plain <= 1 && encodings.All(e => e is not null) && encodings.Distinct(StringComparer.Ordinal).Count() == encodings.Count)
+                    units.Add((group.Key, statics, true));
+                else problems.Add($"'{group.Key}': {statics.Count} static-asset endpoints that are not the content-encoding variants " +
+                                  "of one asset; the matrix cannot classify them as one");
             }
-            var key = KeyOf(route);
-            if (!seen.Add(key)) continue;   // static assets: one endpoint per content encoding, same route
-            var methods = route.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods;
-            IReadOnlyList<string> probe = methods is { Count: > 0 }
-                ? methods.Order(StringComparer.Ordinal).ToList()
-                : [route.RoutePattern.RawText!.EndsWith("/negotiate", StringComparison.Ordinal)
-                   || route.RoutePattern.RawText.EndsWith("/disconnect/", StringComparison.Ordinal) ? "POST" : "GET"];
-            if (route.Metadata.GetMetadata<StaticAssetDescriptor>() is not null && !expected.ContainsKey(key))
+            if (others.Count == 1 && statics.Count == 0) units.Add((group.Key, others, false));
+            else units.AddRange(others.Select(o => (DistinctKeyOf(o), (IReadOnlyList<RouteEndpoint>)[o], false)));
+
+            foreach (var (key, members, isStatic) in units)
             {
-                classified.Add(new(key, route.RoutePattern.RawText!, probe, new Rule(Access.Public, Why: "static asset"), true, route));
-                continue;
+                if (!seen.Add(key))
+                {
+                    problems.Add($"'{key}': more than one endpoint with this route, method and display name; the matrix cannot " +
+                                 "tell them apart — give one a distinct display name or route");
+                    continue;
+                }
+                var route = members[0];
+                var methods = route.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods;
+                IReadOnlyList<string> probe = methods is { Count: > 0 }
+                    ? methods.Order(StringComparer.Ordinal).ToList()
+                    : [route.RoutePattern.RawText!.EndsWith("/negotiate", StringComparison.Ordinal)
+                       || route.RoutePattern.RawText.EndsWith("/disconnect/", StringComparison.Ordinal) ? "POST" : "GET"];
+                if (isStatic && !expected.ContainsKey(key))
+                {
+                    classified.Add(new(key, route.RoutePattern.RawText!, probe, new Rule(Access.Public, Why: "static asset"), true, members));
+                    continue;
+                }
+                if (!expected.TryGetValue(key, out var rule))
+                {
+                    problems.Add($"unclassified endpoint '{key}' ({route.DisplayName}; {route.RequestDelegate?.Method.DeclaringType?.FullName}): " +
+                                 "add it to EndpointAuthMatrixTests.Expected with the access it must have");
+                    continue;
+                }
+                classified.Add(new(key, route.RoutePattern.RawText!, probe, rule, isStatic, members));
             }
-            if (!expected.TryGetValue(key, out var rule))
-            {
-                problems.Add($"unclassified endpoint '{key}' ({route.DisplayName}; {route.RequestDelegate?.Method.DeclaringType?.FullName}): add it to EndpointAuthMatrixTests.Expected " +
-                             "with the access it must have");
-                continue;
-            }
-            classified.Add(new(key, route.RoutePattern.RawText!, probe, rule, false, route));
         }
         foreach (var key in expected.Keys.Where(k => !seen.Contains(k)))
             problems.Add($"classification '{key}' names no endpoint of the app: remove it");
@@ -449,13 +533,13 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
             try
             {
                 using var response = await caller.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-                return new(response.StatusCode, response.Headers.Location?.OriginalString ?? "", _recorder.Ran(probe, endpoint.Endpoint),
+                return new(response.StatusCode, response.Headers.Location?.OriginalString ?? "", _recorder.Ran(probe, endpoint.Endpoints),
                     _recorder.Describe(probe));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // The test server rethrows what the app's exception handler could not turn into a response: a 500.
-                return new(HttpStatusCode.InternalServerError, "", _recorder.Ran(probe, endpoint.Endpoint),
+                return new(HttpStatusCode.InternalServerError, "", _recorder.Ran(probe, endpoint.Endpoints),
                     $"({ex.GetType().Name}: {ex.GetBaseException().Message})");
             }
         }
@@ -490,10 +574,21 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
                 ? "(ran: " + string.Join(", ", bag.Select(e => e is RouteEndpoint r ? KeyOf(r) : e.DisplayName)) + ")"
                 : "";
 
-        internal bool Ran(string probe, Endpoint endpoint) =>
-            _ran.TryGetValue(probe, out var bag) && bag.Any(e => ReferenceEquals(e, endpoint)
-                || (e is RouteEndpoint r && endpoint is RouteEndpoint t && r.RoutePattern.RawText == t.RoutePattern.RawText
-                    && KeyOf(r) == KeyOf(t)));
+        /// <summary>Whether one of exactly these endpoints ran for the probe — by endpoint identity, never by route text:
+        /// another endpoint on the same route and method running is not this handler running.</summary>
+        internal bool Ran(string probe, IReadOnlyList<Endpoint> endpoints) =>
+            _ran.TryGetValue(probe, out var bag)
+            && bag.Any(e => endpoints.Any(t => ReferenceEquals(e, t) || IdentityOf(e) == IdentityOf(t)));
+
+        /// <summary>An endpoint's identity across endpoint objects. The routing middleware reads its own copy of the data
+        /// sources, and a minimal-API or hub data source builds new endpoint objects for each reader, so the object that ran
+        /// is not the one the matrix enumerated. Route, methods, order, display name and host selector together name one
+        /// endpoint: <see cref="Classify"/> reports any two classified endpoints it could not tell apart this way.</summary>
+        internal static string IdentityOf(Endpoint endpoint) => endpoint is RouteEndpoint route
+            ? $"{KeyOf(route)}|{route.Order}|{route.DisplayName}|{string.Join(",", route.Metadata.GetMetadata<IHostMetadata>()?.Hosts ?? [])}"
+            : $"(not routed)|{endpoint.DisplayName}";
+
+        internal void Record(string probe, Endpoint endpoint) => _ran.GetOrAdd(probe, _ => []).Add(endpoint);
 
         private void Record(EventId eventId)
         {
@@ -502,7 +597,7 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
             var probe = context?.Request.Headers[App.ProbeHeader].ToString();
             var endpoint = context?.GetEndpoint();
             if (string.IsNullOrEmpty(probe) || endpoint is null) return;
-            _ran.GetOrAdd(probe, _ => []).Add(endpoint);
+            Record(probe, endpoint);
         }
 
         public void Dispose() { }
