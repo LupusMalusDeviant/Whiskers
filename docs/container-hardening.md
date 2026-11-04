@@ -29,6 +29,18 @@ chiseled, non-root) removes that — it is inherent to managing your own host fr
 The deployment that manages the box it runs on (e.g. the maintainer's own primary node) stays on the
 full profile by design.
 
+## What is in the image (R1-52)
+
+Both profiles run the same image. It carries the programs Whiskers starts and none of the Docker engine:
+the static docker CLI (the local web terminal's `docker exec`; every other Docker call goes through the API, and
+`docker compose` runs on the managed host), `nsenter` (host shell, full profile only), `ssh`/`sshpass`,
+`tailscale`/`tailscaled` with `iptables`, the PostgreSQL 18 client tools and `curl` for the health probe. Until
+R1-52 it installed Ubuntu's `docker.io` package, which also brought `dockerd`, `containerd` and `runc` — never
+started, but scanned, patched and shipped. Base images are pinned by digest (see
+[`../deploy/README.md`](../deploy/README.md#pinned-build-inputs-r1-52)). `ImageRuntimeToolsTests` checks the list
+against the source and a built image. Root and `privileged` in the full profile are unchanged and intended, for the
+reasons above.
+
 ## What the hardened profile changes — and what it costs
 
 The locked-down profile is for the common case where Whiskers is a **monitoring/control plane for

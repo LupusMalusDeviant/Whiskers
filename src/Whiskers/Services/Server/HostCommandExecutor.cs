@@ -75,12 +75,18 @@ public class HostCommandExecutor : IHostCommandExecutor
         // shell as a single argument. Passing it as one argv element (not a concatenated string) means
         // .NET does no word-splitting and the shell sees exactly what the caller wrote — pipes,
         // quotes, $vars and && all behave as intended.
-        var args = new[] { "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", command };
+        var args = LocalShellArguments(command);
 
         _logger.LogDebug("Executing local command via nsenter: {Command}", SecretRedactor.Redact(command));
 
         return await RunProcessAsync("nsenter", args, timeout, ct, maxOutputChars: maxOutputChars);
     }
+
+    /// <summary>The <c>nsenter</c> arguments of a local host command: PID 1's namespaces, then <c>sh -c</c> with the
+    /// command as one argv element. Shared with the image-level deploy test (R1-52), which runs exactly this
+    /// in the built image.</summary>
+    internal static string[] LocalShellArguments(string command) =>
+        ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", command];
 
     // SSH-free shell for TCP+mTLS servers: drive a one-shot privileged nsenter container over the
     // mTLS Docker connection. Same host-namespace effect as ExecuteLocalAsync, but remote and

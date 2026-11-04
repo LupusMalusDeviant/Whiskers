@@ -40,12 +40,12 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.x"
+          global-json-file: global.json
 
       - name: Vulnerable packages (gate)
         run: |
           set -euo pipefail
-          dotnet restore Whiskers.slnx
+          dotnet restore Whiskers.slnx --locked-mode
           dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json
           PROJECTS="$(jq '.projects | length' vulnerable.json)"
           if [ "$PROJECTS" -lt 5 ]; then echo "::error::only ${PROJECTS} project(s) were checked"; exit 1; fi
@@ -112,12 +112,13 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.x"
+          global-json-file: global.json
 
       - name: Security analyzers (gate)
         run: |
           set -euo pipefail
-          dotnet build src/Whiskers/Whiskers.csproj --configuration Release --no-incremental \
+          dotnet restore Whiskers.slnx --locked-mode
+          dotnet build src/Whiskers/Whiskers.csproj --no-restore --configuration Release --no-incremental \
             -p:AnalysisModeSecurity=All -p:CodeAnalysisTreatWarningsAsErrors=true
 
   # CodeQL (C#, buildless) with the security queries; results go to code scanning. The job fails when the analysis cannot

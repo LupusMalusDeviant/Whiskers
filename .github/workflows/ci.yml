@@ -42,10 +42,11 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.x"
+          global-json-file: global.json
 
+      # R1-52: locked restore — exactly the packages.lock.json of every project, or the job fails.
       - name: Restore
-        run: dotnet restore Whiskers.slnx
+        run: dotnet restore Whiskers.slnx --locked-mode
 
       - name: Build
         run: dotnet build Whiskers.slnx --no-restore --configuration Release
@@ -161,3 +162,47 @@ jobs:
           PREVIOUS="$(bash .github/scripts/artifact-checks.sh previous-release "$VER")"
           echo "previous release: ${PREVIOUS}"
           bash .github/scripts/artifact-checks.sh upgrade "$ARTIFACT" "$PREVIOUS"
+
+  # R1-52: the image carries the runtime tools Whiskers starts and nothing of the Docker engine. Built from this commit
+  # and driven through the real terminal, host-shell, compose-deploy and VPN paths (ImageRuntimeToolsTests, category
+  # ImageRuntime). Required here: a missing image, daemon or host compose fails these tests instead of skipping them.
+  # Both release architectures, each on a native runner, so an arm64-only breakage is caught before the merge.
+  image-runtime:
+    name: image-runtime (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Build the test project
+        run: |
+          set -euo pipefail
+          dotnet restore Whiskers.slnx --locked-mode
+          dotnet build src/Whiskers.Tests/Whiskers.Tests.csproj --no-restore --configuration Release
+
+      - name: Build the image
+        run: docker build -t whiskers:image-runtime .
+
+      - name: Image runtime tests
+        env:
+          WHISKERS_IMAGE: whiskers:image-runtime
+          WHISKERS_IMAGE_TESTS_REQUIRED: "true"
+        run: |
+          set -euo pipefail
+          dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
+            --filter "Category=ImageRuntime" --logger "console;verbosity=normal" | tee image-runtime.log
+          grep -Eq "Passed:\s*[1-9]" image-runtime.log
+          if grep -Eq "Skipped:\s*[1-9]" image-runtime.log; then echo "::error::image runtime tests were skipped"; exit 1; fi

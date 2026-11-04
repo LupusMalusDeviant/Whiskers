@@ -1,0 +1,15 @@
+<Project>
+  <!--
+    R1-52: reproducible restores. Every project writes a packages.lock.json next to its csproj: the exact version and
+    content hash of every direct and transitive package. CI (ci.yml) and the image build (Dockerfile) restore in locked
+    mode, so a lock file that does not match its project fails the restore instead of silently resolving something
+    else. BuildReproducibilityTests checks that every project in Whiskers.slnx has its lock file and that CI and the
+    Dockerfile restore locked.
+
+    After changing a PackageReference, refresh the lock files (dotnet restore Whiskers.slnx with force-evaluate, see
+    CONTRIBUTING.md) and commit them with the change: Whiskers.Tests references Whiskers, so its lock file changes too.
+  -->
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+</Project>
