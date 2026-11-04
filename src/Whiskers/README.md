@@ -14,7 +14,7 @@ The ASP.NET Core / Blazor Server application. For project overview, setup and de
 | [`Models/`](Models/) | Data models (+ Agent, Cloud, Cve, Dns, Help, Hetzner, Hostinger) |
 | [`Configuration/`](Configuration/) | Strongly-typed settings classes and their startup validation |
 | [`HealthChecks/`](HealthChecks/) | Liveness and readiness probes behind `/healthz` and `/readyz` (database, server config, maintenance, audit trail) |
-| [`Hubs/`](Hubs/) | SignalR hubs (container + terminal streams) |
+| [`Hubs/`](Hubs/) | SignalR hub (live container streams; the terminal uses no hub) |
 | [`Resources/`](Resources/) | Localized UI strings (`SharedResource.resx` English default, `.de.resx` German) |
 | [`Utils/`](Utils/) | Small helpers (secret redaction, shell quoting, command operands) |
 | [`wwwroot/`](wwwroot/) | Static assets + JS interop |
@@ -25,7 +25,7 @@ The ASP.NET Core / Blazor Server application. For project overview, setup and de
 
 ```bash
 dotnet build ../../Whiskers.slnx -c Release   # what CI runs
-dotnet test ../../Whiskers.slnx               # xUnit suite (Docker/PostgreSQL smoke tests skip without Docker)
+dotnet test ../../Whiskers.slnx               # xUnit + bUnit suite (Docker/PostgreSQL smoke tests skip without Docker)
 dotnet run --project Whiskers.csproj          # listens on :8080
 ```
 

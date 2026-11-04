@@ -569,7 +569,7 @@ Whiskers/
 │   │   ├── Components/              # Blazor UI (Pages, Layout, Shared)
 │   │   ├── Configuration/           # strongly-typed settings classes
 │   │   ├── HealthChecks/            # /healthz and /readyz probes
-│   │   ├── Hubs/                    # SignalR hubs (container + terminal streams)
+│   │   ├── Hubs/                    # SignalR hub (live container streams; the terminal uses no hub)
 │   │   ├── Mcp/                     # MCP server: auth, guardrail filter, Tools/, Prompts/, Resources/
 │   │   ├── Models/                  # data models
 │   │   ├── Modules/                 # optional feature modules + module framework

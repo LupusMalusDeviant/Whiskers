@@ -4,4 +4,4 @@ Provider-neutral DNS models used by the DNS module ([`Services/Dns`](../../Servi
 
 | File | What |
 |---|---|
-| `DnsRecord.cs` | One record of a zone (name relative to the zone, type, content, TTL) and the result record of `set_dns_record`. |
+| `DnsRecord.cs` | `DnsRecord`, one record of a zone (id, name relative to the zone, type, value, TTL); `DnsSetResult`, what `set_dns_record` did (its `DnsSetAction` and the record before and after). |
