@@ -84,6 +84,14 @@ public class ReleaseWorkflowTests
                 "        run: |\n          docker pull \"${IMAGE}@${AMD64_IMAGE}\"\n          bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"")] // raw docker output in the log
     [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh self-test",
                 "        run: |\n          docker image ls\n          bash .github/scripts/artifact-checks.sh self-test")]   // raw docker output in the log
+    [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"",
+                "        run: |\n          /usr/bin/docker image ls\n          bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"")] // docker through a path
+    [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh self-test",
+                "        run: |\n          \"docker\" image ls\n          bash .github/scripts/artifact-checks.sh self-test")]   // docker in quotes
+    [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh self-test",
+                "        run: |\n          docker-compose ps\n          bash .github/scripts/artifact-checks.sh self-test")]   // docker-compose
+    [InlineData("ci.yml", "      - name: Disclosure self-test\n        run: bash .github/scripts/artifact-checks.sh self-test\n\n      - name: Hardened profile\n        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"\n",
+                "      - name: Hardened profile\n        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"\n\n      - name: Disclosure self-test\n        run: bash .github/scripts/artifact-checks.sh self-test\n")] // self-test after the checks
     [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"", "        run: echo skipped")]
     [InlineData("security.yml", "--exit-code 1", "--exit-code 0")]                                                              // secret findings ignored
     [InlineData("security.yml", "-p:CodeAnalysisTreatWarningsAsErrors=true", "-p:CodeAnalysisTreatWarningsAsErrors=false")]
@@ -886,9 +894,15 @@ internal static class WorkflowPolicy
         var runs = JobRuns(job);
         // Docker runs only inside artifact-checks.sh, which keeps its output private: a registry, daemon or credential-helper
         // error from a docker command in the step itself would reach the Actions log raw.
-        if (Regex.IsMatch(runs, @"(?m)(^|[\s;&|(`$])docker\s+[a-z]")) yield return $"{file} job '{id}' runs docker outside artifact-checks.sh; its output would reach the log raw";
+        // Also through a path or in quotes ("/usr/bin/docker", "'docker'"), and docker-compose.
+        if (Regex.IsMatch(runs, @"(?m)(^|[\s;&|(`$/""'])docker(-compose)?[""']?\s+[a-z]"))
+            yield return $"{file} job '{id}' runs docker outside artifact-checks.sh; its output would reach the log raw";
         // The log filter and the data tool's failure messages are proven not to disclose planted values.
         if (!Regex.IsMatch(runs, @"(?m)^\s*bash \.github/scripts/artifact-checks\.sh self-test\s*$")) yield return $"{file} job '{id}' does not run the disclosure self-test";
+        // ... before any other step of the checks script runs, so a broken output rule is known before the image is touched.
+        var checkSteps = Steps(job).Select(s => Scalar(Child(s, "run")) ?? "").Where(r => r.Contains("artifact-checks.sh ", StringComparison.Ordinal)).ToList();
+        if (checkSteps.Count > 0 && !Regex.IsMatch(checkSteps[0], @"artifact-checks\.sh self-test\s*$"))
+            yield return $"{file} job '{id}' runs the checks script before the disclosure self-test";
         if (!Regex.IsMatch(runs, @"artifact-checks\.sh hardened ""\$ARTIFACT""")) yield return $"{file} job '{id}' does not check the hardened profile of $ARTIFACT";
         if (!Regex.IsMatch(runs, @"artifact-checks\.sh upgrade ""\$ARTIFACT"" ""\$PREVIOUS""")) yield return $"{file} job '{id}' does not upgrade N-1 data with $ARTIFACT";
         // N-1 strictly below the release under test: the same release without pending migrations is rightly no upgrade.

@@ -29,12 +29,15 @@ All notable changes to Whiskers are documented here. The format follows
   unchanged with exactly the pending migrations added, bootstrap credentials are given to the first start only, a restart
   of the same release is a no-op, every record changed after the upgrade is back to its old value after
   `--restore-backup latest-pre-upgrade --for-previous-release` with the old migration histories and without the audit
-  rows written meanwhile, and the image upgrades the recovered data again; a release runs the same checks against the staged amd64 digest before anything is
-  published (`artifact-test`, which pulls that digest through `artifact-checks.sh prepare` — no artifact-job step runs
-  `docker` itself). The checks print only text they write themselves: every command's output stays in private files, failure logs are summarised as counts per level, HTTP bodies and upgrade log values are compared, never shown,
-  and the data tool reports failures by operation and file only. A disclosure self-test (`artifact-checks.sh self-test`,
-  in both jobs) plants random values in container logs, streamed output, tool errors, an HTTP answer, upgrade log lines
-  and malformed data for each data-tool command, and fails if any value, fingerprint or 8-character prefix comes through. New `security.yml`: known-vulnerable packages (any severity), dependency review on pull
+  rows written meanwhile, and the image upgrades the recovered data again; a release runs the same checks against the
+  staged amd64 digest before anything is published (`artifact-test`, which pulls that digest through
+  `artifact-checks.sh prepare` — no artifact-job step runs `docker` itself). The checks print only text they write
+  themselves: every command's output stays in private files, failure logs are summarised as counts per level, HTTP
+  bodies and upgrade log values are compared, never shown, and the data tool reports failures by operation and file
+  only. A disclosure self-test (`artifact-checks.sh self-test`, the first check in both jobs) plants random values in
+  container logs, streamed output, tool errors, an HTTP answer, upgrade log lines and malformed data for each data-tool
+  command, and fails if any value, fingerprint or 8-character prefix comes through. New `security.yml`:
+  known-vulnerable packages (any severity), dependency review on pull
   requests, gitleaks over history and tree (`.gitleaks.toml`: no directory or line pattern is exempt, each exception — test fixtures,
   vendored-bundle identifiers, names — only as its exact value in its exact file under its rule), the .NET security analyzers as errors, CodeQL. Every job of
   every workflow is time-limited; `ReleaseWorkflowTests` pins all of it with negative tests. The repository-hosted

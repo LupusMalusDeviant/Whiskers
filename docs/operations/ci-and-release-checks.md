@@ -83,8 +83,10 @@ Every wait is bounded (`WAIT_SECONDS`, default 300 s — the image's own health-
   request. N−1 is never the release under test: the same release without pending migrations is rightly no upgrade, and
   the check fails if it ever were.
 - **`prepare <image-ref> <local-tag>`** pulls the release's staged amd64 digest and tags it for the checks (release
-  `artifact-test`), with Docker's output — registry, daemon, credential helper — kept private like every other command's.
-  No step of an artifact job runs `docker` itself; `ReleaseWorkflowTests` treats one that does as a violation.
+  `artifact-test`), with Docker's output — registry, daemon, credential helper — kept private like every other command's,
+  and requires both image ids to be read as `sha256:` ids and to be equal. No step of an artifact job runs `docker` or
+  `docker-compose` itself (also not through a path or in quotes), and the disclosure self-test is the first step of the
+  checks script in both jobs; `ReleaseWorkflowTests` treats anything else as a violation.
 - **`self-test`** checks the output rule of these checks: the CI log gets **only text the script writes itself** — step
   names, fixed diagnostics, the arguments it was given, counts. Every command's own stdout and stderr (Docker, compose,
   curl, the containers, the data tool) goes to private files in a temporary directory removed on exit; no text from a
@@ -96,7 +98,8 @@ Every wait is bounded (`WAIT_SECONDS`, default 300 s — the image's own health-
   (`state failed while reading vault.json`), never by an exception's message or stack, and exits non-zero. The self-test
   plants random values — hex, letters only, a fingerprint and its 8-character prefix, a 32-digit number — as log
   categories, event ids, messages, an HTTP body, tool errors (a container that does not start, a failing file command, a
-  data-tool run Docker refuses, a pull and a tag of the staged image that fail against a stub `docker`) and upgrade log
+  data-tool run Docker refuses, a pull, a tag and an inspect of the staged image that fail against a stub `docker`, an inspect that answers no
+  image id or two different ids) and upgrade log
   lines, drives the real code paths with them in child processes, and fails
   if any value, its SHA-256 fingerprint or an 8-character prefix of either appears, or if a probe does not end with its
   expected exit status and fixed diagnostic. On malformed data (invalid `vault.json` or `roles.json`, an

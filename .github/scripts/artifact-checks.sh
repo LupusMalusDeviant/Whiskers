@@ -516,8 +516,12 @@ prepare() { # <image-ref> <local-tag>
     step "prepare: $1 as $2"
     docker pull "$1" >/dev/null || fail "the image could not be pulled"
     docker tag "$1" "$2" || fail "the image could not be tagged"
-    [ "$(docker image inspect -f '{{.Id}}' "$1")" = "$(docker image inspect -f '{{.Id}}' "$2")" ] \
-        || fail "the local tag is not the pulled image"
+    # Both ids are read and must be image ids before they are compared: two failed reads would otherwise compare equal.
+    local pulled tagged
+    pulled="$(docker image inspect -f '{{.Id}}' "$1")" || fail "the pulled image could not be inspected"
+    tagged="$(docker image inspect -f '{{.Id}}' "$2")" || fail "the local tag could not be inspected"
+    [[ "$pulled" =~ ^sha256:[0-9a-f]{64}$ && "$tagged" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "the image ids could not be read"
+    [ "$pulled" = "$tagged" ] || fail "the local tag is not the pulled image"
     OK=1
     say "ok: the pulled image is tagged for the checks"
 }
@@ -592,23 +596,38 @@ self_test() {
     probe "a container that does not start" fail "::error::the container 'probe' did not start" _probe-start
     probe "a failing file command" fail "::error::probe: the file command failed" _probe-files "$volume"
     probe "a failing data tool run" fail "::error::probe: the data tool failed" _probe-data-tool "$volume"
-    # The release's preparation (prepare) against a stub docker whose pull or tag fails with the planted values.
+    # The release's preparation (prepare) against a stub docker whose pull, tag or inspect fails with the planted values,
+    # or whose inspect answers with something that is not an image id, or with two different ids.
     # A POSIX path for PATH (WORK may be a Windows path with a drive colon in local Git Bash runs).
-    local stub
+    local stub id_a id_b
     stub="$(mktemp -d)"
     CLEANUP+=("rm -rf $stub")
     export STUB_LOG="$WORK/stub.calls"
+    id_a="sha256:$(printf '%064d' 0 | tr 0 a)"
+    id_b="sha256:$(printf '%064d' 0 | tr 0 b)"
     # shellcheck disable=SC2016 # expanded by the stub, not here
     printf '%s\n' '#!/bin/sh' 'echo "$1" >> "$STUB_LOG"' 'case "$1" in' \
         '  pull) [ "${STUB_PULL:-fail}" = ok ] && exit 0; echo "pull denied: $C $A"; echo "credential helper: $N $F" >&2; exit 3 ;;' \
-        '  tag) echo "tag refused: $S $H" >&2; exit 3 ;;' \
+        '  tag) [ "${STUB_TAG:-fail}" = ok ] && exit 0; echo "tag refused: $S $H" >&2; exit 3 ;;' \
+        '  image) case "${STUB_INSPECT:-fail}" in' \
+        '      garbage) echo "$C $A"; exit 0 ;;' \
+        "      differ) case \"\$5\" in *local*) echo $id_a ;; *) echo $id_b ;; esac; exit 0 ;;" \
+        '      *) echo "inspect failed: $N $S" >&2; exit 3 ;;' \
+        '    esac ;;' \
         '  *) echo "stub: $C" >&2; exit 3 ;;' 'esac' > "$stub/docker"
     chmod +x "$stub/docker"
-    PATH="$stub:$PATH" probe "a failing pull of the staged image" fail "::error::the image could not be pulled" \
-        prepare registry.invalid/whiskers-probe:stub whiskers-probe:local
+    local ref=registry.invalid/whiskers-probe:stub tag=whiskers-probe:local
+    PATH="$stub:$PATH" probe "a failing pull of the staged image" fail "::error::the image could not be pulled" prepare "$ref" "$tag"
     PATH="$stub:$PATH" STUB_PULL=ok probe "a failing tag of the staged image" fail "::error::the image could not be tagged" \
-        prepare registry.invalid/whiskers-probe:stub whiskers-probe:local
-    [ "$(tr -d '\r' < "$STUB_LOG" | tr '\n' ' ')" = "pull pull tag " ] || fail "the preparation probes did not run against the stub docker"
+        prepare "$ref" "$tag"
+    PATH="$stub:$PATH" STUB_PULL=ok STUB_TAG=ok probe "a failing inspect of the staged image" fail \
+        "::error::the pulled image could not be inspected" prepare "$ref" "$tag"
+    PATH="$stub:$PATH" STUB_PULL=ok STUB_TAG=ok STUB_INSPECT=garbage probe "an inspect that returns no image id" fail \
+        "::error::the image ids could not be read" prepare "$ref" "$tag"
+    PATH="$stub:$PATH" STUB_PULL=ok STUB_TAG=ok STUB_INSPECT=differ probe "an inspect that returns two different ids" fail \
+        "::error::the local tag is not the pulled image" prepare "$ref" "$tag"
+    [ "$(tr -d '\r' < "$STUB_LOG" | tr '\n' ' ')" = "pull pull tag pull tag image pull tag image image pull tag image image " ] \
+        || fail "the preparation probes did not run against the stub docker"
     CLEANUP+=("docker image rm ${RUN_ID}-probe:prepared")
     probe "a successful preparation (the real docker)" 0 "ok: the pulled image is tagged for the checks" \
         prepare "$NODE_IMAGE" "${RUN_ID}-probe:prepared"

@@ -305,15 +305,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The checks below print only text they write themselves; planted values must not reach this log by any path.
+      - name: Disclosure self-test
+        run: bash .github/scripts/artifact-checks.sh self-test
+
       # Through the checks script: Docker's own output (registry, daemon, credential helper) never reaches this log.
       - name: Pull the staged amd64 image by digest
         env:
           AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}
         run: bash .github/scripts/artifact-checks.sh prepare "${IMAGE}@${AMD64_IMAGE}" "$ARTIFACT"
-
-      # The checks below print only text they write themselves; planted values must not reach this log by any path.
-      - name: Disclosure self-test
-        run: bash .github/scripts/artifact-checks.sh self-test
 
       - name: Hardened profile
         run: bash .github/scripts/artifact-checks.sh hardened "$ARTIFACT"
