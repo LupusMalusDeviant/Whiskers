@@ -97,8 +97,10 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
     {
         if (!_queue.Writer.TryWrite(row))
         {
+            // The account is not named (R1-27: no address in a log); what happened, how and from where is.
             _logger.LogError("AUDIT WRITE FAILED: sign-in audit queue {State}, dropped [web] {Actor} → {Action} ({Method}, success={Success}, {Details})",
-                Volatile.Read(ref _stopped) ? "stopped" : "full", row.Actor, row.Action, row.Method, row.Success, row.Details);
+                Volatile.Read(ref _stopped) ? "stopped" : "full", AuditLogService.AccountPlaceholder, row.Action, row.Method,
+                row.Success, row.Details);
             _recovery?.LegacyWriteFailed();
         }
         return Task.CompletedTask;

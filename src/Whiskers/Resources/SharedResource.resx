@@ -5613,7 +5613,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Authentication is disabled (AUTH_DISABLED): there is no Google/OIDC sign-in, and bindings cannot be confirmed or removed here. The host command --confirm-identity-binding still works.</value>
   </data>
   <data name="IdentityBindings_Unavailable" xml:space="preserve">
-    <value>The identity bindings file (identity-bindings.json) cannot be read: every Google/OIDC sign-in and session is refused until it is repaired. Local accounts are not affected.</value>
+    <value>The identity bindings (identity-bindings.json) cannot be read, or a save failed: every Google/OIDC sign-in and session is refused until they are read and saved again (retried every 30 seconds) or the host operator repairs the file. Local accounts are not affected.</value>
   </data>
   <data name="IdentityBindings_Pending_Heading" xml:space="preserve">
     <value>Waiting for confirmation</value>
@@ -5697,7 +5697,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Cancel</value>
   </data>
   <data name="IdentityBindings_Confirm_Remove" xml:space="preserve">
-    <value>The person's Google/OIDC sessions end; the next sign-in has to be confirmed again.</value>
+    <value>The Google/OIDC sessions of this binding end. Removing a binding does not take the access away: while the address is still configured (a role or a whitelist entry), the next sign-in binds again — automatically through a trusted provider with a verified address, otherwise after a confirmation here. To take the access away, remove the address from the roles and the whitelist.</value>
   </data>
   <data name="IdentityBindings_Hint" xml:space="preserve">
     <value>Confirm only a request you expected: it lets that provider's subject sign in as the account. Without an Admin who can sign in, the host operator confirms with: dotnet Whiskers.dll --confirm-identity-binding &lt;address&gt;.</value>

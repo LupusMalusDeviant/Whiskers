@@ -11,15 +11,24 @@ namespace Whiskers.Services.Auth;
 /// and the binding requests waiting for confirmation, in <c>identity-bindings.json</c>. A binding is created once (at a
 /// trusted, verified first sign-in, by an Admin's confirmation or by the host CLI) and from then on the subject is the
 /// identity; the account handle (the configured address) stays the key of roles, owners, approvals and audit.
-/// <para>Every write runs under <see cref="AccessControlWriteGate"/> and is persisted before it is published. A file that
-/// cannot be read makes the store unavailable: every read throws <see cref="IdentityBindingStoreUnavailableException"/>
-/// and every write refuses <see cref="IdentityBindingErrors.StoreUnavailable"/> (fail closed). Nothing here logs an
-/// email address or a subject; the people-facing views carry a fingerprint instead of the subject.</para>
+/// <para>The file is the authority, shared with the host CLI's process: every write runs under
+/// <see cref="AccessControlWriteGate"/> and an exclusive file lock, re-reads the file, and is persisted before it is
+/// published; reads follow the file when it changed. A file that cannot be read (or whose previous generation exists
+/// without it) makes the store unavailable, as does a failed save until a re-read and prune succeed: every read then throws
+/// <see cref="IdentityBindingStoreUnavailableException"/> and every federated admission and session refuses (fail closed).
+/// Nothing here logs an email address or a subject; the people-facing views carry a fingerprint instead of the
+/// subject.</para>
 /// </summary>
 public interface IIdentityBindingStore
 {
-    /// <summary>False when the file could not be read or parsed at start (a directory in its place included).</summary>
+    /// <summary>False while the file cannot be read or parsed (a directory in its place included), or after a failed save
+    /// until <see cref="RefreshAsync"/> (or a later write) succeeded.</summary>
     bool IsAvailable { get; }
+
+    /// <summary>Re-reads the file and prunes the records of addresses that are no longer entries (and those a failed prune
+    /// had to remove), under the gate and the file lock. True when the store is available afterwards. Never throws for a
+    /// store or file error.</summary>
+    Task<bool> RefreshAsync(CancellationToken ct = default);
 
     /// <summary>The binding of <paramref name="issuer"/> and <paramref name="subject"/> (both compared ordinally), or
     /// <c>null</c>.</summary>
@@ -32,8 +41,10 @@ public interface IIdentityBindingStore
     IdentityBindingSnapshot Snapshot();
 
     /// <summary>The admission's automatic binding at a trusted, verified first sign-in — a designed exemption from the
-    /// gateway like the setup wizard (S-13): nobody exists yet whom it could decide for. Under the gate it re-checks that
-    /// the subject is unbound, that the account has no binding yet and is still a configured entry; then it writes
+    /// gateway like the setup wizard (S-13): nobody exists yet whom it could decide for. Under the gate it re-checks the
+    /// whole admission on what is in force then: an explicit Admin exists, the account is a configured entry the whitelist
+    /// admits, the address is the standard claim, verified by a trusted provider, the subject is unbound and the account has
+    /// no binding yet; then it writes
     /// <c>auth.identity_bound</c> — without that row nothing is written (<see cref="IdentityBindingErrors.AuditUnavailable"/>)
     /// — and persists the binding. Only <see cref="FederatedAdmission"/> calls it (pinned).</summary>
     Task<IdentityBindingResult> BindAtSignInAsync(FederatedSignInClaims claims, string account, CancellationToken ct = default);

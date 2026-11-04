@@ -5613,7 +5613,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Die Authentifizierung ist abgeschaltet (AUTH_DISABLED): es gibt keine Google/OIDC-Anmeldung, und Bindungen lassen sich hier weder bestätigen noch entfernen. Der Host-Befehl --confirm-identity-binding funktioniert weiterhin.</value>
   </data>
   <data name="IdentityBindings_Unavailable" xml:space="preserve">
-    <value>Die Datei der Identitätsbindungen (identity-bindings.json) ist nicht lesbar: jede Google/OIDC-Anmeldung und -Sitzung wird abgewiesen, bis sie repariert ist. Lokale Konten sind nicht betroffen.</value>
+    <value>Die Identitätsbindungen (identity-bindings.json) sind nicht lesbar, oder ein Speichern ist fehlgeschlagen: jede Google/OIDC-Anmeldung und -Sitzung wird abgewiesen, bis sie wieder gelesen und gespeichert sind (Neuversuch alle 30 Sekunden) oder der Host-Betreiber die Datei repariert. Lokale Konten sind nicht betroffen.</value>
   </data>
   <data name="IdentityBindings_Pending_Heading" xml:space="preserve">
     <value>Warten auf Bestätigung</value>
@@ -5697,7 +5697,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Abbrechen</value>
   </data>
   <data name="IdentityBindings_Confirm_Remove" xml:space="preserve">
-    <value>Die Google/OIDC-Sitzungen der Person enden; die nächste Anmeldung muss erneut bestätigt werden.</value>
+    <value>Die Google/OIDC-Sitzungen dieser Bindung enden. Das Entfernen einer Bindung nimmt den Zugang nicht weg: solange die Adresse eingerichtet ist (Rollen- oder Whitelist-Eintrag), bindet die nächste Anmeldung wieder — automatisch über einen vertrauenswürdigen Anbieter mit bestätigter Adresse, sonst nach einer Bestätigung hier. Um den Zugang wegzunehmen, die Adresse aus den Rollen und der Whitelist entfernen.</value>
   </data>
   <data name="IdentityBindings_Hint" xml:space="preserve">
     <value>Nur eine erwartete Anfrage bestätigen: sie lässt dieses Subjekt des Anbieters als das Konto anmelden. Kann sich kein Admin anmelden, bestätigt der Host-Betreiber mit: dotnet Whiskers.dll --confirm-identity-binding &lt;Adresse&gt;.</value>

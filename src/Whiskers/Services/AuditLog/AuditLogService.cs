@@ -62,8 +62,21 @@ public class AuditLogService : IAuditLogService
             });
 
             _logger.LogInformation("Audit: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} (success={Success})",
-                actorType, actor, action, targetType, targetName, success);
+                actorType, LoggedName(action, actor), action, targetType, LoggedName(action, targetName), success);
             return true;
+        }
+        catch (Exception ex) when (IsAccountRow(action))
+        {
+            // R1-27: a sign-in and identity row names an account by its address — the row keeps it, the application log
+            // does not (contract 0003: no address in a log). What survives here is what happened, without whom; the
+            // exception's type only (a message may carry a value).
+            _logger.LogError(
+                "AUDIT WRITE FAILED: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} " +
+                "(target={TargetId}, server={ServerId}, success={Success}, details={Details}, error={Error})",
+                actorType, AccountPlaceholder, action, targetType, AccountPlaceholder, AccountPlaceholder, serverId, success,
+                SinkRedaction.Json(details), ex.GetType().Name);
+            _recovery?.LegacyWriteFailed();
+            return false;
         }
         catch (Exception ex)
         {
@@ -79,6 +92,15 @@ public class AuditLogService : IAuditLogService
             return false;
         }
     }
+
+    /// <summary>What the application log shows instead of an account address.</summary>
+    public const string AccountPlaceholder = "[account]";
+
+    /// <summary>Rows whose actor and target are a person's account address (sign-ins, sessions, identity bindings —
+    /// <c>auth.*</c>): the database keeps the address, the application log never sees it.</summary>
+    public static bool IsAccountRow(string? action) => action?.StartsWith("auth.", StringComparison.Ordinal) == true;
+
+    private static string LoggedName(string action, string name) => IsAccountRow(action) ? AccountPlaceholder : name;
 
     public async Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0,
                                                             string? actionFilter = null,

@@ -29,12 +29,17 @@ public class RoleService : IRoleService, IInitializable
     }
 
     /// <summary>R1-27 (contract 0003, rule 5): when the write removes a role entry, the bindings and pending requests of
-    /// addresses that stop being entries are pruned first, under the held gate. A failed prune throws: the write is refused.</summary>
+    /// addresses that stop being entries are pruned first, under the held gate. A failed prune throws: the write is refused.
+    /// While the bindings are unavailable (a prune that could not be saved still owed) a write that adds an entry prunes
+    /// first too — an address configured again must not revive what was owed to go.</summary>
     private async Task PruneRemovedAsync(UserRoleData before, UserRoleData next, AccessControlWriteGate.Lease lease)
     {
         if (_bindings is null) return;
-        var removesAnEntry = before.Roles.Any(b => !next.Roles.Any(n => n.Email.Equals(b.Email, StringComparison.OrdinalIgnoreCase)));
-        if (removesAnEntry) await _bindings.PruneOrphansAsync(lease, nextRoles: next);
+        static bool Missing(UserRoleData data, string email) =>
+            !data.Roles.Any(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+        var removesAnEntry = before.Roles.Any(b => Missing(next, b.Email));
+        var addsAnEntry = next.Roles.Any(n => Missing(before, n.Email));
+        if (removesAnEntry || (addsAnEntry && !_bindings.IsAvailable)) await _bindings.PruneOrphansAsync(lease, nextRoles: next);
     }
 
     /// <summary>Tests only: replaces the persistence of <see cref="SetFirstAdminAsync"/> (a save that waits or fails on
@@ -148,7 +153,7 @@ public class RoleService : IRoleService, IInitializable
 
     public async Task SetRoleAsync(string email, AppRole role)
     {
-        using (await _gate.EnterAsync())
+        using (var lease = await _gate.EnterAsync())
         {
             // The gate makes this the only writer, so the state read here is still current when it is published.
             var before = GetRoleData();
@@ -159,6 +164,7 @@ public class RoleService : IRoleService, IInitializable
             else
                 next.Roles.Add(new UserRoleEntry { Email = email, Role = role });
             EnsureAdminRemains(before, next);
+            await PruneRemovedAsync(before, next, lease);
 
             // Persist first, publish after: a failed save throws here and the change never takes effect, so it cannot
             // act now and then vanish on the next start.

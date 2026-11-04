@@ -210,13 +210,20 @@ All notable changes to Whiskers are documented here. The format follows
   last Admin can sign in cannot be removed). The host operator confirms the newest pending request of an address with
   `docker compose exec serverwatch dotnet Whiskers.dll --confirm-identity-binding <email> [--issuer <issuer>]` (exit
   `0` bound, `2` usage, `3` nothing pending, `4` several issuers pending, `1` nothing changed; its audit row is written
-  first). **No Google/OIDC sign-in is admitted before an Admin exists** — before, every Google/OIDC account in the world
-  was admitted as Viewer until a role existed and reached `/mcp` and the hubs. Removing an address from roles or the
-  whitelist removes its bindings in the same write, so a recycled address never revives the old account. New audit
-  actions `auth.identity_bound`, `auth.identity_pending`; refused sign-ins of addresses that are not configured are
-  recorded as `anonymous`; no log line carries an address or a subject. The readiness check `identity-bindings` reports
-  an unreadable store (every federated sign-in is then refused, local sign-in keeps working). An Admin with a local
-  password **or an active binding** counts as one who can sign in (replaces "seen signing in").
+  first); it shares the file with the running instance under a lock, and the running instance sees the binding at once —
+  no restart. **No Google/OIDC sign-in is admitted before an Admin exists** — before, every Google/OIDC account in the
+  world was admitted as Viewer until a role existed and reached `/mcp` and the hubs. Removing a binding ends that IdP
+  account's sessions but not the access: while the address is configured, the next sign-in binds again (automatically
+  or after confirmation). When an address stops being an entry (its role and its whitelist listing are gone), its
+  bindings go in the same write, so a recycled address never revives the old account. New audit actions
+  `auth.identity_bound`, `auth.identity_pending`; refused sign-ins of addresses that are not configured are recorded as
+  `anonymous`. The application log no longer names the account of any `auth.*` audit row (written, failed or dropped —
+  the audit row itself keeps it), and no R1-27 log line carries an address or a subject. The readiness check
+  `identity-bindings` reports an unavailable store: unreadable, incomplete, missing while its `.bak` exists (the `.bak`
+  is never taken over by itself), or after a failed save until it is read and pruned again; every federated sign-in and
+  session is then refused, local sign-in keeps working, and role or whitelist changes that add or remove an address
+  wait. An Admin with a local password **or an active binding** counts as one who can sign in (replaces "seen signing
+  in"); removing a binding and deleting a local account check that rule one at a time.
   **Upgrade notes:** nothing on disk changes; `identity-bindings.json` appears in the data directory with the first
   binding and is part of the self-backup. **Every Google/OIDC browser session ends at its next request** (open pages
   within 30 s); local sessions continue. A Google user signs in again and is bound. **An OIDC user (Authentik included)

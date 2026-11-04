@@ -22,8 +22,9 @@ public sealed class LocalAccountService : ILocalAccountService
     public const string RecoveryRedeemedAction = "auth.recovery_redeemed";
     public const string RecoveryRefusedAction = "auth.recovery_refused";
 
-    // One Admin change at a time, also across scopes (each circuit has its own service).
-    private static readonly SemaphoreSlim AdminGate = new(1, 1);
+    // One Admin change at a time, also across scopes (each circuit has its own service) — and the same boundary as the
+    // removal of an identity binding (R1-27): the last-usable-Admin check and the commit of a removal are one step.
+    private static SemaphoreSlim AdminGate => AdminSignIn.Gate;
 
     private readonly UserManager<AppUser> _users;
     private readonly WhiskersIdentityDbContext _db;

@@ -245,6 +245,75 @@ public sealed class LocalAccountLifecycleTests
     }
 
     [Fact]
+    public async Task A_binding_removal_and_a_local_deletion_at_the_same_moment_leave_an_admin_who_can_sign_in()
+    {
+        // R1-27 review: local Admin A (password) and federated-only Admin B (binding). A removes B's binding while B deletes
+        // A's account; each check alone sees the other's way in place. Forced interleaving: B's deletion runs while A's
+        // removal stands between its last-Admin check and its commit (given up to two seconds to finish there).
+        await using var world = await LocalAccountWorld.CreateAsync();
+        const string fed = "fed@local.test";
+        await world.Roles.SetRoleAsync(fed, AppRole.Admin);
+        var bSession = await world.BoundFederatedAsync(fed);
+        var bindingId = bSession.FindFirstValue(AuthConstants.BindingIdClaim)!;
+        using var b = world.As(bSession);
+        Task<LocalAccountResult>? deletion = null;
+        world.Bindings.BeforeRemoveCommitForTests = async () =>
+        {
+            using (ExecutionContext.SuppressFlow())
+                deletion = Task.Run(() => b.Accounts.DeleteAsync(LocalAccountWorld.Root));
+            await Task.WhenAny(deletion, Task.Delay(TimeSpan.FromSeconds(2)));
+        };
+
+        var principal = new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.User(LocalAccountWorld.Root),
+            LocalAccountWorld.Root, McpPermissionLevels.Admin);
+        IdentityBindingResult removed;
+        using (MutationScope.Begin("identity.binding_remove", "test-" + Guid.NewGuid().ToString("N"), principal))
+            removed = await world.Bindings.RemoveAsync(bindingId);
+        var deleted = await deletion!;
+
+        Assert.True(removed.Success, removed.ToString());
+        Assert.False(deleted.Success, deleted.ToString());
+        Assert.True(await world.PasswordWorksAsync(LocalAccountWorld.Root, LocalAccountWorld.Password));
+    }
+
+    [Fact]
+    public async Task Sign_in_identities_are_confirmed_and_removed_through_the_gateway_by_an_admin_only()
+    {
+        // R1-27: the panel's path end to end — the UI mutation runner, the gateway's decision, the store.
+        await using var world = await LocalAccountWorld.CreateAsync();
+        const string person = "person@local.test";
+        await world.Roles.SetRoleAsync(person, AppRole.Operator);
+        await world.AddUserAsync("op@local.test", AppRole.Operator);
+        var admission = new FederatedAdmission(world.Bindings, world.Roles, world.Whitelist, world.Configuration);
+        var pendingDecision = await admission.AdmitAsync(new FederatedSignInClaims("oidc", "https://idp.local.test/", "o-person",
+            person, "true", EmailIsStandardClaim: true));   // OIDC is not trusted by default: pending
+        Assert.Equal(AuthAuditReasons.PendingConfirmation, pendingDecision.Reason);
+        var request = Assert.Single(world.Bindings.Snapshot().Pending).Id;
+
+        using var operatorActing = world.As(await world.SessionOfAsync("op@local.test"));
+        await Assert.ThrowsAsync<MutationRefusedException>(() => operatorActing.Mutations.RunAsync("identity.binding_confirm",
+            new { binding = request }, ct => world.Bindings.ConfirmAsync(request, ct)));
+        Assert.Empty(world.Bindings.Snapshot().Bindings);
+
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        var confirmed = await admin.Mutations.RunAsync("identity.binding_confirm", new { binding = request },
+            ct => world.Bindings.ConfirmAsync(request, ct));
+        Assert.True(confirmed.Success, confirmed.ToString());
+        var binding = Assert.Single(world.Bindings.Snapshot().Bindings);
+        Assert.Equal(PrincipalIds.User(LocalAccountWorld.Root), binding.BoundBy);
+        Assert.True((await admission.AdmitAsync(new FederatedSignInClaims("oidc", "https://idp.local.test/", "o-person",
+            person, null, EmailIsStandardClaim: true))).Admitted);
+
+        await Assert.ThrowsAsync<MutationRefusedException>(() => operatorActing.Mutations.RunAsync("identity.binding_remove",
+            new { binding = binding.Id }, ct => world.Bindings.RemoveAsync(binding.Id, ct)));
+        Assert.Single(world.Bindings.Snapshot().Bindings);
+        Assert.True((await admin.Mutations.RunAsync("identity.binding_remove", new { binding = binding.Id },
+            ct => world.Bindings.RemoveAsync(binding.Id, ct))).Success);
+        Assert.Empty(world.Bindings.Snapshot().Bindings);
+        Assert.Contains("complete:Executed", world.Sink.Events);
+    }
+
+    [Fact]
     public async Task An_admin_with_a_password_but_no_binding_counts_too()
     {
         await using var world = await LocalAccountWorld.CreateAsync();

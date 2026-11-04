@@ -63,19 +63,39 @@ A non-standard `Oidc:EmailClaim` (`preferred_username`, `upn`, …) never binds 
   request for that address, `4` several issuers pending (lists issuer, time and fingerprint per line — no address, no
   subject; repeat with `--issuer`), `1` nothing changed (store or audit unavailable, refused). Its audit row
   (actor `cli (--confirm-identity-binding)`) is written first; without it nothing changes. The web host is not
-  started. Sign in again afterwards.
+  started. The command writes the same file the running instance uses, under a lock both share
+  (`identity-bindings.json.lock`), and the running instance reads the change at once: the person signs in right
+  afterwards, no restart. A binding the command replaced ends that subject's sessions at their next request.
 
-## Removal, recycled addresses and backups
+## Removing a binding versus removing access
 
-- Removing an address from the roles or the whitelist (also deleting a local account, which removes its role) removes
-  its bindings and pending requests **in the same write**; if that fails, the role or whitelist change is refused.
-  The start also removes bindings of addresses that are no longer entries. So an address given to someone else later
-  never signs in as the old IdP account.
+- **Removing a binding** (*Settings → Sign-in identities → Remove*) ends the sessions of that one IdP account. It does
+  **not** remove the person's access: while the address is still configured, the next sign-in binds again —
+  automatically through a trusted provider with a verified address, otherwise as a pending request to confirm.
+- **Removing access** means the address stops being an entry: remove its role **and** its whitelist listing (deleting
+  a local account removes its role). Only then are its bindings and pending requests removed — in the same write; if
+  that cannot be saved, the role or whitelist change is refused. While the address is still an entry through the other
+  grant (a role, or an enabled whitelist listing), its bindings stay. The start also removes bindings of addresses that
+  are no longer entries. So an address given to someone else later never signs in as the old IdP account.
+
+## Backups, damage and recovery
+
 - `identity-bindings.json` lives in the data directory and is part of the self-backup. Restoring a backup from before
   R1-27 restores no bindings: every federated user binds again.
-- If the file cannot be read (corrupt, or a directory in its place), every federated sign-in and session is refused,
-  local sign-in keeps working, and the readiness check `identity-bindings` reports `Degraded`. Restore the file from
-  `identity-bindings.json.bak` or a backup, or remove it (everyone binds again).
+- Every save keeps the previous file as `identity-bindings.json.bak`. Whiskers **never** takes it over by itself: it may
+  hold a binding that was revoked since.
+- The store is **unavailable** — every federated sign-in and session is refused, local sign-in keeps working, the
+  readiness check `identity-bindings` reports `Degraded` — when the file cannot be read or parsed, lacks its `version`,
+  `bindings` or `pending`, is a directory, or is missing while `identity-bindings.json.bak` exists; and after a save that
+  failed (a full disk), until it has been read and pruned again (retried every 30 seconds and at every federated
+  sign-in). While it is unavailable, role and whitelist changes that add or remove an address are refused.
+- **Recovery is the host operator's decision**, with Whiskers running or stopped:
+  - restore a known-good file: copy `identity-bindings.json.bak` (check it first — it is the generation before the
+    last change) or the file from a backup over `identity-bindings.json`; or
+  - start over: delete **both** `identity-bindings.json` and `identity-bindings.json.bak` — every federated user binds
+    again (Google automatically, OIDC after confirmation). Deleting only the current file leaves the store unavailable.
+
+  The running instance picks the repaired file up at its next read.
 
 ## Upgrading to R1-27
 

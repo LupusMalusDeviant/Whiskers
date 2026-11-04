@@ -25,10 +25,19 @@ public sealed class FederatedAdmission : IFederatedAdmission
         _whitelist = whitelist ?? throw new ArgumentNullException(nameof(whitelist));
         ArgumentNullException.ThrowIfNull(configuration);
         // Decision 3 b): Google's email_verified is trusted, a generic OIDC provider's is not unless the operator says so.
-        _trustGoogle = configuration.GetValue($"{GoogleAuthSettings.SectionName}:{nameof(GoogleAuthSettings.TrustEmailVerified)}", true);
-        _trustOidc = configuration.GetValue($"{OidcSettings.SectionName}:{nameof(OidcSettings.TrustEmailVerified)}", false);
+        _trustGoogle = Trusts(configuration, "google");
+        _trustOidc = Trusts(configuration, "oidc");
         _logger = logger;
     }
+
+    /// <summary>Whether <paramref name="provider"/>'s <c>email_verified</c> is trusted for an automatic binding (decision
+    /// 3 b: Google by default, a generic OIDC provider only when the operator says so).</summary>
+    internal static bool Trusts(IConfiguration configuration, string provider) => provider switch
+    {
+        "google" => configuration.GetValue($"{GoogleAuthSettings.SectionName}:{nameof(GoogleAuthSettings.TrustEmailVerified)}", true),
+        "oidc" => configuration.GetValue($"{OidcSettings.SectionName}:{nameof(OidcSettings.TrustEmailVerified)}", false),
+        _ => false,
+    };
 
     public async Task<AdmissionDecision> AdmitAsync(FederatedSignInClaims claims, CancellationToken ct = default)
     {
@@ -65,7 +74,9 @@ public sealed class FederatedAdmission : IFederatedAdmission
         var issuer = IssuerOf(claims.Issuer);
         if (issuer is null || string.IsNullOrEmpty(claims.Subject)) return AdmissionDecision.Refused(AuthAuditReasons.NoSubject);
         claims = claims with { Issuer = issuer };
-        if (!_bindings.IsAvailable) return AdmissionDecision.Refused(AuthAuditReasons.StoreUnavailable);
+        // An unavailable store gets one re-read and prune (a file repaired, a failed save behind it); still unavailable → refuse.
+        if (!_bindings.IsAvailable && !await _bindings.RefreshAsync(ct))
+            return AdmissionDecision.Refused(AuthAuditReasons.StoreUnavailable);
 
         // 3. A bound subject keeps its account, whatever address the IdP sends now.
         if (_bindings.Find(issuer, claims.Subject) is { } bound)
@@ -94,9 +105,12 @@ public sealed class FederatedAdmission : IFederatedAdmission
         if (pending is not null)
         {
             var recorded = await _bindings.RecordPendingAsync(claims, account, pending, ct);
-            if (!recorded.Success)
-                _logger?.LogWarning("A binding request ({Reason}) could not be recorded ({Error})", pending, recorded.Error);
-            return AdmissionDecision.Refused(AuthAuditReasons.PendingConfirmation, account);
+            if (recorded.Success) return AdmissionDecision.Refused(AuthAuditReasons.PendingConfirmation, account);
+            // Nothing waits for confirmation: the refusal says why, not "pending".
+            _logger?.LogWarning("A binding request ({Reason}) could not be recorded ({Error})", pending, recorded.Error);
+            return AdmissionDecision.Refused(recorded.Error == IdentityBindingErrors.NotFound
+                ? AuthAuditReasons.NotWhitelisted
+                : AuthAuditReasons.StoreUnavailable, account);
         }
 
         // 7. A trusted provider vouches for the configured address: bind (audited first), then admit.
@@ -117,6 +131,7 @@ public sealed class FederatedAdmission : IFederatedAdmission
         "oidc" => _trustOidc,
         _ => false,
     };
+    // (Trusts is read again by the store under its gate, contract 0003 rule 1.7.)
 
     /// <summary>The issuer, or <c>null</c> when the handler set none (empty or the claims library's default).</summary>
     internal static string? IssuerOf(string? issuer) =>

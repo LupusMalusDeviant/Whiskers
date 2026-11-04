@@ -134,7 +134,10 @@ public class WhitelistService : IWhitelistService, IInitializable
             var before = GetWhitelist();
             // R1-27 (contract 0003, rule 5): an address that stops being listed loses its identity bindings first, under
             // the held gate; a failed prune throws and the whitelist stays as it is.
-            if (_bindings is not null && Listed(before).Except(Listed(copy), StringComparer.OrdinalIgnoreCase).Any())
+            // While the bindings are unavailable (a prune still owed), a save that lists a new address prunes first too.
+            if (_bindings is not null
+                && (Listed(before).Except(Listed(copy), StringComparer.OrdinalIgnoreCase).Any()
+                    || (Listed(copy).Except(Listed(before), StringComparer.OrdinalIgnoreCase).Any() && !_bindings.IsAvailable)))
                 await _bindings.PruneOrphansAsync(lease, nextWhitelist: copy);
             await _store.SaveAsync(copy);
             SetCache(copy);

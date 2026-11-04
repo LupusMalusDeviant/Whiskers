@@ -185,6 +185,9 @@ public sealed class OidcIdentityBindingTests
     [InlineData("yes")]
     [InlineData("1")]
     [InlineData("")]
+    [InlineData(" true ")]
+    [InlineData("true\n")]
+    [InlineData("\ttrue")]
     public async Task An_unverified_address_binds_nothing_and_admits_nobody(string? verified)
     {
         await using var world = await BindingWorld.CreateAsync();
@@ -259,6 +262,16 @@ public sealed class OidcIdentityBindingTests
         Assert.True(oidcClaims.EmailIsStandardClaim);
         Assert.False(IsTrue(FederatedSignIn.ClaimsOf(Run(oidc.ClaimActions, denied.RootElement, "oidc"), "oidc",
             builder.Configuration).EmailVerified));
+        // Exactly "true" (any case), nothing trimmed: a padded value is passed on as it is and is not verified.
+        foreach (var padded in new[] { " true ", "true\n", "\ttrue", "TRUE " })
+        {
+            var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "s-1"),
+                new Claim(AuthConstants.EmailVerifiedClaim, padded)], "Google"));
+            var extracted = FederatedSignIn.ClaimsOf(user, "google", builder.Configuration).EmailVerified;
+            Assert.Equal(padded, extracted);
+            Assert.False(IdentityBindingStore.IsTrue(extracted));
+        }
+        Assert.True(IdentityBindingStore.IsTrue("True"));
 
         static ClaimsPrincipal Run(Microsoft.AspNetCore.Authentication.OAuth.Claims.ClaimActionCollection actions,
             JsonElement user, string type)
@@ -329,11 +342,36 @@ public sealed class OidcIdentityBindingTests
 
         Assert.False(refused.Admitted);
         Assert.Equal(AuthAuditReasons.StoreUnavailable, refused.Reason);
-        Assert.Empty(world.Store.Snapshot().Bindings);
-        Assert.Null(world.Store.Find(AuthConstants.GoogleIssuer, "g-ops"));
         // The announced binding's outcome follows its row.
         Assert.Contains(world.Audit.Rows, r => r.Action == AuthAuditLog.IdentityBoundAction && !r.Success);
         Assert.False(File.Exists(file));
+        // A failed save leaves the store unavailable (federated paths refuse, readiness Degraded) until it is read and
+        // pruned again.
+        Assert.False(world.Store.IsAvailable);
+        Assert.Throws<IdentityBindingStoreUnavailableException>(() => world.Store.Snapshot());
+        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded,
+            (await new Whiskers.HealthChecks.IdentityBindingsReadyCheck(world.Store).CheckHealthAsync(new())).Status);
+
+        world.Store.PersistForTests = null;
+        Assert.True(await world.Store.RefreshAsync());
+        Assert.Empty(world.Store.Snapshot().Bindings);
+        Assert.Null(world.Store.Find(AuthConstants.GoogleIssuer, "g-ops"));
+    }
+
+    [Fact]
+    public async Task A_failed_pending_save_is_refused_as_store_unavailable_and_records_no_request()
+    {
+        await using var world = await BindingWorld.CreateAsync();   // OIDC untrusted: the sign-in would be pending
+        world.BlockSaves();
+
+        var refused = await world.Admission.AdmitAsync(Oidc("o-ops", Ops));
+
+        Assert.False(refused.Admitted);
+        Assert.Equal(AuthAuditReasons.StoreUnavailable, refused.Reason);
+        Assert.DoesNotContain(world.Audit.Rows, r => r.Action == AuthAuditLog.IdentityPendingAction);
+        world.Store.PersistForTests = null;
+        Assert.True(await world.Store.RefreshAsync());
+        Assert.Empty(world.Store.Snapshot().Pending);
     }
 
     [Theory]
@@ -347,7 +385,7 @@ public sealed class OidcIdentityBindingTests
         var local = await world.LocalSessionAsync(Ops);
         var file = new DataPathOptions(world.Directory).IdentityBindingsJson;
         File.Delete(file);
-        if (File.Exists(file + ".bak")) File.Delete(file + ".bak");
+        if (damage == "directory" && File.Exists(file + ".bak")) File.Delete(file + ".bak");
         if (damage == "corrupt") await File.WriteAllTextAsync(file, "{ not json");
         else Directory.CreateDirectory(file);
 
@@ -363,8 +401,9 @@ public sealed class OidcIdentityBindingTests
         Assert.True((await validator.CheckAsync(local)).Valid);
         var health = await new Whiskers.HealthChecks.IdentityBindingsReadyCheck(store).CheckHealthAsync(new());
         Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded, health.Status);
-        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy,
-            (await new Whiskers.HealthChecks.IdentityBindingsReadyCheck(world.Store).CheckHealthAsync(new())).Status);
+        // The running instance follows the file: it refuses as well, without a restart.
+        Assert.False(world.Store.IsAvailable);
+        Assert.Equal(SessionRevocationReasons.StoreUnavailable, (await world.Validator.CheckAsync(federated)).Reason);
         // A role or whitelist write that removes an entry cannot prune an unreadable store: it is refused.
         var roles = new RoleService(world.Configuration, NullLogger<RoleService>.Instance, dataPaths: new DataPathOptions(world.Directory),
             writeGate: world.Gate, bindings: store);
@@ -491,13 +530,204 @@ public sealed class OidcIdentityBindingTests
         Assert.Equal(IdentityBindingStore.CliActor, row.Actor);
         Assert.Contains("method=host_cli", row.Details);
 
-        // The CLI's own store instance wrote the file: the running instance reads it after its restart.
-        var reloaded = world.NewStore();
-        await reloaded.InitializeAsync();
-        var bound = reloaded.Find(OidcIssuer, "o-ops");
+        // The CLI's own store (its own process: its own gate) wrote the file; the running instance sees it without a restart
+        // and the person signs in now.
+        var bound = world.Store.Find(OidcIssuer, "o-ops");
         Assert.NotNull(bound);
         Assert.Equal(IdentityBindingMethods.HostCli, bound.Method);
         Assert.Equal("cli", bound.BoundBy);
+        var admitted = await world.Admission.AdmitAsync(Oidc("o-ops", Ops));
+        Assert.True(admitted.Admitted);
+        Assert.Equal(bound.Id, admitted.BindingId);
+    }
+
+    [Fact]
+    public async Task The_host_cli_and_the_running_instance_share_the_file_without_overwriting_each_other()
+    {
+        await using var world = await BindingWorld.CreateAsync();   // OIDC untrusted
+        var googleOps = await world.SignInAsync(Google("g-ops", Ops));
+        await world.Admission.AdmitAsync(Oidc("o-root", Root));      // pending provider_untrusted
+        await world.Admission.AdmitAsync(Oidc("o-ops", Ops));        // pending second_issuer
+
+        // The CLI's process: its own store and gate on the same data directory, loaded now.
+        var cli = world.NewProcessStore();
+        await cli.InitializeAsync();
+        Assert.NotNull(cli.Find(AuthConstants.GoogleIssuer, "g-ops"));
+
+        // The running instance revokes; the CLI then confirms from its earlier view — it must not write that view back.
+        var googleId = googleOps.FindFirstValue(AuthConstants.BindingIdClaim)!;
+        Assert.True((await world.AsAdminAsync("identity.binding_remove", () => world.Store.RemoveAsync(googleId))).Success);
+        Assert.True((await cli.ConfirmFromHostAsync(Root, null)).Success);
+
+        // Both directions, no restart: the live instance sees the CLI's binding, the revocation stands for both, the
+        // other request is still there.
+        Assert.Equal(Root, world.Store.Find(OidcIssuer, "o-root")?.Account);
+        Assert.True((await world.Admission.AdmitAsync(Oidc("o-root", Root))).Admitted);
+        Assert.Null(world.Store.Find(AuthConstants.GoogleIssuer, "g-ops"));
+        Assert.Null(cli.Find(AuthConstants.GoogleIssuer, "g-ops"));
+        Assert.Equal(SessionRevocationReasons.BindingRevoked, (await world.Validator.CheckAsync(googleOps)).Reason);
+        Assert.Contains(world.Store.Snapshot().Pending, p => p.Account == Ops && p.Issuer == OidcIssuer);
+
+        // The other way round: the CLI confirms Ops; the live instance's next write starts from that, not from its cache.
+        Assert.True((await cli.ConfirmFromHostAsync(Ops, OidcIssuer)).Success);
+        await world.Admission.AdmitAsync(Google("g-ops-new", Ops));   // live write: a pending request for Google
+        Assert.Equal(Ops, world.Store.Find(OidcIssuer, "o-ops")?.Account);
+        Assert.Equal(Ops, cli.Find(OidcIssuer, "o-ops")?.Account);
+        Assert.Contains(cli.Snapshot().Pending, p => p.Account == Ops && p.Issuer == AuthConstants.GoogleIssuer);
+    }
+
+    [Fact]
+    public async Task A_writer_waits_for_the_other_process_lock()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        var lockPath = new DataPathOptions(world.Directory).IdentityBindingsJson + IdentityBindingStore.LockSuffix;
+        var held = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var signIn = world.Admission.AdmitAsync(Google("g-ops", Ops));
+        await Task.Delay(300);
+        Assert.False(signIn.IsCompleted);   // the other process holds the lock
+        await held.DisposeAsync();
+        Assert.True((await signIn).Admitted);
+    }
+
+    [Theory]
+    [InlineData("corrupt")]
+    [InlineData("missing")]
+    public async Task A_damaged_or_missing_file_is_never_replaced_by_its_previous_generation(string damage)
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        var first = await world.SignInAsync(Google("g-ops-1", Ops));
+        await world.Admission.AdmitAsync(Google("g-ops-2", Ops));   // pending subject_changed
+        var request = Assert.Single(world.Store.Snapshot().Pending);
+        Assert.True((await world.AsAdminAsync("identity.binding_confirm", () => world.Store.ConfirmAsync(request.Id))).Success);
+        var file = new DataPathOptions(world.Directory).IdentityBindingsJson;
+        var previous = await File.ReadAllTextAsync(file + ".bak");
+        Assert.Contains("g-ops-1", previous);   // the previous generation still holds the revoked subject
+
+        if (damage == "corrupt") await File.WriteAllTextAsync(file, "{ torn");
+        else File.Delete(file);
+        var restarted = world.NewStore();
+        await restarted.InitializeAsync();
+
+        foreach (var store in new[] { restarted, world.Store })
+        {
+            Assert.False(store.IsAvailable);
+            Assert.Throws<IdentityBindingStoreUnavailableException>(() => store.Find(AuthConstants.GoogleIssuer, "g-ops-1"));
+            var validator = new SessionValidator(world.Scopes, world.Whitelist, world.Roles, world.Configuration, bindings: store);
+            Assert.Equal(SessionRevocationReasons.StoreUnavailable, (await validator.CheckAsync(first)).Reason);
+            var admission = new FederatedAdmission(store, world.Roles, world.Whitelist, world.Configuration);
+            Assert.Equal(AuthAuditReasons.StoreUnavailable, (await admission.AdmitAsync(Google("g-ops-1", Ops))).Reason);
+        }
+        Assert.Equal(previous, await File.ReadAllTextAsync(file + ".bak"));   // untouched
+        Assert.Equal(damage == "corrupt", File.Exists(file));                 // nothing written back
+    }
+
+    [Theory]
+    [InlineData("""{}""")]
+    [InlineData("""{"version":1,"pending":[]}""")]
+    [InlineData("""{"version":1,"bindings":[]}""")]
+    [InlineData("""{"bindings":[],"pending":[]}""")]
+    [InlineData("""{"version":1,"bindings":null,"pending":[]}""")]
+    [InlineData("""{"version":1,"bindings":[],"pending":null}""")]
+    [InlineData("""{"version":null,"bindings":[],"pending":[]}""")]
+    [InlineData("""{"version":2,"bindings":[],"pending":[]}""")]
+    [InlineData("""null""")]
+    [InlineData("""[]""")]
+    public async Task An_incomplete_document_makes_the_store_unavailable(string json)
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        await File.WriteAllTextAsync(new DataPathOptions(world.Directory).IdentityBindingsJson, json);
+        var store = world.NewStore();
+        await store.InitializeAsync();
+        Assert.False(store.IsAvailable);
+        var admission = new FederatedAdmission(store, world.Roles, world.Whitelist, world.Configuration);
+        Assert.Equal(AuthAuditReasons.StoreUnavailable, (await admission.AdmitAsync(Google("g-ops", Ops))).Reason);
+    }
+
+    [Fact]
+    public async Task A_complete_empty_document_and_no_file_at_all_are_an_empty_store()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        Assert.True(world.Store.IsAvailable);   // never written: neither the file nor its previous generation
+        await File.WriteAllTextAsync(new DataPathOptions(world.Directory).IdentityBindingsJson,
+            """{"version":1,"bindings":[],"pending":[]}""");
+        var store = world.NewStore();
+        await store.InitializeAsync();
+        Assert.True(store.IsAvailable);
+        Assert.Empty(store.Snapshot().Bindings);
+    }
+
+    [Fact]
+    public async Task A_failed_start_up_prune_keeps_federated_access_closed_and_a_recycled_address_does_not_revive_the_old_subject()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        var old = await world.SignInAsync(Google("g-ops", Ops));
+        // roles.json edited by hand while Whiskers was stopped: Ops is gone. The start-up prune cannot be saved.
+        var roles = new UserRoleData { Roles = [new UserRoleEntry { Email = Root, Role = AppRole.Admin }] };
+        await File.WriteAllTextAsync(new DataPathOptions(world.Directory).RolesJson, JsonSerializer.Serialize(roles));
+        await world.Roles.InitializeAsync();
+        world.BlockSaves();
+
+        await new IdentityBindingStartupPrune(world.Store, world.Gate).InitializeAsync();
+
+        Assert.False(world.Store.IsAvailable);
+        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded,
+            (await new Whiskers.HealthChecks.IdentityBindingsReadyCheck(world.Store).CheckHealthAsync(new())).Status);
+        Assert.Equal(AuthAuditReasons.StoreUnavailable, (await world.Admission.AdmitAsync(Google("g-ops", Ops))).Reason);
+        Assert.Equal(SessionRevocationReasons.StoreUnavailable, (await world.Validator.CheckAsync(old)).Reason);
+        // Configuring the address again while the prune is owed is refused: the owed prune cannot be saved.
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(Ops, AppRole.Operator)));
+        Assert.False(world.Roles.HasExplicitRole(Ops));
+
+        // Saves work again: configuring the address again takes the owed prune with it — the old subject is gone.
+        world.Store.PersistForTests = null;
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(Ops, AppRole.Operator));
+        Assert.True(world.Store.IsAvailable);
+        Assert.Empty(world.Store.Snapshot().Bindings);
+        Assert.Equal(SessionRevocationReasons.BindingRevoked, (await world.Validator.CheckAsync(old)).Reason);
+        Assert.Null(world.Store.Find(AuthConstants.GoogleIssuer, "g-ops"));
+    }
+
+    [Fact]
+    public async Task The_sign_in_binding_decides_the_whitelist_again_under_the_gate()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        await GatewayArrange.RunAsync("config.whitelist", () => world.Whitelist.SaveWhitelistAsync(
+            new WhitelistData { Enabled = true, Emails = [Root, Ops] }));
+        // Between the admission's checks and the binding, an Admin takes Ops off the whitelist (its role keeps it an entry).
+        world.Store.BeforeBindGateForTests = () => GatewayArrange.RunAsync("config.whitelist", () =>
+            world.Whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = [Root] }));
+
+        var refused = await world.Admission.AdmitAsync(Google("g-ops", Ops));
+
+        Assert.False(refused.Admitted);
+        Assert.Equal(AuthAuditReasons.NotWhitelisted, refused.Reason);
+        Assert.Empty(world.Store.Snapshot().Bindings);
+        Assert.DoesNotContain(world.Audit.Rows, r => r.Action == AuthAuditLog.IdentityBoundAction);
+    }
+
+    [Fact]
+    public async Task Pending_requests_expire_after_a_day_and_are_capped()
+    {
+        var time = new ManualClock(DateTimeOffset.UtcNow);
+        await using var world = await BindingWorld.CreateAsync(time: time);
+        await world.Admission.AdmitAsync(Oidc("o-ops", Ops));
+        Assert.Single(world.Store.Snapshot().Pending);
+        time.Advance(IdentityBindingStore.PendingLifetime + TimeSpan.FromMinutes(1));
+        Assert.Empty(world.Store.Snapshot().Pending);
+        Assert.Equal(3, await IdentityBindingCli.RunAsync(world.CliServices(), [Ops], new StringWriter()));   // expired
+
+        for (var i = 0; i < IdentityBindingStore.MaxPending + 5; i++)
+        {
+            var address = $"user{i}@corp.test";
+            await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(address, AppRole.Viewer));
+            time.Advance(TimeSpan.FromSeconds(1));
+            await world.Admission.AdmitAsync(Oidc($"o-{i}", address));
+        }
+        var pending = world.Store.Snapshot().Pending;
+        Assert.Equal(IdentityBindingStore.MaxPending, pending.Count);
+        Assert.DoesNotContain(pending, p => p.Account == "user0@corp.test");   // the oldest went first
+        Assert.Contains(pending, p => p.Account == $"user{IdentityBindingStore.MaxPending + 4}@corp.test");
     }
 
     [Fact]
@@ -519,7 +749,10 @@ public sealed class OidcIdentityBindingTests
         world.BlockSaves();
         await Assert.ThrowsAnyAsync<Exception>(() => GatewayArrange.RunAsync("config.roles", () => world.Roles.RemoveRoleAsync(Ops)));
         Assert.True(world.Roles.HasExplicitRole(Ops));
-        Assert.Single(world.Store.Snapshot().Bindings);
+        Assert.False(world.Store.IsAvailable);
+        world.Store.PersistForTests = null;
+        Assert.True(await world.Store.RefreshAsync());
+        Assert.Single(world.Store.Snapshot().Bindings);   // the refused write removed nothing
     }
 
     [Fact]
@@ -566,6 +799,52 @@ public sealed class OidcIdentityBindingTests
             Assert.DoesNotContain(secret, text, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task The_real_audit_writer_keeps_the_account_in_the_row_and_out_of_the_log()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        using var trail = new AuditTrailFixture(vaultKey: null);
+        var logs = new NotificationDeliveryTests.ListLoggerProvider();
+        using var factory = LoggerFactory.Create(b => b.AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
+        var paths = new DataPathOptions(world.Directory);
+
+        // Rows written: the sign-in binding, a pending request, the host confirmation, and a queued sign-in row.
+        var written = new AuditLogService(trail.Scopes, factory.CreateLogger<AuditLogService>());
+        var store = new IdentityBindingStore(world.Services, written, world.Configuration, world.Gate, paths);
+        var admission = new FederatedAdmission(store, world.Roles, world.Whitelist, world.Configuration);
+        Assert.True((await admission.AdmitAsync(Google("g-ops", Ops))).Admitted);
+        await admission.AdmitAsync(Oidc("o-root", Root));
+        Assert.True((await store.ConfirmFromHostAsync(Root, null)).Success);
+        var queue = new AuthAuditLog(written, factory.CreateLogger<AuthAuditLog>());
+        await queue.StartAsync(default);
+        await queue.SignedInAsync(new DefaultHttpContext(), "google", Ops);
+        await queue.StopAsync(default);
+        // Rows lost: the database is gone (the fallback line), and the queue is closed (the dropped-row line).
+        var lost = new AuditLogService(new ThrowingScopes(), factory.CreateLogger<AuditLogService>());
+        var lostStore = new IdentityBindingStore(world.Services, lost, world.Configuration, world.Gate, paths);
+        var lostAdmission = new FederatedAdmission(lostStore, world.Roles, world.Whitelist, world.Configuration);
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync("third@corp.test", AppRole.Viewer));
+        Assert.Equal(AuthAuditReasons.AuditUnavailable, (await lostAdmission.AdmitAsync(Google("g-third", "third@corp.test"))).Reason);
+        await lost.TryLogAsync(Ops, "web", AuthAuditLog.LoginFailedAction, AuthAuditLog.Target, "google", "google", "reason=x", success: false);
+        await queue.SignInRefusedAsync(new DefaultHttpContext(), "oidc", Ops, AuthAuditReasons.PendingConfirmation);
+
+        var text = string.Join("\n", logs.Lines);
+        Assert.Contains("AUDIT WRITE FAILED", text);
+        Assert.Contains(AuthAuditLog.IdentityBoundAction, text);
+        Assert.DoesNotContain("corp.test", text, StringComparison.OrdinalIgnoreCase);
+        // The persisted rows still name the account.
+        using var scope = trail.Scope();
+        var rows = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().ToListAsync();
+        Assert.Contains(rows, r => r.Action == AuthAuditLog.IdentityBoundAction && r.Actor == Ops && r.TargetName == Ops);
+        Assert.Contains(rows, r => r.Action == AuthAuditLog.IdentityBoundAction && r.Actor == IdentityBindingStore.CliActor && r.TargetName == Root);
+        Assert.Contains(rows, r => r.Action == AuthAuditLog.LoginAction && r.Actor == Ops);
+    }
+
+    private sealed class ThrowingScopes : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => throw new InvalidOperationException("audit db unavailable");
+    }
+
     // ------------------------------------------------------------------------------------------------ helpers
 
     internal static TicketReceivedContext Ticket(HttpContext http, string scheme, ClaimsIdentity identity) =>
@@ -589,6 +868,7 @@ internal sealed class BindingWorld : IAsyncDisposable
     public Audit Audit { get; } = new();
     public NotificationDeliveryTests.ListLoggerProvider Logs { get; } = new();
     public IServiceScopeFactory Scopes => _sp.GetRequiredService<IServiceScopeFactory>();
+    public IServiceProvider Services => _sp;
     private readonly ILoggerFactory _loggers;
 
     private BindingWorld(string dir, IConfiguration configuration)
@@ -607,7 +887,10 @@ internal sealed class BindingWorld : IAsyncDisposable
         _loggers = _sp.GetRequiredService<ILoggerFactory>();
     }
 
-    public static async Task<BindingWorld> CreateAsync(bool seedAdmin = true, bool trustOidc = false, bool authDisabled = false)
+    public TimeProvider? Time { get; private set; }
+
+    public static async Task<BindingWorld> CreateAsync(bool seedAdmin = true, bool trustOidc = false, bool authDisabled = false,
+        TimeProvider? time = null)
     {
         var dir = Path.Combine(Path.GetTempPath(), $"sw-r127-{Guid.NewGuid():N}");
         System.IO.Directory.CreateDirectory(dir);
@@ -617,7 +900,7 @@ internal sealed class BindingWorld : IAsyncDisposable
             ["Auth:Disabled"] = authDisabled ? "true" : "false",
         };
         if (seedAdmin) settings["WHISKERS_ADMIN_EMAIL"] = OidcIdentityBindingTests.Root;
-        var world = new BindingWorld(dir, new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+        var world = new BindingWorld(dir, new ConfigurationBuilder().AddInMemoryCollection(settings).Build()) { Time = time };
         using (var scope = world._sp.CreateScope())
             await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.EnsureCreatedAsync();
         var paths = new DataPathOptions(dir);
@@ -638,15 +921,19 @@ internal sealed class BindingWorld : IAsyncDisposable
         return world;
     }
 
-    /// <summary>Another store instance over the same file (a restart, or the CLI's process).</summary>
-    public IdentityBindingStore NewStore() => new(_sp, Audit, Configuration, Gate, new DataPathOptions(Directory),
+    /// <summary>Another store instance over the same file in this process (a restart).</summary>
+    public IdentityBindingStore NewStore() => new(_sp, Audit, Configuration, Gate, new DataPathOptions(Directory), Time,
         logger: _loggers.CreateLogger<IdentityBindingStore>());
 
-    /// <summary>The services the host CLI resolves: the initializers it runs and the binding store.</summary>
+    /// <summary>A store as another process (the host CLI) has it: same file, its own write gate.</summary>
+    public IdentityBindingStore NewProcessStore() => new(_sp, Audit, Configuration, new AccessControlWriteGate(),
+        new DataPathOptions(Directory), Time, logger: _loggers.CreateLogger<IdentityBindingStore>());
+
+    /// <summary>The services the host CLI resolves: the initializers it runs and the binding store (another process).</summary>
     public IServiceProvider CliServices()
     {
         var services = new ServiceCollection();
-        services.AddSingleton<IIdentityBindingStore>(_ => NewStore());
+        services.AddSingleton<IIdentityBindingStore>(_ => NewProcessStore());
         services.AddSingleton<Whiskers.Services.IInitializable>(sp =>
             (Whiskers.Services.IInitializable)sp.GetRequiredService<IIdentityBindingStore>());
         return services.BuildServiceProvider();
