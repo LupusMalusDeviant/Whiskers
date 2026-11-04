@@ -109,7 +109,6 @@ public class HostingerApiService : IHostingerService
     public Task StopAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/stop", ct);
     public Task RestartAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/restart", ct);
 
-
     public Task CreateSnapshotAsync(string token, long id, CancellationToken ct = default) => SendAsync(token, HttpMethod.Post, $"/virtual-machines/{id}/snapshot", ct);
 
     public Task<string> GetMetricsRawAsync(string token, long id, CancellationToken ct = default)
