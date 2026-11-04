@@ -2,7 +2,7 @@
   "identifier": "lupusmalusdeviant-whiskers",
   "name": "Whiskers",
   "version": "0.15.0",
-  "description": "Whiskers — Zero-Trust MCP Control Plane for Docker & Kubernetes. AI agents operate Docker hosts, Kubernetes workloads, logs, CVEs and cloud servers through scoped tools (Read/Write/Admin) instead of a raw socket: code-enforced guardrails, blast-radius checks, human-in-the-loop approvals and a tamper-evident audit trail. Self-hosted, SSH-key-free (mesh + mTLS).",
+  "description": "Whiskers — Zero-Trust MCP Control Plane for Docker & Kubernetes. AI agents operate Docker hosts, logs, CVEs and cloud servers through scoped tools (Read/Write/Admin) instead of a raw socket; Kubernetes workloads are managed in the governed UI (MCP pod tools on the roadmap). Code-enforced guardrails, blast-radius and update-risk assessment, human-in-the-loop approvals and a hash-chained audit trail (tamper-evident with VAULT_KEY). Self-hosted, SSH-key-free in steady state (mesh + mTLS).",
   "author": "LupusMalusDeviant",
   "authorUrl": "https://github.com/LupusMalusDeviant",
   "homepage": "https://github.com/LupusMalusDeviant/Whiskers",

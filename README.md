@@ -35,18 +35,22 @@ antidote:
 
 | | Typical Docker/K8s MCP server | Whiskers control plane |
 |---|---|---|
-| **Access** | Raw `docker.sock` or kubeconfig in the agent's process | The agent never touches the socket or the kubeconfig — it calls scoped tools; Whiskers holds the credentials |
-| **Reach** | `stdio`, one host | Streamable HTTP to many hosts over mesh + mTLS, no standing SSH key |
+| **Access** | Raw `docker.sock` or kubeconfig in the agent's process | The agent never touches the socket or the kubeconfig (encrypted in the vault) — it calls scoped tools; Kubernetes workloads are operated from the governed UI today, MCP pod tools are on the roadmap |
+| **Reach** | `stdio`, one host | Agent ↔ Whiskers over Streamable HTTP; Whiskers ↔ many hosts over mesh + mTLS — no standing SSH key once a host is onboarded |
 | **Permissions** | Everything the socket allows | Per key: Read, Write or Admin scope, or an explicit tool list — checked on every call |
-| **Risky actions** | Executed blindly | Guardrails allow, block or pause for human approval; blast-radius and CVE check before an update |
-| **Afterwards** | No record | Tamper-evident, hash-chained audit trail plus Agent History |
+| **Risky actions** | Executed as requested | Guardrails (agent module, on by default) allow, deny or pause for human approval; blast-radius and update-risk assessment before an update (`get_blast_radius`, `assess_update_risk`, `plan_safe_update`) |
+| **Afterwards** | Usually no record | Hash-chained audit trail with signed checkpoints (tamper-evident when `VAULT_KEY` is set) plus Agent History |
+
+**Zero-trust here means:** no caller is trusted by default — every call is authenticated per key, scope-checked and
+guardrail-evaluated in code, and every host link is mTLS over a private mesh.
 
 AI agents can operate infrastructure — but the usual way to let them is to hand over an SSH key or a
 shell, which grants far more power than any single task needs. Whiskers puts a governed layer in
 between:
 
 - **Limit what an operator or agent can do.** API keys, roles and explicit tool access define the
-  available capability set — no arbitrary shell.
+  available capability set — no arbitrary shell below Admin scope; the Admin-only `execute_command` is
+  guardrail-checked and audited.
 - **Require approval before impact.** Code-enforced guardrails allow, block, or pause sensitive
   operations for human confirmation.
 - **Know exactly what happened.** Agent History and the Audit Log record actor, decision, target,
@@ -590,8 +594,6 @@ Beta is feature-rich but not finished. Planned / not-yet-implemented:
 
 **Agent governance** (building on the shipped Agent-History, approvals/human-in-the-loop and rich
 chat widgets)
-- Extend approvals to **block external/direct MCP calls** too — today the human-in-the-loop gate
-  covers the in-process agent; direct `tools/call` requests are recorded but not held for approval.
 - Real per-tool **diffs** in the approval card (show exactly what a write would change).
 - A fuller **rich-widget / MCP-Apps** catalog beyond the curated chart + status card.
 

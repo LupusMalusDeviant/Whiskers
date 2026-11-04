@@ -167,6 +167,8 @@ acceptance test for governance features.
 - SSH-key-free steady-state operation
 - mesh + mTLS
 - infrastructure capabilities / tools
+- zero-trust MCP control plane — always with its definition: no caller is trusted by default; every call is
+  authenticated per key, scope-checked and guardrail-evaluated in code, and every host link is mTLS over a private mesh
 
 **Avoid, or use only as secondary support:**
 
