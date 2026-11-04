@@ -278,10 +278,10 @@ hardened() {
     local compose=(docker compose -p "$project" -f docker-compose.hardened.yml -f "$override")
     CLEANUP+=("${compose[*]} down -v --remove-orphans")
     LOG_TARGETS+=("${compose[*]} logs --no-color --no-log-prefix")
-    # GOOGLE_ADMIN_EMAIL as .env.example describes it (the first Admin, seeds the whitelist). Left empty, the compose file's
-    # GoogleAuth__AllowedEmails__0= seeds a whitelist that holds only an empty address and the local Admin is refused
-    # (R1-47 finding, reported; the whitelist logic is outside this package).
-    run_quiet env WHISKERS_ADMIN_EMAIL="$ADMIN_EMAIL" GOOGLE_ADMIN_EMAIL="$ADMIN_EMAIL" \
+    # GOOGLE_ADMIN_EMAIL stays empty, the .env.example default: the compose file then passes GoogleAuth__AllowedEmails__0=
+    # with an empty value, which must not seed a whitelist that admits nobody — the real sign-in below proves the
+    # WHISKERS_ADMIN_EMAIL administrator gets in.
+    run_quiet env WHISKERS_ADMIN_EMAIL="$ADMIN_EMAIL" GOOGLE_ADMIN_EMAIL= \
         WHISKERS_ADMIN_PASSWORD_FILE=/run/whiskers-ci/admin-password VAULT_KEY="$(random_hex 32)" \
         "${compose[@]}" up -d --no-build || fail "the hardened compose project did not start"
 

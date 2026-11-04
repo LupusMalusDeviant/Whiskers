@@ -9,8 +9,11 @@ All notable changes to Whiskers are documented here. The format follows
 - **Fix: an unset `GOOGLE_ADMIN_EMAIL` no longer switches on a whitelist that admits nobody.** Compose passes it as
   `GoogleAuth__AllowedEmails__0=`, and a fresh instance seeded an enabled whitelist holding one empty entry, which turned
   away every Google and OIDC sign-in. The seed now drops blank entries (and trims and de-duplicates the rest); with none
-  left the whitelist stays off, so the C5 rule applies (only role holders once an administrator exists). An existing
-  `whitelist.json` is not changed.
+  left the whitelist stays off, so the C5 rule applies: until a role exists every Google/OIDC account is admitted as
+  Viewer, afterwards only accounts with a role — set `WHISKERS_ADMIN_EMAIL` or finish the setup promptly. The artifact
+  check now starts the hardened image with `GOOGLE_ADMIN_EMAIL` empty and signs the administrator in. An existing
+  `whitelist.json` is not changed; an instance that already holds the empty entry is fixed in Settings (whitelist), or
+  by deleting `whitelist.json` and `whitelist.json.bak` in the data directory and restarting.
 - **Fix: a role change takes effect only once it is saved.** `SetRoleAsync` and `RemoveRoleAsync` published the new roles
   before writing `roles.json`; a failed save left a change that was in force although the caller saw an error, and that
   was gone after the next start (a revoked role came back). They now persist first and publish after, like the setup

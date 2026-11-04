@@ -167,12 +167,35 @@ public class AuthBootstrapTests
         return (svc, path);
     }
 
+    /// <summary>The call failed in the save itself (a file-system error), not earlier for an unrelated reason.</summary>
+    private static void AssertSaveFailure(Exception? ex)
+        => Assert.True(ex is IOException or UnauthorizedAccessException, $"expected a failed save, got {ex?.GetType().Name ?? "no exception"}");
+
+    [Fact]
+    public async Task A_blank_GOOGLE_ADMIN_EMAIL_seeds_nothing_and_admits_the_configured_admin_with_the_real_services()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sw-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var paths = new DataPathOptions(dir);
+        var cfg = Cfg(("WHISKERS_ADMIN_EMAIL", "admin@x"), ("GoogleAuth:AllowedEmails:0", ""));
+        var roles = new RoleService(cfg, NullLogger<RoleService>.Instance, dataPaths: paths);
+        await roles.InitializeAsync();
+        var wl = new WhitelistService(cfg, roles, NullLogger<WhitelistService>.Instance, paths);
+        await wl.InitializeAsync();
+
+        Assert.Equal(AppRole.Admin, roles.GetRole("admin@x"));
+        Assert.True(wl.IsEmailAllowed("admin@x"));
+        Assert.False(wl.IsEmailAllowed("stranger@x"));
+        // Nothing written: a later GOOGLE_ADMIN_EMAIL must still seed the list on a start without whitelist.json.
+        Assert.False(File.Exists(paths.WhitelistJson));
+    }
+
     [Fact]
     public async Task A_role_grant_whose_save_fails_never_takes_effect()
     {
         var (svc, _) = await RolesWithFailingSave();
 
-        await Assert.ThrowsAnyAsync<Exception>(() => svc.SetRoleAsync("new@x", AppRole.Admin));
+        AssertSaveFailure(await Record.ExceptionAsync(() => svc.SetRoleAsync("new@x", AppRole.Admin)));
 
         Assert.Equal(AppRole.Viewer, svc.GetRole("new@x"));
         Assert.False(svc.HasExplicitRole("new@x"));
@@ -184,7 +207,7 @@ public class AuthBootstrapTests
     {
         var (svc, _) = await RolesWithFailingSave();
 
-        await Assert.ThrowsAnyAsync<Exception>(() => svc.RemoveRoleAsync("op@x"));
+        AssertSaveFailure(await Record.ExceptionAsync(() => svc.RemoveRoleAsync("op@x")));
 
         Assert.Equal(AppRole.Operator, svc.GetRole("op@x"));
         Assert.True(svc.HasExplicitRole("op@x"));
