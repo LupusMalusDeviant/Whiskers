@@ -1,28 +1,42 @@
 version: 2
+# R1-52: every dependency input of the build is covered here, and BuildReproducibilityTests fails when one is not:
+#   nuget          every project in Whiskers.slnx (its directory below) — PackageReferences and packages.lock.json
+#   dotnet-sdk     global.json (the SDK version CI and developers build with)
+#   docker         the Dockerfile's base images, pinned as tag@sha256 digest (SDK, ASP.NET runtime, docker CLI)
+#   github-actions every workflow's actions, pinned to full commit SHAs
+# A Dependabot PR is only mergeable after the CI suite passed on it (ci.yml restores in locked mode, so a lock file that
+# does not match its project fails there).
 updates:
-  # .NET dependencies (main app + tests)
+  # .NET dependencies: one entry for all projects, so a package shared by several projects moves in one PR.
+  # A new project must be added to this list (BuildReproducibilityTests).
   - package-ecosystem: "nuget"
-    directory: "/src/Whiskers"
+    directories:
+      - "/src/Whiskers"
+      - "/src/Whiskers.Data"
+      - "/src/Whiskers.Migrations.Sqlite"
+      - "/src/Whiskers.Migrations.Postgres"
+      - "/src/Whiskers.Tests"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies"]
 
-  - package-ecosystem: "nuget"
-    directory: "/src/Whiskers.Tests"
+  # The .NET SDK pinned in global.json.
+  - package-ecosystem: "dotnet-sdk"
+    directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 3
     labels: ["dependencies"]
 
-  # Base image in the Dockerfile
+  # Base images in the Dockerfile. They are pinned by digest (image:tag@sha256:…); Dependabot moves tag and digest
+  # together, also when only the digest behind an unchanged tag changed (a rebuilt runtime image with OS fixes).
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
     labels: ["dependencies", "docker"]
 
-  # GitHub Actions (when workflows are added)
+  # GitHub Actions in .github/workflows (pinned to commit SHAs; the comment names the release).
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

@@ -593,7 +593,10 @@ The `Services/` tree is the heart of the app — see [src/Whiskers/Services/READ
 
 ## Development
 
-Requirements: the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+Requirements: the [.NET 10 SDK](https://dotnet.microsoft.com/download), exactly the version in `global.json`. Package
+versions are locked in each project's `packages.lock.json`; after changing a package reference run
+`dotnet restore Whiskers.slnx --force-evaluate` and commit the lock files (see
+[deploy/README.md](deploy/README.md#pinned-build-inputs-r1-52)).
 
 ```bash
 # build

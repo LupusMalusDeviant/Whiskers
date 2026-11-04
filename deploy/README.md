@@ -110,6 +110,23 @@ The image and the release assets are produced by [`.github/workflows/release.yml
 
 All actions in the workflows are pinned to full commit SHAs (Dependabot updates them); each job holds only the permissions it needs.
 
+### Pinned build inputs (R1-52)
+
+Everything a build reads is pinned, and each pin has an update path in [`.github/dependabot.yml`](../.github/dependabot.yml) (`BuildReproducibilityTests` fails when a project, the SDK, the base images or the actions lose coverage):
+
+| Input | Pinned in | Moved by |
+|---|---|---|
+| NuGet packages (direct and transitive, with content hash) | `src/*/packages.lock.json`; CI and the Dockerfile restore with `--locked-mode` | Dependabot `nuget` (every project directory) |
+| .NET SDK | `global.json` (exact version, `rollForward: disable`) and the Dockerfile's `sdk:<version>@sha256:…` | Dependabot `dotnet-sdk` and `docker` — see below |
+| Base images (SDK, ASP.NET runtime, `docker:<v>-cli`) | `FROM image:tag@sha256:…` in the [`Dockerfile`](../Dockerfile) | Dependabot `docker`: a new digest behind the same tag (OS and runtime fixes) or a new tag |
+| GitHub Actions | full commit SHA + `# vX.Y.Z` comment | Dependabot `github-actions` |
+
+**Moving a digest by hand:** `docker buildx imagetools inspect <image:tag>` prints the multi-arch index digest (the `Digest:` line); write it as `image:tag@sha256:<digest>`. Use the index digest, not a per-architecture one, or the arm64 build gets the amd64 image.
+
+**Moving the SDK** touches three things in one PR: `global.json`'s version, the Dockerfile's `mcr.microsoft.com/dotnet/sdk:<version>@sha256:…`, and the lock files — the SDK writes its own framework package (`Microsoft.AspNetCore.App.Internal.Assets`) into `src/Whiskers/packages.lock.json` and `src/Whiskers.Tests/packages.lock.json`. With the new SDK installed, run `dotnet restore Whiskers.slnx --force-evaluate` and commit the result. A Dependabot PR that moves only one of them fails `BuildReproducibilityTests` or CI's locked restore — complete it on that branch.
+
+**Runtime tools in the image.** The image ships what Whiskers starts as a process and nothing of the Docker engine: the static docker CLI (local terminal `docker exec`), `nsenter` (host shell of the full profile), `ssh`/`sshpass`, `tailscale`/`tailscaled` with `iptables`, the PostgreSQL 18 client tools and `curl` (health probe). `ImageRuntimeToolsTests` keeps that list in step with the source and checks a built image in CI (`image-runtime` job). Run them locally against an image with `WHISKERS_IMAGE=<image> dotnet test src/Whiskers.Tests --filter Category=ImageRuntime`. The Tailscale and PostgreSQL packages come from their apt repositories at their current version.
+
 See the [README quick start](../README.md#quick-start) for the user-facing install paths.
 
 ## `tailnet-guard.sh` — for hosts that reach their fleet over Tailscale

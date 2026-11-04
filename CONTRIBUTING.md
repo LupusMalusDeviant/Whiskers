@@ -40,6 +40,10 @@ For local development without SSO, set `Auth__Disabled=true` and
   agent on every call with nothing logged. If the change adds or renames a tool, say so in the CHANGELOG
   **and note that MCP clients must reconnect**: connectors read the tool list once, at session start, so a
   new tool looks broken until they do.
+- **Changed a package?** Refresh the lock files with `dotnet restore Whiskers.slnx --force-evaluate` and commit
+  every changed `packages.lock.json` (CI restores in locked mode and fails on a stale one). The SDK is the exact
+  version in `global.json`; moving it also moves the Dockerfile's SDK image and the lock files
+  ([deploy/README.md](deploy/README.md#pinned-build-inputs-r1-52)).
 - **No secrets** in the diff (`.env`, `vault*.json`, `data/`, keys, certificates are gitignored,
   keep it that way).
 - Keep commits focused and write a clear commit message describing the *why*.

@@ -6,6 +6,26 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-52: **Reproducible builds and a smaller image without the Docker engine.** Every project now has a
+  `packages.lock.json` (`Directory.Build.props`); CI and the Dockerfile restore with `--locked-mode`, so a package
+  resolved differently from the lock file fails the build. `global.json` pins the SDK exactly (`10.0.402`, no roll
+  forward); CI installs it from there and the Dockerfile's SDK image is the same version. Every base image is pinned as
+  `image:tag@sha256:…`; Dependabot now covers all five projects (one nuget entry), the SDK (`dotnet-sdk`), the base
+  images (`docker`) and the actions. The image no longer installs `docker.io` (dockerd, containerd, runc): it takes
+  the static docker CLI from a pinned `docker:<version>-cli` stage — inside the container Whiskers only runs
+  `docker exec` for the local web terminal; everything else talks to the Docker API or runs `docker compose` on the
+  managed host — and installs `iptables` explicitly, which the engine package used to bring in and `tailscaled` uses
+  (local build 1.34 GB → 1.03 GB). New CI job `image-runtime` builds the image and runs `ImageRuntimeToolsTests`
+  against it (tools present and starting, no engine, local `docker exec` terminal, `nsenter` host shell, boot to
+  `/healthz`); `BuildReproducibilityTests` guards lock files, locked restores, digest pins and Dependabot coverage. The
+  full profile stays root and privileged by design. **Upgrade notes:** no application, configuration or database
+  change. (1) Developers need exactly .NET SDK `10.0.402` (`global.json`); a newer SDK is refused until `global.json`
+  is moved. (2) After changing a `PackageReference`, run `dotnet restore Whiskers.slnx --force-evaluate` and commit
+  the changed lock files (also `Whiskers.Tests`'s). (3) Moving the SDK means moving `global.json`, the Dockerfile's
+  SDK image and the lock files together (`deploy/README.md`, "Pinned build inputs"). (4) An image derived from
+  Whiskers' that relied on `dockerd`/`containerd`/`runc` being present must install them itself; the `docker` CLI is
+  still at `/usr/local/bin/docker`, now without the `docker` group the package created.
+
 - R1-48: **A change that no decision covers is refused, not just noticed.** The Mutation Gateway's scope guard ran in
   report mode: a call to a marked service outside a gateway decision was logged and then ran. It now throws
   (`MutationScopeViolationException`) before the call runs, in production, and logs the attempt at Error. A decision
