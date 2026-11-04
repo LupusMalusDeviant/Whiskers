@@ -94,16 +94,21 @@ flowchart LR
 ### Quick — one command
 
 ```bash
-# Installer: pulls the image, writes a small compose file in ./whiskers/, waits until healthy, prints the URL.
-curl -fsSL https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/deploy/install.sh | bash
+VER=X.Y.Z   # a release from https://github.com/LupusMalusDeviant/Whiskers/releases
+# The installer of that release installs exactly that release, generates the vault key, verifies the image signature
+# if cosign is installed, writes ./whiskers/ and waits until healthy:
+curl -fsSLO "https://github.com/LupusMalusDeviant/Whiskers/releases/download/v${VER}/install.sh"
+curl -fsSLO "https://github.com/LupusMalusDeviant/Whiskers/releases/download/v${VER}/checksums.txt"
+sha256sum --check --ignore-missing checksums.txt && bash install.sh   # the checksum catches a broken download; the
+                                                                     # signature check inside the installer protects the image
 
-# ...or a bare docker run:
+# ...or a bare docker run (no vault key — set VAULT_KEY_FILE before you store secrets):
 docker run -d --name whiskers -p 127.0.0.1:5100:8080 \
   -v whiskers-data:/app/data -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/lupusmalusdeviant/whiskers:latest
+  "ghcr.io/lupusmalusdeviant/whiskers:${VER}"
 ```
 
-Open `http://127.0.0.1:5100`. The installer accepts `--port`, `--bind`, `--data`, `--yes` (`install.sh --help`); re-running it updates in place (`pull` + `up`).
+Open `http://127.0.0.1:5100`. The installer accepts `--version`, `--port`, `--bind`, `--data`, `--verify`, `--yes` (`install.sh --help`); it never installs `latest` (installers attached to releases up to 0.15.0 still default to `latest`; this applies from the next release on). It prints where the vault key is and what to back up — **keep the key and the backups apart, off the host**. Re-running it with a newer release upgrades in place (only the image line changes; downgrades are refused). Details: [deploy/README.md → Installer](https://github.com/LupusMalusDeviant/Whiskers/blob/main/deploy/README.md#installer).
 
 ### Standard — Docker Compose
 
@@ -178,13 +183,17 @@ Run Whiskers **on** a cluster as the control plane for your remote Docker fleet 
 clusters — pods appear next to containers on the dashboard):
 
 ```bash
-helm install whiskers oci://ghcr.io/lupusmalusdeviant/charts/whiskers \
-  --set vault.key="$(openssl rand -hex 32)"
+( umask 077; openssl rand -hex 32 | tr -d '\n' > vault.key )          # a private key file, never an argument
+kubectl create secret generic whiskers-vault --from-file=vaultKey=vault.key
+# copy vault.key off the cluster (password manager / offline), then: shred -u vault.key
+helm install whiskers oci://ghcr.io/lupusmalusdeviant/charts/whiskers --version X.Y.Z \
+  --set vault.existingSecret=whiskers-vault
 kubectl port-forward svc/whiskers 8080:8080   # → http://localhost:8080 (setup wizard)
 ```
 
 Single-replica by design (Blazor Server + stateful loops), non-root, read-only rootfs, PVC-backed
-data. All values, ingress/WebSocket notes and the Postgres variant:
+data; no VPN daemon in the app container (`VPN_PROVIDER=none`), mesh access through an optional pinned Tailscale
+sidecar whose node identity lives on its own PVC. All values, ingress/WebSocket notes and the Postgres variant:
 **[deploy/helm/whiskers/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/deploy/helm/whiskers/README.md)**. To *manage* a cluster from
 Whiskers instead, see **[deploy/k8s/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/deploy/k8s/README.md)**.
 </details>

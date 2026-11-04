@@ -15,3 +15,23 @@ spec:
   storageClassName: {{ .Values.persistence.storageClass | quote }}
   {{- end }}
 {{- end }}
+{{- with .Values.tailscaleSidecar }}
+{{- if and .enabled .state.persistent (not .state.existingClaim) }}
+---
+# R1-46: the Tailscale sidecar's node identity survives pod restarts (one tailnet node, auth key used once).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "whiskers.tailscaleStateClaim" $ }}
+  labels:
+    {{- include "whiskers.labels" $ | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .state.size }}
+  {{- if .state.storageClass }}
+  storageClassName: {{ .state.storageClass | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}
