@@ -4,7 +4,7 @@
 
 services:
   victoriametrics:
-    image: victoriametrics/victoria-metrics:v1.102.1
+    image: victoriametrics/victoria-metrics:v1.155.0
     container_name: victoriametrics
     restart: unless-stopped
     command:
