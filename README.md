@@ -137,7 +137,38 @@ Whiskers is **self-hosted**: there is no hosted or cloud endpoint. Your MCP clie
 }
 ```
 
-Details, scopes and the guardrail behaviour are in [MCP server](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#mcp-server).
+**Claude Code** — one command:
+
+```bash
+claude mcp add --transport http whiskers http://localhost:5100/mcp --header "Authorization: Bearer $WHISKERS_MCP_API_KEY"
+```
+
+**Crush** ([charmbracelet/crush](https://github.com/charmbracelet/crush)) — in `./crushrc` (project) or
+`~/.config/crush/crushrc` (global); the key is read from your environment, not written into the file:
+
+```bash
+mcp add whiskers --type http \
+  --url "http://localhost:5100/mcp" \
+  --header Authorization "Bearer $WHISKERS_MCP_API_KEY"
+```
+
+Still on the legacy JSON config? The same entry in `crush.json` (headers are shell-expanded at load time):
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "mcp": {
+    "whiskers": {
+      "type": "http",
+      "url": "http://localhost:5100/mcp",
+      "headers": { "Authorization": "Bearer $WHISKERS_MCP_API_KEY" }
+    }
+  }
+}
+```
+
+Use your instance's URL instead of `localhost:5100` when Whiskers runs elsewhere. Details, scopes and the guardrail
+behaviour are in [MCP server](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#mcp-server).
 
 ### More install options
 
