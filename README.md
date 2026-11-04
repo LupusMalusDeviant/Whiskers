@@ -16,6 +16,7 @@ governed by **permissions, code-enforced guardrails, approvals and a complete ac
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Blazor](https://img.shields.io/badge/Blazor-Server-512BD4.svg)](https://learn.microsoft.com/aspnet/core/blazor/)
 [![MCP Badge](https://lobehub.com/badge/mcp/lupusmalusdeviant-whiskers)](https://lobehub.com/mcp/lupusmalusdeviant-whiskers)
+[![Whiskers MCP server](https://mcprush.com/badge/whiskers-mcp/card.svg)](https://mcprush.com/to/whiskers-mcp?ref=badge)
 
 > ⚠️ **Beta.** Whiskers is under active development and not yet API-stable.
 > Run it on a trusted network, review the [security policy](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md), and expect breaking
