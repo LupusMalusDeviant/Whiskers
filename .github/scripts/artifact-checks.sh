@@ -27,6 +27,10 @@
 #       Prints the image of the highest published release (GitHub releases, no drafts or pre-releases) below <version>,
 #       or the highest one without a version. Needs gh with GH_TOKEN and GITHUB_REPOSITORY.
 #
+#   artifact-checks.sh prepare <image-ref> <local-tag>
+#       Pulls <image-ref> (the release's staged digest) and tags it <local-tag> for the checks above, with Docker's output
+#       kept private.
+#
 #   artifact-checks.sh self-test
 #       Disclosure self-test: plants random values (hex, letters, a fingerprint and its prefix, a 32-digit number) in a
 #       probe container's logs and output, in an HTTP answer, in tool errors, in upgrade log lines and in malformed data,
@@ -503,6 +507,21 @@ previous_release() {
     printf '%s:%s\n' "$IMAGE_REPO" "$chosen" >&4
 }
 
+# ----------------------------------------------------------------------------------------------------------- prepare
+
+# The release's staged image, pulled by digest and tagged for the checks, here rather than in the workflow step: Docker's
+# own output (registry, daemon, credential helper) stays private like every other command's.
+prepare() { # <image-ref> <local-tag>
+    require docker
+    step "prepare: $1 as $2"
+    docker pull "$1" >/dev/null || fail "the image could not be pulled"
+    docker tag "$1" "$2" || fail "the image could not be tagged"
+    [ "$(docker image inspect -f '{{.Id}}' "$1")" = "$(docker image inspect -f '{{.Id}}' "$2")" ] \
+        || fail "the local tag is not the pulled image"
+    OK=1
+    say "ok: the pulled image is tagged for the checks"
+}
+
 # ----------------------------------------------------------------------------------------------------------- self-test
 
 # The planted values, exported for the probe containers and the child processes (never on a command line that is
@@ -531,7 +550,9 @@ expect_no_disclosure() { # <what> <file>...
     local what="$1" value hex form; shift
     for value in "$C" "$S" "$A" "$N" "$F"; do
         hex="${value#sha256:}"
-        for form in "$value" "${value:0:8}" "$hex" "${hex:0:8}"; do
+        # A fingerprint's own 8-character prefix is "sha256:" plus one character, which any digest reference in the output
+        # (the data tool's pinned image) can match by chance; its hex and the hex's prefix are what identify it.
+        for form in "$value" "${hex:0:8}" "$hex"; do
             if grep -qiF -- "$form" "$@"; then fail "$what: the output holds a planted value, its fingerprint or an 8-character prefix"; fi
         done
     done
@@ -571,6 +592,26 @@ self_test() {
     probe "a container that does not start" fail "::error::the container 'probe' did not start" _probe-start
     probe "a failing file command" fail "::error::probe: the file command failed" _probe-files "$volume"
     probe "a failing data tool run" fail "::error::probe: the data tool failed" _probe-data-tool "$volume"
+    # The release's preparation (prepare) against a stub docker whose pull or tag fails with the planted values.
+    # A POSIX path for PATH (WORK may be a Windows path with a drive colon in local Git Bash runs).
+    local stub
+    stub="$(mktemp -d)"
+    CLEANUP+=("rm -rf $stub")
+    export STUB_LOG="$WORK/stub.calls"
+    # shellcheck disable=SC2016 # expanded by the stub, not here
+    printf '%s\n' '#!/bin/sh' 'echo "$1" >> "$STUB_LOG"' 'case "$1" in' \
+        '  pull) [ "${STUB_PULL:-fail}" = ok ] && exit 0; echo "pull denied: $C $A"; echo "credential helper: $N $F" >&2; exit 3 ;;' \
+        '  tag) echo "tag refused: $S $H" >&2; exit 3 ;;' \
+        '  *) echo "stub: $C" >&2; exit 3 ;;' 'esac' > "$stub/docker"
+    chmod +x "$stub/docker"
+    PATH="$stub:$PATH" probe "a failing pull of the staged image" fail "::error::the image could not be pulled" \
+        prepare registry.invalid/whiskers-probe:stub whiskers-probe:local
+    PATH="$stub:$PATH" STUB_PULL=ok probe "a failing tag of the staged image" fail "::error::the image could not be tagged" \
+        prepare registry.invalid/whiskers-probe:stub whiskers-probe:local
+    [ "$(tr -d '\r' < "$STUB_LOG" | tr '\n' ' ')" = "pull pull tag " ] || fail "the preparation probes did not run against the stub docker"
+    CLEANUP+=("docker image rm ${RUN_ID}-probe:prepared")
+    probe "a successful preparation (the real docker)" 0 "ok: the pulled image is tagged for the checks" \
+        prepare "$NODE_IMAGE" "${RUN_ID}-probe:prepared"
 
     step "self-test: HTTP answers are compared, never shown"
     # shellcheck disable=SC2016 # JavaScript, not shell
@@ -699,7 +740,8 @@ case "${1:-}" in
     hardened) [ $# -eq 2 ] || fail "usage: $SELF hardened <image>"; hardened "$2" ;;
     upgrade) [ $# -eq 3 ] || fail "usage: $SELF upgrade <image> <previous-image>"; upgrade "$2" "$3" ;;
     previous-release) [ $# -le 2 ] || fail "usage: $SELF previous-release [<version>]"; previous_release "${2:-}" ;;
+    prepare) [ $# -eq 3 ] || fail "usage: $SELF prepare <image-ref> <local-tag>"; prepare "$2" "$3" ;;
     self-test) [ $# -eq 1 ] || fail "usage: $SELF self-test"; self_test ;;
     _probe-*) probe_mode "$@" ;;
-    *) fail "usage: $SELF hardened <image> | upgrade <image> <previous-image> | previous-release [<version>] | self-test" ;;
+    *) fail "usage: $SELF hardened <image> | upgrade <image> <previous-image> | previous-release [<version>] | prepare <image-ref> <local-tag> | self-test" ;;
 esac

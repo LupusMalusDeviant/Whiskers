@@ -76,10 +76,14 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "          bash .github/scripts/artifact-checks.sh upgrade \"$ARTIFACT\" \"$PREVIOUS\"", "          echo skipped")]
     [InlineData("ci.yml", "      - name: Trivy scan (gate, fail on CRITICAL)\n        uses: aquasecurity", "      - name: Trivy scan (gate, fail on CRITICAL)\n        if: false\n        uses: aquasecurity")]
     [InlineData("release.yml", "    needs: [prepare, test, build, scan, artifact-test]", "    needs: [prepare, test, build, scan]")] // publish before the artifact test
-    [InlineData("release.yml", "          docker pull \"${IMAGE}@${AMD64_IMAGE}\"\n          docker tag \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"",
-                "          docker build -t \"$ARTIFACT\" .")]                                                                    // tests a rebuild, not the staged digest
-    [InlineData("release.yml", "          AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}\n        run: |\n          set -euo pipefail\n          docker pull",
-                "          AMD64_IMAGE: ${{ needs.build.outputs.amd64_index }}\n        run: |\n          set -euo pipefail\n          docker pull")]
+    [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"",
+                "        run: docker build -t \"$ARTIFACT\" .")]                                                          // tests a rebuild, not the staged digest
+    [InlineData("release.yml", "          AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}\n        run: bash .github/scripts/artifact-checks.sh prepare",
+                "          AMD64_IMAGE: ${{ needs.build.outputs.amd64_index }}\n        run: bash .github/scripts/artifact-checks.sh prepare")]
+    [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"",
+                "        run: |\n          docker pull \"${IMAGE}@${AMD64_IMAGE}\"\n          bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"")] // raw docker output in the log
+    [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh self-test",
+                "        run: |\n          docker image ls\n          bash .github/scripts/artifact-checks.sh self-test")]   // raw docker output in the log
     [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"", "        run: echo skipped")]
     [InlineData("security.yml", "--exit-code 1", "--exit-code 0")]                                                              // secret findings ignored
     [InlineData("security.yml", "-p:CodeAnalysisTreatWarningsAsErrors=true", "-p:CodeAnalysisTreatWarningsAsErrors=false")]
@@ -846,8 +850,8 @@ internal static class WorkflowPolicy
         foreach (var (id, job) in releaseArtifact)
         {
             violations.AddRange(ArtifactJobViolations("release.yml", id, job));
-            var pull = Steps(job).FirstOrDefault(s => Scalar(Child(s, "run"))?.Contains("docker pull \"${IMAGE}@${AMD64_IMAGE}\"") == true
-                                                      && Scalar(Child(s, "run"))!.Contains("docker tag \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\""));
+            var pull = Steps(job).FirstOrDefault(s => Scalar(Child(s, "run"))?.Contains(
+                "artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"", StringComparison.Ordinal) == true);
             if (pull is null || Scalar(Child(Child(pull, "env"), "AMD64_IMAGE"))?.Contains("needs.build.outputs.amd64_image") != true)
                 violations.Add($"release.yml job '{id}' does not check the staged amd64 digest that is published");
             if (JobRuns(job).Contains("docker build", StringComparison.Ordinal) || JobsUsing(new() { [id] = job }, "docker/build-push-action@").Count > 0)
@@ -880,6 +884,9 @@ internal static class WorkflowPolicy
     private static IEnumerable<string> ArtifactJobViolations(string file, string id, YamlMappingNode job)
     {
         var runs = JobRuns(job);
+        // Docker runs only inside artifact-checks.sh, which keeps its output private: a registry, daemon or credential-helper
+        // error from a docker command in the step itself would reach the Actions log raw.
+        if (Regex.IsMatch(runs, @"(?m)(^|[\s;&|(`$])docker\s+[a-z]")) yield return $"{file} job '{id}' runs docker outside artifact-checks.sh; its output would reach the log raw";
         // The log filter and the data tool's failure messages are proven not to disclose planted values.
         if (!Regex.IsMatch(runs, @"(?m)^\s*bash \.github/scripts/artifact-checks\.sh self-test\s*$")) yield return $"{file} job '{id}' does not run the disclosure self-test";
         if (!Regex.IsMatch(runs, @"artifact-checks\.sh hardened ""\$ARTIFACT""")) yield return $"{file} job '{id}' does not check the hardened profile of $ARTIFACT";

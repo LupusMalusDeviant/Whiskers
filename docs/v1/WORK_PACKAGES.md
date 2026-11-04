@@ -853,7 +853,8 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > post-upgrade changes reverted by the recovery, upgrade again; only script-written text in the CI log — tool and
 > container output private, failure logs as counts per level, HTTP bodies and upgrade log values compared, never shown,
 > data-tool failures by operation and file only — checked by the disclosure `self-test` with planted values on every
-> output path and on malformed data per data-tool command) in `ci.yml` `artifact` (built image, Trivy) and release
+> output path and on malformed data per data-tool command; no artifact-job step runs `docker` itself, the release pulls
+> the staged digest through `artifact-checks.sh prepare`) in `ci.yml` `artifact` (built image, Trivy) and release
 > `artifact-test` (staged digest, before `publish-image`), `security.yml` (vulnerable packages, dependency review,
 > gitleaks with every exception per rule, exact value and file, security analyzers, CodeQL), job time limits everywhere,
 > all pinned by `ReleaseWorkflowTests`; controls in `docs/operations/ci-and-release-checks.md`.

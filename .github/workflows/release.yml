@@ -305,13 +305,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Through the checks script: Docker's own output (registry, daemon, credential helper) never reaches this log.
       - name: Pull the staged amd64 image by digest
         env:
           AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}
-        run: |
-          set -euo pipefail
-          docker pull "${IMAGE}@${AMD64_IMAGE}"
-          docker tag "${IMAGE}@${AMD64_IMAGE}" "$ARTIFACT"
+        run: bash .github/scripts/artifact-checks.sh prepare "${IMAGE}@${AMD64_IMAGE}" "$ARTIFACT"
 
       # The checks below print only text they write themselves; planted values must not reach this log by any path.
       - name: Disclosure self-test
