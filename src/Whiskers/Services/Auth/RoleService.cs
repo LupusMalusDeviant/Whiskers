@@ -137,26 +137,21 @@ public class RoleService : IRoleService, IInitializable
     {
         using (await _gate.EnterAsync())
         {
-            UserRoleData snapshot, before;
-            _lock.EnterWriteLock();
-            try
-            {
-                before = Snapshot(_data);
-                var next = Snapshot(_data);
-                var existing = next.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-                if (existing != null)
-                    existing.Role = role;
-                else
-                    next.Roles.Add(new UserRoleEntry { Email = email, Role = role });
-                EnsureAdminRemains(_data, next);
-                _data = next;
-                // Snapshot inside the lock; persist outside — never serialize the live list another writer may mutate.
-                snapshot = Snapshot(_data);
-            }
-            finally { _lock.ExitWriteLock(); }
+            // The gate makes this the only writer, so the state read here is still current when it is published.
+            var before = GetRoleData();
+            var next = Snapshot(before);
+            var existing = next.Roles.FirstOrDefault(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+                existing.Role = role;
+            else
+                next.Roles.Add(new UserRoleEntry { Email = email, Role = role });
+            EnsureAdminRemains(before, next);
 
-            await _store.SaveAsync(snapshot);
-            Whiskers.Services.Mutations.ConfigChange.Record("roles", before, snapshot);   // R1-22
+            // Persist first, publish after: a failed save throws here and the change never takes effect, so it cannot
+            // act now and then vanish on the next start.
+            await _store.SaveAsync(Snapshot(next));
+            SetData(next);
+            Whiskers.Services.Mutations.ConfigChange.Record("roles", before, next);   // R1-22
         }
     }
 
@@ -194,21 +189,15 @@ public class RoleService : IRoleService, IInitializable
     {
         using (await _gate.EnterAsync())
         {
-            UserRoleData snapshot, before;
-            _lock.EnterWriteLock();
-            try
-            {
-                before = Snapshot(_data);
-                var next = Snapshot(_data);
-                next.Roles.RemoveAll(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-                EnsureAdminRemains(_data, next);
-                _data = next;
-                snapshot = Snapshot(_data);
-            }
-            finally { _lock.ExitWriteLock(); }
+            var before = GetRoleData();
+            var next = Snapshot(before);
+            next.Roles.RemoveAll(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+            EnsureAdminRemains(before, next);
 
-            await _store.SaveAsync(snapshot);
-            Whiskers.Services.Mutations.ConfigChange.Record("roles", before, snapshot);   // R1-22
+            // Persist first, publish after (see SetRoleAsync).
+            await _store.SaveAsync(Snapshot(next));
+            SetData(next);
+            Whiskers.Services.Mutations.ConfigChange.Record("roles", before, next);   // R1-22
         }
     }
 
