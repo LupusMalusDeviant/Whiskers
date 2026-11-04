@@ -218,7 +218,8 @@ All notable changes to Whiskers are documented here. The format follows
   bindings go in the same write, so a recycled address never revives the old account. New audit actions
   `auth.identity_bound`, `auth.identity_pending`; refused sign-ins of addresses that are not configured are recorded as
   `anonymous`. The application log no longer names the account of any `auth.*` audit row (written, failed or dropped —
-  the audit row itself keeps it), and no R1-27 log line carries an address or a subject. The readiness check
+  the audit row itself keeps it), shows no details of an identity row and keeps every value of such a line on one
+  line, and no R1-27 log line carries an address or a subject. The readiness check
   `identity-bindings` reports an unavailable store: unreadable, incomplete, missing while its `.bak` exists (the `.bak`
   is never taken over by itself), after a failed save, a start-up prune that did not succeed, or a repair of the file
   (readable again with other content), until it is read and pruned again; every federated sign-in and session is then

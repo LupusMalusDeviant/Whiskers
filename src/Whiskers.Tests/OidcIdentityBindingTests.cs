@@ -1156,6 +1156,54 @@ public sealed class OidcIdentityBindingTests
         Assert.Contains(rows, r => r.Action == AuthAuditLog.LoginAction && r.Actor == Ops);
     }
 
+    [Fact]
+    public async Task Lines_of_lost_audit_rows_carry_no_issuer_or_fingerprint_and_cannot_be_forged()
+    {
+        await using var world = await BindingWorld.CreateAsync(trustOidc: true);
+        using var trail = new AuditTrailFixture(vaultKey: null);
+        var logs = new NotificationDeliveryTests.ListLoggerProvider();
+        using var factory = LoggerFactory.Create(b => b.AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
+        const string forged = "FORGED audit line";
+        const string evilIssuer = "https://evil-idp.test/\r\n" + forged + "\n\u2028" + forged;
+
+        // An identity row whose issuer (from the provider's token) carries line breaks, lost by the audit writer.
+        var lost = new AuditLogService(new ThrowingScopes(), factory.CreateLogger<AuditLogService>());
+        var store = new IdentityBindingStore(world.Services, lost, world.Configuration, world.Gate,
+            new DataPathOptions(world.Directory));
+        var admission = new FederatedAdmission(store, world.Roles, world.Whitelist, world.Configuration);
+        Assert.Equal(AuthAuditReasons.AuditUnavailable,
+            (await admission.AdmitAsync(Oidc("o-ops", Ops, issuer: evilIssuer))).Reason);
+        await lost.TryLogAsync(Ops, "web", AuthAuditLog.IdentityPendingAction, AuthAuditLog.Target, Ops, Ops,
+            $"issuer={evilIssuer}; fingerprint=0123456789ab", success: false);
+        // Other auth rows whose values carry line breaks: the fallback line keeps them on one line.
+        await lost.TryLogAsync(Ops, "web\r\n" + forged, AuthAuditLog.LoginFailedAction + "\n" + forged, "auth\r" + forged,
+            Ops, Ops, "reason=x\r\n" + forged, serverId: "s\n" + forged, success: false);
+        // A written row of the same kind: the success line too.
+        var written = new AuditLogService(trail.Scopes, factory.CreateLogger<AuditLogService>());
+        Assert.True(await written.TryLogAsync(Ops, "web\n" + forged, AuthAuditLog.LoginAction, "auth\r\n" + forged, Ops, Ops));
+        // A row dropped by the closed sign-in queue: the drop line.
+        var queue = new AuthAuditLog(written, factory.CreateLogger<AuthAuditLog>());
+        await queue.StartAsync(default);
+        await queue.StopAsync(default);
+        await queue.SignInRefusedAsync(new DefaultHttpContext(), "oidc\r\n" + forged, Ops, "pending\n" + forged);
+
+        var lines = logs.Lines.Where(l => l.Contains("Audit", StringComparison.OrdinalIgnoreCase)
+                                          || l.Contains("AUDIT", StringComparison.Ordinal)).ToList();
+        Assert.True(lines.Count >= 5, string.Join("\n", lines));
+        var text = string.Join("\n", logs.Lines);
+        Assert.DoesNotContain("evil-idp", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("fingerprint=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("corp.test", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(AuditLogService.WithheldDetails, text);
+        foreach (var line in lines)
+        {
+            Assert.DoesNotContain('\r', line);
+            Assert.DoesNotContain('\n', line);
+            Assert.DoesNotContain('\u2028', line);
+        }
+        Assert.Contains(lines, l => l.Contains("sign-in audit queue", StringComparison.Ordinal) && l.Contains(forged));
+    }
+
     private sealed class ThrowingScopes : IServiceScopeFactory
     {
         public IServiceScope CreateScope() => throw new InvalidOperationException("audit db unavailable");
