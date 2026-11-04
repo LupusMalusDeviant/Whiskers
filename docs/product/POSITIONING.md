@@ -168,7 +168,7 @@ acceptance test for governance features.
 - mesh + mTLS
 - infrastructure capabilities / tools
 - zero-trust MCP control plane — always with its definition: no caller is trusted by default; every call is
-  authenticated (API key or signed-in user), scope-checked and guardrail-evaluated in code, and every onboarded host
+  authenticated (API key or signed-in user), scope-checked and guardrail-evaluated in code, and every onboarded Docker host
   is reached over a private WireGuard mesh, with the Docker and host-control planes on mTLS (client certificate,
   CN-pinned); name the opt-in `Auth:Disabled` LAN mode where accuracy matters
 
