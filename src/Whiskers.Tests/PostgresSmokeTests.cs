@@ -8,31 +8,24 @@ using Whiskers.Services.Persistence;
 
 namespace Whiskers.Tests;
 
-/// <summary>Smoke tests against a REAL PostgreSQL 17 (Testcontainers) — the automated counterpart to the
-/// manual Docker-host proof (stableDB step 8). Marked <c>RequiresDocker</c> and <b>skipped</b> when no Docker
-/// daemon is reachable, so <c>dotnet test</c> stays green on machines/CI without Docker; run them with Docker
-/// up (e.g. <c>dotnet test --filter Category=RequiresDocker</c>).</summary>
-[Trait("Category", "RequiresDocker")]
+/// <summary>Smoke tests of the metrics database against a REAL PostgreSQL 17 (Testcontainers) — the automated
+/// counterpart to the manual Docker-host proof (stableDB step 8). Marked <c>RequiresDocker</c>: skipped on a machine
+/// without a Docker daemon, mandatory on CI (R1-47, <see cref="DockerRequirement"/>); run them with Docker up
+/// (<c>dotnet test --filter Category=RequiresDocker</c>).</summary>
+[Trait("Category", DockerRequirement.Category)]
 public sealed class PostgresSmokeTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder().WithImage("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:17-alpine").Build();
     private bool _up;
+    private Exception? _startFailure;
 
     public async Task InitializeAsync()
     {
-        try { await _pg.StartAsync(); _up = true; }
-        catch (Exception ex) { _up = false; _startFailure = ex; } // no Docker daemon → skipped locally, failed on CI
+        _startFailure = await DockerRequirement.TryStartAsync(_pg);
+        _up = _startFailure is null;
     }
 
-    private Exception? _startFailure;
-
-    // CI has Docker (R1-33): there a server that does not start is a failure, not a silent skip.
-    private void SkipUnlessUp()
-    {
-        if (!_up && Environment.GetEnvironmentVariable("CI") is not null)
-            throw new InvalidOperationException("The PostgreSQL test server did not start on CI.", _startFailure);
-        Skip.IfNot(_up, "Docker daemon not available");
-    }
+    private void SkipUnlessUp() => DockerRequirement.SkipUnlessStarted(_startFailure);
 
     public async Task DisposeAsync()
     {

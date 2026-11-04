@@ -22,7 +22,7 @@ namespace Whiskers.Tests;
 /// </summary>
 public class ReleaseWorkflowTests
 {
-    private static readonly string[] Workflows = ["ci.yml", "chart-ci.yml", "release.yml"];
+    private static readonly string[] Workflows = ["ci.yml", "chart-ci.yml", "release.yml", "security.yml"];
 
     /// <summary>Jobs allowed to hold a write permission, and which ones. Everything else is read-only.</summary>
     private static readonly Dictionary<string, Dictionary<string, string[]>> AllowedWrites = new()
@@ -37,7 +37,71 @@ public class ReleaseWorkflowTests
             ["github-release"] = ["contents"],
             ["move-tags"] = ["packages"],                 // move X.Y and latest after the GitHub release exists
         },
+        ["security.yml"] = new()
+        {
+            ["codeql"] = ["security-events"],             // upload the SARIF to code scanning
+        },
     };
+
+    // ---- R1-47: mandatory integration and artifact checks --------------------------------------------------------
+
+    [Theory]
+    [InlineData("ci.yml")]
+    [InlineData("chart-ci.yml")]
+    [InlineData("release.yml")]
+    [InlineData("security.yml")]
+    public void Every_job_is_time_limited(string file)
+        => Assert.Empty(WorkflowPolicy.TimeLimitViolations(Workflow(file)));
+
+    [Fact]
+    public void A_job_without_a_time_limit_is_caught()
+        => Assert.NotEmpty(WorkflowPolicy.TimeLimitViolations(Mutate(Workflow("ci.yml"), "    timeout-minutes: 45\n", "")));
+
+    [Fact]
+    public void The_suite_and_the_artifact_are_checked_fail_closed()
+        => Assert.Empty(WorkflowPolicy.IntegrationGateViolations(Workflow("release.yml"), Workflow("ci.yml"), Workflow("security.yml")));
+
+    [Theory]
+    [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/docker.trx 70 --no-skips --require .github/required-tests/docker.txt\n", "")]  // skips of the PostgreSQL suites pass
+    [InlineData("ci.yml", "TestResults/docker.trx 70 --no-skips", "TestResults/docker.trx 70")]                                // skipped tests allowed
+    [InlineData("ci.yml", "--filter \"Category=RequiresDocker\"", "--filter \"Category=Nothing\"")]                           // the suite never runs
+    [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/in-process.trx 3000 --require .github/required-tests/in-process.txt\n", "")]  // only "some test passed"
+    [InlineData("ci.yml", " --require .github/required-tests/docker.txt", "")]                                                 // the Identity test may vanish behind the floor
+    [InlineData("ci.yml", " --require .github/required-tests/in-process.txt", "")]                                             // the endpoint matrix may vanish behind the floor
+    [InlineData("ci.yml", "--require .github/required-tests/docker.txt", "--require .github/required-tests/in-process.txt")]   // the wrong manifest for the run
+    [InlineData("ci.yml", "artifact-checks.sh previous-release \"$VER\")", "artifact-checks.sh previous-release)")]             // N-1 may be the release under test
+    [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh self-test", "        run: echo skipped")]             // log disclosure unproven
+    [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh self-test", "        run: echo skipped")]
+    [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"", "        run: echo skipped")]
+    [InlineData("ci.yml", "          bash .github/scripts/artifact-checks.sh upgrade \"$ARTIFACT\" \"$PREVIOUS\"", "          echo skipped")]
+    [InlineData("ci.yml", "      - name: Trivy scan (gate, fail on CRITICAL)\n        uses: aquasecurity", "      - name: Trivy scan (gate, fail on CRITICAL)\n        if: false\n        uses: aquasecurity")]
+    [InlineData("release.yml", "    needs: [prepare, test, build, scan, artifact-test]", "    needs: [prepare, test, build, scan]")] // publish before the artifact test
+    [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"",
+                "        run: docker build -t \"$ARTIFACT\" .")]                                                          // tests a rebuild, not the staged digest
+    [InlineData("release.yml", "          AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}\n        run: bash .github/scripts/artifact-checks.sh prepare",
+                "          AMD64_IMAGE: ${{ needs.build.outputs.amd64_index }}\n        run: bash .github/scripts/artifact-checks.sh prepare")]
+    [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"",
+                "        run: |\n          docker pull \"${IMAGE}@${AMD64_IMAGE}\"\n          bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"")] // raw docker output in the log
+    [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh self-test",
+                "        run: |\n          docker image ls\n          bash .github/scripts/artifact-checks.sh self-test")]   // raw docker output in the log
+    [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"",
+                "        run: |\n          /usr/bin/docker image ls\n          bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"")] // docker through a path
+    [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh self-test",
+                "        run: |\n          \"docker\" image ls\n          bash .github/scripts/artifact-checks.sh self-test")]   // docker in quotes
+    [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh self-test",
+                "        run: |\n          docker-compose ps\n          bash .github/scripts/artifact-checks.sh self-test")]   // docker-compose
+    [InlineData("ci.yml", "      - name: Disclosure self-test\n        run: bash .github/scripts/artifact-checks.sh self-test\n\n      - name: Hardened profile\n        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"\n",
+                "      - name: Hardened profile\n        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"\n\n      - name: Disclosure self-test\n        run: bash .github/scripts/artifact-checks.sh self-test\n")] // self-test after the checks
+    [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"", "        run: echo skipped")]
+    [InlineData("security.yml", "--exit-code 1", "--exit-code 0")]                                                              // secret findings ignored
+    [InlineData("security.yml", "-p:CodeAnalysisTreatWarningsAsErrors=true", "-p:CodeAnalysisTreatWarningsAsErrors=false")]
+    [InlineData("security.yml", "          if [ \"$FOUND\" -gt 0 ]; then", "          if false; then")]                     // vulnerable packages pass
+    [InlineData("security.yml", "          fail-on-severity: low", "          fail-on-severity: critical")]
+    public void A_weakened_integration_or_artifact_gate_is_caught(string file, string from, string to)
+    {
+        string Text(string name) => name == file ? Mutate(Workflow(name), from, to) : Workflow(name);
+        Assert.NotEmpty(WorkflowPolicy.IntegrationGateViolations(Text("release.yml"), Text("ci.yml"), Text("security.yml")));
+    }
 
     // ---- the real files ------------------------------------------------------------------------------------
 
@@ -45,6 +109,7 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml")]
     [InlineData("chart-ci.yml")]
     [InlineData("release.yml")]
+    [InlineData("security.yml")]
     public void Every_action_is_pinned_to_a_full_commit_sha(string file)
     {
         var text = Workflow(file);
@@ -56,6 +121,7 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml")]
     [InlineData("chart-ci.yml")]
     [InlineData("release.yml")]
+    [InlineData("security.yml")]
     public void Permissions_are_least_privilege(string file)
         => Assert.Empty(WorkflowPolicy.PermissionViolations(Workflow(file), AllowedWrites[file]));
 
@@ -63,6 +129,7 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml")]
     [InlineData("chart-ci.yml")]
     [InlineData("release.yml")]
+    [InlineData("security.yml")]
     public void No_event_or_input_is_interpolated_into_a_shell_script(string file)
     {
         var text = Workflow(file);
@@ -91,6 +158,7 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml")]
     [InlineData("chart-ci.yml")]
     [InlineData("release.yml")]
+    [InlineData("security.yml")]
     public void No_workflow_hides_findings_behind_ignore_unfixed(string file)
         => Assert.DoesNotMatch(new Regex(@"ignore-unfixed\s*:\s*['""]?true", RegexOptions.IgnoreCase), Workflow(file));
 
@@ -145,6 +213,7 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml")]
     [InlineData("chart-ci.yml")]
     [InlineData("release.yml")]
+    [InlineData("security.yml")]
     public void No_step_output_is_written_from_an_unchecked_command_substitution(string file)
         => Assert.Empty(WorkflowPolicy.SwallowedOutputFailures(Workflow(file)));
 
@@ -155,8 +224,8 @@ public class ReleaseWorkflowTests
             "echo \"amd64_image=$(image_digest \"$AMD64_INDEX\" amd64)\" >> \"$GITHUB_OUTPUT\"")));
 
     [Theory]
-    [InlineData("    needs: [prepare, test, build, scan]", "    needs: [prepare, build, scan]")]         // publish-image without tests
-    [InlineData("    needs: [prepare, test, build, scan]", "    needs: [prepare, test, build]")]         // publish-image without scan
+    [InlineData("    needs: [prepare, test, build, scan, artifact-test]", "    needs: [prepare, build, scan, artifact-test]")] // publish-image without tests
+    [InlineData("    needs: [prepare, test, build, scan, artifact-test]", "    needs: [prepare, test, build, artifact-test]")] // publish-image without scan
     [InlineData("    needs: [prepare, test, scan, publish-image]", "    needs: [prepare, test, publish-image]")]
     [InlineData("    needs: [prepare, test, build, scan, publish-image, publish-chart]", "    needs: [prepare, build, scan, publish-image, publish-chart]")]
     [InlineData("PUBLISHED=\"$(gh release list", "PUBLISHED=\"$(git tag -l 'v*'; true) #")] // latest from git tags, not published releases
@@ -191,9 +260,9 @@ public class ReleaseWorkflowTests
     [InlineData("          image-ref: ${{ env.IMAGE }}@${{ needs.build.outputs.amd64_image }}", "          image-ref: ${{ env.IMAGE }}:scan")] // by tag, not by digest
     [InlineData("          severity: CRITICAL\n          vuln-type: os,library\n          trivyignores: .trivyignore\n\n      - name: Trivy scan arm64",
                 "          severity: CRITICAL\n          vuln-type: os,library\n          ignore-unfixed: true\n          trivyignores: .trivyignore\n\n      - name: Trivy scan arm64")]
-    [InlineData("          exit-code: \"1\"\n          severity: CRITICAL\n          vuln-type: os,library\n          trivyignores: .trivyignore\n\n  # Tag exactly",
-                "          exit-code: \"0\"\n          severity: CRITICAL\n          vuln-type: os,library\n          trivyignores: .trivyignore\n\n  # Tag exactly")] // a scan that never fails
-    [InlineData("          trivyignores: .trivyignore\n\n  # Tag exactly", "\n  # Tag exactly")] // exceptions file not used
+    [InlineData("          exit-code: \"1\"\n          severity: CRITICAL\n          vuln-type: os,library\n          trivyignores: .trivyignore\n\n  # GATE (R1-47)",
+                "          exit-code: \"0\"\n          severity: CRITICAL\n          vuln-type: os,library\n          trivyignores: .trivyignore\n\n  # GATE (R1-47)")] // a scan that never fails
+    [InlineData("          trivyignores: .trivyignore\n\n  # GATE (R1-47)", "\n  # GATE (R1-47)")] // exceptions file not used
     [InlineData("          platforms: linux/arm64", "          platforms: linux/amd64,linux/arm64")]
     [InlineData("          platforms: linux/arm64", "          platforms: linux/amd64")]
     [InlineData("outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true\n          cache-from: type=gha,scope=release-amd64",
@@ -210,7 +279,7 @@ public class ReleaseWorkflowTests
     {
         var text = Workflow("release.yml");
         var start = text.IndexOf("      - name: Trivy scan arm64", StringComparison.Ordinal);
-        var end = text.IndexOf("  # Tag exactly the scanned digests", StringComparison.Ordinal);
+        var end = text.IndexOf("  # GATE (R1-47): the staged amd64 image", StringComparison.Ordinal);
         Assert.True(start > 0 && end > start);
         Assert.NotEmpty(WorkflowPolicy.ScanViolations(text[..start] + text[end..]));
     }
@@ -525,10 +594,11 @@ internal static class WorkflowPolicy
         var ci = Parse(ciYaml);
         if (Child(Child(ci, "on"), "workflow_call") is null) violations.Add("ci.yml cannot be called by the release (no workflow_call)");
         var ciJobs = Jobs(ci).ToList();
-        // R1-52: the image-runtime job's `dotnet test --filter "Category=ImageRuntime"` is not the suite.
-        if (!ciJobs.SelectMany(j => Steps(j.Job)).Any(s => Scalar(Child(s, "run")) is { } run
-                && run.Contains("dotnet test", StringComparison.Ordinal) && !run.Contains("Category=ImageRuntime", StringComparison.Ordinal)))
-            violations.Add("ci.yml does not run 'dotnet test'");
+        // R1-47: both parts of the suite — the in-process tests and the Docker-backed integration tests.
+        foreach (var part in new[] { "--filter \"Category!=RequiresDocker\"", "--filter \"Category=RequiresDocker\"" })
+            if (!ciJobs.SelectMany(j => Steps(j.Job)).Any(s => Scalar(Child(s, "run")) is { } run
+                    && run.Contains("dotnet test", StringComparison.Ordinal) && run.Contains(part, StringComparison.Ordinal)))
+                violations.Add($"ci.yml does not run 'dotnet test {part}'");
         foreach (var (id, job) in ciJobs)
             foreach (var checkout in Steps(job).Where(s => Scalar(Child(s, "uses"))?.StartsWith("actions/checkout@") == true))
                 if (Scalar(Child(Child(checkout, "with"), "ref"))?.Contains("inputs.ref") != true)
@@ -721,6 +791,128 @@ internal static class WorkflowPolicy
         if (!Regex.IsMatch(Scalar(Child(push, "run")) ?? "", @"if \[ ""\$STATE"" = ""absent"" \]; then\s*\n\s*docker buildx imagetools create -t"))
             yield return $"job '{job}' tags X.Y.Z even when the version already exists";
     }
+
+    // ---- R1-47: time limits, the mandatory suites and the artifact gate ----
+
+    /// <summary>Every job that runs steps has a <c>timeout-minutes</c> of at most three hours (the default is six).</summary>
+    public static IReadOnlyList<string> TimeLimitViolations(string yaml)
+    {
+        var violations = new List<string>();
+        foreach (var (id, job) in Jobs(Parse(yaml)))
+        {
+            if (Child(job, "uses") is not null) continue;   // a called workflow limits its own jobs
+            var limit = Scalar(Child(job, "timeout-minutes"));
+            if (!int.TryParse(limit, out var minutes) || minutes is < 1 or > 180)
+                violations.Add($"job '{id}' has no time limit of 1-180 minutes (timeout-minutes: '{limit}')");
+        }
+        return violations;
+    }
+
+    public static IReadOnlyList<string> IntegrationGateViolations(string releaseYaml, string ciYaml, string securityYaml)
+    {
+        var violations = new List<string>();
+        var ci = Jobs(Parse(ciYaml)).ToDictionary(j => j.Id, j => j.Job);
+        var release = Jobs(Parse(releaseYaml)).ToDictionary(j => j.Id, j => j.Job);
+        var security = Jobs(Parse(securityYaml)).ToDictionary(j => j.Id, j => j.Job);
+
+        foreach (var (file, jobs) in new[] { ("ci.yml", ci), ("release.yml", release), ("security.yml", security) })
+        foreach (var (id, job) in jobs)
+        foreach (var step in Steps(job))
+            if (Scalar(Child(step, "continue-on-error")) is { } c && !c.Equals("false", StringComparison.OrdinalIgnoreCase))
+                violations.Add($"{file} job '{id}' lets a step fail without failing the job (continue-on-error)");
+
+        // The suite: in-process tests with a floor, Docker-backed tests with a floor and no skips (TA-50, F-13), each with
+        // the manifest of its required tests — a floor alone lets one mandatory test vanish behind the others.
+        var ciRuns = ci.Values.SelectMany(Steps).Select(s => Scalar(Child(s, "run"))).OfType<string>().ToList();
+        if (!ciRuns.Any(r => r.Contains("dotnet test", StringComparison.Ordinal)
+                             && r.Contains("--filter \"Category!=RequiresDocker\"", StringComparison.Ordinal)
+                             && Regex.IsMatch(r, @"check-test-results\.sh \S+ [1-9]\d* --require \.github/required-tests/in-process\.txt\n")))
+            violations.Add("ci.yml does not check the in-process test results against a floor and their required tests");
+        if (!ciRuns.Any(r => r.Contains("dotnet test", StringComparison.Ordinal)
+                             && r.Contains("--filter \"Category=RequiresDocker\"", StringComparison.Ordinal)
+                             && r.Contains("docker info", StringComparison.Ordinal)
+                             && Regex.IsMatch(r, @"check-test-results\.sh \S+ [1-9]\d* --no-skips --require \.github/required-tests/docker\.txt\n")))
+            violations.Add("ci.yml does not run the Docker-backed suites as mandatory (Docker probe, floor, no skips, required tests)");
+
+        // The artifact on pull requests and pushes: built, Trivy-gated, hardened and N-1 upgrade checks on that image.
+        var ciArtifact = ci.Where(j => JobRuns(j.Value).Contains("artifact-checks.sh hardened", StringComparison.Ordinal)).ToList();
+        if (ciArtifact.Count != 1) violations.Add($"ci.yml: expected one job that checks the built image, found {ciArtifact.Count}");
+        foreach (var (id, job) in ciArtifact)
+        {
+            violations.AddRange(ArtifactJobViolations("ci.yml", id, job));
+            var build = Steps(job).FirstOrDefault(s => Scalar(Child(s, "uses"))?.StartsWith("docker/build-push-action@") == true);
+            if (build is null || Scalar(Child(Child(build, "with"), "load")) != "true"
+                || Scalar(Child(Child(build, "with"), "tags")) != "${{ env.ARTIFACT }}")
+                violations.Add($"ci.yml job '{id}' does not check the image it built ($ARTIFACT)");
+            var scan = Steps(job).FirstOrDefault(s => Scalar(Child(s, "uses"))?.StartsWith("aquasecurity/trivy-action@") == true);
+            var scanWith = Child(scan, "with");
+            if (scan is null || Child(scan, "if") is not null || Scalar(Child(scanWith, "exit-code")) != "1"
+                || Scalar(Child(scanWith, "image-ref")) != "${{ env.ARTIFACT }}"
+                || !(Scalar(Child(scanWith, "severity")) ?? "").Contains("CRITICAL", StringComparison.Ordinal))
+                violations.Add($"ci.yml job '{id}' does not gate the built image on Trivy (CRITICAL)");
+        }
+
+        // The release: the staged digest itself, before anything is published.
+        var releaseArtifact = release.Where(j => JobRuns(j.Value).Contains("artifact-checks.sh hardened", StringComparison.Ordinal)).ToList();
+        if (releaseArtifact.Count != 1) violations.Add($"release.yml: expected one job that checks the staged image, found {releaseArtifact.Count}");
+        foreach (var (id, job) in releaseArtifact)
+        {
+            violations.AddRange(ArtifactJobViolations("release.yml", id, job));
+            var pull = Steps(job).FirstOrDefault(s => Scalar(Child(s, "run"))?.Contains(
+                "artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"", StringComparison.Ordinal) == true);
+            if (pull is null || Scalar(Child(Child(pull, "env"), "AMD64_IMAGE"))?.Contains("needs.build.outputs.amd64_image") != true)
+                violations.Add($"release.yml job '{id}' does not check the staged amd64 digest that is published");
+            if (JobRuns(job).Contains("docker build", StringComparison.Ordinal) || JobsUsing(new() { [id] = job }, "docker/build-push-action@").Count > 0)
+                violations.Add($"release.yml job '{id}' builds an image instead of checking the staged one");
+            var builders = JobsUsing(release, "docker/build-push-action@");
+            foreach (var publisher in release.Where(j => Child(j.Value, "permissions") is { } p && Writes(p).Any() && !builders.Contains(j.Key)))
+                if (!Ancestors(release, publisher.Key).Contains(id))
+                    violations.Add($"release.yml publish job '{publisher.Key}' does not wait for the artifact checks ('{id}')");
+        }
+
+        // Dependencies, secrets, static analysis, CodeQL (TA-47, F-09).
+        var securityRuns = string.Join("\n", security.Values.SelectMany(Steps).Select(s => Scalar(Child(s, "run"))).OfType<string>());
+        if (!securityRuns.Contains("--vulnerable --include-transitive", StringComparison.Ordinal)
+            || !Regex.IsMatch(securityRuns, @"if \[ ""\$FOUND"" -gt 0 \]; then[\s\S]*?exit 1"))
+            violations.Add("security.yml does not fail on a known-vulnerable package");
+        var review = security.Values.SelectMany(Steps).FirstOrDefault(s => Scalar(Child(s, "uses"))?.StartsWith("actions/dependency-review-action@") == true);
+        if (review is null || Scalar(Child(Child(review, "with"), "fail-on-severity")) != "low")
+            violations.Add("security.yml does not refuse a pull request that adds any vulnerable dependency");
+        if (!securityRuns.Contains("GITLEAKS_IMAGE", StringComparison.Ordinal) || !securityRuns.Contains("--exit-code 1", StringComparison.Ordinal)
+            || !securityRuns.Contains("run_gitleaks git .", StringComparison.Ordinal) || !securityRuns.Contains("run_gitleaks dir .", StringComparison.Ordinal))
+            violations.Add("security.yml does not fail on a secret in the history or the tree");
+        if (!securityRuns.Contains("-p:AnalysisModeSecurity=All", StringComparison.Ordinal)
+            || !securityRuns.Contains("-p:CodeAnalysisTreatWarningsAsErrors=true", StringComparison.Ordinal))
+            violations.Add("security.yml does not gate on the security analyzers");
+        if (JobsUsing(security, "github/codeql-action/analyze@").Count != 1)
+            violations.Add("security.yml does not run CodeQL");
+        return violations;
+    }
+
+    private static IEnumerable<string> ArtifactJobViolations(string file, string id, YamlMappingNode job)
+    {
+        var runs = JobRuns(job);
+        // Docker runs only inside artifact-checks.sh, which keeps its output private: a registry, daemon or credential-helper
+        // error from a docker command in the step itself would reach the Actions log raw.
+        // Also through a path or in quotes ("/usr/bin/docker", "'docker'"), and docker-compose.
+        if (Regex.IsMatch(runs, @"(?m)(^|[\s;&|(`$/""'])docker(-compose)?[""']?\s+[a-z]"))
+            yield return $"{file} job '{id}' runs docker outside artifact-checks.sh; its output would reach the log raw";
+        // The log filter and the data tool's failure messages are proven not to disclose planted values.
+        if (!Regex.IsMatch(runs, @"(?m)^\s*bash \.github/scripts/artifact-checks\.sh self-test\s*$")) yield return $"{file} job '{id}' does not run the disclosure self-test";
+        // ... before any other step of the checks script runs, so a broken output rule is known before the image is touched.
+        var checkSteps = Steps(job).Select(s => Scalar(Child(s, "run")) ?? "").Where(r => r.Contains("artifact-checks.sh ", StringComparison.Ordinal)).ToList();
+        if (checkSteps.Count > 0 && !Regex.IsMatch(checkSteps[0], @"artifact-checks\.sh self-test\s*$"))
+            yield return $"{file} job '{id}' runs the checks script before the disclosure self-test";
+        if (!Regex.IsMatch(runs, @"artifact-checks\.sh hardened ""\$ARTIFACT""")) yield return $"{file} job '{id}' does not check the hardened profile of $ARTIFACT";
+        if (!Regex.IsMatch(runs, @"artifact-checks\.sh upgrade ""\$ARTIFACT"" ""\$PREVIOUS""")) yield return $"{file} job '{id}' does not upgrade N-1 data with $ARTIFACT";
+        // N-1 strictly below the release under test: the same release without pending migrations is rightly no upgrade.
+        if (!Regex.IsMatch(runs, @"artifact-checks\.sh previous-release ""\$VER""")) yield return $"{file} job '{id}' does not resolve N-1 as a published release below the version under test";
+        foreach (var step in Steps(job).Where(s => Child(s, "if") is not null))
+            yield return $"{file} job '{id}' has a conditional step '{Scalar(Child(step, "name"))}'; every artifact check runs";
+    }
+
+    private static string JobRuns(YamlMappingNode job)
+        => string.Join("\n", Steps(job).Select(s => Scalar(Child(s, "run"))).OfType<string>());
 
     // ---- .trivyignore ----
 

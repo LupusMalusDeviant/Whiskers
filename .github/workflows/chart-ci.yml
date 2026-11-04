@@ -17,6 +17,7 @@ permissions: {}
 jobs:
   lint-template:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -102,6 +103,7 @@ jobs:
   # image (first v* release) — run via the Actions UI after tagging.
   kind-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: read

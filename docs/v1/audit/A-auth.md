@@ -223,6 +223,7 @@ _R1-41: the Prometheus part (label values interpolated unescaped in `/metrics`) 
     - verifies that `/setup` is dead after completion,
     - verifies that a whitelist removal invalidates the cookie.
 - **Recommendation:** Add a `WebApplicationFactory` endpoint-authorization matrix test that enumerates `EndpointDataSource` and asserts that every endpoint not on the allowlist requires auth. This guards the fail-closed fallback policy against regressions.
+- **Status (R1-47):** fixed. `EndpointAuthMatrixTests` enumerates every endpoint of the booted app (Production, authentication on) and requests each as anonymous, Viewer, Operator and Admin, checking that a refused call never reaches its handler and an allowed one does; an endpoint without a classification fails the test; a handler run counts only for the endpoint that ran, and endpoints sharing a route and method are classified and probed apart (only the content-encoding variants of one static asset are merged); the static-asset fallback is probed with a file only it can serve, and opening it to anonymous callers fails the matrix. The Viewer refusal of the backup download and the audit export, the dead `/setup` and the anonymous challenge of every page are rows of the matrix; lockout is in `LoginHardeningTests`, whitelist removal in `SessionRevocationTests`.
 
 ---
 

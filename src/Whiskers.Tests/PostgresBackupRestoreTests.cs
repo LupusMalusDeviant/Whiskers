@@ -37,8 +37,8 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
 
     public async Task InitializeAsync()
     {
-        try { await _pg.StartAsync(); _up = true; }
-        catch (Exception ex) { _up = false; _startFailure = ex; } // no Docker daemon → skipped locally, failed on CI
+        _startFailure = await DockerRequirement.TryStartAsync(_pg);
+        _up = _startFailure is null;
     }
 
     public async Task DisposeAsync()
@@ -53,15 +53,12 @@ public abstract class PostgresBackupRestoreTestsBase(string image) : IAsyncLifet
 
     private async Task SkipUnlessReadyAsync()
     {
-        // CI has Docker and the tools: there a server that does not start is a failure, not a skip.
-        if (!_up && Environment.GetEnvironmentVariable("CI") is not null)
-            throw new InvalidOperationException("The PostgreSQL test server did not start on CI.", _startFailure);
-        Skip.IfNot(_up, "Docker daemon not available");
+        // CI has Docker and the tools: there a server that does not start, or a missing tool, is a failure, not a skip.
+        DockerRequirement.SkipUnlessStarted(_startFailure);
         try { await new PostgresDumpTool(BinDir).CheckReadableAsync(Path.Combine(Path.GetTempPath(), "none")); }
         catch (PostgresToolException ex) when (ex.Message.Contains("is not available", StringComparison.Ordinal))
         {
-            // CI installs the tools: there a missing tool is a failure, not a skip.
-            Skip.If(Environment.GetEnvironmentVariable("CI") is null, "PostgreSQL client tools not installed");
+            DockerRequirement.SkipUnlessAvailable(false, "PostgreSQL client tools not installed");
             throw;
         }
         catch (PostgresToolException) { /* the tool ran and refused the missing file: it is there */ }

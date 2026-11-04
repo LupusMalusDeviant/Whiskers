@@ -5,6 +5,7 @@
 #   test           the full CI suite (ci.yml via workflow_call) on the tag commit
 #   build          build amd64 and arm64 ONCE each and stage them in GHCR untagged, by digest
 #   scan           Trivy gate on both staged digests (any CRITICAL fails; exceptions only via .trivyignore)
+#   artifact-test  R1-47 gate on the staged amd64 digest: hardened compose profile, N-1 upgrade and recovery
 #   publish-image  tag exactly the scanned digests (no rebuild), verify, cosign-sign; accepts an X.Y.Z that
 #                  already holds exactly these digests, so "Re-run failed jobs" can finish a broken run
 #   publish-chart  push the Helm chart for the same version
@@ -43,6 +44,7 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: read
@@ -149,6 +151,7 @@ jobs:
   build:
     needs: [prepare, test]
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write   # stage the untagged per-arch images by digest
@@ -236,6 +239,7 @@ jobs:
   scan:
     needs: [prepare, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: read    # pull the staged digests
@@ -276,11 +280,60 @@ jobs:
           vuln-type: os,library
           trivyignores: .trivyignore
 
+  # GATE (R1-47): the staged amd64 image itself — pulled by the digest that was scanned and will be published — starts
+  # with the hardened compose profile, and upgrades the previous published release's data and back
+  # (.github/scripts/artifact-checks.sh). Nothing is tagged before it passed.
+  artifact-test:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read    # pull the staged digest
+    env:
+      ARTIFACT: whiskers:release-candidate
+    steps:
+      - name: Checkout the tag commit (compose files and checks)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The checks below print only text they write themselves; planted values must not reach this log by any path.
+      - name: Disclosure self-test
+        run: bash .github/scripts/artifact-checks.sh self-test
+
+      # Through the checks script: Docker's own output (registry, daemon, credential helper) never reaches this log.
+      - name: Pull the staged amd64 image by digest
+        env:
+          AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}
+        run: bash .github/scripts/artifact-checks.sh prepare "${IMAGE}@${AMD64_IMAGE}" "$ARTIFACT"
+
+      - name: Hardened profile
+        run: bash .github/scripts/artifact-checks.sh hardened "$ARTIFACT"
+
+      - name: N-1 upgrade and recovery
+        env:
+          VER: ${{ needs.prepare.outputs.ver }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PREVIOUS="$(bash .github/scripts/artifact-checks.sh previous-release "$VER")"
+          echo "previous release: ${PREVIOUS}"
+          bash .github/scripts/artifact-checks.sh upgrade "$ARTIFACT" "$PREVIOUS"
+
   # Tag exactly the scanned digests. `X.Y.Z` is immutable (refused if it exists); the moving tags `X.Y` and `latest`
   # are moved by the last job, move-tags.
   publish-image:
-    needs: [prepare, test, build, scan]
+    needs: [prepare, test, build, scan, artifact-test]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write   # tag the image in GHCR, store the signature
@@ -359,6 +412,7 @@ jobs:
   publish-chart:
     needs: [prepare, test, scan, publish-image]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write   # push the chart to GHCR
@@ -392,6 +446,7 @@ jobs:
   github-release:
     needs: [prepare, test, build, scan, publish-image, publish-chart]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write   # create the GitHub Release
       packages: read    # read the published image for the SBOM
@@ -470,6 +525,7 @@ jobs:
   # "Re-run failed jobs" — also one that only had to finish the GitHub release — decides them again from the releases
   # published at that moment: a version finished after a later hotfix still takes `latest` back.
   move-tags:
+    timeout-minutes: 15
     needs: [prepare, test, build, scan, publish-image, publish-chart, github-release]
     runs-on: ubuntu-latest
     permissions:

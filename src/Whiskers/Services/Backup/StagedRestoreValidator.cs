@@ -153,6 +153,8 @@ public static class StagedRestoreValidator
 
     // The manifest's migration lists drive the schema check before the restore; the database must say the same, or
     // the check was made against something other than what would be restored.
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities",
+        Justification = "The table name is one of the two migration-history constants of the callers.")]
     private static void CheckHistory(SqliteConnection connection, string table, string[] expected, string which)
     {
         var applied = new HashSet<string>(StringComparer.Ordinal);

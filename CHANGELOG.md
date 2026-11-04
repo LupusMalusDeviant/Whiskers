@@ -6,6 +6,45 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-47: **CI and the release check the endpoints, the PostgreSQL suites and the image itself, and fail closed.**
+  `EndpointAuthMatrixTests` boots the real app (Production, authentication on), enumerates every endpoint of its endpoint
+  data sources (minimal APIs, pages, hubs, Blazor framework endpoints, MCP, probes, static assets) and requests each as
+  anonymous, Viewer, Operator and Admin, recording whether the handler actually ran: a refused call never reaches it, an
+  allowed one must, and a run counts only for the endpoint that ran, never for another one on the same route; endpoints are
+  merged only as the content-encoding variants of one static asset, the static-asset fallback is probed with a file only it
+  can serve (a second app with that endpoint opened to anonymous callers must fail the matrix), and an endpoint without a classification fails the
+  test until someone decides who may call it. The
+  PostgreSQL suites are mandatory on CI: a server that does not start throws there (`DockerRequirement`, enforced for every
+  container test by `DockerRequirementTests`), CI runs them as their own step after a Docker probe and refuses any skipped
+  test (`.github/scripts/check-test-results.sh`, which also replaces "some test passed" with floors read from the TRX
+  files, and from manifests of required tests in `.github/required-tests/` — each named test must be in the run and pass,
+  so a mandatory test cannot vanish behind a floor; `RequiredTestsManifestTests` keeps the manifests in step with the test
+  assembly), and local accounts are now tested on PostgreSQL through the whole pipeline (`PostgresIdentityTests`: migrations
+  of both schemas, seeded administrator, sign-in, lockout, security stamp and deletion ending the session). The image is
+  checked as delivered (`.github/scripts/artifact-checks.sh`): on every push and pull request CI builds it and gates it on
+  Trivy, starts it with the hardened compose profile (uid 10001, read-only root, no capabilities, health, readiness, the
+  anonymous surface, a real sign-in) and upgrades the data of the previous published release below its version with it
+  and back the documented way, proven on the stored records (`.github/scripts/artifact-data.mjs` reads the stopped data
+  volume and reports sensitive values only as SHA-256 fingerprints, so a failed comparison never logs them): accounts, a role, a metrics row and a vault entry the previous release encrypted itself survive the upgrade
+  unchanged with exactly the pending migrations added, bootstrap credentials are given to the first start only, a restart
+  of the same release is a no-op, every record changed after the upgrade is back to its old value after
+  `--restore-backup latest-pre-upgrade --for-previous-release` with the old migration histories and without the audit
+  rows written meanwhile, and the image upgrades the recovered data again; a release runs the same checks against the
+  staged amd64 digest before anything is published (`artifact-test`, which pulls that digest through
+  `artifact-checks.sh prepare` — no artifact-job step runs `docker` itself). The checks print only text they write
+  themselves: every command's output stays in private files, failure logs are summarised as counts per level, HTTP
+  bodies and upgrade log values are compared, never shown, and the data tool reports failures by operation and file
+  only. A disclosure self-test (`artifact-checks.sh self-test`, the first check in both jobs) plants random values in
+  container logs, streamed output, tool errors, an HTTP answer, upgrade log lines and malformed data for each data-tool
+  command, and fails if any value, fingerprint or 8-character prefix comes through. New `security.yml`:
+  known-vulnerable packages (any severity), dependency review on pull
+  requests, gitleaks over history and tree (`.gitleaks.toml`: no directory or line pattern is exempt, each exception — test fixtures,
+  vendored-bundle identifiers, names — only as its exact value in its exact file under its rule), the .NET security analyzers as errors, CodeQL. Every job of
+  every workflow is time-limited; `ReleaseWorkflowTests` pins all of it with negative tests. The repository-hosted
+  controls (required checks, tag rules, code-scanning merge protection, Dependabot, secret scanning) are documented in
+  `docs/operations/ci-and-release-checks.md`. Recorded for R1-50 by the matrix: the Google/OIDC challenge of an
+  unconfigured provider answers 500, and an anonymous MCP call gets the sign-in redirect, not a bare 401.
+
 - R1-52: **Reproducible builds and a smaller image without the Docker engine.** Every project now has a
   `packages.lock.json` (`Directory.Build.props`); CI and the Dockerfile restore with `--locked-mode`, so a package
   resolved differently from the lock file fails the build. `global.json` pins the SDK exactly (`10.0.402`, no roll
@@ -1229,6 +1268,16 @@ All notable changes to Whiskers are documented here. The format follows
 v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1/TECHNICAL_AUDIT.md`).
 
 ### ⚠️ Upgrade notes
+
+- **R1-47 (maintainers): new required checks.** Make the `ci` jobs `build-test` and `artifact` and the `security` jobs
+  `dependency-vulnerabilities`, `dependency-review`, `secret-scan`, `static-analysis` and `codeql` required on `main`, and
+  enable the repository-hosted controls listed in `docs/operations/ci-and-release-checks.md` (dependency graph — the
+  dependency review fails without it —, code-scanning merge protection, tag rules for `v*`). CI now needs Docker on its
+  runner (the PostgreSQL suites fail without it), and the in-process and Docker test floors in `ci.yml` must be raised
+  when the suite grows; a new mandatory test goes into `.github/required-tests/` in the same change. The upgrade check
+  needs a published release below the version under test (N−1: below the release version, on pull requests below the
+  `<Version>` of `Whiskers.csproj`), pulled anonymously from GHCR, and pulls the pinned `node:24-alpine` image for its
+  data tool.
 
 - **R1-11: while the kill switch is on, configuration can no longer be saved** — Settings, roles, whitelist, keys,
   vault, registries and guardrails included. Switch it off with the button on the Guardrails page first. Registry

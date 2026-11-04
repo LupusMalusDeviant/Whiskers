@@ -1,0 +1,19 @@
+# Required tests of the Docker-backed run (ci.yml, "Test (Docker integration, mandatory)"), checked by
+# .github/scripts/check-test-results.sh --require: each must be in the run and pass, whatever the floor says.
+# "<minimum> <name>": a test (every case of a theory) or a whole class. Kept in step with the test assembly by
+# RequiredTestsManifestTests — a class in the RequiresDocker category that is missing here fails that test.
+
+# PostgreSQL Identity: local accounts, sign-in, lock-out and ended sessions on a real server (R1-47).
+1 Whiskers.Tests.PostgresIdentityTests.Local_accounts_live_in_postgres_sign_in_lock_out_and_end_their_sessions_there
+
+# PostgreSQL metrics database: migrations, CRUD, retention, transfer and the audit chain on a real server.
+1 Whiskers.Tests.PostgresSmokeTests.Migrate_crud_retention_and_markread_on_real_postgres
+1 Whiskers.Tests.PostgresSmokeTests.Migrator_copies_sqlite_data_into_real_postgres
+1 Whiskers.Tests.PostgresSmokeTests.A_failed_transfer_into_real_postgres_leaves_it_empty_and_runs_again
+1 Whiskers.Tests.PostgresSmokeTests.Approval_decisions_and_uses_commit_on_real_postgres_with_retries_on
+1 Whiskers.Tests.PostgresSmokeTests.Audit_chain_writes_verifies_prunes_and_exports_on_real_postgres_with_retries_on
+1 Whiskers.Tests.PostgresSmokeTests.The_cli_migration_keeps_the_sqlite_audit_checkpoint_aside
+
+# PostgreSQL backup and restore (pg_dump/pg_restore), on the current server and on the oldest supported one.
+33 Whiskers.Tests.PostgresBackupRestoreTests
+33 Whiskers.Tests.PostgresBackupRestorePg14Tests

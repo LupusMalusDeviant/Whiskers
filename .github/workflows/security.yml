@@ -1,0 +1,146 @@
+# Security checks (R1-47, TA-47, F-09): dependency vulnerabilities, dependency review, secret scanning, static analysis and
+# CodeQL — on every push and pull request against main, and weekly (new advisories for unchanged dependencies).
+#
+# Fail closed: a check that cannot run (no vulnerability data, no SARIF, an unreachable image) fails its job. Every job is
+# time-limited and every action pinned to a full commit SHA (Dependabot keeps them current). Controls that live in the
+# repository settings (branch protection and required checks, Dependabot alerts, GitHub secret scanning and push
+# protection, code-scanning merge protection) are documented in docs/operations/ci-and-release-checks.md.
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # gitleaks 8.30.1, pinned by digest (docker buildx imagetools inspect zricethezav/gitleaks:v8.30.1).
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+
+jobs:
+  # Known-vulnerable NuGet packages, direct or transitive, in any project of the solution. Any finding fails; so does a run
+  # that produced no data for every project.
+  dependency-vulnerabilities:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Vulnerable packages (gate)
+        run: |
+          set -euo pipefail
+          dotnet restore Whiskers.slnx --locked-mode
+          dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json
+          PROJECTS="$(jq '.projects | length' vulnerable.json)"
+          if [ "$PROJECTS" -lt 5 ]; then echo "::error::only ${PROJECTS} project(s) were checked"; exit 1; fi
+          PROBLEMS="$(jq '[.problems // [] | .[]] | length' vulnerable.json)"
+          if [ "$PROBLEMS" -gt 0 ]; then jq '.problems' vulnerable.json; echo "::error::the check reported problems"; exit 1; fi
+          FOUND="$(jq '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
+            | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json)"
+          if [ "$FOUND" -gt 0 ]; then
+            jq -r '.projects[] | .path as $p | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
+              | select((.vulnerabilities // []) | length > 0)
+              | "\($p): \(.id) \(.resolvedVersion) -> \([.vulnerabilities[] | "\(.severity) \(.advisoryurl)"] | join(", "))"' vulnerable.json
+            echo "::error::${FOUND} vulnerable package(s)"; exit 1
+          fi
+          echo "no known-vulnerable packages in ${PROJECTS} projects"
+
+  # A pull request may not add a dependency with a known vulnerability (any severity), in any ecosystem the dependency
+  # graph sees (NuGet, Actions, Docker).
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Dependency review (gate)
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: low
+
+  # Committed secrets: the whole history and the working tree, with gitleaks' default rules and the narrow, reasoned
+  # exceptions in .gitleaks.toml. Any finding fails.
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks (history and tree, gate)
+        run: |
+          set -euo pipefail
+          run_gitleaks() {
+            docker run --rm -v "$PWD:/repo" -w /repo \
+              -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
+              "$GITLEAKS_IMAGE" "$@" --config .gitleaks.toml --redact --no-banner --exit-code 1
+          }
+          run_gitleaks git .
+          run_gitleaks dir .
+
+  # Roslyn security analyzers over the shipped projects, warnings as errors. A reviewed false positive is suppressed at
+  # its method with a justification, never project-wide.
+  static-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Security analyzers (gate)
+        run: |
+          set -euo pipefail
+          dotnet restore Whiskers.slnx --locked-mode
+          dotnet build src/Whiskers/Whiskers.csproj --no-restore --configuration Release --no-incremental \
+            -p:AnalysisModeSecurity=All -p:CodeAnalysisTreatWarningsAsErrors=true
+
+  # CodeQL (C#, buildless) with the security queries; results go to code scanning. The job fails when the analysis cannot
+  # run; blocking a merge on a new alert is the repository's code-scanning merge protection (see the CI document).
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      security-events: write   # upload the SARIF to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          languages: csharp
+          build-mode: none
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          category: /language:csharp

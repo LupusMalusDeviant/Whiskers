@@ -825,6 +825,8 @@ public sealed class BackupService : IBackupService
     }
 
     // SELECT of every column the model maps, per table, with no rows: fails on a table or column that is missing.
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities",
+        Justification = "The text is built only from the app's own EF model (quoted identifiers), see MappedColumnQueries.")]
     private static async Task ReadEveryMappedColumnAsync(DbContext db, CancellationToken ct)
     {
         await db.Database.OpenConnectionAsync(ct);
