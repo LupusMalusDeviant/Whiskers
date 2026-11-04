@@ -153,24 +153,6 @@ public class AuthBootstrapTests
         Assert.False(wl.IsEmailAllowed("b@x"));
     }
 
-    // ---------------------------------------------------------------- RoleService: persist first, publish after
-
-    /// <summary>A role store whose next save fails: the file is replaced by a directory of the same name.</summary>
-    private static async Task<(RoleService Roles, string Path)> RolesWithFailingSave()
-    {
-        var path = TempStore();
-        var svc = new RoleService(Cfg(), NullLogger<RoleService>.Instance, path);
-        await svc.SetRoleAsync("admin@x", AppRole.Admin);
-        await svc.SetRoleAsync("op@x", AppRole.Operator);
-        File.Delete(path);
-        Directory.CreateDirectory(path);
-        return (svc, path);
-    }
-
-    /// <summary>The call failed in the save itself (a file-system error), not earlier for an unrelated reason.</summary>
-    private static void AssertSaveFailure(Exception? ex)
-        => Assert.True(ex is IOException or UnauthorizedAccessException, $"expected a failed save, got {ex?.GetType().Name ?? "no exception"}");
-
     [Fact]
     public async Task A_blank_GOOGLE_ADMIN_EMAIL_seeds_nothing_and_admits_the_configured_admin_with_the_real_services()
     {
@@ -189,6 +171,24 @@ public class AuthBootstrapTests
         // Nothing written: a later GOOGLE_ADMIN_EMAIL must still seed the list on a start without whitelist.json.
         Assert.False(File.Exists(paths.WhitelistJson));
     }
+
+    // ---------------------------------------------------------------- RoleService: persist first, publish after
+
+    /// <summary>A role store whose next save fails: the file is replaced by a directory of the same name.</summary>
+    private static async Task<(RoleService Roles, string Path)> RolesWithFailingSave()
+    {
+        var path = TempStore();
+        var svc = new RoleService(Cfg(), NullLogger<RoleService>.Instance, path);
+        await svc.SetRoleAsync("admin@x", AppRole.Admin);
+        await svc.SetRoleAsync("op@x", AppRole.Operator);
+        File.Delete(path);
+        Directory.CreateDirectory(path);
+        return (svc, path);
+    }
+
+    /// <summary>The call failed in the save itself (a file-system error), not earlier for an unrelated reason.</summary>
+    private static void AssertSaveFailure(Exception? ex)
+        => Assert.True(ex is IOException or UnauthorizedAccessException, $"expected a failed save, got {ex?.GetType().Name ?? "no exception"}");
 
     [Fact]
     public async Task A_role_grant_whose_save_fails_never_takes_effect()
