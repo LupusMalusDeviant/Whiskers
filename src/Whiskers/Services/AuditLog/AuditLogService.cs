@@ -70,11 +70,13 @@ public class AuditLogService : IAuditLogService
             // R1-27: a sign-in and identity row names an account by its address — the row keeps it, the application log
             // does not (contract 0003: no address in a log). What survives here is what happened, without whom; the
             // exception's type only (a message may carry a value).
+            // Identity rows carry issuer and subject fingerprint in their details: those stay out of the log too.
             _logger.LogError(
                 "AUDIT WRITE FAILED: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} " +
                 "(target={TargetId}, server={ServerId}, success={Success}, details={Details}, error={Error})",
                 actorType, AccountPlaceholder, action, targetType, AccountPlaceholder, AccountPlaceholder, serverId, success,
-                SinkRedaction.Json(details), ex.GetType().Name);
+                action.StartsWith("auth.identity_", StringComparison.Ordinal) ? "[withheld]" : SinkRedaction.Json(details),
+                ex.GetType().Name);
             _recovery?.LegacyWriteFailed();
             return false;
         }

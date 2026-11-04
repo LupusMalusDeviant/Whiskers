@@ -699,11 +699,17 @@ public class MutationGatewayCoverageTests
         Assert.Equal(["Program"], MutationCallScanner
             .Callers(App, m => m.Name == "RunAsync" && m.DeclaringType?.Name == "IdentityBindingCli")
             .Select(c => c.Owner.FullName!).Distinct());
-        // The prune runs only inside the role and whitelist writes and at start.
-        Assert.Equal(["Whiskers.Services.Auth.IdentityBindingStartupPrune.InitializeAsync",
-                "Whiskers.Services.Auth.RoleService.PruneRemovedAsync",
+        // The prune runs only inside the role and whitelist writes (the wizard's first-admin writes included); the start-up
+        // prune, the admission's recovery and the CLI re-read and prune through RefreshAsync.
+        Assert.Equal(["Whiskers.Services.Auth.RoleService.PruneRemovedAsync",
+                "Whiskers.Services.Auth.RoleService.SetFirstAdminAsync",
+                "Whiskers.Services.Auth.WhitelistService.AddFirstAdminAsync",
                 "Whiskers.Services.Auth.WhitelistService.SaveWhitelistAsync"],
             CallersOf("PruneOrphansAsync"));
+        Assert.Equal(["Whiskers.Services.Auth.FederatedAdmission.DecideAsync",
+                "Whiskers.Services.Auth.IdentityBindingCli.RunAsync",
+                "Whiskers.Services.Auth.IdentityBindingStartupPrune.InitializeAsync"],
+            CallersOf("RefreshAsync"));
     }
 
     [Fact]

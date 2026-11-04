@@ -259,6 +259,28 @@ new `IdentityBindingCli.cs` (+ `Program.cs` dispatch), `SessionValidator.cs`, `I
   approval actor key and the audit details' `keyId` field and belongs with a later principal package.
 - Cookie hardening, `SaveTokens`, `RequireHttpsMetadata` (R1-50); MFA; local-account changes beyond the predicate.
 
+## Amendments accepted 4 November 2026
+
+Accepted by the maintainer after review rounds 1 and 2 of R1-27; they tighten the data-model and rule-5 text above.
+
+- **(a) Missing file next to its previous generation.** `identity-bindings.json` missing while
+  `identity-bindings.json.bak` exists makes the store **unavailable**, like an unreadable file; the store is empty only
+  when neither exists. The `.bak` is never taken over automatically (it may hold a revoked binding); a file that is
+  readable again after it was unreadable (repaired, restored from the `.bak`) makes the store wait until a re-read and
+  prune have succeeded. Recovery is the host operator's act.
+- **(b) Lock file.** Every writer of every process (the running instance and the host CLI) holds an exclusive lock on
+  `identity-bindings.json.lock` around its re-read, change and save, and writes a revision into it that readers compare
+  (with the file's time and length) to follow changes without a restart. The lock file is not part of the self-backup.
+  `DOTNET_SYSTEM_IO_DISABLEFILELOCKING` must not be set.
+- **(c) Role and whitelist writes prune first, additions included.** Every role or whitelist write that removes **or
+  adds** an entry — the setup wizard's first-admin writes (`SetFirstAdminAsync`, `AddFirstAdminAsync`) included —
+  prunes the bindings and pending requests of addresses that are no entries first, under the held gate; a prune that
+  cannot be done (store unavailable, save failed) refuses the write. A failed save or a start-up prune that did not
+  succeed (unreadable file, lock not taken) leaves the store unavailable until a re-read and prune succeed.
+- **(d) Audit log lines.** No application log line of `AuditLogService` names the account of an `auth.*` row (written,
+  failed or dropped from the sign-in queue); the identity rows' failure fallback also withholds their details. The
+  persisted audit rows keep the account handle.
+
 ## Decisions for the maintainer
 
 **Taken on 4 November 2026:** 1 → **a)** refuse federated sign-in until an Admin exists. 2 → **a)** automatic binding

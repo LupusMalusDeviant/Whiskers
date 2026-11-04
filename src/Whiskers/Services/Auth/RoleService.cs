@@ -30,8 +30,8 @@ public class RoleService : IRoleService, IInitializable
 
     /// <summary>R1-27 (contract 0003, rule 5): when the write removes a role entry, the bindings and pending requests of
     /// addresses that stop being entries are pruned first, under the held gate. A failed prune throws: the write is refused.
-    /// While the bindings are unavailable (a prune that could not be saved still owed) a write that adds an entry prunes
-    /// first too — an address configured again must not revive what was owed to go.</summary>
+    /// A write that adds an entry prunes first too (amendment c) — an address configured again must not revive a binding
+    /// from before it stopped being one.</summary>
     private async Task PruneRemovedAsync(UserRoleData before, UserRoleData next, AccessControlWriteGate.Lease lease)
     {
         if (_bindings is null) return;
@@ -39,7 +39,7 @@ public class RoleService : IRoleService, IInitializable
             !data.Roles.Any(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
         var removesAnEntry = before.Roles.Any(b => Missing(next, b.Email));
         var addsAnEntry = next.Roles.Any(n => Missing(before, n.Email));
-        if (removesAnEntry || (addsAnEntry && !_bindings.IsAvailable)) await _bindings.PruneOrphansAsync(lease, nextRoles: next);
+        if (removesAnEntry || addsAnEntry) await _bindings.PruneOrphansAsync(lease, nextRoles: next);
     }
 
     /// <summary>Tests only: replaces the persistence of <see cref="SetFirstAdminAsync"/> (a save that waits or fails on
@@ -195,6 +195,8 @@ public class RoleService : IRoleService, IInitializable
             existing.Role = AppRole.Admin;
         else
             candidate.Roles.Add(new UserRoleEntry { Email = email, Role = AppRole.Admin });
+        // R1-27 (contract 0003, amendment c): an addition prunes first, under the held gate; a failed prune refuses it.
+        if (existing is null && _bindings is not null) await _bindings.PruneOrphansAsync(lease, nextRoles: candidate);
 
         // Persist first, publish after: no reader (GetRole, session validation, the gateway's principal) sees the Admin
         // before it is on disk. A failed save throws here and leaves the published roles untouched — the wizard stays open.

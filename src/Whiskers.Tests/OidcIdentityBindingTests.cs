@@ -667,7 +667,7 @@ public sealed class OidcIdentityBindingTests
         await world.Roles.InitializeAsync();
         world.BlockSaves();
 
-        await new IdentityBindingStartupPrune(world.Store, world.Gate).InitializeAsync();
+        await new IdentityBindingStartupPrune(world.Store).InitializeAsync();
 
         Assert.False(world.Store.IsAvailable);
         Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded,
@@ -686,6 +686,147 @@ public sealed class OidcIdentityBindingTests
         Assert.Empty(world.Store.Snapshot().Bindings);
         Assert.Equal(SessionRevocationReasons.BindingRevoked, (await world.Validator.CheckAsync(old)).Reason);
         Assert.Null(world.Store.Find(AuthConstants.GoogleIssuer, "g-ops"));
+    }
+
+    [Fact]
+    public async Task A_previous_generation_restored_live_does_not_revive_an_orphan_when_the_address_is_configured_again()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        world.Store.RecoveryDelay = TimeSpan.FromHours(1);   // only the steps below prune
+        var old = await world.SignInAsync(Google("g-ops", Ops));
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.RemoveRoleAsync(Ops));   // pruned; the .bak keeps it
+        var file = new DataPathOptions(world.Directory).IdentityBindingsJson;
+        Assert.Contains("g-ops", await File.ReadAllTextAsync(file + ".bak"));
+
+        // The file is damaged, and the operator copies the .bak back while Whiskers runs.
+        await File.WriteAllTextAsync(file, "{ torn");
+        Assert.False(world.Store.IsAvailable);
+        File.Copy(file + ".bak", file, overwrite: true);
+        Assert.False(world.Store.IsAvailable);   // readable again, but not pruned yet
+
+        // The address goes to someone new: the addition prunes first.
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.SetRoleAsync(Ops, AppRole.Operator));
+        Assert.True(world.Store.IsAvailable);
+        Assert.Null(world.Store.Find(AuthConstants.GoogleIssuer, "g-ops"));
+        Assert.False((await world.Admission.AdmitAsync(Google("g-ops", Ops, verified: "false"))).Admitted);
+        Assert.Equal(SessionRevocationReasons.BindingRevoked, (await world.Validator.CheckAsync(old)).Reason);
+    }
+
+    [Fact]
+    public async Task A_file_unreadable_at_start_and_repaired_live_waits_for_a_prune()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        var old = await world.SignInAsync(Google("g-ops", Ops));
+        await GatewayArrange.RunAsync("config.roles", () => world.Roles.RemoveRoleAsync(Ops));
+        var file = new DataPathOptions(world.Directory).IdentityBindingsJson;
+        var withOrphan = await File.ReadAllTextAsync(file + ".bak");
+        await File.WriteAllTextAsync(file, "{ torn");
+
+        var store = world.NewStore();
+        store.RecoveryDelay = TimeSpan.FromHours(1);
+        await store.InitializeAsync();
+        await new IdentityBindingStartupPrune(store).InitializeAsync();   // skipped: unreadable
+        Assert.False(store.IsAvailable);
+
+        await File.WriteAllTextAsync(file, withOrphan);   // repaired live — with the orphan in it
+        Assert.False(store.IsAvailable);
+        Assert.Throws<IdentityBindingStoreUnavailableException>(() => store.Find(AuthConstants.GoogleIssuer, "g-ops"));
+
+        var roles = new RoleService(world.Configuration, NullLogger<RoleService>.Instance, dataPaths: new DataPathOptions(world.Directory),
+            writeGate: world.Gate, bindings: store);
+        await roles.InitializeAsync();
+        await GatewayArrange.RunAsync("config.roles", () => roles.SetRoleAsync(Ops, AppRole.Operator));
+        Assert.True(store.IsAvailable);
+        Assert.Null(store.Find(AuthConstants.GoogleIssuer, "g-ops"));
+        var admission = new FederatedAdmission(store, roles, world.Whitelist, world.Configuration);
+        Assert.False((await admission.AdmitAsync(Google("g-ops", Ops, verified: "false"))).Admitted);
+        var validator = new SessionValidator(world.Scopes, world.Whitelist, roles, world.Configuration, bindings: store);
+        Assert.Equal(SessionRevocationReasons.BindingRevoked, (await validator.CheckAsync(old)).Reason);
+    }
+
+    [Fact]
+    public async Task A_start_up_prune_that_cannot_take_the_lock_leaves_the_store_unavailable()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        await world.SignInAsync(Google("g-ops", Ops));
+        var store = world.NewStore();
+        store.LockWait = TimeSpan.FromMilliseconds(200);
+        store.RecoveryDelay = TimeSpan.FromHours(1);
+        await store.InitializeAsync();
+        Assert.True(store.IsAvailable);
+
+        var lockPath = new DataPathOptions(world.Directory).IdentityBindingsJson + IdentityBindingStore.LockSuffix;
+        await using (new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            await new IdentityBindingStartupPrune(store).InitializeAsync();
+            Assert.False(store.IsAvailable);
+        }
+        Assert.True(await store.RefreshAsync());
+        Assert.NotNull(store.Find(AuthConstants.GoogleIssuer, "g-ops"));
+    }
+
+    [Fact]
+    public async Task A_failed_read_is_tried_again_without_the_file_changing()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        await world.SignInAsync(Google("g-ops", Ops));
+        world.Store.RecoveryDelay = TimeSpan.FromMilliseconds(50);
+        var file = new DataPathOptions(world.Directory).IdentityBindingsJson;
+        File.SetLastWriteTimeUtc(file, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));   // outside the re-read window
+        Assert.True(world.Store.IsAvailable);
+
+        // A changed file that cannot be opened for a moment (an antivirus scan, a backup tool).
+        File.SetLastWriteTimeUtc(file, new DateTime(2020, 1, 2, 0, 0, 0, DateTimeKind.Utc));
+        await using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            Assert.False(world.Store.IsAvailable);
+
+        // Released, the file unchanged since: the store reads it again and becomes available after its prune.
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!world.Store.IsAvailable && DateTime.UtcNow < until) await Task.Delay(50);
+        Assert.True(world.Store.IsAvailable);
+    }
+
+    [Fact]
+    public async Task A_change_is_noticed_outside_the_re_read_window_and_with_unchanged_time_and_length()
+    {
+        await using var world = await BindingWorld.CreateAsync();
+        var session = await world.SignInAsync(Google("g-ops", Ops));
+        await world.Admission.AdmitAsync(Oidc("o-root", Root));   // a second write: the .bak exists from here on
+        var file = new DataPathOptions(world.Directory).IdentityBindingsJson;
+        Assert.True(File.Exists(file + ".bak"));
+        var frozen = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(file, frozen);
+        var today = Assert.Single(world.Store.Snapshot().Bindings).LastSignInDay;
+
+        // Another process notes a sign-in a day later: same length; the file system keeps the old time.
+        var tomorrow = new ManualClock(DateTimeOffset.UtcNow.AddDays(1));
+        var other = new IdentityBindingStore(world.Services, world.Audit, world.Configuration, new AccessControlWriteGate(),
+            new DataPathOptions(world.Directory), tomorrow);
+        await other.InitializeAsync();
+        var length = new FileInfo(file).Length;
+        Assert.True((await other.RecordSignInAsync(session.FindFirstValue(AuthConstants.BindingIdClaim)!)).Success);
+        File.SetLastWriteTimeUtc(file, frozen);
+        Assert.Equal(length, new FileInfo(file).Length);
+
+        var seen = Assert.Single(world.Store.Snapshot().Bindings).LastSignInDay;
+        Assert.NotEqual(today, seen);
+        Assert.Equal(tomorrow.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), seen);
+    }
+
+    [Fact]
+    public async Task A_reader_holding_the_file_does_not_stop_a_writer()
+    {
+        await using var world = await BindingWorld.CreateAsync(trustOidc: true);
+        await world.SignInAsync(Google("g-ops", Ops));
+        var file = new DataPathOptions(world.Directory).IdentityBindingsJson;
+        // A reader (this process's or the other one's) has the file open while the write replaces it, then lets go.
+        var reader = IdentityBindingStore.OpenShared(file);
+        var write = world.Admission.AdmitAsync(Oidc("o-root", Root));
+        await Task.Delay(80);
+        await reader.DisposeAsync();
+        Assert.True((await write).Admitted);
+        Assert.True(world.Store.IsAvailable);
+        Assert.Equal(2, world.Store.Snapshot().Bindings.Count);
     }
 
     [Fact]
@@ -765,7 +906,7 @@ public sealed class OidcIdentityBindingTests
         await File.WriteAllTextAsync(new DataPathOptions(world.Directory).RolesJson, JsonSerializer.Serialize(roles));
         await world.Roles.InitializeAsync();
 
-        await new IdentityBindingStartupPrune(world.Store, world.Gate).InitializeAsync();
+        await new IdentityBindingStartupPrune(world.Store).InitializeAsync();
 
         Assert.Empty(world.Store.Snapshot().Bindings);
     }
@@ -832,6 +973,7 @@ public sealed class OidcIdentityBindingTests
         Assert.Contains("AUDIT WRITE FAILED", text);
         Assert.Contains(AuthAuditLog.IdentityBoundAction, text);
         Assert.DoesNotContain("corp.test", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("fingerprint=", text, StringComparison.Ordinal);   // identity details stay out of the fallback
         // The persisted rows still name the account.
         using var scope = trail.Scope();
         var rows = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().ToListAsync();

@@ -64,7 +64,7 @@ A non-standard `Oidc:EmailClaim` (`preferred_username`, `upn`, …) never binds 
   subject; repeat with `--issuer`), `1` nothing changed (store or audit unavailable, refused). Its audit row
   (actor `cli (--confirm-identity-binding)`) is written first; without it nothing changes. The web host is not
   started. The command writes the same file the running instance uses, under a lock both share
-  (`identity-bindings.json.lock`), and the running instance reads the change at once: the person signs in right
+  (`identity-bindings.json.lock`; do not set `DOTNET_SYSTEM_IO_DISABLEFILELOCKING`, which switches that lock off on Linux), and the running instance reads the change at once: the person signs in right
   afterwards, no restart. A binding the command replaced ends that subject's sessions at their next request.
 
 ## Removing a binding versus removing access
@@ -87,15 +87,21 @@ A non-standard `Oidc:EmailClaim` (`preferred_username`, `upn`, …) never binds 
 - The store is **unavailable** — every federated sign-in and session is refused, local sign-in keeps working, the
   readiness check `identity-bindings` reports `Degraded` — when the file cannot be read or parsed, lacks its `version`,
   `bindings` or `pending`, is a directory, or is missing while `identity-bindings.json.bak` exists; and after a save that
-  failed (a full disk), until it has been read and pruned again (retried every 30 seconds and at every federated
-  sign-in). While it is unavailable, role and whitelist changes that add or remove an address are refused.
+  failed (a full disk), after a start-up prune that did not succeed, and after the file became readable again (repaired
+  or restored) — each time until it has been read and pruned again (retried every 30 seconds, at every federated
+  sign-in and with every role or whitelist change).
+- **Every role or whitelist change that adds or removes an address prunes first** — the setup wizard's first
+  administrator included. If that prune cannot be done (the file cannot be read, or the save fails), the change is
+  refused; once the store can be read and saved again, the change goes through and takes the owed prune with it.
 - **Recovery is the host operator's decision**, with Whiskers running or stopped:
   - restore a known-good file: copy `identity-bindings.json.bak` (check it first — it is the generation before the
     last change) or the file from a backup over `identity-bindings.json`; or
   - start over: delete **both** `identity-bindings.json` and `identity-bindings.json.bak` — every federated user binds
     again (Google automatically, OIDC after confirmation). Deleting only the current file leaves the store unavailable.
 
-  The running instance picks the repaired file up at its next read.
+  The running instance picks the repaired file up at its next read and becomes available once it has pruned it (within
+  30 seconds, or at the next federated sign-in or role/whitelist change): a restored `.bak` may hold bindings of
+  addresses removed since, and those go before anyone is admitted.
 
 ## Upgrading to R1-27
 

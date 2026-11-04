@@ -220,9 +220,11 @@ All notable changes to Whiskers are documented here. The format follows
   `anonymous`. The application log no longer names the account of any `auth.*` audit row (written, failed or dropped —
   the audit row itself keeps it), and no R1-27 log line carries an address or a subject. The readiness check
   `identity-bindings` reports an unavailable store: unreadable, incomplete, missing while its `.bak` exists (the `.bak`
-  is never taken over by itself), or after a failed save until it is read and pruned again; every federated sign-in and
-  session is then refused, local sign-in keeps working, and role or whitelist changes that add or remove an address
-  wait. An Admin with a local password **or an active binding** counts as one who can sign in (replaces "seen signing
+  is never taken over by itself), after a failed save, a start-up prune that did not succeed, or a repair of the file,
+  until it is read and pruned again; every federated sign-in and session is then refused and local sign-in keeps
+  working. Every role or whitelist change that adds or removes an address — the setup wizard's included — prunes the
+  bindings of addresses that are no entries first, and waits while that cannot be done. Do not set
+  `DOTNET_SYSTEM_IO_DISABLEFILELOCKING`: it switches off the lock the instance and the CLI share. An Admin with a local password **or an active binding** counts as one who can sign in (replaces "seen signing
   in"); removing a binding and deleting a local account check that rule one at a time.
   **Upgrade notes:** nothing on disk changes; `identity-bindings.json` appears in the data directory with the first
   binding and is part of the self-backup. **Every Google/OIDC browser session ends at its next request** (open pages

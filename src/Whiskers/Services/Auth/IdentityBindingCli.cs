@@ -55,7 +55,7 @@ public static class IdentityBindingCli
             foreach (var initializable in services.GetServices<IInitializable>().Where(i => i.Order <= 20).OrderBy(i => i.Order))
                 await initializable.InitializeAsync(ct);
             var store = services.GetRequiredService<IIdentityBindingStore>();
-            if (!store.IsAvailable)
+            if (!store.IsAvailable && !await store.RefreshAsync(ct))
             {
                 await output.WriteLineAsync("The identity bindings file cannot be read. Nothing was changed.");
                 return 1;
