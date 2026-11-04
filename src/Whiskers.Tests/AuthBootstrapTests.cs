@@ -122,6 +122,113 @@ public class AuthBootstrapTests
         Assert.False(wl.IsEmailAllowed("b@x"));
     }
 
+    [Fact]
+    public async Task A_blank_GOOGLE_ADMIN_EMAIL_does_not_switch_on_a_whitelist_that_admits_nobody()
+    {
+        // Compose maps an unset GOOGLE_ADMIN_EMAIL to `GoogleAuth__AllowedEmails__0=` — an empty entry.
+        var wl = await Whitelist(new FakeRoles(), ("GoogleAuth:AllowedEmails:0", ""));
+
+        Assert.False(wl.GetWhitelist().Enabled);
+        Assert.Empty(wl.GetWhitelist().Emails);
+        Assert.True(wl.IsEmailAllowed("oidc-user@x"));   // unconfigured instance: the legacy fail-open, not a lockout
+
+        var roles = new FakeRoles { AnyRoles = true };
+        roles.Explicit.Add("admin@x");
+        var afterSetup = await Whitelist(roles, ("GoogleAuth:AllowedEmails:0", "  "));
+        Assert.False(afterSetup.GetWhitelist().Enabled);
+        Assert.True(afterSetup.IsEmailAllowed("admin@x"));      // the administrator gets in
+        Assert.False(afterSetup.IsEmailAllowed("stranger@x"));  // and the C5 fail-closed still holds
+    }
+
+    [Fact]
+    public async Task Whitelist_seed_trims_and_dedupes_and_drops_blank_entries()
+    {
+        var wl = await Whitelist(new FakeRoles(),
+            ("GoogleAuth:AllowedEmails:0", ""), ("GoogleAuth:AllowedEmails:1", " a@x "), ("GoogleAuth:AllowedEmails:2", "A@X"),
+            ("GoogleAuth:AllowedEmails:3", " "));
+
+        Assert.True(wl.GetWhitelist().Enabled);
+        Assert.Equal(["a@x"], wl.GetWhitelist().Emails);
+        Assert.True(wl.IsEmailAllowed("a@x"));
+        Assert.False(wl.IsEmailAllowed("b@x"));
+    }
+
+    [Fact]
+    public async Task A_blank_GOOGLE_ADMIN_EMAIL_seeds_nothing_and_admits_the_configured_admin_with_the_real_services()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sw-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var paths = new DataPathOptions(dir);
+        var cfg = Cfg(("WHISKERS_ADMIN_EMAIL", "admin@x"), ("GoogleAuth:AllowedEmails:0", ""));
+        var roles = new RoleService(cfg, NullLogger<RoleService>.Instance, dataPaths: paths);
+        await roles.InitializeAsync();
+        var wl = new WhitelistService(cfg, roles, NullLogger<WhitelistService>.Instance, paths);
+        await wl.InitializeAsync();
+
+        Assert.Equal(AppRole.Admin, roles.GetRole("admin@x"));
+        Assert.True(wl.IsEmailAllowed("admin@x"));
+        Assert.False(wl.IsEmailAllowed("stranger@x"));
+        // Nothing written: a later GOOGLE_ADMIN_EMAIL must still seed the list on a start without whitelist.json.
+        Assert.False(File.Exists(paths.WhitelistJson));
+    }
+
+    // ---------------------------------------------------------------- RoleService: persist first, publish after
+
+    /// <summary>A role store whose next save fails: the file is replaced by a directory of the same name.</summary>
+    private static async Task<(RoleService Roles, string Path)> RolesWithFailingSave()
+    {
+        var path = TempStore();
+        var svc = new RoleService(Cfg(), NullLogger<RoleService>.Instance, path);
+        await svc.SetRoleAsync("admin@x", AppRole.Admin);
+        await svc.SetRoleAsync("op@x", AppRole.Operator);
+        File.Delete(path);
+        Directory.CreateDirectory(path);
+        return (svc, path);
+    }
+
+    /// <summary>The call failed in the save itself (a file-system error), not earlier for an unrelated reason.</summary>
+    private static void AssertSaveFailure(Exception? ex)
+        => Assert.True(ex is IOException or UnauthorizedAccessException, $"expected a failed save, got {ex?.GetType().Name ?? "no exception"}");
+
+    [Fact]
+    public async Task A_role_grant_whose_save_fails_never_takes_effect()
+    {
+        var (svc, _) = await RolesWithFailingSave();
+
+        AssertSaveFailure(await Record.ExceptionAsync(() => svc.SetRoleAsync("new@x", AppRole.Admin)));
+
+        Assert.Equal(AppRole.Viewer, svc.GetRole("new@x"));
+        Assert.False(svc.HasExplicitRole("new@x"));
+        Assert.Equal(2, svc.GetRoleData().Roles.Count);
+    }
+
+    [Fact]
+    public async Task A_role_removal_whose_save_fails_never_takes_effect()
+    {
+        var (svc, _) = await RolesWithFailingSave();
+
+        AssertSaveFailure(await Record.ExceptionAsync(() => svc.RemoveRoleAsync("op@x")));
+
+        Assert.Equal(AppRole.Operator, svc.GetRole("op@x"));
+        Assert.True(svc.HasExplicitRole("op@x"));
+    }
+
+    [Fact]
+    public async Task A_saved_role_change_is_published_and_survives_a_restart()
+    {
+        var path = TempStore();
+        var svc = new RoleService(Cfg(), NullLogger<RoleService>.Instance, path);
+        await svc.SetRoleAsync("admin@x", AppRole.Admin);
+        await svc.SetRoleAsync("op@x", AppRole.Operator);
+        await svc.RemoveRoleAsync("op@x");
+
+        Assert.Equal(AppRole.Viewer, svc.GetRole("op@x"));
+        var restarted = new RoleService(Cfg(), NullLogger<RoleService>.Instance, path);
+        await restarted.InitializeAsync();
+        Assert.Equal(AppRole.Admin, restarted.GetRole("admin@x"));
+        Assert.False(restarted.HasExplicitRole("op@x"));
+    }
+
     private sealed class FakeRoles : IRoleService
     {
         public bool AnyRoles;

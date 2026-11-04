@@ -39,9 +39,15 @@ public class WhitelistService : IWhitelistService, IInitializable
         }
         else
         {
-            // Seed from config if AllowedEmails are set
-            var configEmails = _configuration.GetSection("GoogleAuth:AllowedEmails").Get<List<string>>();
-            if (configEmails is { Count: > 0 })
+            // Seed from config if AllowedEmails are set. Blank entries are dropped: compose maps an unset
+            // GOOGLE_ADMIN_EMAIL to `AllowedEmails__0=`, and an enabled list holding only "" admits nobody — not the
+            // OIDC user, not the local admin the setup wizard creates.
+            var configEmails = (_configuration.GetSection("GoogleAuth:AllowedEmails").Get<List<string>>() ?? [])
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Select(e => e.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (configEmails.Count > 0)
             {
                 var data = new WhitelistData { Enabled = true, Emails = configEmails };
                 await _store.SaveAsync(data);

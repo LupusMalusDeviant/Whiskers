@@ -6,6 +6,19 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Fix: an unset `GOOGLE_ADMIN_EMAIL` no longer switches on a whitelist that admits nobody.** Compose passes it as
+  `GoogleAuth__AllowedEmails__0=`, and a fresh instance seeded an enabled whitelist holding one empty entry, which turned
+  away every Google and OIDC sign-in. The seed now drops blank entries (and trims and de-duplicates the rest); with none
+  left the whitelist stays off, so the C5 rule applies: until a role exists every Google/OIDC account is admitted as
+  Viewer, afterwards only accounts with a role — set `WHISKERS_ADMIN_EMAIL` or finish the setup promptly. The artifact
+  check now starts the hardened image with `GOOGLE_ADMIN_EMAIL` empty and signs the administrator in. An existing
+  `whitelist.json` is not changed. An instance that already holds the empty entry: stop it, delete `whitelist.json` and
+  `whitelist.json.bak` in the data directory and start it again (or remove the entry in Settings, if an administrator
+  can still sign in).
+- **Fix: a role change takes effect only once it is saved.** `SetRoleAsync` and `RemoveRoleAsync` published the new roles
+  before writing `roles.json`; a failed save left a change that was in force although the caller saw an error, and that
+  was gone after the next start (a revoked role came back). They now persist first and publish after, like the setup
+  wizard's first-admin write.
 - R1-47: **CI and the release check the endpoints, the PostgreSQL suites and the image itself, and fail closed.**
   `EndpointAuthMatrixTests` boots the real app (Production, authentication on), enumerates every endpoint of its endpoint
   data sources (minimal APIs, pages, hubs, Blazor framework endpoints, MCP, probes, static assets) and requests each as
