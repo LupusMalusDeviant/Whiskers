@@ -1178,6 +1178,9 @@ public sealed class OidcIdentityBindingTests
         // Other auth rows whose values carry line breaks: the fallback line keeps them on one line.
         await lost.TryLogAsync(Ops, "web\r\n" + forged, AuthAuditLog.LoginFailedAction + "\n" + forged, "auth\r" + forged,
             Ops, Ops, "reason=x\r\n" + forged, serverId: "s\n" + forged, success: false);
+        // The Unicode line breaks (NEL, LS, PS) in values that are logged, not withheld.
+        await lost.TryLogAsync(Ops, "web\u0085" + forged, AuthAuditLog.LoginFailedAction, "auth\u2029" + forged,
+            Ops, Ops, "reason=y\u2028" + forged, serverId: "s\u0085" + forged, success: false);
         // A written row of the same kind: the success line too.
         var written = new AuditLogService(trail.Scopes, factory.CreateLogger<AuditLogService>());
         Assert.True(await written.TryLogAsync(Ops, "web\n" + forged, AuthAuditLog.LoginAction, "auth\r\n" + forged, Ops, Ops));
@@ -1194,12 +1197,15 @@ public sealed class OidcIdentityBindingTests
         Assert.DoesNotContain("evil-idp", text, StringComparison.Ordinal);
         Assert.DoesNotContain("fingerprint=", text, StringComparison.Ordinal);
         Assert.DoesNotContain("corp.test", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("o-ops", text, StringComparison.Ordinal);   // the subject of the admitted path either
         Assert.Contains(AuditLogService.WithheldDetails, text);
         foreach (var line in lines)
         {
             Assert.DoesNotContain('\r', line);
             Assert.DoesNotContain('\n', line);
+            Assert.DoesNotContain('\u0085', line);
             Assert.DoesNotContain('\u2028', line);
+            Assert.DoesNotContain('\u2029', line);
         }
         Assert.Contains(lines, l => l.Contains("sign-in audit queue", StringComparison.Ordinal) && l.Contains(forged));
     }
