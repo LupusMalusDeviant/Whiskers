@@ -62,7 +62,7 @@
     <value>Container-Verwaltung</value>
   </data>
   <data name="Login_Error_Unauthorized" xml:space="preserve">
-    <value>Ihre E-Mail ist nicht autorisiert, auf diese Anwendung zuzugreifen.</value>
+    <value>Ihre E-Mail ist nicht autorisiert, auf diese Anwendung zuzugreifen. Wenn Sie Zugang erwartet haben, kann ein Administrator Ihre Anmeldung unter Einstellungen → Anmelde-Identitäten bestätigen.</value>
   </data>
   <data name="Login_Button_Google" xml:space="preserve">
     <value>Mit Google anmelden</value>
@@ -5602,5 +5602,140 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Recover_NoCode" xml:space="preserve">
     <value>Kein Code? Ein Admin setzt dein Passwort unter Einstellungen → Lokale Konten zurück; kann sich kein Admin mehr anmelden, stellt der Host-Betreiber mit --recover-local-account einen aus.</value>
+  </data>
+  <data name="IdentityBindings_Panel" xml:space="preserve">
+    <value>Anmelde-Identitäten</value>
+  </data>
+  <data name="IdentityBindings_Intro" xml:space="preserve">
+    <value>Eine Google- oder OIDC-Anmeldung wird über das Subjekt des Anbieters zugelassen, das einmal an eine eingerichtete Adresse (Rolleneintrag oder Whitelist-Eintrag) gebunden wird. Die erste Anmeldung bindet nur dann automatisch, wenn dem Anbieter die Prüfung von Adressen anvertraut ist (Google standardmäßig; OIDC nur mit Oidc:TrustEmailVerified) und die Adresse bestätigt ist; alles andere wartet hier auf Bestätigung.</value>
+  </data>
+  <data name="IdentityBindings_AuthDisabled" xml:space="preserve">
+    <value>Die Authentifizierung ist abgeschaltet (AUTH_DISABLED): es gibt keine Google/OIDC-Anmeldung, und Bindungen lassen sich hier weder bestätigen noch entfernen. Der Host-Befehl --confirm-identity-binding funktioniert weiterhin.</value>
+  </data>
+  <data name="IdentityBindings_Unavailable" xml:space="preserve">
+    <value>Die Datei der Identitätsbindungen (identity-bindings.json) ist nicht lesbar: jede Google/OIDC-Anmeldung und -Sitzung wird abgewiesen, bis sie repariert ist. Lokale Konten sind nicht betroffen.</value>
+  </data>
+  <data name="IdentityBindings_Pending_Heading" xml:space="preserve">
+    <value>Warten auf Bestätigung</value>
+  </data>
+  <data name="IdentityBindings_Bindings_Heading" xml:space="preserve">
+    <value>Gebundene Identitäten</value>
+  </data>
+  <data name="IdentityBindings_Th_Account" xml:space="preserve">
+    <value>Konto</value>
+  </data>
+  <data name="IdentityBindings_Th_Provider" xml:space="preserve">
+    <value>Anbieter</value>
+  </data>
+  <data name="IdentityBindings_Th_Issuer" xml:space="preserve">
+    <value>Aussteller</value>
+  </data>
+  <data name="IdentityBindings_Th_Fingerprint" xml:space="preserve">
+    <value>Fingerabdruck des Subjekts</value>
+  </data>
+  <data name="IdentityBindings_Th_Reason" xml:space="preserve">
+    <value>Warum es wartet</value>
+  </data>
+  <data name="IdentityBindings_Th_EmailVerified" xml:space="preserve">
+    <value>Adresse vom Anbieter bestätigt</value>
+  </data>
+  <data name="IdentityBindings_Th_Expires" xml:space="preserve">
+    <value>Läuft ab</value>
+  </data>
+  <data name="IdentityBindings_Th_Bound" xml:space="preserve">
+    <value>Gebunden</value>
+  </data>
+  <data name="IdentityBindings_Th_LastSignIn" xml:space="preserve">
+    <value>Letzte Anmeldung</value>
+  </data>
+  <data name="IdentityBindings_None_Pending" xml:space="preserve">
+    <value>Keine Anmeldung wartet auf Bestätigung.</value>
+  </data>
+  <data name="IdentityBindings_None_Bindings" xml:space="preserve">
+    <value>Noch keine Google/OIDC-Identität gebunden.</value>
+  </data>
+  <data name="IdentityBindings_Yes" xml:space="preserve">
+    <value>ja</value>
+  </data>
+  <data name="IdentityBindings_No" xml:space="preserve">
+    <value>nein</value>
+  </data>
+  <data name="IdentityBindings_Reason_email_unverified" xml:space="preserve">
+    <value>Adresse vom Anbieter nicht bestätigt</value>
+  </data>
+  <data name="IdentityBindings_Reason_provider_untrusted" xml:space="preserve">
+    <value>Anbieter nicht zur Adressprüfung vertraut</value>
+  </data>
+  <data name="IdentityBindings_Reason_second_issuer" xml:space="preserve">
+    <value>Zweiter Anbieter für ein gebundenes Konto</value>
+  </data>
+  <data name="IdentityBindings_Reason_subject_changed" xml:space="preserve">
+    <value>Neues Subjekt beim selben Anbieter</value>
+  </data>
+  <data name="IdentityBindings_Reason_nonstandard_email_claim" xml:space="preserve">
+    <value>Adresse aus einem nicht standardmäßigen Claim</value>
+  </data>
+  <data name="IdentityBindings_Method_verified_email" xml:space="preserve">
+    <value>bestätigte Adresse bei der Anmeldung</value>
+  </data>
+  <data name="IdentityBindings_Method_admin" xml:space="preserve">
+    <value>von einem Admin bestätigt</value>
+  </data>
+  <data name="IdentityBindings_Method_host_cli" xml:space="preserve">
+    <value>auf dem Host bestätigt</value>
+  </data>
+  <data name="IdentityBindings_Button_Confirm" xml:space="preserve">
+    <value>Bestätigen</value>
+  </data>
+  <data name="IdentityBindings_Button_Remove" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="IdentityBindings_Button_RemoveConfirm" xml:space="preserve">
+    <value>Bindung entfernen</value>
+  </data>
+  <data name="IdentityBindings_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="IdentityBindings_Confirm_Remove" xml:space="preserve">
+    <value>Die Google/OIDC-Sitzungen der Person enden; die nächste Anmeldung muss erneut bestätigt werden.</value>
+  </data>
+  <data name="IdentityBindings_Hint" xml:space="preserve">
+    <value>Nur eine erwartete Anfrage bestätigen: sie lässt dieses Subjekt des Anbieters als das Konto anmelden. Kann sich kein Admin anmelden, bestätigt der Host-Betreiber mit: dotnet Whiskers.dll --confirm-identity-binding &lt;Adresse&gt;.</value>
+  </data>
+  <data name="IdentityBindings_Snackbar_Confirmed" xml:space="preserve">
+    <value>Die Anmeldung ist gebunden; die Person kann sich jetzt anmelden.</value>
+  </data>
+  <data name="IdentityBindings_Snackbar_Removed" xml:space="preserve">
+    <value>Entfernt.</value>
+  </data>
+  <data name="IdentityBindings_Error_not_authorized" xml:space="preserve">
+    <value>Nur ein Admin darf Anmelde-Identitäten ändern.</value>
+  </data>
+  <data name="IdentityBindings_Error_session_invalid" xml:space="preserve">
+    <value>Deine Sitzung ist nicht mehr gültig; bitte neu anmelden.</value>
+  </data>
+  <data name="IdentityBindings_Error_not_found" xml:space="preserve">
+    <value>Die Anfrage oder Bindung gibt es nicht mehr, oder ihre Adresse ist nicht mehr eingerichtet.</value>
+  </data>
+  <data name="IdentityBindings_Error_last_admin" xml:space="preserve">
+    <value>Das ist der letzte Anmeldeweg des letzten Admins, der sich anmelden kann; er bleibt.</value>
+  </data>
+  <data name="IdentityBindings_Error_ambiguous" xml:space="preserve">
+    <value>Mehrere Anfragen passen; bitte eine wählen.</value>
+  </data>
+  <data name="IdentityBindings_Error_store_unavailable" xml:space="preserve">
+    <value>Die Identitätsbindungen konnten nicht gelesen oder gespeichert werden.</value>
+  </data>
+  <data name="IdentityBindings_Error_audit_unavailable" xml:space="preserve">
+    <value>Das Audit-Log konnte nicht geschrieben werden; nichts wurde geändert.</value>
+  </data>
+  <data name="IdentityBindings_Error_conflict" xml:space="preserve">
+    <value>Dieses Subjekt ist bereits an ein anderes Konto gebunden.</value>
+  </data>
+  <data name="IdentityBindings_Error_auth_disabled" xml:space="preserve">
+    <value>Die Authentifizierung ist abgeschaltet; Anmelde-Identitäten lassen sich hier nicht ändern.</value>
+  </data>
+  <data name="IdentityBindings_Error_failed" xml:space="preserve">
+    <value>Die Aktion ist fehlgeschlagen ({0}); siehe Log.</value>
   </data>
 </root>

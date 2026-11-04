@@ -10,6 +10,10 @@
 1 Whiskers.Tests.EndpointAuthMatrixTests.An_anonymous_static_fallback_fails_the_matrix
 1 Whiskers.Tests.EndpointAuthMatrixTests.Every_endpoint_answers_each_role_as_classified_and_runs_its_handler_only_when_allowed
 
+# Federated identity binding: subject is the identity, no admission before setup, fail closed (R1-27, contract 0003).
+31 Whiskers.Tests.OidcIdentityBindingTests
+1 Whiskers.Tests.FederatedAdmissionBootTests.An_unconfigured_instance_admits_no_federated_user_to_mcp_or_the_hub
+
 # Container tests stay mandatory on CI, and this manifest stays in step with the test assembly.
 4 Whiskers.Tests.DockerRequirementTests
 4 Whiskers.Tests.RequiredTestsManifestTests

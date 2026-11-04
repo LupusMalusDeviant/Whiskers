@@ -27,6 +27,12 @@ public class OidcSettings
     /// <summary>Which claim carries the user's email (mapped to ClaimTypes.Email for whitelist/roles).</summary>
     public string EmailClaim { get; set; } = "email";
 
+    /// <summary>R1-27 (contract 0003, decision 3 b): whether this provider's <c>email_verified=true</c> binds a new subject
+    /// to a configured address at its first sign-in. Off by default: every OIDC user is confirmed once by an Admin or the
+    /// host CLI. Set it only when the IdP emits <c>email_verified</c> honestly and users cannot change their own address.
+    /// A non-standard <see cref="EmailClaim"/> never counts as verified.</summary>
+    public bool TrustEmailVerified { get; set; }
+
     /// <summary>Allow http metadata — only for local/dev IdPs. Keep true in production.</summary>
     public bool RequireHttpsMetadata { get; set; } = true;
 }

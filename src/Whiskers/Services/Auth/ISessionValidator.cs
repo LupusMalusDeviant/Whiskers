@@ -38,4 +38,12 @@ public static class SessionRevocationReasons
     public const string NotWhitelisted = "not_whitelisted";
     public const string RoleLowered = "role_lowered";
     public const string StoreUnavailable = "store_unavailable";
+
+    // R1-27: a federated session is valid only on an identity binding that still exists.
+    /// <summary>A federated session without a binding claim, or one of an authentication type issued before R1-27.</summary>
+    public const string BindingMissing = "binding_missing";
+    /// <summary>The session's binding was removed or now belongs to another account.</summary>
+    public const string BindingRevoked = "binding_revoked";
+    /// <summary>A federated session on an instance without an explicit Admin.</summary>
+    public const string SetupIncomplete = "setup_incomplete";
 }

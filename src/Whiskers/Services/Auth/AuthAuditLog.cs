@@ -18,6 +18,10 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
     public const string LogoutAction = "auth.logout";
     /// <summary>A session ended because it no longer passed revalidation (R1-26).</summary>
     public const string SessionRevokedAction = "auth.session_revoked";
+    /// <summary>A Google/OIDC subject was bound to a configured account (R1-27): written before the binding is.</summary>
+    public const string IdentityBoundAction = "auth.identity_bound";
+    /// <summary>A binding request was recorded for a configured account and waits for confirmation (R1-27).</summary>
+    public const string IdentityPendingAction = "auth.identity_pending";
 
     /// <summary>Rows waiting to be written; beyond this a row is dropped (and reported), never waited for.</summary>
     public const int Capacity = 1024;

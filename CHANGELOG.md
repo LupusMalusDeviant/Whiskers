@@ -9,8 +9,9 @@ All notable changes to Whiskers are documented here. The format follows
 - **Fix: an unset `GOOGLE_ADMIN_EMAIL` no longer switches on a whitelist that admits nobody.** Compose passes it as
   `GoogleAuth__AllowedEmails__0=`, and a fresh instance seeded an enabled whitelist holding one empty entry, which turned
   away every Google and OIDC sign-in. The seed now drops blank entries (and trims and de-duplicates the rest); with none
-  left the whitelist stays off, so the C5 rule applies: until a role exists every Google/OIDC account is admitted as
-  Viewer, afterwards only accounts with a role — set `WHISKERS_ADMIN_EMAIL` or finish the setup promptly. The artifact
+  left the whitelist stays off, so the C5 rule applies: only accounts with a role are admitted once a role exists, and
+  since R1-27 no Google/OIDC sign-in is admitted at all until an Admin exists — set `WHISKERS_ADMIN_EMAIL` or finish the
+  setup. The artifact
   check now starts the hardened image with `GOOGLE_ADMIN_EMAIL` empty and signs the administrator in. An existing
   `whitelist.json` is not changed. An instance that already holds the empty entry: stop it, delete `whitelist.json` and
   `whitelist.json.bak` in the data directory and start it again (or remove the entry in Settings, if an administrator
@@ -196,6 +197,35 @@ All notable changes to Whiskers are documented here. The format follows
   (`tailscaleSidecar.state`) are missing: use your values file or `--reset-then-reuse-values`. The sidecar now reads
   its auth key from a mounted file: the Secret named by `tailscaleSidecar.authKeySecret` must keep the key `authKey`
   (unchanged); nothing else to do.
+
+- R1-27: **Google and OIDC sign-ins are bound to the provider's account, not to an email address.** A federated user
+  is now identified by issuer and subject. The email address is used once per provider: to bind a new subject to an
+  address an Admin configured (a role or a whitelist entry), automatically only when the provider is trusted and says
+  `email_verified=true` for the standard `email` claim — Google is trusted by default, a generic OIDC provider is **not**
+  (`Oidc:TrustEmailVerified=false`; `GoogleAuth:TrustEmailVerified=true`). Everything else — unverified or untrusted, a
+  non-standard `Oidc:EmailClaim`, the same address from a second provider, a new subject for an already bound address
+  (IdP account re-created, issuer changed) — becomes a **pending request**; the sign-in is refused with the usual
+  message, which now adds that an administrator can confirm it under *Settings → Sign-in identities*. Admins confirm or
+  remove bindings there (new audited capabilities `identity.binding_confirm`, `identity.binding_remove`; the last way the
+  last Admin can sign in cannot be removed). The host operator confirms the newest pending request of an address with
+  `docker compose exec serverwatch dotnet Whiskers.dll --confirm-identity-binding <email> [--issuer <issuer>]` (exit
+  `0` bound, `2` usage, `3` nothing pending, `4` several issuers pending, `1` nothing changed; its audit row is written
+  first). **No Google/OIDC sign-in is admitted before an Admin exists** — before, every Google/OIDC account in the world
+  was admitted as Viewer until a role existed and reached `/mcp` and the hubs. Removing an address from roles or the
+  whitelist removes its bindings in the same write, so a recycled address never revives the old account. New audit
+  actions `auth.identity_bound`, `auth.identity_pending`; refused sign-ins of addresses that are not configured are
+  recorded as `anonymous`; no log line carries an address or a subject. The readiness check `identity-bindings` reports
+  an unreadable store (every federated sign-in is then refused, local sign-in keeps working). An Admin with a local
+  password **or an active binding** counts as one who can sign in (replaces "seen signing in").
+  **Upgrade notes:** nothing on disk changes; `identity-bindings.json` appears in the data directory with the first
+  binding and is part of the self-backup. **Every Google/OIDC browser session ends at its next request** (open pages
+  within 30 s); local sessions continue. A Google user signs in again and is bound. **An OIDC user (Authentik included)
+  is pending once:** run the `--confirm-identity-binding` command above (or let a local Admin confirm in Settings), then
+  sign in again; only if your IdP emits `email_verified` honestly and users cannot change their own address, set
+  `Oidc__TrustEmailVerified=true` to bind automatically. An instance whose setup is not finished admits no federated
+  sign-in until the wizard has run. Changing the OIDC Authority (issuer) later puts every OIDC user back to pending.
+  Restoring a backup from before this release restores no bindings. MCP keys are unaffected.
+  See [docs/operations/identity-bindings.md](docs/operations/identity-bindings.md).
 
 - R1-49: **Local accounts get a complete lifecycle.** Everyone with a local account changes their own password under
   *My account* (person icon in the top bar; the current password is required and a wrong one counts towards the

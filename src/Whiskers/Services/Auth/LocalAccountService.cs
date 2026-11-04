@@ -36,12 +36,15 @@ public sealed class LocalAccountService : ILocalAccountService
     private readonly bool _authDisabled;
     private readonly TimeProvider _time;
     private readonly ILogger<LocalAccountService>? _logger;
+    private readonly IIdentityBindingStore? _bindings;
 
+    /// <param name="bindings">R1-27: an Admin with an active Google/OIDC binding can sign in (last-Admin rule).</param>
     public LocalAccountService(UserManager<AppUser> users, WhiskersIdentityDbContext db, IRoleService roles,
         ICurrentUserService user, IOwnerAccounts owners, IAuditLogService audit, IRecoveryAttemptLimiter limiter,
         IClientAddress client, IConfiguration configuration, TimeProvider? time = null,
-        ILogger<LocalAccountService>? logger = null)
+        ILogger<LocalAccountService>? logger = null, IIdentityBindingStore? bindings = null)
     {
+        _bindings = bindings;
         _limiter = limiter ?? throw new ArgumentNullException(nameof(limiter));
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -263,23 +266,16 @@ public sealed class LocalAccountService : ILocalAccountService
         finally { AdminGate.Release(); }
     }
 
-    /// <summary>Whether an Admin other than <paramref name="target"/> can still sign in: a local account with a
-    /// password, or (without a local account) a Google/OIDC user Whiskers has seen signing in — what
-    /// <see cref="IOwnerAccounts"/> counts as present. An Admin waiting for a recovery code does not count.</summary>
+    /// <summary>Whether an Admin other than <paramref name="target"/> can still sign in (R1-27, contract 0003 rule 6 —
+    /// the predicate the identity-binding store's last-Admin rule uses too): a local account with a password, or an
+    /// active Google/OIDC identity binding. An Admin waiting for a recovery code without a binding does not count.</summary>
     private async Task<bool> AnotherUsableAdminAsync(string target, CancellationToken ct)
     {
         foreach (var admin in _roles.GetRoleData().Roles
                      .Where(r => r.Role == AppRole.Admin && !SameEmail(r.Email, target)).Select(r => r.Email))
         {
-            var normalized = _users.NormalizeEmail(admin);
-            var local = await _db.Users.AsNoTracking().Where(u => u.NormalizedEmail == normalized)
-                .Select(u => new { u.PasswordHash }).FirstOrDefaultAsync(ct);
-            if (local is not null)
-            {
-                if (local.PasswordHash is not null) return true;
-                continue;
-            }
-            if (_owners.StateOf(admin) == OwnerAccountState.Present) return true;
+            if (await AdminSignIn.HasLocalPasswordAsync(_db, _users.KeyNormalizer, admin, ct)) return true;
+            if (AdminSignIn.HasBinding(_bindings, admin)) return true;
         }
         return false;
     }

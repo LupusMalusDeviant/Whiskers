@@ -229,5 +229,11 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("account.create", A, "account", Root, Short);
         yield return Ui("account.password_reset", A, "account", Root, Short);
         yield return Ui("account.delete", A, "account", Des, Short);
+
+        // Google/OIDC identity bindings (R1-27, contract 0003); the target id is the binding or pending-request id.
+        // Confirming a request decides who signs in as a configured account: Admin and root-equivalent. Removing a
+        // binding or request only takes a way to sign in away (the last Admin's last way is refused by the store).
+        yield return Ui("identity.binding_confirm", A, "identity", Root, Short);
+        yield return Ui("identity.binding_remove", A, "identity", Dis, Short);
     }
 }

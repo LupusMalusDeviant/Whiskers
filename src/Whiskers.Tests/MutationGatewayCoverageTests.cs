@@ -476,6 +476,9 @@ public class MutationGatewayCoverageTests
         ("IServerConfigService.AdoptCloudKeyRefAsync", "start-up credential migration (R1-29), pinned by CredentialAdoptionCallersTests"),
         ("IVaultService.AdoptLegacyCredentialAsync", "start-up credential migration, pinned by CredentialAdoptionCallersTests"),
         ("IWhitelistService.AddFirstAdminAsync", "first-run wizard, refuses once an Admin exists, pinned to SetupStateService"),
+        ("IIdentityBindingStore.RecordPendingAsync", "R1-27: a refused Google/OIDC sign-in records its binding request for a configured address — nobody exists yet the gateway could decide for; it grants nothing, pinned to FederatedAdmission"),
+        ("IIdentityBindingStore.RecordSignInAsync", "R1-27: the day of an admitted sign-in on its binding (housekeeping of the admission), pinned to FederatedAdmission"),
+        ("IIdentityBindingStore.PruneOrphansAsync", "R1-27: removes bindings of addresses that stop being entries, inside the decided config.roles / config.whitelist write (and at start); it only takes access away"),
         ("ILocalAccountService.RedeemRecoveryCodeAsync", "S-12 (R1-49): the holder of a one-time recovery code sets that account's own password on the anonymous /account/recover page — no person exists the gateway could decide for; audited, rate-limited, pinned to AccountRecover"),
         // Execution plumbing beneath a marked operation or the primitive.
         ("IDockerConnectionManager.ExecuteAsync", "the Docker API transport the marked IDockerService operations run on"),
@@ -680,6 +683,29 @@ public class MutationGatewayCoverageTests
             .Callers(App, m => m.Name == "RunAsync" && m.DeclaringType?.Name == "LocalAccountRecoveryCli")
             .Select(c => c.Owner.FullName!).Distinct());
     }
+    [Fact]
+    public void The_identity_binding_exemptions_have_exactly_their_callers()
+    {
+        // R1-27 (contract 0003): the automatic binding at sign-in is a designed exemption like the setup wizard (S-13),
+        // the host confirmation one like the recovery CLI (S-11). Both are audited first; here they are pinned.
+        static IReadOnlyList<string> CallersOf(string method) => MutationCallScanner
+            .Callers(App, m => m.Name == method && m.DeclaringType?.Name is "IIdentityBindingStore" or "IdentityBindingStore")
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().Order(StringComparer.Ordinal).ToList();
+
+        Assert.Equal(["Whiskers.Services.Auth.FederatedAdmission.DecideAsync"], CallersOf("BindAtSignInAsync"));
+        Assert.Equal(["Whiskers.Services.Auth.FederatedAdmission.DecideAsync"], CallersOf("RecordPendingAsync"));
+        Assert.Equal(["Whiskers.Services.Auth.FederatedAdmission.DecideAsync"], CallersOf("RecordSignInAsync"));
+        Assert.Equal(["Whiskers.Services.Auth.IdentityBindingCli.RunAsync"], CallersOf("ConfirmFromHostAsync"));
+        Assert.Equal(["Program"], MutationCallScanner
+            .Callers(App, m => m.Name == "RunAsync" && m.DeclaringType?.Name == "IdentityBindingCli")
+            .Select(c => c.Owner.FullName!).Distinct());
+        // The prune runs only inside the role and whitelist writes and at start.
+        Assert.Equal(["Whiskers.Services.Auth.IdentityBindingStartupPrune.InitializeAsync",
+                "Whiskers.Services.Auth.RoleService.PruneRemovedAsync",
+                "Whiskers.Services.Auth.WhitelistService.SaveWhitelistAsync"],
+            CallersOf("PruneOrphansAsync"));
+    }
+
     [Fact]
     public void The_first_admin_writes_have_exactly_the_setup_wizard_as_caller()
     {
