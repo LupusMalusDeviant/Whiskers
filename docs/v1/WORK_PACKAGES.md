@@ -790,10 +790,39 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `InstallerContractTests` verifies released-version installation, persistent protected vault-key setup and clear backup instructions.
-- [ ] `HelmDeploymentTests` verifies pinned sidecar, durable identity state, explicit VPN mode and required PostgreSQL secrets.
-- [ ] Non-root/read-only deployment boots without trying an inappropriate legacy VPN daemon.
-- [ ] Installation/signature verification and upgrade behavior are documented in English.
+- [x] `InstallerContractTests` verifies released-version installation, persistent protected vault-key setup and clear backup instructions.
+- [x] `HelmDeploymentTests` verifies pinned sidecar, durable identity state, explicit VPN mode and required PostgreSQL secrets.
+- [x] Non-root/read-only deployment boots without trying an inappropriate legacy VPN daemon.
+- [x] Installation/signature verification and upgrade behavior are documented in English.
+
+> Implemented (2026-11-03): `install.sh` installs one release (`WHISKERS_RELEASE`, checked against the tag in
+> `release.yml` prepare; `--version X.Y.Z`; `latest`/unpinned images refused), verifies the cosign signature when cosign
+> is present (`--verify auto|require|off`, a bad signature stops it), generates `secrets/vault.key` (0700/0600, never
+> printed) handed over as `VAULT_KEY_FILE`, prints what to back up, and upgrades by changing only the image line
+> (copy kept, downgrade refused). Helm: `VPN_PROVIDER=none` + `Vpn__Provider=none` on every render (not overridable by
+> `extraEnv`); sidecar pinned to `tailscale/tailscale:v1.104.4@sha256:…`, state on its own PVC with `TS_KUBE_SECRET=""`
+> (containerboot otherwise stores it in a Secret the chart has no RBAC for) and `TS_AUTH_ONCE`; render refused for
+> postgres without a secret, an unknown provider, an unpinned sidecar and `image.tag=latest`; English NOTES; startup
+> budget stays 5 min (R1-34). The installer tests run the real script under bash with fake tools (the key-mode test is
+> Linux-only); the entrypoint test runs the real `entrypoint.sh` under the chart's environment (Linux-only); the
+> `helm template` tests need helm (skipped locally without it, mandatory on CI). Also verified by hand: the 0.15.0 image
+> with this `entrypoint.sh`, uid 10001, read-only root, `VPN_PROVIDER=none`/`Vpn__Provider=none` → healthy, no
+> `tailscaled`; without them it starts `tailscaled`. Decision: the in-app VPN providers are not offered in the chart
+> (no value to choose them); a `--profile hardened` for the installer was not added.
+> Review round 1: the downgrade guard also covers installs of `:latest`/a digest (installed release = newest of the
+> compose tag, `/app/data/.last-started-version` of the running container and the image's version label; unknown →
+> refused unless `--allow-unknown-current`, which never allows a known downgrade); the cosign identity is the exact
+> tag `vX.Y.Z` and the verified digest is pinned (`repo:X.Y.Z@sha256:…`); image reference, bind, port and data path are
+> validated strictly; a rewrite keeps the compose file's mode (the `.bak` copy is flagged as possibly holding
+> secrets); a re-run reads port/bind back and warns about ignored `--port/--bind/--data`; pre-releases are refused on
+> both sides (release `prepare` accepts only `vX.Y.Z`, the installer only X.Y.Z); `extraEnv` names are normalised
+> (`:` → `__`) before the VPN deny-list; chart-ci compares the pinned sidecar digest with the tag's digest; the kind
+> run with the sidecar is a manual checklist in the chart README.
+> Review round 2: the downgrade guard runs before the same-image shortcut; the target release comes from its tag or the
+> verified signature subject (digest-only targets), `--allow-unknown-current` covers only an unknown installed release
+> and an unresolved target is refused; the sidecar gets its auth key as a mounted file (`TS_AUTHKEY=file:…`, Secret
+> volume 0440) instead of a literal value on `tailscale up`'s argv; the vault Secret is created `--from-file` from a
+> private key file; `$` in `--data` is refused; `[IPv6]` binds are validated group by group.
 
 **Out of scope:** Socket-proxy verb changes.
 
