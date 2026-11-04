@@ -29,6 +29,9 @@ For local development without SSO, set `Auth__Disabled=true` and
 
 - **Build clean:** `dotnet build` with **0 warnings / 0 errors**.
 - **Tests green:** `dotnet test` (add tests for new behaviour where it makes sense).
+- **New endpoint?** Classify it in `EndpointAuthMatrixTests.Expected` (who may reach its handler); the test fails until
+  you do. A new test that starts a container goes through `DockerRequirement` (see
+  [docs/operations/ci-and-release-checks.md](docs/operations/ci-and-release-checks.md)).
 - **Boot it:** start the app in `Development` once, `ValidateOnBuild` aggregates the whole DI
   graph at startup and catches registration mistakes that the build alone misses.
 - **Keep docs in sync:** new DI services go behind an `IFoo` interface and are registered

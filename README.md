@@ -602,6 +602,9 @@ dotnet build src/Whiskers/Whiskers.csproj
 # run tests
 dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj
 
+# the PostgreSQL suites (Docker required; skipped without it locally, mandatory on CI)
+dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --filter Category=RequiresDocker
+
 # run locally (listens on :8080)
 dotnet run --project src/Whiskers/Whiskers.csproj
 ```
@@ -613,7 +616,8 @@ dotnet run --project src/Whiskers/Whiskers.csproj
 Issues and pull requests are welcome. Please:
 
 - keep changes interface-first and add/extend tests under `src/Whiskers.Tests/`;
-- run `dotnet build` (0 warnings) and `dotnet test` before opening a PR;
+- run `dotnet build` (0 warnings) and `dotnet test` before opening a PR; CI also checks the image, the PostgreSQL
+  suites, dependencies, secrets and static analysis (see [docs/operations/ci-and-release-checks.md](docs/operations/ci-and-release-checks.md));
 - write in-code comments and docs in English.
 
 ---

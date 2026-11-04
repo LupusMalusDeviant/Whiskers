@@ -6,6 +6,28 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- R1-47: **CI and the release check the endpoints, the PostgreSQL suites and the image itself, and fail closed.**
+  `EndpointAuthMatrixTests` boots the real app (Production, authentication on), enumerates every endpoint of its endpoint
+  data sources (minimal APIs, pages, hubs, Blazor framework endpoints, MCP, probes, static assets) and requests each as
+  anonymous, Viewer, Operator and Admin, recording whether the handler actually ran: a refused call never reaches it, an
+  allowed one must; an endpoint without a classification fails the test until someone decides who may call it. The
+  PostgreSQL suites are mandatory on CI: a server that does not start throws there (`DockerRequirement`, enforced for every
+  container test by `DockerRequirementTests`), CI runs them as their own step after a Docker probe and refuses any skipped
+  test (`.github/scripts/check-test-results.sh`, which also replaces "some test passed" with floors read from the TRX
+  files), and local accounts are now tested on PostgreSQL through the whole pipeline (`PostgresIdentityTests`: migrations
+  of both schemas, seeded administrator, sign-in, lockout, security stamp and deletion ending the session). The image is
+  checked as delivered (`.github/scripts/artifact-checks.sh`): on every push and pull request CI builds it and gates it on
+  Trivy, starts it with the hardened compose profile (uid 10001, read-only root, no capabilities, health, readiness, the
+  anonymous surface, a real sign-in) and upgrades the previous published release's data with it and back the documented
+  way (pre-upgrade backup, `--restore-backup latest-pre-upgrade --for-previous-release`, the previous release on the
+  restored data, upgrade again); a release runs the same checks against the staged amd64 digest before anything is
+  published (`artifact-test`). New `security.yml`: known-vulnerable packages (any severity), dependency review on pull
+  requests, gitleaks over history and tree (`.gitleaks.toml`), the .NET security analyzers as errors, CodeQL. Every job of
+  every workflow is time-limited; `ReleaseWorkflowTests` pins all of it with negative tests. The repository-hosted
+  controls (required checks, tag rules, code-scanning merge protection, Dependabot, secret scanning) are documented in
+  `docs/operations/ci-and-release-checks.md`. Recorded for R1-50 by the matrix: the Google/OIDC challenge of an
+  unconfigured provider answers 500, and an anonymous MCP call gets the sign-in redirect, not a bare 401.
+
 - R1-48: **A change that no decision covers is refused, not just noticed.** The Mutation Gateway's scope guard ran in
   report mode: a call to a marked service outside a gateway decision was logged and then ran. It now throws
   (`MutationScopeViolationException`) before the call runs, in production, and logs the attempt at Error. A decision
@@ -1206,6 +1228,13 @@ All notable changes to Whiskers are documented here. The format follows
 v1.0 readiness, work package 1 (immediate fixes from the Phase 0 audit, `docs/v1/TECHNICAL_AUDIT.md`).
 
 ### ⚠️ Upgrade notes
+
+- **R1-47 (maintainers): new required checks.** Make the `ci` jobs `build-test` and `artifact` and the `security` jobs
+  `dependency-vulnerabilities`, `dependency-review`, `secret-scan`, `static-analysis` and `codeql` required on `main`, and
+  enable the repository-hosted controls listed in `docs/operations/ci-and-release-checks.md` (dependency graph — the
+  dependency review fails without it —, code-scanning merge protection, tag rules for `v*`). CI now needs Docker on its
+  runner (the PostgreSQL suites fail without it), and the in-process and Docker test floors in `ci.yml` must be raised
+  when the suite grows. A release needs a published previous release (N−1) to upgrade from, pulled anonymously from GHCR.
 
 - **R1-11: while the kill switch is on, configuration can no longer be saved** — Settings, roles, whitelist, keys,
   vault, registries and guardrails included. Switch it off with the button on the Guardrails page first. Registry

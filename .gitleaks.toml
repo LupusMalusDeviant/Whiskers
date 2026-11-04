@@ -1,0 +1,24 @@
+# Secret scanning (R1-47, F-09): gitleaks with its default rules, run by .github/workflows/security.yml on every push and
+# pull request (the commits in the change) and weekly (the whole history and tree).
+#
+# Exceptions are listed here with a reason and stay as narrow as a path or a line pattern. A finding outside them fails the
+# job; never add a broad pattern to make a real finding pass. Rotate a leaked secret first, then remove it from history.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Vendored third-party bundles (minified JavaScript, not maintained here)"
+paths = ['''(^|/)src/(Whiskers|ServerWatch)/wwwroot/js/vendor/''']
+
+[[allowlists]]
+description = "Test fixtures: deliberately fake tokens, keys and URLs that exercise redaction and secret handling"
+paths = ['''(^|/)src/(Whiskers|ServerWatch)\.Tests/''']
+
+[[allowlists]]
+description = "Names, not values: the notification HTTP client names and the secrets inventory of the audit"
+regexTarget = "line"
+regexes = [
+  '''"TelegramNotificationService", "MattermostNotificationService"''',
+  '''\| OIDC/Google client secrets, Harbor password, Tailscale/NetBird auth keys \|''',
+]

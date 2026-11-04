@@ -65,3 +65,6 @@ docker-compose.override.yml
 .claude/auto-drive.off
 .claude/gate-guard.off
 .relay/runs/
+
+## Test output (local runs and CI result files)
+TestResults/

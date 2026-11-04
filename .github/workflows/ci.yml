@@ -1,11 +1,15 @@
 # CI: build + full test suite on every push/PR against main. This is the gate that makes
 # Dependabot PRs safely mergeable — without it nothing validated dependency bumps.
-# ubuntu-latest ships Docker, so the Testcontainers-based PostgresSmokeTests run for real here
-# (they are skipped-by-failure on dev boxes without Docker Desktop).
 #
 # R1-45: the release workflow calls this file (`workflow_call`) with the tag commit as `ref`, so a release is
 # only published after exactly this suite passed on the commit it ships. Every action is pinned to a full
 # commit SHA (the comment names the release); Dependabot keeps the pins current.
+#
+# R1-47: fail closed. The suite runs in two parts, each checked from its TRX file (check-test-results.sh): the in-process
+# tests (a floor of passed tests, nothing failed) and the Docker-backed integration tests — PostgreSQL metrics, Identity,
+# backup/restore — where a missing Docker daemon or database fails the job and not a single test may be skipped. The
+# `artifact` job builds the image and checks the deliverable itself (Trivy, hardened profile, N-1 upgrade and recovery);
+# in a release the same checks run against the staged digest instead (release.yml `artifact-test`). Every job is bounded.
 name: ci
 
 on:
@@ -26,6 +30,7 @@ permissions: {}
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -57,13 +62,26 @@ jobs:
           echo "WHISKERS_PG_BIN_DIR=/usr/lib/postgresql/18/bin" >> "$GITHUB_ENV"
           /usr/lib/postgresql/18/bin/pg_dump --version
 
-      - name: Test
-        # The grep guards against a silently-empty run: with the test project missing from
-        # Whiskers.slnx, `dotnet test --no-build` once exited 0 without executing any test.
+      # The floor guards against a silently-empty or shrunken run: with the test project missing from Whiskers.slnx,
+      # `dotnet test --no-build` once exited 0 without executing any test. Raise it when the suite grows.
+      - name: Test (in-process)
         run: |
           set -euo pipefail
-          dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release --logger "console;verbosity=minimal" | tee test.log
-          grep -Eiq "(Passed:|succeeded:)\s*[1-9]" test.log
+          dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
+            --filter "Category!=RequiresDocker" --logger "console;verbosity=minimal" \
+            --logger "trx;LogFileName=in-process.trx" --results-directory TestResults
+          bash .github/scripts/check-test-results.sh TestResults/in-process.trx 3000
+
+      # PostgreSQL metrics, Identity and backup/restore against real servers (Testcontainers). Mandatory: without Docker
+      # the tests throw on CI (CI=true), and the check refuses any skipped test in this category.
+      - name: Test (Docker integration, mandatory)
+        run: |
+          set -euo pipefail
+          docker info --format 'Docker {{.ServerVersion}}' || { echo "::error::no Docker daemon: the integration suite cannot run"; exit 1; }
+          dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
+            --filter "Category=RequiresDocker" --logger "console;verbosity=minimal" \
+            --logger "trx;LogFileName=docker.trx" --results-directory TestResults
+          bash .github/scripts/check-test-results.sh TestResults/docker.trx 70 --no-skips
 
       # DI boot gate (project rule): build+tests miss DI-graph regressions — boot the app in
       # Development (ValidateOnBuild/ValidateScopes) against a fresh data dir until /healthz answers.
@@ -83,3 +101,59 @@ jobs:
             if ! kill -0 $APP_PID 2>/dev/null; then echo "app exited early"; exit 1; fi
           done
           echo "healthz never became ready"; kill $APP_PID; exit 1
+
+  # R1-47: the deliverable itself. Build the image from this commit (amd64, loaded into the runner's Docker), gate it on
+  # Trivy like the release does, start it with the hardened compose profile, and upgrade the previous published release's
+  # data with it and back (.github/scripts/artifact-checks.sh). Skipped when the release calls this workflow (a tag ref):
+  # there release.yml `artifact-test` runs the same checks against the staged digest it publishes.
+  artifact:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    env:
+      ARTIFACT: whiskers:ci-artifact
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image (amd64, loaded locally)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          pull: true
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.ARTIFACT }}
+          cache-from: type=gha,scope=ci-amd64
+          cache-to: type=gha,scope=ci-amd64,mode=max
+
+      - name: Trivy scan (gate, fail on CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: docker
+        with:
+          image-ref: ${{ env.ARTIFACT }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          vuln-type: os,library
+          trivyignores: .trivyignore
+
+      - name: Hardened profile
+        run: bash .github/scripts/artifact-checks.sh hardened "$ARTIFACT"
+
+      - name: N-1 upgrade and recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PREVIOUS="$(bash .github/scripts/artifact-checks.sh previous-release)"
+          echo "previous release: ${PREVIOUS}"
+          bash .github/scripts/artifact-checks.sh upgrade "$ARTIFACT" "$PREVIOUS"
