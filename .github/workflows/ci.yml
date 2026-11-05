@@ -43,10 +43,22 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+          # Packages from the cache when the lock files are unchanged: a nuget.org outage then fails no job. The lock
+          # files pin each package by content hash, and --locked-mode checks them on every restore.
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
 
       # R1-52: locked restore — exactly the packages.lock.json of every project, or the job fails.
       - name: Restore
-        run: dotnet restore Whiskers.slnx --locked-mode
+        run: |
+          set -euo pipefail
+          # A brief nuget.org outage (connection reset) is retried; a lock-file mismatch fails all three tries.
+          for attempt in 1 2 3; do
+            dotnet restore Whiskers.slnx --locked-mode && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            echo "::warning::the NuGet restore failed (attempt $attempt of 3); retrying in 20 s"
+            sleep 20
+          done
 
       - name: Build
         run: dotnet build Whiskers.slnx --no-restore --configuration Release
@@ -57,7 +69,10 @@ jobs:
         run: |
           set -euo pipefail
           . /etc/os-release
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg
+          # Retried, into a file (a retry cannot take back bytes already piped on): a dropped connection to
+          # postgresql.org (curl 56) must not fail the job.
+          curl -fsSL --retry 4 --retry-all-errors --retry-delay 10 --max-time 60 -o "$RUNNER_TEMP/pgdg.asc" https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg "$RUNNER_TEMP/pgdg.asc"
           echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y --no-install-recommends postgresql-client-18
@@ -190,11 +205,21 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+          # Packages from the cache when the lock files are unchanged: a nuget.org outage then fails no job. The lock
+          # files pin each package by content hash, and --locked-mode checks them on every restore.
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
 
       - name: Build the test project
         run: |
           set -euo pipefail
-          dotnet restore Whiskers.slnx --locked-mode
+          # A brief nuget.org outage (connection reset) is retried; a lock-file mismatch fails all three tries.
+          for attempt in 1 2 3; do
+            dotnet restore Whiskers.slnx --locked-mode && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            echo "::warning::the NuGet restore failed (attempt $attempt of 3); retrying in 20 s"
+            sleep 20
+          done
           dotnet build src/Whiskers.Tests/Whiskers.Tests.csproj --no-restore --configuration Release
 
       - name: Build the image
