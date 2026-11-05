@@ -6,6 +6,17 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Security: dependencies on the latest patches of their supported lines.** .NET SDK 10.0.403 (`global.json`, build
+  image) with the 10.0.14 runtime; Entity Framework Core, Identity and `System.Security.Cryptography.Pkcs` 10.0.14,
+  MailKit 4.18.2, Markdig 1.6.0, MudBlazor 9.12.0; lock files refreshed (`dotnet list package --vulnerable
+  --include-transitive`: none). **docker-socket-proxy v0.5.0** (HAProxy 3.x; 0.3.0 shipped the end-of-life HAProxy
+  2.2) — the verb whitelist is unchanged and answers 24 probed endpoints exactly as before; its new pause/unpause
+  switches stay off. **Fix:** the hardened profile's socket proxy could not start on its read-only root (it renders its
+  configuration into a file); it now has a `/tmp` tmpfs. Onboarding rolls out the socket proxy pinned by digest instead
+  of `:latest`, and ghostunnel v1.11.5 (was v1.8.2) for **new** hosts — hosts already onboarded keep their running
+  ghostunnel until they are updated. Telemetry: node_exporter v1.12.1, VictoriaMetrics v1.155.0. Release workflow:
+  cosign-installer v3.10.1 (cosign 2.6.1), sbom-action v0.24.3; chart CI: kind-action v1.15.1.
+
 - **Security: proxy trust defaults to loopback only — check your reverse proxy (R1-50).** Whiskers used to believe
   `X-Forwarded-For` from every private network (RFC 1918 and Tailscale's range), so any client in the LAN or tailnet
   could claim another address and slip past the per-client sign-in limit. Now only loopback is trusted unless

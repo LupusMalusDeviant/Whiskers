@@ -92,6 +92,37 @@ public class OnboardingCommandsTests
         Assert.Contains("--allow-cn=serverwatch-client", yml);
     }
 
+    [Fact]
+    public void The_mtls_proxy_images_rolled_out_to_hosts_are_pinned_by_digest()
+    {
+        // The socket proxy (verb whitelist) and ghostunnel (mTLS) are the security boundary on every onboarded host:
+        // a floating tag (":latest") would change them on the next pull without review. Dependabot does not see these
+        // templates, so the pin is held here.
+        var yml = OnboardingCommands.DockerProxyCompose("100.64.0.7");
+        var images = System.Text.RegularExpressions.Regex.Matches(yml, @"image:\s*(\S+)").Select(m => m.Groups[1].Value).ToList();
+
+        Assert.Equal(2, images.Count);
+        Assert.All(images, image =>
+        {
+            Assert.Matches(@"^[a-z0-9./-]+:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$", image);
+            Assert.DoesNotContain(":latest", image);
+        });
+    }
+
+    [Fact]
+    public void The_hardened_socket_proxy_can_write_its_rendered_config()
+    {
+        // docker-socket-proxy renders haproxy.cfg at start (v0.4+: into /tmp); on the read-only root of the hardened
+        // profile it exits unless /tmp is a tmpfs (measured: "can't create /tmp/haproxy.cfg: Read-only file system").
+        var compose = DeploymentScripts.ReadRepoFile("docker-compose.hardened.yml").Replace("\r\n", "\n");
+        var proxy = compose[compose.IndexOf("  socket-proxy:", StringComparison.Ordinal)..];
+        var end = proxy.IndexOf("\n  serverwatch", StringComparison.Ordinal);
+        if (end > 0) proxy = proxy[..end];
+
+        Assert.Contains("read_only: true", proxy);
+        Assert.Matches(@"tmpfs:\n(\s+- \S+.*\n)*\s+- /tmp\b", proxy);
+    }
+
     // --- Step metadata -----------------------------------------------------------------------------
 
     [Fact]
