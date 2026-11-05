@@ -64,12 +64,19 @@ public sealed record DiskHealthQueries(
     PromQueryResult Zfs,
     PromQueryResult Collectors)
 {
-    /// <summary>Every query failed for the same <paramref name="reason"/> (no endpoint, endpoint unreachable).</summary>
+    /// <summary>Every query failed for the same <paramref name="reason"/> (endpoint unreachable, a read that threw).</summary>
     public static DiskHealthQueries AllFailed(string reason)
     {
         var failed = PromQueryResult.Failed(reason);
         return new(failed, failed, failed, failed, failed, failed);
     }
+
+    /// <summary>The server has no metrics endpoint: nothing was asked (a Docker-source server — Unsupported unless it had
+    /// a reading before).</summary>
+    public static DiskHealthQueries WithoutEndpoint() => AllFailed("no metrics endpoint") with { NoEndpoint = true };
+
+    /// <summary>Set by <see cref="WithoutEndpoint"/>: the failures mean "never asked", not "asked and failed".</summary>
+    public bool NoEndpoint { get; init; }
 
     /// <summary>The PromQL of the six queries for <paramref name="serverId"/>, in the order of the record.</summary>
     public static IReadOnlyList<string> For(string serverId)

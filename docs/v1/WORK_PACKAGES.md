@@ -1458,6 +1458,15 @@ smartctl output); that setup is the operator's, documented in the package, and n
 >   `ComponentTests/DiskHealthPanelTests`, `OnboardingCommandsTests`; `UiMutationGatewayCoverageTests` lists the new write
 >   and handler. **Needs the maintainer / hardware:** a host with real SMART disks and the timer, an md array and a ZFS
 >   pool if present in the fleet, and a look at the dashboard block.
+> - **Review round 1 (2026-11-05):** the query client fails closed on every exception but the caller's cancellation (a
+>   cut-off body, `HttpIOException`, an out-of-range sample time); a read that throws is an all-failed reading, so a
+>   Healthy host turns Unknown; the block shows the reading's age and treats one older than two cycles as Unknown; a first
+>   read with failed queries says "not read yet". `disk_health_unknown` is armed per item (`DiskHealthLostItem`, `Lost` in
+>   `disk-health.json`); a null signal holds the tracker (`BreachTracker.Hold`), so good → Unknown → good does not clear
+>   at once. Switching off forgets immediately (`IDiskHealthSettingsService.Changed`); renamed devices stay Unknown
+>   until then. Every collector sample must be 1; disagreeing duplicates are Unknown; SMART fails only with available and
+>   enabled = 1. Per-finding send, per-host read time, `TimeoutStartSec` in the guide, env-set value read-only in
+>   Settings. **Follow-up (needs a contract change):** a per-server "forget missing items" action.
 
 **Out of scope:** Running smartctl or package managers through Whiskers' own command channel; a general package-update
 inventory beyond the existing security-update findings; GPU readings.

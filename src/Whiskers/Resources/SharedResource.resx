@@ -5768,8 +5768,17 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="DiskHealth_Block_Age" xml:space="preserve">
     <value>{0} ago</value>
   </data>
-  <data name="DiskHealth_Block_Live" xml:space="preserve">
-    <value>live</value>
+  <data name="DiskHealth_Block_ReadAgo" xml:space="preserve">
+    <value>read {0} ago</value>
+  </data>
+  <data name="DiskHealth_Block_Stale" xml:space="preserve">
+    <value>This reading is older than two cycles: Whiskers has not read this host since, so nothing here is vouched for as healthy.</value>
+  </data>
+  <data name="DiskHealth_Block_NotReadYetFailed" xml:space="preserve">
+    <value>Not read yet: {0}</value>
+  </data>
+  <data name="DiskHealth_ReadOnly" xml:space="preserve">
+    <value>Set by {0}; it cannot be changed here.</value>
   </data>
   <data name="DiskHealth_State_Healthy" xml:space="preserve">
     <value>Healthy</value>

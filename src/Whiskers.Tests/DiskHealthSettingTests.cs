@@ -165,6 +165,41 @@ public sealed class DiskHealthSettingTests : IDisposable
         Assert.False(service.Enabled);
     }
 
+    [Fact]
+    public async Task A_value_from_the_environment_is_read_only_wins_and_is_never_overwritten()
+    {
+        await File.WriteAllTextAsync(SettingsFile, """{ "DiskHealth": { "Enabled": false } }""");
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(SettingsFile, optional: false, reloadOnChange: false)
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["DiskHealth:Enabled"] = "true" })
+            .Build();
+        var service = new DiskHealthSettingsService(configuration, new AppSettingsStore(SettingsFile),
+            NullLogger<DiskHealthSettingsService>.Instance, SettingsFile);
+
+        Assert.True(service.Enabled);
+        Assert.True(service.ReadOnly);
+        Assert.NotNull(service.Source);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => Save(Runner(), service, false));
+
+        Assert.True(service.Enabled);
+        Assert.False(JsonNode.Parse(await File.ReadAllTextAsync(SettingsFile))!["DiskHealth"]!["Enabled"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task A_change_is_announced_once_and_only_after_it_is_written()
+    {
+        var service = Service();
+        var heard = new List<bool>();
+        service.Changed += v => heard.Add(v);
+
+        await Save(Runner(), service, true);
+        await Save(Runner(), service, true);
+        await Save(Runner(), service, false);
+
+        Assert.Equal([true, false], heard);
+    }
+
     private sealed class MutableUser(AppRole role) : ICurrentUserService
     {
         public AppRole Role { get; set; } = role;

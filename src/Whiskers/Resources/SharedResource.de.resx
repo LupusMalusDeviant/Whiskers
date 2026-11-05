@@ -5768,8 +5768,17 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="DiskHealth_Block_Age" xml:space="preserve">
     <value>vor {0}</value>
   </data>
-  <data name="DiskHealth_Block_Live" xml:space="preserve">
-    <value>live</value>
+  <data name="DiskHealth_Block_ReadAgo" xml:space="preserve">
+    <value>gelesen vor {0}</value>
+  </data>
+  <data name="DiskHealth_Block_Stale" xml:space="preserve">
+    <value>Dieser Messwert ist älter als zwei Durchläufe: Whiskers hat den Host seitdem nicht gelesen, nichts hier gilt als in Ordnung.</value>
+  </data>
+  <data name="DiskHealth_Block_NotReadYetFailed" xml:space="preserve">
+    <value>Noch nicht gelesen: {0}</value>
+  </data>
+  <data name="DiskHealth_ReadOnly" xml:space="preserve">
+    <value>Festgelegt durch {0}; hier nicht änderbar.</value>
   </data>
   <data name="DiskHealth_State_Healthy" xml:space="preserve">
     <value>In Ordnung</value>

@@ -14,12 +14,19 @@
     @L["DiskHealth_Intro"]
     <MudLink Href="@GuideUrl" Target="_blank" Typo="Typo.body2" id="disk-health-guide">@L["DiskHealth_GuideLink"]</MudLink>
 </MudText>
-<MudSwitch T="bool" Value="@_enabled" ValueChanged="@Toggle" Color="Color.Primary" Disabled="@_saving"
+<MudSwitch T="bool" Value="@_enabled" ValueChanged="@Toggle" Color="Color.Primary" Disabled="@(_saving || DiskHealthSettings.ReadOnly)"
            Label="@L["DiskHealth_Label_Enabled"]" id="disk-health-enabled" />
+@if (DiskHealthSettings.ReadOnly)
+{
+    @* Review round 1: a value set by the environment or appsettings.json wins — shown read-only with its source. *@
+    <MudText Typo="Typo.caption" Color="Color.Secondary" id="disk-health-readonly">@L["DiskHealth_ReadOnly", DiskHealthSettings.Source ?? ""]</MudText>
+}
 }
 
 @code {
-    /// <summary>The operations guide (smartmontools, the textfile script, the freshness limit, what each state means).</summary>
+    /// <summary>The operations guide (smartmontools, the textfile script, the freshness limit, what each state means).
+    /// On <c>main</c>: the app's version is the csproj's, which a development build shares with the last release tag —
+    /// that tag would not hold the guide (review round 1, NIT: the version tag is not known reliably).</summary>
     public const string GuideUrl = "https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/disk-health.md";
 
     private bool _isAdmin;
@@ -50,6 +57,7 @@
             Snackbar.Add(L["DiskHealth_Snackbar_Saved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (ArgumentException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) when (ex is MutationFailedException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             Snackbar.Add(L["DiskHealth_Snackbar_SaveFailed", ex.Message].Value, Severity.Error);

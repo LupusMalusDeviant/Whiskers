@@ -20,7 +20,11 @@ All notable changes to Whiskers are documented here. The format follows
   the node_exporter template (`deploy/telemetry/host/docker-compose.yml`, and the onboarding wizard) now enables the
   textfile collector (`--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector`, through the
   existing read-only mount). Hosts set up earlier need the flag added and node_exporter recreated before they can
-  deliver SMART data.
+  deliver SMART data. The block shows when the reading was made; a reading older than two cycles is shown Unknown.
+  SMART counts as failing only on a disk with SMART available and enabled; disagreeing duplicate series are Unknown.
+  `disk_health_unknown` is armed per disk, array and pool, and an Unknown reading restarts the 10 minutes. Switching
+  the feature off forgets the readings at once (also the way to drop a renamed or removed device); a value set through
+  the environment (`DiskHealth__Enabled`) is shown read-only in Settings.
 - **Security: dependencies on the latest patches of their supported lines.** .NET SDK 10.0.403 (`global.json`, build
   image) with the 10.0.14 runtime; Entity Framework Core, Identity and `System.Security.Cryptography.Pkcs` 10.0.14,
   MailKit 4.18.2, Markdig 1.6.0, MudBlazor 9.12.0; lock files refreshed (`dotnet list package --vulnerable

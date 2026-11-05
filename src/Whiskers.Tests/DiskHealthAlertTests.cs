@@ -25,7 +25,7 @@ public sealed class DiskHealthAlertTests
         foreach (var queries in cycles)
         {
             var reading = DiskHealthParser.Parse("badwolf", queries, at, previous, DiskHealthParser.DefaultFreshness);
-            findings.AddRange(alerts.Evaluate("badwolf", "Badwolf", reading, previous?.Overall, at));
+            findings.AddRange(alerts.Evaluate("badwolf", "Badwolf", reading, previous, at));
             previous = reading;
             at += Cycle;
         }
@@ -52,7 +52,7 @@ public sealed class DiskHealthAlertTests
         foreach (var make in cycles)
         {
             var reading = DiskHealthParser.Parse("badwolf", make(at), at, previous, DiskHealthParser.DefaultFreshness);
-            findings.AddRange(alerts.Evaluate("badwolf", "Badwolf", reading, previous?.Overall, at));
+            findings.AddRange(alerts.Evaluate("badwolf", "Badwolf", reading, previous, at));
             previous = reading;
             at += Cycle;
         }
@@ -179,7 +179,7 @@ public sealed class DiskHealthAlertTests
 
         // Nor does one that was Unsupported before.
         var after = new DiskHealthAlerts();
-        var unsupported = Read(DiskHealthQueries.AllFailed("no metrics endpoint"));
+        var unsupported = Read(DiskHealthQueries.WithoutEndpoint());
         Assert.Empty(Drive(after, Repeat(Queries(run: SmartRunExpired), 24), previous: unsupported));
     }
 
@@ -188,7 +188,7 @@ public sealed class DiskHealthAlertTests
     {
         var alerts = new DiskHealthAlerts();
 
-        Assert.Empty(Drive(alerts, Repeat(DiskHealthQueries.AllFailed("no metrics endpoint"), 50)));
+        Assert.Empty(Drive(alerts, Repeat(DiskHealthQueries.WithoutEndpoint(), 50)));
         Assert.Empty(Drive(alerts, Repeat(Queries(smart: Empty, run: Empty, mtime: Empty, md: Empty, zfs: Empty), 50)));
         Assert.Empty(alerts.OpenFindings());
         Assert.Empty(alerts.Tracked());
@@ -202,7 +202,7 @@ public sealed class DiskHealthAlertTests
         Assert.Single(alerts.OpenFindings());
 
         // After a restart without saved readings the host may read Unsupported: no reading, so no clear.
-        var unsupported = Read(DiskHealthQueries.AllFailed("no metrics endpoint"));
+        var unsupported = Read(DiskHealthQueries.WithoutEndpoint());
         for (var i = 0; i < 12; i++)
             Assert.Empty(alerts.Evaluate("badwolf", "Badwolf", unsupported, null, Now.AddMinutes(15 + 5 * i)));
         Assert.Single(alerts.OpenFindings());
@@ -255,6 +255,85 @@ public sealed class DiskHealthAlertTests
         }
         // Other recoveries keep their classification.
         Assert.True(NotificationEventTypes.IsSuppressible(new NotificationEvent { EventType = "high_disk_recovered" }));
+    }
+
+    [Fact]
+    public void A_host_already_Unknown_for_a_harmless_reason_still_alerts_when_its_good_items_turn_Unknown()
+    {
+        // sda has no usable SMART (Unknown from the first reading); nvme0, md0 and tank read healthy.
+        var unavailable = SmartHealthy.Replace(
+            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"0\"]");
+        var alerts = new DiskHealthAlerts();
+        var cycles = new[] { Queries(smart: unavailable) }
+            .Concat(Repeat(DiskHealthQueries.AllFailed("the metrics endpoint could not be reached (ConnectionError)"), 3));
+
+        var findings = Drive(alerts, cycles);
+
+        var raised = Assert.Single(findings, f => f.EventType == NotificationEventTypes.DiskHealthUnknown);
+        Assert.Equal(Now.AddMinutes(15), raised.AtUtc);      // all lost from minute 5, held 10 minutes
+    }
+
+    [Fact]
+    public void A_good_reading_Unknown_for_hours_and_one_good_reading_does_not_clear_at_once()
+    {
+        var alerts = new DiskHealthAlerts();
+        var cycles = Enumerable.Repeat<Func<DateTime, DiskHealthQueries>>(at => FreshAt(at, smart: SmartFailed), 3)   // raised at 10 min
+            .Append(at => FreshAt(at))                                                                                 // one good reading
+            .Concat(Enumerable.Repeat<Func<DateTime, DiskHealthQueries>>(_ => Queries(run: SmartRunExpired), 24))     // 2 h Unknown
+            .Append(at => FreshAt(at));                                                                                // one good reading
+
+        var findings = DriveFresh(alerts, cycles);
+
+        Assert.DoesNotContain(findings, f => f.EventType == "disk_failing_recovered");
+        Assert.Contains(alerts.OpenFindings(), f => f.Kind == NotificationEventTypes.DiskFailing);
+
+        // Ten more minutes of good readings do clear it.
+        var more = new List<HostLoadFinding>();
+        var at = Now + Cycle * 29;
+        var previous = DiskHealthParser.Parse("badwolf", FreshAt(at - Cycle), at - Cycle, null, DiskHealthParser.DefaultFreshness);
+        for (var i = 0; i < 2; i++, at += Cycle)
+        {
+            var reading = DiskHealthParser.Parse("badwolf", FreshAt(at), at, previous, DiskHealthParser.DefaultFreshness);
+            more.AddRange(alerts.Evaluate("badwolf", "Badwolf", reading, previous, at));
+            previous = reading;
+        }
+        Assert.Contains(more, f => f.EventType == "disk_failing_recovered");
+    }
+
+    [Fact]
+    public void A_bad_reading_Unknown_for_hours_and_one_bad_reading_does_not_raise_at_once()
+    {
+        var alerts = new DiskHealthAlerts();
+        var cycles = new Func<DateTime, DiskHealthQueries>[] { at => FreshAt(at, smart: SmartFailed) }
+            .Concat(Enumerable.Repeat<Func<DateTime, DiskHealthQueries>>(_ => Queries(smart: SmartFailed.Replace(
+                "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
+                "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"0\"]")), 24))
+            .Append(at => FreshAt(at, smart: SmartFailed));
+
+        Assert.DoesNotContain(DriveFresh(alerts, cycles), f => f.EventType == NotificationEventTypes.DiskFailing);
+    }
+
+    [Fact]
+    public void Hold_restarts_a_confirmation_in_progress_and_keeps_a_raised_breach_open()
+    {
+        var tracker = new BreachTracker(new HostLoadThresholds());
+        BreachRules rules = DiskHealthAlerts.Rules;
+        HostLoadFinding? Feed(int minute, double v) => tracker.Consider(Now.AddMinutes(minute), "s", "S",
+            NotificationEventTypes.DiskFailing, v, 1, (_, _) => "raised", _ => "cleared", rules);
+
+        Assert.Null(Feed(0, 1));
+        tracker.Hold("s", NotificationEventTypes.DiskFailing);
+        Assert.Null(Feed(10, 1));                        // the confirmation started again at minute 10
+        Assert.Equal(FindingKind.Raised, Feed(20, 1)!.What);
+
+        Assert.Null(Feed(25, 0));
+        tracker.Hold("s", NotificationEventTypes.DiskFailing);
+        Assert.Null(Feed(40, 0));                        // the recovery started again at minute 40
+        Assert.Single(tracker.OpenFindings());
+        Assert.Equal(FindingKind.Cleared, Feed(50, 0)!.What);
+
+        tracker.Hold("nobody", NotificationEventTypes.DiskFailing);   // nothing to hold: no effect
     }
 
     [Fact]

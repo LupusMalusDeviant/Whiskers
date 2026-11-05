@@ -83,6 +83,16 @@ public static class DiskHealthParser
                 if (!items.Any(i => i.Kind == kind))
                     items.Add(new DiskHealthItem(kind, FailedQueryName, DiskHealthState.Unknown, $"query failed: {error}", null));
 
+        // Review round 1 (NIT): a host never read whose queries failed is "not read yet", not "no sources" — one Unsupported
+        // line says why. It is no reading (Overall stays Unsupported, nothing is carried from it, nothing alerts).
+        if (items.Count == 0 && previous is not { HadReading: true } && !results.NoEndpoint && failed.Count > 0)
+        {
+            var (kind, error) = failed.OrderBy(f => KindOrder(f.Key)).First();
+            return new DiskHealthReading(serverId, DiskHealthState.Unsupported,
+                [new DiskHealthItem(kind, FailedQueryName, DiskHealthState.Unsupported, $"not read yet: query failed: {error}", null)],
+                nowUtc);
+        }
+
         var ordered = items
             .OrderBy(i => KindOrder(i.Kind)).ThenBy(i => i.Name, StringComparer.Ordinal)
             .ToList();
@@ -102,8 +112,9 @@ public static class DiskHealthParser
 
     private static IEnumerable<DiskHealthItem> Smart(DiskHealthQueries results, DateTime now, TimeSpan freshness)
     {
-        var values = new Dictionary<string, (string Name, Dictionary<string, double> Values)>(StringComparer.Ordinal);
-        (string Name, Dictionary<string, double> Values) Of(PromSample s)
+        // Every value a series name has for a disk — more than one distinct value means two sources (instance/job) disagree.
+        var values = new Dictionary<string, (string Name, Dictionary<string, HashSet<double>> Values)>(StringComparer.Ordinal);
+        (string Name, Dictionary<string, HashSet<double>> Values) Of(PromSample s)
         {
             var disk = s.Label("disk") ?? "";
             var type = s.Label("type");
@@ -112,19 +123,25 @@ public static class DiskHealthParser
             {
                 // A controller-addressed disk (megaraid,0 / cciss,1) shares its device path with its siblings.
                 var raw = type is not null && type.Contains(',') ? $"{disk} [{type}]" : disk;
-                values[key] = entry = (DisplayName(raw), new Dictionary<string, double>(StringComparer.Ordinal));
+                values[key] = entry = (DisplayName(raw), new Dictionary<string, HashSet<double>>(StringComparer.Ordinal));
             }
             return entry;
         }
+        static void Add(Dictionary<string, HashSet<double>> into, string name, double value)
+        {
+            if (!into.TryGetValue(name, out var set)) into[name] = set = [];
+            set.Add(value);
+        }
 
         foreach (var s in results.Smart.Samples)
-            Of(s).Values[s.Label("__name__") ?? "?"] = s.Value;
+            Add(Of(s).Values, s.Label("__name__") ?? "?", s.Value);
         foreach (var s in results.SmartRun.Samples)
-            Of(s).Values["run"] = s.Value;
+            Add(Of(s).Values, "run", s.Value);
 
+        // Two copies of the file (two scrape sources): the older one counts.
         DateTime? mtime = results.TextfileMtime.Samples.Count == 0
             ? null
-            : FromUnixOrNull(results.TextfileMtime.Samples.Max(s => s.Value));
+            : FromUnixOrNull(results.TextfileMtime.Samples.Min(s => s.Value));
 
         if (values.Count == 0)
         {
@@ -137,24 +154,38 @@ public static class DiskHealthParser
 
         foreach (var (name, v) in values.Values)
         {
-            DateTime? run = v.TryGetValue("run", out var r) ? FromUnixOrNull(r) : null;
+            double? One(string metric) => v.TryGetValue(metric, out var set) && set.Count == 1 ? set.First() : null;
+            var conflict = v.Values.Any(set => set.Count > 1);
+            var r = One("run");
+            DateTime? run = r is { } runSeconds ? FromUnixOrNull(runSeconds) : null;
             var stale = Staleness(run, mtime, now, freshness);
             DateTime? collected = run is { } a && mtime is { } b ? (a < b ? a : b) : run ?? mtime;
-            v.TryGetValue("smartmon_device_smart_healthy", out var healthy);
-            var hasHealthy = v.ContainsKey("smartmon_device_smart_healthy");
+            var healthyValue = One("smartmon_device_smart_healthy");
+            var hasHealthy = healthyValue is not null;
+            var healthy = healthyValue ?? double.NaN;
+            var available = One("smartmon_device_smart_available");
+            var enabled = One("smartmon_device_smart_enabled");
 
             DiskHealthItem Item(DiskHealthState state, string reason) =>
                 new(DiskHealthKinds.Smart, name, state, reason, collected);
 
-            if (hasHealthy && healthy == 0)
-                yield return Item(DiskHealthState.DegradedOrFailing,
-                    "SMART overall-health failed" + (stale is null ? "" : $" ({stale})"));
-            else if (v.TryGetValue("smartmon_device_smart_available", out var available) && available != 1)
+            // Review round 1 (m3): two sources that disagree about one disk are no reading. (m4): a health value counts
+            // only from a disk whose SMART is available and enabled — only then is 0 a verdict.
+            if (conflict)
+                yield return Item(DiskHealthState.Unknown, "conflicting SMART series from more than one source");
+            else if (available is null)
+                yield return Item(DiskHealthState.Unknown, "SMART availability not reported");
+            else if (available != 1)
                 yield return Item(DiskHealthState.Unknown, "SMART is not available on this disk");
-            else if (v.TryGetValue("smartmon_device_smart_enabled", out var enabled) && enabled != 1)
+            else if (enabled is null)
+                yield return Item(DiskHealthState.Unknown, "SMART enabled state not reported");
+            else if (enabled != 1)
                 yield return Item(DiskHealthState.Unknown, "SMART is not enabled on this disk");
             else if (!hasHealthy)
                 yield return Item(DiskHealthState.Unknown, "no SMART overall-health value");
+            else if (healthy == 0)
+                yield return Item(DiskHealthState.DegradedOrFailing,
+                    "SMART overall-health failed" + (stale is null ? "" : $" ({stale})"));
             else if (healthy != 1)
                 yield return Item(DiskHealthState.Unknown, "unexpected SMART overall-health value " + Number(healthy));
             else if (stale is not null)
@@ -197,7 +228,10 @@ public static class DiskHealthParser
 
             DiskHealthItem Item(DiskHealthState st, string reason) => new(DiskHealthKinds.Md, name, st, reason, null);
 
-            if (failedDisks is > 0.0)
+            // Review round 1 (m3): two sources (instance/job) that disagree about one array are no reading.
+            if (Conflicting(device, s => s.Label("__name__") + "\n" + s.Label("state")))
+                yield return Item(DiskHealthState.Unknown, $"{name}: conflicting md series from more than one source");
+            else if (failedDisks is > 0.0)
                 yield return Item(DiskHealthState.DegradedOrFailing,
                     $"{name}: {Number(failedDisks.Value)} of {(required is { } req ? Number(req) : "?")} disks failed");
             else if (required is { } need && active is { } have && have < need)
@@ -226,7 +260,9 @@ public static class DiskHealthParser
 
             DiskHealthItem Item(DiskHealthState st, string reason) => new(DiskHealthKinds.Zfs, name, st, reason, null);
 
-            if (current.Count != 1)
+            if (Conflicting(pool, s => s.Label("state") ?? ""))
+                yield return Item(DiskHealthState.Unknown, "conflicting pool series from more than one source");
+            else if (current.Count != 1)
                 yield return Item(DiskHealthState.Unknown, "pool state cannot be read");
             else if (!string.Equals(current[0], "online", StringComparison.OrdinalIgnoreCase))
                 yield return Item(DiskHealthState.DegradedOrFailing, $"pool state {DisplayName(current[0])}");
@@ -243,10 +279,16 @@ public static class DiskHealthParser
     private static string? Evidence(IReadOnlyList<PromSample>? collectors, string? error, string collector)
     {
         if (collectors is null) return $"{collector} collector status could not be read ({error ?? "query failed"})";
-        var sample = collectors.FirstOrDefault(s => s.Label("collector") == collector);
-        if (sample is null) return $"no {collector} collector status";
-        return sample.Value == 1 ? null : $"{collector} collector did not succeed";
+        var samples = collectors.Where(s => s.Label("collector") == collector).ToList();
+        if (samples.Count == 0) return $"no {collector} collector status";
+        // Review round 1 (m3): every source must report success — one that does not is not outvoted by another.
+        return samples.All(s => s.Value == 1) ? null : $"{collector} collector did not succeed";
     }
+
+    /// <summary>Whether two samples of the same series (by <paramref name="series"/>) carry different values — the same
+    /// device reported by two sources (instance/job) that disagree.</summary>
+    private static bool Conflicting(IEnumerable<PromSample> samples, Func<PromSample, string> series) =>
+        samples.GroupBy(series, StringComparer.Ordinal).Any(g => g.Select(s => s.Value).Distinct().Count() > 1);
 
     private static string? FirstError(params PromQueryResult[] results) =>
         results.FirstOrDefault(r => !r.Success) is { } f ? f.Error ?? "query failed" : null;

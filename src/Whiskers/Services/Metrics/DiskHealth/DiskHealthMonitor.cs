@@ -33,6 +33,9 @@ public sealed class DiskHealthMonitor : FleetBackgroundService
     private readonly TimeSpan _freshness;
     private bool _restored;
     private string? _saved;
+    // One cycle or one switch-off clean-up at a time (review round 1, m2).
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private CancellationToken _stopping;
 
     public DiskHealthMonitor(IServerConfigService servers, IPrometheusQueryClient query, IDiskHealthSettingsService settings,
         DiskHealthService readings, INotificationService notify, ILogger<DiskHealthMonitor> logger,
@@ -47,6 +50,7 @@ public sealed class DiskHealthMonitor : FleetBackgroundService
         _state = state;
         _time = time ?? TimeProvider.System;
         _freshness = DiskHealthParser.DefaultFreshness;
+        _settings.Changed += OnSettingChanged;
     }
 
     /// <summary>Tests only: the alerts' state.</summary>
@@ -56,6 +60,7 @@ public sealed class DiskHealthMonitor : FleetBackgroundService
 
     protected override async Task RunAsync(CancellationToken stoppingToken)
     {
+        _stopping = stoppingToken;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -75,64 +80,126 @@ public sealed class DiskHealthMonitor : FleetBackgroundService
     /// <summary>One cycle. Internal for tests, which drive it with a fake clock.</summary>
     internal async Task RunCycleAsync(CancellationToken ct)
     {
-        var now = Now();
-        await RestoreAsync(now);
-
-        if (!_settings.Enabled)
+        await _gate.WaitAsync(ct);
+        try
         {
-            // Off: nothing is queried and nothing is shown. What was raised is closed, so no alert is left open.
-            foreach (var serverId in _alerts.Tracked().Concat(_readings.All().Keys).Distinct(StringComparer.Ordinal).ToList())
-                await CloseAsync(serverId, now, "disk-health readings were switched off", ct);
-            _readings.Clear();
+            await RestoreAsync(Now());
+
+            if (!_settings.Enabled)
+            {
+                await ForgetAllAsync(ct);
+                return;
+            }
+
+            var servers = _servers.GetEnabledServers();
+            foreach (var server in servers)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    await ReadAsync(server, ct);
+                }
+                catch (Exception ex) when (!IsHostStopping(ex, ct))
+                {
+                    // R1-41: one host's failure is that host's, this cycle's.
+                    _logger.LogWarning(ex, "Disk health of {Server} could not be evaluated this cycle", server.Name);
+                }
+            }
+
+            // A server no longer configured or enabled: its alerts are closed and its reading dropped.
+            var current = servers.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+            foreach (var gone in _alerts.Tracked().Concat(_readings.All().Keys).Where(id => !current.Contains(id))
+                         .Distinct(StringComparer.Ordinal).ToList())
+                await CloseAsync(gone, Now(), "the server is no longer read", ct);
+
             await SaveAsync();
-            return;
         }
+        finally { _gate.Release(); }
+    }
 
-        var servers = _servers.GetEnabledServers();
-        foreach (var server in servers)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                await ReadAsync(server, now, ct);
-            }
-            catch (Exception ex) when (!IsHostStopping(ex, ct))
-            {
-                // R1-41: one host's failure is that host's, this cycle's. The last reading stays as it was.
-                _logger.LogWarning(ex, "Disk health of {Server} could not be read this cycle", server.Name);
-            }
-        }
-
-        // A server no longer configured or enabled: its alerts are closed and its reading dropped.
-        var current = servers.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
-        foreach (var gone in _alerts.Tracked().Concat(_readings.All().Keys).Where(id => !current.Contains(id))
-                     .Distinct(StringComparer.Ordinal).ToList())
-            await CloseAsync(gone, now, "the server is no longer read", ct);
-
+    /// <summary>Off: nothing is queried and nothing is shown. What was raised is closed, so no alert is left open, and the
+    /// last readings are forgotten. Under <see cref="_gate"/>.</summary>
+    private async Task ForgetAllAsync(CancellationToken ct)
+    {
+        foreach (var serverId in _alerts.Tracked().Concat(_readings.All().Keys).Distinct(StringComparer.Ordinal).ToList())
+            await CloseAsync(serverId, Now(), "disk-health readings were switched off", ct);
+        _readings.Clear();
         await SaveAsync();
     }
 
-    private async Task ReadAsync(Models.ServerConfig server, DateTime now, CancellationToken ct)
+    /// <summary>Review round 1 (m2): switching the feature off forgets at once — not only in the next cycle, which a quick
+    /// off-and-on would skip.</summary>
+    private void OnSettingChanged(bool enabled)
+    {
+        if (enabled) return;
+        // Raised inside the config.save decision that switched it off: the clean-up must not inherit that scope (it would
+        // run on after the decision closed) — it is the monitor's own work.
+        using var noFlow = ExecutionContext.SuppressFlow();
+        SwitchedOff = Task.Run(async () =>
+        {
+            await _gate.WaitAsync(_stopping);
+            try
+            {
+                await RestoreAsync(Now());
+                if (!_settings.Enabled) await ForgetAllAsync(_stopping);
+            }
+            catch (Exception ex) when (!IsHostStopping(ex, _stopping))
+            {
+                _logger.LogWarning(ex, "Disk-health state could not be cleared at the switch-off; the next cycle does it");
+            }
+            finally { _gate.Release(); }
+        });
+    }
+
+    /// <summary>Tests only: the clean-up started by the last switch-off.</summary>
+    internal Task SwitchedOff { get; private set; } = Task.CompletedTask;
+
+    public override void Dispose()
+    {
+        _settings.Changed -= OnSettingChanged;
+        base.Dispose();
+    }
+
+    private async Task ReadAsync(Models.ServerConfig server, CancellationToken ct)
     {
         var previous = _readings.Latest(server.Id);
         DiskHealthQueries results;
         if (server.MetricsEndpoint is not { Length: > 0 } endpoint)
         {
-            results = DiskHealthQueries.AllFailed("no metrics endpoint");
+            results = DiskHealthQueries.WithoutEndpoint();
         }
         else
         {
-            // Side by side: a host whose endpoint does not answer costs one timeout per cycle, not six.
-            var answers = await Task.WhenAll(DiskHealthQueries.For(server.Id).Select(q => _query.QueryAsync(endpoint, q, ct)));
-            results = new DiskHealthQueries(answers[0], answers[1], answers[2], answers[3], answers[4], answers[5]);
+            try
+            {
+                // Side by side: a host whose endpoint does not answer costs one timeout per cycle, not six.
+                var answers = await Task.WhenAll(DiskHealthQueries.For(server.Id).Select(q => _query.QueryAsync(endpoint, q, ct)));
+                results = new DiskHealthQueries(answers[0], answers[1], answers[2], answers[3], answers[4], answers[5]);
+            }
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
+            {
+                // Review round 1 (M1): a read that throws is a failed read, never "keep the last reading" — a host that
+                // read Healthy turns Unknown and the alerts see it.
+                _logger.LogWarning("Disk health of {Server} could not be read: {Type}", server.Name, ex.GetType().Name);
+                results = DiskHealthQueries.AllFailed($"the read failed ({ex.GetType().Name})");
+            }
         }
 
+        // Review round 1 (NIT): the time of this host's own read — a late host in a slow cycle is not judged by its start.
+        var now = Now();
         var reading = DiskHealthParser.Parse(server.Id, results, now, previous, _freshness);
         _readings.Set(reading);
 
         var template = new NotificationEvent { ServerId = server.Id, ServerName = server.Name, ContainerName = server.Name };
-        foreach (var finding in _alerts.Evaluate(server.Id, server.Name, reading, previous?.Overall, now))
-            await NotifyAsync(template, finding, ct);
+        foreach (var finding in _alerts.Evaluate(server.Id, server.Name, reading, previous, now))
+        {
+            // Review round 1 (NIT): one failed send does not lose the next finding of the same reading.
+            try { await NotifyAsync(template, finding, ct); }
+            catch (Exception ex) when (!IsHostStopping(ex, ct))
+            {
+                _logger.LogWarning(ex, "{EventType} on {Server} could not be sent", finding.EventType, server.Name);
+            }
+        }
     }
 
     private async Task CloseAsync(string serverId, DateTime now, string reason, CancellationToken ct)
@@ -175,7 +242,7 @@ public sealed class DiskHealthMonitor : FleetBackgroundService
         {
             var saved = await _state.LoadAsync();
             foreach (var reading in saved.Readings) _readings.Set(reading);
-            _alerts.Restore(saved.Breaches, saved.UnknownArmed, now);
+            _alerts.Restore(saved.Breaches, saved.Lost, now);
             _saved = Serialize(saved);
         }
         catch (Exception ex)
@@ -188,12 +255,12 @@ public sealed class DiskHealthMonitor : FleetBackgroundService
     private async Task SaveAsync()
     {
         if (_state is null) return;
-        var (breaches, armed) = _alerts.Snapshot();
+        var (breaches, lost) = _alerts.Snapshot();
         var state = new DiskHealthStateFile
         {
             Readings = _readings.All().Values.OrderBy(r => r.ServerId, StringComparer.Ordinal).ToList(),
             Breaches = [.. breaches],
-            UnknownArmed = [.. armed],
+            Lost = [.. lost],
         };
         var json = Serialize(state);
         if (json == _saved) return;

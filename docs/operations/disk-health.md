@@ -99,6 +99,8 @@ Type=oneshot
 ExecStart=/usr/local/bin/whiskers-smartmon.sh
 Nice=10
 IOSchedulingClass=idle
+# A smartctl hung on a dying disk must not block the timer for good.
+TimeoutStartSec=10min
 ```
 
 `/etc/systemd/system/whiskers-smartmon.timer`:
@@ -139,13 +141,19 @@ Within 5 minutes the server's expanded panel on the dashboard shows a **Disks** 
 | State | Meaning |
 |---|---|
 | **Healthy** | Every disk, array and pool reads good, and the SMART data is less than 2 hours old. |
-| **Degraded / failing** | A disk reports SMART overall-health failed, an md array has a failed disk or fewer active disks than it needs, or a ZFS pool is not `online`. A bad value counts even when its data is old. |
-| **Unknown** | Whiskers cannot vouch for it. The query failed or was malformed; a disk, array or pool reported before is missing now; SMART data is older than 2 hours or has no run time; a collector did not succeed; SMART is not available or not enabled on a disk; an md array is inactive. It is never shown as healthy. |
-| **Not supported** | The host never had a reading: it has no metrics endpoint (a Docker-source server), or none of SMART, md and ZFS report anything. |
+| **Degraded / failing** | A disk with SMART available and enabled reports overall-health failed, an md array has a failed disk or fewer active disks than it needs, or a ZFS pool is not `online`. A bad value counts even when its data is old. |
+| **Unknown** | Whiskers cannot vouch for it. The query failed, was malformed or could not be read to its end; a disk, array or pool reported before is missing now; SMART data is older than 2 hours or has no run time; a collector did not succeed (every source carrying the server's label must report success); SMART is not available, not enabled or its availability is not reported (a health value from such a disk is no verdict); an md array is inactive; two sources (instance/job) with the same server label disagree about one device. It is never shown as healthy. |
+| **Not supported** | The host never had a reading: it has no metrics endpoint (a Docker-source server), or none of SMART, md and ZFS report anything. A host whose first read failed says "Not read yet" with the reason instead. |
+
+The dashboard block says when the reading was made. A reading older than two cycles and a minute (11 minutes) is shown
+as Unknown: Whiskers has not read the host since, so it vouches for nothing there.
 
 A disk, array or pool that disappears stays **Unknown** ("no longer reported"), also across a restart of Whiskers. It
-might have died, so Whiskers keeps showing it. When it was removed on purpose, switch disk health off and on again in
-Settings. That forgets the last readings.
+might have died, so Whiskers keeps showing it. The same holds for a device that was **renamed**: an md array that comes
+back as `md127` instead of `md0`, a `/dev/sdX` name that shifted after a disk was pulled — the old name stays Unknown
+(and `disk_health_unknown` open) while the new one is read normally. To forget what is gone, switch disk health off in
+Settings: that clears all last readings at once and closes every host's open disk-health alerts as "recovery not
+confirmed". Then switch it on again; the next cycle (within 5 minutes) reads every host afresh.
 
 ## Alerts
 
@@ -153,12 +161,20 @@ Settings. That forgets the last readings.
 |---|---|---|
 | `disk_failing` | a SMART disk reads failing for 10 minutes | every SMART disk reads healthy, with fresh data, for 10 minutes |
 | `array_degraded` | an md array or ZFS pool reads degraded for 10 minutes | every array and pool reads healthy for 10 minutes |
-| `disk_health_unknown` | a host that read Healthy or Degraded / failing reads Unknown for 10 minutes | the host reads Healthy or Degraded / failing for 10 minutes |
+| `disk_health_unknown` | a disk, array or pool that read Healthy or Degraded / failing reads Unknown for 10 minutes | none of them is Unknown any more, for 10 minutes |
 
 Rules that keep the alerts honest:
 
 - Unknown and Not supported never clear an alert. A failing disk stays alerted until a fresh, good reading.
-- A host that was never read, or that read Unknown from the start, raises no `disk_health_unknown`.
+- The 10 minutes are 10 minutes without an Unknown reading in between: a reading that cannot be judged restarts the
+  count, both for a raise and for a clear.
+- `disk_health_unknown` is armed per disk, array and pool. A host that is Unknown for a harmless reason (a USB disk
+  without SMART) still alerts when its other, good readings are lost. An item that was never read good or bad (Unknown
+  from the start) raises nothing.
 - Not supported never alerts.
 - Quiet hours never hold these alerts or their recoveries.
-- Switching the feature off, or removing a server, closes its open alerts with "recovery not confirmed".
+- Switching the feature off (at once, not at the next cycle), or removing a server, closes its open alerts with
+  "recovery not confirmed".
+
+The setting can also come from the environment (`DiskHealth__Enabled=true`) or `appsettings.json`. That value wins, and
+Settings shows it read-only with its source.

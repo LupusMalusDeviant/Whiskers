@@ -54,6 +54,8 @@ public sealed record PromQueryResult(bool Success, string? Error, IReadOnlyList<
                     || !entry.TryGetProperty("value", out var pair) || pair.ValueKind != JsonValueKind.Array
                     || pair.GetArrayLength() != 2
                     || pair[0].ValueKind != JsonValueKind.Number || !pair[0].TryGetDouble(out var ts)
+                    // Review round 1 (M1): a sample time outside the calendar is malformed, not an overflow.
+                    || !(ts >= 0 && ts <= MaxUnixSeconds)
                     || pair[1].ValueKind != JsonValueKind.String
                     || !double.TryParse(pair[1].GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
                     return Failed("malformed response (a sample is misshaped)");
@@ -72,11 +74,14 @@ public sealed record PromQueryResult(bool Success, string? Error, IReadOnlyList<
         {
             return Failed("malformed response (not JSON)");
         }
-        catch (ArgumentOutOfRangeException)
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or OverflowException)
         {
             return Failed("malformed response (a timestamp is out of range)");
         }
     }
+
+    /// <summary>The last second <see cref="DateTime"/> can hold (9999-12-31T23:59:59Z).</summary>
+    public const double MaxUnixSeconds = 253402300799;
 
     /// <summary>Unix seconds (with a fraction) as UTC.</summary>
     public static DateTime FromUnix(double seconds) =>
@@ -106,6 +111,11 @@ public sealed class PrometheusQueryClient(IHttpClientFactory httpFactory, ILogge
     /// <summary>The longest one query may take, as for the system-info reads.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>Tests only: a shorter bound than <see cref="Timeout"/>.</summary>
+    internal TimeSpan? TimeoutForTests { get; init; }
+
+    private TimeSpan Limit => TimeoutForTests ?? Timeout;
+
     /// <summary>The longest response body read; a disk-health vector is a few kilobytes.</summary>
     internal const int MaxBodyBytes = 4 * 1024 * 1024;
 
@@ -116,7 +126,7 @@ public sealed class PrometheusQueryClient(IHttpClientFactory httpFactory, ILogge
             return PromQueryResult.Failed("the metrics endpoint is no http(s) URL");
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(Timeout);
+        deadline.CancelAfter(Limit);
         try
         {
             var http = httpFactory.CreateClient(nameof(PrometheusQueryClient));
@@ -147,13 +157,21 @@ public sealed class PrometheusQueryClient(IHttpClientFactory httpFactory, ILogge
         }
         catch (OperationCanceledException)
         {
-            return PromQueryResult.Failed($"no answer within {Timeout.TotalSeconds:F0} s");
+            return PromQueryResult.Failed($"no answer within {Limit.TotalSeconds:0.#} s");
         }
         catch (HttpRequestException ex)
         {
             // The endpoint is not logged (a URL may carry credentials); the query names what was asked.
             logger.LogDebug("TSDB query {Query} failed: {Error}", promql, ex.HttpRequestError);
             return PromQueryResult.Failed($"the metrics endpoint could not be reached ({ex.HttpRequestError})");
+        }
+        catch (Exception ex)
+        {
+            // Review round 1 (M1): fail closed on everything else too — a body cut off mid-stream (HttpIOException, an
+            // IOException), a handler's own fault. Only the caller's cancellation is thrown. The message is not kept: it
+            // may name the endpoint.
+            logger.LogDebug("TSDB query {Query} failed: {Type}", promql, ex.GetType().Name);
+            return PromQueryResult.Failed($"the answer could not be read ({ex.GetType().Name})");
         }
     }
 }

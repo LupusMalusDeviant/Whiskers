@@ -264,7 +264,7 @@ public sealed class DiskHealthReadingTests
     [Fact]
     public void A_Docker_source_server_without_a_metrics_endpoint_is_Unsupported()
     {
-        var r = Read(DiskHealthQueries.AllFailed("no metrics endpoint"));
+        var r = Read(DiskHealthQueries.WithoutEndpoint());
 
         Assert.Equal(DiskHealthState.Unsupported, r.Overall);
         Assert.Empty(r.Items);
@@ -460,4 +460,162 @@ public sealed class DiskHealthReadingTests
     }
 
     private static string FixTrailingComma(string json) => System.Text.RegularExpressions.Regex.Replace(json, @",\s*\]", "]");
+
+    // ---------------------------------------------------------------------------------------------- review round 1
+
+    /// <summary>The sda lines of <see cref="SmartFailed"/> with its available and enabled values replaced.</summary>
+    private static string SdaFailedWith(string available, string? enabled)
+    {
+        var json = SmartFailed.Replace(
+            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"" + available + "\"]");
+        if (enabled is null)
+            return FixTrailingComma(string.Join("\n", json.Split('\n').Where(l => !(l.Contains("smart_enabled") && l.Contains("/dev/sda")))));
+        return json.Replace(
+            "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"" + enabled + "\"]");
+    }
+
+    [Theory]
+    [InlineData("0", "1")]     // SMART not available, yet a health value 0
+    [InlineData("1", "0")]     // SMART not enabled
+    [InlineData("1", null)]    // no enabled series at all
+    public void A_health_value_0_from_a_disk_without_usable_SMART_is_Unknown_never_failing(string available, string? enabled)
+    {
+        var r = Read(Queries(smart: SdaFailedWith(available, enabled)));
+
+        var sda = Item(r, DiskHealthKinds.Smart, "/dev/sda");
+        Assert.Equal(DiskHealthState.Unknown, sda.State);
+        Assert.NotEqual(DiskHealthState.DegradedOrFailing, r.Overall);
+    }
+
+    [Fact]
+    public void A_sample_time_beyond_the_calendar_is_a_malformed_answer_not_an_exception()
+    {
+        var parsed = PromQueryResult.Parse("""{"status":"success","data":{"resultType":"vector","result":[{"metric":{"__name__":"up"},"value":[1e300,"1"]}]}}""");
+
+        Assert.False(parsed.Success);
+    }
+
+    private sealed class CutOffStream : Stream
+    {
+        private bool _gave;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_gave) throw new IOException("The response ended prematurely.");
+            _gave = true;
+            var head = System.Text.Encoding.UTF8.GetBytes("{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[");
+            Array.Copy(head, 0, buffer, offset, head.Length);
+            return head.Length;
+        }
+    }
+
+    [Fact]
+    public async Task A_body_cut_off_mid_stream_is_a_failed_result_not_an_exception()
+    {
+        var handler = new StubHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new CutOffStream()),
+        }));
+
+        var result = await Client(handler).QueryAsync("http://tsdb:8428", "up", CancellationToken.None);
+
+        Assert.False(result.Success);
+    }
+
+    [Fact]
+    public async Task A_query_that_does_not_answer_in_time_is_a_failed_result()
+    {
+        var handler = new StubHttpHandler(async (_, ct) =>
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            return StubHttpHandler.Json(Empty);
+        });
+        var client = new PrometheusQueryClient(new StubHttpClientFactory(handler), NullLogger<PrometheusQueryClient>.Instance)
+        {
+            TimeoutForTests = TimeSpan.FromMilliseconds(100),
+        };
+
+        var result = await client.QueryAsync("http://tsdb:8428", "up", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result.Success);
+        Assert.StartsWith("no answer within", result.Error);
+    }
+
+    // ---- duplicates (m3) --------------------------------------------------------------------------------------------
+
+    /// <summary>Every sample of <paramref name="json"/> once more, from a second scrape source, with values changed by
+    /// <paramref name="change"/>.</summary>
+    private static string Duplicated(string json, Func<string, string> change)
+    {
+        var lines = json.Split('\n').Where(l => l.TrimStart().StartsWith("{\"metric\"", StringComparison.Ordinal))
+            .Select(l => l.TrimEnd().TrimEnd(','))
+            .ToList();
+        var copies = lines.Select(l => change(l.Replace("\"instance\":\"100.64.0.7:9100\"", "\"instance\":\"100.64.0.8:9100\"")));
+        return """{"status":"success","data":{"resultType":"vector","result":[""" + string.Join(",", lines.Concat(copies)) + "]}}";
+    }
+
+    [Fact]
+    public void Every_source_must_report_its_collectors_success()
+    {
+        // Two node_exporters carry the same server label; one says mdadm failed. It is not outvoted by the other.
+        var r = Read(Queries(collectors: Duplicated(CollectorsOk, l => l.Contains("mdadm") ? l.Replace("\"1\"]", "\"0\"]") : l)));
+
+        Assert.Equal("mdadm collector did not succeed", Item(r, DiskHealthKinds.Md, "md0").Reason);
+        Assert.Equal(DiskHealthState.Healthy, Item(r, DiskHealthKinds.Zfs, "tank").State);
+    }
+
+    [Fact]
+    public void Two_sources_that_disagree_about_one_device_read_Unknown()
+    {
+        var md = Read(Queries(md: Duplicated(MdHealthy, l => l.Contains("\"state\":\"active\"},") && l.Contains("node_md_disks\"")
+            ? l.Replace("\"2\"]", "\"1\"]") : l)));
+        Assert.Equal(DiskHealthState.Unknown, Item(md, DiskHealthKinds.Md, "md0").State);
+        Assert.Contains("conflicting", Item(md, DiskHealthKinds.Md, "md0").Reason);
+
+        var smart = Read(Queries(run: Duplicated(SmartRunFresh, l => l.Replace("\"1793879100\"", "\"1793860000\""))));
+        Assert.Equal(DiskHealthState.Unknown, Item(smart, DiskHealthKinds.Smart, "/dev/sda").State);
+        Assert.Contains("conflicting", Item(smart, DiskHealthKinds.Smart, "/dev/sda").Reason);
+
+        // The pool once online from one source and degraded from another (the fixture is one line: merged by hand).
+        var other = Zpool("degraded").Replace("\"instance\":\"100.64.0.7:9100\"", "\"instance\":\"100.64.0.8:9100\"");
+        var both = ZfsOnline[..^3] + "," + other[(other.IndexOf("\"result\":[", StringComparison.Ordinal) + "\"result\":[".Length)..];
+        var zfs = Read(Queries(zfs: both));
+        Assert.Equal(DiskHealthState.Unknown, Item(zfs, DiskHealthKinds.Zfs, "tank").State);
+
+        // Agreeing duplicates are one reading.
+        Assert.Equal(DiskHealthState.Healthy, Read(Queries(md: Duplicated(MdHealthy, l => l), smart: Duplicated(SmartHealthy, l => l))).Overall);
+    }
+
+    [Fact]
+    public void A_first_read_whose_queries_failed_says_not_read_yet_and_a_server_without_endpoint_says_nothing()
+    {
+        var failed = Read(DiskHealthQueries.AllFailed("the metrics endpoint could not be reached (ConnectionError)"));
+        Assert.Equal(DiskHealthState.Unsupported, failed.Overall);
+        Assert.False(failed.HadReading);
+        Assert.StartsWith("not read yet: query failed", Assert.Single(failed.Items).Reason);
+        // It is no reading: the next good one is a first reading, nothing is carried.
+        Assert.Equal(4, Read(Queries(), previous: failed).Items.Count);
+
+        Assert.Empty(Read(DiskHealthQueries.WithoutEndpoint()).Items);
+    }
+
+    [Fact]
+    public async Task A_handler_that_fails_in_any_other_way_is_a_failed_result_not_an_exception()
+    {
+        var handler = new StubHttpHandler((_, _) => throw new HttpIOException(HttpRequestError.ResponseEnded, "ended"));
+
+        var result = await Client(handler).QueryAsync("http://tsdb:8428", "up", CancellationToken.None);
+
+        Assert.False(result.Success);
+    }
 }

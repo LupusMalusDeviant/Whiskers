@@ -12,8 +12,8 @@ public sealed class DiskHealthStateFile
     /// <summary>The disk-health alerts raised and not yet closed (and the last end of each, as R1-56 keeps them).</summary>
     public List<BreachState> Breaches { get; set; } = [];
 
-    /// <summary>The servers whose Unknown followed a Healthy or DegradedOrFailing reading (<c>disk_health_unknown</c> armed).</summary>
-    public List<string> UnknownArmed { get; set; } = [];
+    /// <summary>The items that read Healthy or DegradedOrFailing and are Unknown now (what arms <c>disk_health_unknown</c>).</summary>
+    public List<DiskHealthLostItem> Lost { get; set; } = [];
 }
 
 /// <summary>
@@ -34,7 +34,7 @@ public interface IDiskHealthStateStore
 public sealed class DiskHealthStateStore(string path) : IDiskHealthStateStore
 {
     private readonly JsonFileStore<DiskHealthStateFile> _file = new(path,
-        problem: f => f.Readings is null || f.Breaches is null || f.UnknownArmed is null
+        problem: f => f.Readings is null || f.Breaches is null || f.Lost is null || f.Lost.Any(l => l is null)
                       || f.Readings.Any(r => r is null || r.Items is null || r.ServerId is null || r.Items.Any(i => i is null))
                       || f.Breaches.Any(b => b is null)
             ? "a list is missing or holds an empty entry" : null);

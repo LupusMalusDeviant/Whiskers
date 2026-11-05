@@ -111,7 +111,7 @@ public class DiskHealthPanelTests : BunitContext, IAsyncLifetime
     public async Task An_Unsupported_host_and_one_not_read_yet_say_so()
     {
         await SwitchOn();
-        _readings.Set(Read(DiskHealthQueries.AllFailed("no metrics endpoint")));
+        _readings.Set(Read(DiskHealthQueries.WithoutEndpoint()));
 
         Assert.Contains("DiskHealth_Block_Unsupported", Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf")).Markup);
         Assert.Contains("DiskHealth_Block_NotReadYet", Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "other")).Markup);
@@ -157,6 +157,61 @@ public class DiskHealthPanelTests : BunitContext, IAsyncLifetime
         var shown = (bool)typeof(DiskHealthPanel).GetField("_enabled", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .GetValue(cut.Instance)!;
         Assert.False(shown);
+    }
+
+    [Fact]
+    public async Task A_reading_older_than_two_cycles_is_shown_as_Unknown_with_its_age()
+    {
+        await SwitchOn();
+        var old = DateTime.UtcNow.AddHours(-3);
+        _readings.Set(HealthyReading() with { ReadUtc = old });
+        _user.Role = AppRole.Viewer;
+
+        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf"));
+
+        Assert.Contains("DiskHealth_State_Unknown", cut.Find("#disk-health-overall-badwolf").TextContent);
+        Assert.Contains("DiskHealth_Block_Stale", cut.Markup);
+    }
+
+    [Fact]
+    public void A_value_set_by_the_environment_is_shown_read_only_with_its_source()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["DiskHealth:Enabled"] = "true" }).Build();
+        Services.AddSingleton<IDiskHealthSettingsService>(new DiskHealthSettingsService(configuration, new AppSettingsStore(_file),
+            NullLogger<DiskHealthSettingsService>.Instance, _file));
+
+        var cut = Render<DiskHealthPanel>();
+
+        Assert.NotEmpty(cut.FindAll("#disk-health-readonly"));
+        Assert.Contains("DiskHealth_ReadOnly", cut.Markup);
+        Assert.Contains(cut.FindAll("input"), i => i.HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public async Task A_first_read_that_failed_says_not_read_yet_with_the_reason()
+    {
+        await SwitchOn();
+        _readings.Set(Read(DiskHealthQueries.AllFailed("the metrics endpoint could not be reached (ConnectionError)")));
+
+        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf"));
+
+        Assert.Contains("DiskHealth_Block_NotReadYetFailed", cut.Markup);
+        Assert.DoesNotContain("DiskHealth_Block_Unsupported", cut.Markup);
+        Assert.Empty(cut.FindAll("#disk-health-overall-badwolf"));
+    }
+
+    [Fact]
+    public async Task A_fresh_reading_says_when_it_was_made()
+    {
+        await SwitchOn();
+        _readings.Set(HealthyReading() with { ReadUtc = DateTime.UtcNow.AddMinutes(-2) });
+
+        var cut = Render<DiskHealthBlock>(p => p.Add(b => b.ServerId, "badwolf"));
+
+        Assert.Contains("DiskHealth_State_Healthy", cut.Find("#disk-health-overall-badwolf").TextContent);
+        Assert.Contains("DiskHealth_Block_ReadAgo", cut.Find("#disk-health-read-badwolf").TextContent);
+        Assert.DoesNotContain("DiskHealth_Block_Stale", cut.Markup);
     }
 
     private sealed class User : ICurrentUserService

@@ -367,7 +367,8 @@ public static class WhiskersHostingExtensions
             new Whiskers.Services.Metrics.DiskHealth.DiskHealthSettingsService(
                 sp.GetRequiredService<IConfiguration>(),
                 sp.GetRequiredService<Whiskers.Services.Persistence.IAppSettingsStore>(),
-                sp.GetRequiredService<ILogger<Whiskers.Services.Metrics.DiskHealth.DiskHealthSettingsService>>()));
+                sp.GetRequiredService<ILogger<Whiskers.Services.Metrics.DiskHealth.DiskHealthSettingsService>>(),
+                sp.GetRequiredService<DataPathOptions>().AppSettingsJson));
         builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.DiskHealthService>();
         builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.IDiskHealthService>(sp =>
             sp.GetRequiredService<Whiskers.Services.Metrics.DiskHealth.DiskHealthService>());

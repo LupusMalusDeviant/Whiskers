@@ -5,24 +5,41 @@
 
 @* R1-58 (contract 0005): the "Disks" block of a server's expanded panel on the dashboard — the overall state and one line
    per disk, md array and ZFS pool (state, name, reason, age). Read-only: any signed-in role sees it, nothing here writes.
-   Nothing is shown while the feature is off. Names and reasons come from the host and are rendered as text. *@
+   Nothing is shown while the feature is off. Names and reasons come from the host and are rendered as text.
+   Review round 1 (M1): the block says when the reading was made, and a reading older than StaleAfter (two cycles and a
+   minute) is shown as Unknown — a monitor that stopped reading never leaves a green "Healthy" behind. *@
 
 @if (DiskHealthSettings.Enabled)
 {
     var reading = DiskHealth.Latest(ServerId);
+    var now = DateTime.UtcNow;
+    var stale = reading is not null && now - reading.ReadUtc > StaleAfter;
+    var notReadYet = reading is { Overall: DiskHealthState.Unsupported, Items.Count: > 0 };
     <div class="sw-disk-health mt-3" id="@("disk-health-" + ServerId)">
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-1">
             <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" Color="Color.Primary" />
             <MudText Typo="Typo.subtitle2">@L["DiskHealth_Block_Title"]</MudText>
-            @if (reading is not null)
+            @if (reading is not null && !notReadYet)
             {
-                <MudChip T="string" Size="Size.Small" Color="@ColorOf(reading.Overall)" Variant="Variant.Outlined"
-                         id="@("disk-health-overall-" + ServerId)">@StateLabel(reading.Overall)</MudChip>
+                var overall = Shown(reading.Overall, stale);
+                <MudChip T="string" Size="Size.Small" Color="@ColorOf(overall)" Variant="Variant.Outlined"
+                         id="@("disk-health-overall-" + ServerId)">@StateLabel(overall)</MudChip>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" id="@("disk-health-read-" + ServerId)">
+                    @L["DiskHealth_Block_ReadAgo", DiskHealthParser.Age(now - reading.ReadUtc)]
+                </MudText>
             }
         </MudStack>
+        @if (stale)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-block mb-1">@L["DiskHealth_Block_Stale"]</MudText>
+        }
         @if (reading is null)
         {
             <MudText Typo="Typo.caption" Color="Color.Secondary">@L["DiskHealth_Block_NotReadYet"]</MudText>
+        }
+        else if (notReadYet)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@L["DiskHealth_Block_NotReadYetFailed", reading.Items[0].Reason]</MudText>
         }
         else if (reading.Items.Count == 0)
         {
@@ -36,13 +53,14 @@
                 <tbody>
                     @foreach (var item in reading.Items)
                     {
+                        var state = Shown(item.State, stale);
                         <tr>
                             <td style="width: 1%; white-space: nowrap;">
-                                <MudChip T="string" Size="Size.Small" Color="@ColorOf(item.State)" Variant="Variant.Text">@StateLabel(item.State)</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="@ColorOf(state)" Variant="Variant.Text">@StateLabel(state)</MudChip>
                             </td>
                             <td style="white-space: nowrap;"><span class="sw-disk-health-kind">@KindLabel(item.Kind)</span> <code>@item.Name</code></td>
                             <td>@item.Reason</td>
-                            <td style="white-space: nowrap;" class="mud-text-secondary">@AgeOf(item, reading)</td>
+                            <td style="white-space: nowrap;" class="mud-text-secondary">@AgeOf(item, reading, now)</td>
                         </tr>
                     }
                 </tbody>
@@ -52,8 +70,15 @@
 }
 
 @code {
+    /// <summary>A reading older than this is shown as Unknown: two cycles and a minute.</summary>
+    public static readonly TimeSpan StaleAfter = DiskHealthMonitor.Interval * 2 + TimeSpan.FromMinutes(1);
+
     /// <summary>The server whose disks are shown.</summary>
     [Parameter, EditorRequired] public string ServerId { get; set; } = "";
+
+    // An old reading vouches for nothing good; a bad state stays shown as bad.
+    private static DiskHealthState Shown(DiskHealthState state, bool stale) =>
+        stale && state == DiskHealthState.Healthy ? DiskHealthState.Unknown : state;
 
     private string StateLabel(DiskHealthState state) => L["DiskHealth_State_" + state].Value;
 
@@ -73,8 +98,7 @@
         _ => Color.Default,
     };
 
-    // SMART: the age of the collection evidence; md/ZFS: read live with the collector's success at query time.
-    private string AgeOf(DiskHealthItem item, DiskHealthReading reading) => item.CollectedUtc is { } at
-        ? L["DiskHealth_Block_Age", DiskHealthParser.Age(reading.ReadUtc - at)].Value
-        : L["DiskHealth_Block_Live"].Value;
+    // SMART: the age of the collection evidence; md/ZFS: the age of the reading (their evidence is the read itself).
+    private string AgeOf(DiskHealthItem item, DiskHealthReading reading, DateTime now) =>
+        L["DiskHealth_Block_Age", DiskHealthParser.Age(now - (item.CollectedUtc ?? reading.ReadUtc))].Value;
 }
