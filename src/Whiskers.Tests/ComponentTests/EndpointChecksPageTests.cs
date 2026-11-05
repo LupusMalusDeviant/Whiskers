@@ -141,7 +141,10 @@ public sealed class EndpointChecksPageTests : BunitContext, IAsyncLifetime
 
         Assert.Equal(0, _runner.Calls);                       // no decision opened, so nothing reached the runner
         Assert.Empty(_store.Results(check.Id));
-        cut.WaitForAssertion(() => Assert.Contains("Checks_State_Suspended", cut.Markup));
+        // Review round 4 N7/N9: the message names the suspension, not "off" (the snackbar, not the reloaded row's chip).
+        var shown = Services.GetRequiredService<ISnackbar>().ShownSnackbars.Select(s => s.Message.ToString()).ToList();
+        Assert.Contains("Checks_State_Suspended", shown);
+        Assert.DoesNotContain("Checks_State_Off", shown);
     }
 
     private sealed class CountingRunner : IEndpointCheckRunner

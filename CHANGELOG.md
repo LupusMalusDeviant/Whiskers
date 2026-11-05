@@ -17,8 +17,9 @@ All notable changes to Whiskers are documented here. The format follows
   Admin, internal addresses in a run's detail and a suspension reason are not shown); the read-only MCP tool
   `endpoint_checks_list` shows the checks and their last outcome and numbers, never internal addresses or a suspension
   reason. Alerts show internal addresses as `[internal address]` and never name a suspended check's former owner, in
-  every channel and for every role. "Run now" runs the check as it is stored at that moment, shares the run slots with the background loop, is
-  not offered for a check that is off, and neither moves the loop's schedule nor feeds the alert. **Hosts need `getent`, `curl`, `openssl` and OpenBSD `nc`** — see
+  every channel and for every role. "Run now" runs the check as it is stored at that moment, shares the run slots
+  with the background loop, is not offered for a check that is off, and neither moves the loop's schedule nor feeds
+  the alert. **Hosts need `getent`, `curl`, `openssl` and OpenBSD `nc`** — see
   [docs/operations/endpoint-checks.md](docs/operations/endpoint-checks.md). New tables `EndpointChecks` and
   `EndpointCheckResults` (migrated automatically on SQLite and PostgreSQL).
 - **New: optional disk-health readings — SMART, md RAID, ZFS (R1-58).** Whiskers can show whether each host's disks
