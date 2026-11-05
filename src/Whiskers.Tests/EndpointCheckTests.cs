@@ -936,12 +936,13 @@ public sealed class EndpointCheckTests : IDisposable
     {
         public Func<EndpointCheckDefinition, EndpointCheckOutcome> Outcome { get; set; } = _ => EndpointCheckOutcome.Passed;
         public List<string> Ran { get; } = [];
+        public Func<EndpointCheckOutcome, string> Detail { get; set; } = o => o.ToString();
 
         public Task<EndpointCheckRun> RunAsync(EndpointCheckDefinition check, CancellationToken ct)
         {
             lock (Ran) Ran.Add(check.Id);
             var outcome = Outcome(check);
-            return Task.FromResult(new EndpointCheckRun(check.Id, time.GetUtcNow().UtcDateTime, outcome, outcome.ToString()));
+            return Task.FromResult(new EndpointCheckRun(check.Id, time.GetUtcNow().UtcDateTime, outcome, Detail(outcome)));
         }
 
         public Task<EndpointCheckRun> RunInDecisionAsync(string checkId, CancellationToken ct) => throw new NotSupportedException();
@@ -1307,6 +1308,39 @@ public sealed class EndpointCheckTests : IDisposable
         Assert.Contains(NotificationEventTypes.EndpointCheckFailed, NotificationEventTypes.RecoverableKinds);
         Assert.Contains(NotificationEventTypes.EndpointCheckFailed, NotificationEventTypes.SuppressibleEvents);
         Assert.Equal("endpoint_check_failed", NotificationEventTypes.EndpointCheckFailed);
+    }
+
+    [Fact]
+    public async Task The_alert_text_reaches_every_role_so_internal_addresses_in_it_are_masked()
+    {
+        var time = new ManualTime();
+        var runner = new ScriptedRunner(time)
+        {
+            Outcome = _ => EndpointCheckOutcome.Failed,
+            Detail = o => o == EndpointCheckOutcome.Failed ? "10.0.0.5: connection refused" : "10.0.0.5: TCP connect succeeded",
+        };
+        var (monitor, store, notes) = Monitor(runner, time);
+        await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443), AdminId, default);
+
+        async Task Minutes(int count)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                await monitor.CycleAsync(CancellationToken.None);
+                await SettleAsync(monitor);
+                time.Advance(TimeSpan.FromSeconds(60));
+            }
+        }
+
+        await Minutes(6);
+        var raised = Assert.Single(notes.Events, e => e.EventType == NotificationEventTypes.EndpointCheckFailed);
+        Assert.Contains("[internal address]: connection refused", raised.ImageInfo);
+        Assert.DoesNotContain("10.0.0.5", raised.ImageInfo);
+
+        runner.Outcome = _ => EndpointCheckOutcome.Passed;
+        await Minutes(6);
+        var cleared = Assert.Single(notes.Events, e => e.EventType == NotificationEventTypes.Recovered(NotificationEventTypes.EndpointCheckFailed));
+        Assert.DoesNotContain("10.0.0.5", cleared.ImageInfo);
     }
 
     [Fact]

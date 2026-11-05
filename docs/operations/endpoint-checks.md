@@ -16,6 +16,9 @@ exceptions, not their addresses. There is no MCP tool that writes a check. The p
 (`?…`) to Admins only, and redacts secrets in every target. A run's detail line names the addresses the host resolved;
 below Admin, every address in a denied range (the R1-54 list below) is shown as `[internal address]`, public addresses
 stay. For a suspended check the MCP tool says only `suspended`, without the reason (which names the former owner).
+Notifications reach every role (`/notifications`, the MCP tool `list_recent_alerts`), so the `endpoint_check_failed`
+text always shows internal addresses as `[internal address]`, and the `automation_suspended` text does not name the
+former owner.
 
 ## Required tools on each host
 
@@ -108,7 +111,8 @@ Every run is a privileged execution and appears in the audit log as one `endpoin
 operation id; the recorded result carries the same id. A run by the background loop acts as the check's **owner** (the
 Admin who saved it last), whose authority is read again on every run. When the owner is no longer Admin (demoted,
 removed from the whitelist, account deleted), the check is **suspended** instead of run: it is switched off with the
-reason shown to Admins (it names the former owner; other roles see only "suspended") and an `automation_suspended` notification. An Admin takes it over by saving it again. "Run now" runs in
+reason shown to Admins (it names the former owner; other roles see only "suspended") and an `automation_suspended`
+notification that does not name the owner. An Admin takes it over by saving it again. "Run now" runs in
 the signed-in Admin's own decision: it reads the check as it is stored at that moment (a check deleted, switched off or
 changed meanwhile runs as it is now, or not at all), takes the same run slot as the loop (when the check or its server is
 busy it says so and runs nothing), and its result carries that decision's operation id. The ▶ button is disabled for a

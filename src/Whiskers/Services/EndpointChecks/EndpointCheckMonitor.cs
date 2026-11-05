@@ -56,11 +56,11 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
             problem: f => f.Breaches is null || f.Breaches.Any(b => b is null) ? "the list of breaches is missing or holds an empty entry" : null);
     }
 
-    /// <summary>The rules of <c>endpoint_check_failed</c>: open after 5 minutes of failing runs (two at least — one
-    /// reading has no duration), clear after 5 minutes of passing ones. Value 1 = failed or refused, 0 = passed.</summary>
     /// <summary>The run slots this monitor takes (the boot test checks they are the app's single shared instance).</summary>
     internal IEndpointCheckSlots Slots => _slots;
 
+    /// <summary>The rules of <c>endpoint_check_failed</c>: open after 5 minutes of failing runs (two at least — one
+    /// reading has no duration), clear after 5 minutes of passing ones. Value 1 = failed or refused, 0 = passed.</summary>
     public static BreachRules RulesFor(int intervalSeconds) =>
         new(OpenAfter, 0.5, ClearAfter, double.PositiveInfinity,
             BreachRules.GapToleranceFor(TimeSpan.FromSeconds(intervalSeconds)), TimeSpan.Zero);
@@ -204,7 +204,8 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
             ServerId = check.ServerId,
             ServerName = ServerName(check.ServerId),
             ContainerName = check.Name,
-            ImageInfo = $"Endpoint check \"{check.Name}\" was suspended: {lost}. It stays off until an Admin saves it again.",
+            // Review round 3 N1: the reason names the former owner; it stays on the check (Admins see it on /checks).
+            ImageInfo = $"Endpoint check \"{check.Name}\" was suspended: its owner can no longer run it. It stays off until an Admin saves it again.",
         }, ct);
     }
 
@@ -213,10 +214,13 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         var serverName = ServerName(check.ServerId);
         var label = $"{check.Name} on {serverName}";
         var value = run.Outcome == EndpointCheckOutcome.Passed ? 0 : 1;
+        // Review round 3 N1: notifications reach every role (/notifications, list_recent_alerts), so internal addresses
+        // are masked as on the page below Admin.
+        var detail = EndpointCheckRunner.MaskInternalAddresses(run.Detail);
         var finding = _tracker.Consider(run.AtUtc, SeriesOf(check.Id), label, NotificationEventTypes.EndpointCheckFailed,
             value, 1,
-            (_, span) => $"{label}: failing for {BreachTracker.Describe(span)} — {run.Detail}",
-            _ => $"{label}: passing again — {run.Detail}",
+            (_, span) => $"{label}: failing for {BreachTracker.Describe(span)} — {detail}",
+            _ => $"{label}: passing again — {detail}",
             RulesFor(check.IntervalSeconds));
         await NotifyAsync(check, finding, ct);
         await SaveBreachesAsync();

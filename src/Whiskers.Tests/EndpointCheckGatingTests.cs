@@ -449,7 +449,10 @@ public sealed class EndpointCheckGatingTests : IDisposable
         Assert.Contains(Admin, suspended.SuspendedReason);
         Assert.Empty(host.Calls);
         Assert.Empty(RawStore().Results(check.Id));
-        Assert.Contains(notes.Events, e => e.EventType == NotificationEventTypes.AutomationSuspended && e.ServerId == "web");
+        var note = Assert.Single(notes.Events, e => e.EventType == NotificationEventTypes.AutomationSuspended && e.ServerId == "web");
+        // Review round 3 N1: notifications reach every role; the former owner stays in the check's reason (Admin-only).
+        Assert.DoesNotContain("@", note.ImageInfo);
+        Assert.DoesNotContain("user:", note.ImageInfo);
 
         // It stays off on the next cycle; an Admin saving it again takes it over.
         await monitor.CycleAsync(CancellationToken.None);
