@@ -12,9 +12,12 @@ All notable changes to Whiskers are documented here. The format follows
   hold the caller — and with it a background loop's slot — indefinitely. The timeout now covers every step from the
   first Docker call to the output, also a call that ignores its cancellation, and killing and removing the helper hold
   the caller for at most 5 seconds after it. A clean-up that takes longer goes on in the background with retries (up to
-  2 minutes) instead of being dropped, and every helper now carries its latest end as a label
-  (`serverwatch.hostshell.deadline`), so the sweep also removes a helper that is still **running** well past it — before,
-  a running helper was never swept. The error says where the run stood: "did not start" before the start request,
+  2 minutes, each retry with the server's current Docker client) instead of being dropped. Every helper now carries its
+  latest end as a label (`serverwatch.hostshell.deadline`), and the sweep judges a labelled helper by it — also one
+  still **running** a minute past it, which before was never swept. When the background clean-up gives up, or a create
+  never answers, a sweep of that server is scheduled for when the helper is past its label; otherwise the sweep runs
+  with a later host-shell call on the server (at most every 5 minutes), so a helper left behind by a Whiskers restart
+  waits for that. The error says where the run stood: "did not start" before the start request,
   "effect unknown" after it (also for a Docker error there, which used to read like a plain failure), "exit code N,
   output not read" once it had finished. Local and SSH commands: a timeout reads "effect unknown" as well, and a command
   that exited while a process it left running kept its output open is reported with its exit code at the deadline

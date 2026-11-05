@@ -1301,8 +1301,11 @@ the Local server included — through that executor; Whiskers itself opens no co
   and a stalled log retrieval, each ending within the deadline.
   *Done (approved by the maintainer on 5 November 2026, own change):* the timeout is one deadline over every Docker
   step (`HostShellOperations`, steps behind `IHostShellDocker`); kill and remove hold the caller 5 s at most and go on
-  in the background (2 min, retried), and the sweep removes a helper still running past its deadline label, so a call
-  ends at most timeout + 5 s after it began and no privileged helper is left to run on; local/SSH output streams are
+  in the background (2 min, retried with the server's current client), so a call ends at most timeout + 5 s after it
+  began. A helper carries its deadline label; when the background clean-up gives up or a create never answers, a sweep
+  of that server is scheduled past the label and removes the helper, running or not. A helper left behind by a
+  Whiskers restart is removed by the sweep of the next host-shell call on that server (at most every 5 min), not
+  sooner; local/SSH output streams are
   awaited at most 5 s after a kill. `HostShellDeadlineTests` stall the client, image check, pull, create, start, wait,
   log read, kill and remove — each step ignoring its token — and every case ends within the bound; two cases drive the
   local process path with a real process.

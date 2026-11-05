@@ -269,6 +269,69 @@ public sealed class HostShellDeadlineTests
         Assert.Contains("remove", _docker.Completed);
     }
 
+    [Fact]
+    public async Task A_clean_up_whose_client_was_disposed_gets_the_server_client_afresh()
+    {
+        // The run's client is disposed after the run (a reconnect replaced it): its kill and remove throw. The next
+        // client the server hands out works.
+        var disposed = new DisposedAfterRun(_docker);
+        var handedOut = 0;
+        var shell = new HostShellOperations(
+            _ => Task.FromResult<IHostShellDocker>(Interlocked.Increment(ref handedOut) == 1 ? disposed : _docker),
+            new MemoryCache(new MemoryCacheOptions()), Cleanup, TimeSpan.FromSeconds(10));
+        _docker.Stall("wait");
+
+        var (result, _) = await Run(shell);
+
+        Assert.Equal("Command timed out after 0.5s — its effect is unknown", result.Error);
+        await WaitUntil(() => _docker.Containers.IsEmpty, "the helper was removed through a fresh client");
+        Assert.True(handedOut >= 2, "a fresh client was asked for");
+    }
+
+    [Fact]
+    public async Task A_clean_up_that_gives_up_schedules_a_sweep_past_the_deadline_label()
+    {
+        // The only remove of the clean-up fails and its background time runs out before the retry; nothing else
+        // would remove the helper before a later host-shell call on the server.
+        _docker.FailRemoveTimes = 1;
+        var shell = new HostShellOperations(_ => Task.FromResult<IHostShellDocker>(_docker),
+            new MemoryCache(new MemoryCacheOptions()), Cleanup, backgroundCleanup: TimeSpan.FromMilliseconds(100),
+            runningGrace: TimeSpan.Zero);
+
+        var (result, _) = await Run(shell);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Single(_docker.Containers);
+        await WaitUntil(() => _docker.Containers.IsEmpty, "the scheduled sweep removed the helper past its label");
+    }
+
+    [Fact]
+    public async Task A_create_that_never_answers_but_made_the_helper_is_swept_past_its_deadline_label()
+    {
+        _docker.CreateHangsAfterMaking = true;
+        var shell = new HostShellOperations(_ => Task.FromResult<IHostShellDocker>(_docker),
+            new MemoryCache(new MemoryCacheOptions()), Cleanup, runningGrace: TimeSpan.Zero);
+
+        var (result, took) = await Run(shell);
+
+        Assert.True(took < Bound, $"took {took}");
+        Assert.Contains("did not start", result.Error);
+        Assert.Single(_docker.Containers);
+        await WaitUntil(() => _docker.Containers.IsEmpty, "the scheduled sweep found the helper by its label");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]   // Timeout.InfiniteTimeSpan
+    [InlineData(-5000)]
+    public async Task A_run_without_a_finite_positive_timeout_is_refused_before_anything_is_created(int milliseconds)
+    {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            Shell().RunHostShellAsync("echo hello", "srv", TimeSpan.FromMilliseconds(milliseconds)));
+
+        Assert.Empty(_docker.RunCalls);
+    }
+
     // ---- the caller ------------------------------------------------------------------------------------------------
 
     [Fact]
@@ -349,6 +412,10 @@ public sealed class HostShellDeadlineTests
     [InlineData(true, -600, -30, false)]    // running, within the grace after its deadline
     [InlineData(true, -600, 60, false)]     // running, deadline still ahead
     [InlineData(true, -3600, null, false)]  // running, no label (older version): left alone
+    [InlineData(false, -120, 60, false)]    // stopped, label ahead: its run may still read the output
+    [InlineData(false, -120, -30, false)]   // stopped, within the grace after its label
+    [InlineData(false, -120, -300, true)]   // stopped, well past its label
+    [InlineData(false, -5, -300, true)]     // stopped and young, but past its label: the label decides
     public void What_the_sweep_counts_as_left_over(bool running, int createdSecondsAgo, int? deadlineInSeconds, bool leftover)
     {
         var now = DateTimeOffset.UtcNow;
@@ -368,6 +435,32 @@ public sealed class HostShellDeadlineTests
             new Dictionary<string, string> { [HostShellOperations.DeadlineLabel] = "-1" });
 
         Assert.False(HostShellOperations.IsLeftover(helper, now));
+    }
+
+    [Theory]
+    [InlineData("253402300800", true, false)]          // one second past year 9999: garbled, running → left alone
+    [InlineData("9223372036854775807", true, false)]  // long.MaxValue: no overflow, left alone
+    [InlineData("253402300800", false, true)]         // garbled on an old stopped helper: the 30 s rule applies
+    public void A_deadline_label_out_of_range_counts_as_garbled(string label, bool running, bool leftover)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var helper = new HostShellHelper("h", now.AddHours(-1).UtcDateTime, running,
+            new Dictionary<string, string> { [HostShellOperations.DeadlineLabel] = label });
+
+        Assert.Equal(leftover, HostShellOperations.IsLeftover(helper, now));
+    }
+
+    [Fact]
+    public async Task A_helper_with_a_bad_label_does_not_stop_the_sweep()
+    {
+        var now = DateTime.UtcNow;
+        _docker.Seed("bad-label", now.AddHours(-1), running: true, deadline: "99999999999999999999");
+        _docker.Seed("old-stopped", now.AddMinutes(-2), running: false, deadline: null);
+
+        await Run();
+
+        await WaitUntil(() => !_docker.Containers.ContainsKey("old-stopped"), "the sweep went past the bad label");
+        Assert.True(_docker.Containers.ContainsKey("bad-label"));
     }
 
     // ---- abandoned calls -------------------------------------------------------------------------------------------
@@ -434,6 +527,21 @@ public sealed class HostShellDeadlineTests
 
     // ---- double ----------------------------------------------------------------------------------------------------
 
+    /// <summary>A client the connection manager disposed after the run: the run's own steps go through, its kill and
+    /// remove throw <see cref="ObjectDisposedException"/>.</summary>
+    private sealed class DisposedAfterRun(FakeDocker inner) : IHostShellDocker
+    {
+        public Task<bool> HasImageAsync(string image, CancellationToken ct) => inner.HasImageAsync(image, ct);
+        public Task PullImageAsync(string repository, string tag, CancellationToken ct) => inner.PullImageAsync(repository, tag, ct);
+        public Task<string> CreateAsync(CreateContainerParameters parameters, CancellationToken ct) => inner.CreateAsync(parameters, ct);
+        public Task StartAsync(string id, CancellationToken ct) => inner.StartAsync(id, ct);
+        public Task<long> WaitAsync(string id, CancellationToken ct) => inner.WaitAsync(id, ct);
+        public Task<(string Output, string Error)> ReadLogsAsync(string id, CancellationToken ct) => inner.ReadLogsAsync(id, ct);
+        public Task KillAsync(string id, CancellationToken ct) => throw new ObjectDisposedException("DockerClient");
+        public Task RemoveAsync(string id, CancellationToken ct) => throw new ObjectDisposedException("DockerClient");
+        public Task<IReadOnlyList<HostShellHelper>> ListHelpersAsync(string label, CancellationToken ct) => inner.ListHelpersAsync(label, ct);
+    }
+
     /// <summary>The Docker steps of the host shell over an in-memory set of containers. A stalled step never completes
     /// and ignores its token. Calls made by the run are recorded apart from the sweep's listing.</summary>
     private sealed class FakeDocker : IHostShellDocker
@@ -478,12 +586,16 @@ public sealed class HostShellDeadlineTests
         public async Task<bool> HasImageAsync(string image, CancellationToken ct) { await Step("has-image"); return !ImageMissing; }
         public async Task PullImageAsync(string repository, string tag, CancellationToken ct) { await Step("pull"); ImageMissing = false; }
 
+        /// <summary>Create makes the helper on the "host", then its answer never arrives.</summary>
+        public bool CreateHangsAfterMaking { get; set; }
+
         public async Task<string> CreateAsync(CreateContainerParameters parameters, CancellationToken ct)
         {
             await Step("create");
             var id = $"helper{Interlocked.Increment(ref _next)}";
             Containers[id] = new Container(DateTime.UtcNow, false, new Dictionary<string, string>(parameters.Labels));
             Created.Enqueue(id);
+            if (CreateHangsAfterMaking) await new TaskCompletionSource().Task;
             return id;
         }
 

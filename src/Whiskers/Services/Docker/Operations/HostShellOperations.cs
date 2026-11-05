@@ -44,8 +44,12 @@ internal sealed class HostShellOperations
     /// <summary>How far past its deadline label a running helper must be before the sweep removes it.</summary>
     internal static readonly TimeSpan RunningGrace = TimeSpan.FromMinutes(1);
 
+    /// <summary>The latest deadline label a sweep accepts (9999-12-31T23:59:59Z); a larger one counts as garbled.</summary>
+    private const long MaxLabelSeconds = 253_402_300_799;
+
     private readonly TimeSpan _cleanupBudget;
     private readonly TimeSpan _backgroundCleanup;
+    private readonly TimeSpan _runningGrace;
     private readonly TimeProvider _time;
     private readonly IDockerConnectionManager? _connectionManager;
 
@@ -60,18 +64,22 @@ internal sealed class HostShellOperations
         _logger = logger ?? NullLogger.Instance;
         _cleanupBudget = DefaultCleanupBudget;
         _backgroundCleanup = DefaultBackgroundCleanup;
+        _runningGrace = RunningGrace;
         _time = TimeProvider.System;
     }
 
-    /// <summary>For tests: the Docker steps come from <paramref name="docker"/>; the budgets and the clock can be set.</summary>
+    /// <summary>For tests: the Docker steps come from <paramref name="docker"/>; the budgets, the sweep's grace past a
+    /// deadline label and the clock can be set.</summary>
     internal HostShellOperations(Func<string?, Task<IHostShellDocker>> docker, MemoryCache statsCache,
-        TimeSpan? cleanupBudget = null, TimeSpan? backgroundCleanup = null, TimeProvider? time = null, ILogger? logger = null)
+        TimeSpan? cleanupBudget = null, TimeSpan? backgroundCleanup = null, TimeProvider? time = null, ILogger? logger = null,
+        TimeSpan? runningGrace = null)
     {
         _docker = docker;
         _statsCache = statsCache;
         _logger = logger ?? NullLogger.Instance;
         _cleanupBudget = cleanupBudget ?? DefaultCleanupBudget;
         _backgroundCleanup = backgroundCleanup ?? DefaultBackgroundCleanup;
+        _runningGrace = runningGrace ?? RunningGrace;
         _time = time ?? TimeProvider.System;
     }
 
@@ -104,9 +112,14 @@ internal sealed class HostShellOperations
     public async Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(
         string command, string? serverId = null, TimeSpan? timeout = null, CancellationToken ct = default)
     {
+        var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
+        // Fail closed: a run without a finite, positive deadline would hold its caller and its privileged helper
+        // without bound. Refused before anything is created.
+        if (effectiveTimeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(timeout), effectiveTimeout,
+                "A host-shell run needs a finite, positive timeout.");
         if (ct.IsCancellationRequested)
             return ("", StoppedMessage(Stage.Setup, byCaller: true, TimeSpan.Zero, -1), -1);
-        var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
 
         // R1-38 (INV-40): the caller's cancellation reaches the command itself — the helper is killed, not left to
         // run on after the caller gave up — just as the timeout does. R1-57: the deadline starts here, before the first
@@ -119,6 +132,7 @@ internal sealed class HostShellOperations
         string? id = null;
         var stage = Stage.Setup;
         long exitCode = -1;
+        var labelEnd = DateTimeOffset.MinValue;
         try
         {
             docker = await Within(_docker(serverId), token);
@@ -146,6 +160,7 @@ internal sealed class HostShellOperations
             }
 
             var latestEnd = _time.GetUtcNow() + effectiveTimeout + _cleanupBudget;
+            labelEnd = latestEnd;
             var create = docker.CreateAsync(new CreateContainerParameters
             {
                 Image = HostShellImage,
@@ -164,10 +179,15 @@ internal sealed class HostShellOperations
             }
             catch when (deadline.IsCancellationRequested)
             {
-                // A create given up on may still make the helper. It was never started; remove it once it shows up.
+                // A create given up on may still make the helper. It was never started; remove it once its answer
+                // arrives — and, should the answer never arrive, a sweep past its deadline label finds it by the label.
                 RemoveWhenCreated(docker, create, serverId);
+                ScheduleSweep(serverId, latestEnd, docker);
                 throw;
             }
+
+            // A deadline that fired in the instant the create answered: the command was not started and is not.
+            token.ThrowIfCancellationRequested();
 
             // From the start request on, the command may run: a stop is no longer "it did not start".
             stage = Stage.Running;
@@ -195,7 +215,7 @@ internal sealed class HostShellOperations
         finally
         {
             if (docker is not null && id is not null)
-                await CleanUpAsync(docker, id, kill: stage == Stage.Running, serverId);
+                await CleanUpAsync(docker, id, kill: stage == Stage.Running, serverId, labelEnd);
         }
     }
 
@@ -225,20 +245,25 @@ internal sealed class HostShellOperations
 
     /// <summary>Kills (when it may still run) and removes the helper. The caller waits for the clean-up budget at most;
     /// whatever has not finished by then goes on in the background, retried up to <see cref="DefaultBackgroundCleanup"/>
-    /// — a privileged helper is never simply abandoned. Should that fail too, the helper's deadline label lets the sweep
-    /// remove it, running or not.</summary>
-    private async Task CleanUpAsync(IHostShellDocker docker, string id, bool kill, string? serverId)
+    /// — a privileged helper is never simply abandoned. Should that fail too, a sweep is scheduled for when the helper is
+    /// past its deadline label, which removes it running or not.</summary>
+    private async Task CleanUpAsync(IHostShellDocker docker, string id, bool kill, string? serverId, DateTimeOffset labelEnd)
     {
-        var cleanup = CleanUpUntilDoneAsync(docker, id, kill, serverId);
+        var cleanup = CleanUpUntilDoneAsync(docker, id, kill, serverId, labelEnd);
         try { await cleanup.WaitAsync(_cleanupBudget); }
         catch (TimeoutException)
         {
+            Observe(cleanup);
             _logger.LogWarning("Removing host-shell helper {Id} on {ServerId} takes longer than {Budget}s; it goes on in the background",
                 id, serverId, _cleanupBudget.TotalSeconds);
         }
     }
 
-    private async Task CleanUpUntilDoneAsync(IHostShellDocker docker, string id, bool kill, string? serverId)
+    /// <summary>Kills (when asked) and removes the helper, retrying until <see cref="DefaultBackgroundCleanup"/> runs
+    /// out. The first attempt uses the client of the run; every retry gets the server's client afresh, since the run's
+    /// may have been disposed meanwhile (a reconnect replaces it). Where no fresh one is to be had — the server is
+    /// paused for background traffic, the connection is being rebuilt — the run's client is tried again.</summary>
+    private async Task CleanUpUntilDoneAsync(IHostShellDocker docker, string id, bool kill, string? serverId, DateTimeOffset labelEnd)
     {
         using var limit = new CancellationTokenSource(_backgroundCleanup);
         var token = limit.Token;
@@ -247,14 +272,15 @@ internal sealed class HostShellOperations
         {
             try
             {
+                var client = attempt == 0 ? docker : await FreshOrAsync(docker, serverId, token);
                 if (kill)
                 {
                     // Not running any more (it exited, or was never started) is the answer kill gives then; the remove
                     // below decides.
-                    try { await Within(docker.KillAsync(id, token), token); }
+                    try { await Within(client.KillAsync(id, token), token); }
                     catch when (!token.IsCancellationRequested) { }
                 }
-                await Within(docker.RemoveAsync(id, token), token);
+                await Within(client.RemoveAsync(id, token), token);
                 return;
             }
             catch when (!token.IsCancellationRequested)
@@ -263,24 +289,57 @@ internal sealed class HostShellOperations
                 try { await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(10_000, 250 * Math.Pow(2, attempt))), token); }
                 catch (OperationCanceledException) { break; }
             }
-            catch (OperationCanceledException)
+            catch (Exception) when (token.IsCancellationRequested)
             {
                 break;
             }
         }
-        _logger.LogWarning("Host-shell helper {Id} on {ServerId} could not be removed within {Limit}; the sweep removes it once it is past its deadline label",
+        _logger.LogWarning("Host-shell helper {Id} on {ServerId} could not be removed within {Limit}; a sweep past its deadline label is scheduled",
             id, serverId, _backgroundCleanup);
+        ScheduleSweep(serverId, labelEnd, docker);
     }
 
-    /// <summary>A create the deadline gave up on may still make the helper on the host: remove it when it does.</summary>
+    /// <summary>The server's client, got afresh; the given one when none is to be had.</summary>
+    private async Task<IHostShellDocker> FreshOrAsync(IHostShellDocker fallback, string? serverId, CancellationToken token)
+    {
+        try { return await Within(_docker(serverId), token); }
+        catch when (!token.IsCancellationRequested) { return fallback; }
+    }
+
+    /// <summary>A create the deadline gave up on may still make the helper on the host: remove it when the answer
+    /// arrives. (Should it never arrive, the sweep scheduled alongside finds the helper by its label.)</summary>
     private void RemoveWhenCreated(IHostShellDocker docker, Task<string> create, string? serverId) =>
-        _ = create.ContinueWith(t =>
+        Observe(create.ContinueWith(t =>
         {
             if (t.IsCompletedSuccessfully)
-                _ = CleanUpUntilDoneAsync(docker, t.Result, kill: false, serverId);
+                Observe(CleanUpUntilDoneAsync(docker, t.Result, kill: false, serverId, DateTimeOffset.MinValue));
             else
                 _ = t.Exception; // observed
-        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default));
+
+    /// <summary>Sweeps the server once its helper with deadline label <paramref name="labelEnd"/> is past that label and
+    /// the grace — so a helper whose removal failed, or whose create never answered, is removed without waiting for a
+    /// later host-shell call. A label of <see cref="DateTimeOffset.MinValue"/> (no helper of this run to wait for) sweeps
+    /// at once. In the background, bounded by the sweep budget, and never holding a caller.</summary>
+    private void ScheduleSweep(string? serverId, DateTimeOffset labelEnd, IHostShellDocker fallback)
+    {
+        var due = labelEnd == DateTimeOffset.MinValue
+            ? TimeSpan.Zero
+            : labelEnd + _runningGrace + TimeSpan.FromSeconds(1) - _time.GetUtcNow();
+        Observe(SweepLaterAsync(serverId, due < TimeSpan.Zero ? TimeSpan.Zero : due, fallback));
+    }
+
+    private async Task SweepLaterAsync(string? serverId, TimeSpan due, IHostShellDocker fallback)
+    {
+        try
+        {
+            if (due > TimeSpan.Zero) await Task.Delay(due, _time);
+            using var budget = new CancellationTokenSource(SweepBudget);
+            var docker = await FreshOrAsync(fallback, serverId, budget.Token);
+            await SweepHostShellLeftoversAsync(docker);
+        }
+        catch { /* best effort; the next host-shell call on the server sweeps again */ }
+    }
 
     /// <summary>Awaits <paramref name="work"/> until <paramref name="token"/> fires, even when the call itself ignores
     /// the token. A call given up on keeps running in the background; its outcome is observed so it cannot surface as an
@@ -320,11 +379,10 @@ internal sealed class HostShellOperations
     /// <summary>
     /// Best-effort cleanup of host-shell helper containers that leaked from a previous run which was
     /// interrupted before its clean-up (e.g. the app container was rebuilt mid-command, or the
-    /// mTLS link dropped, or the background clean-up gave up). Touches only our own labelled containers:
-    /// a stopped one older than a short grace period, so it never races a command in flight, and — R1-57 — a running
-    /// one past its deadline label plus a grace period, which no run is waiting for any more. A running helper without
-    /// the label (an older version's) is left alone. Bounded by its own budget; it runs in the background and never
-    /// holds a caller.
+    /// mTLS link dropped, or the background clean-up gave up). Touches only our own labelled containers, judged by
+    /// <see cref="IsLeftover"/>. Runs with a host-shell call (at most every 5 min per server) and when scheduled past a
+    /// helper's deadline label (<see cref="ScheduleSweep"/>). Bounded by its own budget; it runs in the background and
+    /// never holds a caller; a helper it cannot judge or remove does not stop it.
     /// </summary>
     private async Task SweepHostShellLeftoversAsync(IHostShellDocker docker)
     {
@@ -336,23 +394,31 @@ internal sealed class HostShellOperations
             var now = _time.GetUtcNow();
             foreach (var helper in helpers)
             {
-                if (!IsLeftover(helper, now)) continue;
-                if (helper.Running)
-                    _logger.LogWarning("Removing host-shell helper {Id}: still running past its deadline", helper.Id);
-                try { await Within(docker.RemoveAsync(helper.Id, token), token); }
+                try
+                {
+                    if (!IsLeftover(helper, now, _runningGrace)) continue;
+                    if (helper.Running)
+                        _logger.LogWarning("Removing host-shell helper {Id}: still running past its deadline", helper.Id);
+                    await Within(docker.RemoveAsync(helper.Id, token), token);
+                }
                 catch when (!token.IsCancellationRequested) { /* best effort; next helper */ }
             }
         }
         catch { /* best effort */ }
     }
 
-    /// <summary>Whether the sweep removes <paramref name="helper"/> at <paramref name="now"/>.</summary>
-    internal static bool IsLeftover(HostShellHelper helper, DateTimeOffset now)
+    /// <summary>Whether the sweep removes <paramref name="helper"/> at <paramref name="now"/>. A helper with a readable
+    /// deadline label is judged by it alone, running or stopped: past the label plus <paramref name="grace"/> no run
+    /// waits for it any more, and before that one may (a stopped helper whose output is still being read). Without a
+    /// readable label (an older version's helper, or a garbled one) a stopped helper goes once older than a short grace,
+    /// and a running one is left alone.</summary>
+    internal static bool IsLeftover(HostShellHelper helper, DateTimeOffset now, TimeSpan? grace = null)
     {
-        if (!helper.Running)
-            return new DateTimeOffset(DateTime.SpecifyKind(helper.Created, DateTimeKind.Utc)) < now - StoppedGrace;
-        return helper.Labels.TryGetValue(DeadlineLabel, out var raw)
-               && long.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
-               && DateTimeOffset.FromUnixTimeSeconds(seconds) + RunningGrace < now;
+        if (helper.Labels.TryGetValue(DeadlineLabel, out var raw)
+            && long.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
+            && seconds <= MaxLabelSeconds)
+            return DateTimeOffset.FromUnixTimeSeconds(seconds) < now - (grace ?? RunningGrace);
+        return !helper.Running
+               && new DateTimeOffset(DateTime.SpecifyKind(helper.Created, DateTimeKind.Utc)) < now - StoppedGrace;
     }
 }

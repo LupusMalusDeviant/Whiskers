@@ -382,6 +382,14 @@ public class MutationGatewayCoverageTests
             .Distinct()
             .Order();
         Assert.Equal([hostShell], constructors);
+
+        // The interface pinned above has exactly one implementation in the app: another one would be a second way to
+        // drive Docker that the caller pin does not see.
+        var implementations = App.GetTypes()
+            .Where(t => !t.IsInterface && typeof(Whiskers.Services.Docker.Operations.IHostShellDocker).IsAssignableFrom(t))
+            .Select(t => t.FullName!)
+            .Order();
+        Assert.Equal([typeof(Whiskers.Services.Docker.Operations.DockerClientHostShell).FullName!], implementations);
     }
 
     [Fact]
