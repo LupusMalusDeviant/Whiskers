@@ -15,7 +15,7 @@ using Whiskers.Services.Persistence;
 namespace Whiskers.Tests;
 
 /// <summary>
-/// R1-47 (TA-50, F-13: "Identity on Postgres is not tested"): the local sign-in accounts on a REAL PostgreSQL 17. The whole
+/// R1-47 (TA-50, F-13: "Identity on Postgres is not tested"): the local sign-in accounts on a REAL PostgreSQL 18. The whole
 /// application is booted with <c>WHISKERS_DB_PROVIDER=postgres</c>: its start migrates both contexts into the server (each
 /// with its own history table), seeds the administrator there, and the sign-in, the lockout, the security stamp and the
 /// deletion of an account all run through the real pipeline against the rows in PostgreSQL. Mandatory on CI

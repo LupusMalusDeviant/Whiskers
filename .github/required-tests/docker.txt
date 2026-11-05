@@ -19,3 +19,9 @@
 33 Whiskers.Tests.PostgresBackupRestoreTests
 33 Whiskers.Tests.PostgresBackupRestorePg17Tests
 33 Whiskers.Tests.PostgresBackupRestorePg14Tests
+
+# The PostgreSQL 17 -> 18 upgrade of the overlay: the guard's script from the compose file against prepared volumes (9
+# cases + 2), the guide's dump and restore from 17 into 18 with the confirm run, and compose reading the overlay.
+11 Whiskers.Tests.PostgresUpgradeGuardTests
+3 Whiskers.Tests.PostgresUpgradeTests
+1 Whiskers.Tests.PostgresOverlayComposeTests

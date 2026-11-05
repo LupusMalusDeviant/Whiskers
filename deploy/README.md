@@ -121,7 +121,7 @@ These build inputs are pinned, and each has an update path in [`.github/dependab
 | Base images (SDK, ASP.NET runtime, `docker:<v>-cli`) | `FROM image:tag@sha256:…` in the [`Dockerfile`](../Dockerfile), each a multi-arch index (amd64 + arm64, checked in CI) | Dependabot `docker`: a new digest behind the same tag (OS and runtime fixes) or a new tag |
 | GitHub Actions | full commit SHA + `# vX.Y.Z` comment | Dependabot `github-actions` |
 
-Covered by Dependabot but **not digest-pinned**: the images of the compose files (`postgres:18-alpine`, node-exporter, VictoriaMetrics; the socket-proxy is pinned by digest) and of the Helm chart (the Tailscale sidecar, pinned by digest) — Dependabot `docker-compose` and `helm` propose new versions; a moving tag such as `17-alpine` still resolves to whatever it points at when pulled.
+Covered by Dependabot but **not digest-pinned**: the images of the compose files (`postgres:18-alpine`, node-exporter, VictoriaMetrics; the socket-proxy is pinned by digest) and of the Helm chart (the Tailscale sidecar, pinned by digest) — Dependabot `docker-compose` and `helm` propose new versions; a moving tag such as `18-alpine` still resolves to whatever it points at when pulled.
 
 **Onboarding templates (not seen by Dependabot):** `OnboardingCommands` writes the host-side compose files of the mTLS
 proxy (docker-socket-proxy + ghostunnel) and node_exporter. The socket-proxy and node_exporter images must equal those
