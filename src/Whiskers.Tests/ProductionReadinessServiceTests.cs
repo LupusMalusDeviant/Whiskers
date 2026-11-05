@@ -63,6 +63,46 @@ public class ProductionReadinessServiceTests : IDisposable
             servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true);
 
     [Fact]
+    public async Task A_peer_whose_forwarded_headers_were_ignored_is_named_and_none_means_no_line()
+    {
+        // R1-50: a reverse proxy that still has to be listed in ForwardedHeaders:TrustedNetworks (or a spoofing client).
+        var (vault, servers) = await Stores(null);
+        var observer = new Whiskers.Utils.ForwardedHeadersObserver();
+        async Task<ReadinessCheck?> Line() => (await new ProductionReadinessService(Config(null), vault,
+                _sp.GetRequiredService<IServiceScopeFactory>(), servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths,
+                forwarded: observer).GetChecksAsync(isHttps: true))
+            .SingleOrDefault(c => c.Title == "Reverse-Proxy vertraut");
+
+        Assert.Null(await Line());
+
+        observer.Untrusted(System.Net.IPAddress.Parse("172.18.0.2"));
+        var line = await Line();
+
+        Assert.NotNull(line);
+        Assert.False(line!.Ok);
+        Assert.Contains("172.18.0.2", line.Detail);
+        Assert.Contains("ForwardedHeaders__TrustedNetworks__0", line.Detail);
+    }
+
+    [Theory]
+    [InlineData(true, "false", true)]
+    [InlineData(true, "true", false)]
+    [InlineData(true, null, false)]
+    [InlineData(false, "false", false)]
+    public async Task Oidc_discovery_over_plain_http_is_named(bool enabled, string? requireHttps, bool named)
+    {
+        var (vault, servers) = await Stores(null);
+        var values = new Dictionary<string, string?> { ["Oidc:Enabled"] = enabled ? "true" : "false" };
+        if (requireHttps is not null) values["Oidc:RequireHttpsMetadata"] = requireHttps;
+        var config = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+
+        var checks = await new ProductionReadinessService(config, vault, _sp.GetRequiredService<IServiceScopeFactory>(),
+            servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true);
+
+        Assert.Equal(named, checks.Any(c => c.Title == "OIDC-Discovery über HTTPS" && !c.Ok));
+    }
+
+    [Fact]
     public async Task Unreadable_store_copies_kept_in_the_data_directory_are_named_after_a_restart()
     {
         // R1-35: the copy outlasts the restart that follows a power loss; the in-memory recovery record does not.

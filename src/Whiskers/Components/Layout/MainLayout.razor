@@ -69,8 +69,12 @@
                 @* R1-49: own account (password change for a local account, the MFA posture). *@
                 <MudIconButton Icon="@Icons.Material.Filled.ManageAccounts" Color="Color.Inherit"
                                Href="account" title="@L["Layout_Account"]" Style="color: var(--sw-text-muted);" />
-                <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit"
-                               Href="logout" title="@L["Layout_Logout"]" Style="color: var(--sw-text-muted);" />
+                @* R1-50 (A-16): sign-out is a POST with the antiforgery token, so another site cannot sign the user out. *@
+                <form method="post" action="logout" data-enhance="false" style="display: inline;">
+                    <AntiforgeryToken />
+                    <MudIconButton ButtonType="ButtonType.Submit" Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit"
+                                   title="@L["Layout_Logout"]" Style="color: var(--sw-text-muted);" />
+                </form>
             </Authorized>
         </AuthorizeView>
     </MudAppBar>

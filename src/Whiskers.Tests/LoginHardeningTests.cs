@@ -41,6 +41,32 @@ public sealed class LoginHardeningTests
             Assert.Equal(HttpStatusCode.TooManyRequests, (await LoginAsync(client, token, Password)).StatusCode);
         });
 
+    [Fact]
+    public async Task Every_refusal_spends_one_password_hash_check_unknown_wrong_and_locked_alike()
+    {
+        // R1-50 (A-16): the work, not a timing measurement — an unknown account, a wrong password and a locked account
+        // each cost exactly one hash verification, so the response time tells none of them apart.
+        var hasher = new CountingHasher();
+        await BootAsync(async (_, client) =>
+        {
+            var token = await AntiforgeryTokenAsync(client);
+
+            async Task<int> Cost(string email, string password)
+            {
+                var before = hasher.Verifications;
+                var response = await LoginAsync(client, token, password, email);
+                Assert.Contains("error=invalid", response.Headers.Location!.OriginalString);
+                return hasher.Verifications - before;
+            }
+
+            Assert.Equal(1, await Cost("nobody@local.test", "whatever-password"));
+            for (var i = 0; i < 5; i++)
+                Assert.Equal(1, await Cost(Email, "wrong-password-" + i));
+            // Locked now: refused without checking the real hash, but with the same work.
+            Assert.Equal(1, await Cost(Email, Password));
+        }, services => services.AddSingleton<Microsoft.AspNetCore.Identity.IPasswordHasher<Whiskers.Services.Persistence.AppUser>>(hasher));
+    }
+
     [Theory]
     [InlineData(AuthConstants.AuthDisabledScheme)]
     [InlineData(AuthConstants.AgentSyntheticScheme)]
@@ -76,13 +102,29 @@ public sealed class LoginHardeningTests
         return token;
     }
 
-    private static Task<HttpResponseMessage> LoginAsync(HttpClient client, string token, string password) =>
+    private static Task<HttpResponseMessage> LoginAsync(HttpClient client, string token, string password, string email = Email) =>
         client.PostAsync("/login-local", new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["email"] = Email, ["password"] = password, ["__RequestVerificationToken"] = token,
+            ["email"] = email, ["password"] = password, ["__RequestVerificationToken"] = token,
         }));
 
-    private static async Task BootAsync(Func<WebApplicationFactory<Program>, HttpClient, Task> body)
+    /// <summary>The real hasher, counting its verifications.</summary>
+    private sealed class CountingHasher : Microsoft.AspNetCore.Identity.IPasswordHasher<Whiskers.Services.Persistence.AppUser>
+    {
+        private readonly Microsoft.AspNetCore.Identity.PasswordHasher<Whiskers.Services.Persistence.AppUser> _inner = new();
+        private int _verifications;
+        public int Verifications => Volatile.Read(ref _verifications);
+        public string HashPassword(Whiskers.Services.Persistence.AppUser user, string password) => _inner.HashPassword(user, password);
+        public Microsoft.AspNetCore.Identity.PasswordVerificationResult VerifyHashedPassword(
+            Whiskers.Services.Persistence.AppUser user, string hashedPassword, string providedPassword)
+        {
+            Interlocked.Increment(ref _verifications);
+            return _inner.VerifyHashedPassword(user, hashedPassword, providedPassword);
+        }
+    }
+
+    private static async Task BootAsync(Func<WebApplicationFactory<Program>, HttpClient, Task> body,
+        Action<IServiceCollection>? services = null)
     {
         var dataDir = Path.Combine(Path.GetTempPath(), $"sw-login-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dataDir);
@@ -106,6 +148,7 @@ public sealed class LoginHardeningTests
             {
                 b.UseEnvironment("Development");
                 b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(config));
+                if (services is not null) b.ConfigureServices(services);
             });
             using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
             BootSettings.AssertBoot(factory.Services, config);

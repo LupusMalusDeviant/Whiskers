@@ -860,8 +860,9 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > all pinned by `ReleaseWorkflowTests`; controls in `docs/operations/ci-and-release-checks.md`.
 > Verified locally: the matrix, the PostgreSQL suites with Docker, the artifact checks against a locally built image and
 > the published 0.14.1 (upgrade) and 0.15.0, gitleaks, the vulnerable-package and analyzer gates. **Only CI proves:** the workflow runs
-> themselves (CodeQL, dependency review, the GitHub-hosted runner's Docker and host networking). Recorded for R1-50: the
-> challenge of an unconfigured Google/OIDC provider answers 500; anonymous MCP gets the sign-in redirect, not 401.
+> themselves (CodeQL, dependency review, the GitHub-hosted runner's Docker and host networking). Recorded for R1-50 (since
+> fixed there): the challenge of an unconfigured Google/OIDC provider answered 500; anonymous MCP got the sign-in
+> redirect, not 401.
 
 **Out of scope:** Replacing focused regression tests from earlier packages.
 
@@ -917,10 +918,36 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 
 **Acceptance criteria:**
 
-- [ ] `HttpSecurityTests` covers framing/content headers, supported TLS cookie policy and cross-site logout prevention.
-- [ ] `ForwardedHeadersConfigTests` proves untrusted clients cannot spoof rate-limit/trusted-network identity; invalid explicit configuration fails closed.
-- [ ] `EndpointAuthMatrixTests` covers MCP 401 behavior, absent providers, invalid local redirects and access-denied responses.
-- [ ] Pin unknown-user password work with an appropriate test; avoid claiming exact timing equality from the lockout test alone.
+- [x] `HttpSecurityTests` covers framing/content headers, supported TLS cookie policy and cross-site logout prevention.
+- [x] `ForwardedHeadersConfigTests` proves untrusted clients cannot spoof rate-limit/trusted-network identity; invalid explicit configuration fails closed.
+- [x] `EndpointAuthMatrixTests` covers MCP 401 behavior, absent providers, invalid local redirects and access-denied responses.
+- [x] Pin unknown-user password work with an appropriate test; avoid claiming exact timing equality from the lockout test alone.
+
+> Implemented (2026-11-05; middleware and auth integration approved by the maintainer the same day):
+> - **Proxy trust (A-15):** without `ForwardedHeaders:TrustedNetworks` only loopback is trusted (maintainer decision; it
+>   was every private range). Entries may be CIDRs or single addresses; one that is neither refuses the start. Forwarded
+>   headers from an untrusted peer are ignored and the peer is named in the production-readiness check.
+>   `ForwardedHeadersConfigTests` pins the parser; `HttpSecurityTests` proves over the real pipeline that a client that is
+>   not a trusted proxy cannot move the login rate limit with `X-Forwarded-For`, that a configured proxy forwards its
+>   clients' addresses, and that an unreadable list stops the boot. The Auth:Disabled network gate reads the same
+>   resolved address.
+> - **Headers (A-13):** every answer carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+>   `Content-Security-Policy: frame-ancestors 'none'` and `Referrer-Policy: same-origin`. Not added: a full CSP (Blazor
+>   and MudBlazor inline styles need a nonce scheme of their own) and HSTS (it would bind every service on the host name
+>   to HTTPS; that is the TLS-terminating proxy's decision).
+> - **Cookies (A-14):** the session cookie states HttpOnly, SameSite=Lax and Secure-when-HTTPS (the plain-HTTP LAN
+>   profile stays supported); OIDC no longer saves the IdP's tokens; a signed-in caller without the role gets 403; the
+>   readiness check names OIDC discovery over plain HTTP. Not done: the `__Host-` prefix (it requires Secure, which the
+>   HTTP profile cannot give; renaming would also sign everyone out).
+> - **Endpoints (A-16):** sign-out is a POST checked against the antiforgery token in its handler (a GET shows a
+>   one-button form and ends nothing); MCP without credentials gets 401 with a Bearer challenge; an unconfigured
+>   Google/OIDC provider answers 404; `/set-culture` follows only a local path (else `/`), pinned in `HttpSecurityTests`.
+>   `EndpointAuthMatrixTests` now requires 401 for MCP, 403 for a refused role and runs both provider handlers without a
+>   5xx. Not changed: the sign-in still lands on `/` (no `ReturnUrl`), and `UseAntiforgery` stays before
+>   `UseAuthentication` (the sign-out validates in its handler, after authentication, so its user-bound token checks).
+> - **Password work:** a locked account now spends the same hash verification as an unknown one or a wrong password;
+>   `LoginHardeningTests.Every_refusal_spends_one_password_hash_check_unknown_wrong_and_locked_alike` counts the
+>   verifications (work, not timing).
 
 **Out of scope:** Unconditionally requiring HTTPS where an explicitly supported local HTTP profile exists.
 

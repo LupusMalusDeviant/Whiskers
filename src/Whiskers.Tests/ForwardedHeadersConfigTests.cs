@@ -4,54 +4,61 @@ using Xunit;
 
 namespace Whiskers.Tests;
 
+/// <summary>R1-50 (A-15): which peers' forwarded headers are trusted. Without configuration only loopback; a configured
+/// list is taken as written; an entry that cannot be read refuses the start. The pipeline-level proof (a spoofed
+/// X-Forwarded-For does not move the login rate limit) is in <see cref="HttpSecurityTests"/>.</summary>
 public class ForwardedHeadersConfigTests
 {
+    [Theory]
+    [InlineData("null")]
+    [InlineData("")]
+    [InlineData(" |  ")]
+    public void Without_configuration_only_loopback_is_trusted(string entries)
+    {
+        string[]? configured = entries == "null" ? null : entries.Length == 0 ? [] : entries.Split('|');
+        var result = ForwardedHeadersConfig.ParseTrustedNetworks(configured);
+
+        Assert.True(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Loopback));
+        Assert.True(ForwardedHeadersConfig.IsTrusted(result, IPAddress.IPv6Loopback));
+        // Before R1-50 every private range was trusted: any client in the LAN or tailnet could claim another address.
+        foreach (var lan in new[] { "10.0.0.5", "172.17.0.2", "192.168.1.10", "100.64.1.1", "8.8.8.8" })
+            Assert.False(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Parse(lan)), lan);
+    }
+
     [Fact]
-    public void ParseTrustedNetworks_Null_ReturnsNonEmptyDefaults()
+    public void A_configured_list_is_taken_as_written_cidrs_and_single_addresses()
+    {
+        var result = ForwardedHeadersConfig.ParseTrustedNetworks(new[] { "10.1.2.0/24", " 172.18.0.7 ", "fd00::/8" });
+
+        Assert.True(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Parse("10.1.2.55")));
+        Assert.True(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Parse("172.18.0.7")));
+        Assert.False(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Parse("172.18.0.8")));
+        Assert.True(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Parse("fd00::1")));
+        // Configured means configured: loopback is not added on top.
+        Assert.False(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Loopback));
+        Assert.False(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Parse("8.8.8.8")));
+    }
+
+    [Theory]
+    [InlineData("nonsense")]
+    [InlineData("999.0.0.0/8")]
+    [InlineData("10.0.0.0/33")]
+    public void An_entry_that_cannot_be_read_refuses_the_start_instead_of_trusting_another_set(string bad)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            ForwardedHeadersConfig.ParseTrustedNetworks(new[] { "10.9.0.0/16", bad }));
+
+        Assert.Contains(bad, ex.Message);
+        Assert.Contains(ForwardedHeadersConfig.SectionName, ex.Message);
+    }
+
+    [Fact]
+    public void An_ipv4_mapped_peer_is_judged_by_its_ipv4_address()
     {
         var result = ForwardedHeadersConfig.ParseTrustedNetworks(null);
 
-        Assert.NotEmpty(result);
-        // Loopback must be trusted by default (reverse proxy on the same host).
-        Assert.Contains(result, n => n.Contains(IPAddress.Loopback));
-    }
-
-    [Fact]
-    public void ParseTrustedNetworks_Empty_ReturnsDefaults()
-    {
-        // An explicitly empty list must NOT collapse to trust-all — that is the whole vulnerability.
-        var result = ForwardedHeadersConfig.ParseTrustedNetworks(System.Array.Empty<string>());
-
-        Assert.NotEmpty(result);
-    }
-
-    [Fact]
-    public void ParseTrustedNetworks_AllInvalid_ReturnsDefaults()
-    {
-        // Bad config must fall back to safe defaults, never open trust-all, and never throw.
-        var result = ForwardedHeadersConfig.ParseTrustedNetworks(new[] { "nonsense", "999.0.0/8", "" });
-
-        Assert.NotEmpty(result);
-    }
-
-    [Fact]
-    public void ParseTrustedNetworks_Valid_ParsesExactEntries()
-    {
-        var result = ForwardedHeadersConfig.ParseTrustedNetworks(new[] { "10.1.2.0/24", "192.168.5.0/24" });
-
-        Assert.Equal(2, result.Count);
-        Assert.Contains(result, n => n.Contains(IPAddress.Parse("10.1.2.55")));
-        Assert.Contains(result, n => n.Contains(IPAddress.Parse("192.168.5.9")));
-        // A public address is never covered by the configured private ranges.
-        Assert.DoesNotContain(result, n => n.Contains(IPAddress.Parse("8.8.8.8")));
-    }
-
-    [Fact]
-    public void ParseTrustedNetworks_MixedValidAndInvalid_KeepsOnlyValid()
-    {
-        var result = ForwardedHeadersConfig.ParseTrustedNetworks(new[] { "garbage", "10.9.0.0/16" });
-
-        Assert.Single(result);
-        Assert.Contains(result, n => n.Contains(IPAddress.Parse("10.9.4.4")));
+        Assert.True(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Loopback.MapToIPv6()));
+        Assert.False(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Parse("10.0.0.5").MapToIPv6()));
+        Assert.False(ForwardedHeadersConfig.IsTrusted(result, null));
     }
 }

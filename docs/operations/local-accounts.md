@@ -88,10 +88,13 @@ people counted as one client — when:
   refused for a few minutes (clients) and up to about 15 minutes after the flood stops (accounts), and new entries may
   share one budget for up to about two windows (2 minutes for clients, 30 for accounts); the limit is never lifted. IPv6 clients are counted per /64, so a site with a delegated /56 or /48 prefix can present many clients.
 
-**Narrow `ForwardedHeaders:TrustedNetworks` to your real proxy.** The default trusts loopback, all private (RFC 1918)
-networks and the Tailscale range, so any client on your LAN can send its own `X-Forwarded-For` and pose as many clients.
-The per-account limit and the lockout still hold, but the per-client limit and the bounded audit trail of refusals
-do not. Example: `ForwardedHeaders__TrustedNetworks__0=172.18.0.2/32` for a single proxy container.
+**List your real proxy in `ForwardedHeaders:TrustedNetworks`, and only it.** Since R1-50 the default trusts loopback
+only, so no client can pose as another with its own `X-Forwarded-For`; a proxy in another container or on another host
+must be listed, or every visitor counts as that proxy (Settings → production readiness then names the proxy). Do not
+list whole private ranges: anything in a listed range can claim any address, and the per-client limit and the bounded
+audit trail of refusals no longer hold for it (the per-account limit and the lockout still do). Example:
+`ForwardedHeaders__TrustedNetworks__0=172.18.0.2/32` for a single proxy container. An entry that is neither a CIDR
+nor an address stops the start.
 
 The recovery page and the host CLI are not stopped by the kill switch (a person recovering their own access is not
 a write to managed infrastructure). Adding, resetting and deleting accounts — and redeeming a code — are refused while

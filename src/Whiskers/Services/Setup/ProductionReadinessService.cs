@@ -33,12 +33,14 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     private readonly Whiskers.Services.Agent.IAgentSettingsStore? _agentSettings;
     private readonly VaultKeyRingRepository? _keyRing;
     private readonly Whiskers.Configuration.DataPathOptions? _dataPaths;
+    private readonly Whiskers.Utils.ForwardedHeadersObserver? _forwarded;
 
     public ProductionReadinessService(IConfiguration config, IVaultService vault, IServiceScopeFactory scopeFactory,
         IServerConfigService? servers = null, IAppSettingsStore? appSettings = null,
         Whiskers.Services.Agent.IAgentSettingsStore? agentSettings = null, Whiskers.Configuration.DataPathOptions? dataPaths = null,
-        VaultKeyRingRepository? keyRing = null)
+        VaultKeyRingRepository? keyRing = null, Whiskers.Utils.ForwardedHeadersObserver? forwarded = null)
     {
+        _forwarded = forwarded;
         _keyRing = keyRing;
         _dataPaths = dataPaths;
         _config = config;
@@ -222,6 +224,31 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 ? "Diese Seite wurde über HTTPS ausgeliefert."
                 : "Diese Verbindung läuft über HTTP — im Dauerbetrieb einen TLS-terminierenden Reverse Proxy (Caddy/Traefik/nginx) davorschalten.",
             null, null));
+
+        // R1-50 (A-14): OIDC discovery over plain HTTP lets a man in the middle swap the IdP's keys and endpoints.
+        if (_config.GetValue<bool>("Oidc:Enabled") && !_config.GetValue("Oidc:RequireHttpsMetadata", true))
+        {
+            checks.Add(new ReadinessCheck(
+                "OIDC-Discovery über HTTPS",
+                false,
+                "Oidc:RequireHttpsMetadata ist aus: die Schlüssel und Endpunkte des Identity Providers werden über HTTP geholt " +
+                "und können unterwegs ausgetauscht werden. Nur im abgeschotteten Testnetz so betreiben.",
+                null, null));
+        }
+
+        // 7) R1-50: forwarded headers from a peer that is not a trusted proxy were ignored — either a reverse proxy that
+        // still has to be named in ForwardedHeaders:TrustedNetworks (until then the client address, the login rate limit
+        // and the audit see the proxy) or a client claiming another address.
+        if (_forwarded?.LastUntrustedPeer is { } untrusted)
+        {
+            checks.Add(new ReadinessCheck(
+                "Reverse-Proxy vertraut",
+                false,
+                $"{untrusted.Peer} hat zuletzt um {untrusted.At:yyyy-MM-dd HH:mm} UTC X-Forwarded-Header geschickt, ist aber kein " +
+                "vertrauter Proxy; die Header wurden ignoriert. Ist das Ihr Reverse Proxy, tragen Sie sein Netz in " +
+                "ForwardedHeaders__TrustedNetworks__0 ein (Standard: nur Loopback) — sonst sehen Login-Limit und Audit nur seine Adresse.",
+                null, null));
+        }
 
         return checks;
     }
