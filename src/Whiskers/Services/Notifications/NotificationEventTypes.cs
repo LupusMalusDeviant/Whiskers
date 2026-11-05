@@ -62,6 +62,9 @@ public static class NotificationEventTypes
     public const string LogScanSuspended = "log_scan_suspended";
     public const string LogScanResumed = "log_scan_resumed";
 
+    /// <summary>R1-57: an endpoint check failed for its open window (contract 0004); closes with a <c>_recovered</c>.</summary>
+    public const string EndpointCheckFailed = "endpoint_check_failed";
+
     // --- Agent, automation and administration --------------------------------------------------------------------
     public const string AgentAction = "agent_action";
     public const string AgentApproval = "agent_approval";
@@ -106,6 +109,7 @@ public static class NotificationEventTypes
         HostApiSlow => "slow Docker API",
         HostCpuAnomaly => "unusual server CPU",
         HostCpuBaselineDrifted => "drifted CPU baseline",
+        EndpointCheckFailed => "endpoint check",
         _ => kind,
     };
 
@@ -114,6 +118,7 @@ public static class NotificationEventTypes
     {
         HighCpu, HighMemory, HighDisk, MetricsGap,
         HostCpuHigh, HostMemoryHigh, HostCpuUnexplained, HostApiSlow, HostCpuAnomaly, HostCpuBaselineDrifted,
+        EndpointCheckFailed,
     };
 
     /// <summary>Every constant above (not the two patterns).</summary>
@@ -153,6 +158,7 @@ public static class NotificationEventTypes
         Unhealthy, OomKilled, Stopped, RestartLoop, ImageUpdate, AutoUpdateStart, CveFinding,
         HighCpu, HighMemory, HighDisk, MetricsGap, MetricAnomaly,
         HostCpuHigh, HostMemoryHigh, HostCpuUnexplained, HostApiSlow, HostCpuAnomaly, HostCpuBaselineDrifted,
+        EndpointCheckFailed,
         ServerUnreachable, ServerRecovered, ServerThrottled, ServerThrottlingEnded, CertificateExpiring, CertificateExpired,
         LogRotationMissing, LoopsPaused, LoopsResumed, AgentAction,
     };

@@ -47,6 +47,8 @@ public static class NotificationFormatter
         NotificationEventTypes.ServerRecovered => ("Server reachable again", "Info"),
         NotificationEventTypes.CertificateExpiring => ("Certificate expires soon", "Warning"),
         NotificationEventTypes.CertificateExpired => ("Certificate expired", "Error"),
+        NotificationEventTypes.EndpointCheckFailed => ("Endpoint check failing", "Error"),
+        "endpoint_check_failed_recovered" => ("Endpoint check passing again", "Info"),
         // Whiskers throttling ITSELF. Never silent: a self-imposed pause that nobody is told about
         // turns "quiet" into "blind", and hides the next incident behind the fix for the last one.
         NotificationEventTypes.HostCpuAnomaly => ("Server CPU is far from this host's normal", "Warning"),
@@ -108,6 +110,7 @@ public static class NotificationFormatter
         if (e.EventType is NotificationEventTypes.HighDisk or "high_disk_recovered") return "servers";
         if (e.EventType == "log_rotation_missing") return "servers";
         if (e.EventType is "certificate_expiring" or "certificate_expired") return "servers";
+        if (e.EventType is NotificationEventTypes.EndpointCheckFailed or "endpoint_check_failed_recovered") return "checks";
         if (e.EventType is "loops_paused" or "loops_resumed") return "servers";
         if (e.EventType is "monitoring_stalled" or "monitoring_resumed") return "servers";
         if (e.EventType is "log_scan_suspended" or "log_scan_resumed") return "logs";

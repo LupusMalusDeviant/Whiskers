@@ -415,6 +415,126 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.ToTable("CveFirstSeen");
                 });
 
+            modelBuilder.Entity("Whiskers.Models.EndpointCheckEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ExceptionsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("ExpectedStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("IntervalSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LastOutcome")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("LastRunUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("OwnerId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("Port")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ServerId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SuspendedReason")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("TimeoutSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TlsWarnDays")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServerId");
+
+                    b.ToTable("EndpointChecks");
+                });
+
+            modelBuilder.Entity("Whiskers.Models.EndpointCheckResultEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("AddressesNotTried")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AddressesTried")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AnsweredAddress")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("AtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CheckId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Detail")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("HttpStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LatencyMs")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OperationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("TlsNotAfterUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckId", "AtUtc");
+
+                    b.ToTable("EndpointCheckResults");
+                });
+
             modelBuilder.Entity("Whiskers.Models.LogAlertRuleEntity", b =>
                 {
                     b.Property<long>("Id")

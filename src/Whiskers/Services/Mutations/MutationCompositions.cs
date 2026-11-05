@@ -73,6 +73,7 @@ public static class MutationCompositions
         "db.query",                  // container page: SQL file import through the container's client
         "compose.deploy",            // deploy_compose, UI compose deploys, webhook compose deploys
         "app.deploy",                // UI App Store deploys (a compose deployment planned per container)
+        "endpointcheck.run",         // R1-57: fixed probe commands of an endpoint check (resolve, curl, nc, openssl)
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>True when an execution decided as <paramref name="decided"/> may run a raw host command.</summary>

@@ -144,6 +144,9 @@ public static class SqliteToPostgresMigrator
         T("VolumeBackups",     c => c.VolumeBackups,     e => e.Id = 0),
         T("ScheduledTasks",    c => c.ScheduledTasks,    e => e.Id = 0),
         T("TaskRunHistory",    c => c.TaskRunHistory,    e => e.Id = 0),
+        // R1-57: check ids are strings that audit rows name — kept; results are renumbered.
+        T("EndpointChecks",    c => c.EndpointChecks,    _ => { }),
+        T("EndpointCheckResults", c => c.EndpointCheckResults, e => e.Id = 0),
         T("LogAlertRules",     c => c.LogAlertRules,     e => e.Id = 0),
         T("UpdatePolicies",    c => c.UpdatePolicies,    e => e.Id = 0),
         T("UpdateHistory",     c => c.UpdateHistory,     e => e.Id = 0),

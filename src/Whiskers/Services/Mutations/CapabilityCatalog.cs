@@ -159,6 +159,11 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // Servers page: add / edit a server (host, credentials, SSH key, kubeconfig) or remove it.
         yield return Ui("server.save", A, "server", Root, Short);
         yield return Ui("server.remove", A, "server", Des, Short);
+        // R1-57 (contract 0004): endpoint checks run on the host they are bound to. A run executes fixed probe commands
+        // through the host executor as host.exec does, so it is RootEquivalent; the monitor runs it as the check's owner.
+        yield return Ui("endpointcheck.save", A, "server", Rev, Short);
+        yield return Ui("endpointcheck.delete", A, "server", Rev, Short);
+        yield return Ui("endpointcheck.run", A, "server", Root, Normal);
         // AI triggers page: which events start the agent and what it is told to do.
         yield return Ui("aitrigger.save", A, "whiskers", Root, Short);
         // Settings: restore Whiskers' own data from a self-backup (maintenance, staged swap, process restart).

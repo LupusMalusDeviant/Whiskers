@@ -44,6 +44,7 @@ public class MutationGatewayCoverageTests
         "container.env_set",         // set_container_env (MCP/agent)
         "container.env_file_save",   // container page: .env save + compose up
         "container.exec",            // container page: Artisan migrate / rollback
+        "endpointcheck.run",         // R1-57: the monitor (as the owner) and "Run now" (as the Admin)
     ];
 
     /// <summary>Who calls the primitive, and under which capability (the scanner sees the caller, the guard the scope).</summary>
@@ -61,6 +62,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Components.Pages.ContainerDatabasePanel", "ExecInContainerViaHost", "container.exec, db.query"),
         ("Whiskers.Services.Mutations.ComposeImpact", "DeployAsync", "app.deploy, compose.deploy"),
         ("Whiskers.Services.Webhooks.WebhookService", "DeployCompose", "compose.deploy"),
+        ("Whiskers.Services.EndpointChecks.EndpointCheckRunner", "ProbeAsync", "endpointcheck.run"),
     ];
 
     /// <summary>The writes by surface: a row per path a person, a key, the agent or Whiskers itself starts.</summary>
@@ -88,6 +90,9 @@ public class MutationGatewayCoverageTests
         ("ui", "webhook.set_enabled", "IWebhookService.SetEnabledAsync"),
         ("ui", "webhook.delete", "IWebhookService.DeleteWebhookAsync"),
         ("ui", "cloud.power_on", "ICloudControlService.PowerOnAsync"),
+        ("ui", "endpointcheck.save", "IEndpointCheckStore.SaveAsync"),
+        ("ui", "endpointcheck.delete", "IEndpointCheckStore.DeleteAsync"),
+        ("ui", "endpointcheck.run", "primitive"),
         // MCP tools and the agent (M-rows) — McpGuardrailFilter / AgentToolInvoker
         ("mcp", "host.exec", "primitive"),
         ("mcp", "container.env_set", "primitive"),
@@ -111,6 +116,7 @@ public class MutationGatewayCoverageTests
         ("background", "autopatch.run", "IAutoPatchService.RunCycleAsync"),
         ("background", "container.update", "IDockerService.RecreateContainerAsync"),
         ("background", "vpn.bootstrap", "IVpnProvider.EnsureUpAsync"),
+        ("background", "endpointcheck.run", "primitive"),
         // Webhooks (S-04/S-05) — automation runner on the owner's authority
         ("webhook", "container.restart", "IDockerService.RestartContainerAsync"),
         ("webhook", "gitdeploy.deploy", "IGitDeployService.DeployAsync"),
@@ -546,6 +552,11 @@ public class MutationGatewayCoverageTests
         ("IAgentTranscriptStore.ClearAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAgentTranscriptStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAlertBreachStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
+        ("IEndpointCheckStore.RecordAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
+        ("IEndpointCheckStore.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
+        ("IEndpointCheckStore.SuspendAsync", "R1-57: switches a check off because its owner lost the authority to run it (INV-04), as ScheduledTaskSuspender does — it never runs or widens anything"),
+        ("IEndpointCheckRunner.RunAsync", "R1-57: runs inside its own endpointcheck.run decision (IAutomationMutationRunner); the host command is the guarded primitive"),
+        ("IEndpointCheckRunner.RunInDecisionAsync", "R1-57: runs only inside an endpointcheck.run decision the caller holds; outside one the scope guard refuses its host command"),
         ("IAlertSuppressionStore.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAutoPatchNightlyStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IChatHistoryStore.ClearAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),

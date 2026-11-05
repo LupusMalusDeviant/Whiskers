@@ -5738,4 +5738,136 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="IdentityBindings_Error_failed" xml:space="preserve">
     <value>The action failed ({0}); see the log.</value>
   </data>
+  <data name="Nav_EndpointChecks" xml:space="preserve">
+    <value>Endpoint checks</value>
+  </data>
+  <data name="Checks_Title" xml:space="preserve">
+    <value>Endpoint checks</value>
+  </data>
+  <data name="Checks_Subtitle" xml:space="preserve">
+    <value>HTTP, TCP and certificate checks, run from the managed hosts</value>
+  </data>
+  <data name="Checks_Intro" xml:space="preserve">
+    <value>Each check runs on the host it belongs to (curl, nc, openssl, getent), never from Whiskers itself. Internal addresses are refused unless an Admin adds an exception. Every run is recorded in the audit log.</value>
+  </data>
+  <data name="Checks_Button_New" xml:space="preserve">
+    <value>New check</value>
+  </data>
+  <data name="Checks_Form_New" xml:space="preserve">
+    <value>New endpoint check</value>
+  </data>
+  <data name="Checks_Form_Edit" xml:space="preserve">
+    <value>Edit endpoint check</value>
+  </data>
+  <data name="Checks_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Checks_Field_Server" xml:space="preserve">
+    <value>Runs on server</value>
+  </data>
+  <data name="Checks_Field_Kind" xml:space="preserve">
+    <value>Kind</value>
+  </data>
+  <data name="Checks_Kind_Tls" xml:space="preserve">
+    <value>TLS expiry</value>
+  </data>
+  <data name="Checks_Field_Url" xml:space="preserve">
+    <value>URL (http:// or https://)</value>
+  </data>
+  <data name="Checks_Field_Host" xml:space="preserve">
+    <value>Host name or IP address</value>
+  </data>
+  <data name="Checks_Field_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="Checks_Field_Status" xml:space="preserve">
+    <value>Expected status (empty = any 2xx)</value>
+  </data>
+  <data name="Checks_Field_WarnDays" xml:space="preserve">
+    <value>Warn days (default 14)</value>
+  </data>
+  <data name="Checks_Field_Interval" xml:space="preserve">
+    <value>Interval (s)</value>
+  </data>
+  <data name="Checks_Field_Timeout" xml:space="preserve">
+    <value>Timeout (s)</value>
+  </data>
+  <data name="Checks_Field_Exceptions" xml:space="preserve">
+    <value>Internal-target exceptions</value>
+  </data>
+  <data name="Checks_Field_ExceptionsHelp" xml:space="preserve">
+    <value>One per line: "host port address…" (a host name needs its exact addresses) or "IP port".</value>
+  </data>
+  <data name="Checks_Field_Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="Checks_Button_Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Checks_Button_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Checks_Filter_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Checks_Filter_Failing" xml:space="preserve">
+    <value>Only failing</value>
+  </data>
+  <data name="Checks_Empty" xml:space="preserve">
+    <value>No endpoint checks.</value>
+  </data>
+  <data name="Checks_Table_Name" xml:space="preserve">
+    <value>Check</value>
+  </data>
+  <data name="Checks_Table_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Checks_Table_Target" xml:space="preserve">
+    <value>Target</value>
+  </data>
+  <data name="Checks_Table_Last" xml:space="preserve">
+    <value>Last run</value>
+  </data>
+  <data name="Checks_Table_Latency" xml:space="preserve">
+    <value>Latency</value>
+  </data>
+  <data name="Checks_Table_Expiry" xml:space="preserve">
+    <value>Certificate expires</value>
+  </data>
+  <data name="Checks_State_Off" xml:space="preserve">
+    <value>Off</value>
+  </data>
+  <data name="Checks_State_Suspended" xml:space="preserve">
+    <value>Suspended</value>
+  </data>
+  <data name="Checks_State_NotRun" xml:space="preserve">
+    <value>Not run yet</value>
+  </data>
+  <data name="Checks_Button_RunNow" xml:space="preserve">
+    <value>Run now</value>
+  </data>
+  <data name="Checks_Button_Edit" xml:space="preserve">
+    <value>Edit</value>
+  </data>
+  <data name="Checks_Button_Delete" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="Checks_Outcome_Passed" xml:space="preserve">
+    <value>Passed</value>
+  </data>
+  <data name="Checks_Outcome_Failed" xml:space="preserve">
+    <value>Failed</value>
+  </data>
+  <data name="Checks_Outcome_Refused" xml:space="preserve">
+    <value>Refused</value>
+  </data>
+  <data name="Checks_Snackbar_AdminOnly" xml:space="preserve">
+    <value>Only an Admin can change or run endpoint checks.</value>
+  </data>
+  <data name="Checks_Snackbar_Saved" xml:space="preserve">
+    <value>Endpoint check saved.</value>
+  </data>
+  <data name="Checks_Snackbar_Deleted" xml:space="preserve">
+    <value>Endpoint check deleted.</value>
+  </data>
 </root>
