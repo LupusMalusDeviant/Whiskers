@@ -6,6 +6,15 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Fix: a host command over mTLS can no longer hang past its timeout.** The SSH-free host shell (a one-shot helper
+  container over the mTLS Docker connection) started its timeout only once the helper was created; checking or pulling
+  the helper image, creating it, reading its output and removing it ran without a limit, so a stalled Docker step could
+  hold the caller — and with it a background loop's slot — indefinitely. The timeout now covers every step from the
+  first Docker call to the output, also a call that ignores its cancellation, and killing and removing the helper have
+  5 seconds of their own after it; a helper left behind is removed by the existing sweep. The error says where the run
+  stood: "did not start" before the start request, "effect unknown" after it, "exit code N, output not read" once it had
+  finished. Local and SSH commands wait at most 5 seconds for their output streams after a timeout kill. Prerequisite
+  of R1-57; the mTLS transport itself (certificates, allowed client name, proxy verbs) is unchanged.
 - **Fix: an unset `GOOGLE_ADMIN_EMAIL` no longer switches on a whitelist that admits nobody.** Compose passes it as
   `GoogleAuth__AllowedEmails__0=`, and a fresh instance seeded an enabled whitelist holding one empty entry, which turned
   away every Google and OIDC sign-in. The seed now drops blank entries (and trims and de-duplicates the rest); with none

@@ -1292,13 +1292,18 @@ the Local server included — through that executor; Whiskers itself opens no co
   day; audit retention is R1-23's). Executor calls per run are bounded separately: one `getent`, then at most 4
   allowed addresses tried, each attempt under the check's timeout and the whole run under one deadline; tests cover
   a name with many answers and every address failing.
-- [ ] **Prerequisite — executor deadlines.** Today the mTLS path drops cancellation (`HostCommandExecutor.cs:61`) and
+- [x] **Prerequisite — executor deadlines.** Today the mTLS path drops cancellation (`HostCommandExecutor.cs:61`) and
   `HostShellOperations.cs:56` inspects or pulls the helper image, creates and starts the container before its timeout
   starts, with log retrieval and cleanup outside it; a stalled Docker step can outlive any check deadline. Before
   checks ship, the executor honours one deadline across setup, execution, result retrieval and cleanup on every
   transport. This touches the mTLS layer, a protected area: it needs the maintainer's explicit approval and lands as
   its own reviewed change (or inside R1-57 once approved). Tests cover a stalled image pull/create, a stalled command
   and a stalled log retrieval, each ending within the deadline.
+  *Done (approved by the maintainer on 5 November 2026, own change):* the timeout is one deadline over every Docker
+  step (`HostShellOperations`, steps behind `IHostShellDocker`); kill and remove have a 5 s clean-up budget after it,
+  so a call ends at most timeout + 5 s after it began; local/SSH output streams are awaited at most 5 s after a kill.
+  `HostShellDeadlineTests` stall the client, image check, pull, create, start, wait, log read, kill and remove — each
+  step ignoring its token — and every case ends within the bound.
 - [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
   a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.
 - [ ] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists

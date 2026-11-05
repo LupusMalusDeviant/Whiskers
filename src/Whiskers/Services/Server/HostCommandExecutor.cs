@@ -14,6 +14,9 @@ public class HostCommandExecutor : IHostCommandExecutor
 
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>R1-57: how long a stopped local or SSH command's output streams are awaited after the kill.</summary>
+    private static readonly TimeSpan DrainBudget = TimeSpan.FromSeconds(5);
+
     /// <summary>R1-38 (INV-40): a command stopped by its caller may already have changed something.</summary>
     internal const string CancelledMessage = "Command cancelled — its effect is unknown";
 
@@ -97,7 +100,8 @@ public class HostCommandExecutor : IHostCommandExecutor
         _logger.LogDebug("Executing host command on {ServerId} via mTLS Docker (nsenter container): {Command}", serverId, SecretRedactor.Redact(command));
         try
         {
-            // R1-38: the caller's token reaches the helper container, which is killed when it fires.
+            // R1-38: the caller's token reaches the helper container, which is killed when it fires. R1-57: the timeout
+            // covers every Docker step (setup, run, output) and the clean-up has a short budget of its own after it.
             var (output, error, exitCode) = await _docker.RunHostShellAsync(command, serverId, timeout, ct);
             return new CommandResult { ExitCode = exitCode, Output = output, Error = error };
         }
@@ -245,7 +249,9 @@ public class HostCommandExecutor : IHostCommandExecutor
                 // and observe the read tasks so they don't fault unobserved.
                 var timedOut = !ct.IsCancellationRequested;
                 try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-                try { await Task.WhenAll(stdoutTask, stderrTask); } catch { /* reads cancel with the token */ }
+                // R1-57: the reads cancel with the token, but a pipe a stray grandchild keeps open must not hold the
+                // caller past the deadline either — their outcome is awaited for the clean-up budget at most.
+                try { await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(DrainBudget); } catch { /* best effort */ }
 
                 if (timedOut)
                 {
