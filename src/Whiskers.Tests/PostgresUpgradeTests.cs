@@ -266,7 +266,7 @@ public sealed class PostgresUpgradeTests : IClassFixture<PostgresUpgradeTests.Se
         var early = await GuardRunner.RunAsync(_s.Guard, null, "WHISKERS_FINGERPRINT=1");
         Assert.Equal(1, early.Exit);
         Assert.Equal("", early.Out);
-        Assert.Contains("Stop PostgreSQL 17 first: c17 stop db.", early.Err);
+        Assert.Contains("Stop PostgreSQL 17 first: c17 stop -t 120 db.", early.Err);
         await _s.Pg17.StopAsync();
         var fingerprint = await GuardRunner.RunAsync(_s.Guard, null, "WHISKERS_FINGERPRINT=1");
         Assert.True(fingerprint.Exit == 0, fingerprint.Err);

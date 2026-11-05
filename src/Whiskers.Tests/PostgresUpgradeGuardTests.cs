@@ -171,7 +171,7 @@ public sealed class PostgresUpgradeGuardTests : IAsyncLifetime
 
             Assert.True(run.Exit == 1, $"{dir}: exit {run.Exit}\n{run.Out}{run.Err}");
             Assert.Equal("", run.Out);   // nothing appended to the dump
-            Assert.Contains("Stop PostgreSQL 17 first: c17 stop db.", run.Err);
+            Assert.Contains("Stop PostgreSQL 17 first: c17 stop -t 120 db.", run.Err);
             Assert.Contains("not shut down cleanly: run step 1", run.Err);   // a stale pid file after a kill
         }
     }

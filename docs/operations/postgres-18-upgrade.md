@@ -122,10 +122,10 @@ c run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-p
 - `c17 stop -t 120 db` gives PostgreSQL up to two minutes for its shutdown checkpoint instead of compose's default 10
   seconds, after which it would be killed.
 - The last command appends one comment line, `-- whiskers-pg17-control: <fingerprint>`, taken from the stopped 17
-  cluster. It refuses while PostgreSQL 17 still runs (`c17 stop db` first). With no client connected at the dump and
+  cluster. It refuses while PostgreSQL 17 still runs (`c17 stop -t 120 db` first). With no client connected at the dump and
   17 stopped right after it, the fingerprint stands for the state the dump holds: if PostgreSQL 17 runs again later,
   the restore refuses this dump, and you take a new one.
-- If it refuses although `c17 ps db` shows the database stopped, PostgreSQL 17 was not shut down cleanly (killed, a
+- If it refuses although `c17 ps db` lists nothing (`c17 ps -a db` shows it `Exited`), PostgreSQL 17 was not shut down cleanly (killed, a
   crash): its `postmaster.pid` is still in the volume. Run step 1 again from the top; starting 17 recovers the cluster
   and a clean stop removes the file.
 - This is the last time anything writes to the 17 volume, unless you go back.
