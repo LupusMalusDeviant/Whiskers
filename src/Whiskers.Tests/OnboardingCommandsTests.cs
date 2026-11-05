@@ -83,6 +83,25 @@ public class OnboardingCommandsTests
     }
 
     [Fact]
+    public void NodeExporterCompose_and_the_deploy_compose_read_the_textfile_collector_through_the_read_only_host_mount()
+    {
+        // R1-58 (contract 0005, decision 3): SMART arrives through the textfile collector; the directory is reached through
+        // the existing read-only /:/host mount — no new mount, no write path on the host.
+        const string flag = "--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector";
+        var yml = OnboardingCommands.NodeExporterCompose("100.64.0.7");
+        Assert.Contains(flag, yml);
+        Assert.Contains("'/:/host:ro,rslave'", yml);
+        Assert.Single(yml.Split('\n'), l => l.TrimStart().StartsWith("- '/", StringComparison.Ordinal));
+
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null && !File.Exists(Path.Combine(dir, "Whiskers.slnx"))) dir = Path.GetDirectoryName(dir);
+        Assert.NotNull(dir);
+        var deploy = File.ReadAllText(Path.Combine(dir!, "deploy", "telemetry", "host", "docker-compose.yml"));
+        Assert.Contains(flag, deploy);
+        Assert.Contains("'/:/host:ro,rslave'", deploy);
+    }
+
+    [Fact]
     public void DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off()
     {
         var yml = OnboardingCommands.DockerProxyCompose("100.64.0.7");

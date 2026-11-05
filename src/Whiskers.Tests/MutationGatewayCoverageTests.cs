@@ -546,6 +546,8 @@ public class MutationGatewayCoverageTests
         ("IAgentTranscriptStore.ClearAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAgentTranscriptStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAlertBreachStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
+        // R1-58: the disk-health monitor's last readings and open alerts, kept across a restart.
+        ("IDiskHealthStateStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAlertSuppressionStore.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAutoPatchNightlyStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IChatHistoryStore.ClearAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
