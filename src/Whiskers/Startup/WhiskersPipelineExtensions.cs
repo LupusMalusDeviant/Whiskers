@@ -46,8 +46,7 @@ public static class WhiskersPipelineExtensions
         // X-Forwarded-For and corrupt the client address of the login rate limit, the Auth:Disabled gate and the
         // audit. R1-50: defaults to loopback only; override via ForwardedHeaders:TrustedNetworks (CIDRs or addresses).
         // An entry that is neither refuses the start (fail closed) instead of trusting a different set.
-        var trustedProxies = ForwardedHeadersConfig.ParseTrustedNetworks(
-            app.Configuration.GetSection(ForwardedHeadersConfig.SectionName).Get<string[]>());
+        var trustedProxies = ForwardedHeadersConfig.FromConfiguration(app.Configuration);
         forwardedHeadersOptions.KnownIPNetworks.Clear();
         forwardedHeadersOptions.KnownProxies.Clear();
         foreach (var network in trustedProxies)
@@ -58,10 +57,14 @@ public static class WhiskersPipelineExtensions
         var forwardedObserver = app.Services.GetService<ForwardedHeadersObserver>();
         app.Use(async (ctx, next) =>
         {
-            if (forwardedObserver is not null
-                && (ctx.Request.Headers.ContainsKey("X-Forwarded-For") || ctx.Request.Headers.ContainsKey("X-Forwarded-Proto"))
+            if ((ctx.Request.Headers.ContainsKey("X-Forwarded-For") || ctx.Request.Headers.ContainsKey("X-Forwarded-Proto"))
                 && !ForwardedHeadersConfig.IsTrusted(trustedProxies, ctx.Connection.RemoteIpAddress))
-                forwardedObserver.Untrusted(ctx.Connection.RemoteIpAddress);
+            {
+                // The Auth:Disabled gate refuses such a request: the peer may be a proxy that is not listed yet, and
+                // then its address (often a private one) would stand in for every client behind it.
+                ctx.Items[ForwardedHeadersConfig.IgnoredItemKey] = true;
+                forwardedObserver?.Untrusted(ctx.Connection.RemoteIpAddress);
+            }
             await next();
         });
         app.UseForwardedHeaders(forwardedHeadersOptions);
@@ -176,7 +179,8 @@ public static class WhiskersPipelineExtensions
             {
                 // Every request below this point is an Admin — refuse anything that is not plainly from the trusted
                 // network (public client, DNS-rebinding Host, cross-site Origin). See AuthDisabledAccessPolicy.
-                var refused = access.Check(ctx.Connection.RemoteIpAddress, ctx.Request.Host.Value, ctx.Request.Headers.Origin);
+                var refused = access.Check(ctx.Connection.RemoteIpAddress, ctx.Request.Host.Value, ctx.Request.Headers.Origin,
+                    forwardedIgnored: ctx.Items.ContainsKey(ForwardedHeadersConfig.IgnoredItemKey));
                 if (refused is not null)
                 {
                     ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Whiskers.AuthDisabled")
@@ -233,7 +237,7 @@ public static class WhiskersPipelineExtensions
                     new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true, Path = "/" });
             }
             // R1-50: a redirect that is not local goes home instead of throwing (500); only a local path is followed.
-            var target = !string.IsNullOrEmpty(redirect) && IsLocalPath(redirect) ? redirect : "/";
+            var target = !string.IsNullOrEmpty(redirect) && IsLocalPath(redirect) ? redirect : "~/";
             return Results.LocalRedirect(target);
         }).AllowAnonymous();
 
@@ -284,8 +288,8 @@ public static class WhiskersPipelineExtensions
                 // MaxFailedAccessAttempts (5) wrong passwords lock the account for DefaultLockoutTimeSpan.
                 if (await users.IsLockedOutAsync(user))
                 {
-                    // R1-50: the same hashing work as every other refusal, so the response time does not tell a locked
-                    // account from an unknown one or a wrong password.
+                    // R1-50: the same password-hash work as every other refusal, so the hash cost does not tell a locked
+                    // account from an unknown one (a wrong password still does its own database writes).
                     LocalLoginTiming.BurnPasswordCheck(users, password);
                     await authAudit.SignInRefusedAsync(ctx, "local", user.Email, Whiskers.Services.Auth.AuthAuditReasons.LockedOut);
                     return Results.Redirect(configuredPathBase + "/login?error=invalid");
@@ -337,7 +341,13 @@ public static class WhiskersPipelineExtensions
             // Validated here: the antiforgery middleware only rejects requests of endpoints that bind form fields, and
             // this one binds none. A missing or wrong token ends nothing (fail closed).
             if (!await antiforgery.IsRequestValidAsync(ctx))
+            {
+                // A tab left open after the session ended (expired, revoked): its token belonged to that session.
+                // Nothing is ended either way; without a session the caller just goes to the sign-in page.
+                if (ctx.User.Identity?.IsAuthenticated != true)
+                    return Results.Redirect(configuredPathBase + "/login");
                 return Results.BadRequest();
+            }
             // Recorded before the cookie goes: afterwards the request no longer names the user (R1-22).
             await authAudit.SignedOutAsync(ctx);
             await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);

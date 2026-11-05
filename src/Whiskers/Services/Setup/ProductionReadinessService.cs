@@ -239,14 +239,17 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         // 7) R1-50: forwarded headers from a peer that is not a trusted proxy were ignored — either a reverse proxy that
         // still has to be named in ForwardedHeaders:TrustedNetworks (until then the client address, the login rate limit
         // and the audit see the proxy) or a client claiming another address.
-        if (_forwarded?.LastUntrustedPeer is { } untrusted)
+        if (_forwarded?.RecentUntrustedPeers is { Count: > 0 } untrusted)
         {
+            var peers = string.Join(", ", untrusted.Select(u => $"{u.Peer} ({u.At:yyyy-MM-dd HH:mm} UTC)"));
             checks.Add(new ReadinessCheck(
                 "Reverse-Proxy vertraut",
                 false,
-                $"{untrusted.Peer} hat zuletzt um {untrusted.At:yyyy-MM-dd HH:mm} UTC X-Forwarded-Header geschickt, ist aber kein " +
-                "vertrauter Proxy; die Header wurden ignoriert. Ist das Ihr Reverse Proxy, tragen Sie sein Netz in " +
-                "ForwardedHeaders__TrustedNetworks__0 ein (Standard: nur Loopback) — sonst sehen Login-Limit und Audit nur seine Adresse.",
+                $"X-Forwarded-Header von Peers, die keine vertrauten Proxys sind, wurden ignoriert (letzte 24 h): {peers}. " +
+                "Ist einer davon Ihr Reverse Proxy, tragen Sie sein Netz in ForwardedHeaders__TrustedNetworks__0 ein " +
+                "(Standard: nur Loopback) — sonst sehen Login-Limit und Audit nur seine Adresse, HTTPS wird als HTTP " +
+                "erkannt (Session-Cookie ohne Secure, Google-/OIDC-Rückruf mit http://) und Auth:Disabled weist die " +
+                "Anfragen ab.",
                 null, null));
         }
 

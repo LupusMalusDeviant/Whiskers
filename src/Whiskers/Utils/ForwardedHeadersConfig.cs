@@ -23,6 +23,10 @@ public static class ForwardedHeadersConfig
     /// <summary>The configuration key: an array of CIDRs or single addresses.</summary>
     public const string SectionName = "ForwardedHeaders:TrustedNetworks";
 
+    /// <summary><c>HttpContext.Items</c> key set when a request carried forwarded headers from a peer that is not a
+    /// trusted proxy (the headers were ignored). The Auth:Disabled gate refuses such a request.</summary>
+    public const string IgnoredItemKey = "Whiskers.ForwardedHeadersIgnored";
+
     // Loopback only: a reverse proxy on the same host (or in the same network namespace) forwards from here.
     private static readonly string[] DefaultTrustedCidrs =
     {
@@ -45,9 +49,14 @@ public static class ForwardedHeadersConfig
             {
                 if (string.IsNullOrWhiteSpace(entry)) continue;
                 var value = entry.Trim();
-                if (IPNetwork.TryParse(value, out var network))
+                var slash = value.IndexOf('/');
+                // Only the canonical form of an address counts: IPAddress.TryParse also takes "172.18.0" (= 172.18.0.0),
+                // "10" (= 0.0.0.10) or "0x7f000001", so a typo would quietly trust a different address.
+                if (!IsCanonicalAddress(slash < 0 ? value : value[..slash]))
+                    invalid.Add(value);
+                else if (slash >= 0 && IPNetwork.TryParse(value, out var network))
                     networks.Add(network);
-                else if (IPAddress.TryParse(value, out var address))
+                else if (slash < 0 && IPAddress.TryParse(value, out var address))
                     networks.Add(new IPNetwork(address, address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128));
                 else
                     invalid.Add(value);
@@ -67,6 +76,22 @@ public static class ForwardedHeadersConfig
 
         return networks;
     }
+
+    /// <summary>Reads <see cref="SectionName"/> from <paramref name="configuration"/>: the indexed entries
+    /// (<c>__0</c>, <c>__1</c>, …), or — when the key is set as one value — a comma-separated list. Parsed by
+    /// <see cref="ParseTrustedNetworks"/>, so an unreadable entry throws.</summary>
+    public static IReadOnlyList<IPNetwork> FromConfiguration(Microsoft.Extensions.Configuration.IConfiguration configuration)
+    {
+        var section = configuration.GetSection(SectionName);
+        var entries = section.GetChildren().Any()
+            ? section.GetChildren().Select(c => c.Value ?? "")
+            : (section.Value ?? "").Split(',');
+        return ParseTrustedNetworks(entries);
+    }
+
+    private static bool IsCanonicalAddress(string text) =>
+        IPAddress.TryParse(text, out var address)
+        && string.Equals(address.ToString(), text, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whether <paramref name="peer"/> is one of <paramref name="trusted"/> (an IPv4-mapped IPv6 address
     /// counts as its IPv4 form, as the forwarded-headers middleware treats it).</summary>

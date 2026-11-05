@@ -55,7 +55,8 @@ public sealed class HttpSecurityTests
             var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"), v => v.StartsWith(".AspNetCore.Cookies=", StringComparison.Ordinal));
             Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("samesite=lax", cookie, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(secure, cookie.Contains("secure", StringComparison.OrdinalIgnoreCase));
+            // The attribute, not the (encrypted) value: "; secure".
+            Assert.Equal(secure, cookie.Split(';').Skip(1).Any(a => a.Trim().Equals("secure", StringComparison.OrdinalIgnoreCase)));
         });
 
     [Fact]
@@ -113,8 +114,11 @@ public sealed class HttpSecurityTests
             Assert.Equal(expected, response.Headers.Location!.OriginalString);
         });
 
-    [Fact]
-    public async Task A_client_that_is_not_a_trusted_proxy_cannot_move_the_login_rate_limit_with_x_forwarded_for() =>
+    [Theory]
+    [InlineData("192.168.1.50")]   // a LAN client: trusted as a proxy before R1-50
+    [InlineData("::ffff:10.0.0.5")]   // the same over an IPv4-mapped IPv6 socket
+    [InlineData("100.100.1.2")]      // a tailnet client
+    public async Task A_client_that_is_not_a_trusted_proxy_cannot_move_the_login_rate_limit_with_x_forwarded_for(string peer) =>
         await BootAsync(async (factory, client) =>
         {
             var token = await AntiforgeryTokenAsync(client, "/login");
@@ -122,11 +126,78 @@ public sealed class HttpSecurityTests
             // Ten attempts per minute and client. A spoofing client claims a new address on every attempt.
             HttpResponseMessage? last = null;
             for (var i = 0; i < 11; i++)
-                last = await LoginAsync(client, token, $"nobody{i}@local.test", "wrong", from: "198.51.100.20", forwardedFor: $"203.0.113.{i + 1}");
+                last = await LoginAsync(client, token, $"nobody{i}@local.test", "wrong", from: peer, forwardedFor: $"203.0.113.{i + 1}");
 
             Assert.Equal(HttpStatusCode.TooManyRequests, last!.StatusCode);
             // The ignored headers are named for the operator (a proxy to configure, or a spoofer).
-            Assert.Equal("198.51.100.20", factory.Services.GetRequiredService<ForwardedHeadersObserver>().LastUntrustedPeer?.Peer);
+            var seen = Assert.Single(factory.Services.GetRequiredService<ForwardedHeadersObserver>().RecentUntrustedPeers);
+            Assert.Equal(IPAddress.Parse(peer).ToString(), seen.Peer);
+        });
+
+    [Theory]
+    // An unlisted proxy (or a LAN client) whose own address is in the gate's private ranges: refused, not let through
+    // with the proxy's address standing in for a public client.
+    [InlineData("172.18.0.5", "203.0.113.9", null, HttpStatusCode.Forbidden)]
+    [InlineData("192.168.1.50", "127.0.0.1", null, HttpStatusCode.Forbidden)]
+    // Without forwarded headers a LAN client is served, as before.
+    [InlineData("172.18.0.5", null, null, HttpStatusCode.OK)]
+    // A listed proxy: its clients' addresses decide — a public one is refused, a LAN one is served.
+    [InlineData("10.0.0.5", "203.0.113.9", "10.0.0.0/8", HttpStatusCode.Forbidden)]
+    [InlineData("10.0.0.5", "192.168.1.7", "10.0.0.0/8", HttpStatusCode.OK)]
+    public async Task Auth_disabled_serves_only_the_trusted_network_also_behind_a_proxy(
+        string peer, string? forwardedFor, string? trusted, HttpStatusCode expected)
+    {
+        var extra = new List<KeyValuePair<string, string?>> { new("Auth:Disabled", "true") };
+        if (trusted is not null) extra.Add(new("ForwardedHeaders:TrustedNetworks:0", trusted));
+        await BootAsync(async (_, client) =>
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/healthz");
+            request.Headers.Add(RemoteHeader, peer);
+            if (forwardedFor is not null) request.Headers.Add("X-Forwarded-For", forwardedFor);
+
+            var response = await client.SendAsync(request);
+
+            Assert.Equal(expected, response.StatusCode);
+            if (expected == HttpStatusCode.Forbidden && trusted is null)
+                Assert.Contains("ForwardedHeaders:TrustedNetworks", await response.Content.ReadAsStringAsync());
+        }, extra.ToArray());
+    }
+
+    [Fact]
+    public async Task The_layout_sign_out_button_posts_a_token_that_signs_out() =>
+        await BootAsync(async (_, client) =>
+        {
+            await LoginAsync(client, await AntiforgeryTokenAsync(client, "/login"), Email, Password);
+
+            // The button every page shows: the layout's form, its token rendered with the page.
+            var html = await (await client.GetAsync("/settings")).Content.ReadAsStringAsync();
+            var form = Regex.Match(html, "<form method=\"post\" action=\"logout\".*?</form>", RegexOptions.Singleline).Value;
+            Assert.Contains("type=\"submit\"", form);
+            var token = Regex.Match(form, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+            Assert.False(string.IsNullOrEmpty(token));
+
+            var signedOut = await client.PostAsync("/logout", new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = WebUtility.HtmlDecode(token),
+            }));
+
+            Assert.Equal(HttpStatusCode.Redirect, signedOut.StatusCode);
+            Assert.EndsWith("/login", signedOut.Headers.Location!.OriginalString);
+            Assert.False(await SignedInAsync(client));
+        });
+
+    [Fact]
+    public async Task A_sign_out_after_the_session_ended_goes_to_the_sign_in_page_not_a_bare_400() =>
+        await BootAsync(async (_, client) =>
+        {
+            // A tab left open: the form's token belongs to a session that is gone (here: no session at all).
+            var stale = await client.PostAsync("/logout", new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = "stale",
+            }));
+
+            Assert.Equal(HttpStatusCode.Redirect, stale.StatusCode);
+            Assert.EndsWith("/login", stale.Headers.Location!.OriginalString);
         });
 
     [Fact]
@@ -141,7 +212,7 @@ public sealed class HttpSecurityTests
                 var response = await LoginAsync(client, token, $"nobody{i}@local.test", "wrong", from: "10.0.0.5", forwardedFor: $"203.0.113.{i + 1}");
                 Assert.NotEqual(HttpStatusCode.TooManyRequests, response.StatusCode);
             }
-            Assert.Null(factory.Services.GetRequiredService<ForwardedHeadersObserver>().LastUntrustedPeer);
+            Assert.Empty(factory.Services.GetRequiredService<ForwardedHeadersObserver>().RecentUntrustedPeers);
         }, new KeyValuePair<string, string?>("ForwardedHeaders:TrustedNetworks:0", "10.0.0.0/8"));
 
     [Fact]
@@ -208,8 +279,9 @@ public sealed class HttpSecurityTests
             new("WHISKERS_ADMIN_EMAIL", Email),
             new("WHISKERS_ADMIN_PASSWORD_FILE", pwFile),
         };
-        config.AddRange(extra);
         config.AddRange(BootSettings.OnlyCore());
+        // A setting in `extra` replaces the default of the same name (Auth:Disabled for the gate tests).
+        config = config.Where(c => !extra.Any(e => e.Key == c.Key)).Concat(extra).ToList();
 
         try
         {

@@ -57,7 +57,7 @@ public static class WhiskersAuthenticationExtensions
                     options.LogoutPath = "/logout";
                     options.ExpireTimeSpan = TimeSpan.FromHours(24);
 
-                    // R1-50 (A-13): the session cookie's hardening is stated, not left to defaults. Script cannot read it;
+                    // R1-50 (A-14): the session cookie's hardening is stated, not left to defaults. Script cannot read it;
                     // it is not sent on cross-site subrequests or form posts (Lax keeps a top-level link and the OIDC
                     // callback working); it is Secure whenever the request is HTTPS. The supported plain-HTTP LAN
                     // profile keeps working, so Secure is not forced (SameAsRequest).

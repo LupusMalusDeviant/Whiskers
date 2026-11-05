@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Configuration;
 using Whiskers.Utils;
 using Xunit;
 
@@ -43,6 +44,11 @@ public class ForwardedHeadersConfigTests
     [InlineData("nonsense")]
     [InlineData("999.0.0.0/8")]
     [InlineData("10.0.0.0/33")]
+    // Shorthand forms IPAddress.TryParse accepts would trust a different address than the one meant.
+    [InlineData("172.18.0")]
+    [InlineData("10")]
+    [InlineData("0x7f000001")]
+    [InlineData("10.1/16")]
     public void An_entry_that_cannot_be_read_refuses_the_start_instead_of_trusting_another_set(string bad)
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -50,6 +56,27 @@ public class ForwardedHeadersConfigTests
 
         Assert.Contains(bad, ex.Message);
         Assert.Contains(ForwardedHeadersConfig.SectionName, ex.Message);
+    }
+
+    [Fact]
+    public void Configuration_is_read_from_indexed_entries_or_one_comma_separated_value()
+    {
+        static IReadOnlyList<System.Net.IPNetwork> Read(params (string Key, string Value)[] values) =>
+            ForwardedHeadersConfig.FromConfiguration(new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                .AddInMemoryCollection(values.Select(v => new KeyValuePair<string, string?>(v.Key, v.Value))).Build());
+
+        var indexed = Read(("ForwardedHeaders:TrustedNetworks:0", "10.0.0.0/8"), ("ForwardedHeaders:TrustedNetworks:1", "172.18.0.2"));
+        Assert.True(ForwardedHeadersConfig.IsTrusted(indexed, IPAddress.Parse("10.4.4.4")));
+        Assert.True(ForwardedHeadersConfig.IsTrusted(indexed, IPAddress.Parse("172.18.0.2")));
+
+        // One value without index (ForwardedHeaders__TrustedNetworks=…) used to bind to nothing and fall back silently.
+        var scalar = Read(("ForwardedHeaders:TrustedNetworks", "10.0.0.0/8, 172.18.0.2"));
+        Assert.True(ForwardedHeadersConfig.IsTrusted(scalar, IPAddress.Parse("10.4.4.4")));
+        Assert.True(ForwardedHeadersConfig.IsTrusted(scalar, IPAddress.Parse("172.18.0.2")));
+        Assert.False(ForwardedHeadersConfig.IsTrusted(scalar, IPAddress.Loopback));
+
+        Assert.Throws<InvalidOperationException>(() => Read(("ForwardedHeaders:TrustedNetworks", "10.0.0.0/8,proxy")));
+        Assert.True(ForwardedHeadersConfig.IsTrusted(Read(), IPAddress.Loopback));
     }
 
     [Fact]

@@ -44,9 +44,15 @@ public sealed class AuthDisabledAccessPolicy
         config.GetSection("Auth:DisabledAllowedNetworks").Get<string[]>(),
         config.GetSection("Auth:DisabledAllowedHosts").Get<string[]>());
 
-    /// <summary>Returns null when the request may proceed, otherwise the reason it is refused.</summary>
-    public string? Check(IPAddress? remote, string? host, string? origin)
+    /// <summary>Returns null when the request may proceed, otherwise the reason it is refused.
+    /// <paramref name="forwardedIgnored"/>: the request carried forwarded headers from a peer that is not a trusted
+    /// proxy (R1-50) — refused, because <paramref name="remote"/> may then be an unlisted proxy's address standing in for
+    /// every client behind it (fail closed; the operator names the proxy in <c>ForwardedHeaders:TrustedNetworks</c>).</summary>
+    public string? Check(IPAddress? remote, string? host, string? origin, bool forwardedIgnored = false)
     {
+        if (forwardedIgnored)
+            return "forwarded headers from a peer that is not in ForwardedHeaders:TrustedNetworks";
+
         // No remote address only happens on transports that are local by construction (a Unix domain socket, the
         // in-memory test server); every TCP connection carries one.
         if (remote is not null)

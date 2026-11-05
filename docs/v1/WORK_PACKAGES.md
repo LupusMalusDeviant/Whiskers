@@ -925,12 +925,14 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 
 > Implemented (2026-11-05; middleware and auth integration approved by the maintainer the same day):
 > - **Proxy trust (A-15):** without `ForwardedHeaders:TrustedNetworks` only loopback is trusted (maintainer decision; it
->   was every private range). Entries may be CIDRs or single addresses; one that is neither refuses the start. Forwarded
->   headers from an untrusted peer are ignored and the peer is named in the production-readiness check.
->   `ForwardedHeadersConfigTests` pins the parser; `HttpSecurityTests` proves over the real pipeline that a client that is
->   not a trusted proxy cannot move the login rate limit with `X-Forwarded-For`, that a configured proxy forwards its
->   clients' addresses, and that an unreadable list stops the boot. The Auth:Disabled network gate reads the same
->   resolved address.
+>   was every private range). Entries may be canonical CIDRs or single addresses; one that is neither refuses the start.
+>   Forwarded headers from an untrusted peer are ignored and the peer is named in the production-readiness check (up to
+>   8 peers, 24 h). The Auth:Disabled network gate reads the resolved address and **refuses** a request whose forwarded
+>   headers were ignored: otherwise an unlisted proxy's private address would stand in for every client behind it.
+>   `ForwardedHeadersConfigTests` pins the parser; `HttpSecurityTests` proves over the real pipeline that a LAN, tailnet
+>   or IPv4-mapped client that is not a trusted proxy cannot move the login rate limit with `X-Forwarded-For` (all three
+>   were trusted before), that a configured proxy forwards its clients' addresses, that the Auth:Disabled gate refuses an
+>   unlisted proxy and a listed proxy's public client, and that an unreadable list stops the boot.
 > - **Headers (A-13):** every answer carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 >   `Content-Security-Policy: frame-ancestors 'none'` and `Referrer-Policy: same-origin`. Not added: a full CSP (Blazor
 >   and MudBlazor inline styles need a nonce scheme of their own) and HSTS (it would bind every service on the host name

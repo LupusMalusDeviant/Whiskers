@@ -221,7 +221,10 @@ When serving under a subpath, set `PATH_BASE=/whiskers` in `.env`.
 **Name your proxy.** Whiskers believes `X-Forwarded-For` / `X-Forwarded-Proto` only from loopback unless you list the
 proxy: `ForwardedHeaders__TrustedNetworks__0=172.18.0.2/32` (a CIDR or a single address; more entries with `__1`, …).
 A proxy in another container or on another host that is not listed is ignored — Whiskers then sees the proxy's address
-for every visitor, and Settings → production readiness names it. An entry that is not a CIDR or address stops the start.
+for every visitor and plain HTTP behind a TLS-terminating proxy (session cookie without `Secure`, Google/OIDC sign-in
+fails because the callback is built with `http://`), `AUTH_DISABLED=true` refuses the proxied requests, and
+Settings → production readiness names the proxy. An entry that is not a canonical CIDR or address stops the start;
+a single value without index (`ForwardedHeaders__TrustedNetworks=10.0.0.0/8,172.18.0.2`) is read as a comma-separated list.
 </details>
 
 <details>
