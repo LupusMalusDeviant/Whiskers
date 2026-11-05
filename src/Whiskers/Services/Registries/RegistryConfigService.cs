@@ -15,7 +15,6 @@ public class RegistryConfigService : IRegistryConfigService
     private readonly JsonFileStore<RegistryConfigData> _store;
     private readonly IVaultService _vault;
     private volatile RegistryConfigData _cached = new();   // replaced, never changed in place: read lock-free
-    private bool _loaded;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     public RegistryConfigService(IVaultService vault, string? storePath = null, DataPathOptions? dataPaths = null)
@@ -25,14 +24,7 @@ public class RegistryConfigService : IRegistryConfigService
         _store = new JsonFileStore<RegistryConfigData>(storePath ?? $"{paths.RootDir}/registries.json");
         // Eager, synchronous warm-up so GetCredentialForImage never blocks on I/O mid-pull.
         if (_store.Exists())
-        {
             _cached = _store.LoadAsync().GetAwaiter().GetResult();
-            _loaded = true;
-        }
-        else
-        {
-            _loaded = true;
-        }
     }
 
     private static string CredVaultKey(string id) => $"registry-cred:{id}";

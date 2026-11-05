@@ -169,9 +169,6 @@ public class HetznerApiService : IHetznerService
     public async Task<HetznerAction?> DisableBackupsAsync(string token, long id, CancellationToken ct = default)
         => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/disable_backup", ct: ct)).Action;
 
-    public Task<List<HetznerServerType>> ListServerTypesAsync(string token, CancellationToken ct = default)
-        => ListAllPagesAsync<HetznerServerTypesResponse, HetznerServerType>(token, "/server_types", r => r.ServerTypes, ct);
-
     public async Task<HetznerAction?> ChangeServerTypeAsync(string token, long id, string serverType, bool upgradeDisk, CancellationToken ct = default)
         => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/change_type",
             new { server_type = serverType, upgrade_disk = upgradeDisk }, ct)).Action;

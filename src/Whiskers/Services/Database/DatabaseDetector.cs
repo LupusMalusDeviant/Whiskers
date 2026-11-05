@@ -74,17 +74,6 @@ public static class DatabaseDetector
         return creds;
     }
 
-    /// <summary>Get the DB CLI command name for this database type.</summary>
-    public static string GetCliCommand(DatabaseType dbType) => dbType switch
-    {
-        DatabaseType.PostgreSQL => "psql",
-        DatabaseType.MySQL => "mysql",
-        DatabaseType.MongoDB => "mongosh",
-        DatabaseType.Redis => "redis-cli",
-        DatabaseType.Neo4j => "cypher-shell",
-        _ => "sh"
-    };
-
     /// <summary>Get the default internal port for this database type.</summary>
     public static int GetDefaultPort(DatabaseType dbType) => dbType switch
     {
