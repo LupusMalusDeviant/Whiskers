@@ -151,7 +151,7 @@ public class PostgresOverlayTests
         Assert.Contains("stop Whiskers first: c17 stop serverwatch\" >&2; exit 1; fi", dump);
         Assert.EndsWith("exec pg_dump -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" --no-owner --no-privileges", dump);
         Assert.DoesNotContain("'", dump);   // it sits in single quotes on the host
-        Assert.Contains("' > whiskers-pg17.sql)\nc17 stop db\nc run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql", guide);
+        Assert.Contains("' > whiskers-pg17.sql) \\\n  && c17 stop -t 120 db\nc run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql", guide);
         Assert.Contains("c up -d --no-deps --wait db\nc run --rm --no-deps -T -e WHISKERS_RESTORE=1 db-upgrade-guard < whiskers-pg17.sql", guide);
         Assert.Contains("c rm -f db-upgrade-guard", guide);
         Assert.Contains("whiskers-pg18-period.sql", guide);

@@ -69,7 +69,7 @@ services:
         fp=$${sum%% *}
         if [ "$$mode" = fingerprint ]; then
           if [ -e "$$cluster/postmaster.pid" ]; then
-            refuse "PostgreSQL 17 is running on whiskers-db-data (postmaster.pid); its fingerprint would change at the stop. Stop PostgreSQL 17 first: c17 stop db."
+            refuse "PostgreSQL 17 is running on whiskers-db-data (postmaster.pid); its fingerprint would change at the stop. Stop PostgreSQL 17 first: c17 stop db." "If c17 ps db shows it stopped already, it was not shut down cleanly: run step 1 of $$guide again from the top."
           fi
           printf '%s\n' "$$tag$$fp"
           exit 0

@@ -107,21 +107,27 @@ c17 up -d --no-deps --wait db
 (umask 077; c17 exec -T db sh -c '
   n=$(psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select count(*) from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and backend_type = (select backend_type from pg_stat_activity where pid = pg_backend_pid())")
   if [ "$n" != 0 ]; then echo "whiskers: other clients are connected to the PostgreSQL 17 database ($n); stop Whiskers first: c17 stop serverwatch" >&2; exit 1; fi
-  exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges' > whiskers-pg17.sql)
-c17 stop db
+  exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges' > whiskers-pg17.sql) \
+  && c17 stop -t 120 db
 c run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql
 ```
 
 - `umask 077` creates the dump readable by you only. It holds your whole database, including password hashes and the
   encrypted vault entries; keep it as private as a backup.
 - The dump command first checks that no other client is connected to the 17 database. If Whiskers (or anything else)
-  is still connected, it refuses with `whiskers: other clients are connected …` and exits non-zero. The file it leaves
-  behind is then empty, and so is any file a failed `pg_dump` cut short: neither has the dump's closing line, so the
-  restore in step 2 refuses it. Stop the client and run step 1 again from the top.
+  is still connected, it refuses with `whiskers: other clients are connected …` and exits non-zero; `&&` then leaves
+  PostgreSQL 17 running, so the next command refuses too and appends nothing. A refused or cut-short dump has no
+  closing line, so the restore in step 2 refuses it. Stop the client and run step 1 again from the
+  top. The check runs once, before the dump: keep other tools off the database until `c17 stop` has finished.
+- `c17 stop -t 120 db` gives PostgreSQL up to two minutes for its shutdown checkpoint instead of compose's default 10
+  seconds, after which it would be killed.
 - The last command appends one comment line, `-- whiskers-pg17-control: <fingerprint>`, taken from the stopped 17
   cluster. It refuses while PostgreSQL 17 still runs (`c17 stop db` first). With no client connected at the dump and
   17 stopped right after it, the fingerprint stands for the state the dump holds: if PostgreSQL 17 runs again later,
   the restore refuses this dump, and you take a new one.
+- If it refuses although `c17 ps db` shows the database stopped, PostgreSQL 17 was not shut down cleanly (killed, a
+  crash): its `postmaster.pid` is still in the volume. Run step 1 again from the top; starting 17 recovers the cluster
+  and a clean stop removes the file.
 - This is the last time anything writes to the 17 volume, unless you go back.
 
 ### 2. Start PostgreSQL 18 alone and restore
