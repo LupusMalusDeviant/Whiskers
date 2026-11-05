@@ -6,6 +6,27 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Security: proxy trust defaults to loopback only — check your reverse proxy (R1-50).** Whiskers used to believe
+  `X-Forwarded-For` from every private network (RFC 1918 and Tailscale's range), so any client in the LAN or tailnet
+  could claim another address and slip past the per-client sign-in limit. Now only loopback is trusted unless
+  `ForwardedHeaders__TrustedNetworks__0` (… `__1`, …) names your proxy as a CIDR or address. **Upgrade note:** behind a
+  proxy in another container or on another host, add its address before you upgrade — until then Whiskers sees the
+  proxy's address for every visitor and, behind a TLS-terminating proxy, plain HTTP: the session cookie loses its
+  `Secure` flag, Google/OIDC sign-in breaks (the callback is built with `http://`), and with `AUTH_DISABLED=true`
+  every proxied request is refused (`403`, naming `ForwardedHeaders:TrustedNetworks`) instead of being let in under the
+  proxy's private address. Settings → production readiness names the ignored peers. An entry that is not a canonical
+  CIDR or address (`172.18.0` or `10` no longer pass) stops the start; a single value without index is read as a
+  comma-separated list. Helm: set `trustedProxyCidrs` to your ingress controller's pods (`NOTES.txt` warns when an
+  ingress is enabled and the list is empty). **Do not** set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` as a shortcut:
+  it makes ASP.NET Core trust forwarded headers from every peer, and Whiskers now refuses to start with it.
+- **Security: HTTP hardening (R1-50).** Every answer forbids framing by another site and MIME sniffing and keeps the
+  referrer on the site. Signing out is a POST with an antiforgery token (another site can no longer sign you out with a
+  link or image; opening `/logout` shows a sign-out button). The session cookie's flags are stated (HttpOnly,
+  SameSite=Lax, Secure over HTTPS); OIDC no longer stores the identity provider's tokens in it. MCP clients without
+  credentials get `401` with a Bearer challenge instead of a sign-in redirect; a signed-in user without the role gets
+  `403`; an unconfigured Google/OIDC sign-in answers `404` instead of `500`; the language switch ignores a redirect that
+  is not a local path. A locked account costs the same password-hash work as an unknown one.
+
 - **Fix: a host command over mTLS can no longer hang past its timeout.** The SSH-free host shell (a one-shot helper
   container over the mTLS Docker connection) started its timeout only once the helper was created; checking or pulling
   the helper image, creating it, reading its output and removing it ran without a limit, so a stalled Docker step could

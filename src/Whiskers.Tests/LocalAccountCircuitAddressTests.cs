@@ -30,7 +30,7 @@ public sealed class LocalAccountCircuitAddressTests
     private const string RemoteHeader = "X-Test-Remote-Address";
 
     [Theory]
-    [InlineData(HttpTransportType.WebSockets, "10.0.0.5", "203.0.113.9")]           // trusted proxy (RFC1918)
+    [InlineData(HttpTransportType.WebSockets, "10.0.0.5", "203.0.113.9")]           // trusted proxy (configured)
     [InlineData(HttpTransportType.LongPolling, "10.0.0.5", "203.0.113.9")]
     [InlineData(HttpTransportType.LongPolling, "198.51.100.20", "198.51.100.20")]   // untrusted: its own address
     [InlineData(HttpTransportType.WebSockets, "198.51.100.20", "198.51.100.20")]
@@ -48,6 +48,8 @@ public sealed class LocalAccountCircuitAddressTests
             new("Auth:Disabled", "false"),
             new("WHISKERS_ADMIN_EMAIL", LocalAccountWorld.Root),
             new("WHISKERS_ADMIN_PASSWORD_FILE", pwFile),
+            // R1-50: only loopback is trusted by default; the proxy of this test is named, as an operator would.
+            new("ForwardedHeaders:TrustedNetworks:0", "10.0.0.0/8"),
         };
         config.AddRange(BootSettings.OnlyCore());
         var seen = new ConcurrentQueue<string?>();

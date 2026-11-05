@@ -57,6 +57,36 @@ public static class WhiskersAuthenticationExtensions
                     options.LogoutPath = "/logout";
                     options.ExpireTimeSpan = TimeSpan.FromHours(24);
 
+                    // R1-50 (A-14): the session cookie's hardening is stated, not left to defaults. Script cannot read it;
+                    // it is not sent on cross-site subrequests or form posts (Lax keeps a top-level link and the OIDC
+                    // callback working); it is Secure whenever the request is HTTPS. The supported plain-HTTP LAN
+                    // profile keeps working, so Secure is not forced (SameAsRequest).
+                    options.Cookie.HttpOnly = true;
+                    options.Cookie.SameSite = SameSiteMode.Lax;
+                    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+
+                    // R1-50: MCP clients are API clients — an anonymous call gets 401 with a Bearer challenge, not a
+                    // redirect to an HTML sign-in page; a refused signed-in caller gets 403, nowhere a redirect to an
+                    // access-denied page that does not exist.
+                    // Everything else keeps the framework's own answer (a redirect for pages, 401 for API endpoints
+                    // such as the SignalR hubs).
+                    var frameworkRedirectToLogin = options.Events.OnRedirectToLogin;
+                    options.Events.OnRedirectToLogin = ctx =>
+                    {
+                        if (IsApiPath(ctx.Request))
+                        {
+                            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                            ctx.Response.Headers.WWWAuthenticate = "Bearer";
+                            return Task.CompletedTask;
+                        }
+                        return frameworkRedirectToLogin(ctx);
+                    };
+                    options.Events.OnRedirectToAccessDenied = ctx =>
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return Task.CompletedTask;
+                    };
+
                     // R1-26 (INV-03/09, approved 2026-11-03): every request re-checks the session — synthetic
                     // identities (TA-11), a deleted or changed local account and its security stamp, the whitelist —
                     // and FAILS CLOSED: an error rejects the cookie. See SessionCookieValidation / ISessionValidator.
@@ -85,7 +115,9 @@ public static class WhiskersAuthenticationExtensions
                     options.ClientSecret = oidcSection["ClientSecret"];
                     options.ResponseType = "code";
                     options.UsePkce = true;
-                    options.SaveTokens = true;
+                    // R1-50 (A-14): the IdP's tokens are not kept in the session cookie — nothing in Whiskers uses them,
+                    // and a cookie that carries them carries a credential for the IdP.
+                    options.SaveTokens = false;
                     options.GetClaimsFromUserInfoEndpoint = true;
                     var oidcRequireHttps = oidcSection.GetValue("RequireHttpsMetadata", true);
                     options.RequireHttpsMetadata = oidcRequireHttps;
@@ -174,4 +206,9 @@ public static class WhiskersAuthenticationExtensions
                 .Build());
         builder.Services.AddCascadingAuthenticationState();
     }
+
+    /// <summary>R1-50: requests from API clients (MCP), which get a status code instead of an HTML redirect
+    /// (<see cref="HttpRequest.Path"/> is already without the PathBase).</summary>
+    internal static bool IsApiPath(HttpRequest request) =>
+        request.Path.StartsWithSegments("/mcp", StringComparison.OrdinalIgnoreCase);
 }

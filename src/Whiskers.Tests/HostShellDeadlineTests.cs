@@ -13,7 +13,11 @@ namespace Whiskers.Tests;
 /// across setup (client, image check and pull, create), the run, the output and the clean-up. Each test stalls one
 /// Docker step forever — a step that also ignores its cancellation token, the worst case a client library can produce —
 /// and proves the caller still has its answer within the deadline plus the clean-up budget, told what matches where the
-/// run stood; a privileged helper is never simply abandoned. The local/SSH process path is driven with a real process.</summary>
+/// run stood; a privileged helper is never simply abandoned. The local/SSH process path is driven with a real process.
+/// <para>Runs alone (<see cref="WallClockTimingCollection"/>): the bounds measure real time, and on a two-core CI runner
+/// the parallel test classes starved the timers (a 1 s deadline-plus-clean-up measured 6.9 s) — the bound stays, the
+/// competition goes.</para></summary>
+[Collection(WallClockTimingCollection.Name)]
 public sealed class HostShellDeadlineTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(500);
@@ -21,7 +25,8 @@ public sealed class HostShellDeadlineTests
     /// <summary>Timeout + clean-up budget + scheduling slack. A stalled step never completes, so one that held the caller
     /// would cross any finite bound. The slack is 4 s: a shared CI runner under the parallel suite has been seen to delay
     /// timer callbacks by more than 2 s, and the bound (5 s) must stay below timeout + the production clean-up budget
-    /// (0.5 s + 5 s), so a caller held for the default budget instead of the injected one still fails. A run that crosses
+    /// (0.5 s + 5 s), so a caller held for the default budget instead of the injected one still fails. The slack is kept as headroom although the class now runs alone
+    /// (<see cref="WallClockTimingCollection"/>); background work of earlier tests can still compete. A run that crosses
     /// it fails (it does not hang the suite).</summary>
     private static readonly TimeSpan Bound = Timeout + Cleanup + TimeSpan.FromSeconds(4);
 

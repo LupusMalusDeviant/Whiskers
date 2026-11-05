@@ -134,6 +134,9 @@ serviceAccount:
   annotations: {}
   name: ""
 
-# Forwarded headers: Whiskers trusts RFC1918 + loopback + Tailscale CGNAT by default, which covers
-# typical pod CIDRs. Clusters with pod CIDRs outside RFC1918 must list them here (CIDR strings).
+# Forwarded headers (R1-50): without entries Whiskers trusts loopback only, so behind an ingress controller every
+# visitor has the controller's pod address (login rate limit, audit) and HTTPS is seen as HTTP (cookie without Secure,
+# Google/OIDC callback with http://). List the ingress controller's pod CIDR or
+# addresses here (CIDR strings or single addresses) — narrowly: anything in a listed range can claim any client address.
+# An entry that is not a canonical CIDR or address (e.g. 172.18.0.2/16: host bits set) stops the start.
 trustedProxyCidrs: []

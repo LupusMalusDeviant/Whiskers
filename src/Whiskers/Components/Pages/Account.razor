@@ -90,8 +90,10 @@
             {
                 _current = _new = _confirm = "";
                 Snackbar.Add(L["Account_Snackbar_Changed"].Value, Severity.Success);
-                // Every session of the account has ended (new security stamp, R1-26): sign in again.
-                Nav.NavigateTo("logout", forceLoad: true);
+                // Every session of the account has ended (new security stamp, R1-26): sign in again. The cookie check
+                // refuses this session on the next request, so a full load of the sign-in page drops it (R1-50: the
+                // sign-out endpoint itself takes a POST with an antiforgery token).
+                Nav.NavigateTo("login", forceLoad: true);
                 return;
             }
             var text = L[$"LocalAccounts_Error_{result.Error}"];

@@ -81,6 +81,7 @@ UI: `/account` (*My account*), `/account/recover` (anonymous), Settings panel *L
     protected pipeline stays unchanged). The client address is the circuit's hub connection's (WebSockets and long
     polling), as the forwarded-headers middleware resolved it. Unknown client addresses share one bucket; each table
     holds at most 4096 keys, beyond which new keys share one overflow bucket (fail closed). Every answer of the page
-    takes at least one second. Operators should narrow `ForwardedHeaders:TrustedNetworks` to the real proxy.
+    takes at least one second. Operators must list their real proxy in `ForwardedHeaders:TrustedNetworks` (default
+    since R1-50: loopback only).
 11. Demotion of the only Admin who can sign in is guarded only by the role store's explicit-Admin rule (TA-02); not
     extended in R1-49.

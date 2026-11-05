@@ -201,8 +201,14 @@ Three areas carry most of the risk. Changes there get a dedicated review and tes
 (an ADR or the maintainer's sign-off on the pull request):
 
 - the authentication middleware and its order (forwarded headers first, fail-closed authorization, cookie
-  validation, the whitelist re-check); only the request-correlation middleware runs ahead of the forwarded headers —
+  validation, the whitelist re-check); the request-correlation middleware runs ahead of everything —
   it reads nothing but `X-Request-Id` and the current activity and decides nothing (user-approved 2026-11-03, R1-53);
+  R1-50 (user-approved 2026-11-05) adds two steps: right before the forwarded headers a marker that flags a request whose
+  `X-Forwarded-*` come from a peer outside `ForwardedHeaders:TrustedNetworks` (it must see the original peer; the
+  Auth:Disabled gate refuses such a request, the readiness check names the peer), and right after them the registration
+  of the response headers (nosniff, frame denial, referrer policy), before anything that can write a response; the trusted-proxy list (default loopback only) is
+  read once at startup and an unreadable entry, or `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` (the framework's
+  trust-all forwarded headers), stops the start;
   cookie validation re-checks the whole session on every request and fails closed (`SessionCookieValidation` →
   `ISessionValidator`: local account, security stamp, whitelist), and `/login-local` ties the cookie to the account's
   security stamp — the order and the whitelist logic are unchanged (user-approved 2026-11-03, R1-26);

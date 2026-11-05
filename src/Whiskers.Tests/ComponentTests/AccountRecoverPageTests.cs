@@ -13,7 +13,8 @@ namespace Whiskers.Tests.ComponentTests;
 
 /// <summary>R1-49 (review round 2, NIT 5): every answer of the recovery page takes at least
 /// <see cref="AccountRecover.MinimumDuration"/> — a success as much as a refusal — and that is a floor, not a wait added
-/// on top of a slow check.</summary>
+/// on top of a slow check. Runs alone (<see cref="WallClockTimingCollection"/>): it tells 1.5 s from 2.5 s by real time.</summary>
+[Collection(WallClockTimingCollection.Name)]
 public class AccountRecoverPageTests : BunitContext
 {
     private IRenderedComponent<AccountRecover> RenderWith(ILocalAccountService accounts)

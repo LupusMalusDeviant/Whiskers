@@ -271,6 +271,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Registries.IRegistryConfigService, Whiskers.Services.Registries.RegistryConfigService>();
         // W3.4: static production-readiness checklist (Settings panel). Read-only checks.
         builder.Services.AddSingleton<Whiskers.Services.Setup.IProductionReadinessService, Whiskers.Services.Setup.ProductionReadinessService>();
+        // R1-50: peers whose forwarded headers were ignored (not a trusted proxy), for the readiness check.
+        builder.Services.AddSingleton<Whiskers.Utils.ForwardedHeadersObserver>();
         // Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)
         builder.Services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, Whiskers.Services.Auth.CurrentUserService>();
         // R1-49: local-account lifecycle (own password, Admin add/reset/delete, recovery codes) on ASP.NET Identity.

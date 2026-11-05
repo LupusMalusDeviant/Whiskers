@@ -60,4 +60,14 @@ public class AuthDisabledAccessPolicyTests
         Assert.Null(Default.Check(null, "localhost", null));
         Assert.NotNull(Default.Check(null, "attacker.example", null));
     }
+
+    [Fact]
+    public void Ignored_forwarded_headers_refuse_even_a_private_peer()
+    {
+        // R1-50: an unlisted proxy at a private address would otherwise let every client behind it in.
+        var reason = Default.Check(IPAddress.Parse("172.18.0.5"), "localhost", null, forwardedIgnored: true);
+        Assert.NotNull(reason);
+        Assert.Contains("ForwardedHeaders:TrustedNetworks", reason);
+        Assert.Null(Default.Check(IPAddress.Parse("172.18.0.5"), "localhost", null, forwardedIgnored: false));
+    }
 }
