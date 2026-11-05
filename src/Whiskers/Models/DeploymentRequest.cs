@@ -13,8 +13,3 @@ public class DeploymentRequest
     public string RestartPolicy { get; set; } = "unless-stopped";
     public string? NetworkName { get; set; }
 }
-
-public class ComposeDeployRequest
-{
-    public string YamlContent { get; set; } = string.Empty;
-}

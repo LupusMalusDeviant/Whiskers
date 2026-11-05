@@ -21,7 +21,7 @@ public sealed class UiAuditCompletenessTests : IDisposable
     /// <summary>The infrastructure pages migrated in R1-21.</summary>
     public static readonly string[] MigratedPages =
     [
-        "Pages/Dashboard.razor", "Pages/ContainerDetail.razor", "Pages/Deploy.razor", "Pages/AppStore.razor",
+        "Pages/Dashboard.razor", "Pages/ContainerDetail.razor", "Pages/ContainerDatabasePanel.razor", "Pages/Deploy.razor", "Pages/AppStore.razor",
         "Pages/ComposeEditor.razor", "Pages/Networks.razor", "Pages/Firewall.razor", "Pages/AddFirewallRuleDialog.razor",
         "Pages/NginxManager.razor", "Pages/SystemdManager.razor", "Pages/SslCerts.razor", "Pages/CloudView.razor",
         "Pages/GitDeployView.razor", "Pages/ScheduledTasksView.razor", "Pages/VolumeBackupsView.razor",
@@ -279,7 +279,7 @@ public sealed class UiAuditCompletenessTests : IDisposable
         var source = File.ReadAllText(Path.Combine(Components(), page));
         var reads = new Dictionary<string, string[]>
         {
-            ["Pages/ContainerDetail.razor"] = ["CheckMigrationStatus"],
+            ["Pages/ContainerDatabasePanel.razor"] = ["CheckMigrationStatus"],
             ["Pages/NginxManager.razor"] = ["TestConfig"],
             // Skips loading the admin-only settings into the circuit; changes nothing.
             ["Pages/Settings.razor"] = ["OnInitializedAsync"],

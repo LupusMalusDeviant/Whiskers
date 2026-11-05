@@ -39,9 +39,6 @@ internal sealed class SystemInfoOperations
         _snapshots = snapshots;
     }
 
-    private async Task<DockerClient> GetClient(string? serverId)
-        => await _connectionManager.GetClientAsync(serverId);
-
     public async Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default)
     {
         var server = serverId != null
