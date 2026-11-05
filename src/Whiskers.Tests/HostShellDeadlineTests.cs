@@ -25,7 +25,8 @@ public sealed class HostShellDeadlineTests
     /// <summary>Timeout + clean-up budget + scheduling slack. A stalled step never completes, so one that held the caller
     /// would cross any finite bound. The slack is 4 s: a shared CI runner under the parallel suite has been seen to delay
     /// timer callbacks by more than 2 s, and the bound (5 s) must stay below timeout + the production clean-up budget
-    /// (0.5 s + 5 s), so a caller held for the default budget instead of the injected one still fails. A run that crosses
+    /// (0.5 s + 5 s), so a caller held for the default budget instead of the injected one still fails. The slack is kept as headroom although the class now runs alone
+    /// (<see cref="WallClockTimingCollection"/>); background work of earlier tests can still compete. A run that crosses
     /// it fails (it does not hang the suite).</summary>
     private static readonly TimeSpan Bound = Timeout + Cleanup + TimeSpan.FromSeconds(4);
 
