@@ -60,7 +60,7 @@ public class HostCommandExecutor : IHostCommandExecutor
         // R1-57, fail closed on every transport: without a finite, positive timeout a command has no deadline (an
         // infinite one) or would be started before the deadline is refused (one CancelAfter rejects). Refused before
         // anything starts.
-        if (!Whiskers.Services.Docker.Operations.HostShellOperations.IsUsableTimeout(effectiveTimeout))
+        if (!Whiskers.Utils.ExecutionTimeout.IsUsable(effectiveTimeout))
             throw new ArgumentOutOfRangeException(nameof(timeout), effectiveTimeout,
                 "A host command needs a finite, positive timeout.");
 
@@ -228,7 +228,7 @@ public class HostCommandExecutor : IHostCommandExecutor
 
         // R1-57: the deadline is set up before the process starts, so a timeout it refuses never leaves a started
         // process behind that is reported as "failed to start".
-        if (!Whiskers.Services.Docker.Operations.HostShellOperations.IsUsableTimeout(timeout))
+        if (!Whiskers.Utils.ExecutionTimeout.IsUsable(timeout))
             throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "A host command needs a finite, positive timeout.");
         if (ct.IsCancellationRequested)
             return new CommandResult { ExitCode = -1, Error = "Command cancelled before it started" };
@@ -237,9 +237,11 @@ public class HostCommandExecutor : IHostCommandExecutor
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(timeout);
 
+        var started = false;
         try
         {
             process.Start();
+            started = true;
 
             var cap = maxOutputChars is > 0 ? maxOutputChars.Value : MaxOutputChars;
             var stdoutTask = ReadCappedAsync(process.StandardOutput, cap, cts.Token);
@@ -314,10 +316,31 @@ public class HostCommandExecutor : IHostCommandExecutor
                 return new CommandResult { ExitCode = -1, Error = CancelledMessage };
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!started)
         {
             _logger.LogError(ex, "Failed to start process {FileName}", fileName);
             return new CommandResult { ExitCode = -1, Error = ex.Message };
+        }
+        catch (Exception ex)
+        {
+            // R1-57: an error after the start (a read faulted) — the command ran, or still runs. It is stopped and
+            // reported as such, never as "failed to start".
+            var exited = false;
+            try
+            {
+                exited = process.HasExited;
+                if (!exited) process.Kill(entireProcessTree: true);
+            }
+            catch { /* best effort */ }
+            _logger.LogError(ex, "Process {FileName} failed after it started", fileName);
+            var cause = SecretRedactor.Redact($"{ex.GetType().Name}: {ex.Message}");
+            return new CommandResult
+            {
+                ExitCode = -1,
+                Error = exited
+                    ? $"Command exited with code {process.ExitCode}, but its output could not be read ({cause})"
+                    : $"Command failed after it was started — its effect is unknown ({cause})"
+            };
         }
     }
 

@@ -1303,15 +1303,17 @@ the Local server included — through that executor; Whiskers itself opens no co
   step (`HostShellOperations`, steps behind `IHostShellDocker`); kill and remove hold the caller 5 s at most and go on
   in the background (2 min, retried with the server's current client), so a call ends at most timeout + 5 s after it
   began. A helper carries its deadline label; when the background clean-up gives up or a create never answers, a sweep
-  of that server is scheduled past the label and removes the helper, running or not. A helper left behind by a
-  Whiskers restart is removed by the sweep of the next host-shell call on that server (at most every 5 min), not
-  sooner; local/SSH output streams are
-  awaited at most 5 s after a kill, and their deadline is set before the process starts. A timeout that is not finite
-  and positive is refused on every transport before anything starts. `HostShellDeadlineTests` stall the client, image
-  check, pull, create, start, wait, log read, kill and remove — each step ignoring its token — and every case ends
-  within the bound; Docker errors at start and log read, a deadline firing as the create answers and the executor's
-  mapping of the host-shell result are covered too; the cases that drive the
-  local process path with a real process.
+  of that server is scheduled past the label and removes the helper, running or not; a sweep that cannot reach the
+  server (link outage) retries for up to an hour. A helper left behind by a Whiskers restart, or by an outage longer
+  than that hour, is removed by the sweep of the next host-shell call on that server (at most every 5 min), not
+  sooner. The label is Whiskers' wall clock: the sweep assumes Whiskers' clock is synchronised (NTP) — one far ahead
+  could remove a helper still in its run. Local/SSH output streams are awaited at most 5 s after a kill, their deadline
+  is set before the process starts, and an error after the start is reported as "effect unknown" (the process is
+  killed), never as "failed to start". A timeout that is not finite and positive is refused on every transport before
+  anything starts. `HostShellDeadlineTests` stall the client, image check, pull, create, start, wait, log read, kill and
+  remove — each step ignoring its token — and every case ends within the bound. They also cover Docker errors at start
+  and log read, a deadline firing as the create answers, the scheduled sweep's retries and the executor's mapping of
+  the host-shell result, and drive the local process path with a real process.
 - [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
   a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.
 - [ ] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists

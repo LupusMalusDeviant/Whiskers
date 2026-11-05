@@ -261,12 +261,16 @@ public sealed class HostShellDeadlineTests
     {
         _docker.Stall("wait");
         _docker.KillTakes = TimeSpan.FromMilliseconds(100);
+        // Kill and remove refuse a token that has already fired, as the real client does: run on the run's deadline
+        // token, neither would complete.
+        _docker.CleanupHonoursTokens = true;
 
         await Run();
 
         // Kill answered after the run's deadline had fired: its own budget let it finish and the remove follow.
         Assert.Contains("kill", _docker.Completed);
         Assert.Contains("remove", _docker.Completed);
+        Assert.Empty(_docker.Containers);
     }
 
     [Fact]
@@ -303,6 +307,22 @@ public sealed class HostShellDeadlineTests
         Assert.Equal(0, result.ExitCode);
         Assert.Single(_docker.Containers);
         await WaitUntil(() => _docker.Containers.IsEmpty, "the scheduled sweep removed the helper past its label");
+    }
+
+    [Fact]
+    public async Task A_scheduled_sweep_that_cannot_reach_the_server_tries_again()
+    {
+        // The clean-up gives up; then the link is down for the first tries of the scheduled sweep.
+        _docker.FailRemoveTimes = 1;
+        var shell = new HostShellOperations(_ => Task.FromResult<IHostShellDocker>(_docker),
+            new MemoryCache(new MemoryCacheOptions()), Cleanup, backgroundCleanup: TimeSpan.FromMilliseconds(100),
+            runningGrace: TimeSpan.Zero, sweepRetry: TimeSpan.FromMilliseconds(200));
+
+        await Run(shell);
+        _docker.FailListTimes = 2;
+
+        await WaitUntil(() => _docker.Containers.IsEmpty, "a later try of the scheduled sweep removed the helper");
+        Assert.True(_docker.FailListTimes < 0, "the sweep's first tries failed");
     }
 
     [Fact]
@@ -761,22 +781,32 @@ public sealed class HostShellDeadlineTests
 
         public async Task<(string Output, string Error)> ReadLogsAsync(string id, CancellationToken ct) { await Step("logs"); return ("hello\n", ""); }
 
+        /// <summary>Kill and remove throw when their token has already fired, before doing anything.</summary>
+        public bool CleanupHonoursTokens { get; set; }
+
         public async Task KillAsync(string id, CancellationToken ct)
         {
+            if (CleanupHonoursTokens) ct.ThrowIfCancellationRequested();
             await Step("kill");
             if (Containers.TryGetValue(id, out var c)) Containers[id] = c with { Running = false };
         }
 
         public async Task RemoveAsync(string id, CancellationToken ct)
         {
+            if (CleanupHonoursTokens) ct.ThrowIfCancellationRequested();
             await Step("remove", record: id.StartsWith("helper", StringComparison.Ordinal));
             if (Interlocked.Decrement(ref FailRemoveTimes) >= 0) throw new InvalidOperationException("daemon busy");
             Containers.TryRemove(id, out _);
         }
 
+        /// <summary>How many more listings fail (the link is down).</summary>
+        public int FailListTimes;
+
         public Task<IReadOnlyList<HostShellHelper>> ListHelpersAsync(string label, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<HostShellHelper>>(Containers
-                .Select(kv => new HostShellHelper(kv.Key, kv.Value.Created, kv.Value.Running, kv.Value.Labels))
-                .ToList());
+            Interlocked.Decrement(ref FailListTimes) >= 0
+                ? Task.FromException<IReadOnlyList<HostShellHelper>>(new IOException("connection refused"))
+                : Task.FromResult<IReadOnlyList<HostShellHelper>>(Containers
+                    .Select(kv => new HostShellHelper(kv.Key, kv.Value.Created, kv.Value.Running, kv.Value.Labels))
+                    .ToList());
     }
 }
