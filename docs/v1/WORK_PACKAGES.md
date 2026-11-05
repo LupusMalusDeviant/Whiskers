@@ -1307,13 +1307,14 @@ the Local server included — through that executor; Whiskers itself opens no co
   server (link outage) retries for up to an hour. A helper left behind by a Whiskers restart, or by an outage longer
   than that hour, is removed by the sweep of the next host-shell call on that server (at most every 5 min), not
   sooner. The label is Whiskers' wall clock: a forward step of that clock between the run and the sweep (an NTP
-  correction, a restart with a corrected clock) could remove a helper still in its run. Local/SSH output streams are awaited at most 5 s after a kill, their deadline
-  is set before the process starts, and an error after the start is reported as "effect unknown" (the process is
-  killed), never as "failed to start". A timeout that is not finite and positive is refused on every transport before
-  anything starts. `HostShellDeadlineTests` stall the client, image check, pull, create, start, wait, log read, kill and
-  remove — each step ignoring its token — and every case ends within the bound. They also cover Docker errors at start
-  and log read, a deadline firing as the create answers, the scheduled sweep's retries and the executor's mapping of
-  the host-shell result, and drive the local process path with a real process.
+  correction, a restart with a corrected clock) could remove a helper still in its run. Local/SSH output streams are
+  awaited at most 5 s after a kill, their deadline is set before the process starts, and an error after the start is
+  reported as "effect unknown" (the process is killed), never as "failed to start". A timeout that is not finite and
+  positive is refused on every transport before anything starts. `HostShellDeadlineTests` stall the client, image
+  check, pull, create, start, wait, log read, kill and remove — each step ignoring its token — and every case ends
+  within the bound. They also cover Docker errors at start and log read, a deadline firing as the create answers, the
+  scheduled sweep's retries and cover window, and the executor's mapping of the host-shell result, and drive the local
+  process path with a real process — also a read that faults after the start (through the `OutputReader` seam).
 - [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
   a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.
 - [ ] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists

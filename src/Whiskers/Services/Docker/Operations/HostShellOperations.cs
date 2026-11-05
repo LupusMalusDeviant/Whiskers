@@ -357,9 +357,9 @@ internal sealed class HostShellOperations
     /// <summary>Sweeps the server once its helper with deadline label <paramref name="labelEnd"/> is past that label and
     /// the grace — so a helper whose removal failed, or whose create never answered, is removed without waiting for a
     /// later host-shell call. A label of <see cref="DateTimeOffset.MinValue"/> (no helper of this run to wait for) sweeps
-    /// at once. A pending sweep due no earlier and within <see cref="SweepCoverWindow"/> covers a new one (repeated
-    /// failures on one server do not queue a sweep each); otherwise each runs at its own time, so a short helper never
-    /// waits for a long one's sweep. A sweep that cannot reach the server retries with backoff for up to an hour. In the
+    /// at once. As a rule each failure gets its own sweep at its own due, so a short helper never waits for a long one's
+    /// sweep; only a new sweep due no later than the latest pending one and at most <see cref="SweepCoverWindow"/>
+    /// before it is left to that one. A sweep that cannot reach the server retries with backoff for up to an hour. In the
     /// background, each try bounded by the sweep budget, never holding a caller.</summary>
     private void ScheduleSweep(string? serverId, DateTimeOffset labelEnd, IHostShellDocker fallback)
     {

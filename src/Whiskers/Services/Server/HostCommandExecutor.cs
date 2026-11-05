@@ -207,6 +207,10 @@ public class HostCommandExecutor : IHostCommandExecutor
         _ = task.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
+    /// <summary>Test seam: what the standard output is read through (the stream itself in production).
+    /// <c>HostShellDeadlineTests</c> makes a read fault after the start with it.</summary>
+    internal Func<TextReader, TextReader> OutputReader { get; init; } = static reader => reader;
+
     /// <summary>Runs a process and collects its output under <paramref name="timeout"/> (internal for
     /// <c>HostShellDeadlineTests</c>, which drives it with a real process).</summary>
     internal async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct,
@@ -245,7 +249,7 @@ public class HostCommandExecutor : IHostCommandExecutor
             started = true;
 
             var cap = maxOutputChars is > 0 ? maxOutputChars.Value : MaxOutputChars;
-            stdoutTask = ReadCappedAsync(process.StandardOutput, cap, cts.Token);
+            stdoutTask = ReadCappedAsync(OutputReader(process.StandardOutput), cap, cts.Token);
             // stderr keeps the default cap regardless: a raised cap is granted for the document a caller
             // wants to read, not for whatever the command decides to complain about.
             stderrTask = ReadCappedAsync(process.StandardError, MaxOutputChars, cts.Token);
@@ -333,7 +337,9 @@ public class HostCommandExecutor : IHostCommandExecutor
                 if (!exited) process.Kill(entireProcessTree: true);
             }
             catch { /* best effort */ }
-            // The other read fails once the process is disposed: observed, never unobserved.
+            // The other read is cancelled (a process outside the killed tree may hold its pipe open) and, like the one
+            // that failed, observed — never unobserved.
+            try { cts.Cancel(); } catch { /* best effort */ }
             if (stdoutTask is not null) ObserveFaults(stdoutTask);
             if (stderrTask is not null) ObserveFaults(stderrTask);
             _logger.LogError(ex, "Process {FileName} failed after it started", fileName);
@@ -342,7 +348,7 @@ public class HostCommandExecutor : IHostCommandExecutor
             {
                 ExitCode = -1,
                 Error = exited
-                    ? $"Command exited with code {process.ExitCode}, but its output could not be read ({cause})"
+                    ? $"Command finished with exit code {process.ExitCode}, but its output could not be read ({cause})"
                     : $"Command failed after it was started — its effect is unknown ({cause})"
             };
         }

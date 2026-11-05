@@ -310,6 +310,29 @@ public sealed class HostShellDeadlineTests
     }
 
     [Fact]
+    public async Task A_short_helper_is_swept_at_its_own_due_not_with_a_long_helper_pending_later()
+    {
+        var shell = new HostShellOperations(_ => Task.FromResult<IHostShellDocker>(_docker),
+            new MemoryCache(new MemoryCacheOptions()), Cleanup, backgroundCleanup: TimeSpan.FromMilliseconds(100),
+            runningGrace: TimeSpan.Zero);
+
+        // A long run whose clean-up gives up: its sweep is pending ten minutes ahead.
+        _docker.FailRemoveTimes = 1;
+        await Run(shell, timeout: TimeSpan.FromMinutes(10));
+        var longHelper = _docker.Created.Single();
+
+        // A short run whose clean-up gives up too: its sweep is due in a few seconds.
+        await WaitUntil(() => _docker.FailRemoveTimes == 0, "the long run's remove failed");
+        await Task.Delay(TimeSpan.FromMilliseconds(400)); // its 100 ms of background clean-up ran out: sweep scheduled
+        _docker.FailRemoveTimes = 1;
+        await Run(shell);
+        var shortHelper = _docker.Created.Last();
+
+        await WaitUntil(() => !_docker.Containers.ContainsKey(shortHelper), "the short helper was swept at its own due");
+        Assert.True(_docker.Containers.ContainsKey(longHelper), "the long helper is still within its label");
+    }
+
+    [Fact]
     public async Task A_scheduled_sweep_that_cannot_reach_the_server_tries_again()
     {
         // The clean-up gives up; then the link is down for the first tries of the scheduled sweep.
@@ -655,6 +678,29 @@ public sealed class HostShellDeadlineTests
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"took {watch.Elapsed}");
         Assert.Equal(-1, result.ExitCode);
         Assert.StartsWith("Command exited with code 0, but a process it left running kept its output open", result.Error);
+    }
+
+    [SkippableFact]
+    public async Task A_read_that_fails_after_the_start_is_not_reported_as_a_failed_start()
+    {
+        var (file, args) = OperatingSystem.IsWindows() ? ("cmd", new[] { "/c", "echo hi" }) : ("sh", new[] { "-c", "echo hi" });
+        Skip.IfNot(OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS());
+        var executor = new HostCommandExecutor(null!, null!, NullLogger<HostCommandExecutor>.Instance)
+        {
+            OutputReader = _ => new FaultingReader(),
+        };
+
+        var result = await executor.RunProcessAsync(file, args, TimeSpan.FromSeconds(10), default).WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Equal("Command finished with exit code 0, but its output could not be read (IOException: pipe broken)", result.Error);
+    }
+
+    /// <summary>A standard output whose read fails (a broken pipe).</summary>
+    private sealed class FaultingReader : TextReader
+    {
+        public override ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(new IOException("pipe broken"));
     }
 
     // ---- double ----------------------------------------------------------------------------------------------------
