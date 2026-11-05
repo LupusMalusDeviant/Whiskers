@@ -67,6 +67,7 @@ $@"services:
     command:
       - '--path.rootfs=/host'
       - '--web.listen-address={tsIp}:9100'
+      - '--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector'
     volumes:
       - '/:/host:ro,rslave'
 ";

@@ -35,6 +35,16 @@ public static class NotificationEventTypes
     /// <summary>A series had no readings for longer than the gap tolerance: its breach state was reset (R1-56).</summary>
     public const string MetricsGap = "metrics_gap";
 
+    // --- Disk health (R1-58, contract 0005): one raise per breach and a <kind>_recovered, never held by quiet hours ----
+    /// <summary>A disk reports SMART overall-health failed.</summary>
+    public const string DiskFailing = "disk_failing";
+
+    /// <summary>An md array lost disks or a ZFS pool is not online.</summary>
+    public const string ArrayDegraded = "array_degraded";
+
+    /// <summary>A host's disk health that was read turned Unknown (never on a host that had no reading before).</summary>
+    public const string DiskHealthUnknown = "disk_health_unknown";
+
     /// <summary>A point-in-time outlier, not a breach: re-fires after the cool-down, has no recovery.</summary>
     public const string MetricAnomaly = "metric_anomaly";
 
@@ -106,6 +116,9 @@ public static class NotificationEventTypes
         HostApiSlow => "slow Docker API",
         HostCpuAnomaly => "unusual server CPU",
         HostCpuBaselineDrifted => "drifted CPU baseline",
+        DiskFailing => "failing disk",
+        ArrayDegraded => "degraded array",
+        DiskHealthUnknown => "disk health unknown",
         _ => kind,
     };
 
@@ -114,6 +127,7 @@ public static class NotificationEventTypes
     {
         HighCpu, HighMemory, HighDisk, MetricsGap,
         HostCpuHigh, HostMemoryHigh, HostCpuUnexplained, HostApiSlow, HostCpuAnomaly, HostCpuBaselineDrifted,
+        DiskFailing, ArrayDegraded, DiskHealthUnknown,
     };
 
     /// <summary>Every constant above (not the two patterns).</summary>
@@ -145,6 +159,8 @@ public static class NotificationEventTypes
         WebhookDisabled, AgentApproval,
         LoopsPausedReminder, LogScanSuspended, LogScanResumed, MonitoringStalled, MonitoringResumed,
         AutoUpdateFailed, QuietHoursSummary, Test,
+        // R1-58 (decision 4): a dying disk does not wait for the morning — and neither does the end of it (IsSuppressible).
+        DiskFailing, ArrayDegraded, DiskHealthUnknown,
     };
 
     /// <summary>What quiet hours may hold (and a summary reports after the window).</summary>
@@ -187,6 +203,8 @@ public static class NotificationEventTypes
     {
         var type = evt.EventType;
         if (!IsKnown(type) || UnsuppressibleEvents.Contains(type)) return false;
+        // R1-58: the end of a breach whose raise is never held is not held either (disk_failing_recovered, …).
+        if (IsRecovery(type) && UnsuppressibleEvents.Contains(type[..^RecoveredSuffix.Length])) return false;
         if (type == CveFinding && evt.HighestCveSeverity is Whiskers.Models.Cve.CveSeverity.Critical) return false;
         return SuppressibleEvents.Contains(type) || IsLogAlert(type) || IsRecovery(type);
     }

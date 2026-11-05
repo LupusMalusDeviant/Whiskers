@@ -5735,6 +5735,54 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="IdentityBindings_Error_auth_disabled" xml:space="preserve">
     <value>Die Authentifizierung ist abgeschaltet; Anmelde-Identitäten lassen sich hier nicht ändern.</value>
   </data>
+  <data name="DiskHealth_Panel" xml:space="preserve">
+    <value>Datenträger-Zustand (SMART, RAID, ZFS)</value>
+  </data>
+  <data name="DiskHealth_Intro" xml:space="preserve">
+    <value>Liest alle 5 Minuten den Zustand von SMART, md-RAID und ZFS aus dem Metrik-Endpunkt jedes Hosts (node_exporter über VictoriaMetrics). Whiskers führt auf den Hosts nichts aus; für SMART braucht der Host einen Timer, der smartmon.prom schreibt. Ein Messwert, für den Whiskers nicht bürgen kann — fehlend, fehlerhaft oder älter als 2 Stunden —, wird als unbekannt angezeigt, nie als in Ordnung.</value>
+  </data>
+  <data name="DiskHealth_GuideLink" xml:space="preserve">
+    <value>Betriebsanleitung</value>
+  </data>
+  <data name="DiskHealth_Label_Enabled" xml:space="preserve">
+    <value>Datenträger-Zustand lesen (SMART, RAID, ZFS)</value>
+  </data>
+  <data name="DiskHealth_Snackbar_Saved" xml:space="preserve">
+    <value>Einstellung zum Datenträger-Zustand gespeichert.</value>
+  </data>
+  <data name="DiskHealth_Snackbar_SaveFailed" xml:space="preserve">
+    <value>Die Einstellung zum Datenträger-Zustand konnte nicht gespeichert werden: {0}</value>
+  </data>
+  <data name="DiskHealth_Block_Title" xml:space="preserve">
+    <value>Datenträger</value>
+  </data>
+  <data name="DiskHealth_Block_NotReadYet" xml:space="preserve">
+    <value>Noch nicht gelesen; der erste Messwert folgt innerhalb von 5 Minuten.</value>
+  </data>
+  <data name="DiskHealth_Block_Unsupported" xml:space="preserve">
+    <value>Für diesen Host gibt es keinen Datenträger-Zustand: Er hat keinen Metrik-Endpunkt, oder weder SMART noch md-RAID noch ZFS melden etwas.</value>
+  </data>
+  <data name="DiskHealth_Block_NoItems" xml:space="preserve">
+    <value>Es wird nichts mehr gemeldet.</value>
+  </data>
+  <data name="DiskHealth_Block_Age" xml:space="preserve">
+    <value>vor {0}</value>
+  </data>
+  <data name="DiskHealth_Block_Live" xml:space="preserve">
+    <value>live</value>
+  </data>
+  <data name="DiskHealth_State_Healthy" xml:space="preserve">
+    <value>In Ordnung</value>
+  </data>
+  <data name="DiskHealth_State_DegradedOrFailing" xml:space="preserve">
+    <value>Beeinträchtigt / fällt aus</value>
+  </data>
+  <data name="DiskHealth_State_Unknown" xml:space="preserve">
+    <value>Unbekannt</value>
+  </data>
+  <data name="DiskHealth_State_Unsupported" xml:space="preserve">
+    <value>Nicht unterstützt</value>
+  </data>
   <data name="IdentityBindings_Error_failed" xml:space="preserve">
     <value>Die Aktion ist fehlgeschlagen ({0}); siehe Log.</value>
   </data>

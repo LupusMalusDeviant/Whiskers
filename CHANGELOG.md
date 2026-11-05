@@ -6,6 +6,21 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **New: optional disk-health readings — SMART, md RAID, ZFS (R1-58).** Whiskers can show whether each host's disks
+  and arrays are healthy, read only from the host's existing metrics endpoint (node_exporter through VictoriaMetrics).
+  It never runs anything on the host. Off by default; an Admin switches it on in Settings → *Disk health (SMART, RAID,
+  ZFS)* (a gated, audited `config.save`). Each server's expanded dashboard panel then shows a *Disks* block: the overall
+  state and one line per disk, array and pool, readable by every role. States: Healthy, Degraded / failing, Unknown and
+  Not supported. Whiskers shows Unknown, never Healthy, when it cannot vouch for a reading: a failed or malformed
+  query, something missing since the last reading, or SMART data older than 2 hours. Freshness is judged by the
+  smartctl run time and the textfile's modification time, never by the query time. New alerts `disk_failing`,
+  `array_degraded` and `disk_health_unknown` are raised after 10 minutes and cleared after 10 minutes of good readings.
+  Quiet hours never hold them; Unknown never clears them. SMART needs a host timer writing `smartmon.prom`:
+  `docs/operations/disk-health.md` has the shell script and systemd units. md and ZFS need nothing. **Upgrade note:**
+  the node_exporter template (`deploy/telemetry/host/docker-compose.yml`, and the onboarding wizard) now enables the
+  textfile collector (`--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector`, through the
+  existing read-only mount). Hosts set up earlier need the flag added and node_exporter recreated before they can
+  deliver SMART data.
 - **Security: proxy trust defaults to loopback only — check your reverse proxy (R1-50).** Whiskers used to believe
   `X-Forwarded-For` from every private network (RFC 1918 and Tailscale's range), so any client in the LAN or tailnet
   could claim another address and slip past the per-client sign-in limit. Now only loopback is trusted unless

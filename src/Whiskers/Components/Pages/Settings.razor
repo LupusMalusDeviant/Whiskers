@@ -188,6 +188,11 @@ else
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveHealth" Class="mt-2">@L["Settings_Button_Save"]</MudButton>
     </MudExpansionPanel>
 
+    @* R1-58: optional disk-health readings (SMART, RAID, ZFS) from the hosts' metrics endpoints. *@
+    <MudExpansionPanel Text="@L["DiskHealth_Panel"]" Icon="@Icons.Material.Filled.Storage">
+        <DiskHealthPanel />
+    </MudExpansionPanel>
+
     @* Metric alerts *@
     <MudExpansionPanel Text="@L["Settings_Panel_MetricAlerts"]" Icon="@Icons.Material.Filled.Insights">
         <MudGrid>
