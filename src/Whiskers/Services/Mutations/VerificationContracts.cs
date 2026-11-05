@@ -112,6 +112,10 @@ public static class VerificationContracts
                 "the agent stack is installed by a script; the next health check shows whether the host reports."),
             ["server.save"] = VerificationContract.None(OwnRecord),
             ["server.remove"] = VerificationContract.None(OwnRecord),
+            ["endpointcheck.save"] = VerificationContract.None(OwnRecord),
+            ["endpointcheck.delete"] = VerificationContract.None(OwnRecord),
+            ["endpointcheck.run"] = VerificationContract.None(
+                "a probe changes nothing on the host; its result is the check's answer and is recorded as such."),
             ["aitrigger.save"] = VerificationContract.None(OwnRecord),
             ["selfbackup.restore"] = VerificationContract.None(
                 "staged only: the restore is applied by the next start, before anything opens the database."),

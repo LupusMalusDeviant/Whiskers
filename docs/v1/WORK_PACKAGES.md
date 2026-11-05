@@ -1311,10 +1311,10 @@ the Local server included — through that executor; Whiskers itself opens no co
 
 **Acceptance criteria:**
 
-- [ ] `EndpointCheckTests` cover HTTP, TCP and TLS-expiry checks with timeouts and a bounded result size. The bound
+- [x] `EndpointCheckTests` cover HTTP, TCP and TLS-expiry checks with timeouts and a bounded result size. The bound
   comes from the templates themselves (`curl -o /dev/null -w …`, output cut with `head -c`), since the mTLS transport
   applies no output cap (`HostCommandExecutor.cs:59–61`); a test sends a large response through the TCP transport.
-- [ ] A check run is a registered gateway capability with an owner principal (INV-04): the owner's authority is
+- [x] A check run is a registered gateway capability with an owner principal (INV-04): the owner's authority is
   re-checked on every run, the kill switch and an audit failure refuse the run, and every run is one audited gateway
   event with its own operation id (R1-18). Runs come from one background loop under R1-41's rules, and a check's
   interval has a validated minimum of 60 seconds, which bounds runs and their audit rows (at most 1440 per check and
@@ -1344,13 +1344,13 @@ the Local server included — through that executor; Whiskers itself opens no co
   within the bound. They also cover Docker errors at start and log read, a deadline firing as the create answers, the
   scheduled sweep's retries and cover window, and the executor's mapping of the host-shell result, and drive the local
   process path with a real process — also a read that faults after the start (through the `OutputReader` seam).
-- [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
+- [x] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
   a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.
-- [ ] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists
+- [x] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists
   (R1-42 validators, INV-41) and inserted single-quoted; a test proves that an option-leading operand (`-…`) or one
   containing shell metacharacters, quotes or whitespace is refused **before** anything runs. No new agent, no new
   listening port.
-- [ ] A check runs in three steps so the host's DNS view is kept and the range decision stays in Whiskers: (1) a
+- [x] A check runs in three steps so the host's DNS view is kept and the range decision stays in Whiskers: (1) a
   fixed resolve command on the host (`getent ahosts '<name>'`); (2) Whiskers checks every answered address against the
   R1-54 default-denied ranges and the check's exceptions; (3) a second fixed command pinned to the chosen address —
   HTTP: `curl -q -s -S --max-time <timeout> --resolve '<name>:<port>:<ip>' --noproxy '*'` (`-q` first, so no
@@ -1383,16 +1383,43 @@ the Local server included — through that executor; Whiskers itself opens no co
   to `169.254.169.254`, a name answering an internal address, IPv4-
   mapped IPv6 forms and a refused destination. Internal targets — the usual case for a LAN service — need an explicit,
   Admin-only exception per check (IP literal or name plus allowed addresses, as in R1-54).
-- [ ] The required tool set per host is documented: `getent`, `curl`, `openssl` and one `nc` flavour (OpenBSD
+- [x] The required tool set per host is documented: `getent`, `curl`, `openssl` and one `nc` flavour (OpenBSD
   netcat, the Debian/Ubuntu default) for the TCP check; another `nc` variant is reported as unsupported rather than
   guessed at.
-- [ ] A missing tool on the host (`getent`, `curl`, `openssl`, `nc`), a non-zero exit or unparsable output is a failed
+- [x] A missing tool on the host (`getent`, `curl`, `openssl`, `nc`), a non-zero exit or unparsable output is a failed
   check, never a pass — tested.
-- [ ] A check definition is a gated configuration write (R1-11) with audit (R1-22): Viewer/Operator and a demoted
+- [x] A check definition is a gated configuration write (R1-11) with audit (R1-22): Viewer/Operator and a demoted
   Admin are refused, the kill switch refuses, an audit failure refuses before publication. A check bound to a server
   without a shell transport (a Kubernetes server without SSH host; `HostCommandExecutor` returns exit code -1 there)
   is refused on save, tested.
-- [ ] Results feed the alert pipeline with R1-56's duration semantics.
+- [x] Results feed the alert pipeline with R1-56's duration semantics.
+- [ ] **[braucht Nutzer/Hardware]** One live check per transport against a real host: local `nsenter`, the mTLS
+  one-shot container, SSH, and an HTTPS target behind an internal-address exception (contract 0004, plan triage). This
+  also confirms on a real host that `nc -h` of `netcat-openbsd` names "OpenBSD netcat" (Debian/Ubuntu and Alpine) and
+  that the `head -c` bound cuts a large answer over the mTLS transport.
+
+**Done (R1-57, contract 0004):** `Services/EndpointChecks/` — `EndpointCheckValidator` (canonical literals, RFC 1123
+names, http/https URLs without user info, quotes, whitespace, shell or glob characters; port equal to the URL's;
+interval 60–86 400 s, timeout 1–30 s; shell transport required), `EndpointCheckCommands` (fixed `getent`/`curl`/OpenBSD
+`nc`/`openssl s_client` templates, operands quoted, `( … 2>&1; echo "__rc=$?" ) | head -c 16384`),
+`EndpointCheckParser` (positive evidence; the certificate's `notAfter` is read in Whiskers from the bounded `s_client`
+output, as the contract allows), `EndpointCheckRunner` (one `endpointcheck.run` decision as the owner, every answered
+address public or excepted, at most 4 tried, 1 + 4 executor calls, one run deadline), `EndpointCheckStore`,
+`EndpointCheckMonitor` (15 s tick, 4 at a time / 1 per server, suspension, `endpoint_check_failed`, 7-day retention);
+entities and paired migrations `EndpointChecks`; capabilities `endpointcheck.save`/`.delete`/`.run`; page `/checks`;
+read-only MCP tool `endpoint_checks_list`. Tests: `EndpointCheckTests`, `EndpointCheckGatingTests` (shared doubles in
+`EndpointCheckTestDoubles`). The test pass found that a run's actor carried no provenance, so the gateway treated
+every check as agent-created and refused each unattended run as needing a confirmation; the actor now names the owner
+as its provenance (only an Admin creates a check, in the UI). Operator guide:
+[`docs/operations/endpoint-checks.md`](../operations/endpoint-checks.md). The page filters by server, outcome, latency
+and certificate expiry; the Dashboard shows each server's count of failing checks as a link to the filtered page.
+Review round 1: "Run now" passes only the check id and the runner reads the stored check inside the UI decision (gone or
+off = Refused, nothing runs), stamping that decision's operation id on the result; the monitor and "Run now" share
+`IEndpointCheckSlots` (4 fleet-wide, 1 per server and check); an answer that reaches the 16 384-byte cap is cut off
+whatever it ends with; addresses are judged canonically but probed as answered (NAT64) and a literal as written; a
+check without an owner is refused and suspended; the MCP list gives no run details and the page hides an HTTP query
+string from non-Admins; results of a deleted check are not recorded and are pruned; each executor call gets the
+timeout + 2 s and `curl` runs with `-g`.
 
 **Out of scope:** Synthetic browser checks; checks from outside the fleet or from Whiskers' own process; changing the
 host transport; the existing certificate monitor (`Services/Certificates/`), which keeps its own probe.

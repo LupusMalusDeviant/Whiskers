@@ -203,6 +203,11 @@ public static class WhiskersHostingExtensions
         builder.Services.AddHostedService<Whiskers.Services.Observability.Outcomes.ActionOutcomeSweeper>();
         // Warns before an mTLS or certbot certificate expires (NextToImplement C1).
         builder.Services.AddHostedService<Whiskers.Services.Certificates.CertificateMonitor>();
+        // R1-57 (contract 0004): endpoint checks run on the managed host, through the gateway as the check's owner.
+        builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckStore, Whiskers.Services.EndpointChecks.EndpointCheckStore>();
+        builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckSlots, Whiskers.Services.EndpointChecks.EndpointCheckSlots>();
+        builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckRunner, Whiskers.Services.EndpointChecks.EndpointCheckRunner>();
+        builder.Services.AddHostedService<Whiskers.Services.EndpointChecks.EndpointCheckMonitor>();
         // Last known reading per server, so a page paints from what the loops already learned instead of
         // asking the whole fleet again while the user waits.
         builder.Services.AddSingleton<Whiskers.Services.Observability.IFleetSnapshotCache, Whiskers.Services.Observability.FleetSnapshotCache>();
