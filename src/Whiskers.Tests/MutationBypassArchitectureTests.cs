@@ -498,6 +498,15 @@ internal static class MutationCallScanner
             .Distinct()
             .ToList();
 
+    /// <summary>The owners of every place in <paramref name="assembly"/> that constructs <paramref name="constructed"/>.</summary>
+    public static IReadOnlyList<Type> Constructors(Assembly assembly, Type constructed) =>
+        SafeTypes(assembly)
+            .SelectMany(t => t.GetMethods(All).Cast<MethodBase>().Concat(t.GetConstructors(All)).Select(m => (Type: t, Method: m)))
+            .Where(b => CalledMethods(b.Method).OfType<ConstructorInfo>().Any(c => c.DeclaringType == constructed))
+            .Select(b => OwnerOf(b.Type))
+            .Distinct()
+            .ToList();
+
     private static int OperandSize(OpCode op, byte[] il, int pos) => op.OperandType switch
     {
         OperandType.InlineNone => 0,

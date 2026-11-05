@@ -17,6 +17,10 @@ public class HostCommandExecutor : IHostCommandExecutor
     /// <summary>R1-57: how long a stopped local or SSH command's output streams are awaited after the kill.</summary>
     private static readonly TimeSpan DrainBudget = TimeSpan.FromSeconds(5);
 
+    /// <summary>Seconds as the messages show them: invariant ("0.5", never "0,5").</summary>
+    private static string Seconds(TimeSpan timeout) =>
+        timeout.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     /// <summary>R1-38 (INV-40): a command stopped by its caller may already have changed something.</summary>
     internal const string CancelledMessage = "Command cancelled — its effect is unknown";
 
@@ -191,7 +195,13 @@ public class HostCommandExecutor : IHostCommandExecutor
         return args;
     }
 
-    private async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct,
+    private static void ObserveFaults(Task task) =>
+        _ = task.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+    /// <summary>Runs a process and collects its output under <paramref name="timeout"/> (internal for
+    /// <c>HostShellDeadlineTests</c>, which drives it with a real process).</summary>
+    internal async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct,
         (string Key, string Value)? env = null, int? maxOutputChars = null)
     {
         var psi = new ProcessStartInfo
@@ -223,11 +233,16 @@ public class HostCommandExecutor : IHostCommandExecutor
             // wants to read, not for whatever the command decides to complain about.
             var stderrTask = ReadCappedAsync(process.StandardError, MaxOutputChars, cts.Token);
 
+            var exited = false;
             try
             {
                 await process.WaitForExitAsync(cts.Token);
-                var stdout = await stdoutTask;
-                var stderr = await stderrTask;
+                exited = true;
+                // R1-57: the reads are awaited against the deadline as well. They take the token, but a pipe read need
+                // not honour it (Windows), and a process the command left running in the background can hold the pipe
+                // open long after the command itself exited.
+                var stdout = await stdoutTask.WaitAsync(cts.Token);
+                var stderr = await stderrTask.WaitAsync(cts.Token);
 
                 if (stdout.Truncated)
                     _logger.LogWarning(
@@ -248,16 +263,37 @@ public class HostCommandExecutor : IHostCommandExecutor
                 // whole process tree so an aborted `ufw disable` / `systemctl stop` can't keep running,
                 // and observe the read tasks so they don't fault unobserved.
                 var timedOut = !ct.IsCancellationRequested;
-                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-                // R1-57: the reads cancel with the token, but a pipe a stray grandchild keeps open must not hold the
-                // caller past the deadline either — their outcome is awaited for the clean-up budget at most.
-                try { await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(DrainBudget); } catch { /* best effort */ }
+                if (!exited)
+                {
+                    try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+                    // R1-57: with the command killed the pipes close, but a process it started outside its tree can keep
+                    // them open — the reads are awaited for the drain budget at most.
+                    try { await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(DrainBudget); } catch { /* best effort */ }
+                }
+                // Reads given up on fault once the process (and its streams) is disposed: observed, never unobserved.
+                ObserveFaults(stdoutTask);
+                ObserveFaults(stderrTask);
+
+                if (exited)
+                {
+                    // The command itself finished; something it left running kept its output open. Its exit code is
+                    // known, its output is not — reported as such, not as a timeout of the command.
+                    _logger.LogWarning("Output of {FileName} stayed open after it exited with code {ExitCode}: {Arguments}",
+                        fileName, process.ExitCode, SecretRedactor.Redact(string.Join(' ', psi.ArgumentList)));
+                    return new CommandResult
+                    {
+                        ExitCode = -1,
+                        Error = timedOut
+                            ? $"Command exited with code {process.ExitCode}, but a process it left running kept its output open past {Seconds(timeout)}s; the output was not read"
+                            : $"Command exited with code {process.ExitCode}, but reading its output was cancelled"
+                    };
+                }
 
                 if (timedOut)
                 {
                     _logger.LogWarning("Command timed out after {Timeout}: {FileName} {Arguments}",
                         timeout, fileName, SecretRedactor.Redact(string.Join(' ', psi.ArgumentList)));
-                    return new CommandResult { ExitCode = -1, Error = $"Command timed out after {timeout.TotalSeconds}s" };
+                    return new CommandResult { ExitCode = -1, Error = $"Command timed out after {Seconds(timeout)}s — its effect is unknown" };
                 }
 
                 _logger.LogWarning("Command cancelled: {FileName}", fileName);

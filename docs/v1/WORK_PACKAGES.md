@@ -1300,10 +1300,12 @@ the Local server included — through that executor; Whiskers itself opens no co
   its own reviewed change (or inside R1-57 once approved). Tests cover a stalled image pull/create, a stalled command
   and a stalled log retrieval, each ending within the deadline.
   *Done (approved by the maintainer on 5 November 2026, own change):* the timeout is one deadline over every Docker
-  step (`HostShellOperations`, steps behind `IHostShellDocker`); kill and remove have a 5 s clean-up budget after it,
-  so a call ends at most timeout + 5 s after it began; local/SSH output streams are awaited at most 5 s after a kill.
-  `HostShellDeadlineTests` stall the client, image check, pull, create, start, wait, log read, kill and remove — each
-  step ignoring its token — and every case ends within the bound.
+  step (`HostShellOperations`, steps behind `IHostShellDocker`); kill and remove hold the caller 5 s at most and go on
+  in the background (2 min, retried), and the sweep removes a helper still running past its deadline label, so a call
+  ends at most timeout + 5 s after it began and no privileged helper is left to run on; local/SSH output streams are
+  awaited at most 5 s after a kill. `HostShellDeadlineTests` stall the client, image check, pull, create, start, wait,
+  log read, kill and remove — each step ignoring its token — and every case ends within the bound; two cases drive the
+  local process path with a real process.
 - [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
   a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.
 - [ ] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists

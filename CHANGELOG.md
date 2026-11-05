@@ -10,11 +10,16 @@ All notable changes to Whiskers are documented here. The format follows
   container over the mTLS Docker connection) started its timeout only once the helper was created; checking or pulling
   the helper image, creating it, reading its output and removing it ran without a limit, so a stalled Docker step could
   hold the caller — and with it a background loop's slot — indefinitely. The timeout now covers every step from the
-  first Docker call to the output, also a call that ignores its cancellation, and killing and removing the helper have
-  5 seconds of their own after it; a helper left behind is removed by the existing sweep. The error says where the run
-  stood: "did not start" before the start request, "effect unknown" after it, "exit code N, output not read" once it had
-  finished. Local and SSH commands wait at most 5 seconds for their output streams after a timeout kill. Prerequisite
-  of R1-57; the mTLS transport itself (certificates, allowed client name, proxy verbs) is unchanged.
+  first Docker call to the output, also a call that ignores its cancellation, and killing and removing the helper hold
+  the caller for at most 5 seconds after it. A clean-up that takes longer goes on in the background with retries (up to
+  2 minutes) instead of being dropped, and every helper now carries its latest end as a label
+  (`serverwatch.hostshell.deadline`), so the sweep also removes a helper that is still **running** well past it — before,
+  a running helper was never swept. The error says where the run stood: "did not start" before the start request,
+  "effect unknown" after it (also for a Docker error there, which used to read like a plain failure), "exit code N,
+  output not read" once it had finished. Local and SSH commands: a timeout reads "effect unknown" as well, and a command
+  that exited while a process it left running kept its output open is reported with its exit code at the deadline
+  instead of as a timeout. Timeout texts are formatted the same on every host ("0.5s", not "0,5s"). Prerequisite of
+  R1-57; the mTLS transport itself (certificates, allowed client name, proxy verbs) is unchanged.
 - **Fix: an unset `GOOGLE_ADMIN_EMAIL` no longer switches on a whitelist that admits nobody.** Compose passes it as
   `GoogleAuth__AllowedEmails__0=`, and a fresh instance seeded an enabled whitelist holding one empty entry, which turned
   away every Google and OIDC sign-in. The seed now drops blank entries (and trims and de-duplicates the rest); with none
