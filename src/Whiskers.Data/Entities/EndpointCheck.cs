@@ -78,7 +78,9 @@ public class EndpointCheckResultEntity
     public string CheckId { get; set; } = "";
     public DateTime AtUtc { get; set; }
 
-    /// <summary>The gateway operation id of the run (R1-18); null when the run was refused before the gateway.</summary>
+    /// <summary>The gateway operation id of the run (R1-18): the monitor's own <c>endpointcheck.run</c> decision (also a
+    /// refused one), or for "Run now" the UI decision the run happened in. Null only for a run that could not be
+    /// completed at all (an exception the monitor recorded as a failure).</summary>
     public string? OperationId { get; set; }
 
     public EndpointCheckOutcome Outcome { get; set; }

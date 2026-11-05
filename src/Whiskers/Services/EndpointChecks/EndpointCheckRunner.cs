@@ -14,16 +14,19 @@ public interface IEndpointCheckRunner
     /// refusal or a stalled host — only when <paramref name="ct"/> is cancelled.</summary>
     Task<EndpointCheckRun> RunAsync(EndpointCheckDefinition check, CancellationToken ct);
 
-    /// <summary>"Run now": the same run, inside an <c>endpointcheck.run</c> decision the caller already holds (the UI's,
-    /// for the signed-in Admin) — no decision of its own. Outside such a decision the scope guard refuses the host
-    /// command. A definition that no longer validates comes back <c>Refused</c> without running anything.</summary>
-    Task<EndpointCheckRun> RunInDecisionAsync(EndpointCheckDefinition check, CancellationToken ct);
+    /// <summary>"Run now": the run of the check <paramref name="checkId"/> as it is stored <b>now</b> (review M1: never a
+    /// copy a page loaded earlier), inside an <c>endpointcheck.run</c> decision the caller already holds (the UI's, for
+    /// the signed-in Admin) — no decision of its own, and the result carries that decision's operation id. A check that
+    /// is gone, switched off or no longer validates comes back <c>Refused</c> without running anything. Outside such a
+    /// decision the scope guard refuses the host command.</summary>
+    Task<EndpointCheckRun> RunInDecisionAsync(string checkId, CancellationToken ct);
 }
 
 /// <summary>
 /// R1-57: resolves and probes on the host, inside one <c>endpointcheck.run</c> decision (one audit event, one operation
 /// id). Whiskers never connects to the target; it decides which addresses the host may contact. Bounded: at most 1 + 4
-/// executor calls, each limited by the check's timeout, the whole run by <see cref="EndpointCheckValidator.RunDeadline"/>.
+/// executor calls, each limited by the check's timeout plus <see cref="AttemptGrace"/>, the whole run by
+/// <see cref="EndpointCheckValidator.RunDeadline"/>.
 /// </summary>
 public sealed class EndpointCheckRunner : IEndpointCheckRunner
 {
@@ -33,17 +36,24 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
     /// <summary>The longest detail line kept.</summary>
     public const int MaxDetail = 300;
 
+    /// <summary>Review n1: what an executor call gets on top of the check's timeout, so a tool's own time limit
+    /// (<c>curl --max-time</c>, <c>nc -w</c>) ends first and its clearer answer is kept. Five calls of timeout + 2 s are
+    /// exactly the run deadline, timeout × 5 + 10 s.</summary>
+    public static readonly TimeSpan AttemptGrace = TimeSpan.FromSeconds(2);
+
     private readonly IAutomationMutationRunner _automation;
     private readonly IHostCommandExecutor _executor;
     private readonly IServerConfigService _servers;
+    private readonly IEndpointCheckStore _store;
     private readonly TimeProvider _time;
 
     public EndpointCheckRunner(IAutomationMutationRunner automation, IHostCommandExecutor executor,
-        IServerConfigService servers, TimeProvider? time = null)
+        IServerConfigService servers, IEndpointCheckStore store, TimeProvider? time = null)
     {
         _automation = automation;
         _executor = executor;
         _servers = servers;
+        _store = store;
         _time = time ?? TimeProvider.System;
     }
 
@@ -56,20 +66,30 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
         return new("check:" + check.Id, $"Endpoint check '{check.Name}'", owner, owner);
     }
 
+    /// <summary>The executor timeout of one attempt.</summary>
+    public static TimeSpan AttemptTimeout(int timeoutSeconds) => TimeSpan.FromSeconds(timeoutSeconds) + AttemptGrace;
+
     public async Task<EndpointCheckRun> RunAsync(EndpointCheckDefinition check, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(check);
         var at = _time.GetUtcNow().UtcDateTime;
         var arguments = new { serverId = check.ServerId, checkId = check.Id };
 
+        // Review m5: no owner, no run — also during the owner grace period, which would otherwise lend the item the
+        // capability's own level (Admin, for a root-equivalent command). Recorded at read level, nothing runs.
+        if (string.IsNullOrWhiteSpace(check.OwnerId))
+        {
+            const string reason = "The check has no owner; an Admin must save it again before it runs.";
+            var refused = await _automation.RefuseAsync(ActorOf(check), "endpointcheck.run", arguments, reason, ct);
+            return new EndpointCheckRun(check.Id, at, Models.EndpointCheckOutcome.Refused, reason, NullIfEmpty(refused.OperationId));
+        }
+
         // 1. The definition against the server as it is now: a check saved for a server that lost its shell transport,
         // or one whose stored values no longer pass, runs nothing — recorded as the gateway's refusal.
-        var errors = EndpointCheckValidator.Validate(check.ToDraft(), _servers.GetServer(check.ServerId));
-        if (errors.Count > 0 || !EndpointCheckValidator.TryTarget(check.ToDraft(), out var target, out _))
+        if (Invalid(check, out var target) is { } invalid)
         {
-            var reason = errors.Count > 0 ? string.Join(" ", errors) : "The target is not valid.";
-            var refused = await _automation.RefuseAsync(ActorOf(check), "endpointcheck.run", arguments, reason, ct);
-            return new EndpointCheckRun(check.Id, at, Models.EndpointCheckOutcome.Refused, Bounded(reason),
+            var refused = await _automation.RefuseAsync(ActorOf(check), "endpointcheck.run", arguments, invalid, ct);
+            return new EndpointCheckRun(check.Id, at, Models.EndpointCheckOutcome.Refused, Bounded(invalid),
                 NullIfEmpty(refused.OperationId));
         }
 
@@ -86,15 +106,36 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
         };
     }
 
-    public Task<EndpointCheckRun> RunInDecisionAsync(EndpointCheckDefinition check, CancellationToken ct)
+    public async Task<EndpointCheckRun> RunInDecisionAsync(string checkId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(checkId);
+        var operationId = NullIfEmpty(MutationScope.Current?.OperationId);
+        var check = _store.Get(checkId);
+        if (check is null || !check.Enabled)
+            return new EndpointCheckRun(checkId, _time.GetUtcNow().UtcDateTime, Models.EndpointCheckOutcome.Refused,
+                check is null ? "The check no longer exists." : "The check is switched off.", operationId);
+        var run = await ProbeDefinitionAsync(check, ct);
+        return run with { OperationId = operationId };
+    }
+
+    /// <summary>Validates <paramref name="check"/> against the server as it is now and probes it, in the decision the
+    /// caller holds. The probe logic of both paths; tests drive it directly.</summary>
+    internal Task<EndpointCheckRun> ProbeDefinitionAsync(EndpointCheckDefinition check, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(check);
         var at = _time.GetUtcNow().UtcDateTime;
+        return Invalid(check, out var target) is { } invalid
+            ? Task.FromResult(new EndpointCheckRun(check.Id, at, Models.EndpointCheckOutcome.Refused, Bounded(invalid)))
+            : ProbeAsync(check, target, at, ct);
+    }
+
+    /// <summary>Why <paramref name="check"/> cannot run on its server as it is now; null when it can.</summary>
+    private string? Invalid(EndpointCheckDefinition check, out EndpointCheckValidator.Target target)
+    {
         var errors = EndpointCheckValidator.Validate(check.ToDraft(), _servers.GetServer(check.ServerId));
-        if (errors.Count > 0 || !EndpointCheckValidator.TryTarget(check.ToDraft(), out var target, out _))
-            return Task.FromResult(new EndpointCheckRun(check.Id, at, Models.EndpointCheckOutcome.Refused,
-                Bounded(errors.Count > 0 ? string.Join(" ", errors) : "The target is not valid.")));
-        return ProbeAsync(check, target, at, ct);
+        if (!EndpointCheckValidator.TryTarget(check.ToDraft(), out target, out _))
+            return errors.Count > 0 ? string.Join(" ", errors) : "The target is not valid.";
+        return errors.Count > 0 ? string.Join(" ", errors) : null;
     }
 
     private async Task<EndpointCheckRun> ProbeAsync(EndpointCheckDefinition check, EndpointCheckValidator.Target target,
@@ -102,14 +143,16 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(EndpointCheckValidator.RunDeadline(check.TimeoutSeconds));
-        var attempt = TimeSpan.FromSeconds(check.TimeoutSeconds);
+        var attempt = AttemptTimeout(check.TimeoutSeconds);
         try
         {
-            // 2.–3. The addresses: a literal is its own; a name is resolved on the host, completely, or not at all.
-            IReadOnlyList<IPAddress> addresses;
+            // 2.–3. The addresses: a literal is its own, probed as written (it is canonical text already); a name is
+            // resolved on the host, completely, or not at all. Each is judged by its canonical form and contacted as the
+            // host answered it (review m4).
+            IReadOnlyList<ResolvedAddress> addresses;
             if (target.Literal is { } literal)
             {
-                addresses = [OutboundAddressPolicy.Canonicalize(literal)];
+                addresses = [new ResolvedAddress(literal, OutboundAddressPolicy.Canonicalize(literal))];
             }
             else
             {
@@ -121,7 +164,7 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
                 if (!answer.IsUsable)
                     return Run(check, at, Models.EndpointCheckOutcome.Failed,
                         $"Resolving {target.Host} on the host: {answer.Unreadable ?? "no address"}{TransportNote(resolved)}.");
-                addresses = answer.Addresses;
+                addresses = answer.Entries;
             }
 
             // Every address the host would use must be public or excepted for this host and port — not only the ones
@@ -129,10 +172,10 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
             var exceptions = OutboundExceptionList.From(check.Exceptions, 0);
             foreach (var address in addresses)
             {
-                if (OutboundAddressPolicy.DeniedRange(address) is { } range
-                    && !exceptions.Allows(target.Host, target.Port, address))
+                if (OutboundAddressPolicy.DeniedRange(address.Canonical) is { } range
+                    && !exceptions.Allows(target.Host, target.Port, address.Canonical))
                     return Run(check, at, Models.EndpointCheckOutcome.Refused,
-                        $"{address} ({range}) is an internal address; an Admin can allow it with an exception for " +
+                        $"{Describe(address)} ({range}) is an internal address; an Admin can allow it with an exception for " +
                         $"{target.Host}:{target.Port}.");
             }
 
@@ -142,7 +185,7 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
             IPAddress? lastAddress = null;
             for (var i = 0; i < tried.Count; i++)
             {
-                var address = tried[i];
+                var address = tried[i].Answered;
                 var result = await _executor.ExecuteMutationAsync(check.ServerId, CommandFor(check, target, address),
                     attempt, deadline.Token, EndpointCheckCommands.OutputCap + 64);
                 var probe = result.OutputTruncated
@@ -167,6 +210,9 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
                 $"The run did not finish within {EndpointCheckValidator.RunDeadline(check.TimeoutSeconds).TotalSeconds:0} s.");
         }
     }
+
+    private static string Describe(ResolvedAddress address) =>
+        address.Answered.Equals(address.Canonical) ? address.Canonical.ToString() : $"{address.Answered} (= {address.Canonical})";
 
     private static string CommandFor(EndpointCheckDefinition check, EndpointCheckValidator.Target target, IPAddress address) =>
         check.Kind switch

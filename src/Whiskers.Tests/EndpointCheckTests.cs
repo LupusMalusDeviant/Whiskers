@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models;
@@ -33,7 +34,7 @@ public sealed class EndpointCheckTests : IDisposable
 
     /// <summary>A runner whose decision is already open (as "Run now" holds it): the probe logic alone.</summary>
     private EndpointCheckRunner Runner(Host host) =>
-        new(AutomationMutationRunnerTests.Build().Runner, host, _servers);
+        new(AutomationMutationRunnerTests.Build().Runner, host, _servers, new EndpointCheckStore(_db.Scopes, _servers));
 
     private static IReadOnlyList<string> Errors(EndpointCheckDraft draft) => EndpointCheckValidator.Validate(draft, SshServer());
 
@@ -52,7 +53,7 @@ public sealed class EndpointCheckTests : IDisposable
         var command = EndpointCheckCommands.Http("https://example.com/health?x=1", "example.com", Public4, 443, 10);
 
         Assert.Equal(
-            "( curl -q -s -S -o /dev/null -w '%{http_code} %{time_total}' --proto '=http,https' --max-time 10 " +
+            "( curl -q -g -s -S -o /dev/null -w '%{http_code} %{time_total}' --proto '=http,https' --max-time 10 " +
             "--resolve 'example.com:443:93.184.215.14' --noproxy '*' 'https://example.com/health?x=1' 2>&1; " +
             "echo \"__rc=$?\" ) | head -c 16384", command);
         Assert.DoesNotContain(" -L", command);
@@ -112,7 +113,7 @@ public sealed class EndpointCheckTests : IDisposable
 
         // Re-validated before every run: a stored definition that does not pass runs nothing.
         var host = new Host();
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, target, 443), CancellationToken.None);
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, target, 443), CancellationToken.None);
         Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
         Assert.Empty(host.Calls);
     }
@@ -150,7 +151,7 @@ public sealed class EndpointCheckTests : IDisposable
         Assert.NotEmpty(Errors(Draft(EndpointCheckKind.Http, url)));
 
         var host = new Host();
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Http, url), CancellationToken.None);
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Http, url), CancellationToken.None);
         Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
         Assert.Empty(host.Calls);
     }
@@ -308,7 +309,7 @@ public sealed class EndpointCheckTests : IDisposable
     public async Task An_ipv4_mapped_literal_is_judged_as_the_ipv4_address_it_carries()
     {
         var host = new Host();
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "::ffff:169.254.169.254", 80),
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "::ffff:169.254.169.254", 80),
             CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
@@ -352,13 +353,13 @@ public sealed class EndpointCheckTests : IDisposable
     public async Task An_unreadable_or_truncated_answer_fails_the_run_and_probes_nothing()
     {
         var host = new Host().Answering("garbage\n__rc=0\n", "__rc=0\n");
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
         Assert.Equal(EndpointCheckOutcome.Failed, run.Outcome);
         Assert.Single(host.Calls);
 
         // The executor itself cut the answer off: never read as complete, even though it ends with a marker.
         var cut = new Host { Answer = (_, _, _) => Task.FromResult(new CommandResult { Output = Getent("93.184.215.14"), OutputTruncated = true }) };
-        run = await Runner(cut).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
+        run = await Runner(cut).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
         Assert.Equal(EndpointCheckOutcome.Failed, run.Outcome);
         Assert.Single(cut.Calls);
     }
@@ -370,7 +371,7 @@ public sealed class EndpointCheckTests : IDisposable
         var host = new Host().Answering(
             Getent("93.184.215.1", "93.184.215.2", "93.184.215.3", "93.184.215.4", "10.0.0.5"), "__rc=0\n");
 
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
         Assert.Contains("10.0.0.5", run.Detail);
@@ -384,7 +385,7 @@ public sealed class EndpointCheckTests : IDisposable
         var host = new Host().Answering(
             Getent("93.184.215.1", "93.184.215.2", "93.184.215.3", "93.184.215.4", "93.184.215.5"), "__rc=1\n");
 
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Failed, run.Outcome);
         Assert.Equal(4, run.AddressesTried);
@@ -400,7 +401,7 @@ public sealed class EndpointCheckTests : IDisposable
     {
         var host = new Host().Answering(Getent("93.184.215.1", "93.184.215.2", "93.184.215.3"), "__rc=0\n");
 
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Passed, run.Outcome);
         Assert.Equal("93.184.215.1", run.AnsweredAddress);
@@ -410,11 +411,42 @@ public sealed class EndpointCheckTests : IDisposable
     }
 
     [Fact]
+    public async Task A_nat64_answer_is_judged_by_its_ipv4_address_but_probed_as_answered()
+    {
+        // Review m4: an IPv6-only host behind DNS64 must contact the address it was given, not the embedded IPv4 one.
+        var host = new Host().Answering(Getent("64:ff9b::5db8:d70e"), "__rc=0\n");
+
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
+
+        Assert.Equal(EndpointCheckOutcome.Passed, run.Outcome);
+        Assert.Equal("64:ff9b::5db8:d70e", run.AnsweredAddress);
+        Assert.Contains("nc -z -w 5 '64:ff9b::5db8:d70e' '443'", Assert.Single(host.Probes));
+
+        // Judged canonically all the same: NAT64 of an internal address is refused.
+        var internalHost = new Host().Answering(Getent("64:ff9b::a00:5"), "__rc=0\n");
+        run = await Runner(internalHost).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
+        Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
+        Assert.Empty(internalHost.Probes);
+    }
+
+    [Fact]
+    public async Task A_literal_target_is_probed_as_written()
+    {
+        var host = new Host();
+
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "64:ff9b::5db8:d70e", 443), CancellationToken.None);
+
+        Assert.Equal(EndpointCheckOutcome.Passed, run.Outcome);
+        Assert.Contains("'64:ff9b::5db8:d70e' '443'", Assert.Single(host.Calls).Command);
+        Assert.Equal("64:ff9b::5db8:d70e", run.AnsweredAddress);
+    }
+
+    [Fact]
     public async Task Repeated_addresses_are_tried_once()
     {
         var host = new Host().Answering(Getent("93.184.215.1", "93.184.215.1", "::ffff:93.184.215.1", "93.184.215.2"), "__rc=1\n");
 
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443), CancellationToken.None);
 
         Assert.Equal(2, run.AddressesTried);
         Assert.Equal(0, run.AddressesNotTried);
@@ -436,7 +468,7 @@ public sealed class EndpointCheckTests : IDisposable
     {
         var host = new Host().Answering(Getent("93.184.215.1", address), "__rc=0\n");
 
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Http, "https://example.com/"), CancellationToken.None);
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Http, "https://example.com/"), CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
         Assert.Contains(range, run.Detail);
@@ -450,7 +482,7 @@ public sealed class EndpointCheckTests : IDisposable
     public async Task An_internal_literal_is_refused_without_an_exception(string literal)
     {
         var host = new Host();
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, literal, 5432), CancellationToken.None);
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, literal, 5432), CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
         Assert.Empty(host.Calls);
@@ -465,7 +497,7 @@ public sealed class EndpointCheckTests : IDisposable
     {
         var host = new Host().Answering(Getent("10.0.0.5"), "__rc=0\n");
 
-        var run = await Runner(host).RunInDecisionAsync(
+        var run = await Runner(host).ProbeDefinitionAsync(
             Definition(EndpointCheckKind.Tcp, "db.lan", 5432, exceptions: [DbLan]), CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Passed, run.Outcome);
@@ -476,7 +508,7 @@ public sealed class EndpointCheckTests : IDisposable
     public async Task An_internal_literal_runs_with_a_matching_literal_exception()
     {
         var host = new Host();
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "10.0.0.5", 5432,
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "10.0.0.5", 5432,
             exceptions: [new OutboundExceptionEntry { Host = "10.0.0.5", Port = 5432 }]), CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Passed, run.Outcome);
@@ -497,7 +529,7 @@ public sealed class EndpointCheckTests : IDisposable
     {
         var host = new Host().Answering(Getent("10.0.0.5"), "__rc=0\n");
 
-        var run = await Runner(host).RunInDecisionAsync(
+        var run = await Runner(host).ProbeDefinitionAsync(
             Definition(EndpointCheckKind.Tcp, "db.lan", 5432, exceptions: [entry]), CancellationToken.None);
 
         Assert.True(run.Outcome == EndpointCheckOutcome.Refused, why);
@@ -509,7 +541,7 @@ public sealed class EndpointCheckTests : IDisposable
     {
         var host = new Host().Answering(Getent("10.0.0.5", "10.0.0.9"), "__rc=0\n");
 
-        var run = await Runner(host).RunInDecisionAsync(
+        var run = await Runner(host).ProbeDefinitionAsync(
             Definition(EndpointCheckKind.Tcp, "db.lan", 5432, exceptions: [DbLan]), CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
@@ -600,6 +632,33 @@ public sealed class EndpointCheckTests : IDisposable
         Assert.True(EndpointCheckParser.ParseTcp("__rc=0\n").Passed);
     }
 
+    [Fact]
+    public void Output_that_reaches_the_cap_is_cut_off_even_when_it_ends_in_a_marker()
+    {
+        // Review m3: when head -c cut the real marker away, whatever the target put at byte 16 384 is the end. A target
+        // that pads its answer so the cut lands right after its own "__rc=0" must not pass.
+        static string AtCap(string head)
+        {
+            const string forged = "\n__rc=0";
+            return head + new string('A', EndpointCheckCommands.OutputCap - System.Text.Encoding.UTF8.GetByteCount(head) - forged.Length) + forged;
+        }
+
+        var tcp = AtCap("nc: banner from the target ");
+        Assert.Equal(EndpointCheckCommands.OutputCap, System.Text.Encoding.UTF8.GetByteCount(tcp));
+        Assert.False(EndpointCheckParser.ParseTcp(tcp).Passed);
+        Assert.False(EndpointCheckParser.ParseHttp(AtCap("200 0.100\n")).Passed);
+        Assert.False(EndpointCheckParser.ParseTls(AtCap(Cert(Now.AddDays(90))), Now, 14).Passed);
+        Assert.False(EndpointCheckParser.ParseResolve(AtCap("93.184.215.14 STREAM example.com\n")).IsUsable);
+
+        // Multi-byte characters count as bytes, as head -c counts them.
+        var wide = new string('ä', EndpointCheckCommands.OutputCap / 2 - 3) + "\n__rc=0";
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(wide) >= EndpointCheckCommands.OutputCap);
+        Assert.False(EndpointCheckParser.ParseTcp(wide).Passed);
+
+        // One byte under the cap is a complete answer.
+        Assert.True(EndpointCheckParser.ParseTcp(new string('A', EndpointCheckCommands.OutputCap - 8) + "\n__rc=0").Passed);
+    }
+
     private static string Cert(DateTime notAfterUtc)
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -661,7 +720,7 @@ public sealed class EndpointCheckTests : IDisposable
                  })
         {
             var host = new Host().Answering("", "sh: 1: tool: not found\n__rc=127\n");
-            var run = await Runner(host).RunInDecisionAsync(Definition(kind, target, port), CancellationToken.None);
+            var run = await Runner(host).ProbeDefinitionAsync(Definition(kind, target, port), CancellationToken.None);
             Assert.Equal(EndpointCheckOutcome.Failed, run.Outcome);
             Assert.Contains("not installed", run.Detail);
         }
@@ -670,14 +729,16 @@ public sealed class EndpointCheckTests : IDisposable
     // ------------------------------------------------------------------------------------------------ bounds
 
     [Fact]
-    public async Task A_large_response_through_the_uncapped_tcp_transport_is_cut_at_the_cap_and_fails()
+    public async Task A_large_response_is_cut_at_the_template_cap_and_fails()
     {
         // The mTLS ("TCP") transport has no output cap of its own: the template's head -c is the bound, and the marker
-        // sits inside it, so a cut-off answer has no marker and is no pass.
+        // sits inside it, so a cut-off answer has no marker and is no pass. Review T3: no transport runs here — the fake
+        // host applies the command's own "| head -c 16384" as the host's shell would, so this proves the template and the
+        // parser; that a real mTLS host cuts the stream is part of the live checks (WORK_PACKAGES R1-57, open).
         var flood = new string('A', 100_000) + "\n__rc=0\n";
         var host = new Host { Answer = (_, _, _) => Task.FromResult(new CommandResult { Output = flood }) };
 
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "93.184.215.14", 443, serverId: "mtls"),
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "93.184.215.14", 443, serverId: "mtls"),
             CancellationToken.None);
 
         Assert.Equal(EndpointCheckOutcome.Failed, run.Outcome);
@@ -707,7 +768,9 @@ public sealed class EndpointCheckTests : IDisposable
     [Fact]
     public async Task Each_attempt_is_limited_by_the_timeout_and_a_run_makes_at_most_five_calls()
     {
-        // The host honours each call's timeout (as every transport does, #140) but never answers within it.
+        // The host honours each call's timeout (as every transport does, #140) but never answers within it. Each call gets
+        // the check's timeout + 2 s (review n1: the tool's own limit ends first); five such calls are exactly the run
+        // deadline, so even the worst case of every call running to its end stays inside it.
         var host = new Host
         {
             Answer = async (command, timeout, ct) =>
@@ -720,13 +783,15 @@ public sealed class EndpointCheckTests : IDisposable
         };
         var watch = Stopwatch.StartNew();
 
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443, timeout: 1),
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443, timeout: 1),
             CancellationToken.None);
 
         watch.Stop();
         Assert.Equal(EndpointCheckOutcome.Failed, run.Outcome);
         Assert.Equal(5, host.Calls.Count);
-        Assert.All(host.Calls, c => Assert.Equal(TimeSpan.FromSeconds(1), c.Timeout));
+        Assert.All(host.Calls, c => Assert.Equal(TimeSpan.FromSeconds(3), c.Timeout));
+        Assert.Equal(EndpointCheckValidator.RunDeadline(1), EndpointCheckRunner.AttemptTimeout(1) * 5);
+        Assert.Equal(EndpointCheckValidator.RunDeadline(30), EndpointCheckRunner.AttemptTimeout(30) * 5);
         Assert.True(watch.Elapsed < EndpointCheckValidator.RunDeadline(1), $"took {watch.Elapsed}");
         Assert.Contains("timed out", run.Detail);
     }
@@ -749,7 +814,7 @@ public sealed class EndpointCheckTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(15), deadline);   // timeout × 5 + 10 s
         var watch = Stopwatch.StartNew();
 
-        var run = await Runner(host).RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443, timeout: 1),
+        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443, timeout: 1),
             CancellationToken.None).WaitAsync(deadline + TimeSpan.FromSeconds(10));
 
         watch.Stop();
@@ -845,7 +910,7 @@ public sealed class EndpointCheckTests : IDisposable
             return Task.FromResult(new EndpointCheckRun(check.Id, time.GetUtcNow().UtcDateTime, outcome, outcome.ToString()));
         }
 
-        public Task<EndpointCheckRun> RunInDecisionAsync(EndpointCheckDefinition check, CancellationToken ct) => RunAsync(check, ct);
+        public Task<EndpointCheckRun> RunInDecisionAsync(string checkId, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private (EndpointCheckMonitor Monitor, EndpointCheckStore Store, FakeNotifications Notes) Monitor(
@@ -899,7 +964,7 @@ public sealed class EndpointCheckTests : IDisposable
             return Task.FromResult(new EndpointCheckRun(check.Id, time.GetUtcNow().UtcDateTime, EndpointCheckOutcome.Passed, "ok"));
         }
 
-        public Task<EndpointCheckRun> RunInDecisionAsync(EndpointCheckDefinition check, CancellationToken ct) => RunAsync(check, ct);
+        public Task<EndpointCheckRun> RunInDecisionAsync(string checkId, CancellationToken ct) => throw new NotSupportedException();
     }
 
     [Fact]
@@ -920,6 +985,187 @@ public sealed class EndpointCheckTests : IDisposable
 
         Assert.Equal("last", store.Results(check.Id).Single().Detail);
         Assert.Equal("recent", store.Results(other.Id).Single().Detail);
+    }
+
+    // ------------------------------------------------------------------------------------------------ slots (review m1)
+
+    [Fact]
+    public void The_slots_allow_one_run_per_check_and_server_and_four_across_the_fleet()
+    {
+        var slots = new EndpointCheckSlots();
+
+        Assert.True(slots.TryAcquire("a1", "a"));
+        Assert.False(slots.TryAcquire("a1", "a"));          // the same check again
+        Assert.False(slots.TryAcquire("a2", "a"));          // another check on the busy server
+        Assert.True(slots.TryAcquire("b1", "b"));
+        Assert.True(slots.TryAcquire("c1", "c"));
+        Assert.True(slots.TryAcquire("d1", "d"));
+        Assert.False(slots.TryAcquire("e1", "e"));          // four in flight
+        Assert.Equal(4, slots.Running.Count);
+        Assert.Equal("a", slots.Running["a1"]);
+
+        slots.Release("a1");
+        Assert.True(slots.TryAcquire("a2", "a"));
+        slots.Release("nothing");                           // releasing what is not held changes nothing
+        Assert.Equal(4, slots.Running.Count);
+    }
+
+    [Fact]
+    public void Concurrent_acquires_never_exceed_the_limits()
+    {
+        var slots = new EndpointCheckSlots();
+        var granted = new System.Collections.Concurrent.ConcurrentBag<(string Check, string Server)>();
+        Parallel.For(0, 400, i =>
+        {
+            var check = $"c{i % 40}";
+            var server = $"s{i % 6}";
+            if (slots.TryAcquire(check, server)) granted.Add((check, server));
+        });
+
+        Assert.Equal(4, granted.Count);
+        Assert.Equal(4, granted.Select(g => g.Server).Distinct().Count());
+    }
+
+    private sealed class GatedRunner(ManualTime time) : IEndpointCheckRunner
+    {
+        public TaskCompletionSource Gate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public HashSet<string> Slow { get; } = [];
+        public List<string> Ran { get; } = [];
+
+        public async Task<EndpointCheckRun> RunAsync(EndpointCheckDefinition check, CancellationToken ct)
+        {
+            lock (Ran) Ran.Add(check.Id);
+            if (Slow.Contains(check.Id)) await Gate.Task.WaitAsync(ct);
+            return new EndpointCheckRun(check.Id, time.GetUtcNow().UtcDateTime, EndpointCheckOutcome.Passed, "ok");
+        }
+
+        public Task<EndpointCheckRun> RunInDecisionAsync(string checkId, CancellationToken ct) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task A_slow_run_holds_its_check_and_server_across_ticks_and_run_now_shares_the_slots()
+    {
+        var time = new ManualTime();
+        var runner = new GatedRunner(time);
+        var slots = new EndpointCheckSlots();
+        var fixture = AutomationMutationRunnerTests.Build();
+        fixture.Whitelist.Allowed.Add(Admin);
+        fixture.Roles.Map[Admin] = AppRole.Admin;
+        var store = new EndpointCheckStore(_db.Scopes, _servers, time);
+        var monitor = new EndpointCheckMonitor(store, runner, fixture.Runner, _servers, new FakeNotifications(),
+            NullLogger<EndpointCheckMonitor>.Instance, time: time, slots: slots);
+        var slow = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443, serverId: "web", name: "slow"), AdminId, default);
+        var sameServer = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 444, serverId: "web", name: "same"), AdminId, default);
+        var other = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443, serverId: "db", name: "other"), AdminId, default);
+        runner.Slow.Add(slow.Id);
+        runner.Slow.Add(sameServer.Id);
+
+        // First tick: one of the two "web" checks and the "db" one.
+        await monitor.CycleAsync(CancellationToken.None);
+        await WaitUntil(() => runner.Ran.Count == 2 && !slots.Running.ContainsKey(other.Id));
+        var first = runner.Ran.Single(id => id != other.Id);
+
+        // Ticks while it hangs: neither "web" check starts again; "db" runs on.
+        for (var i = 0; i < 3; i++)
+        {
+            time.Advance(TimeSpan.FromSeconds(60));
+            await monitor.CycleAsync(CancellationToken.None);
+            await WaitUntil(() => runner.Ran.Count(id => id == other.Id) == i + 2 && !slots.Running.ContainsKey(other.Id));
+        }
+        Assert.Equal(1, runner.Ran.Count(id => id != other.Id));
+        Assert.Equal("web", slots.Running[first]);
+
+        // "Run now" of any "web" check finds no slot while the monitor's run holds the server.
+        Assert.False(slots.TryAcquire(slow.Id, "web"));
+        Assert.False(slots.TryAcquire(sameServer.Id, "web"));
+
+        runner.Gate.SetResult();
+        await SettleAsync(monitor);
+        Assert.DoesNotContain(first, slots.Running.Keys);
+
+        // A slot "Run now" holds keeps the monitor off that server in turn.
+        Assert.True(slots.TryAcquire(sameServer.Id, "web"));
+        time.Advance(TimeSpan.FromSeconds(60));
+        var before = runner.Ran.Count(id => id != other.Id);
+        await monitor.CycleAsync(CancellationToken.None);
+        await SettleAsync(monitor);
+        Assert.Equal(before, runner.Ran.Count(id => id != other.Id));
+        slots.Release(sameServer.Id);
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        var until = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > until) throw new TimeoutException("The condition was not met within 10 s.");
+            await Task.Delay(10);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ disclosure (review m6, m7)
+
+    [Fact]
+    public void The_mcp_summary_gives_the_numbers_but_never_the_detail_with_its_addresses()
+    {
+        var result = new EndpointCheckResultEntity
+        {
+            CheckId = "c1", AtUtc = T0, Outcome = EndpointCheckOutcome.Passed, Detail = "10.0.0.5: TCP connect succeeded",
+            AnsweredAddress = "10.0.0.5", LatencyMs = 12, HttpStatus = 204, TlsNotAfterUtc = T0.AddDays(30),
+        };
+
+        var summary = Whiskers.Mcp.Tools.EndpointCheckTools.Summary(result);
+
+        Assert.Equal("Passed at 2026-11-05 12:00 UTC, HTTP 204, 12 ms, certificate valid until 2026-12-05", summary);
+        Assert.DoesNotContain("10.0.0.5", summary);
+    }
+
+    [Fact]
+    public void The_page_hides_a_urls_query_from_non_admins_and_redacts_secrets_for_everyone()
+    {
+        var check = Definition(EndpointCheckKind.Http, "https://example.com/health?token=abc123secret#top");
+
+        foreach (var role in new[] { AppRole.Viewer, AppRole.Operator })
+        {
+            var shown = Whiskers.Components.Pages.EndpointChecks.DisplayTarget(check, role);
+            Assert.Equal("https://example.com/health?…#top", shown);
+        }
+        Assert.DoesNotContain("abc123secret", Whiskers.Components.Pages.EndpointChecks.DisplayTarget(check, AppRole.Admin));
+        Assert.Equal("db.lan:5432",
+            Whiskers.Components.Pages.EndpointChecks.DisplayTarget(Definition(EndpointCheckKind.Tcp, "db.lan", 5432), AppRole.Viewer));
+    }
+
+    // ------------------------------------------------------------------------------------------------ orphans (review m8)
+
+    [Fact]
+    public async Task A_run_of_a_check_deleted_meanwhile_is_not_recorded()
+    {
+        var store = new EndpointCheckStore(_db.Scopes, _servers);
+        var check = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443), AdminId, default);
+        await store.DeleteAsync(check.Id, default);
+
+        await store.RecordAsync(new EndpointCheckRun(check.Id, T0, EndpointCheckOutcome.Passed, "late"));
+
+        Assert.Equal(0, _db.ResultCount());
+    }
+
+    [Fact]
+    public async Task Pruning_removes_the_results_of_a_check_that_is_gone()
+    {
+        var store = new EndpointCheckStore(_db.Scopes, _servers);
+        var kept = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443), AdminId, default);
+        await store.RecordAsync(new EndpointCheckRun(kept.Id, T0, EndpointCheckOutcome.Passed, "kept"));
+        using (var scope = _db.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Whiskers.Services.Persistence.MetricsDbContext>();
+            db.EndpointCheckResults.Add(new EndpointCheckResultEntity { CheckId = "gone", AtUtc = T0, Detail = "orphan" });
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(1, await store.PruneAsync(T0.AddDays(-7)));
+
+        Assert.Equal(1, _db.ResultCount());
+        Assert.Single(store.Results(kept.Id));
     }
 
     // ------------------------------------------------------------------------------------------------ alerting

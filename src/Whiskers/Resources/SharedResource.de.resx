@@ -5876,6 +5876,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Checks_Snackbar_AdminOnly" xml:space="preserve">
     <value>Nur ein Admin kann Endpunkt-Checks ändern oder ausführen.</value>
   </data>
+  <data name="Checks_Snackbar_Busy" xml:space="preserve">
+    <value>Ein Lauf dieses Checks oder auf diesem Server ist im Gang. Bitte gleich noch einmal versuchen.</value>
+  </data>
   <data name="Checks_Snackbar_Saved" xml:space="preserve">
     <value>Endpunkt-Check gespeichert.</value>
   </data>

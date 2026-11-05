@@ -76,10 +76,19 @@ public sealed record EndpointCheckDefinition(
         }).ToList());
 }
 
-/// <summary>R1-57: what <c>getent ahosts</c> answered: the unique addresses in answer order, or why it is unusable.</summary>
-public sealed record ResolveAnswer(IReadOnlyList<IPAddress> Addresses, string? Unreadable)
+/// <summary>R1-57: one address as the host answered it (<see cref="Answered"/>, what a probe contacts and the result
+/// records) and as it is judged (<see cref="Canonical"/>: an IPv4-mapped, NAT64 or 6to4 form is its IPv4 address).
+/// Review m4: an IPv6-only host behind DNS64 must be sent to the address it was given.</summary>
+public sealed record ResolvedAddress(IPAddress Answered, IPAddress Canonical);
+
+/// <summary>R1-57: what <c>getent ahosts</c> answered: the addresses unique by their canonical form, in answer order, or
+/// why it is unusable.</summary>
+public sealed record ResolveAnswer(IReadOnlyList<ResolvedAddress> Entries, string? Unreadable)
 {
-    public bool IsUsable => Unreadable is null && Addresses.Count > 0;
+    /// <summary>The canonical forms, as they are judged.</summary>
+    public IReadOnlyList<IPAddress> Addresses => Entries.Select(e => e.Canonical).ToList();
+
+    public bool IsUsable => Unreadable is null && Entries.Count > 0;
 }
 
 /// <summary>R1-57: one probe's reading. <see cref="Passed"/> only on positive evidence.</summary>

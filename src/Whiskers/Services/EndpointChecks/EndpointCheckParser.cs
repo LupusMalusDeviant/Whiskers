@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.RegularExpressions;
 using Whiskers.Services.Notifications;
 
@@ -26,17 +27,21 @@ public static partial class EndpointCheckParser
     [GeneratedRegex(@"-----BEGIN CERTIFICATE-----\s*([A-Za-z0-9+/=\s]+?)\s*-----END CERTIFICATE-----")]
     private static partial Regex Pem();
 
-    /// <summary>The exit code in the end marker and the output before it; null when there is no marker at the end.</summary>
+    /// <summary>The exit code in the end marker and the output before it; null when there is no marker at the end, or
+    /// when the output reached the template's <c>head -c</c> bound (review m3): then the real marker may have been cut
+    /// away and whatever the target placed at the cut would read as one — counted in UTF-8 bytes, as <c>head</c> does.</summary>
     internal static (int Code, string Body)? Split(string? output)
     {
         if (string.IsNullOrEmpty(output)) return null;
+        if (Encoding.UTF8.GetByteCount(output) >= EndpointCheckCommands.OutputCap) return null;
         var m = EndMarker().Match(output);
         if (!m.Success) return null;
         return (int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture), output[..m.Index]);
     }
 
-    /// <summary><c>getent ahosts</c>'s answer: every line "address SOCKTYPE [name]", the addresses canonical and unique
-    /// in answer order. Anything else — no marker, a line that does not read, no address at all — is unusable.</summary>
+    /// <summary><c>getent ahosts</c>'s answer: every line "address SOCKTYPE [name]", unique by canonical form in answer
+    /// order, each kept as answered too. Anything else — no marker, a line that does not read, no address at all — is
+    /// unusable.</summary>
     public static ResolveAnswer ParseResolve(string? output)
     {
         if (Split(output) is not { } split) return new ResolveAnswer([], "the answer was cut off or empty (no exit marker)");
@@ -44,7 +49,7 @@ public static partial class EndpointCheckParser
         if (split.Code == 127) return new ResolveAnswer([], "getent is not installed on the host");
         if (split.Code != 0) return new ResolveAnswer([], $"getent failed (exit {split.Code})");
 
-        var addresses = new List<IPAddress>();
+        var addresses = new List<ResolvedAddress>();
         foreach (var line in split.Body.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
@@ -55,7 +60,8 @@ public static partial class EndpointCheckParser
                 || (parsed.AddressFamily == AddressFamily.InterNetwork && parsed.ToString() != parts[0]))
                 return new ResolveAnswer([], "the host's answer could not be read");
             var canonical = OutboundAddressPolicy.Canonicalize(parsed);
-            if (!addresses.Contains(canonical)) addresses.Add(canonical);
+            if (!addresses.Any(a => a.Canonical.Equals(canonical)))
+                addresses.Add(new ResolvedAddress(new IPAddress(parsed.GetAddressBytes()), canonical));
         }
         return addresses.Count == 0
             ? new ResolveAnswer([], "the name resolved to no address")

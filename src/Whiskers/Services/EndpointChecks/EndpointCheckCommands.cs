@@ -38,7 +38,8 @@ public static class EndpointCheckCommands
         var resolve = IsLiteral(host)
             ? ""
             : $" --resolve {ShellUtils.Quote($"{RequireName(host)}:{port}:{Bracketed(address)}")}";
-        return "( curl -q -s -S -o /dev/null -w '%{http_code} %{time_total}' --proto '=http,https' " +
+        // -g (--globoff): no URL globbing, on top of the validator's bracket and brace checks.
+        return "( curl -q -g -s -S -o /dev/null -w '%{http_code} %{time_total}' --proto '=http,https' " +
                $"--max-time {timeoutSeconds}{resolve} --noproxy '*' {ShellUtils.Quote(url)} 2>&1; echo \"__rc=$?\" ){Cap}";
     }
 

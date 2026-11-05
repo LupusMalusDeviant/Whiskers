@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models;
@@ -189,7 +191,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         fixture.Roles.Map[Admin] = AppRole.Admin;
         var host = new Host().Answering(Getent("93.184.215.14"), "__rc=0\n");
         var executor = MutationScopeProxy<IHostCommandExecutor>.Wrap(host, _guard);
-        return (new EndpointCheckRunner(fixture.Runner, executor, _servers), host, fixture);
+        return (new EndpointCheckRunner(fixture.Runner, executor, _servers, RawStore()), host, fixture);
     }
 
     [Fact]
@@ -275,10 +277,115 @@ public sealed class EndpointCheckGatingTests : IDisposable
     public async Task A_probe_outside_a_decision_is_refused_by_the_scope_guard()
     {
         var (runner, host, _) = RunFixture();
+        var check = await Save(Ui(), Store(), Draft(EndpointCheckKind.Tcp, "93.184.215.14", 443));
 
         // "Run now" without the UI's decision around it: the host command primitive refuses.
         await Assert.ThrowsAsync<MutationScopeViolationException>(() =>
-            runner.RunInDecisionAsync(Definition(EndpointCheckKind.Tcp, "93.184.215.14", 443), CancellationToken.None));
+            runner.RunInDecisionAsync(check.Id, CancellationToken.None));
+        Assert.Empty(host.Calls);
+    }
+
+    // ------------------------------------------------------------------------------------------------ review round 1
+
+    private static EndpointCheckDraft Internal(string? id = null, bool withException = true) =>
+        Draft(EndpointCheckKind.Tcp, "10.0.0.5", 5432, id: id,
+            exceptions: withException ? [new OutboundExceptionEntry { Host = "10.0.0.5", Port = 5432 }] : []);
+
+    [Fact]
+    public async Task Run_now_after_another_admin_removed_the_exception_is_refused_and_reaches_no_host()
+    {
+        // Review M1: the page holds the definition it loaded; another Admin removes the exception meanwhile.
+        var (runner, host, _) = RunFixture();
+        var store = Store();
+        var ui = Ui();
+        var check = await Save(ui, store, Internal());
+        var loaded = RawStore().Get(check.Id)!;
+        await Save(ui, store, Internal(check.Id, withException: false));
+
+        var run = await ui.RunAsync("endpointcheck.run", new { serverId = loaded.ServerId, checkId = loaded.Id },
+            ct => runner.RunInDecisionAsync(loaded.Id, ct));
+
+        Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
+        Assert.Empty(host.Calls);
+    }
+
+    [Fact]
+    public async Task Run_now_of_a_deleted_or_switched_off_check_is_refused_and_reaches_no_host()
+    {
+        var (runner, host, _) = RunFixture();
+        var store = Store();
+        var ui = Ui();
+        var deleted = await Save(ui, store, Draft(EndpointCheckKind.Tcp, "93.184.215.14", 443));
+        await Delete(ui, store, deleted);
+        var off = await Save(ui, store, Draft(EndpointCheckKind.Tcp, "93.184.215.14", 444) with { Enabled = false });
+
+        foreach (var check in new[] { deleted, off })
+        {
+            var run = await ui.RunAsync("endpointcheck.run", new { serverId = check.ServerId, checkId = check.Id },
+                ct => runner.RunInDecisionAsync(check.Id, ct));
+            Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
+        }
+        Assert.Empty(host.Calls);
+    }
+
+    [Fact]
+    public async Task Run_now_runs_the_stored_check_inside_the_ui_decision_and_records_its_operation_id()
+    {
+        // Review T1/m2: one audited UI event; every probe inside it; the result carries its operation id.
+        var (runner, host, _) = RunFixture();
+        var store = Store();
+        var ui = Ui();
+        var check = await Save(ui, store, Draft(EndpointCheckKind.Tcp, "example.com", 443));
+        _audit.Events.Clear();
+
+        var run = await ui.RunAsync("endpointcheck.run", new { serverId = check.ServerId, checkId = check.Id },
+            ct => runner.RunInDecisionAsync(check.Id, ct));
+        await RawStore().RecordAsync(run);
+
+        Assert.True(run.Outcome == EndpointCheckOutcome.Passed, run.Detail);
+        Assert.Equal(["begin:endpointcheck.run:", "complete:Executed"], _audit.Events);
+        Assert.False(string.IsNullOrEmpty(run.OperationId));
+        Assert.Equal(2, host.Calls.Count);
+        Assert.All(host.Calls, c =>
+        {
+            Assert.Equal("endpointcheck.run", c.Capability);
+            Assert.Equal(run.OperationId, c.OperationId);
+        });
+        Assert.Equal(run.OperationId, Assert.Single(RawStore().Results(check.Id)).OperationId);
+    }
+
+    [Fact]
+    public async Task A_check_without_an_owner_is_refused_and_runs_nothing()
+    {
+        // Review m5: with the owner grace period on (RequireOwner = false) an ownerless item would get the capability's
+        // own level — Admin, for a root-equivalent command.
+        var (runner, host, fixture) = RunFixture();
+
+        var run = await runner.RunAsync(Definition(EndpointCheckKind.Tcp, "93.184.215.14", 443, ownerId: ""), CancellationToken.None);
+
+        Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
+        Assert.Empty(host.Calls);
+        Assert.Equal(["denied:Denied"], fixture.Audit.Events);
+        Assert.Equal(McpPermissionLevels.Read, Assert.Single(fixture.Audit.Principals).PermissionLevel);
+    }
+
+    [Fact]
+    public async Task The_monitor_suspends_a_check_without_an_owner()
+    {
+        var (runner, host, fixture) = RunFixture();
+        var check = await Save(Ui(), Store(), Draft(EndpointCheckKind.Tcp, "93.184.215.14", 443));
+        using (var scope = _db.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<Whiskers.Services.Persistence.MetricsDbContext>().EndpointChecks
+                .Where(c => c.Id == check.Id).ExecuteUpdateAsync(s => s.SetProperty(c => c.OwnerId, ""));
+        var monitor = new EndpointCheckMonitor(RawStore(), runner, fixture.Runner, _servers, new FakeNotifications(),
+            NullLogger<EndpointCheckMonitor>.Instance);
+
+        await monitor.CycleAsync(CancellationToken.None);
+        await SettleAsync(monitor);
+
+        var stored = RawStore().Get(check.Id)!;
+        Assert.False(stored.Enabled);
+        Assert.Contains("no owner", stored.SuspendedReason);
         Assert.Empty(host.Calls);
     }
 

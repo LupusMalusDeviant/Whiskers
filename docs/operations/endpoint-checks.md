@@ -10,8 +10,10 @@ target; it only decides which addresses the host may contact. Contract:
 Checks are listed under **Checks** (`/checks`). Every signed-in role can read them. Only an Admin creates, edits,
 deletes or runs one ("Run now"), because a run is a command on the host. The list filters by server, outcome, latency
 and certificate expiry, and the Dashboard shows each server's number of failing checks as a link to that list. The read-only MCP tool
-`endpoint_checks_list` shows the checks and their last result; it gives the number of internal-target exceptions, not
-their addresses. There is no MCP tool that writes a check.
+`endpoint_checks_list` shows the checks and their last result as outcome, time, latency, HTTP status and certificate
+expiry only — not the run's detail line, which names the address that answered — and the number of internal-target
+exceptions, not their addresses. There is no MCP tool that writes a check. The page shows an HTTP target's query string
+(`?…`) to Admins only, and redacts secrets in every target.
 
 ## Required tools on each host
 
@@ -51,7 +53,9 @@ Before anything is probed, Whiskers judges every address:
 3. Every address in the answer, after canonicalisation (IPv4-mapped, NAT64 and 6to4 forms count as the IPv4 address
    they carry), must be public, or allowed by one of the check's exceptions. One internal address refuses the whole
    run (outcome *Refused*, naming the address and its range), even if it would not have been tried.
-4. Then at most the first **4** unique addresses are tried, in answer order, until one answers. The result names the
+4. Then at most the first **4** unique addresses are tried, in answer order, until one answers. An address is judged
+   in its canonical form but contacted as the host answered it: on an IPv6-only host behind DNS64 the probe goes to the
+   NAT64 address, not to the IPv4 address it embeds. The result names the
    answering address, or that none answered, and how many addresses were not tried.
 
 The denied ranges are the fixed R1-54 list (loopback, RFC 1918, link-local including `169.254.169.254`, CGNAT and
@@ -84,11 +88,11 @@ An exception matches only the exact name or literal, port and address. Ranges, w
 | Bound | Value |
 |---|---|
 | Executor calls per run | at most 1 + 4 (one `getent`, at most four probes) |
-| One attempt | the check's timeout, 1–30 s (default 10 s); every transport ends a call at most 5 s after it |
-| Whole run | one deadline: timeout × 5 + 10 s (60 s at the default timeout) |
-| Output per call | 16 384 bytes, cut on the host with `head -c 16384`; the exit marker `__rc=` is inside that bound, so a cut-off answer has no marker and fails |
+| One attempt | the tool's own limit is the check's timeout, 1–30 s (default 10 s: `curl --max-time`, `nc -w`); the executor call gets that timeout + 2 s, so the tool's clearer answer arrives first. `openssl s_client` has no limit of its own and is ended by the call's timeout |
+| Whole run | one deadline: timeout × 5 + 10 s (60 s at the default timeout) — exactly five calls of timeout + 2 s |
+| Output per call | 16 384 bytes, cut on the host with `head -c 16384`; the exit marker `__rc=` is inside that bound. An answer that reaches 16 384 bytes (counted in UTF-8 bytes) is read as cut off and fails, whatever it ends with — a target cannot place a forged marker at the cut |
 | Interval | at least 60 s (validated on save; a stored shorter value still waits 60 s), at most 86 400 s |
-| Concurrency | at most 4 runs at a time across the fleet, 1 per server; the loop ticks every 15 s |
+| Concurrency | at most 4 runs at a time across the fleet, 1 per server and 1 per check — shared by the loop (which ticks every 15 s) and "Run now" |
 | Result retention | 7 days per check; each check's last result is kept indefinitely |
 
 A run passes only on positive evidence: the exit marker `__rc=0` at the very end of the output **and** the answer the
@@ -103,7 +107,10 @@ operation id; the recorded result carries the same id. A run by the background l
 Admin who saved it last), whose authority is read again on every run. When the owner is no longer Admin (demoted,
 removed from the whitelist, account deleted), the check is **suspended** instead of run: it is switched off with the
 reason shown and an `automation_suspended` notification. An Admin takes it over by saving it again. "Run now" runs in
-the signed-in Admin's own decision. Saving and deleting a check are audited `endpointcheck.save` and
+the signed-in Admin's own decision: it reads the check as it is stored at that moment (a check deleted, switched off or
+changed meanwhile runs as it is now, or not at all), takes the same run slot as the loop (when the check or its server is
+busy it says so and runs nothing), and its result carries that decision's operation id. A check without an owner never
+runs; the loop suspends it. Saving and deleting a check are audited `endpointcheck.save` and
 `endpointcheck.delete` events. The kill switch refuses all three, and an audit failure refuses before anything is
 written or run.
 

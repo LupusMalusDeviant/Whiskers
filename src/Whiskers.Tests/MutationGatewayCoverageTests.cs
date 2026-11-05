@@ -555,6 +555,7 @@ public class MutationGatewayCoverageTests
         ("IEndpointCheckStore.RecordAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IEndpointCheckStore.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IEndpointCheckStore.SuspendAsync", "R1-57: switches a check off because its owner lost the authority to run it (INV-04), as ScheduledTaskSuspender does — it never runs or widens anything"),
+        ("IEndpointCheckSlots.TryAcquire", "R1-57: in-memory run slot of the endpoint checks (4 fleet-wide, 1 per server); it only limits runs, each of which is its own endpointcheck.run decision"),
         ("IEndpointCheckRunner.RunAsync", "R1-57: runs inside its own endpointcheck.run decision (IAutomationMutationRunner); the host command is the guarded primitive"),
         ("IEndpointCheckRunner.RunInDecisionAsync", "R1-57: runs only inside an endpointcheck.run decision the caller holds; outside one the scope guard refuses its host command"),
         ("IAlertSuppressionStore.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),

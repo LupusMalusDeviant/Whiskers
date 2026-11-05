@@ -17,7 +17,7 @@ namespace Whiskers.Services.EndpointChecks;
 public sealed class EndpointCheckMonitor : FleetBackgroundService
 {
     public static readonly TimeSpan Tick = TimeSpan.FromSeconds(15);
-    public const int MaxConcurrent = 4;
+    public const int MaxConcurrent = EndpointCheckSlots.MaxConcurrent;
     public static readonly TimeSpan Retention = TimeSpan.FromDays(7);
     public static readonly TimeSpan OpenAfter = TimeSpan.FromMinutes(5);
     public static readonly TimeSpan ClearAfter = TimeSpan.FromMinutes(5);
@@ -32,7 +32,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
     private readonly TimeProvider _time;
     private readonly JsonFileStore<EndpointCheckBreachFile>? _breachFile;
     private readonly BreachTracker _tracker = new(new HostLoadThresholds());
-    private readonly ConcurrentDictionary<string, string> _running = new(StringComparer.Ordinal); // check id → server id
+    private readonly IEndpointCheckSlots _slots;   // shared with "Run now" (review m1)
     private readonly ConcurrentDictionary<string, Task> _inFlight = new(StringComparer.Ordinal);
     private DateTime _lastPrune = DateTime.MinValue;
     private bool _restored;
@@ -41,7 +41,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
 
     public EndpointCheckMonitor(IEndpointCheckStore store, IEndpointCheckRunner runner, IAutomationMutationRunner automation,
         IServerConfigService servers, INotificationService notify, ILogger<EndpointCheckMonitor> logger,
-        DataPathOptions? paths = null, TimeProvider? time = null)
+        DataPathOptions? paths = null, TimeProvider? time = null, IEndpointCheckSlots? slots = null)
     {
         _store = store;
         _runner = runner;
@@ -50,6 +50,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         _notify = notify;
         _logger = logger;
         _time = time ?? TimeProvider.System;
+        _slots = slots ?? new EndpointCheckSlots();
         _breachFile = paths is null ? null : new JsonFileStore<EndpointCheckBreachFile>(paths.EndpointCheckBreachesJson,
             problem: f => f.Breaches is null || f.Breaches.Any(b => b is null) ? "the list of breaches is missing or holds an empty entry" : null);
     }
@@ -97,9 +98,9 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         var checks = _store.List();
         await CloseDroppedAsync(checks, now, ct);
 
-        foreach (var check in Due(checks, now, _running))
+        foreach (var check in Due(checks, now, _slots.Running))
         {
-            if (!_running.TryAdd(check.Id, check.ServerId)) continue;
+            if (!_slots.TryAcquire(check.Id, check.ServerId)) continue;   // taken meanwhile ("Run now")
             _inFlight[check.Id] = RunOneAsync(check, ct);   // yields first, so the slot is taken before it can end
         }
 
@@ -136,6 +137,14 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         await Task.Yield();
         try
         {
+            // Review m5: a check without an owner never runs, grace period or not — it would run on the capability's
+            // own level (Admin, root-equivalent). Only a row written past the store can have none.
+            if (string.IsNullOrWhiteSpace(check.OwnerId))
+            {
+                await SuspendAsync(check, "it has no owner", ct);
+                return;
+            }
+
             // INV-04: an owner who lost the authority suspends the check instead of running it.
             if (_automation.LostAuthority(EndpointCheckRunner.ActorOf(check), "endpointcheck.run") is { } lost)
             {
@@ -164,7 +173,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         }
         finally
         {
-            _running.TryRemove(check.Id, out _);
+            _slots.Release(check.Id);
         }
     }
 

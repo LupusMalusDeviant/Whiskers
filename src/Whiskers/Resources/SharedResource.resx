@@ -5876,6 +5876,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Checks_Snackbar_AdminOnly" xml:space="preserve">
     <value>Only an Admin can change or run endpoint checks.</value>
   </data>
+  <data name="Checks_Snackbar_Busy" xml:space="preserve">
+    <value>A run of this check or on this server is in progress. Try again in a moment.</value>
+  </data>
   <data name="Checks_Snackbar_Saved" xml:space="preserve">
     <value>Endpoint check saved.</value>
   </data>

@@ -4,6 +4,7 @@
 @using Whiskers.Configuration
 @inject IEndpointCheckStore Store
 @inject IEndpointCheckRunner Runner
+@inject IEndpointCheckSlots Slots
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IUiMutationRunner Mutations
@@ -134,7 +135,7 @@ else
             @{ _last.TryGetValue(context.Id, out var result); }
             <MudTd><strong>@context.Name</strong> <MudChip T="string" Size="Size.Small">@KindLabel(context.Kind)</MudChip></MudTd>
             <MudTd>@ServerName(context.ServerId)</MudTd>
-            <MudTd><code>@context.Target@(context.Kind == EndpointCheckKind.Http ? "" : $":{context.Port}")</code></MudTd>
+            <MudTd><code>@DisplayTarget(context)</code></MudTd>
             <MudTd>
                 @if (!context.Enabled)
                 {
@@ -228,6 +229,25 @@ else
     }
 
     private string ServerName(string id) => ServerConfigService.GetServer(id)?.Name ?? id;
+
+    /// <summary>Review m7: the target as the table shows it — secrets redacted, and for a non-Admin an http(s) URL's
+    /// query string replaced by "?…" (health URLs often carry a token there).</summary>
+    private string DisplayTarget(EndpointCheckDefinition c) => DisplayTarget(c, _role);
+
+    internal static string DisplayTarget(EndpointCheckDefinition c, AppRole role)
+    {
+        var target = c.Target;
+        if (c.Kind == EndpointCheckKind.Http)
+        {
+            if (role < AppRole.Admin && target.IndexOf('?') is >= 0 and var query)
+            {
+                var fragment = target.IndexOf('#', query);
+                target = target[..query] + "?…" + (fragment >= 0 ? target[fragment..] : "");
+            }
+            return Whiskers.Utils.SecretRedactor.Redact(target);
+        }
+        return Whiskers.Utils.SecretRedactor.Redact($"{target}:{c.Port}");
+    }
 
     private string KindLabel(EndpointCheckKind kind) => kind switch
     {
@@ -324,10 +344,18 @@ else
     {
         var arguments = new { serverId = c.ServerId, checkId = c.Id };
         if (!await RequireAdminAsync("endpointcheck.run", arguments)) return;
+        // Review m1: the same slots as the monitor — one run per check and per server, four across the fleet.
+        if (!Slots.TryAcquire(c.Id, c.ServerId))
+        {
+            Snackbar.Add(L["Checks_Snackbar_Busy"].Value, Severity.Warning);
+            return;
+        }
         _busy = true;
         try
         {
-            var run = await Mutations.RunAsync("endpointcheck.run", arguments, ct => Runner.RunInDecisionAsync(c, ct));
+            // Review M1: only the id; the runner reads the check as it is stored now, inside the decision.
+            var checkId = c.Id;
+            var run = await Mutations.RunAsync("endpointcheck.run", arguments, ct => Runner.RunInDecisionAsync(checkId, ct));
             await Store.RecordAsync(run);
             Snackbar.Add($"{OutcomeLabel(run.Outcome)}: {run.Detail}",
                 run.Outcome == EndpointCheckOutcome.Passed ? Severity.Success : Severity.Warning);
@@ -335,6 +363,10 @@ else
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (MutationFailedException ex) { Snackbar.Add(ex.Message, Severity.Error); }
-        finally { _busy = false; }
+        finally
+        {
+            Slots.Release(c.Id);
+            _busy = false;
+        }
     }
 }

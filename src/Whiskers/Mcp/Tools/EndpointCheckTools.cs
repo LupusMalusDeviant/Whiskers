@@ -39,7 +39,7 @@ public class EndpointCheckTools
             var state = !check.Enabled
                 ? check.SuspendedReason is { } why ? $"suspended ({why})" : "off"
                 : result is null ? "not run yet"
-                : $"{result.Outcome} at {result.AtUtc.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)}: {result.Detail}";
+                : Summary(result);
             var exceptions = check.Exceptions.Count == 0 ? "" : $", {check.Exceptions.Count} internal-target exception(s)";
             lines.Add($"- {check.Name} [{check.Kind}] on {server} ({check.Id}), every {check.IntervalSeconds} s{exceptions}: {state}");
         }
@@ -47,5 +47,21 @@ public class EndpointCheckTools
         if (lines.Count == 0)
             return failingOnly ? "No endpoint check is failing." : "No endpoint checks are defined.";
         return "Endpoint checks:\n" + string.Join('\n', lines);
+    }
+
+    /// <summary>Review m6: the outcome and its numbers only. The run's detail names the address that answered or was
+    /// refused — for an excepted target an internal one — which is exactly the map the exceptions' addresses are left
+    /// out for.</summary>
+    internal static string Summary(EndpointCheckResultEntity result)
+    {
+        var parts = new List<string>
+        {
+            $"{result.Outcome} at {result.AtUtc.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)}",
+        };
+        if (result.HttpStatus is { } status) parts.Add($"HTTP {status.ToString(CultureInfo.InvariantCulture)}");
+        if (result.LatencyMs is { } ms) parts.Add($"{ms.ToString(CultureInfo.InvariantCulture)} ms");
+        if (result.TlsNotAfterUtc is { } notAfter)
+            parts.Add($"certificate valid until {notAfter.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}");
+        return string.Join(", ", parts);
     }
 }

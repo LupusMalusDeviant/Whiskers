@@ -1413,6 +1413,13 @@ every check as agent-created and refused each unattended run as needing a confir
 as its provenance (only an Admin creates a check, in the UI). Operator guide:
 [`docs/operations/endpoint-checks.md`](../operations/endpoint-checks.md). The page filters by server, outcome, latency
 and certificate expiry; the Dashboard shows each server's count of failing checks as a link to the filtered page.
+Review round 1: "Run now" passes only the check id and the runner reads the stored check inside the UI decision (gone or
+off = Refused, nothing runs), stamping that decision's operation id on the result; the monitor and "Run now" share
+`IEndpointCheckSlots` (4 fleet-wide, 1 per server and check); an answer that reaches the 16 384-byte cap is cut off
+whatever it ends with; addresses are judged canonically but probed as answered (NAT64) and a literal as written; a
+check without an owner is refused and suspended; the MCP list gives no run details and the page hides an HTTP query
+string from non-Admins; results of a deleted check are not recorded and are pruned; each executor call gets the
+timeout + 2 s and `curl` runs with `-g`.
 
 **Out of scope:** Synthetic browser checks; checks from outside the fleet or from Whiskers' own process; changing the
 host transport; the existing certificate monitor (`Services/Certificates/`), which keeps its own probe.

@@ -27,7 +27,7 @@ public interface IEndpointCheckStore
     /// <paramref name="expectedOwnerId"/> and is on. False when an Admin took it over meanwhile, or it is gone.</summary>
     Task<bool> SuspendAsync(string id, string expectedOwnerId, string reason, CancellationToken ct = default);
 
-    /// <summary>Records one run and the check's last outcome.</summary>
+    /// <summary>Records one run and the check's last outcome; nothing when the check no longer exists.</summary>
     Task RecordAsync(EndpointCheckRun run, CancellationToken ct = default);
 
     /// <summary>The latest results of a check, newest first.</summary>
@@ -36,7 +36,8 @@ public interface IEndpointCheckStore
     /// <summary>The newest result of every check that has one.</summary>
     IReadOnlyDictionary<string, EndpointCheckResultEntity> LastResults();
 
-    /// <summary>Deletes results older than <paramref name="cutoffUtc"/>, except each check's newest one.</summary>
+    /// <summary>Deletes results older than <paramref name="cutoffUtc"/>, except each check's newest one, and every
+    /// result whose check no longer exists.</summary>
     Task<int> PruneAsync(DateTime cutoffUtc, CancellationToken ct = default);
 }
 
@@ -142,6 +143,9 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
         ArgumentNullException.ThrowIfNull(run);
         using var scope = _scopes.CreateScope();
         var db = Db(scope);
+        // Review m8: a check deleted while it ran leaves no result behind (there is no foreign key to clean it up, and
+        // the newest result of a check is kept by the pruning).
+        if (!await db.EndpointChecks.AnyAsync(c => c.Id == run.CheckId, ct)) return;
         db.EndpointCheckResults.Add(new EndpointCheckResultEntity
         {
             CheckId = run.CheckId,
@@ -181,8 +185,11 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
     {
         using var scope = _scopes.CreateScope();
         var db = Db(scope);
+        // Results whose check is gone go whatever their age (review m8); of the others each check's newest is kept.
+        var orphans = await db.EndpointCheckResults.Where(r => !db.EndpointChecks.Any(c => c.Id == r.CheckId))
+            .ExecuteDeleteAsync(ct);
         var keep = await db.EndpointCheckResults.GroupBy(r => r.CheckId).Select(g => g.Max(r => r.Id)).ToListAsync(ct);
-        return await db.EndpointCheckResults.Where(r => r.AtUtc < cutoffUtc && !keep.Contains(r.Id)).ExecuteDeleteAsync(ct);
+        return orphans + await db.EndpointCheckResults.Where(r => r.AtUtc < cutoffUtc && !keep.Contains(r.Id)).ExecuteDeleteAsync(ct);
     }
 
     private static MetricsDbContext Db(IServiceScope scope) => scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
