@@ -184,11 +184,11 @@ jobs:
         with:
           context: .
           # Always fetch the base images: their ASP.NET Core runtime carries the server-side SignalR and Kestrel fixes.
+          # No layer cache (cache-from/cache-to) in a release: it always builds fresh. A cached restore layer would be a
+          # NuGet package cache, and a cache hit skips NuGet's hash and signature checks (BuildReproducibilityTests).
           pull: true
           platforms: linux/amd64
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=release-amd64
-          cache-to: type=gha,scope=release-amd64,mode=max
           provenance: true
           sbom: true
 
@@ -200,8 +200,6 @@ jobs:
           pull: true
           platforms: linux/arm64
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=release-arm64
-          cache-to: type=gha,scope=release-arm64,mode=max
           provenance: true
           sbom: true
 

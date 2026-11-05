@@ -44,9 +44,10 @@ jobs:
         with:
           global-json-file: global.json
 
-      # R1-52: locked restore — exactly the packages.lock.json of every project, or the job fails.
+      # R1-52: locked restore — exactly the packages.lock.json of every project, or the job fails. The script retries only
+      # a transient failure (a nuget.org connection reset); a lock-file or content-hash mismatch fails at once.
       - name: Restore
-        run: dotnet restore Whiskers.slnx --locked-mode
+        run: bash .github/scripts/restore-locked.sh
 
       - name: Build
         run: dotnet build Whiskers.slnx --no-restore --configuration Release
@@ -57,7 +58,11 @@ jobs:
         run: |
           set -euo pipefail
           . /etc/os-release
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg
+          # The PGDG signing key is committed (deploy/keys/, the same file the Dockerfile uses): no download from
+          # postgresql.org, and the key is pinned — the whole file by SHA-256 and its fingerprint — before apt trusts it.
+          echo "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76  deploy/keys/pgdg-ACCC4CF8.asc" | sha256sum -c -
+          gpg --show-keys --with-colons deploy/keys/pgdg-ACCC4CF8.asc | grep '^fpr:::::::::B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8:$' >/dev/null
+          sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg deploy/keys/pgdg-ACCC4CF8.asc
           echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y --no-install-recommends postgresql-client-18
@@ -133,8 +138,12 @@ jobs:
           load: true
           push: false
           tags: ${{ env.ARTIFACT }}
+          # The layer cache speeds up the runtime stage only. The `build` stage (the NuGet restore) is never taken from it:
+          # a cached restore layer is a NuGet package cache, and a cache hit skips NuGet's hash and signature checks.
+          # mode=min exports only the final image's (runtime) layers: the build stage is never read back, so not stored.
           cache-from: type=gha,scope=ci-amd64
-          cache-to: type=gha,scope=ci-amd64,mode=max
+          cache-to: type=gha,scope=ci-amd64,mode=min
+          no-cache-filters: build
 
       - name: Trivy scan (gate, fail on CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -194,7 +203,7 @@ jobs:
       - name: Build the test project
         run: |
           set -euo pipefail
-          dotnet restore Whiskers.slnx --locked-mode
+          bash .github/scripts/restore-locked.sh
           dotnet build src/Whiskers.Tests/Whiskers.Tests.csproj --no-restore --configuration Release
 
       - name: Build the image

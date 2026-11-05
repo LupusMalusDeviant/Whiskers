@@ -45,20 +45,37 @@ jobs:
       - name: Vulnerable packages (gate)
         run: |
           set -euo pipefail
-          dotnet restore Whiskers.slnx --locked-mode
-          dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json
-          PROJECTS="$(jq '.projects | length' vulnerable.json)"
-          if [ "$PROJECTS" -lt 5 ]; then echo "::error::only ${PROJECTS} project(s) were checked"; exit 1; fi
-          PROBLEMS="$(jq '[.problems // [] | .[]] | length' vulnerable.json)"
-          if [ "$PROBLEMS" -gt 0 ]; then jq '.problems' vulnerable.json; echo "::error::the check reported problems"; exit 1; fi
-          FOUND="$(jq '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
-            | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json)"
+          bash .github/scripts/restore-locked.sh
+          # The vulnerability data comes live from nuget.org. Retried (3 tries, 20 s apart) only while there is no
+          # complete data: a non-zero exit, unreadable JSON, problems, or fewer than 5 projects. A finding is never retried:
+          # FOUND > 0 ends the loop at once and fails below. With no finding, the data is asserted complete again after the
+          # loop (BuildReproducibilityTests.VulnerableGateViolations holds this shape). All three values are computed anew on
+          # every try, before any break. A jq failure (jq -e: also no output at all) is incomplete data — status=1, never
+          # "no finding" — and jq's error stays in the log.
+          for attempt in 1 2 3; do
+            status=0
+            dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json || status=$?
+            FOUND="$(jq -e '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
+              | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json)" || { FOUND=0; status=1; }
+            PROJECTS="$(jq -e '.projects | length' vulnerable.json)" || { PROJECTS=0; status=1; }
+            PROBLEMS="$(jq -e '[.problems // [] | .[]] | length' vulnerable.json)" || { PROBLEMS=1; status=1; }
+            if [ "$FOUND" -gt 0 ]; then break; fi
+            if [ "$status" -eq 0 ] && [ "$PROJECTS" -ge 5 ] && [ "$PROBLEMS" -eq 0 ]; then break; fi
+            if [ "$attempt" -eq 3 ]; then
+              if [ "$PROBLEMS" -gt 0 ]; then jq '.problems' vulnerable.json || true; fi
+              echo "::error::no complete vulnerability data after 3 tries (last exit $status, ${PROJECTS} project(s) checked, ${PROBLEMS} problem(s))"
+              exit 1
+            fi
+            echo "::warning::no complete vulnerability data (exit $status, ${PROJECTS} project(s), ${PROBLEMS} problem(s); attempt $attempt of 3); retrying in 20 s"
+            sleep 20
+          done
           if [ "$FOUND" -gt 0 ]; then
             jq -r '.projects[] | .path as $p | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
               | select((.vulnerabilities // []) | length > 0)
               | "\($p): \(.id) \(.resolvedVersion) -> \([.vulnerabilities[] | "\(.severity) \(.advisoryurl)"] | join(", "))"' vulnerable.json
             echo "::error::${FOUND} vulnerable package(s)"; exit 1
           fi
+          if [ "$status" -ne 0 ] || [ "$PROJECTS" -lt 5 ] || [ "$PROBLEMS" -ne 0 ]; then echo "::error::no finding, but the data is not complete (exit $status, ${PROJECTS} project(s), ${PROBLEMS} problem(s))"; exit 1; fi
           echo "no known-vulnerable packages in ${PROJECTS} projects"
 
   # A pull request may not add a dependency with a known vulnerability (any severity), in any ecosystem the dependency
@@ -117,7 +134,7 @@ jobs:
       - name: Security analyzers (gate)
         run: |
           set -euo pipefail
-          dotnet restore Whiskers.slnx --locked-mode
+          bash .github/scripts/restore-locked.sh
           dotnet build src/Whiskers/Whiskers.csproj --no-restore --configuration Release --no-incremental \
             -p:AnalysisModeSecurity=All -p:CodeAnalysisTreatWarningsAsErrors=true
 
