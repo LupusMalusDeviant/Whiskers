@@ -1224,6 +1224,9 @@ Projekt: {4}</value>
   <data name="Dashboard_Chart_UsageHistoryTitle" xml:space="preserve">
     <value>Auslastungsverlauf</value>
   </data>
+  <data name="Dashboard_FailingChecks" xml:space="preserve">
+    <value>{0} Check(s) schlagen fehl</value>
+  </data>
   <data name="Dashboard_Cve_Tooltip" xml:space="preserve">
     <value>{0} Critical, {1} High, {2} Medium, {3} Low — klick zu /cves</value>
   </data>
@@ -5794,5 +5797,149 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="IdentityBindings_Error_failed" xml:space="preserve">
     <value>Die Aktion ist fehlgeschlagen ({0}); siehe Log.</value>
+  </data>
+  <data name="Nav_EndpointChecks" xml:space="preserve">
+    <value>Endpunkt-Checks</value>
+  </data>
+  <data name="Checks_Title" xml:space="preserve">
+    <value>Endpunkt-Checks</value>
+  </data>
+  <data name="Checks_Subtitle" xml:space="preserve">
+    <value>HTTP-, TCP- und Zertifikats-Checks, ausgeführt von den verwalteten Hosts</value>
+  </data>
+  <data name="Checks_Intro" xml:space="preserve">
+    <value>Jeder Check läuft auf seinem Host (curl, nc, openssl, getent), nie von Whiskers selbst. Interne Adressen werden abgelehnt, solange kein Admin eine Ausnahme einträgt. Jeder Lauf steht im Audit-Log.</value>
+  </data>
+  <data name="Checks_Button_New" xml:space="preserve">
+    <value>Neuer Check</value>
+  </data>
+  <data name="Checks_Form_New" xml:space="preserve">
+    <value>Neuer Endpunkt-Check</value>
+  </data>
+  <data name="Checks_Form_Edit" xml:space="preserve">
+    <value>Endpunkt-Check bearbeiten</value>
+  </data>
+  <data name="Checks_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Checks_Field_Server" xml:space="preserve">
+    <value>Läuft auf Server</value>
+  </data>
+  <data name="Checks_Field_Kind" xml:space="preserve">
+    <value>Art</value>
+  </data>
+  <data name="Checks_Kind_Tls" xml:space="preserve">
+    <value>TLS-Ablauf</value>
+  </data>
+  <data name="Checks_Field_Url" xml:space="preserve">
+    <value>URL (http:// oder https://)</value>
+  </data>
+  <data name="Checks_Field_Host" xml:space="preserve">
+    <value>Hostname oder IP-Adresse</value>
+  </data>
+  <data name="Checks_Field_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="Checks_Field_Status" xml:space="preserve">
+    <value>Erwarteter Status (leer = jedes 2xx)</value>
+  </data>
+  <data name="Checks_Field_WarnDays" xml:space="preserve">
+    <value>Warntage (Standard 14)</value>
+  </data>
+  <data name="Checks_Field_Interval" xml:space="preserve">
+    <value>Intervall (s)</value>
+  </data>
+  <data name="Checks_Field_Timeout" xml:space="preserve">
+    <value>Timeout (s)</value>
+  </data>
+  <data name="Checks_Field_Exceptions" xml:space="preserve">
+    <value>Ausnahmen für interne Ziele</value>
+  </data>
+  <data name="Checks_Field_ExceptionsHelp" xml:space="preserve">
+    <value>Eine pro Zeile: „Host Port Adresse…“ (ein Hostname braucht seine genauen Adressen) oder „IP Port“.</value>
+  </data>
+  <data name="Checks_Field_Enabled" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="Checks_Button_Save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="Checks_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="Checks_Filter_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Checks_Filter_Outcome" xml:space="preserve">
+    <value>Ergebnis</value>
+  </data>
+  <data name="Checks_Filter_Latency" xml:space="preserve">
+    <value>Latenz ≥ ms</value>
+  </data>
+  <data name="Checks_Filter_Expiry" xml:space="preserve">
+    <value>Zertifikat läuft ab in (Tagen)</value>
+  </data>
+  <data name="Checks_Filter_Failing" xml:space="preserve">
+    <value>Nur fehlschlagende</value>
+  </data>
+  <data name="Checks_Empty" xml:space="preserve">
+    <value>Keine Endpunkt-Checks.</value>
+  </data>
+  <data name="Checks_Table_Name" xml:space="preserve">
+    <value>Check</value>
+  </data>
+  <data name="Checks_Table_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Checks_Table_Target" xml:space="preserve">
+    <value>Ziel</value>
+  </data>
+  <data name="Checks_Table_Last" xml:space="preserve">
+    <value>Letzter Lauf</value>
+  </data>
+  <data name="Checks_Table_Latency" xml:space="preserve">
+    <value>Latenz</value>
+  </data>
+  <data name="Checks_Table_Expiry" xml:space="preserve">
+    <value>Zertifikat läuft ab</value>
+  </data>
+  <data name="Checks_State_Off" xml:space="preserve">
+    <value>Aus</value>
+  </data>
+  <data name="Checks_State_Suspended" xml:space="preserve">
+    <value>Ausgesetzt</value>
+  </data>
+  <data name="Checks_State_NotRun" xml:space="preserve">
+    <value>Noch nicht gelaufen</value>
+  </data>
+  <data name="Checks_Button_RunNow" xml:space="preserve">
+    <value>Jetzt ausführen</value>
+  </data>
+  <data name="Checks_Button_Edit" xml:space="preserve">
+    <value>Bearbeiten</value>
+  </data>
+  <data name="Checks_Button_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="Checks_Outcome_Passed" xml:space="preserve">
+    <value>Bestanden</value>
+  </data>
+  <data name="Checks_Outcome_Failed" xml:space="preserve">
+    <value>Fehlgeschlagen</value>
+  </data>
+  <data name="Checks_Outcome_Refused" xml:space="preserve">
+    <value>Abgelehnt</value>
+  </data>
+  <data name="Checks_Snackbar_AdminOnly" xml:space="preserve">
+    <value>Nur ein Admin kann Endpunkt-Checks ändern oder ausführen.</value>
+  </data>
+  <data name="Checks_Snackbar_Busy" xml:space="preserve">
+    <value>Ein Lauf dieses Checks oder auf diesem Server ist im Gang. Bitte gleich noch einmal versuchen.</value>
+  </data>
+  <data name="Checks_Snackbar_Saved" xml:space="preserve">
+    <value>Endpunkt-Check gespeichert.</value>
+  </data>
+  <data name="Checks_Snackbar_Deleted" xml:space="preserve">
+    <value>Endpunkt-Check gelöscht.</value>
   </data>
 </root>

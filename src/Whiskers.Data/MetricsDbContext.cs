@@ -85,6 +85,9 @@ public class MetricsDbContext : DbContext
     public DbSet<McpToolCallEntity> McpToolCalls => Set<McpToolCallEntity>();
     public DbSet<VolumeBackupEntity> VolumeBackups => Set<VolumeBackupEntity>();
     public DbSet<ScheduledTaskEntity> ScheduledTasks => Set<ScheduledTaskEntity>();
+    /// <summary>R1-57 (contract 0004): endpoint checks run on managed hosts, and their results.</summary>
+    public DbSet<EndpointCheckEntity> EndpointChecks => Set<EndpointCheckEntity>();
+    public DbSet<EndpointCheckResultEntity> EndpointCheckResults => Set<EndpointCheckResultEntity>();
     public DbSet<TaskRunHistoryEntity> TaskRunHistory => Set<TaskRunHistoryEntity>();
     public DbSet<LogAlertRuleEntity> LogAlertRules => Set<LogAlertRuleEntity>();
     public DbSet<UpdatePolicyEntity> UpdatePolicies => Set<UpdatePolicyEntity>();
@@ -211,6 +214,20 @@ public class MetricsDbContext : DbContext
             e.HasIndex(x => x.TaskId).IsUnique();
             e.HasIndex(x => x.Enabled);
             e.HasIndex(x => x.NextRun);
+        });
+
+        modelBuilder.Entity<EndpointCheckEntity>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasConversion<string>();
+            e.Property(x => x.LastOutcome).HasConversion<string>();
+            e.HasIndex(x => x.ServerId);
+        });
+
+        modelBuilder.Entity<EndpointCheckResultEntity>(e =>
+        {
+            e.Property(x => x.Outcome).HasConversion<string>();
+            e.HasIndex(x => new { x.CheckId, x.AtUtc });
         });
 
         modelBuilder.Entity<TaskRunHistoryEntity>(e =>

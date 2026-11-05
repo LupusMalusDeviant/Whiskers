@@ -24,6 +24,7 @@ Every subfolder carries its own `README.md` with a per-file breakdown. Tour:
 | [`HealthMonitor/`](HealthMonitor/) | Background container health watching and health reports |
 | [`LogMonitor/`](LogMonitor/) | Log search and pattern-based log alerts |
 | [`Cve/`](Cve/) | OS and container CVE scanning (Trivy) and findings storage |
+| [`EndpointChecks/`](EndpointChecks/) | R1-57: HTTP, TCP and TLS-expiry checks run on the managed host through the host command executor, each run one audited `endpointcheck.run` decision as the check's owner; alert `endpoint_check_failed` |
 | [`AuditLog/`](AuditLog/) | Append-only audit trail of privileged actions |
 | [`Mutations/`](Mutations/) | The Mutation Gateway (ADR-0005): capability catalog, decide → execute → verify → audit pipeline, scope guard around mutating services |
 | [`Guardrails/`](Guardrails/) | The guardrail policy engine, its store and the direct-MCP guard (core since ADR-0005 step 2.1) |

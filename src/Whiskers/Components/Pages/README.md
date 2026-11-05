@@ -27,6 +27,7 @@ The routable Blazor pages. Each `.razor` here is a screen in the app; some have 
 | `NginxManager.razor` | Nginx site configuration editor. |
 | `SystemdManager.razor` | systemd service control. |
 | `SslCerts.razor` | SSL certificate status and renewal. |
+| `EndpointChecks.razor` | R1-57: `/checks`, the fleet's endpoint checks (HTTP, TCP, TLS expiry) with their last result, filtered by server, failing ones, outcome, latency and certificate expiry; `?server=…&failing=true` comes from the Dashboard's failing-checks link. Every role reads; only an Admin creates, edits, deletes or runs one ("Run now"), each through the gateway (`endpointcheck.save` / `.delete` / `.run`). The form takes internal-target exceptions one per line (`host port address...` or `IP port`). "Run now" passes only the check id (the runner reads the stored check inside the decision) and first takes the run slot the monitor uses (`IEndpointCheckSlots`); a busy check or server is reported and nothing runs. Targets are shown redacted, an HTTP query string as `?…` to non-Admins. See [`docs/operations/endpoint-checks.md`](../../../../docs/operations/endpoint-checks.md). |
 | `Networks.razor` | Docker network management. |
 | `Cloud.razor` | Out-of-band cloud control (Hetzner/Hostinger). |
 

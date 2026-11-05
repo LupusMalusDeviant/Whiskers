@@ -35,7 +35,7 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
     {
         typeof(ContainerTools), typeof(ServerTools), typeof(MonitoringTools),
         typeof(NetworkTools), typeof(DatabaseTools), typeof(LoopSuspensionTools),
-        typeof(SelfStatusTools), typeof(HostLoadTools), typeof(ActionOutcomeTools),
+        typeof(SelfStatusTools), typeof(HostLoadTools), typeof(ActionOutcomeTools), typeof(EndpointCheckTools),
         // Scheduler/Log/Cve tools → their modules; Cloud+Hetzner tools → Modules/CloudControl;
         // AgentTools (instruct_agent) → Modules/Agent (RoadToSAP Phase 1).
     };
@@ -51,6 +51,8 @@ public sealed class AllInOnePseudoModule : IWhiskersModule
         // Plan-0003 WP4 — "is Whiskers still working?", next to the fleet health it is supposed to report on.
         new NavItem("self-status", "Nav_SelfStatus",        Icons.Material.Filled.Insights,     "Übersicht",        AppRole.Viewer, 25),
         // "cves" → Modules/Cve, "logs" → Modules/LogMonitor (RoadToSAP Phase 1).
+        // R1-57: endpoint checks run from the managed hosts.
+        new NavItem("checks",      "Nav_EndpointChecks",    Icons.Material.Filled.NetworkCheck, "Übersicht",        AppRole.Viewer, 40),
         new NavItem("graph",       "Nav_Topology",          Icons.Material.Filled.Hub,          "Übersicht",        AppRole.Viewer, 50),
         new NavItem("diff",        "Nav_Compare",        Icons.Material.Filled.Compare,      "Übersicht",        AppRole.Viewer, 60),
         new NavItem("notifications", "Nav_Notifications", Icons.Material.Filled.Notifications, "Übersicht",     AppRole.Viewer, 70),

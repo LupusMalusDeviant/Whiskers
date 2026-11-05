@@ -104,6 +104,8 @@ public sealed class DataPathOptions
     public string NotificationOutboxJson => P("notification-outbox.json");
     /// <summary>The threshold breaches open when Whiskers stopped, so a restart resumes them (R1-56).</summary>
     public string AlertBreachesJson => P("alert-breaches.json");
+    /// <summary>The endpoint-check alerts open when Whiskers stopped, so a restart resumes them (R1-57).</summary>
+    public string EndpointCheckBreachesJson => P("endpoint-check-breaches.json");
     /// <summary>The last disk-health readings and the open disk-health alerts, so a restart resumes them (R1-58).</summary>
     public string DiskHealthJson => P("disk-health.json");
 
