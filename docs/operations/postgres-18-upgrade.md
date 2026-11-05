@@ -104,16 +104,24 @@ sets.
 ```sh
 c17 stop serverwatch
 c17 up -d --no-deps --wait db
-(umask 077; c17 exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges' > whiskers-pg17.sql)
+(umask 077; c17 exec -T db sh -c '
+  n=$(psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select count(*) from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and backend_type = (select backend_type from pg_stat_activity where pid = pg_backend_pid())")
+  if [ "$n" != 0 ]; then echo "whiskers: other clients are connected to the PostgreSQL 17 database ($n); stop Whiskers first: c17 stop serverwatch" >&2; exit 1; fi
+  exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges' > whiskers-pg17.sql)
 c17 stop db
 c run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql
 ```
 
 - `umask 077` creates the dump readable by you only. It holds your whole database, including password hashes and the
   encrypted vault entries; keep it as private as a backup.
+- The dump command first checks that no other client is connected to the 17 database. If Whiskers (or anything else)
+  is still connected, it refuses with `whiskers: other clients are connected …` and exits non-zero. The file it leaves
+  behind is then empty, and so is any file a failed `pg_dump` cut short: neither has the dump's closing line, so the
+  restore in step 2 refuses it. Stop the client and run step 1 again from the top.
 - The last command appends one comment line, `-- whiskers-pg17-control: <fingerprint>`, taken from the stopped 17
-  cluster. It binds the dump to that state: if PostgreSQL 17 runs again later, the restore refuses this dump, and you
-  take a new one.
+  cluster. It refuses while PostgreSQL 17 still runs (`c17 stop db` first). With no client connected at the dump and
+  17 stopped right after it, the fingerprint stands for the state the dump holds: if PostgreSQL 17 runs again later,
+  the restore refuses this dump, and you take a new one.
 - This is the last time anything writes to the 17 volume, unless you go back.
 
 ### 2. Start PostgreSQL 18 alone and restore
@@ -128,13 +136,18 @@ c run --rm --no-deps -T -e WHISKERS_RESTORE=1 db-upgrade-guard < whiskers-pg17.s
   transaction (`--single-transaction` with `ON_ERROR_STOP`), checks the migration history and only then writes the
   marker. It ends with `whiskers: restored: <n> migrations in the PostgreSQL 18 database; …`.
 - **If it fails before or during the restore** (the messages end in "nothing restored"), nothing was written. Fix the
-  cause and run the same command again.
+  cause and run the same command again. One exception: "the PostgreSQL 18 database already holds Whiskers' tables"
+  means Whiskers started on the 18 database at some point. Remove the 18 volume as below and run step 2 again. If
+  Whiskers really ran on 18 and you need what it wrote, dump that first, as in
+  [going back](#going-back-to-17).
 - **If it fails after the restore** (the marker could not be written, or no migration history), remove the 18 volume
   and run step 2 again:
   ```sh
   c down
   docker volume rm <project>_whiskers-db18-data
   ```
+  "No migration history" means the dump is not of Whiskers' database. Check `WHISKERS_DB_NAME` (and
+  `WHISKERS_DB_USER`) in your `.env`, and take a new dump from the right database (step 1) before step 2.
 
 Until the restore mode succeeds, the guard keeps refusing. A failed or skipped restore therefore never ends in
 Whiskers starting on an empty database, and neither does a database Whiskers initialised on its own.

@@ -160,6 +160,22 @@ public sealed class PostgresUpgradeGuardTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task The_fingerprint_mode_refuses_while_postgresql_17_runs()
+    {
+        SkipUnlessUp();
+        foreach (var dir in new[] { "/old", "/old/pgdata" })
+        {
+            await GuardRunner.ResetAsync(_box, $"{Cluster(dir)} && echo 4711 > {dir}/postmaster.pid");
+
+            var run = await GuardRunner.RunAsync(_box, null, "WHISKERS_FINGERPRINT=1");
+
+            Assert.True(run.Exit == 1, $"{dir}: exit {run.Exit}\n{run.Out}{run.Err}");
+            Assert.Equal("", run.Out);   // nothing appended to the dump
+            Assert.Contains("Stop PostgreSQL 17 first: c17 stop db.", run.Err);
+        }
+    }
+
+    [SkippableFact]
     public async Task The_fingerprint_and_restore_modes_refuse_without_17_data_or_with_unrecognised_content()
     {
         SkipUnlessUp();

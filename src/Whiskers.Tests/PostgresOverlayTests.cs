@@ -52,6 +52,21 @@ public class PostgresOverlayTests
         return raw.Replace("$$", "$");
     }
 
+    /// <summary>The script of the guide's step-1 dump command, as the 17 container's shell receives it: the text between
+    /// <c>(umask 077; c17 exec -T db sh -c '</c> and <c>' &gt; whiskers-pg17.sql)</c>. The tests run this, not a copy.</summary>
+    internal static string GuideDumpScript()
+    {
+        var guide = DeploymentScripts.ReadRepoFile("docs", "operations", "postgres-18-upgrade.md");
+        const string head = "(umask 077; c17 exec -T db sh -c '";
+        const string tail = "' > whiskers-pg17.sql)";
+        var start = guide.IndexOf(head, StringComparison.Ordinal);
+        Assert.True(start >= 0, "the guide's dump command is missing");
+        start += head.Length;
+        var end = guide.IndexOf(tail, start, StringComparison.Ordinal);
+        Assert.True(end > start, "the guide's dump command is not closed");
+        return guide[start..end];
+    }
+
     [Fact]
     public void The_database_runs_postgresql_18_on_its_own_volume_mounted_at_the_parent_directory()
     {
@@ -105,6 +120,7 @@ public class PostgresOverlayTests
         Assert.Contains("\"${WHISKERS_FINGERPRINT:-}\" = 1", script);
         Assert.Contains("\"${WHISKERS_RESTORE:-}\" = 1", script);
         Assert.Contains("tag=\"-- whiskers-pg17-control: \"", script);
+        Assert.Contains("[ -e \"$cluster/postmaster.pid\" ]", script);
         Assert.Contains("psql -h db -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -v ON_ERROR_STOP=1", script);
         Assert.Contains("current_setting('server_version_num')", script);
         Assert.Contains("to_regclass('public.\\\"__EFMigrationsHistory\\\"') is null", script);
@@ -130,8 +146,12 @@ public class PostgresOverlayTests
     public void The_upgrade_guide_dumps_fingerprints_and_restores_through_the_guard()
     {
         var guide = DeploymentScripts.ReadRepoFile("docs", "operations", "postgres-18-upgrade.md");
-        Assert.Contains("(umask 077; c17 exec -T db sh -c 'pg_dump -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" --no-owner --no-privileges' > whiskers-pg17.sql)", guide);
-        Assert.Contains("c17 stop db\nc run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql", guide);
+        var dump = GuideDumpScript();
+        Assert.Contains("pg_stat_activity where datname = current_database() and pid <> pg_backend_pid()", dump);
+        Assert.Contains("stop Whiskers first: c17 stop serverwatch\" >&2; exit 1; fi", dump);
+        Assert.EndsWith("exec pg_dump -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" --no-owner --no-privileges", dump);
+        Assert.DoesNotContain("'", dump);   // it sits in single quotes on the host
+        Assert.Contains("' > whiskers-pg17.sql)\nc17 stop db\nc run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql", guide);
         Assert.Contains("c up -d --no-deps --wait db\nc run --rm --no-deps -T -e WHISKERS_RESTORE=1 db-upgrade-guard < whiskers-pg17.sql", guide);
         Assert.Contains("c rm -f db-upgrade-guard", guide);
         Assert.Contains("whiskers-pg18-period.sql", guide);

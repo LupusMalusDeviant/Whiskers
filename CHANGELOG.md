@@ -18,9 +18,12 @@ All notable changes to Whiskers are documented here. The format follows
     recognise (a volume holding only `lost+found` included) and a volume it cannot read. Whiskers then stays down with
     a message that names the volumes and points to the guide; a pulled overlay never starts as an empty,
     fresh-looking install.
-  - **Dump bound to the 17 state:** after the dump, with 17 stopped,
+  - **Dump bound to the 17 state:** the guide's dump command refuses while other clients (Whiskers) are connected to
+    the 17 database; a refused or cut-off dump has no closing line, so the restore refuses it. After the dump, with
+    17 stopped,
     `docker compose … run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql` appends
-    the 17 cluster's fingerprint as one SQL comment line. Any later 17 start changes it, so a stale dump is refused.
+    the 17 cluster's fingerprint as one SQL comment line; it refuses while 17 still runs. Any later 17 start changes
+    the fingerprint, so a stale dump is refused.
   - **Restore through the guard:** with the 18 database running,
     `docker compose … run --rm --no-deps -T -e WHISKERS_RESTORE=1 db-upgrade-guard < whiskers-pg17.sql` checks the dump
     (complete, fingerprint of the current 17 data) and the server (PostgreSQL 18, no Whiskers tables yet, so an 18
@@ -43,7 +46,8 @@ All notable changes to Whiskers are documented here. The format follows
   - **Tests:**
     - `PostgresUpgradeGuardTests`: the guard's script, taken from the compose file, runs against prepared volumes,
       including the fingerprint and restore modes' dump checks.
-    - `PostgresUpgradeTests`: the guide's flow from 17 into 18 and the restore mode's server checks.
+    - `PostgresUpgradeTests`: the guide's flow from 17 into 18 with the guide's own dump command, the restore mode's
+      server checks, the rollback of a dump that fails halfway and a marker that cannot be written.
     - `PostgresPgControlTests`: a real 17 start changes the fingerprint.
     - `PostgresOverlayComposeTests`: `docker compose config` over the overlay.
     - The PostgreSQL suites run on 18; the self-backup suite also runs on 17 and 14.

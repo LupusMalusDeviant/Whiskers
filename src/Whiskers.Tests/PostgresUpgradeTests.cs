@@ -15,12 +15,14 @@ namespace Whiskers.Tests;
 /// <summary>
 /// The upgrade path of docs/operations/postgres-18-upgrade.md, end to end with real servers and the guard script from
 /// the compose file. A postgres:17-alpine server on its own volume gets Whiskers' schema (the PostgreSQL migrations,
-/// applied as at a start) and rows; the guide's pg_dump runs in it; 17 is stopped; the guard's fingerprint mode reads
-/// the stopped cluster through a read-only mount of that volume and its line is appended to the dump; the guard's
+/// applied as at a start) and rows; the guide's own dump command (taken from the guide) refuses while a client is
+/// connected and dumps once none is; the fingerprint mode refuses while 17 runs; 17 is stopped; the guard's fingerprint
+/// mode reads the stopped cluster through a read-only mount of that volume and its line is appended to the dump; the guard's
 /// restore mode restores it into postgres:18-alpine (network alias <c>db</c>) and writes the marker. Afterwards the
 /// migration history and every table's row count are equal, the sequences continue and the normal run passes; a 17
 /// start makes it refuse, and the same dump is refused as stale. The restore mode's server checks are covered too: a
-/// Whiskers-initialised 18 database, a server older than 18, and a dump without migration history.
+/// Whiskers-initialised 18 database, a server older than 18, a dump without migration history, a dump that fails
+/// halfway (rolled back completely, then a valid one goes through) and a marker that cannot be written.
 /// </summary>
 [Trait("Category", DockerRequirement.Category)]
 public sealed class PostgresUpgradeTests : IClassFixture<PostgresUpgradeTests.Servers>
@@ -154,6 +156,68 @@ public sealed class PostgresUpgradeTests : IClassFixture<PostgresUpgradeTests.Se
         return fp;
     }
 
+    private static async Task WaitForNoClientsAsync(PostgreSqlContainer server)
+    {
+        const string count = "psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tAc \"select count(*) from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and backend_type = 'client backend'\"";
+        for (var i = 0; i < 50; i++)
+        {
+            var run = await server.ExecAsync(["sh", "-c", count]);
+            if (run.ExitCode == 0 && run.Stdout.Trim() == "0") return;
+            await Task.Delay(200);
+        }
+        Assert.Fail("the test's own pooled connections to PostgreSQL 17 did not close within 10 s");
+    }
+
+    [SkippableFact]
+    public async Task The_restore_mode_rolls_a_failing_dump_back_completely_and_a_valid_one_then_goes_through()
+    {
+        SkipUnlessUp();
+        // Review round 3, m2: a dump that fails halfway leaves nothing behind.
+        await CreateDatabaseAsync(_s.Pg18, "halfway");
+        var halfway = new NpgsqlConnectionStringBuilder(_s.Pg18.GetConnectionString()) { Database = "halfway" }.ConnectionString;
+        await PrepareFakeAsync(_s.GuardFake, "CREATE TABLE half (x int);\nINSERT INTO half VALUES (1);\nSELECT 1/0;\n");
+
+        var failed = await GuardRunner.RunAsync(_s.GuardFake, "/tmp/in.sql", "WHISKERS_RESTORE=1", "POSTGRES_DB=halfway");
+
+        Assert.True(failed.Exit == 1, failed.Err);
+        Assert.Contains("the restore failed and was rolled back; nothing restored", failed.Err);
+        Assert.Null(await GuardRunner.MarkerAsync(_s.GuardFake));
+        await using (var conn = new NpgsqlConnection(halfway))
+        {
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand("select to_regclass('public.half') is null", conn);
+            Assert.True((bool)(await cmd.ExecuteScalarAsync())!);
+        }
+
+        // The same database, a valid dump: it goes through, as the guide says ("run the same command again").
+        var fp = await PrepareFakeAsync(_s.GuardFake,
+            "CREATE TABLE \"__EFMigrationsHistory\" (\"MigrationId\" varchar(150) PRIMARY KEY, \"ProductVersion\" varchar(32) NOT NULL);\n"
+            + "INSERT INTO \"__EFMigrationsHistory\" VALUES ('20260101000000_Init', '10.0.14');\n");
+        var ok = await GuardRunner.RunAsync(_s.GuardFake, "/tmp/in.sql", "WHISKERS_RESTORE=1", "POSTGRES_DB=halfway");
+        Assert.True(ok.Exit == 0, ok.Err);
+        Assert.Equal(fp, await GuardRunner.MarkerAsync(_s.GuardFake));
+    }
+
+    [SkippableFact]
+    public async Task The_restore_mode_reports_a_marker_it_could_not_write()
+    {
+        SkipUnlessUp();
+        await CreateDatabaseAsync(_s.Pg18, "nomarker");
+        await PrepareFakeAsync(_s.GuardFake,
+            "CREATE TABLE \"__EFMigrationsHistory\" (\"MigrationId\" varchar(150) PRIMARY KEY, \"ProductVersion\" varchar(32) NOT NULL);\n"
+            + "INSERT INTO \"__EFMigrationsHistory\" VALUES ('20260101000000_Init', '10.0.14');\n");
+        // /new unusable as a directory (root ignores permissions, so a file stands in for a read-only volume).
+        var block = await _s.GuardFake.ExecAsync(["sh", "-c", "rm -rf /new && touch /new"]);
+        Assert.Equal(0, block.ExitCode);
+
+        var run = await GuardRunner.RunAsync(_s.GuardFake, "/tmp/in.sql", "WHISKERS_RESTORE=1", "POSTGRES_DB=nomarker");
+
+        Assert.True(run.Exit == 1, run.Err);
+        Assert.Contains("the dump was restored, but the marker could not be written into whiskers-db18-data", run.Err);
+        Assert.Contains("Remove the 18 volume", run.Err);
+        Assert.Null(await GuardRunner.MarkerAsync(_s.GuardFake));
+    }
+
     [SkippableFact]
     public async Task The_guides_flow_carries_a_17_install_into_18_and_the_guard_follows_the_17_state()
     {
@@ -178,10 +242,31 @@ public sealed class PostgresUpgradeTests : IClassFixture<PostgresUpgradeTests.Se
         // A blind pull: the normal run refuses.
         Assert.Equal(1, (await GuardRunner.RunAsync(_s.Guard)).Exit);
 
-        // Step 1: c17 exec -T db sh -c 'pg_dump …' > whiskers-pg17.sql; c17 stop db;
-        // c run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql
-        var dump = await _s.Pg17.ExecAsync(["sh", "-c", "pg_dump -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" --no-owner --no-privileges"]);
+        // Step 1, the guide's own dump command (c17 exec -T db sh -c '…' > whiskers-pg17.sql). With a client still
+        // connected (Whiskers not stopped) it refuses and writes nothing to stdout, so the file stays empty and has no
+        // closing line for the restore to accept.
+        var dumpScript = PostgresOverlayTests.GuideDumpScript();
+        await using (var whiskers = new NpgsqlConnection(_s.Pg17.GetConnectionString()))
+        {
+            await whiskers.OpenAsync();
+            var refused = await _s.Pg17.ExecAsync(["sh", "-c", dumpScript]);
+            Assert.NotEqual(0, refused.ExitCode);
+            Assert.Equal("", refused.Stdout);
+            Assert.Contains("stop Whiskers first: c17 stop serverwatch", refused.Stderr);
+        }
+        // Whiskers stopped: no client left (the pooled connections closed).
+        NpgsqlConnection.ClearAllPools();
+        await WaitForNoClientsAsync(_s.Pg17);
+        var dump = await _s.Pg17.ExecAsync(["sh", "-c", dumpScript]);
         Assert.True(dump.ExitCode == 0, dump.Stderr);
+        Assert.Contains("PostgreSQL database dump complete", dump.Stdout);
+
+        // c17 stop db; c run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql
+        // Before the stop the fingerprint mode refuses: a running 17 rewrites pg_control when it stops.
+        var early = await GuardRunner.RunAsync(_s.Guard, null, "WHISKERS_FINGERPRINT=1");
+        Assert.Equal(1, early.Exit);
+        Assert.Equal("", early.Out);
+        Assert.Contains("Stop PostgreSQL 17 first: c17 stop db.", early.Err);
         await _s.Pg17.StopAsync();
         var fingerprint = await GuardRunner.RunAsync(_s.Guard, null, "WHISKERS_FINGERPRINT=1");
         Assert.True(fingerprint.Exit == 0, fingerprint.Err);
