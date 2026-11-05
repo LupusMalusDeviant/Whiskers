@@ -49,15 +49,17 @@ jobs:
           # The vulnerability data comes live from nuget.org. Retried (3 tries, 20 s apart) only while there is no
           # complete data: a non-zero exit, unreadable JSON, problems, or fewer than 5 projects. A finding is never retried:
           # FOUND > 0 ends the loop at once and fails below. With no finding, the data is asserted complete again after the
-          # loop (BuildReproducibilityTests.VulnerableGateViolations holds this shape).
+          # loop (BuildReproducibilityTests.VulnerableGateViolations holds this shape). All three values are computed anew on
+          # every try, before any break. A jq failure (jq -e: also no output at all) is incomplete data — status=1, never
+          # "no finding" — and jq's error stays in the log.
           for attempt in 1 2 3; do
             status=0
             dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json || status=$?
-            FOUND="$(jq '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
-              | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json 2>/dev/null || echo 0)"
+            FOUND="$(jq -e '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
+              | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json)" || { FOUND=0; status=1; }
+            PROJECTS="$(jq -e '.projects | length' vulnerable.json)" || { PROJECTS=0; status=1; }
+            PROBLEMS="$(jq -e '[.problems // [] | .[]] | length' vulnerable.json)" || { PROBLEMS=1; status=1; }
             if [ "$FOUND" -gt 0 ]; then break; fi
-            PROJECTS="$(jq '.projects | length' vulnerable.json 2>/dev/null || echo 0)"
-            PROBLEMS="$(jq '[.problems // [] | .[]] | length' vulnerable.json 2>/dev/null || echo 1)"
             if [ "$status" -eq 0 ] && [ "$PROJECTS" -ge 5 ] && [ "$PROBLEMS" -eq 0 ]; then break; fi
             if [ "$attempt" -eq 3 ]; then
               if [ "$PROBLEMS" -gt 0 ]; then jq '.problems' vulnerable.json || true; fi

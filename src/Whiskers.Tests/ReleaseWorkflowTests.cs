@@ -96,6 +96,7 @@ public class ReleaseWorkflowTests
     [InlineData("security.yml", "--exit-code 1", "--exit-code 0")]                                                              // secret findings ignored
     [InlineData("security.yml", "-p:CodeAnalysisTreatWarningsAsErrors=true", "-p:CodeAnalysisTreatWarningsAsErrors=false")]
     [InlineData("security.yml", "          if [ \"$FOUND\" -gt 0 ]; then\n", "          if false; then\n")]                 // vulnerable packages pass
+    [InlineData("security.yml", "echo \"::error::${FOUND} vulnerable package(s)\"; exit 1\n", "echo \"::warning::${FOUND} vulnerable package(s)\"\n")] // reported, not failed
     [InlineData("security.yml", "          fail-on-severity: low", "          fail-on-severity: critical")]
     public void A_weakened_integration_or_artifact_gate_is_caught(string file, string from, string to)
     {
@@ -873,7 +874,7 @@ internal static class WorkflowPolicy
         // Dependencies, secrets, static analysis, CodeQL (TA-47, F-09).
         var securityRuns = string.Join("\n", security.Values.SelectMany(Steps).Select(s => Scalar(Child(s, "run"))).OfType<string>());
         if (!securityRuns.Contains("--vulnerable --include-transitive", StringComparison.Ordinal)
-            || !Regex.IsMatch(securityRuns, @"if \[ ""\$FOUND"" -gt 0 \]; then\n[\s\S]*?exit 1"))
+            || !Regex.IsMatch(securityRuns, @"if \[ ""\$FOUND"" -gt 0 \]; then\n(?:(?!\s*fi\n)[^\n]*\n)*?[^\n]*;\s*exit 1\n\s*fi\n"))
             violations.Add("security.yml does not fail on a known-vulnerable package");
         var review = security.Values.SelectMany(Steps).FirstOrDefault(s => Scalar(Child(s, "uses"))?.StartsWith("actions/dependency-review-action@") == true);
         if (review is null || Scalar(Child(Child(review, "with"), "fail-on-severity")) != "low")

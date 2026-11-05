@@ -161,6 +161,12 @@ public class BuildReproducibilityTests
     [InlineData("          set -euo pipefail\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests",
                 "          set -euo pipefail\n          set +e\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests")]
     [InlineData("  build-test:\n    runs-on: ubuntu-latest\n", "  build-test:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n")]
+    [InlineData("          set -euo pipefail\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests",
+                "          set +eu\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests")]
+    [InlineData("          set -euo pipefail\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests",
+                "          set +euo pipefail\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests")]
+    [InlineData("          set -euo pipefail\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests",
+                "          set -euo pipefail\n          set +o errexit\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests")]
     public void Restore_step_check_finds_an_ignored_failure(string original, string mutation)
     {
         var real = Repo(".github", "workflows", "ci.yml");
@@ -274,6 +280,35 @@ public class BuildReproducibilityTests
         Assert.NotEmpty(BuildPolicy.NuGetCacheViolations(real.Replace(original, mutation), "release.yml", Repo("Dockerfile")));
     }
 
+    /// <summary>The release rule follows the workflow, not its file name: the same build with a layer cache, moved into
+    /// a file with another name, is still caught by its name or its tag trigger.</summary>
+    [Fact]
+    public void A_release_workflow_under_another_file_name_is_still_a_release()
+    {
+        var real = Repo(".github", "workflows", "release.yml");
+        var cached = real.Replace("          platforms: linux/arm64\n",
+            "          platforms: linux/arm64\n          cache-from: type=gha,scope=x\n          no-cache-filters: build\n");
+        Assert.NotEqual(real, cached);
+        Assert.NotEmpty(BuildPolicy.NuGetCacheViolations(cached, "publish.yml", Repo("Dockerfile")));        // by its name: release
+        Assert.Contains("name: release\n", cached);
+        var renamed = cached.Replace("name: release\n", "name: publish\n");
+        Assert.Contains("    tags:", renamed);
+        Assert.NotEmpty(BuildPolicy.NuGetCacheViolations(renamed, "publish.yml", Repo("Dockerfile")));       // by its tag trigger
+        // The same step in ci.yml (not a release) is allowed: the restore stage is filtered.
+        Assert.Empty(BuildPolicy.NuGetCacheViolations(Repo(".github", "workflows", "ci.yml"), "ci.yml", Repo("Dockerfile")));
+    }
+
+    [Theory]
+    [InlineData("        run: docker build -t whiskers:image-runtime .", "        run: docker build --cache-from type=gha,scope=x -t whiskers:image-runtime .")]
+    [InlineData("        run: docker build -t whiskers:image-runtime .", "        run: docker buildx build --cache-to type=gha,mode=max -t whiskers:image-runtime .")]
+    [InlineData("        run: docker build -t whiskers:image-runtime .", "        run: |\n          docker buildx build \\\n            --cache-from type=local,src=/tmp/c -t whiskers:image-runtime .")]
+    public void NuGet_cache_check_finds_a_layer_cache_in_a_run_step(string original, string mutation)
+    {
+        var real = Repo(".github", "workflows", "ci.yml");
+        Assert.Contains(original, real);
+        Assert.NotEmpty(BuildPolicy.NuGetCacheViolations(real.Replace(original, mutation), "ci.yml", Repo("Dockerfile")));
+    }
+
     // ---- the vulnerable-packages gate: missing data is retried, a finding never ----------------------------------
 
     [Fact]
@@ -291,11 +326,34 @@ public class BuildReproducibilityTests
     [InlineData("          if [ \"$status\" -ne 0 ] || [ \"$PROJECTS\" -lt 5 ]", "          if false && [ \"$status\" -ne 0 ] || [ \"$PROJECTS\" -lt 5 ]")]
     [InlineData("--format json > vulnerable.json || status=$?", "--format json > vulnerable.json || true")]             // the exit code is dropped
     [InlineData("for attempt in 1 2 3; do\n            status=0\n            dotnet list", "for attempt in 1 2 3 4 5; do\n            status=0\n            dotnet list")]
+    [InlineData("vulnerable.json)\" || { FOUND=0; status=1; }", "vulnerable.json 2>/dev/null || echo 0)\"")]               // a jq error reads as "no finding"
+    [InlineData("|| { FOUND=0; status=1; }", "|| FOUND=0")]                                                               // a jq error reads as complete data
+    [InlineData("|| { PROJECTS=0; status=1; }", "|| { PROJECTS=0; }")]
+    [InlineData("|| { PROBLEMS=1; status=1; }", "|| { PROBLEMS=0; }")]
+    [InlineData("FOUND=\"$(jq -e '", "FOUND=\"$(jq '")]                                                                   // no output reads as success
+    [InlineData("vulnerable.json)\" || { FOUND=0; status=1; }", "vulnerable.json 2>/dev/null)\" || { FOUND=0; status=1; }")] // jq's error hidden
+    [InlineData("echo \"::error::${FOUND} vulnerable package(s)\"; exit 1\n", "echo \"::warning::${FOUND} vulnerable package(s)\"\n")] // a finding passes
+    [InlineData("            if [ \"$FOUND\" -gt 0 ]; then break; fi\n", "            if [ \"$FOUND\" -gt 0 ]; then break; fi\n            [ \"$attempt\" -eq 2 ] && exit 0\n")] // exit 0 inside
+    [InlineData("          done\n          if [ \"$FOUND\"", "          done\n          [ \"$FOUND\" -eq 0 ] && exit 0\n          if [ \"$FOUND\"")] // exit 0 after the loop
     public void Vulnerable_gate_check_finds_a_fail_open_loop(string original, string mutation)
     {
         var real = Repo(".github", "workflows", "security.yml");
         Assert.Contains(original, real);
         Assert.NotEmpty(BuildPolicy.VulnerableGateViolations(real.Replace(original, mutation)));
+    }
+
+    /// <summary>PROJECTS and PROBLEMS moved behind the finding break: on a try that breaks, the values of an earlier try
+    /// would survive and pass the check after the loop.</summary>
+    [Fact]
+    public void Vulnerable_gate_check_finds_values_computed_after_a_break()
+    {
+        var real = Repo(".github", "workflows", "security.yml");
+        const string values = "            PROJECTS=\"$(jq -e '.projects | length' vulnerable.json)\" || { PROJECTS=0; status=1; }\n"
+                            + "            PROBLEMS=\"$(jq -e '[.problems // [] | .[]] | length' vulnerable.json)\" || { PROBLEMS=1; status=1; }\n";
+        const string foundBreak = "            if [ \"$FOUND\" -gt 0 ]; then break; fi\n";
+        Assert.Contains(values + foundBreak, real);
+        var moved = real.Replace(values + foundBreak, foundBreak + values);
+        Assert.Contains(BuildPolicy.VulnerableGateViolations(moved), v => v.Contains("after a break", StringComparison.Ordinal));
     }
 
     // ---- the PGDG signing key is committed and pinned, never downloaded ---------------------------------------
@@ -337,6 +395,21 @@ public class BuildReproducibilityTests
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(BuildPolicy.PgdgKeySha256, new string('0', 64)), dockerfile, key));
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace(BuildPolicy.PgdgKeySha256, new string('0', 64)), key));
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(" | sha256sum -c -", " | true"), dockerfile, key));
+        // The check swallowed, or run after the key is dearmored.
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace("| sha256sum -c -\n", "| sha256sum -c - || true\n"), dockerfile, key));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace("| sha256sum -c - \\\n", "| sha256sum -c - || true \\\n"), key));
+        var ciLines = ci.Split('\n').ToList();
+        var shaAt = ciLines.FindIndex(l => l.Contains("sha256sum -c -", StringComparison.Ordinal));
+        var dearmorAt = ciLines.FindIndex(l => l.Contains("--dearmor", StringComparison.Ordinal));
+        Assert.True(shaAt >= 0 && dearmorAt > shaAt);
+        (ciLines[shaAt], ciLines[dearmorAt]) = (ciLines[dearmorAt], ciLines[shaAt]);
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(string.Join('\n', ciLines), dockerfile, key));
+        var dfLines = dockerfile.Split('\n').ToList();
+        shaAt = dfLines.FindIndex(l => l.Contains("sha256sum -c -", StringComparison.Ordinal));
+        dearmorAt = dfLines.FindIndex(l => l.Contains("--dearmor", StringComparison.Ordinal));
+        Assert.True(shaAt >= 0 && dearmorAt > shaAt);
+        (dfLines[shaAt], dfLines[dearmorAt]) = (dfLines[dearmorAt], dfLines[shaAt]);
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, string.Join('\n', dfLines), key));
         Assert.Contains("| grep '^fpr", ci);
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace("| grep '^fpr", "| grep -q '^fpr"), dockerfile, key));
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace("| grep '^fpr", "| grep -q '^fpr"), key));
@@ -747,7 +820,12 @@ internal static class BuildPolicy
     /// point the packages folder at any cached directory);</item>
     /// <item>a <c>docker/build-push-action</c> with a layer cache (<c>cache-from</c>) names the Dockerfile's restore stage in
     /// <c>no-cache-filters</c>, so the restore layer is never taken from the cache;</item>
-    /// <item><c>release.yml</c> builds have no layer cache at all (<c>cache-from</c>/<c>cache-to</c>): a release builds fresh.</item>
+    /// <item>release builds have no layer cache at all (<c>cache-from</c>/<c>cache-to</c>): a release builds fresh. A
+    /// workflow counts as a release workflow by its file name (<c>release.yml</c>), its <c>name:</c> (contains "release")
+    /// or its trigger (<c>on.push.tags</c>). A reusable workflow that only a release calls is not recognised;
+    /// docs/operations/ci-and-release-checks.md states this limit;</item>
+    /// <item>no <c>run</c> step passes <c>--cache-from</c>/<c>--cache-to</c> to <c>docker build</c>/<c>docker buildx
+    /// build</c>: such a cache could hold the restore layer, and the action's <c>no-cache-filters</c> rule cannot see it.</item>
     /// </list></summary>
     public static IReadOnlyList<string> NuGetCacheViolations(string workflowYaml, string workflowName, string dockerfile)
     {
@@ -757,10 +835,15 @@ internal static class BuildPolicy
         if (workflowYaml.Replace("\r\n", "\n").Split('\n').Any(l => !l.TrimStart().StartsWith('#') && l.Contains("NUGET_PACKAGES", StringComparison.Ordinal)))
             violations.Add($"{workflowName} sets NUGET_PACKAGES: the packages folder could be a cached directory");
         var root = (YamlMappingNode)Load(workflowYaml);
+        var release = IsReleaseWorkflow(root, workflowName);
         foreach (var (job, steps) in JobSteps(root))
         {
             foreach (var step in steps)
             {
+                var run = (Scalar(step, "run") ?? "").Replace("\r\n", "\n");
+                foreach (var line in JoinContinuations(run).Where(l => !l.TrimStart().StartsWith('#')))
+                    if (Regex.IsMatch(line, @"\bdocker\s+(buildx\s+)?build\b") && Regex.IsMatch(line, @"--cache-(from|to)\b"))
+                        violations.Add($"{workflowName} job '{job}': a docker build with a layer cache in a run step: '{line.Trim()}'");
                 var uses = Scalar(step, "uses") ?? "";
                 var with = step.Children.TryGetValue(new YamlScalarNode("with"), out var w) ? w as YamlMappingNode : null;
                 bool Has(string key) => with is not null && with.Children.ContainsKey(new YamlScalarNode(key));
@@ -771,8 +854,8 @@ internal static class BuildPolicy
                     violations.Add($"job '{job}': {uses.Split('@')[0]} caches NuGet packages (a cache hit skips NuGet's hash and signature checks)");
                 if (!uses.StartsWith("docker/build-push-action@", StringComparison.Ordinal)) continue;
                 var stepName = Scalar(step, "name") ?? uses;
-                if (workflowName == "release.yml" && (Has("cache-from") || Has("cache-to")))
-                    violations.Add($"release.yml job '{job}', '{stepName}': a release build has a layer cache; it must build fresh");
+                if (release && (Has("cache-from") || Has("cache-to")))
+                    violations.Add($"{workflowName} (a release workflow) job '{job}', '{stepName}': a release build has a layer cache; it must build fresh");
                 if (Has("cache-from"))
                 {
                     var filters = (Scalar(with!, "no-cache-filters") ?? "").Split([',', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -782,6 +865,20 @@ internal static class BuildPolicy
             }
         }
         return violations;
+    }
+
+    /// <summary>A release workflow: the file <c>release.yml</c>, a <c>name:</c> containing "release", or a tag trigger
+    /// (<c>on.push.tags</c>).</summary>
+    public static bool IsReleaseWorkflow(YamlMappingNode root, string workflowName)
+    {
+        if (workflowName == "release.yml") return true;
+        if ((Scalar(root, "name") ?? "").Contains("release", StringComparison.OrdinalIgnoreCase)) return true;
+        foreach (var key in new[] { "on", "true" }) // YAML 1.1 readers may turn a bare `on` into true
+            if (root.Children.TryGetValue(new YamlScalarNode(key), out var on) && on is YamlMappingNode triggers
+                && triggers.Children.TryGetValue(new YamlScalarNode("push"), out var push) && push is YamlMappingNode p
+                && p.Children.ContainsKey(new YamlScalarNode("tags")))
+                return true;
+        return false;
     }
 
     /// <summary>A step that restores (the script or <c>dotnet restore</c>) cannot be made to pass on a failure: no
@@ -804,7 +901,7 @@ internal static class BuildPolicy
                 var name = Scalar(step, "name") ?? "(unnamed)";
                 if (step.Children.ContainsKey(new YamlScalarNode("continue-on-error")) || job.Children.ContainsKey(new YamlScalarNode("continue-on-error")))
                     violations.Add($"job '{jobName}', step '{name}': continue-on-error on a restore");
-                if (Regex.IsMatch(run, @"(^|[\s;&|])set\s+(\+e|\+o\s+errexit)\b", RegexOptions.Multiline))
+                if (Regex.IsMatch(run, @"(^|[\s;&|])set\s+(\+[a-z]*e[a-z]*|\+o\s+errexit)\b", RegexOptions.Multiline))
                     violations.Add($"job '{jobName}', step '{name}': 'set +e' in a restore step");
             }
         }
@@ -820,6 +917,13 @@ internal static class BuildPolicy
         RegexOptions.CultureInvariant | RegexOptions.Multiline);
     private static readonly Regex VulnerableLastTry = new(
         @"^\s*if \[ ""\$attempt"" -eq 3 \]; then\n(?<body>(?:(?!\s*fi\n)[^\n]*\n)*?)\s*fi\n", RegexOptions.CultureInvariant | RegexOptions.Multiline);
+    private static readonly Regex VulnerableReport = new(
+        @"^\s*if \[ ""\$FOUND"" -gt 0 \]; then\n(?<body>(?:(?!\s*fi\n)[^\n]*\n)*?)\s*fi\n", RegexOptions.CultureInvariant | RegexOptions.Multiline);
+    /// <summary>One value of the gate: <c>VAR="$(jq -e '…' vulnerable.json)" || { VAR=n; status=1; }</c>. jq -e also fails
+    /// on no output; a failure is incomplete data (status=1), never a default that reads as "complete, nothing found", and
+    /// jq's stderr stays in the log.</summary>
+    private static readonly Regex VulnerableValue = new(
+        @"\b(?<var>FOUND|PROJECTS|PROBLEMS)=""\$\(jq -e '[^']*' vulnerable\.json\)"" \|\| \{ \k<var>=\d+; status=1; \}", RegexOptions.CultureInvariant);
 
     /// <summary>The <c>Vulnerable packages (gate)</c> step retries only missing data and never a finding: exactly three
     /// tries; <c>FOUND</c> is computed once per try, inside the loop, and a finding ends the loop at once
@@ -844,8 +948,23 @@ internal static class BuildPolicy
         var list = lines.FirstOrDefault(l => l.StartsWith("dotnet list Whiskers.slnx package --vulnerable", StringComparison.Ordinal));
         if (list is null || !list.EndsWith(" || status=$?", StringComparison.Ordinal))
             violations.Add("the vulnerability listing's exit code is not kept ('|| status=$?')");
-        if (Regex.Matches(run, @"\bFOUND=").Count != 1 || !Regex.IsMatch(loop, @"\bFOUND="))
-            violations.Add("FOUND is not computed exactly once per try, inside the loop");
+        // FOUND, PROJECTS and PROBLEMS: each assigned exactly once in the step, inside the loop, in the fail-closed shape,
+        // and all three before the first break — no value from an earlier try survives a break.
+        var firstBreak = loop.IndexOf("break", StringComparison.Ordinal);
+        foreach (var name in new[] { "FOUND", "PROJECTS", "PROBLEMS" })
+        {
+            var outside = VulnerableValue.Replace(run, "");
+            if (VulnerableValue.Matches(run).Count(m => m.Groups["var"].Value == name) != 1 || Regex.IsMatch(outside, $@"\b{name}="))
+                violations.Add($"{name} is not assigned exactly once in the step");
+            var value = VulnerableValue.Matches(loop).FirstOrDefault(m => m.Groups["var"].Value == name);
+            if (value is null)
+                violations.Add($"{name} is not computed as {name}=\"$(jq -e '…' vulnerable.json)\" || {{ {name}=n; status=1; }} inside the loop");
+            else if (firstBreak >= 0 && value.Index > firstBreak)
+                violations.Add($"{name} is computed after a break: a value from an earlier try could survive it");
+        }
+        if (loop.Contains("2>/dev/null", StringComparison.Ordinal) || loop.Contains("|| echo", StringComparison.Ordinal))
+            violations.Add("the loop hides a jq error ('2>/dev/null' or '|| echo'): a failed jq must be incomplete data, with its error in the log");
+        if (Regex.IsMatch(run, @"\bexit 0\b")) violations.Add("the step has an 'exit 0': only the end of the step may pass");
         var foundAt = lines.IndexOf(FoundBreak);
         if (foundAt < 0) violations.Add($"a finding does not end the loop at once ('{FoundBreak}')");
         var completeAt = lines.IndexOf(CompleteBreak);
@@ -855,9 +974,12 @@ internal static class BuildPolicy
         var lastTry = VulnerableLastTry.Match(loop + "\n");
         if (!lastTry.Success || lastTry.Groups["body"].Value.Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Trim() != "exit 1")
             violations.Add("the third try without complete data does not end in exit 1");
-        var report = after.IndexOf("if [ \"$FOUND\" -gt 0 ]; then\n", StringComparison.Ordinal);
+        var reportBlock = VulnerableReport.Match(after);
+        var report = reportBlock.Success ? reportBlock.Index : -1;
         var assert = CompleteAfterLoop.Match(after);
-        if (report < 0) violations.Add("a finding does not fail after the loop");
+        if (!reportBlock.Success) violations.Add("a finding does not fail after the loop");
+        else if (!Regex.IsMatch(reportBlock.Groups["body"].Value.TrimEnd(), @"(^|;\s*)exit 1$"))
+            violations.Add("the report of a finding does not end in 'exit 1' before its 'fi'");
         if (!assert.Success || assert.Index < report) violations.Add("with no finding, the data is not asserted complete again after the loop");
         return violations;
     }
@@ -882,9 +1004,20 @@ internal static class BuildPolicy
         foreach (var (name, text, path) in new[] { ("ci.yml", ciYaml, PgdgKeyPath), ("Dockerfile", dockerfile, "/tmp/pgdg-ACCC4CF8.asc") })
         {
             var lines = text.Replace("\r\n", "\n").Split('\n').Where(l => !l.TrimStart().StartsWith('#')).ToList();
+            // The check is its own command, ending in `sha256sum -c -` (in the Dockerfile before its `\` continuation): nothing
+            // after it (`|| true`) may swallow a mismatch. And it runs before the key is dearmored.
             var check = $"echo \"{PgdgKeySha256}  {path}\" | sha256sum -c -";
-            if (!lines.Any(l => l.Contains(check, StringComparison.Ordinal)))
+            var checkAt = lines.FindIndex(l => l.Contains(check, StringComparison.Ordinal));
+            var dearmorAt = lines.FindIndex(l => l.Contains("--dearmor", StringComparison.Ordinal));
+            if (checkAt < 0)
                 violations.Add($"{name} does not check the key file's SHA-256 ('{check}')");
+            else
+            {
+                if (!lines[checkAt].TrimEnd().TrimEnd('\\').TrimEnd().EndsWith("| sha256sum -c -", StringComparison.Ordinal))
+                    violations.Add($"{name}: the SHA-256 check does not end in 'sha256sum -c -': '{lines[checkAt].Trim()}'");
+                if (dearmorAt < 0 || dearmorAt < checkAt)
+                    violations.Add($"{name}: the key is dearmored before its SHA-256 is checked");
+            }
             foreach (var line in lines.Where(l => Regex.IsMatch(l, @"\b(curl|wget)\b") && l.Contains("postgresql.org", StringComparison.Ordinal)))
                 violations.Add($"{name} downloads from postgresql.org: '{line.Trim()}'");
             if (lines.Any(l => l.Contains("www.postgresql.org", StringComparison.Ordinal) || l.Contains("/media/keys/", StringComparison.Ordinal)))

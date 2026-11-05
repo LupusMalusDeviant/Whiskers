@@ -140,8 +140,9 @@ jobs:
           tags: ${{ env.ARTIFACT }}
           # The layer cache speeds up the runtime stage only. The `build` stage (the NuGet restore) is never taken from it:
           # a cached restore layer is a NuGet package cache, and a cache hit skips NuGet's hash and signature checks.
+          # mode=min exports only the final image's (runtime) layers: the build stage is never read back, so not stored.
           cache-from: type=gha,scope=ci-amd64
-          cache-to: type=gha,scope=ci-amd64,mode=max
+          cache-to: type=gha,scope=ci-amd64,mode=min
           no-cache-filters: build
 
       - name: Trivy scan (gate, fail on CRITICAL)
