@@ -7,9 +7,10 @@ namespace Whiskers.Tests;
 /// mount at /var/lib/postgresql/data (measured: it exits with "there appears to be PostgreSQL data in
 /// /var/lib/postgresql/data (unused mount/volume)", even for an empty volume), so the data volume moved to
 /// /var/lib/postgresql under a new name. The PostgreSQL 17 volume stays the way back, and db-upgrade-guard keeps 18 from
-/// starting next to it until a restore has been confirmed for exactly that 17 data. The guard script itself runs in
-/// <see cref="PostgresUpgradeGuardTests"/>, the guide's dump and restore and the confirm run in
-/// <see cref="PostgresUpgradeTests"/>, and compose reads the file in <see cref="PostgresOverlayComposeTests"/>.
+/// starting next to it until the guard itself has restored a dump of exactly that 17 data. The guard script itself runs
+/// in <see cref="PostgresUpgradeGuardTests"/>, the guide's dump, fingerprint and restore in <see cref="PostgresUpgradeTests"/>,
+/// the pg_control property it rests on in <see cref="PostgresPgControlTests"/>, and compose reads the file in
+/// <see cref="PostgresOverlayComposeTests"/>.
 /// </summary>
 public class PostgresOverlayTests
 {
@@ -95,17 +96,23 @@ public class PostgresOverlayTests
     }
 
     [Fact]
-    public void The_guard_script_keys_on_the_17_clusters_fingerprint_and_the_confirmed_restore()
+    public void The_guard_script_keys_on_the_17_clusters_fingerprint_and_restores_itself()
     {
         var script = GuardScript();
         Assert.Contains("find /old -maxdepth 2 -name PG_VERSION -type f", script);
         Assert.Contains("sha256sum \"$cluster/global/pg_control\"", script);
         Assert.Contains("marker=/new/.whiskers-restored-from-17", script);
-        Assert.Contains("\"${WHISKERS_CONFIRM_RESTORE:-}\" = 1", script);
-        Assert.Contains("psql -h db -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\"", script);
-        Assert.Contains("\"__EFMigrationsHistory\"", script);
+        Assert.Contains("\"${WHISKERS_FINGERPRINT:-}\" = 1", script);
+        Assert.Contains("\"${WHISKERS_RESTORE:-}\" = 1", script);
+        Assert.Contains("tag=\"-- whiskers-pg17-control: \"", script);
+        Assert.Contains("psql -h db -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -v ON_ERROR_STOP=1", script);
+        Assert.Contains("current_setting('server_version_num')", script);
+        Assert.Contains("to_regclass('public.\\\"__EFMigrationsHistory\\\"') is null", script);
+        Assert.Contains("q --single-transaction -q -f \"$dump\"", script);
         Assert.Contains("docs/operations/postgres-18-upgrade.md", script);
         Assert.Contains("docker volume ls", script);
+        // The separate confirm run of round 1 is gone: it could mark a database it had not restored.
+        Assert.DoesNotContain("WHISKERS_CONFIRM_RESTORE", Overlay);
     }
 
     [Fact]
@@ -120,15 +127,19 @@ public class PostgresOverlayTests
     }
 
     [Fact]
-    public void The_upgrade_guide_holds_the_checked_restore_and_the_confirm_run()
+    public void The_upgrade_guide_dumps_fingerprints_and_restores_through_the_guard()
     {
         var guide = DeploymentScripts.ReadRepoFile("docs", "operations", "postgres-18-upgrade.md");
-        Assert.Contains("c17 exec -T db sh -c 'pg_dump -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" --no-owner --no-privileges'", guide);
-        Assert.Contains("grep -q 'PostgreSQL database dump complete' whiskers-pg17.sql", guide);
-        Assert.Contains("-v ON_ERROR_STOP=1 --single-transaction -q' < whiskers-pg17.sql", guide);
-        Assert.Contains("c run --rm --no-deps -e WHISKERS_CONFIRM_RESTORE=1 db-upgrade-guard", guide);
-        Assert.Contains("umask 077", guide);
+        Assert.Contains("(umask 077; c17 exec -T db sh -c 'pg_dump -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" --no-owner --no-privileges' > whiskers-pg17.sql)", guide);
+        Assert.Contains("c17 stop db\nc run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql", guide);
+        Assert.Contains("c up -d --no-deps --wait db\nc run --rm --no-deps -T -e WHISKERS_RESTORE=1 db-upgrade-guard < whiskers-pg17.sql", guide);
         Assert.Contains("c rm -f db-upgrade-guard", guide);
+        Assert.Contains("whiskers-pg18-period.sql", guide);
+        Assert.Contains("COMPOSE_PROJECT_NAME", guide);
+        Assert.Contains("lost+found", guide);
+        // No separate restore chain or confirm run any more: the guard restores.
+        Assert.DoesNotContain("WHISKERS_CONFIRM_RESTORE", guide);
+        Assert.DoesNotContain("grep -q", guide);
         Assert.DoesNotContain("$C", guide);   // shell functions, not word-split variables (zsh)
     }
 }

@@ -10,19 +10,22 @@
 #
 # PostgreSQL 18. Coming from the PostgreSQL 17 overlay (volume whiskers-db-data)? Follow
 # docs/operations/postgres-18-upgrade.md. Until you do, db-upgrade-guard keeps the database (and so Whiskers) from
-# starting while your data sits in the 17 volume and no restore of it into the 18 volume has been confirmed. The new
-# overlay never mounts the 17 volume writable: it stays as your way back.
+# starting while your data sits in the 17 volume and the guard has not itself restored a dump of exactly that 17 data
+# into the 18 volume. The new overlay never mounts the 17 volume writable: it stays as your way back.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
   # Decides whether PostgreSQL 18 may start: a blind pull of this file must not look like a fresh install, and a
-  # rollback to 17 must not be followed by a start on the older 18 copy.
+  # rollback to 17 must not be followed by a start on the older 18 copy. Three modes:
   # - Normal run (the dependency of db): passes when whiskers-db-data is empty, or when it holds a 17 cluster whose
-  #   global/pg_control fingerprint equals the marker written by a confirmed restore. Refuses everything else.
-  # - Confirm run, after the restore (docs/operations/postgres-18-upgrade.md):
-  #     docker compose ... run --rm --no-deps -e WHISKERS_CONFIRM_RESTORE=1 db-upgrade-guard
-  #   checks over the network that the running 18 database holds Whiskers' migration history, and only then writes the
-  #   17 cluster's fingerprint into the 18 volume.
+  #   global/pg_control fingerprint equals the marker the restore mode wrote. Refuses everything else.
+  # - Fingerprint mode, after the dump with 17 stopped (docs/operations/postgres-18-upgrade.md, step 1):
+  #     docker compose ... run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql
+  #   prints one SQL comment line with the 17 cluster's fingerprint, binding the dump to that state.
+  # - Restore mode, with the 18 db running (step 2):
+  #     docker compose ... run --rm --no-deps -T -e WHISKERS_RESTORE=1 db-upgrade-guard < whiskers-pg17.sql
+  #   checks the dump (complete, fingerprint of the current 17 data) and the server (PostgreSQL 18, no Whiskers tables
+  #   yet), restores in one transaction, checks the migration history, and only then writes the marker.
   db-upgrade-guard:
     image: postgres:18-alpine
     entrypoint: ["/bin/sh", "-c"]
@@ -30,18 +33,23 @@ services:
       - |
         guide="docs/operations/postgres-18-upgrade.md"
         marker=/new/.whiskers-restored-from-17
+        tag="-- whiskers-pg17-control: "
         say() { echo "whiskers: $$*" >&2; }
         refuse() {
           for line in "$$@"; do say "$$line"; done
           say "The volumes are whiskers-db-data (PostgreSQL 17) and whiskers-db18-data (PostgreSQL 18); docker volume ls shows them with your compose project as a prefix."
           exit 1
         }
+        q() { PGCONNECT_TIMEOUT=10 psql -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -tA "$$@"; }
+        mode=normal
+        [ "$${WHISKERS_FINGERPRINT:-}" = 1 ] && mode=fingerprint
+        [ "$${WHISKERS_RESTORE:-}" = 1 ] && mode=restore
         if ! entries=$$(ls -A /old 2>/dev/null); then
           refuse "cannot list the PostgreSQL 17 volume whiskers-db-data; not starting." "See $$guide."
         fi
         if [ -z "$$entries" ]; then
-          if [ "$${WHISKERS_CONFIRM_RESTORE:-}" = 1 ]; then
-            refuse "no PostgreSQL 17 data in whiskers-db-data: there is no restore to confirm."
+          if [ "$$mode" != normal ]; then
+            refuse "no PostgreSQL 17 data in whiskers-db-data: there is nothing to fingerprint or restore."
           fi
           exit 0
         fi
@@ -59,37 +67,68 @@ services:
           refuse "cannot read global/pg_control of the PostgreSQL data in whiskers-db-data; not starting." "See $$guide."
         fi
         fp=$${sum%% *}
-        if [ "$${WHISKERS_CONFIRM_RESTORE:-}" = 1 ]; then
-          if ! rows=$$(PGCONNECT_TIMEOUT=10 psql -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -tAc 'select count(*) from "__EFMigrationsHistory"'); then
-            refuse "could not read Whiskers' migration history from the running PostgreSQL 18 database (is db up, and the restore done?); nothing confirmed."
+        if [ "$$mode" = fingerprint ]; then
+          printf '%s\n' "$$tag$$fp"
+          exit 0
+        fi
+        if [ "$$mode" = restore ]; then
+          umask 077
+          if ! dump=$$(mktemp /tmp/whiskers-pg17.XXXXXX) || ! cat > "$$dump"; then
+            refuse "could not read the dump from standard input; nothing restored."
           fi
-          case "$$rows" in
-            ''|*[!0-9]*) refuse "unexpected answer from the PostgreSQL 18 database: $$rows; nothing confirmed." ;;
+          if ! grep -q 'PostgreSQL database dump complete' "$$dump"; then
+            refuse "the dump is incomplete (no 'PostgreSQL database dump complete'); nothing restored."
+          fi
+          if [ "$$(grep -c "^$$tag" "$$dump")" != 1 ]; then
+            refuse "the dump needs exactly one line '$$tag<fingerprint>' (step 1 of $$guide); nothing restored."
+          fi
+          line=$$(grep "^$$tag" "$$dump")
+          if [ "$${line#"$$tag"}" != "$$fp" ]; then
+            refuse "the dump is not of the current PostgreSQL 17 data (17 ran again after the dump?); take a new dump (step 1 of $$guide); nothing restored."
+          fi
+          if ! version=$$(q -c "select current_setting('server_version_num')::int"); then
+            refuse "could not reach the PostgreSQL 18 database (is db up?); nothing restored."
+          fi
+          case "$$version" in
+            ''|*[!0-9]*) refuse "unexpected answer from the database server: $$version; nothing restored." ;;
           esac
-          if [ "$$rows" -lt 1 ]; then
-            refuse "the PostgreSQL 18 database has an empty migration history: the restore did not happen; nothing confirmed."
+          if [ "$$version" -lt 180000 ]; then
+            refuse "the database server at db is PostgreSQL $$version, not 18 (is the 17 db still running?); nothing restored."
           fi
+          if ! empty=$$(q -c "select to_regclass('public.\"__EFMigrationsHistory\"') is null"); then
+            refuse "could not inspect the PostgreSQL 18 database; nothing restored."
+          fi
+          if [ "$$empty" != t ]; then
+            refuse "the PostgreSQL 18 database already holds Whiskers' tables (did Whiskers start on it?); remove the 18 volume and start again ($$guide); nothing restored."
+          fi
+          if ! q --single-transaction -q -f "$$dump" >/dev/null; then
+            refuse "the restore failed and was rolled back; nothing restored. Fix the cause and run the restore again."
+          fi
+          rows=$$(q -c 'select count(*) from "__EFMigrationsHistory"' 2>/dev/null)
+          case "$$rows" in
+            ''|*[!0-9]*|0) refuse "the dump was restored but holds no Whiskers migration history; not marking it. Remove the 18 volume and start again ($$guide)." ;;
+          esac
           if ! { printf '%s\n' "$$fp" > "$$marker.tmp" && mv "$$marker.tmp" "$$marker"; }; then
-            refuse "could not write the marker into whiskers-db18-data; nothing confirmed."
+            refuse "the dump was restored, but the marker could not be written into whiskers-db18-data. Remove the 18 volume and run the restore again ($$guide)."
           fi
-          say "restore confirmed: $$rows migrations in the PostgreSQL 18 database; marker written for the PostgreSQL 17 data in whiskers-db-data."
+          say "restored: $$rows migrations in the PostgreSQL 18 database; marker written for the PostgreSQL 17 data in whiskers-db-data."
           exit 0
         fi
         if [ ! -f "$$marker" ]; then
-          refuse "PostgreSQL $$(cat "$$found") data found in the volume whiskers-db-data, and the PostgreSQL 18 volume whiskers-db18-data holds no confirmed restore of it." "not starting an empty database. Follow $$guide (dump, restore, confirm, start)."
+          refuse "PostgreSQL $$(cat "$$found") data found in the volume whiskers-db-data, and the PostgreSQL 18 volume whiskers-db18-data holds no restore of it." "not starting an empty database. Follow $$guide (dump, restore, start)."
         fi
         if [ "$$(cat "$$marker" 2>/dev/null)" != "$$fp" ]; then
           refuse "the PostgreSQL 17 data changed after the upgrade (a rollback?). Whiskers will not start on the older 18 copy; to upgrade again remove the 18 volume and follow $$guide."
         fi
         exit 0
     environment:
-      # The same values as db: the confirm run checks the restored database with them.
+      # The same values as db: the restore mode connects with them.
       - POSTGRES_DB=${WHISKERS_DB_NAME:-whiskers}
       - POSTGRES_USER=${WHISKERS_DB_USER:-whiskers}
       - PGPASSWORD=${WHISKERS_DB_PASSWORD:?set WHISKERS_DB_PASSWORD in your .env}
     volumes:
       - whiskers-db-data:/old:ro
-      # Writable for the confirm run's marker only; the normal run only reads it.
+      # Writable for the restore mode's marker only; the other modes only read it.
       - whiskers-db18-data:/new
     restart: "no"
 

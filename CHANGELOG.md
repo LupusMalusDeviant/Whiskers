@@ -13,30 +13,40 @@ All notable changes to Whiskers are documented here. The format follows
     and PostgreSQL does not read a 17 data directory.
   - **The guard:** the new one-shot service `db-upgrade-guard` decides whether PostgreSQL 18 may start. It passes when
     the old `whiskers-db-data` volume is empty (a fresh install, or the 17 volume removed), or when it holds a 17
-    cluster for which a restore was confirmed: a fingerprint of that cluster's `global/pg_control` in the 18 volume.
+    cluster that the guard itself restored: a fingerprint of that cluster's `global/pg_control` in the 18 volume.
     It refuses everything else, among it a blind pull, a failed or skipped restore, a 17 data directory it does not
-    recognise and a volume it cannot read. Whiskers then stays down with a message that names the volumes and points
-    to the guide; a pulled overlay never starts as an empty, fresh-looking install.
-  - **The confirm step:** after the restore,
-    `docker compose … run --rm --no-deps -e WHISKERS_CONFIRM_RESTORE=1 db-upgrade-guard` checks over the network that
-    the running 18 database holds Whiskers' migration history, and only then writes the fingerprint.
+    recognise (a volume holding only `lost+found` included) and a volume it cannot read. Whiskers then stays down with
+    a message that names the volumes and points to the guide; a pulled overlay never starts as an empty,
+    fresh-looking install.
+  - **Dump bound to the 17 state:** after the dump, with 17 stopped,
+    `docker compose … run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql` appends
+    the 17 cluster's fingerprint as one SQL comment line. Any later 17 start changes it, so a stale dump is refused.
+  - **Restore through the guard:** with the 18 database running,
+    `docker compose … run --rm --no-deps -T -e WHISKERS_RESTORE=1 db-upgrade-guard < whiskers-pg17.sql` checks the dump
+    (complete, fingerprint of the current 17 data) and the server (PostgreSQL 18, no Whiskers tables yet, so an 18
+    database Whiskers initialised on its own is refused), restores in one transaction, checks the migration history
+    and only then writes the marker.
   - **Upgrade:** `docs/operations/postgres-18-upgrade.md` covers it: dump on 17 (user and database from the container's
-    own environment, the file created private), a checked restore on 18 in one transaction chained to the confirm
-    step, start. The database's health check now asks over TCP, so the image's temporary init server never counts as
-    ready.
+    own environment, the file created private) and fingerprint, restore through the guard, start. The database's
+    health check now asks over TCP, so the image's temporary init server never counts as ready.
   - **Rollback:** the new overlay mounts the 17 volume read-only. The dump and a rollback run PostgreSQL 17 on it
     read-write, so the way back is the data as of the dump. After going back, the 17 data has changed and the guard
-    refuses to start 18 on the older copy; to upgrade again, remove the 18 volume first. `down -v` now removes the 17
-    volume kept for the way back as well.
+    refuses to start 18 on the older copy; to upgrade again, remove the 18 volume first (the guide shows how to dump
+    the 18-period data before that) and take a new dump. `down -v` now removes the 17 volume kept for the way back as
+    well.
   - **Tested with Docker,** in the test suite and once by hand with compose:
     - 17 → 18 with Whiskers' schema, data, migration history and sequences carried over;
-    - the guard refusing a blind pull and, after a rollback, the older 18 copy;
-    - a fresh install starting directly on 18.
+    - the guard refusing a blind pull and, after a rollback, the older 18 copy and the stale dump;
+    - the restore refusing an 18 database Whiskers had initialised;
+    - a second upgrade and a fresh install starting directly on 18.
   - **Not affected:** SQLite installs and Helm installs with an external database.
-  - **Tests:** the guard's script, taken from the compose file, runs against prepared volumes (`PostgresUpgradeGuardTests`);
-    the guide's dump and restore from 17 into 18 and the confirm run (`PostgresUpgradeTests`); `docker compose config`
-    over the overlay (`PostgresOverlayComposeTests`). The PostgreSQL suites run on 18; the self-backup suite also runs
-    on 17 and 14.
+  - **Tests:**
+    - `PostgresUpgradeGuardTests`: the guard's script, taken from the compose file, runs against prepared volumes,
+      including the fingerprint and restore modes' dump checks.
+    - `PostgresUpgradeTests`: the guide's flow from 17 into 18 and the restore mode's server checks.
+    - `PostgresPgControlTests`: a real 17 start changes the fingerprint.
+    - `PostgresOverlayComposeTests`: `docker compose config` over the overlay.
+    - The PostgreSQL suites run on 18; the self-backup suite also runs on 17 and 14.
 
 - **New: optional disk-health readings — SMART, md RAID, ZFS (R1-58).** Whiskers can show whether each host's disks
   and arrays are healthy, read only from the host's existing metrics endpoint (node_exporter through VictoriaMetrics).

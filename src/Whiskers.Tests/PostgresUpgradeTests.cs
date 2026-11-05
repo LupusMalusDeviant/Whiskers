@@ -1,7 +1,8 @@
-using System.Text;
 using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Configurations;
 using DotNet.Testcontainers.Containers;
 using DotNet.Testcontainers.Networks;
+using DotNet.Testcontainers.Volumes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
@@ -12,112 +13,84 @@ using Whiskers.Services.Persistence;
 namespace Whiskers.Tests;
 
 /// <summary>
-/// The upgrade path of docs/operations/postgres-18-upgrade.md, end to end with real servers: Whiskers' schema (the
-/// PostgreSQL migrations, applied as at a start) and some rows on postgres:17-alpine, the guide's pg_dump in the 17
-/// container, its grep check and its single-transaction psql restore into postgres:18-alpine. Afterwards the migration
-/// history and every table's row count are equal and the sequences continue. Then the guard's confirm run
-/// (WHISKERS_CONFIRM_RESTORE=1, the script from the compose file) against that 18 server under the network alias
-/// <c>db</c>: it writes the marker only for a database with Whiskers' migration history.
+/// The upgrade path of docs/operations/postgres-18-upgrade.md, end to end with real servers and the guard script from
+/// the compose file. A postgres:17-alpine server on its own volume gets Whiskers' schema (the PostgreSQL migrations,
+/// applied as at a start) and rows; the guide's pg_dump runs in it; 17 is stopped; the guard's fingerprint mode reads
+/// the stopped cluster through a read-only mount of that volume and its line is appended to the dump; the guard's
+/// restore mode restores it into postgres:18-alpine (network alias <c>db</c>) and writes the marker. Afterwards the
+/// migration history and every table's row count are equal, the sequences continue and the normal run passes; a 17
+/// start makes it refuse, and the same dump is refused as stale. The restore mode's server checks are covered too: a
+/// Whiskers-initialised 18 database, a server older than 18, and a dump without migration history.
 /// </summary>
 [Trait("Category", DockerRequirement.Category)]
 public sealed class PostgresUpgradeTests : IClassFixture<PostgresUpgradeTests.Servers>
 {
-    private const string MarkerPath = "/new/.whiskers-restored-from-17";
     private readonly Servers _s;
 
     public PostgresUpgradeTests(Servers servers) => _s = servers;
 
     public sealed class Servers : IAsyncLifetime
     {
+        public IVolume Volume17 { get; } = new VolumeBuilder().Build();
         public INetwork Network { get; } = new NetworkBuilder().Build();
+        public INetwork Network17 { get; } = new NetworkBuilder().Build();
         public PostgreSqlContainer Pg17 { get; }
         public PostgreSqlContainer Pg18 { get; }
+        public PostgreSqlContainer Pg17AsDb { get; }
+        /// <summary>The guard as the overlay runs it, with the 17 volume read-only at /old.</summary>
         public IContainer Guard { get; }
+        /// <summary>A guard on the same network with a prepared /old instead of the volume.</summary>
+        public IContainer GuardFake { get; }
+        /// <summary>A guard whose host <c>db</c> is a PostgreSQL 17 server.</summary>
+        public IContainer GuardOld { get; }
         public Exception? StartFailure { get; private set; }
-        private readonly SemaphoreSlim _once = new(1, 1);
-        private bool _upgraded;
-        public Snapshot? Before { get; private set; }
+
+        private ContainerBuilder GuardBuilder(INetwork network) => new ContainerBuilder("postgres:18-alpine")
+            .WithNetwork(network)
+            .WithEntrypoint("tail", "-f", "/dev/null")
+            .WithEnvironment("POSTGRES_USER", "postgres")
+            .WithEnvironment("POSTGRES_DB", "postgres")
+            .WithEnvironment("PGPASSWORD", "postgres");
 
         public Servers()
         {
-            Pg17 = new PostgreSqlBuilder("postgres:17-alpine").Build();
+            Pg17 = new PostgreSqlBuilder("postgres:17-alpine").WithVolumeMount(Volume17, "/var/lib/postgresql/data").Build();
             Pg18 = new PostgreSqlBuilder("postgres:18-alpine").WithNetwork(Network).WithNetworkAliases("db").Build();
-            // The guard's container as the overlay runs it: the 18 image, the db service's user and database, the
-            // password as PGPASSWORD. Kept alive so each case runs the script in it.
-            Guard = new ContainerBuilder("postgres:18-alpine")
-                .WithNetwork(Network)
-                .WithEntrypoint("tail", "-f", "/dev/null")
-                .WithEnvironment("POSTGRES_USER", "postgres")
-                .WithEnvironment("POSTGRES_DB", "postgres")
-                .WithEnvironment("PGPASSWORD", "postgres")
-                .Build();
+            Pg17AsDb = new PostgreSqlBuilder("postgres:17-alpine").WithNetwork(Network17).WithNetworkAliases("db").Build();
+            Guard = GuardBuilder(Network).WithVolumeMount(Volume17, "/old", AccessMode.ReadOnly).Build();
+            GuardFake = GuardBuilder(Network).Build();
+            GuardOld = GuardBuilder(Network17).Build();
         }
 
         public async Task InitializeAsync()
         {
             try
             {
+                await Volume17.CreateAsync();
                 await Network.CreateAsync();
+                await Network17.CreateAsync();
             }
             catch (Exception ex)
             {
                 StartFailure = ex;
                 return;
             }
-            StartFailure = await DockerRequirement.TryStartAsync(Pg17)
-                           ?? await DockerRequirement.TryStartAsync(Pg18)
-                           ?? await DockerRequirement.TryStartAsync(Guard);
+            foreach (var c in new IContainer[] { Pg17, Pg18, Pg17AsDb, Guard, GuardFake, GuardOld })
+            {
+                StartFailure = await DockerRequirement.TryStartAsync(c);
+                if (StartFailure is not null) return;
+            }
+            var mkdir = await Guard.ExecAsync(["mkdir", "-p", "/new"]);
+            if (mkdir.ExitCode != 0) StartFailure = new InvalidOperationException(mkdir.Stderr);
         }
 
         public async Task DisposeAsync()
         {
-            await Guard.DisposeAsync();
-            await Pg18.DisposeAsync();
-            await Pg17.DisposeAsync();
+            foreach (var c in new IContainer[] { GuardOld, GuardFake, Guard, Pg17AsDb, Pg18, Pg17 })
+                await c.DisposeAsync();
+            await Network17.DisposeAsync();
             await Network.DisposeAsync();
-        }
-
-        /// <summary>Runs the upgrade once for the class: schema and rows on 17, dump and restore as the guide does.</summary>
-        public async Task UpgradeAsync()
-        {
-            await _once.WaitAsync();
-            try
-            {
-                if (_upgraded) return;
-                var options = new DbContextOptionsBuilder<MetricsDbContext>()
-                    .UseNpgsql(Pg17.GetConnectionString(), o => o.MigrationsAssembly("Whiskers.Migrations.Postgres"))
-                    .Options;
-                await using (var db = new MetricsDbContext(options))
-                {
-                    await DatabaseInitializer.InitializeAsync(db, NullLogger.Instance);
-                    var now = DateTime.UtcNow;
-                    for (var i = 0; i < 5; i++)
-                        db.AuditLog.Add(new AuditLogEntity { Actor = $"user{i}@example.com", ActorType = "web",
-                            Action = "container.restart", TargetType = "container", TargetId = $"c{i}", Details = "Ärger <&>",
-                            Timestamp = now.AddMinutes(-i) });
-                    db.ContainerMetrics.Add(new ContainerMetricEntity { ContainerId = "c1", ContainerName = "web", ServerId = "s1",
-                        Timestamp = now, CpuPercent = 3.5 });
-                    db.Notifications.Add(new NotificationEntity { NotificationId = "n1", Title = "t", Detail = "d", Timestamp = now,
-                        Severity = "Info", Read = false });
-                    await db.SaveChangesAsync();
-                }
-                Before = await Snapshot.TakeAsync(Pg17.GetConnectionString());
-
-                // Step 1 of the guide: c17 exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges' > whiskers-pg17.sql
-                var dump = await Pg17.ExecAsync(["sh", "-c", "pg_dump -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" --no-owner --no-privileges"]);
-                Assert.True(dump.ExitCode == 0, dump.Stderr);
-                // Step 2: grep -q 'PostgreSQL database dump complete' whiskers-pg17.sql && c exec -T db sh -c 'psql … --single-transaction …' < whiskers-pg17.sql
-                Assert.Contains("PostgreSQL database dump complete", dump.Stdout);
-                await Pg18.CopyAsync(new UTF8Encoding(false).GetBytes(dump.Stdout), "/tmp/whiskers-pg17.sql");
-                var restore = await Pg18.ExecAsync(["sh", "-c",
-                    "psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -v ON_ERROR_STOP=1 --single-transaction -q < /tmp/whiskers-pg17.sql"]);
-                Assert.True(restore.ExitCode == 0, restore.Stderr);
-                _upgraded = true;
-            }
-            finally
-            {
-                _once.Release();
-            }
+            await Volume17.DisposeAsync();
         }
     }
 
@@ -152,98 +125,231 @@ public sealed class PostgresUpgradeTests : IClassFixture<PostgresUpgradeTests.Se
 
     private void SkipUnlessUp() => DockerRequirement.SkipUnlessStarted(_s.StartFailure, "The PostgreSQL 17/18 upgrade servers");
 
-    private async Task<(long? Exit, string Out, string Err)> GuardAsync(params string[] env)
+    private static DbContextOptions<MetricsDbContext> Options(string connectionString) =>
+        new DbContextOptionsBuilder<MetricsDbContext>()
+            .UseNpgsql(connectionString, o => o.MigrationsAssembly("Whiskers.Migrations.Postgres"))
+            .Options;
+
+    private static async Task MigrateAsync(string connectionString)
     {
-        var result = await _s.Guard.ExecAsync(["env", .. env, "sh", "-c", PostgresOverlayTests.GuardScript()]);
-        return (result.ExitCode, result.Stdout, result.Stderr);
+        await using var db = new MetricsDbContext(Options(connectionString));
+        await DatabaseInitializer.InitializeAsync(db, NullLogger.Instance);
     }
 
-    private async Task PrepareVolumesAsync()
+    private static async Task CreateDatabaseAsync(PostgreSqlContainer server, string name)
     {
-        var setup = await _s.Guard.ExecAsync(["sh", "-c",
-            "rm -rf /old /new && mkdir -p /old/global /new && echo 17 > /old/PG_VERSION && head -c 8192 /dev/urandom > /old/global/pg_control"]);
-        Assert.True(setup.ExitCode == 0, setup.Stderr);
+        var create = await server.ExecAsync(["sh", "-c",
+            $"psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -v ON_ERROR_STOP=1 -c 'create database {name}'"]);
+        Assert.True(create.ExitCode == 0, create.Stderr);
     }
 
-    private async Task<string?> MarkerAsync()
+    private const string Footer = "--\n-- PostgreSQL database dump complete\n--\n";
+
+    /// <summary>A prepared 17 cluster in the fake guard and a dump text bound to it (footer and fingerprint line).</summary>
+    private static async Task<string> PrepareFakeAsync(IContainer guard, string body)
     {
-        var read = await _s.Guard.ExecAsync(["sh", "-c", $"cat {MarkerPath}"]);
-        return read.ExitCode == 0 ? read.Stdout.Trim() : null;
+        await GuardRunner.ResetAsync(guard, GuardRunner.Cluster("/old"));
+        var fp = await GuardRunner.Sha256Async(guard, "/old/global/pg_control");
+        await GuardRunner.WriteAsync(guard, "/tmp/in.sql", $"{body}{Footer}{GuardRunner.Tag}{fp}\n");
+        return fp;
     }
 
     [SkippableFact]
-    public async Task The_guides_dump_and_restore_carry_history_rows_and_sequences_from_17_to_18()
+    public async Task The_guides_flow_carries_a_17_install_into_18_and_the_guard_follows_the_17_state()
     {
         SkipUnlessUp();
-        await _s.UpgradeAsync();
-        var before = _s.Before!;
-        var after = await Snapshot.TakeAsync(_s.Pg18.GetConnectionString());
-
+        // A 17 install with Whiskers' schema and rows.
+        await MigrateAsync(_s.Pg17.GetConnectionString());
+        await using (var db = new MetricsDbContext(Options(_s.Pg17.GetConnectionString())))
+        {
+            var now = DateTime.UtcNow;
+            for (var i = 0; i < 5; i++)
+                db.AuditLog.Add(new AuditLogEntity { Actor = $"user{i}@example.com", ActorType = "web", Action = "container.restart",
+                    TargetType = "container", TargetId = $"c{i}", Details = "Ärger <&>", Timestamp = now.AddMinutes(-i) });
+            db.ContainerMetrics.Add(new ContainerMetricEntity { ContainerId = "c1", ContainerName = "web", ServerId = "s1",
+                Timestamp = now, CpuPercent = 3.5 });
+            db.Notifications.Add(new NotificationEntity { NotificationId = "n1", Title = "t", Detail = "d", Timestamp = now,
+                Severity = "Info", Read = false });
+            await db.SaveChangesAsync();
+        }
+        var before = await Snapshot.TakeAsync(_s.Pg17.GetConnectionString());
         Assert.NotEmpty(before.History);
+
+        // A blind pull: the normal run refuses.
+        Assert.Equal(1, (await GuardRunner.RunAsync(_s.Guard)).Exit);
+
+        // Step 1: c17 exec -T db sh -c 'pg_dump …' > whiskers-pg17.sql; c17 stop db;
+        // c run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql
+        var dump = await _s.Pg17.ExecAsync(["sh", "-c", "pg_dump -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" --no-owner --no-privileges"]);
+        Assert.True(dump.ExitCode == 0, dump.Stderr);
+        await _s.Pg17.StopAsync();
+        var fingerprint = await GuardRunner.RunAsync(_s.Guard, null, "WHISKERS_FINGERPRINT=1");
+        Assert.True(fingerprint.Exit == 0, fingerprint.Err);
+        var fp = await GuardRunner.Sha256Async(_s.Guard, "/old/global/pg_control");
+        Assert.Equal($"{GuardRunner.Tag}{fp}\n", fingerprint.Out);
+        await GuardRunner.WriteAsync(_s.Guard, "/tmp/in.sql", dump.Stdout + fingerprint.Out);
+
+        // Step 2: c run --rm --no-deps -T -e WHISKERS_RESTORE=1 db-upgrade-guard < whiskers-pg17.sql
+        var restore = await GuardRunner.RunAsync(_s.Guard, "/tmp/in.sql", "WHISKERS_RESTORE=1");
+        Assert.True(restore.Exit == 0, restore.Err);
+        Assert.Contains("whiskers: restored:", restore.Err);
+        Assert.Equal(fp, await GuardRunner.MarkerAsync(_s.Guard));
+
+        var after = await Snapshot.TakeAsync(_s.Pg18.GetConnectionString());
         Assert.Equal(before.History, after.History);
         Assert.Equal(before.Rows, after.Rows);
         Assert.Equal(5, after.Rows["public.\"AuditLog\""]);
         Assert.Equal(before.Sequences.Keys, after.Sequences.Keys);
-
-        await using var conn = new NpgsqlConnection(_s.Pg18.GetConnectionString());
-        await conn.OpenAsync();
-        await using (var version = new NpgsqlCommand("show server_version_num", conn))
-            Assert.StartsWith("18", (string)(await version.ExecuteScalarAsync())!);
-        var used = before.Sequences.Where(s => s.Value is not null).ToList();
-        Assert.NotEmpty(used);   // at least the audit log's identity
-        foreach (var (name, last) in used)
+        await using (var conn = new NpgsqlConnection(_s.Pg18.GetConnectionString()))
         {
-            await using var next = new NpgsqlCommand($"select nextval('{name.Replace("'", "''")}')", conn);
-            Assert.Equal(last + 1, (long)(await next.ExecuteScalarAsync())!);
+            await conn.OpenAsync();
+            await using (var version = new NpgsqlCommand("show server_version_num", conn))
+                Assert.StartsWith("18", (string)(await version.ExecuteScalarAsync())!);
+            var used = before.Sequences.Where(s => s.Value is not null).ToList();
+            Assert.NotEmpty(used);   // at least the audit log's identity
+            foreach (var (name, last) in used)
+            {
+                await using var next = new NpgsqlCommand($"select nextval('{name.Replace("'", "''")}')", conn);
+                Assert.Equal(last + 1, (long)(await next.ExecuteScalarAsync())!);
+            }
         }
+
+        // Step 3: the normal run passes.
+        var start = await GuardRunner.RunAsync(_s.Guard);
+        Assert.True(start.Exit == 0, start.Err);
+
+        // The same restore again: the 18 database holds Whiskers' tables now.
+        var again = await GuardRunner.RunAsync(_s.Guard, "/tmp/in.sql", "WHISKERS_RESTORE=1");
+        Assert.Equal(1, again.Exit);
+        Assert.Contains("already holds Whiskers' tables", again.Err);
+
+        // Going back: 17 starts and stops again. The normal run refuses the older 18 copy, and the old dump is stale.
+        await _s.Pg17.StartAsync();
+        await _s.Pg17.StopAsync();
+        Assert.NotEqual(fp, await GuardRunner.Sha256Async(_s.Guard, "/old/global/pg_control"));
+        var rollback = await GuardRunner.RunAsync(_s.Guard);
+        Assert.Equal(1, rollback.Exit);
+        Assert.Contains("the PostgreSQL 17 data changed after the upgrade", rollback.Err);
+        var stale = await GuardRunner.RunAsync(_s.Guard, "/tmp/in.sql", "WHISKERS_RESTORE=1");
+        Assert.Equal(1, stale.Exit);
+        Assert.Contains("the dump is not of the current PostgreSQL 17 data", stale.Err);
+        Assert.Equal(fp, await GuardRunner.MarkerAsync(_s.Guard));   // untouched
     }
 
     [SkippableFact]
-    public async Task The_confirm_run_writes_the_marker_only_for_a_database_with_migration_history()
+    public async Task The_restore_mode_refuses_an_18_database_whiskers_initialised_itself()
     {
         SkipUnlessUp();
-        await _s.UpgradeAsync();
-        await PrepareVolumesAsync();
-        var expected = (await _s.Guard.ExecAsync(["sh", "-c", "sha256sum /old/global/pg_control | cut -d' ' -f1"])).Stdout.Trim();
+        // Review M1, scenario A: db started with --no-deps, then Whiskers migrated the empty 18 database on its own.
+        await CreateDatabaseAsync(_s.Pg18, "selfinit");
+        var selfInit = new NpgsqlConnectionStringBuilder(_s.Pg18.GetConnectionString()) { Database = "selfinit" }.ConnectionString;
+        await MigrateAsync(selfInit);
+        var history = (await Snapshot.TakeAsync(selfInit)).History;
+        await PrepareFakeAsync(_s.GuardFake, "SELECT 1;\n");
 
-        // Before the confirmation the normal run refuses; the confirm run against the restored 18 server then writes the
-        // 17 cluster's fingerprint, and the normal run passes.
-        Assert.Equal(1, (await GuardAsync()).Exit);
-        var confirm = await GuardAsync("WHISKERS_CONFIRM_RESTORE=1");
-        Assert.True(confirm.Exit == 0, confirm.Err);
-        Assert.Contains("restore confirmed", confirm.Err);
-        Assert.Equal(expected, await MarkerAsync());
-        Assert.Equal(0, (await GuardAsync()).Exit);
+        var run = await GuardRunner.RunAsync(_s.GuardFake, "/tmp/in.sql", "WHISKERS_RESTORE=1", "POSTGRES_DB=selfinit");
 
-        // 17 started again (a rollback): pg_control changes, the normal run refuses the older 18 copy.
-        await _s.Guard.ExecAsync(["sh", "-c", "head -c 8192 /dev/urandom > /old/global/pg_control"]);
-        Assert.Equal(1, (await GuardAsync()).Exit);
+        Assert.True(run.Exit == 1, run.Err);
+        Assert.Contains("the PostgreSQL 18 database already holds Whiskers' tables (did Whiskers start on it?)", run.Err);
+        Assert.Contains("nothing restored", run.Err);
+        Assert.Null(await GuardRunner.MarkerAsync(_s.GuardFake));
+        Assert.Equal(history, (await Snapshot.TakeAsync(selfInit)).History);
+        Assert.Equal(1, (await GuardRunner.RunAsync(_s.GuardFake)).Exit);
     }
 
     [SkippableFact]
-    public async Task The_confirm_run_refuses_an_empty_database_and_writes_nothing()
+    public async Task The_restore_mode_refuses_a_server_older_than_18()
     {
         SkipUnlessUp();
-        await _s.UpgradeAsync();
-        var create = await _s.Pg18.ExecAsync(["sh", "-c",
-            "psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -v ON_ERROR_STOP=1 -c 'create database emptydb' -c 'create database nohistory'"
-            + " && psql -U \"$POSTGRES_USER\" -d nohistory -v ON_ERROR_STOP=1 -c 'create table \"__EFMigrationsHistory\" (\"MigrationId\" text primary key, \"ProductVersion\" text not null)'"]);
-        Assert.True(create.ExitCode == 0, create.Stderr);
+        // Review m2: the 17 db still up under the name db.
+        await PrepareFakeAsync(_s.GuardOld, "SELECT 1;\n");
 
-        foreach (var database in new[] { "emptydb", "nohistory" })
+        var run = await GuardRunner.RunAsync(_s.GuardOld, "/tmp/in.sql", "WHISKERS_RESTORE=1");
+
+        Assert.True(run.Exit == 1, run.Err);
+        Assert.Contains("not 18", run.Err);
+        Assert.Null(await GuardRunner.MarkerAsync(_s.GuardOld));
+    }
+
+    [SkippableFact]
+    public async Task The_restore_mode_writes_no_marker_for_a_dump_without_migration_history()
+    {
+        SkipUnlessUp();
+        await CreateDatabaseAsync(_s.Pg18, "blank");
+        await PrepareFakeAsync(_s.GuardFake, "CREATE TABLE notwhiskers (x int);\n");
+
+        var run = await GuardRunner.RunAsync(_s.GuardFake, "/tmp/in.sql", "WHISKERS_RESTORE=1", "POSTGRES_DB=blank");
+
+        Assert.True(run.Exit == 1, run.Err);
+        Assert.Contains("holds no Whiskers migration history; not marking it", run.Err);
+        Assert.Null(await GuardRunner.MarkerAsync(_s.GuardFake));
+    }
+}
+
+/// <summary>
+/// The property the guard rests on (review round 2, m3): a real PostgreSQL 17 start rewrites global/pg_control, so its
+/// fingerprint changes, while a stopped cluster keeps it. Measured with postgres:17-alpine on one volume, read by the
+/// guard's fingerprint mode through a read-only mount.
+/// </summary>
+[Trait("Category", DockerRequirement.Category)]
+public sealed class PostgresPgControlTests : IAsyncLifetime
+{
+    private readonly IVolume _volume = new VolumeBuilder().Build();
+    private readonly PostgreSqlContainer _pg17;
+    private readonly IContainer _reader;
+    private Exception? _startFailure;
+
+    public PostgresPgControlTests()
+    {
+        _pg17 = new PostgreSqlBuilder("postgres:17-alpine").WithVolumeMount(_volume, "/var/lib/postgresql/data").Build();
+        _reader = new ContainerBuilder("postgres:18-alpine")
+            .WithEntrypoint("tail", "-f", "/dev/null")
+            .WithVolumeMount(_volume, "/old", AccessMode.ReadOnly)
+            .Build();
+    }
+
+    public async Task InitializeAsync()
+    {
+        try
         {
-            await PrepareVolumesAsync();
-            var confirm = await GuardAsync("WHISKERS_CONFIRM_RESTORE=1", $"POSTGRES_DB={database}");
-            Assert.True(confirm.Exit == 1, $"{database}: {confirm.Err}");
-            Assert.Contains("nothing confirmed", confirm.Err);
-            Assert.Null(await MarkerAsync());
-            Assert.Equal(1, (await GuardAsync()).Exit);
+            await _volume.CreateAsync();
         }
+        catch (Exception ex)
+        {
+            _startFailure = ex;
+            return;
+        }
+        _startFailure = await DockerRequirement.TryStartAsync(_pg17) ?? await DockerRequirement.TryStartAsync(_reader);
+    }
 
-        // No 17 data at all: there is nothing to confirm either.
-        var reset = await _s.Guard.ExecAsync(["sh", "-c", "rm -rf /old /new && mkdir /old /new"]);
-        Assert.Equal(0, reset.ExitCode);
-        Assert.Equal(1, (await GuardAsync("WHISKERS_CONFIRM_RESTORE=1")).Exit);
-        Assert.Null(await MarkerAsync());
+    public async Task DisposeAsync()
+    {
+        await _reader.DisposeAsync();
+        await _pg17.DisposeAsync();
+        await _volume.DisposeAsync();
+    }
+
+    private async Task<string> FingerprintAsync()
+    {
+        var run = await GuardRunner.RunAsync(_reader, null, "WHISKERS_FINGERPRINT=1");
+        Assert.True(run.Exit == 0, run.Err);
+        Assert.StartsWith(GuardRunner.Tag, run.Out);
+        return run.Out.Trim();
+    }
+
+    [SkippableFact]
+    public async Task A_postgresql_17_start_changes_the_fingerprint_and_a_stopped_cluster_keeps_it()
+    {
+        DockerRequirement.SkipUnlessStarted(_startFailure, "The PostgreSQL 17 server");
+        await _pg17.StopAsync();
+        var first = await FingerprintAsync();
+        Assert.Equal(first, await FingerprintAsync());
+
+        await _pg17.StartAsync();
+        await _pg17.StopAsync();
+        var second = await FingerprintAsync();
+
+        Assert.NotEqual(first, second);
+        Assert.Equal(second, await FingerprintAsync());
     }
 }
