@@ -11,7 +11,8 @@ All notable changes to Whiskers are documented here. The format follows
   MailKit 4.18.2, Markdig 1.6.0, MudBlazor 9.12.0; lock files refreshed (`dotnet list package --vulnerable
   --include-transitive`: none). Test-only: Microsoft.NET.Test.Sdk 18.11.0, Testcontainers 4.16.0 (it now brings the
   fixed SSH.NET 2026.0.0 itself, so the separate pin is gone), Xunit.SkippableFact 1.5.85; bUnit still pulls the
-  10.0.13 Blazor component packages into the test project (the shared framework of the runtime wins at run time).
+  10.0.13 Blazor component packages into the test project (test-only: the Components packages come from the shared
+  framework at run time, the WebAssembly ones are not used by the tests).
 - **docker-socket-proxy v0.5.0** (HAProxy 3.x; 0.3.0 shipped the end-of-life HAProxy 2.2). The verb whitelist is
   unchanged — a test now pins it exactly, in the hardened profile and in the onboarding template — and, measured by
   hand against a real Docker engine, 24 endpoints answered with the same status as under 0.3.0. Whiskers does not use

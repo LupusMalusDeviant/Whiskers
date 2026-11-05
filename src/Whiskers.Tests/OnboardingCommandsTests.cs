@@ -142,12 +142,26 @@ public class OnboardingCommandsTests
     }
 
     [Fact]
+    public void The_boundary_services_have_exactly_the_approved_keys()
+    {
+        // Review round 2 (m1): an env_file, an entrypoint, a command or a second environment would reach past the pinned
+        // lists, so the keys of each boundary service are pinned too.
+        Assert.Equal(["container_name", "environment", "image", "restart", "volumes"],
+            KeysOf(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7"), "socket-proxy")).Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["cap_drop", "container_name", "environment", "image", "ports", "read_only", "restart", "security_opt", "tmpfs", "volumes"],
+            KeysOf(Service(HardenedCompose(), "socket-proxy")).Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["command", "container_name", "depends_on", "image", "ports", "restart", "volumes"],
+            KeysOf(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7"), "ghostunnel")).Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void The_ghostunnel_command_is_exactly_the_approved_one()
     {
-        var command = System.Text.RegularExpressions.Regex
-            .Matches(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7"), "ghostunnel"), @"^\s+- (--\S+|server)$",
-                System.Text.RegularExpressions.RegexOptions.Multiline)
-            .Select(m => m.Groups[1].Value).ToArray();
+        // Every item under command:, whatever its quoting (review round 2, m1): ghostunnel's allow-flags are alternatives,
+        // so one more of them in any style would admit a second set of client certificates.
+        var command = KeysOf(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7"), "ghostunnel"))["command"]
+            .Select(item => Unquoted(item.StartsWith("- ", StringComparison.Ordinal) ? item[2..] : "<not a list item: " + item + ">"))
+            .ToArray();
 
         Assert.Equal(
         [
@@ -180,12 +194,53 @@ public class OnboardingCommandsTests
         return next.Success ? rest[..(next.Index + 1)] : rest;
     }
 
+    /// <summary>Every entry under <c>environment:</c>, as <c>KEY=value</c>. An entry in any other form (a list item, a
+    /// quoted key) is kept as it is written, so it can never be skipped and the comparison fails on it.</summary>
     private static string[] EnvironmentOf(string service) =>
-        System.Text.RegularExpressions.Regex.Matches(service, @"^      ([A-Z_]+): *([^\s#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
-            .Select(m => $"{m.Groups[1].Value}={m.Groups[2].Value}").Order(StringComparer.Ordinal).ToArray();
+        KeysOf(service)["environment"].Select(line =>
+            System.Text.RegularExpressions.Regex.Match(line, @"^([A-Z_]+): *(\S+)$") is { Success: true } m
+                ? $"{m.Groups[1].Value}={Unquoted(m.Groups[2].Value)}"
+                : "<unexpected: " + line + ">").Order(StringComparer.Ordinal).ToArray();
+
+    /// <summary>The keys of a service block (four-space indent) with their child lines, comments and blank lines
+    /// removed. An inline value (<c>image: x</c>) is the key's one child.</summary>
+    private static Dictionary<string, List<string>> KeysOf(string service)
+    {
+        var keys = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        List<string>? current = null;
+        foreach (var raw in service.Replace("\r\n", "\n").Split('\n').Skip(1))
+        {
+            var line = WithoutComment(raw).TrimEnd();
+            if (line.Trim().Length == 0) continue;
+            var key = System.Text.RegularExpressions.Regex.Match(line, @"^    ([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$");
+            if (key.Success)
+            {
+                Assert.False(keys.ContainsKey(key.Groups[1].Value), $"key {key.Groups[1].Value} appears twice");
+                keys[key.Groups[1].Value] = current = [];
+                if (key.Groups[2].Value.Length > 0) current.Add(key.Groups[2].Value);
+            }
+            else
+            {
+                Assert.True(current is not null && line.StartsWith("      ", StringComparison.Ordinal), $"unexpected line: {line}");
+                current!.Add(line.Trim());
+            }
+        }
+        return keys;
+    }
+
+    private static string WithoutComment(string line)
+    {
+        var hash = line.IndexOf(" #", StringComparison.Ordinal);
+        if (line.TrimStart().StartsWith('#')) return "";
+        return hash >= 0 ? line[..hash] : line;
+    }
+
+    private static string Unquoted(string value) =>
+        value.Length >= 2 && (value[0] == '\'' || value[0] == '"') && value[^1] == value[0] ? value[1..^1] : value;
 
     private static string ImageOf(string text) =>
-        System.Text.RegularExpressions.Regex.Match(text.Replace("\r\n", "\n"), @"image:\s*(\S+)").Groups[1].Value;
+        System.Text.RegularExpressions.Regex.Match(text.Replace("\r\n", "\n"), @"^\s+image:\s*(\S+)",
+            System.Text.RegularExpressions.RegexOptions.Multiline).Groups[1].Value;
 
     // --- Step metadata -----------------------------------------------------------------------------
 

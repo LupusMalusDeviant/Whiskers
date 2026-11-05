@@ -53,6 +53,9 @@ public class MarkdownSanitizerTests
         Assert.DoesNotContain("href=\"javascript:", safe);
         Assert.DoesNotContain("href=\"data:", safe);
         Assert.DoesNotMatch(@"<a\b(?![^>]*href=""(#|https?://|mailto:))[^>]*href=", safe);
+        // Review round 2 (n1): the input did become a link (and the image in it an image), so the checks above saw one.
+        Assert.Contains("<a href=\"#\"", safe);
+        if (markdown.Contains("![img]", StringComparison.Ordinal)) Assert.Contains("<img", safe);
     }
 
     [Fact]
