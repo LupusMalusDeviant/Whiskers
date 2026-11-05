@@ -41,7 +41,7 @@ public sealed class ServerBudget : IServerBudget
     private readonly ILogger<ServerBudget> _logger;
 
     /// <summary>Measures the queue wait and the run behind <see cref="Lanes.SaturationFailures"/>. The system clock in
-    /// production; tests pass a clock they move by hand, so "waited longer than it ran" does not hang on a runner's
+    /// production; tests pass a clock they move by hand, so "waited longer than it ran" does not depend on a runner's
     /// scheduling.</summary>
     private readonly TimeProvider _time;
 

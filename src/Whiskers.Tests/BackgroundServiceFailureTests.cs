@@ -333,7 +333,7 @@ public class BackgroundServiceFailureTests
     [Theory]
     [InlineData(1000, 2000)] // ran longer than it waited
     [InlineData(1500, 1500)] // the edge: as long as it waited
-    public async Task A_listing_sent_after_a_short_queue_wait_and_then_cut_short_is_no_saturation(int waitedMs, int ranMs)
+    public async Task A_listing_that_ran_at_least_as_long_as_it_waited_is_no_saturation(int waitedMs, int ranMs)
     {
         // The other side of the rule above: only a run shorter than the wait is the queue's doing. A request that ran at
         // least as long as it waited is the server's timeout alone.
@@ -387,7 +387,10 @@ public class BackgroundServiceFailureTests
             await Task.WhenAll(busy).WaitAsync(TimeSpan.FromSeconds(10));
             await sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
             clock.Advance(ran);
-            return (await listingTask.WaitAsync(TimeSpan.FromSeconds(10)), circuit, budget);
+            var listing = await listingTask.WaitAsync(TimeSpan.FromSeconds(10));
+            // The budget measured exactly the wait the test set (the held slots waited for nothing).
+            Assert.Equal((long)waited.TotalMilliseconds, budget.Snapshot("badwolf").MaxWaitMilliseconds);
+            return (listing, circuit, budget);
         }
         finally
         {
