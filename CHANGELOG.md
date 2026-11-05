@@ -21,7 +21,9 @@ All notable changes to Whiskers are documented here. The format follows
   "effect unknown" after it (also for a Docker error there, which used to read like a plain failure), "exit code N,
   output not read" once it had finished. Local and SSH commands: a timeout reads "effect unknown" as well, and a command
   that exited while a process it left running kept its output open is reported with its exit code at the deadline
-  instead of as a timeout. Timeout texts are formatted the same on every host ("0.5s", not "0,5s"). Prerequisite of
+  instead of as a timeout; their deadline is set before the process starts. A timeout that is not finite and positive
+  (zero, negative, infinite) is refused on every transport before anything starts — before, an infinite one gave a
+  local or SSH command no deadline at all. Timeout texts are formatted the same on every host ("0.5s", not "0,5s"). Prerequisite of
   R1-57; the mTLS transport itself (certificates, allowed client name, proxy verbs) is unchanged.
 - **Fix: an unset `GOOGLE_ADMIN_EMAIL` no longer switches on a whitelist that admits nobody.** Compose passes it as
   `GoogleAuth__AllowedEmails__0=`, and a fresh instance seeded an enabled whitelist holding one empty entry, which turned

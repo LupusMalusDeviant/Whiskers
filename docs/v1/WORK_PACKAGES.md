@@ -1306,8 +1306,11 @@ the Local server included — through that executor; Whiskers itself opens no co
   of that server is scheduled past the label and removes the helper, running or not. A helper left behind by a
   Whiskers restart is removed by the sweep of the next host-shell call on that server (at most every 5 min), not
   sooner; local/SSH output streams are
-  awaited at most 5 s after a kill. `HostShellDeadlineTests` stall the client, image check, pull, create, start, wait,
-  log read, kill and remove — each step ignoring its token — and every case ends within the bound; two cases drive the
+  awaited at most 5 s after a kill, and their deadline is set before the process starts. A timeout that is not finite
+  and positive is refused on every transport before anything starts. `HostShellDeadlineTests` stall the client, image
+  check, pull, create, start, wait, log read, kill and remove — each step ignoring its token — and every case ends
+  within the bound; Docker errors at start and log read, a deadline firing as the create answers and the executor's
+  mapping of the host-shell result are covered too; the cases that drive the
   local process path with a real process.
 - [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
   a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.

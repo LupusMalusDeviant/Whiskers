@@ -57,6 +57,12 @@ public class HostCommandExecutor : IHostCommandExecutor
             return new CommandResult { ExitCode = -1, Error = $"Server '{serverId}' not found" };
 
         var effectiveTimeout = timeout ?? DefaultTimeout;
+        // R1-57, fail closed on every transport: without a finite, positive timeout a command has no deadline (an
+        // infinite one) or would be started before the deadline is refused (one CancelAfter rejects). Refused before
+        // anything starts.
+        if (!Whiskers.Services.Docker.Operations.HostShellOperations.IsUsableTimeout(effectiveTimeout))
+            throw new ArgumentOutOfRangeException(nameof(timeout), effectiveTimeout,
+                "A host command needs a finite, positive timeout.");
 
         // Shell transport, chosen independently of the Docker connection:
         //   Local → nsenter into the host directly.
@@ -111,6 +117,8 @@ public class HostCommandExecutor : IHostCommandExecutor
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Defensive: RunHostShellAsync answers a caller's cancellation with a result, not an exception. Kept so an
+            // implementation of IDockerService that throws instead is still reported as "effect unknown".
             _logger.LogWarning("Host command via Docker cancelled on {ServerId}", serverId);
             return new CommandResult { ExitCode = -1, Error = CancelledMessage };
         }
@@ -218,14 +226,20 @@ public class HostCommandExecutor : IHostCommandExecutor
         if (env is { } e)
             psi.Environment[e.Key] = e.Value;
 
+        // R1-57: the deadline is set up before the process starts, so a timeout it refuses never leaves a started
+        // process behind that is reported as "failed to start".
+        if (!Whiskers.Services.Docker.Operations.HostShellOperations.IsUsableTimeout(timeout))
+            throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "A host command needs a finite, positive timeout.");
+        if (ct.IsCancellationRequested)
+            return new CommandResult { ExitCode = -1, Error = "Command cancelled before it started" };
+
         using var process = new Process { StartInfo = psi };
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(timeout);
 
         try
         {
             process.Start();
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(timeout);
 
             var cap = maxOutputChars is > 0 ? maxOutputChars.Value : MaxOutputChars;
             var stdoutTask = ReadCappedAsync(process.StandardOutput, cap, cts.Token);

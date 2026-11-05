@@ -320,6 +320,118 @@ public sealed class HostShellDeadlineTests
         await WaitUntil(() => _docker.Containers.IsEmpty, "the scheduled sweep found the helper by its label");
     }
 
+    [Fact]
+    public async Task A_clean_up_attempt_that_hangs_is_dropped_and_retried_through_a_fresh_client()
+    {
+        // A half-open connection: the run's client never answers the kill. The next client the server hands out works.
+        var hanging = new KillHangs(_docker);
+        var handedOut = 0;
+        var shell = new HostShellOperations(
+            _ => Task.FromResult<IHostShellDocker>(Interlocked.Increment(ref handedOut) == 1 ? hanging : _docker),
+            new MemoryCache(new MemoryCacheOptions()), Cleanup, TimeSpan.FromSeconds(60));
+        _docker.Stall("wait");
+
+        await Run(shell);
+
+        // Well before the 60 s background window: the hanging attempt was dropped after its budget.
+        await WaitUntil(() => _docker.Containers.IsEmpty, "the helper was removed by a retry through a fresh client");
+    }
+
+    [Fact]
+    public async Task A_docker_error_while_reading_the_output_reports_the_exit_code_and_removes_the_helper()
+    {
+        _docker.ExitCode = 3;
+        _docker.FailOn = "logs";
+
+        var (result, _) = await Run();
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Equal("Command finished with exit code 3, but its output could not be read (InvalidOperationException: docker said no)",
+            result.Error);
+        await WaitUntil(() => _docker.Containers.IsEmpty, "the helper was removed");
+    }
+
+    [Fact]
+    public async Task A_docker_error_from_the_start_request_reads_as_effect_unknown_and_the_helper_is_killed_and_removed()
+    {
+        _docker.FailOn = "start";
+
+        var (result, _) = await Run();
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Equal("Command failed after it was started — its effect is unknown (InvalidOperationException: docker said no)",
+            result.Error);
+        Assert.Contains("kill", _docker.RunCalls);
+        await WaitUntil(() => _docker.Containers.IsEmpty, "the helper was removed");
+    }
+
+    [Fact]
+    public async Task A_deadline_that_fires_as_the_create_answers_does_not_start_the_command()
+    {
+        using var cts = new CancellationTokenSource();
+        _docker.CancelOnCreate = cts;
+
+        var (result, _) = await Run(ct: cts.Token, timeout: TimeSpan.FromMinutes(5));
+
+        Assert.Equal("Command cancelled before it started", result.Error);
+        Assert.DoesNotContain("start", _docker.RunCalls);
+        Assert.DoesNotContain("kill", _docker.RunCalls);
+        await WaitUntil(() => _docker.Containers.IsEmpty, "the never-started helper was removed");
+    }
+
+    [Fact]
+    public async Task A_create_that_fails_but_made_the_helper_is_swept_past_its_deadline_label()
+    {
+        _docker.CreateFailsAfterMaking = true;
+        var shell = new HostShellOperations(_ => Task.FromResult<IHostShellDocker>(_docker),
+            new MemoryCache(new MemoryCacheOptions()), Cleanup, runningGrace: TimeSpan.Zero);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Run(shell));
+
+        Assert.Single(_docker.Containers);
+        await WaitUntil(() => _docker.Containers.IsEmpty, "the scheduled sweep found the helper by its label");
+    }
+
+    [Fact]
+    public async Task The_executor_hands_the_host_shell_result_and_its_errors_through_unchanged()
+    {
+        var server = new Whiskers.Models.ServerConfig { Id = "edge", Name = "edge", ConnectionType = Whiskers.Models.ConnectionType.TCP };
+        var docker = new global::Whiskers.Tests.FakeDocker();
+        var executor = new HostCommandExecutor(new FakeServerConfig(server), docker, NullLogger<HostCommandExecutor>.Instance);
+
+        docker.HostShell = (_, _, _, _) => Task.FromResult(("out", "err", 7));
+        var ran = await executor.ExecuteAsync("edge", "true");
+        Assert.Equal((7, "out", "err"), (ran.ExitCode, ran.Output, ran.Error));
+
+        docker.HostShell = (_, _, _, _) => Task.FromResult(("", "Command timed out after 1s — its effect is unknown", -1));
+        var stopped = await executor.ExecuteAsync("edge", "true");
+        Assert.Equal((-1, "Command timed out after 1s — its effect is unknown"), (stopped.ExitCode, stopped.Error));
+
+        // A Docker error before the start request: the command did not run, the error says why.
+        docker.HostShell = (_, _, _, _) => throw new InvalidOperationException("daemon unreachable");
+        var failed = await executor.ExecuteAsync("edge", "true");
+        Assert.Equal((-1, "daemon unreachable"), (failed.ExitCode, failed.Error));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]     // Timeout.InfiniteTimeSpan: no deadline at all
+    [InlineData("-5000")]
+    [InlineData("max")]    // beyond what CancelAfter accepts
+    public async Task A_local_or_ssh_command_without_a_finite_positive_timeout_is_refused_before_a_process_starts(string milliseconds)
+    {
+        var timeout = milliseconds == "max" ? TimeSpan.MaxValue : TimeSpan.FromMilliseconds(int.Parse(milliseconds, CultureInfo.InvariantCulture));
+        var (file, args) = OperatingSystem.IsWindows() ? ("cmd", new[] { "/c", "echo hi" }) : ("sh", new[] { "-c", "echo hi" });
+
+        // Refused by a throw before Process.Start — a started process would have produced a result instead.
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => Executor().RunProcessAsync(file, args, timeout, default));
+
+        var local = new Whiskers.Models.ServerConfig { Id = "here", Name = "here", ConnectionType = Whiskers.Models.ConnectionType.Local };
+        var executor = new HostCommandExecutor(new FakeServerConfig(local), new global::Whiskers.Tests.FakeDocker(),
+            NullLogger<HostCommandExecutor>.Instance);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => executor.ExecuteAsync("here", "echo hi", timeout));
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]   // Timeout.InfiniteTimeSpan
@@ -527,6 +639,20 @@ public sealed class HostShellDeadlineTests
 
     // ---- double ----------------------------------------------------------------------------------------------------
 
+    /// <summary>A client on a half-open connection: its kill never answers (and ignores its token).</summary>
+    private sealed class KillHangs(FakeDocker inner) : IHostShellDocker
+    {
+        public Task<bool> HasImageAsync(string image, CancellationToken ct) => inner.HasImageAsync(image, ct);
+        public Task PullImageAsync(string repository, string tag, CancellationToken ct) => inner.PullImageAsync(repository, tag, ct);
+        public Task<string> CreateAsync(CreateContainerParameters parameters, CancellationToken ct) => inner.CreateAsync(parameters, ct);
+        public Task StartAsync(string id, CancellationToken ct) => inner.StartAsync(id, ct);
+        public Task<long> WaitAsync(string id, CancellationToken ct) => inner.WaitAsync(id, ct);
+        public Task<(string Output, string Error)> ReadLogsAsync(string id, CancellationToken ct) => inner.ReadLogsAsync(id, ct);
+        public Task KillAsync(string id, CancellationToken ct) => new TaskCompletionSource().Task;
+        public Task RemoveAsync(string id, CancellationToken ct) => new TaskCompletionSource().Task;
+        public Task<IReadOnlyList<HostShellHelper>> ListHelpersAsync(string label, CancellationToken ct) => inner.ListHelpersAsync(label, ct);
+    }
+
     /// <summary>A client the connection manager disposed after the run: the run's own steps go through, its kill and
     /// remove throw <see cref="ObjectDisposedException"/>.</summary>
     private sealed class DisposedAfterRun(FakeDocker inner) : IHostShellDocker
@@ -589,13 +715,34 @@ public sealed class HostShellDeadlineTests
         /// <summary>Create makes the helper on the "host", then its answer never arrives.</summary>
         public bool CreateHangsAfterMaking { get; set; }
 
-        public async Task<string> CreateAsync(CreateContainerParameters parameters, CancellationToken ct)
+        /// <summary>Create makes the helper on the "host", then fails (the link dropped after the daemon handled it).</summary>
+        public bool CreateFailsAfterMaking { get; set; }
+
+        /// <summary>Create cancels this source as it answers, already completed: the deadline fires the instant the
+        /// create's answer is there.</summary>
+        public CancellationTokenSource? CancelOnCreate { get; set; }
+
+        public Task<string> CreateAsync(CreateContainerParameters parameters, CancellationToken ct)
+        {
+            if (CancelOnCreate is { } cancel)
+            {
+                _calls.Enqueue("create");
+                var made = $"helper{Interlocked.Increment(ref _next)}";
+                Containers[made] = new Container(DateTime.UtcNow, false, new Dictionary<string, string>(parameters.Labels));
+                cancel.Cancel();
+                return Task.FromResult(made);
+            }
+            return CreateSlowlyAsync(parameters);
+        }
+
+        private async Task<string> CreateSlowlyAsync(CreateContainerParameters parameters)
         {
             await Step("create");
             var id = $"helper{Interlocked.Increment(ref _next)}";
             Containers[id] = new Container(DateTime.UtcNow, false, new Dictionary<string, string>(parameters.Labels));
             Created.Enqueue(id);
             if (CreateHangsAfterMaking) await new TaskCompletionSource().Task;
+            if (CreateFailsAfterMaking) throw new InvalidOperationException("connection reset");
             return id;
         }
 

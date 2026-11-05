@@ -322,7 +322,10 @@ internal sealed class FakeDocker : IDockerService
     public Task RemoveNetworkAsync(string networkId, string? serverId = null) => throw new NotSupportedException();
     public Task ConnectContainerToNetworkAsync(string networkId, string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task DisconnectContainerFromNetworkAsync(string networkId, string containerId, string? serverId = null) => throw new NotSupportedException();
-    public Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(string command, string? serverId = null, TimeSpan? timeout = null, CancellationToken ct = default) => throw new NotSupportedException();
+    /// <summary>What <see cref="RunHostShellAsync"/> does; unset, it is not supported.</summary>
+    public Func<string, string?, TimeSpan?, CancellationToken, Task<(string Output, string Error, int ExitCode)>>? HostShell { get; set; }
+    public Task<(string Output, string Error, int ExitCode)> RunHostShellAsync(string command, string? serverId = null, TimeSpan? timeout = null, CancellationToken ct = default) =>
+        HostShell is { } run ? run(command, serverId, timeout, ct) : throw new NotSupportedException();
 }
 
 /// <summary>A detector that excludes nothing — for tests about other things. The real one is exercised in
