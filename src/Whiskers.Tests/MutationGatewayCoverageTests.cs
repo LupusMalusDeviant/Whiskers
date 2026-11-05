@@ -363,6 +363,36 @@ public class MutationGatewayCoverageTests
     }
 
     [Fact]
+    public void Only_the_host_shell_drives_its_docker_steps()
+    {
+        // R1-57: the helper container's steps sit behind IHostShellDocker. Creating that privileged nsenter helper from
+        // anywhere else would be a host-command path past RunHostShellAsync and its pinned caller above.
+        var hostShell = typeof(Whiskers.Services.Docker.Operations.HostShellOperations).FullName!;
+
+        var callers = MutationCallScanner
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Docker.Operations.IHostShellDocker))
+            .Select(c => c.Owner.FullName!)
+            .Distinct()
+            .Order();
+        Assert.Equal([hostShell], callers);
+
+        var constructors = MutationCallScanner
+            .Constructors(App, typeof(Whiskers.Services.Docker.Operations.DockerClientHostShell))
+            .Select(t => t.FullName!)
+            .Distinct()
+            .Order();
+        Assert.Equal([hostShell], constructors);
+
+        // The interface pinned above has exactly one implementation in the app: another one would be a second way to
+        // drive Docker that the caller pin does not see.
+        var implementations = App.GetTypes()
+            .Where(t => !t.IsInterface && typeof(Whiskers.Services.Docker.Operations.IHostShellDocker).IsAssignableFrom(t))
+            .Select(t => t.FullName!)
+            .Order();
+        Assert.Equal([typeof(Whiskers.Services.Docker.Operations.DockerClientHostShell).FullName!], implementations);
+    }
+
+    [Fact]
     public void Every_changing_mcp_tool_is_decided_by_the_gateway()
     {
         var tools = App.GetTypes()
@@ -484,6 +514,11 @@ public class MutationGatewayCoverageTests
         ("IDockerConnectionManager.ExecuteAsync", "the Docker API transport the marked IDockerService operations run on"),
         ("IDockerConnectionManager.ExecuteGuardedAsync", "the Docker API transport the marked IDockerService operations run on"),
         ("IDockerService.RunHostShellAsync", "the host executor's mTLS backend; only HostCommandExecutor calls it (pinned)"),
+        ("IHostShellDocker.CreateAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IHostShellDocker.KillAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IHostShellDocker.PullImageAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IHostShellDocker.RemoveAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IHostShellDocker.StartAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
         ("IHostCommandExecutor.ExecuteAsync", "the plain read path; every caller is listed (The_plain_executor_is_called_only_for_reads_or_inside_a_marked_operation)"),
         ("IServerBudget.RunAsync", "the per-server concurrency lane work runs in"),
         ("ITaskExecutor.ExecuteAsync", "runs a scheduled task inside the scheduler's automation-runner decision; each step it takes is marked or the primitive"),

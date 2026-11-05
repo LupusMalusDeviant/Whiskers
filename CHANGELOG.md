@@ -6,6 +6,28 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Fix: a host command over mTLS can no longer hang past its timeout.** The SSH-free host shell (a one-shot helper
+  container over the mTLS Docker connection) started its timeout only once the helper was created; checking or pulling
+  the helper image, creating it, reading its output and removing it ran without a limit, so a stalled Docker step could
+  hold the caller — and with it a background loop's slot — indefinitely. The timeout now covers every step from the
+  first Docker call to the output, also a call that ignores its cancellation, and killing and removing the helper hold
+  the caller for at most 5 seconds after it. A clean-up that takes longer goes on in the background with retries (up to
+  2 minutes, each retry with the server's current Docker client) instead of being dropped. Every helper now carries its
+  latest end as a label (`serverwatch.hostshell.deadline`), and the sweep judges a labelled helper by it — also one
+  still **running** a minute past it, which before was never swept. When the background clean-up gives up, or a create
+  never answers, a sweep of that server is scheduled for when the helper is past its label, and it keeps trying for up
+  to an hour while the server cannot be reached; otherwise the sweep runs with a later host-shell call on the server (at
+  most every 5 minutes), so a helper left behind by a Whiskers restart waits for that. The label is Whiskers' clock: a
+  forward step of it between a run and the sweep could remove a helper early. The error says where the run stood: "did
+  not start" before the start request, "effect unknown" after it (also for a Docker error there, which used to read
+  like a plain failure), "exit code N, output not read" once it had finished. Local and SSH commands: a timeout reads
+  "effect unknown" as well, and a command that exited while a process it left running kept its output open is reported
+  with its exit code at the deadline instead of as a timeout; their deadline is set before the process starts, and an
+  error after the start (a failed read) stops the process and reads "effect unknown" or "exit code N, output not read"
+  instead of the bare exception text that looked like a start failure. A timeout that is not finite and positive (zero,
+  negative, infinite) is refused on every transport before anything starts — before, an infinite one gave a local or
+  SSH command no deadline at all. Timeout texts are formatted the same on every host ("0.5s", not "0,5s").
+  Prerequisite of R1-57; the mTLS transport itself (certificates, allowed client name, proxy verbs) is unchanged.
 - **Fix: an unset `GOOGLE_ADMIN_EMAIL` no longer switches on a whitelist that admits nobody.** Compose passes it as
   `GoogleAuth__AllowedEmails__0=`, and a fresh instance seeded an enabled whitelist holding one empty entry, which turned
   away every Google and OIDC sign-in. The seed now drops blank entries (and trims and de-duplicates the rest); with none

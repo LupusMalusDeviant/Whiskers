@@ -1292,13 +1292,29 @@ the Local server included — through that executor; Whiskers itself opens no co
   day; audit retention is R1-23's). Executor calls per run are bounded separately: one `getent`, then at most 4
   allowed addresses tried, each attempt under the check's timeout and the whole run under one deadline; tests cover
   a name with many answers and every address failing.
-- [ ] **Prerequisite — executor deadlines.** Today the mTLS path drops cancellation (`HostCommandExecutor.cs:61`) and
+- [x] **Prerequisite — executor deadlines.** Today the mTLS path drops cancellation (`HostCommandExecutor.cs:61`) and
   `HostShellOperations.cs:56` inspects or pulls the helper image, creates and starts the container before its timeout
   starts, with log retrieval and cleanup outside it; a stalled Docker step can outlive any check deadline. Before
   checks ship, the executor honours one deadline across setup, execution, result retrieval and cleanup on every
   transport. This touches the mTLS layer, a protected area: it needs the maintainer's explicit approval and lands as
   its own reviewed change (or inside R1-57 once approved). Tests cover a stalled image pull/create, a stalled command
   and a stalled log retrieval, each ending within the deadline.
+  *Done (approved by the maintainer on 5 November 2026, own change):* the timeout is one deadline over every Docker
+  step (`HostShellOperations`, steps behind `IHostShellDocker`); kill and remove hold the caller 5 s at most and go on
+  in the background (2 min, retried with the server's current client), so a call ends at most timeout + 5 s after it
+  began. A helper carries its deadline label; when the background clean-up gives up or a create never answers, a sweep
+  of that server is scheduled past the label and removes the helper, running or not; a sweep that cannot reach the
+  server (link outage) retries for up to an hour. A helper left behind by a Whiskers restart, or by an outage longer
+  than that hour, is removed by the sweep of the next host-shell call on that server (at most every 5 min), not
+  sooner. The label is Whiskers' wall clock: a forward step of that clock between the run and the sweep (an NTP
+  correction, a restart with a corrected clock) could remove a helper still in its run. Local/SSH output streams are
+  awaited at most 5 s after a kill, their deadline is set before the process starts, and an error after the start is
+  reported as "effect unknown" (the process is killed), never as "failed to start". A timeout that is not finite and
+  positive is refused on every transport before anything starts. `HostShellDeadlineTests` stall the client, image
+  check, pull, create, start, wait, log read, kill and remove — each step ignoring its token — and every case ends
+  within the bound. They also cover Docker errors at start and log read, a deadline firing as the create answers, the
+  scheduled sweep's retries and cover window, and the executor's mapping of the host-shell result, and drive the local
+  process path with a real process — also a read that faults after the start (through the `OutputReader` seam).
 - [ ] The URL scheme is `http` or `https` only, enforced on save and in the template (`curl --proto '=http,https'`);
   a test refuses `file:`, `gopher:`, `dict:` and `ftp:` URLs before anything runs.
 - [ ] The commands on the host are fixed templates. Target, port and path are validated against strict allow-lists

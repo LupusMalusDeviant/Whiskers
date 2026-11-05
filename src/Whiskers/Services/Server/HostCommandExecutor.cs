@@ -14,6 +14,13 @@ public class HostCommandExecutor : IHostCommandExecutor
 
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>R1-57: how long a stopped local or SSH command's output streams are awaited after the kill.</summary>
+    private static readonly TimeSpan DrainBudget = TimeSpan.FromSeconds(5);
+
+    /// <summary>Seconds as the messages show them: invariant ("0.5", never "0,5").</summary>
+    private static string Seconds(TimeSpan timeout) =>
+        timeout.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     /// <summary>R1-38 (INV-40): a command stopped by its caller may already have changed something.</summary>
     internal const string CancelledMessage = "Command cancelled — its effect is unknown";
 
@@ -50,6 +57,12 @@ public class HostCommandExecutor : IHostCommandExecutor
             return new CommandResult { ExitCode = -1, Error = $"Server '{serverId}' not found" };
 
         var effectiveTimeout = timeout ?? DefaultTimeout;
+        // R1-57, fail closed on every transport: without a finite, positive timeout a command has no deadline (an
+        // infinite one) or would be started before the deadline is refused (one CancelAfter rejects). Refused before
+        // anything starts.
+        if (!Whiskers.Utils.ExecutionTimeout.IsUsable(effectiveTimeout))
+            throw new ArgumentOutOfRangeException(nameof(timeout), effectiveTimeout,
+                "A host command needs a finite, positive timeout.");
 
         // Shell transport, chosen independently of the Docker connection:
         //   Local → nsenter into the host directly.
@@ -97,12 +110,15 @@ public class HostCommandExecutor : IHostCommandExecutor
         _logger.LogDebug("Executing host command on {ServerId} via mTLS Docker (nsenter container): {Command}", serverId, SecretRedactor.Redact(command));
         try
         {
-            // R1-38: the caller's token reaches the helper container, which is killed when it fires.
+            // R1-38: the caller's token reaches the helper container, which is killed when it fires. R1-57: the timeout
+            // covers every Docker step (setup, run, output) and the clean-up has a short budget of its own after it.
             var (output, error, exitCode) = await _docker.RunHostShellAsync(command, serverId, timeout, ct);
             return new CommandResult { ExitCode = exitCode, Output = output, Error = error };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Defensive: RunHostShellAsync answers a caller's cancellation with a result, not an exception. Kept so an
+            // implementation of IDockerService that throws instead is still reported as "effect unknown".
             _logger.LogWarning("Host command via Docker cancelled on {ServerId}", serverId);
             return new CommandResult { ExitCode = -1, Error = CancelledMessage };
         }
@@ -187,7 +203,17 @@ public class HostCommandExecutor : IHostCommandExecutor
         return args;
     }
 
-    private async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct,
+    private static void ObserveFaults(Task task) =>
+        _ = task.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+    /// <summary>Test seam: what the standard output is read through (the stream itself in production).
+    /// <c>HostShellDeadlineTests</c> makes a read fault after the start with it.</summary>
+    internal Func<TextReader, TextReader> OutputReader { get; init; } = static reader => reader;
+
+    /// <summary>Runs a process and collects its output under <paramref name="timeout"/> (internal for
+    /// <c>HostShellDeadlineTests</c>, which drives it with a real process).</summary>
+    internal async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct,
         (string Key, string Value)? env = null, int? maxOutputChars = null)
     {
         var psi = new ProcessStartInfo
@@ -204,26 +230,40 @@ public class HostCommandExecutor : IHostCommandExecutor
         if (env is { } e)
             psi.Environment[e.Key] = e.Value;
 
-        using var process = new Process { StartInfo = psi };
+        // R1-57: the deadline is set up before the process starts, so a timeout it refuses never leaves a started
+        // process behind that is reported as "failed to start".
+        if (!Whiskers.Utils.ExecutionTimeout.IsUsable(timeout))
+            throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "A host command needs a finite, positive timeout.");
+        if (ct.IsCancellationRequested)
+            return new CommandResult { ExitCode = -1, Error = "Command cancelled before it started" };
 
+        using var process = new Process { StartInfo = psi };
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(timeout);
+
+        var started = false;
+        Task<(string Text, bool Truncated)>? stdoutTask = null, stderrTask = null;
         try
         {
             process.Start();
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(timeout);
+            started = true;
 
             var cap = maxOutputChars is > 0 ? maxOutputChars.Value : MaxOutputChars;
-            var stdoutTask = ReadCappedAsync(process.StandardOutput, cap, cts.Token);
+            stdoutTask = ReadCappedAsync(OutputReader(process.StandardOutput), cap, cts.Token);
             // stderr keeps the default cap regardless: a raised cap is granted for the document a caller
             // wants to read, not for whatever the command decides to complain about.
-            var stderrTask = ReadCappedAsync(process.StandardError, MaxOutputChars, cts.Token);
+            stderrTask = ReadCappedAsync(process.StandardError, MaxOutputChars, cts.Token);
 
+            var exited = false;
             try
             {
                 await process.WaitForExitAsync(cts.Token);
-                var stdout = await stdoutTask;
-                var stderr = await stderrTask;
+                exited = true;
+                // R1-57: the reads are awaited against the deadline as well. They take the token, but a pipe read need
+                // not honour it (Windows), and a process the command left running in the background can hold the pipe
+                // open long after the command itself exited.
+                var stdout = await stdoutTask.WaitAsync(cts.Token);
+                var stderr = await stderrTask.WaitAsync(cts.Token);
 
                 if (stdout.Truncated)
                     _logger.LogWarning(
@@ -244,24 +284,75 @@ public class HostCommandExecutor : IHostCommandExecutor
                 // whole process tree so an aborted `ufw disable` / `systemctl stop` can't keep running,
                 // and observe the read tasks so they don't fault unobserved.
                 var timedOut = !ct.IsCancellationRequested;
-                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-                try { await Task.WhenAll(stdoutTask, stderrTask); } catch { /* reads cancel with the token */ }
+                if (!exited)
+                {
+                    try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+                    // R1-57: with the command killed the pipes close, but a process it started outside its tree can keep
+                    // them open — the reads are awaited for the drain budget at most.
+                    try { await Task.WhenAll(stdoutTask, stderrTask).WaitAsync(DrainBudget); } catch { /* best effort */ }
+                }
+                // Reads given up on fault once the process (and its streams) is disposed: observed, never unobserved.
+                ObserveFaults(stdoutTask);
+                ObserveFaults(stderrTask);
+
+                if (exited)
+                {
+                    // The command itself finished; something it left running kept its output open. Its exit code is
+                    // known, its output is not — reported as such, not as a timeout of the command.
+                    // The arguments are not logged: they may carry what the command was given (an SSH destination,
+                    // the command text), and the exit code and program name are enough to find the run.
+                    _logger.LogWarning("Output of {FileName} stayed open after it exited with code {ExitCode}",
+                        fileName, process.ExitCode);
+                    return new CommandResult
+                    {
+                        ExitCode = -1,
+                        Error = timedOut
+                            ? $"Command exited with code {process.ExitCode}, but a process it left running kept its output open past {Seconds(timeout)}s; the output was not read"
+                            : $"Command exited with code {process.ExitCode}, but reading its output was cancelled"
+                    };
+                }
 
                 if (timedOut)
                 {
                     _logger.LogWarning("Command timed out after {Timeout}: {FileName} {Arguments}",
                         timeout, fileName, SecretRedactor.Redact(string.Join(' ', psi.ArgumentList)));
-                    return new CommandResult { ExitCode = -1, Error = $"Command timed out after {timeout.TotalSeconds}s" };
+                    return new CommandResult { ExitCode = -1, Error = $"Command timed out after {Seconds(timeout)}s — its effect is unknown" };
                 }
 
                 _logger.LogWarning("Command cancelled: {FileName}", fileName);
                 return new CommandResult { ExitCode = -1, Error = CancelledMessage };
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!started)
         {
             _logger.LogError(ex, "Failed to start process {FileName}", fileName);
             return new CommandResult { ExitCode = -1, Error = ex.Message };
+        }
+        catch (Exception ex)
+        {
+            // R1-57: an error after the start (a read faulted) — the command ran, or still runs. It is stopped and
+            // reported as such, never as "failed to start".
+            var exited = false;
+            try
+            {
+                exited = process.HasExited;
+                if (!exited) process.Kill(entireProcessTree: true);
+            }
+            catch { /* best effort */ }
+            // The other read is cancelled (a process outside the killed tree may hold its pipe open) and, like the one
+            // that failed, observed — never unobserved.
+            try { cts.Cancel(); } catch { /* best effort */ }
+            if (stdoutTask is not null) ObserveFaults(stdoutTask);
+            if (stderrTask is not null) ObserveFaults(stderrTask);
+            _logger.LogError(ex, "Process {FileName} failed after it started", fileName);
+            var cause = SecretRedactor.Redact($"{ex.GetType().Name}: {ex.Message}");
+            return new CommandResult
+            {
+                ExitCode = -1,
+                Error = exited
+                    ? $"Command finished with exit code {process.ExitCode}, but its output could not be read ({cause})"
+                    : $"Command failed after it was started — its effect is unknown ({cause})"
+            };
         }
     }
 

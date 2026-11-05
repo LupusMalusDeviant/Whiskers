@@ -43,7 +43,7 @@ public class DockerService : IDockerService
         _images = new ImageOperations(connectionManager, logger, registryConfig);
         _lifecycle = new ContainerLifecycleOperations(connectionManager, _images, logger);
         _networks = new NetworkOperations(connectionManager, serverConfigService);
-        _hostShell = new HostShellOperations(connectionManager, statsCache);
+        _hostShell = new HostShellOperations(connectionManager, statsCache, logger);
         _systemInfo = new SystemInfoOperations(connectionManager, serverConfigService, prometheusMetrics, _containers, logger, statsCache, snapshots);
     }
 
