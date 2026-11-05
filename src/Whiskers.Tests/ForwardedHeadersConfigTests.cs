@@ -51,6 +51,7 @@ public class ForwardedHeadersConfigTests
     [InlineData("10.1/16")]
     [InlineData("2001:0db8::/32")]
     [InlineData("172.18.0.2/16")]
+    [InlineData("10.0.0.0/08")]
     public void An_entry_that_cannot_be_read_refuses_the_start_instead_of_trusting_another_set(string bad)
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>

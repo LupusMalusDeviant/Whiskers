@@ -161,8 +161,15 @@ public sealed class HttpSecurityTests
             var response = await client.SendAsync(request);
 
             Assert.Equal(expected, response.StatusCode);
-            if (expected == HttpStatusCode.Forbidden && trusted is null && !IPAddress.Parse(peer).Equals(IPAddress.Loopback))
-                Assert.Contains("ForwardedHeaders:TrustedNetworks", await response.Content.ReadAsStringAsync());
+            if (expected == HttpStatusCode.Forbidden)
+            {
+                // Which refusal: headers ignored (an untrusted peer) or the resolved client outside the allowed networks.
+                var body = await response.Content.ReadAsStringAsync();
+                var forwardedRefusal = trusted is null && !ForwardedHeadersConfig.IsTrusted(
+                    ForwardedHeadersConfig.ParseTrustedNetworks(null), IPAddress.Parse(peer));
+                Assert.Contains(forwardedRefusal ? "ForwardedHeaders:TrustedNetworks" : "Auth:DisabledAllowedNetworks", body);
+                Assert.DoesNotContain(forwardedRefusal ? "Auth:DisabledAllowedNetworks" : "ForwardedHeaders:TrustedNetworks", body);
+            }
         }, extra.ToArray());
     }
 
@@ -217,6 +224,33 @@ public sealed class HttpSecurityTests
             }
             Assert.Empty(factory.Services.GetRequiredService<ForwardedHeadersObserver>().RecentUntrustedPeers);
         }, new KeyValuePair<string, string?>("ForwardedHeaders:TrustedNetworks:0", "10.0.0.0/8"));
+
+    [Fact]
+    public async Task The_frameworks_trust_all_forwarded_headers_switch_refuses_the_start()
+    {
+        // ASPNETCORE_FORWARDEDHEADERS_ENABLED=true would add a step ahead of the pipeline that trusts every peer.
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => BootAsync((_, client) => client.GetAsync("/healthz"),
+            new KeyValuePair<string, string?>("ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true")));
+
+        var inner = ex;
+        while (inner is not InvalidOperationException && inner.InnerException is not null) inner = inner.InnerException;
+        Assert.Contains("ASPNETCORE_FORWARDEDHEADERS_ENABLED", inner.Message);
+    }
+
+    [Fact]
+    public async Task A_request_without_a_peer_address_is_not_marked_as_untrusted() =>
+        await BootAsync(async (factory, client) =>
+        {
+            // A local transport (Unix socket; here the in-memory test server) has no peer address: the forwarded-headers
+            // middleware applies the headers, so the request is neither marked nor reported.
+            var request = new HttpRequestMessage(HttpMethod.Get, "/healthz");
+            request.Headers.Add("X-Forwarded-For", "203.0.113.9");
+
+            var response = await client.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Empty(factory.Services.GetRequiredService<ForwardedHeadersObserver>().RecentUntrustedPeers);
+        });
 
     [Fact]
     public async Task An_unreadable_trusted_proxy_list_refuses_the_start()

@@ -17,8 +17,8 @@ namespace Whiskers.Startup;
 
 /// <summary>The HTTP request pipeline + startup warm-up, moved <b>verbatim</b> from Program.cs. The middleware
 /// ORDER is security-critical (protected layer, docs/ARCHITECTURE.md): the request correlation id (R1-53, decides
-/// nothing) ahead of everything, then (R1-50, approved 2026-11-05) the untrusted-forwarded-headers marker and the
-/// response-header registration, forwarded headers first among the rest, then the fixed
+/// nothing) ahead of everything, then (R1-50, approved 2026-11-05) the untrusted-forwarded-headers marker (it must see
+/// the original peer), the forwarded headers, the response-header registration (before anything can write), then the fixed
 /// <c>Antiforgery → Authentication → [LAN bypass] → McpBearer → Authorization</c> chain. Apart from the R1-50 steps every
 /// <c>Use*</c>/<c>Map*</c> call keeps the order it had in Program.cs (the McpCallLog middleware still sits between the
 /// endpoint maps exactly where it did).</summary>

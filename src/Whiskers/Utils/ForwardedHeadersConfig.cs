@@ -45,9 +45,11 @@ public static class ForwardedHeadersConfig
         var invalid = new List<string>();
         if (configured is not null)
         {
+            var index = -1;
             foreach (var entry in configured)
             {
-                if (entry is null) { invalid.Add("(an entry without a value, e.g. a nested object)"); continue; }
+                index++;
+                if (entry is null) { invalid.Add($"entry {index} has no value (e.g. a nested object)"); continue; }
                 if (string.IsNullOrWhiteSpace(entry)) continue;
                 if (Parse(entry.Trim(), out var network, out var problem)) networks.Add(network);
                 else invalid.Add(problem);
@@ -93,7 +95,7 @@ public static class ForwardedHeadersConfig
             return true;
         }
         if (!int.TryParse(value[(slash + 1)..], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var prefix)
-            || prefix > bits)
+            || prefix > bits || value[(slash + 1)..] != prefix.ToString(System.Globalization.CultureInfo.InvariantCulture))
         {
             problem = $"'{value}' has no valid prefix length (0–{bits})";
             return false;
