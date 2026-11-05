@@ -105,6 +105,13 @@
         }
     </MudSelect>
     <MudSwitch T="bool" @bind-Value="_failingOnly" Label="@L["Checks_Filter_Failing"]" Color="Color.Error" />
+    <MudSelect T="EndpointCheckOutcome?" @bind-Value="_filterOutcome" Label="@L["Checks_Filter_Outcome"]" Clearable="true" Style="max-width:180px">
+        <MudSelectItem T="EndpointCheckOutcome?" Value="@((EndpointCheckOutcome?)EndpointCheckOutcome.Passed)">@L["Checks_Outcome_Passed"]</MudSelectItem>
+        <MudSelectItem T="EndpointCheckOutcome?" Value="@((EndpointCheckOutcome?)EndpointCheckOutcome.Failed)">@L["Checks_Outcome_Failed"]</MudSelectItem>
+        <MudSelectItem T="EndpointCheckOutcome?" Value="@((EndpointCheckOutcome?)EndpointCheckOutcome.Refused)">@L["Checks_Outcome_Refused"]</MudSelectItem>
+    </MudSelect>
+    <MudNumericField T="int?" @bind-Value="_minLatencyMs" Label="@L["Checks_Filter_Latency"]" Min="0" Clearable="true" Style="max-width:180px" />
+    <MudNumericField T="int?" @bind-Value="_expiresWithinDays" Label="@L["Checks_Filter_Expiry"]" Min="0" Clearable="true" Style="max-width:200px" />
 </MudStack>
 
 @if (!Visible.Any())
@@ -185,19 +192,32 @@ else
     private Form? _editing;
     private string? _filterServer;
     private bool _failingOnly;
+    private EndpointCheckOutcome? _filterOutcome;
+    private int? _minLatencyMs;
+    private int? _expiresWithinDays;
+
+    // The dashboard links here with ?server=…&failing=true.
+    [SupplyParameterFromQuery(Name = "server")] public string? ServerQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "failing")] public bool? FailingQuery { get; set; }
     private List<Whiskers.Models.ServerConfig> _servers = [];
     private IReadOnlyList<EndpointCheckDefinition> _checks = [];
     private IReadOnlyDictionary<string, EndpointCheckResultEntity> _last = new Dictionary<string, EndpointCheckResultEntity>();
 
     private IEnumerable<EndpointCheckDefinition> Visible => _checks
         .Where(c => string.IsNullOrEmpty(_filterServer) || c.ServerId == _filterServer)
-        .Where(c => !_failingOnly || (_last.TryGetValue(c.Id, out var r) && r.Outcome != EndpointCheckOutcome.Passed));
+        .Where(c => !_failingOnly || (_last.TryGetValue(c.Id, out var r) && r.Outcome != EndpointCheckOutcome.Passed))
+        .Where(c => _filterOutcome is not { } o || (_last.TryGetValue(c.Id, out var r) && r.Outcome == o))
+        .Where(c => _minLatencyMs is not { } ms || (_last.TryGetValue(c.Id, out var r) && r.LatencyMs >= ms))
+        .Where(c => _expiresWithinDays is not { } days
+                    || (_last.TryGetValue(c.Id, out var r) && r.TlsNotAfterUtc is { } exp && exp <= DateTime.UtcNow.AddDays(days)));
 
     protected override async Task OnInitializedAsync()
     {
         _role = await CurrentUser.GetRoleAsync();
         _me = await CurrentUser.GetEmailAsync() is { Length: > 0 } email ? PrincipalIds.User(email) : null;
         _servers = ServerConfigService.GetEnabledServers().Where(EndpointCheckValidator.HasShellTransport).ToList();
+        _filterServer = string.IsNullOrWhiteSpace(ServerQuery) ? null : ServerQuery;
+        _failingOnly = FailingQuery == true;
         Reload();
     }
 

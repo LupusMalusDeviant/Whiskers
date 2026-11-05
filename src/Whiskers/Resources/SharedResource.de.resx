@@ -1224,6 +1224,9 @@ Projekt: {4}</value>
   <data name="Dashboard_Chart_UsageHistoryTitle" xml:space="preserve">
     <value>Auslastungsverlauf</value>
   </data>
+  <data name="Dashboard_FailingChecks" xml:space="preserve">
+    <value>{0} Check(s) schlagen fehl</value>
+  </data>
   <data name="Dashboard_Cve_Tooltip" xml:space="preserve">
     <value>{0} Critical, {1} High, {2} Medium, {3} Low — klick zu /cves</value>
   </data>
@@ -5809,6 +5812,15 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Checks_Filter_Server" xml:space="preserve">
     <value>Server</value>
+  </data>
+  <data name="Checks_Filter_Outcome" xml:space="preserve">
+    <value>Ergebnis</value>
+  </data>
+  <data name="Checks_Filter_Latency" xml:space="preserve">
+    <value>Latenz ≥ ms</value>
+  </data>
+  <data name="Checks_Filter_Expiry" xml:space="preserve">
+    <value>Zertifikat läuft ab in (Tagen)</value>
   </data>
   <data name="Checks_Filter_Failing" xml:space="preserve">
     <value>Nur fehlschlagende</value>

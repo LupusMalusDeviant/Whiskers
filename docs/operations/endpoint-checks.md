@@ -8,7 +8,8 @@ target; it only decides which addresses the host may contact. Contract:
 [`docs/contracts/0004-endpoint-checks.md`](../contracts/0004-endpoint-checks.md) (R1-57).
 
 Checks are listed under **Checks** (`/checks`). Every signed-in role can read them. Only an Admin creates, edits,
-deletes or runs one ("Run now"), because a run is a command on the host. The read-only MCP tool
+deletes or runs one ("Run now"), because a run is a command on the host. The list filters by server, outcome, latency
+and certificate expiry, and the Dashboard shows each server's number of failing checks as a link to that list. The read-only MCP tool
 `endpoint_checks_list` shows the checks and their last result; it gives the number of internal-target exceptions, not
 their addresses. There is no MCP tool that writes a check.
 

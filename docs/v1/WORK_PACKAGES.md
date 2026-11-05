@@ -1411,8 +1411,8 @@ read-only MCP tool `endpoint_checks_list`. Tests: `EndpointCheckTests`, `Endpoin
 `EndpointCheckTestDoubles`). The test pass found that a run's actor carried no provenance, so the gateway treated
 every check as agent-created and refused each unattended run as needing a confirmation; the actor now names the owner
 as its provenance (only an Admin creates a check, in the UI). Operator guide:
-[`docs/operations/endpoint-checks.md`](../operations/endpoint-checks.md). Not in this change: the Dashboard link with
-the count of failing checks per server (contract 0004, UI section).
+[`docs/operations/endpoint-checks.md`](../operations/endpoint-checks.md). The page filters by server, outcome, latency
+and certificate expiry; the Dashboard shows each server's count of failing checks as a link to the filtered page.
 
 **Out of scope:** Synthetic browser checks; checks from outside the fleet or from Whiskers' own process; changing the
 host transport; the existing certificate monitor (`Services/Certificates/`), which keeps its own probe.
