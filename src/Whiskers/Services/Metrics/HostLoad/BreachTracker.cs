@@ -227,6 +227,24 @@ public sealed class BreachTracker
             value, threshold, openFor);
     }
 
+    /// <summary>R1-58 (review round 1, m1): no reading judged the series this time — it was neither clearly over nor
+    /// clearly under the line. A confirmation in progress starts again with the next reading that judges it: the time a
+    /// recovery was being confirmed is dropped, and so is the time a breach not yet raised was being confirmed. Nothing
+    /// is raised or closed; a raised breach stays open.</summary>
+    public void Hold(string serverId, string kind)
+    {
+        lock (_sync)
+        {
+            if (!_breaches.TryGetValue($"{serverId}|{kind}", out var breach)) return;
+            breach.BelowSince = null;
+            if (breach.Reported is null)
+            {
+                breach.Since = null;
+                breach.Peak = 0;
+            }
+        }
+    }
+
     private static void Reset(Breach breach)
     {
         breach.Since = null;

@@ -90,6 +90,7 @@ public static class SelfBackupLayout
         [Rel(Probe.NotificationOutboxJson)] = "notifications this install still had to deliver to its channels (R1-40)",
         [Rel(Probe.AlertBreachesJson)] = "the threshold alerts this install had raised and not yet closed (R1-56)",
         [Rel(Probe.EndpointCheckBreachesJson)] = "the endpoint-check alerts this install had raised and not yet closed (R1-57)",
+        [Rel(Probe.DiskHealthJson)] = "the disk-health readings and alerts of this install (R1-58)",
         // Not a DataPathOptions path: the vault's recovery copies from the CBC-to-GCM conversion (vault.json.legacy-cbc*.bak).
         ["vault.json.legacy-cbc.bak"] = "recovery copy of the old unauthenticated vault, kept on this volume only",
     };

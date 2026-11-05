@@ -365,6 +365,21 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Metrics.IAlertBreachStore>(sp =>
             new Whiskers.Services.Metrics.AlertBreachStore(sp.GetRequiredService<DataPathOptions>().AlertBreachesJson));
         builder.Services.AddHostedService<MetricsCollectorService>();
+        // R1-58: optional disk-health readings (SMART, md, ZFS) from the hosts' metrics endpoints — off by default, a gated
+        // config.save turns them on. The typed query client is generic; PrometheusMetricsSource keeps its own reads.
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.IPrometheusQueryClient, Whiskers.Services.Metrics.PrometheusQueryClient>();
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.IDiskHealthSettingsService>(sp =>
+            new Whiskers.Services.Metrics.DiskHealth.DiskHealthSettingsService(
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<Whiskers.Services.Persistence.IAppSettingsStore>(),
+                sp.GetRequiredService<ILogger<Whiskers.Services.Metrics.DiskHealth.DiskHealthSettingsService>>(),
+                sp.GetRequiredService<DataPathOptions>().AppSettingsJson));
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.DiskHealthService>();
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.IDiskHealthService>(sp =>
+            sp.GetRequiredService<Whiskers.Services.Metrics.DiskHealth.DiskHealthService>());
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.IDiskHealthStateStore>(sp =>
+            new Whiskers.Services.Metrics.DiskHealth.DiskHealthStateStore(sp.GetRequiredService<DataPathOptions>().DiskHealthJson));
+        builder.Services.AddHostedService<Whiskers.Services.Metrics.DiskHealth.DiskHealthMonitor>();
 
         // Database service
         builder.Services.AddSingleton<Whiskers.Services.Database.IDatabaseService, Whiskers.Services.Database.DatabaseService>();

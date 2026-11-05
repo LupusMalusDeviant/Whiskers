@@ -37,6 +37,13 @@ public static class NotificationFormatter
         NotificationEventTypes.MetricsGap => ("No readings: alerts cannot fire for this", "Warning"),
         "metrics_gap_recovered" => ("Readings are back", "Info"),
         NotificationEventTypes.MetricAnomaly => ("Metric anomaly", "Warning"),
+        // R1-58: disk health — SMART, md arrays, ZFS pools.
+        NotificationEventTypes.DiskFailing => ("Disk failing (SMART)", "Error"),
+        "disk_failing_recovered" => ("Disks report SMART healthy again", "Info"),
+        NotificationEventTypes.ArrayDegraded => ("Disk array degraded", "Error"),
+        "array_degraded_recovered" => ("Disk arrays healthy again", "Info"),
+        NotificationEventTypes.DiskHealthUnknown => ("Disk health can no longer be read", "Warning"),
+        "disk_health_unknown_recovered" => ("Disk health readable again", "Info"),
         NotificationEventTypes.AgentAction => ("AI-Agent", "Info"),
         NotificationEventTypes.AgentApproval => ("Approval required", "Warning"),
         NotificationEventTypes.AutoUpdateFailed => ("Auto-update failed", "Error"),
@@ -108,6 +115,10 @@ public static class NotificationFormatter
                 or "high_cpu_recovered" or "high_memory_recovered")
             return string.IsNullOrWhiteSpace(e.ContainerId) ? "servers" : $"container/{e.ContainerId}";
         if (e.EventType is NotificationEventTypes.HighDisk or "high_disk_recovered") return "servers";
+        // R1-58: the disk-health block sits in the server's panel on the dashboard.
+        if (e.EventType is NotificationEventTypes.DiskFailing or "disk_failing_recovered"
+                or NotificationEventTypes.ArrayDegraded or "array_degraded_recovered"
+                or NotificationEventTypes.DiskHealthUnknown or "disk_health_unknown_recovered") return "";
         if (e.EventType == "log_rotation_missing") return "servers";
         if (e.EventType is "certificate_expiring" or "certificate_expired") return "servers";
         if (e.EventType is NotificationEventTypes.EndpointCheckFailed or "endpoint_check_failed_recovered") return "checks";

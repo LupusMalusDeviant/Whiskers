@@ -324,6 +324,9 @@
                 </MudItem>
             </MudGrid>
 
+            @* R1-58: disk health (SMART, md, ZFS) — shown only while the feature is on; any signed-in role reads it. *@
+            <DiskHealthBlock ServerId="@serverGroup.ServerId" />
+
             @* Auslastungsverlauf *@
             <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-4 mb-2" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Filled.ShowChart" Size="Size.Small" Color="Color.Primary" />
