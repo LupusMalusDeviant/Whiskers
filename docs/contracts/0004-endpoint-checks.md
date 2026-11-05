@@ -1,7 +1,7 @@
 # Contract 0004 — Endpoint checks from the managed host (R1-57)
 
 Status: **Accepted** · 5 November 2026 by the maintainer, including the decisions listed at the end (all six as
-recommended). To be implemented in R1-57. Addendum A (signatures as built) accepted 5 November 2026.
+recommended). To be implemented in R1-57. Addendum A (signatures as built, A1–A7) accepted 5 November 2026.
 
 ## Purpose
 
@@ -262,7 +262,7 @@ the contract already required, or makes an accepted rule enforceable.
 - **A6 `IEndpointCheckSlots`.** Decision 5 (at most 4 runs in flight, 1 per server) now holds on every path, with one
   extra rule: a check never runs twice at once. The monitor and "Run now" take the same slot. When no slot is free,
   "Run now" answers "busy" and does not wait.
-- **A7 gateway arguments `new { serverId, checkId }`** (added 5 November 2026, review round 2; awaiting acceptance).
+- **A7 gateway arguments `new { serverId, checkId }`** (added 5 November 2026, review round 2; accepted 5 November 2026).
   The Run section first named them `new { check = id, server = serverId }`. The gateway resolves the `server` target of
   `endpointcheck.run` (and of `save` and `delete`) from the argument `serverId`, so every path — monitor, "Run now",
   save, delete and the refusals — passes `serverId` and `checkId`.
