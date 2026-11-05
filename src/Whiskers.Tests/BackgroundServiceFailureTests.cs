@@ -316,38 +316,8 @@ public class BackgroundServiceFailureTests
         // Review round 5: the budget also reports saturation when the request was sent but ran shorter than it waited
         // before the deadline expired. That request did reach the server, so it is the server's timeout and counts
         // toward server_unreachable; only a request still queued at the deadline is NotAsked.
-        // The queue wait, the run and the deadline all go by a clock the test moves (2026-11-05: on wall-clock time a slow
-        // CI runner stretched the run past the wait, and the budget rightly counted no saturation).
-        var clock = new QueueClock();
-        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var (docker, circuit, budget) = Connection(
-            sentRequest: deadline => { sent.TrySetResult(); return Task.Delay(Timeout.Infinite, deadline); }, time: clock);
-        var release = new TaskCompletionSource();
-        // The slots are held through the unhooked path, so only the listing meets the silent server.
-        var slots = new ServerBudgetSettings().InteractiveConcurrency;
-        var holding = 0;
-        var busy = Enumerable.Range(0, slots)
-            .Select(_ => docker.ExecuteGuardedAsync("badwolf", async _ =>
-            {
-                Interlocked.Increment(ref holding);
-                await release.Task;
-                return 0;
-            })).ToList();
-        var ops = Operations(docker, TimeSpan.FromSeconds(3), clock);
-        await Until(() => Volatile.Read(ref holding) == slots, "every slot is held");
-
-        // The listing reads the budget's clock once as it joins the queue; nothing else reads it while the slots are held.
-        var readsBefore = clock.TimestampReads;
-        var listingTask = ops.ListAllContainersDetailedAsync(true, CancellationToken.None);
-        await Until(() => clock.TimestampReads > readsBefore, "the listing joined the queue");
-
         // Queued for 2 s, then sent to a server that does not answer: the deadline (3 s) cuts it short after 1 s < waited.
-        clock.Advance(TimeSpan.FromSeconds(2));
-        release.SetResult();
-        await Task.WhenAll(busy).WaitAsync(TimeSpan.FromSeconds(10));
-        await sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        clock.Advance(TimeSpan.FromSeconds(1));
-        var listing = await listingTask.WaitAsync(TimeSpan.FromSeconds(10));
+        var (listing, circuit, budget) = await ListingCutShort(waited: TimeSpan.FromSeconds(2), ran: TimeSpan.FromSeconds(1));
 
         var failure = Assert.Single(listing.FailedServers);
         Assert.False(failure.NotAsked, failure.Error);
@@ -358,6 +328,73 @@ public class BackgroundServiceFailureTests
         var tracker = new Whiskers.Services.HealthMonitor.ServerReachabilityTracker(threshold: 2, coldStartThreshold: 2);
         Assert.Empty(tracker.Evaluate(listing));
         Assert.Equal("server_unreachable", Assert.Single(tracker.Evaluate(listing)).EventType);
+    }
+
+    [Theory]
+    [InlineData(1000, 2000)] // ran longer than it waited
+    [InlineData(1500, 1500)] // the edge: as long as it waited
+    public async Task A_listing_sent_after_a_short_queue_wait_and_then_cut_short_is_no_saturation(int waitedMs, int ranMs)
+    {
+        // The other side of the rule above: only a run shorter than the wait is the queue's doing. A request that ran at
+        // least as long as it waited is the server's timeout alone.
+        var (listing, circuit, budget) = await ListingCutShort(
+            waited: TimeSpan.FromMilliseconds(waitedMs), ran: TimeSpan.FromMilliseconds(ranMs));
+
+        var failure = Assert.Single(listing.FailedServers);
+        Assert.False(failure.NotAsked, failure.Error);
+        Assert.StartsWith("Timed out", failure.Error);
+        Assert.Equal(0, budget.Snapshot("badwolf").SaturationFailures);
+        Assert.Equal(1, circuit.Snapshot("badwolf").ConsecutiveFailures); // the server's timeout, held against it
+    }
+
+    /// <summary>
+    /// A fleet listing that waits <paramref name="waited"/> for a budget slot and is then sent to a server that does not
+    /// answer, until the per-server deadline (<paramref name="waited"/> + <paramref name="ran"/>) cuts it short. The queue
+    /// wait, the run and the deadline all go by a clock the test moves (2026-11-05: on wall-clock time a slow CI runner
+    /// stretched the run past the wait, and the budget rightly counted no saturation).
+    /// </summary>
+    private static async Task<(FleetContainerListing Listing, ServerCircuitBreaker Circuit, ServerBudget Budget)> ListingCutShort(
+        TimeSpan waited, TimeSpan ran)
+    {
+        var clock = new QueueClock();
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (docker, circuit, budget) = Connection(
+            sentRequest: deadline => { sent.TrySetResult(); return Task.Delay(Timeout.Infinite, deadline); }, time: clock);
+        var release = new TaskCompletionSource();
+        try
+        {
+            // The slots are held through the unhooked path, so only the listing meets the silent server.
+            var slots = new ServerBudgetSettings().InteractiveConcurrency;
+            var holding = 0;
+            var busy = Enumerable.Range(0, slots)
+                .Select(_ => docker.ExecuteGuardedAsync("badwolf", async _ =>
+                {
+                    Interlocked.Increment(ref holding);
+                    await release.Task;
+                    return 0;
+                })).ToList();
+            var ops = Operations(docker, waited + ran, clock);
+            await Until(() => Volatile.Read(ref holding) == slots, "every slot is held");
+
+            // The listing reads the budget's clock once as it joins the queue; nothing else reads it while the slots are
+            // held. The clock counts a read only after it took the time, so the advance below cannot slip in between.
+            var readsBefore = clock.TimestampReads;
+            var listingTask = ops.ListAllContainersDetailedAsync(true, CancellationToken.None);
+            await Until(() => clock.TimestampReads > readsBefore, "the listing joined the queue");
+
+            clock.Advance(waited);
+            release.SetResult();
+            await Task.WhenAll(busy).WaitAsync(TimeSpan.FromSeconds(10));
+            await sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            clock.Advance(ran);
+            return (await listingTask.WaitAsync(TimeSpan.FromSeconds(10)), circuit, budget);
+        }
+        finally
+        {
+            // A failed step must not leave the held slots and the listing blocked for good.
+            release.TrySetResult();
+            clock.Advance(TimeSpan.FromMinutes(1));
+        }
     }
 
     [Fact]
@@ -463,7 +500,8 @@ public class BackgroundServiceFailureTests
     }
 
     /// <summary>A clock the test moves by hand: timestamps for the budget's wait and run, one-shot timers for the server
-    /// deadline. It counts timestamp reads, so a test can see a call join the budget's queue.</summary>
+    /// deadline. It counts timestamp reads, so a test can see a call join the budget's queue. Timers are one-shot and fire
+    /// only on <see cref="Advance"/>, a zero due time included.</summary>
     private sealed class QueueClock : TimeProvider
     {
         private readonly object _gate = new();
@@ -477,12 +515,18 @@ public class BackgroundServiceFailureTests
 
         public override long GetTimestamp()
         {
-            Interlocked.Increment(ref _reads);
-            lock (_gate) return _ticks;
+            lock (_gate)
+            {
+                var now = _ticks;
+                Volatile.Write(ref _reads, _reads + 1); // counted only once the time is taken
+                return now;
+            }
         }
 
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
+            if (period != Timeout.InfiniteTimeSpan && period != TimeSpan.Zero)
+                throw new NotSupportedException("QueueClock has one-shot timers only.");
             var timer = new ManualTimer(this, callback, state);
             timer.Change(dueTime, period);
             return timer;
@@ -506,6 +550,8 @@ public class BackgroundServiceFailureTests
 
             public bool Change(TimeSpan dueTime, TimeSpan period)
             {
+                if (period != Timeout.InfiniteTimeSpan && period != TimeSpan.Zero)
+                    throw new NotSupportedException("QueueClock has one-shot timers only.");
                 lock (clock._gate)
                 {
                     clock._timers.Remove(this);
