@@ -238,16 +238,17 @@ public class HostCommandExecutor : IHostCommandExecutor
         cts.CancelAfter(timeout);
 
         var started = false;
+        Task<(string Text, bool Truncated)>? stdoutTask = null, stderrTask = null;
         try
         {
             process.Start();
             started = true;
 
             var cap = maxOutputChars is > 0 ? maxOutputChars.Value : MaxOutputChars;
-            var stdoutTask = ReadCappedAsync(process.StandardOutput, cap, cts.Token);
+            stdoutTask = ReadCappedAsync(process.StandardOutput, cap, cts.Token);
             // stderr keeps the default cap regardless: a raised cap is granted for the document a caller
             // wants to read, not for whatever the command decides to complain about.
-            var stderrTask = ReadCappedAsync(process.StandardError, MaxOutputChars, cts.Token);
+            stderrTask = ReadCappedAsync(process.StandardError, MaxOutputChars, cts.Token);
 
             var exited = false;
             try
@@ -332,6 +333,9 @@ public class HostCommandExecutor : IHostCommandExecutor
                 if (!exited) process.Kill(entireProcessTree: true);
             }
             catch { /* best effort */ }
+            // The other read fails once the process is disposed: observed, never unobserved.
+            if (stdoutTask is not null) ObserveFaults(stdoutTask);
+            if (stderrTask is not null) ObserveFaults(stderrTask);
             _logger.LogError(ex, "Process {FileName} failed after it started", fileName);
             var cause = SecretRedactor.Redact($"{ex.GetType().Name}: {ex.Message}");
             return new CommandResult

@@ -346,15 +346,21 @@ internal sealed class HostShellOperations
     /// the sweep of a later host-shell call.</summary>
     private static readonly TimeSpan ScheduledSweepPersistence = TimeSpan.FromHours(1);
 
-    /// <summary>Per server: when the pending scheduled sweep is due. A sweep due at or after a new one's due covers it.</summary>
+    /// <summary>How much later a pending sweep may be due and still cover a new one: the interval of the sweep that runs
+    /// with host-shell calls.</summary>
+    private static readonly TimeSpan SweepCoverWindow = TimeSpan.FromMinutes(5);
+
+    /// <summary>Per server: when the latest scheduled sweep is due. It covers a new one due no later and at most
+    /// <see cref="SweepCoverWindow"/> earlier; any other new one runs at its own time.</summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _pendingSweeps = new();
 
     /// <summary>Sweeps the server once its helper with deadline label <paramref name="labelEnd"/> is past that label and
     /// the grace — so a helper whose removal failed, or whose create never answered, is removed without waiting for a
     /// later host-shell call. A label of <see cref="DateTimeOffset.MinValue"/> (no helper of this run to wait for) sweeps
-    /// at once. One pending sweep per server is enough when it is due no earlier. A sweep that cannot reach the server
-    /// retries with backoff for up to an hour. In the background, each try bounded by the sweep budget, never holding a
-    /// caller.</summary>
+    /// at once. A pending sweep due no earlier and within <see cref="SweepCoverWindow"/> covers a new one (repeated
+    /// failures on one server do not queue a sweep each); otherwise each runs at its own time, so a short helper never
+    /// waits for a long one's sweep. A sweep that cannot reach the server retries with backoff for up to an hour. In the
+    /// background, each try bounded by the sweep budget, never holding a caller.</summary>
     private void ScheduleSweep(string? serverId, DateTimeOffset labelEnd, IHostShellDocker fallback)
     {
         var now = _time.GetUtcNow();
@@ -363,11 +369,16 @@ internal sealed class HostShellOperations
         var claimed = false;
         _pendingSweeps.AddOrUpdate(key,
             _ => { claimed = true; return at; },
-            (_, pending) => { claimed = pending < at; return claimed ? at : pending; });
+            (_, pending) =>
+            {
+                claimed = !(pending >= at && pending <= at + SweepCoverWindow);
+                return claimed ? at : pending;
+            });
         if (!claimed) return;
 
-        // Task.Delay takes at most uint.MaxValue - 1 ms; a due beyond it (a timeout near that limit) waits the maximum
-        // and the sweep then judges the helper by its label as always.
+        // Task.Delay takes at most uint.MaxValue - 1 ms. A due beyond it (a timeout of about 49 days) waits the maximum;
+        // the sweep then finds the helper still within its label and leaves it — accepted: such a helper is removed by
+        // the sweep of a later host-shell call on the server once past its label.
         var due = at - now;
         var maxDelay = TimeSpan.FromMilliseconds(uint.MaxValue - 2.0);
         due = due < TimeSpan.Zero ? TimeSpan.Zero : due > maxDelay ? maxDelay : due;
