@@ -138,6 +138,39 @@ public sealed class MutationScope : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// The target binding of a call (<see cref="MutationTargetAttribute"/>): true when an open scope of this flow that
+    /// authorizes <paramref name="capabilityId"/> (it decided it, or a capability that composes it) also decided
+    /// <paramref name="identity"/> — as its resolved target, a related resource or an argument value policy saw — on
+    /// the server the call acts on. Unlike <see cref="Authorizes(string, bool, string?, Func{string, string?}?)"/>, the
+    /// server is matched for the decided capability itself too: a delegate that names the decided container on another
+    /// server acts on another container. Servers compare by their canonical id (<paramref name="canonical"/>), or
+    /// exactly as named when neither side resolves; anything else fails closed. A scope opened without a request
+    /// decided nothing and covers no target.
+    /// </summary>
+    public static bool AuthorizesTarget(string capabilityId, string? identity, bool actsOnServer, string? namedServer,
+        string? server, Func<string, string?>? canonical)
+    {
+        if (string.IsNullOrWhiteSpace(identity)) return false;
+        for (var s = Current; s is not null; s = s._parent)
+        {
+            if (!string.Equals(s.CapabilityId, capabilityId, StringComparison.Ordinal)
+                && !MutationCompositions.Allows(s.CapabilityId, capabilityId))
+                continue;
+            if (!s._decided.Contains(identity)) continue;
+            if (!actsOnServer || string.IsNullOrEmpty(s._serverId)) return true;
+            var decided = canonical is null ? null : canonical(s._serverId);
+            if (server is not null && decided is not null
+                && string.Equals(decided, server, StringComparison.OrdinalIgnoreCase))
+                return true;
+            // Neither side resolves (no registry): only the very same name is the same server.
+            if (server is null && decided is null && namedServer is not null
+                && string.Equals(namedServer, s._serverId, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>True when an open, attached scope of this flow decided a capability whose execution is a raw host
     /// command (<see cref="MutationCompositions.RawHostCommands"/>) — the condition for the host executor's primitive.</summary>
     public static bool AuthorizesRawHostCommand()

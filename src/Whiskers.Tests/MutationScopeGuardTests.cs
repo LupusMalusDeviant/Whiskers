@@ -684,6 +684,151 @@ public class MutationScopeGuardTests
 
         public Task<string> CreateAsync() => Task.FromResult("created");
     }
+
+    // ---------------------------------------------------------------- target binding
+
+    public interface ITargetProbe
+    {
+        [MutatingOperation("container.restart")]
+        Task<string> RestartAsync([MutationTarget] string containerId, string serverId);
+
+        [MutatingOperation("container.restart")]
+        Task<string> RestartOnDefaultAsync([MutationTarget] string containerId, string? serverId = null);
+    }
+
+    private sealed class TargetProbe : ITargetProbe
+    {
+        public List<string> Acted { get; } = [];
+
+        public Task<string> RestartAsync(string containerId, string serverId)
+        {
+            lock (Acted) Acted.Add($"{containerId}@{serverId}");
+            return Task.FromResult("restarted " + containerId);
+        }
+
+        public Task<string> RestartOnDefaultAsync(string containerId, string? serverId = null)
+        {
+            lock (Acted) Acted.Add($"{containerId}@{serverId ?? "default"}");
+            return Task.FromResult("restarted " + containerId);
+        }
+    }
+
+    /// <summary>A decision on <paramref name="containerId"/> (resolved to <paramref name="name"/>) on
+    /// <paramref name="serverId"/>, as the gateway hands it to the scope.</summary>
+    private static MutationRequest Decided(string capability, string containerId, string serverId, string op,
+        string? name = null) => new(capability,
+        new MutationPrincipal(MutationPrincipalKind.Human, "a@x", "a@x", Whiskers.Models.McpPermissionLevels.Admin),
+        MutationSurface.Ui, new MutationTarget("container", containerId, name, serverId),
+        new Dictionary<string, System.Text.Json.JsonElement>
+        {
+            ["containerId"] = System.Text.Json.JsonSerializer.SerializeToElement(name ?? containerId),
+            ["serverId"] = System.Text.Json.JsonSerializer.SerializeToElement(serverId),
+        }, OperationId: op);
+
+    [Fact]
+    public async Task A_call_acts_only_on_the_target_its_decision_was_taken_for()
+    {
+        // The execution delegate is the caller's own code. Whatever it computed or captured, the guarded service runs
+        // only on an identity the open decision covered — not on another container of the same capability.
+        var inner = new TargetProbe();
+        var guarded = MutationScopeProxy<ITargetProbe>.Wrap(inner, WithRegistry(defaultServer: "server-a"));
+
+        using (MutationScope.Begin("container.restart", "op-t1", request: Decided("container.restart", "c0ffee", "server-a", "op-t1", name: "web-1")))
+        {
+            await guarded.RestartAsync("c0ffee", "server-a");                 // the resolved id
+            await guarded.RestartAsync("web-1", "server-a");                  // its name, as decided
+            var other = await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.RestartAsync("db-1", "server-a"));
+            Assert.Equal("db-1", other.Target);
+            Assert.Equal("container.restart", other.OpenScope);
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.RestartAsync("c0ffe", "server-a"));   // a prefix is another name
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.RestartAsync("", "server-a"));
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.RestartAsync(null!, "server-a"));
+        }
+
+        Assert.Equal(["c0ffee@server-a", "web-1@server-a"], inner.Acted);
+    }
+
+    [Fact]
+    public async Task The_decided_target_on_another_server_is_another_target()
+    {
+        // Before the target binding the decided capability itself was not matched by server: the same container id on
+        // server B ran under a decision for server A.
+        var inner = new TargetProbe();
+        var guarded = MutationScopeProxy<ITargetProbe>.Wrap(inner, WithRegistry(defaultServer: "server-b"));
+
+        using (MutationScope.Begin("container.restart", "op-t2", request: Decided("container.restart", "c0ffee", "server-a", "op-t2")))
+        {
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.RestartAsync("c0ffee", "server-b"));
+            // Omitted, with no routing declared for it, the server cannot be resolved: it matches nothing (fail closed).
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.RestartOnDefaultAsync("c0ffee"));
+            await guarded.RestartAsync("c0ffee", "SERVER-A");                 // ids ignore case
+        }
+
+        Assert.Equal(["c0ffee@SERVER-A"], inner.Acted);
+    }
+
+    [Fact]
+    public async Task A_composed_call_is_bound_to_the_composing_decisions_target()
+    {
+        // workload.restart composes container.restart: the composed call may restart the decided workload's container,
+        // not another one.
+        var inner = new TargetProbe();
+        var guarded = MutationScopeProxy<ITargetProbe>.Wrap(inner, WithRegistry(defaultServer: "server-a"));
+        var workload = Decided("workload.restart", "c0ffee", "server-a", "op-t3") with
+        {
+            Target = new MutationTarget("workload", "c0ffee", null, "server-a"),
+        };
+
+        using (MutationScope.Begin("workload.restart", "op-t3", request: workload))
+        {
+            await guarded.RestartAsync("c0ffee", "server-a");
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.RestartAsync("db-1", "server-a"));
+        }
+
+        Assert.Equal(["c0ffee@server-a"], inner.Acted);
+    }
+
+    [Fact]
+    public async Task A_scope_that_decided_no_target_covers_none()
+    {
+        var inner = new TargetProbe();
+        var guarded = MutationScopeProxy<ITargetProbe>.Wrap(inner, WithRegistry(defaultServer: "server-a"));
+
+        using (MutationScope.Begin("container.restart", "op-t4"))
+            await Assert.ThrowsAsync<MutationScopeViolationException>(() => guarded.RestartAsync("c0ffee", "server-a"));
+
+        Assert.Empty(inner.Acted);
+    }
+
+    [Fact]
+    public async Task A_target_outside_the_decision_is_counted_in_report_mode()
+    {
+        var monitor = ReportOnly();
+        var guarded = MutationScopeProxy<ITargetProbe>.Wrap(new TargetProbe(), monitor);
+
+        using (MutationScope.Begin("container.restart", "op-t5", request: Decided("container.restart", "c0ffee", "server-a", "op-t5")))
+            await guarded.RestartAsync("db-1", "server-a");
+
+        Assert.Equal("container.restart", Assert.Single(monitor.Snapshot()).CapabilityId);
+    }
+
+    [Fact]
+    public void Every_target_binding_is_one_string_parameter_of_a_mutating_operation()
+    {
+        var marked = typeof(MutationScope).Assembly.GetTypes()
+            .Where(t => t.IsInterface)
+            .SelectMany(t => t.GetMethods())
+            .Where(m => m.GetParameters().Any(p => p.IsDefined(typeof(MutationTargetAttribute), false)))
+            .ToList();
+
+        Assert.NotEmpty(marked);
+        foreach (var method in marked)
+        {
+            Assert.True(method.IsDefined(typeof(MutatingOperationAttribute), false),
+                $"{method.DeclaringType?.Name}.{method.Name} binds a target but is no mutating operation");
+            Assert.True(MutatingMethods.TargetIndexOf(method) >= 0);
+        }
+    }
 }
 
 internal sealed class NoUser : Whiskers.Services.Auth.ICurrentUserService
