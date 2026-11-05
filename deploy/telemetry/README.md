@@ -26,6 +26,14 @@ curl --max-time 5 http://<public-ip>:9100/metrics   # MUST time out / be refused
 
 > Whiskers's onboarding wizard automates all of the above for a newly-added server.
 
+## Disk health (optional, R1-58)
+
+`host/docker-compose.yml` starts node_exporter with
+`--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector`, read through the existing read-only
+`/:/host` mount (no new mount). A host-side timer that writes `smartmon.prom` there delivers SMART data; md RAID and ZFS
+come from node_exporter's built-in collectors. Setup and what Whiskers reads:
+[`docs/operations/disk-health.md`](../../docs/operations/disk-health.md). A missing directory only means no SMART data.
+
 ## Persistence
 
 VictoriaMetrics storage lives under `/opt/serverwatch-telemetry/vm-storage` (bind-mount, survives

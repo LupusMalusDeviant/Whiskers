@@ -5735,6 +5735,63 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="IdentityBindings_Error_auth_disabled" xml:space="preserve">
     <value>Authentication is disabled; sign-in identities cannot be changed here.</value>
   </data>
+  <data name="DiskHealth_Panel" xml:space="preserve">
+    <value>Disk health (SMART, RAID, ZFS)</value>
+  </data>
+  <data name="DiskHealth_Intro" xml:space="preserve">
+    <value>Reads SMART, md RAID and ZFS state from each host's metrics endpoint (node_exporter through VictoriaMetrics) every 5 minutes. Whiskers runs nothing on the hosts; SMART needs a timer on the host that writes smartmon.prom. A reading it cannot vouch for — missing, malformed or older than 2 hours — is shown as unknown, never as healthy.</value>
+  </data>
+  <data name="DiskHealth_GuideLink" xml:space="preserve">
+    <value>Operations guide</value>
+  </data>
+  <data name="DiskHealth_Label_Enabled" xml:space="preserve">
+    <value>Read disk health (SMART, RAID, ZFS)</value>
+  </data>
+  <data name="DiskHealth_Snackbar_Saved" xml:space="preserve">
+    <value>Disk-health setting saved.</value>
+  </data>
+  <data name="DiskHealth_Snackbar_SaveFailed" xml:space="preserve">
+    <value>The disk-health setting could not be saved: {0}</value>
+  </data>
+  <data name="DiskHealth_Block_Title" xml:space="preserve">
+    <value>Disks</value>
+  </data>
+  <data name="DiskHealth_Block_NotReadYet" xml:space="preserve">
+    <value>Not read yet; the first reading follows within 5 minutes.</value>
+  </data>
+  <data name="DiskHealth_Block_Unsupported" xml:space="preserve">
+    <value>No disk-health readings for this host: it has no metrics endpoint, or none of SMART, md RAID and ZFS reports.</value>
+  </data>
+  <data name="DiskHealth_Block_NoItems" xml:space="preserve">
+    <value>Nothing is reported any more.</value>
+  </data>
+  <data name="DiskHealth_Block_Age" xml:space="preserve">
+    <value>{0} ago</value>
+  </data>
+  <data name="DiskHealth_Block_ReadAgo" xml:space="preserve">
+    <value>read {0} ago</value>
+  </data>
+  <data name="DiskHealth_Block_Stale" xml:space="preserve">
+    <value>This reading is older than two cycles: Whiskers has not read this host since, so nothing here is vouched for as healthy.</value>
+  </data>
+  <data name="DiskHealth_Block_NotReadYetFailed" xml:space="preserve">
+    <value>Not read yet: {0}</value>
+  </data>
+  <data name="DiskHealth_ReadOnly" xml:space="preserve">
+    <value>Set by {0}; it cannot be changed here.</value>
+  </data>
+  <data name="DiskHealth_State_Healthy" xml:space="preserve">
+    <value>Healthy</value>
+  </data>
+  <data name="DiskHealth_State_DegradedOrFailing" xml:space="preserve">
+    <value>Degraded / failing</value>
+  </data>
+  <data name="DiskHealth_State_Unknown" xml:space="preserve">
+    <value>Unknown</value>
+  </data>
+  <data name="DiskHealth_State_Unsupported" xml:space="preserve">
+    <value>Not supported</value>
+  </data>
   <data name="IdentityBindings_Error_failed" xml:space="preserve">
     <value>The action failed ({0}); see the log.</value>
   </data>

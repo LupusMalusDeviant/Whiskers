@@ -53,6 +53,9 @@ public class UiMutationGatewayCoverageTests : IDisposable
         // R1-56: quiet hours.
         (typeof(Whiskers.Services.Notifications.IQuietHoursService),
             nameof(Whiskers.Services.Notifications.IQuietHoursService.SaveAsync), "config.save"),
+        // R1-58: whether disk health is read.
+        (typeof(Whiskers.Services.Metrics.DiskHealth.IDiskHealthSettingsService),
+            nameof(Whiskers.Services.Metrics.DiskHealth.IDiskHealthSettingsService.SaveAsync), "config.save"),
     ];
 
     public static TheoryData<string> Capabilities()
@@ -154,6 +157,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         (typeof(Whiskers.Components.Shared.OutboundExceptionsPanel), "Save", "config.save"),
         (typeof(Whiskers.Components.Shared.MetricRetentionPanel), "Save", "config.save"),
         (typeof(Whiskers.Components.Shared.QuietHoursPanel), "Save", "config.save"),
+        (typeof(Whiskers.Components.Shared.DiskHealthPanel), "Save", "config.save"),
     ];
 
     [Fact]
