@@ -1,7 +1,7 @@
 # Contract 0004 — Endpoint checks from the managed host (R1-57)
 
 Status: **Accepted** · 5 November 2026 by the maintainer, including the decisions listed at the end (all six as
-recommended). To be implemented in R1-57.
+recommended). To be implemented in R1-57. Addendum A (signatures as built) accepted 5 November 2026.
 
 ## Purpose
 
@@ -86,7 +86,7 @@ public interface IEndpointCheckStore            // definitions; every write is [
 {
     IReadOnlyList<EndpointCheckDefinition> List(string? serverId = null);
     EndpointCheckDefinition? Get(string id);
-    [MutatingOperation("endpointcheck.save")]   Task<EndpointCheckDefinition> SaveAsync(EndpointCheckDraft draft, CancellationToken ct);
+    [MutatingOperation("endpointcheck.save")]   Task<EndpointCheckDefinition> SaveAsync(EndpointCheckDraft draft, string editorId, CancellationToken ct); // A1
     [MutatingOperation("endpointcheck.delete")] Task DeleteAsync(string id, CancellationToken ct);
 }
 
@@ -98,7 +98,7 @@ public static class EndpointCheckValidator      // pure; used on save AND again 
 public static class EndpointCheckCommands       // pure: fixed templates, operands single-quoted
 {
     public static string Resolve(string name);                                     // getent ahosts '<name>'
-    public static string Http(Uri url, IPAddress address, int port, int timeoutSeconds);
+    public static string Http(string url, string host, IPAddress address, int port, int timeoutSeconds); // A2
     public static string Tcp(IPAddress address, int port, int timeoutSeconds);
     public static string Tls(string serverName, IPAddress address, int port);
     public const int OutputCap = 16_384;                                           // head -c bound, in every template
@@ -106,15 +106,26 @@ public static class EndpointCheckCommands       // pure: fixed templates, operan
 
 public static class EndpointCheckParser         // pure; requires positive evidence
 {
-    public static ResolveAnswer ParseResolve(string output);   // complete + well-formed, or Unreadable
-    public static ProbeResult ParseHttp(string output);        // "__rc=0" AND a 3-digit status
-    public static ProbeResult ParseTcp(string output);         // "__rc=0"
-    public static ProbeResult ParseTls(string output, DateTime nowUtc, int warnDays); // s_client rc 0 AND notAfter=
+    public static ResolveAnswer ParseResolve(string? output);  // complete + well-formed, or Unreadable (A5)
+    public static ProbeResult ParseHttp(string? output, int? expectedStatus = null); // "__rc=0" AND a 3-digit status (A4)
+    public static ProbeResult ParseTcp(string? output);        // "__rc=0"
+    public static ProbeResult ParseTls(string? output, DateTime nowUtc, int warnDays); // s_client rc 0 AND notAfter=
 }
+
+public sealed record ResolvedAddress(IPAddress Answered, IPAddress Canonical);              // A5
+public sealed record ResolveAnswer(IReadOnlyList<ResolvedAddress> Entries, string? Unreadable);
 
 public interface IEndpointCheckRunner           // one run of one check, through the gateway
 {
     Task<EndpointCheckRun> RunAsync(EndpointCheckDefinition check, CancellationToken ct);
+    Task<EndpointCheckRun> RunInDecisionAsync(string checkId, CancellationToken ct);         // A3
+}
+
+public interface IEndpointCheckSlots            // decision 5, shared by the monitor and "Run now" (A6)
+{
+    bool TryAcquire(string checkId, string serverId);   // false: check running, server busy, or 4 in flight
+    void Release(string checkId);
+    IReadOnlyDictionary<string, string> Running { get; }
 }
 ```
 
@@ -228,6 +239,29 @@ Bounds per run:
   - mTLS one-shot container.
   - SSH.
   - An HTTPS target behind an internal-address exception.
+
+## Addendum A — signatures as built (5 November 2026)
+
+Accepted by the maintainer on 5 November 2026. The implementation (R1-57, review round 1) changed six signatures in
+**Services** above. Rights, bounds, templates and behaviour stay as accepted; every change below either passes a value
+the contract already required, or makes an accepted rule enforceable.
+
+- **A1 `SaveAsync(draft, editorId, ct)`.** The owner (decision 2) is the Admin who saves. The store takes that principal
+  id explicitly instead of reading ambient state. It refuses a blank or non-user id.
+- **A2 `Http(string url, string host, …)`.** The validated URL is passed as the exact string that was checked, not
+  re-serialised by `Uri`, which can change it. `host` decides between `--resolve` for a name and no pinning for an IP
+  literal. A literal URL is already fixed to its address.
+- **A3 `RunInDecisionAsync(checkId, ct)`.** "Run now" runs inside the UI's own `endpointcheck.run` decision for the
+  signed-in Admin, and the result records that decision's operation id. It re-reads the check from the store inside the
+  decision, so a stale copy loaded earlier by a page is never run. A missing, disabled or invalid check is `Refused`.
+- **A4 `ParseHttp(output, expectedStatus)`.** `ExpectedStatus` (Definition table) has to reach the parser. A null value
+  keeps the default of any 2xx status.
+- **A5 `ResolvedAddress(Answered, Canonical)`.** An address is judged by its canonical form, where IPv4-mapped, NAT64
+  and 6to4 addresses count as IPv4. It is probed and recorded as the host answered it, so an IPv6-only host behind
+  DNS64 still reaches its target. The parsers take `string?`, and a null input is not a complete answer.
+- **A6 `IEndpointCheckSlots`.** Decision 5 (at most 4 runs in flight, 1 per server) now holds on every path, with one
+  extra rule: a check never runs twice at once. The monitor and "Run now" take the same slot. When no slot is free,
+  "Run now" answers "busy" and does not wait.
 
 ## Decisions for the maintainer
 
