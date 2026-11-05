@@ -49,12 +49,6 @@ public sealed record AgentCompletionRequest(
     AgentToolChoice ToolChoice = AgentToolChoice.Auto,
     string? Endpoint = null);
 
-public sealed record AgentCompletion(
-    string? AssistantText,
-    IReadOnlyList<AgentToolCall> ToolCalls,
-    AgentStopReason StopReason,
-    AgentUsage Usage);
-
 /// <summary>A streaming increment: either text, a (partial) tool call, or the turn end.</summary>
 public sealed record AgentStreamDelta(
     string? TextDelta = null,

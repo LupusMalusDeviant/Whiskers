@@ -41,7 +41,6 @@ public interface IHetznerService
     [MutatingOperation("hetzner.backups_disable")]
     Task<HetznerAction?> DisableBackupsAsync(string token, long id, CancellationToken ct = default);
 
-    Task<List<HetznerServerType>> ListServerTypesAsync(string token, CancellationToken ct = default);
     [MutatingOperation("hetzner.server_type_change")]
     Task<HetznerAction?> ChangeServerTypeAsync(string token, long id, string serverType, bool upgradeDisk, CancellationToken ct = default);
 

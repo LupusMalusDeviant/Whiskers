@@ -11,7 +11,6 @@ public interface IHostingerService
     Task<bool> TestConnectionAsync(string token, CancellationToken ct = default);
 
     Task<List<HostingerVm>> ListVmsAsync(string token, CancellationToken ct = default);
-    Task<HostingerVm?> GetVmAsync(string token, long id, CancellationToken ct = default);
 
     // R1-48: the provider calls of a decided cloud operation, guarded like IHetznerService's.
     [Whiskers.Services.Mutations.MutatingOperation("cloud.power_on")]
@@ -21,7 +20,6 @@ public interface IHostingerService
     [Whiskers.Services.Mutations.MutatingOperation("cloud.reboot")]
     Task RestartAsync(string token, long id, CancellationToken ct = default);
 
-    Task<HostingerSnapshot?> GetSnapshotAsync(string token, long id, CancellationToken ct = default);
     [Whiskers.Services.Mutations.MutatingOperation("cloud.snapshot_create")]
     Task CreateSnapshotAsync(string token, long id, CancellationToken ct = default);
 
