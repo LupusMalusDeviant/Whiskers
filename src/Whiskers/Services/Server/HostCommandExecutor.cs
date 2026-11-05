@@ -299,8 +299,10 @@ public class HostCommandExecutor : IHostCommandExecutor
                 {
                     // The command itself finished; something it left running kept its output open. Its exit code is
                     // known, its output is not — reported as such, not as a timeout of the command.
-                    _logger.LogWarning("Output of {FileName} stayed open after it exited with code {ExitCode}: {Arguments}",
-                        fileName, process.ExitCode, SecretRedactor.Redact(string.Join(' ', psi.ArgumentList)));
+                    // The arguments are not logged: they may carry what the command was given (an SSH destination,
+                    // the command text), and the exit code and program name are enough to find the run.
+                    _logger.LogWarning("Output of {FileName} stayed open after it exited with code {ExitCode}",
+                        fileName, process.ExitCode);
                     return new CommandResult
                     {
                         ExitCode = -1,
