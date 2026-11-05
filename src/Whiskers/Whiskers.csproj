@@ -21,7 +21,8 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.14" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.14" />
     <!-- R1-54: SMTP over a socket the outbound guard opened. MimeKit (its dependency) pulls in
-         System.Security.Cryptography.Pkcs 10.0.0, which carries known advisories: pinned to the first fixed release. -->
+         System.Security.Cryptography.Pkcs below the current servicing release (10.0.13 with MimeKit 4.18.2; 10.0.0 carried
+         known advisories): pinned to the latest 10.0.x patch. -->
     <PackageReference Include="MailKit" Version="4.18.2" />
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
     <PackageReference Include="Markdig" Version="1.6.0" />

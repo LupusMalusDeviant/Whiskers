@@ -120,8 +120,72 @@ public class OnboardingCommandsTests
         if (end > 0) proxy = proxy[..end];
 
         Assert.Contains("read_only: true", proxy);
-        Assert.Matches(@"tmpfs:\n(\s+- \S+.*\n)*\s+- /tmp\b", proxy);
+        // A writable tmpfs: "- /tmp" alone or with a comment, never "- /tmp:ro".
+        Assert.Matches(@"tmpfs:\n(\s+- \S+.*\n)*\s+- /tmp(\s|$)", proxy);
     }
+
+    // --- The protected boundary (socket-proxy verb whitelist, ghostunnel mTLS flags) ----------------------------------
+
+    /// <summary>The verb whitelist, exactly — the same in the hardened profile and in the template rolled out to hosts.
+    /// Changing it is a protected-area decision, so a test fails first.</summary>
+    private static readonly string[] Whitelist =
+    [
+        "AUTH=0", "CONFIGS=0", "CONTAINERS=1", "EXEC=0", "IMAGES=1", "INFO=1", "NETWORKS=1", "PLUGINS=0", "POST=1",
+        "SECRETS=0", "SWARM=0", "SYSTEM=0", "VERSION=1", "VOLUMES=1",
+    ];
+
+    [Fact]
+    public void The_socket_proxy_whitelist_is_exactly_the_approved_one_in_both_places()
+    {
+        Assert.Equal(Whitelist, EnvironmentOf(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7"), "socket-proxy")));
+        Assert.Equal(Whitelist, EnvironmentOf(Service(HardenedCompose(), "socket-proxy")));
+    }
+
+    [Fact]
+    public void The_ghostunnel_command_is_exactly_the_approved_one()
+    {
+        var command = System.Text.RegularExpressions.Regex
+            .Matches(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7"), "ghostunnel"), @"^\s+- (--\S+|server)$",
+                System.Text.RegularExpressions.RegexOptions.Multiline)
+            .Select(m => m.Groups[1].Value).ToArray();
+
+        Assert.Equal(
+        [
+            "server", "--listen=0.0.0.0:2376", "--target=socket-proxy:2375", "--unsafe-target", "--cert=/certs/server.crt",
+            "--key=/certs/server.key", "--cacert=/certs/ca.crt", "--allow-cn=serverwatch-client",
+        ], command);
+    }
+
+    [Fact]
+    public void The_templates_roll_out_the_same_images_as_the_files_dependabot_keeps_current()
+    {
+        // Dependabot moves the compose files, not these C# templates: a template that differs would hand new hosts an
+        // older image. ghostunnel has no compose file of its own; its pin is checked by hand (deploy/README.md).
+        Assert.Equal(ImageOf(Service(HardenedCompose(), "socket-proxy")),
+            ImageOf(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7"), "socket-proxy")));
+        Assert.Equal(ImageOf(DeploymentScripts.ReadRepoFile("deploy", "telemetry", "host", "docker-compose.yml")),
+            ImageOf(OnboardingCommands.NodeExporterCompose("100.64.0.7")));
+    }
+
+    private static string HardenedCompose() => DeploymentScripts.ReadRepoFile("docker-compose.hardened.yml");
+
+    /// <summary>The block of one service (a two-space indented key) up to the next service.</summary>
+    private static string Service(string compose, string name)
+    {
+        compose = compose.Replace("\r\n", "\n");
+        var start = compose.IndexOf($"\n  {name}:\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, $"service {name} not found");
+        var rest = compose[(start + 1)..];
+        var next = System.Text.RegularExpressions.Regex.Match(rest[1..], @"\n  [a-z][a-z0-9-]*:\n");
+        return next.Success ? rest[..(next.Index + 1)] : rest;
+    }
+
+    private static string[] EnvironmentOf(string service) =>
+        System.Text.RegularExpressions.Regex.Matches(service, @"^      ([A-Z_]+): *([^\s#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
+            .Select(m => $"{m.Groups[1].Value}={m.Groups[2].Value}").Order(StringComparer.Ordinal).ToArray();
+
+    private static string ImageOf(string text) =>
+        System.Text.RegularExpressions.Regex.Match(text.Replace("\r\n", "\n"), @"image:\s*(\S+)").Groups[1].Value;
 
     // --- Step metadata -----------------------------------------------------------------------------
 
