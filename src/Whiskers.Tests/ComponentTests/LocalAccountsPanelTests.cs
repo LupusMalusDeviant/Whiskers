@@ -89,7 +89,9 @@ public class LocalAccountsPanelTests : BunitContext, IAsyncLifetime
     public async Task Deleting_the_last_admin_who_can_sign_in_is_refused_on_the_panel()
     {
         await _world.Roles.SetRoleAsync("gone@local.test", AppRole.Admin);   // an Admin by role with nothing to sign in with
-        var cut = RenderAs(LocalAccountWorld.Federated("gone@local.test"));
+        // An Admin still waiting for a recovery code (no password, no Google/OIDC binding) cannot sign in either.
+        await _world.AddUserAsync("pending@local.test", AppRole.Admin, password: null);
+        var cut = RenderAs(await _world.SessionOfAsync("pending@local.test"));
         Assert.Contains("LocalAccounts_Button_Delete", cut.Markup);
 
         await Invoke(cut, "Delete", LocalAccountWorld.Root);

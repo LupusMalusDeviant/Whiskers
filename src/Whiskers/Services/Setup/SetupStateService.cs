@@ -195,7 +195,8 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
 
             _complete = true;
             DeleteTokenFile();
-            _logger.LogInformation("Setup completed: admin {Email} ({Kind})", email, req.IsLocal ? "local" : "federated");
+            // R1-27: no address in the log (the audit row names the account).
+            _logger.LogInformation("Setup completed: first administrator created ({Kind})", req.IsLocal ? "local" : "federated");
             return SetupCompletionResult.Success;
         }
         finally { _lock.Release(); }

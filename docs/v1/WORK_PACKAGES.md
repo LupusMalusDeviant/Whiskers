@@ -477,10 +477,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `OidcIdentityBindingTests` distinguishes issuer/subject and local IDs even when emails match.
-- [ ] Unverified OIDC email cannot acquire whitelist authority.
-- [ ] Unconfigured instances do not admit unrelated federated users to MCP/hubs.
-- [ ] Existing identity migration requires explicit trustworthy binding; errors cannot grant access.
+- [x] `OidcIdentityBindingTests` distinguishes issuer/subject and local IDs even when emails match.
+- [x] Unverified OIDC email cannot acquire whitelist authority.
+- [x] Unconfigured instances do not admit unrelated federated users to MCP/hubs.
+- [x] Existing identity migration requires explicit trustworthy binding; errors cannot grant access.
 
 **Out of scope:** Reopening PC-D1…PC-D8.
 

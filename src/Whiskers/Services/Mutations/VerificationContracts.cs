@@ -178,6 +178,10 @@ public static class VerificationContracts
             ["account.create"] = VerificationContract.None(OwnAccount),
             ["account.password_reset"] = VerificationContract.None(OwnAccount),
             ["account.delete"] = VerificationContract.None(OwnAccount),
+
+            // Google/OIDC identity bindings (R1-27)
+            ["identity.binding_confirm"] = VerificationContract.None(OwnRecord),
+            ["identity.binding_remove"] = VerificationContract.None(OwnRecord),
         };
 
     private const string OwnAccount =

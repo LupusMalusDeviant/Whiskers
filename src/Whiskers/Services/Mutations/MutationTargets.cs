@@ -76,6 +76,7 @@ public static class MutationTargets
         "webhook" => "webhookId",
         "config" => "section",
         "account" => "account",
+        "identity" => "binding",
         "host" or "server" => "serverId",
         _ => null,
     };

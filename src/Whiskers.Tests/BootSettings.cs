@@ -98,8 +98,10 @@ internal sealed class BootSettings : IDisposable
     /// the validator, the ContainerHub filter resolves, and with the agent module on, sessions re-read their principal.</summary>
     public static void AssertSessionRevocationWiring(IServiceProvider services, bool agentEnabled)
     {
-        Assert.IsType<Whiskers.Services.Auth.SessionValidator>(
+        var validator = Assert.IsType<Whiskers.Services.Auth.SessionValidator>(
             services.GetRequiredService<Whiskers.Services.Auth.ISessionValidator>());
+        // R1-27: without the bindings every federated session would be refused as store_unavailable.
+        Assert.True(validator.ChecksBindings, "The session validator was built without the identity bindings.");
         Assert.NotNull(services.GetRequiredService<Whiskers.Hubs.SessionHubFilter>());
         using (var scope = services.CreateScope())
         {

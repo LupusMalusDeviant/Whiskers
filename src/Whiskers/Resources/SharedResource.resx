@@ -62,7 +62,7 @@
     <value>Container management</value>
   </data>
   <data name="Login_Error_Unauthorized" xml:space="preserve">
-    <value>Your email is not authorized to access this application.</value>
+    <value>Your email is not authorized to access this application. If you expected access, an administrator can confirm your sign-in under Settings → Sign-in identities.</value>
   </data>
   <data name="Login_Button_Google" xml:space="preserve">
     <value>Sign in with Google</value>
@@ -5602,5 +5602,140 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Recover_NoCode" xml:space="preserve">
     <value>No code? An Admin resets your password under Settings → Local accounts; if no Admin can sign in, the host operator issues one with --recover-local-account.</value>
+  </data>
+  <data name="IdentityBindings_Panel" xml:space="preserve">
+    <value>Sign-in identities</value>
+  </data>
+  <data name="IdentityBindings_Intro" xml:space="preserve">
+    <value>A Google or OIDC sign-in is admitted on the provider's subject, bound once to a configured address (a role entry or a whitelist listing). The first sign-in binds automatically only when the provider is trusted to verify addresses (Google by default; OIDC only with Oidc:TrustEmailVerified) and the address is verified; everything else waits here for confirmation.</value>
+  </data>
+  <data name="IdentityBindings_AuthDisabled" xml:space="preserve">
+    <value>Authentication is disabled (AUTH_DISABLED): there is no Google/OIDC sign-in, and bindings cannot be confirmed or removed here. The host command --confirm-identity-binding still works.</value>
+  </data>
+  <data name="IdentityBindings_Unavailable" xml:space="preserve">
+    <value>The identity bindings (identity-bindings.json) cannot be read, or a save failed: every Google/OIDC sign-in and session is refused until they are read and saved again (retried every 30 seconds) or the host operator repairs the file. Local accounts are not affected.</value>
+  </data>
+  <data name="IdentityBindings_Pending_Heading" xml:space="preserve">
+    <value>Waiting for confirmation</value>
+  </data>
+  <data name="IdentityBindings_Bindings_Heading" xml:space="preserve">
+    <value>Bound identities</value>
+  </data>
+  <data name="IdentityBindings_Th_Account" xml:space="preserve">
+    <value>Account</value>
+  </data>
+  <data name="IdentityBindings_Th_Provider" xml:space="preserve">
+    <value>Provider</value>
+  </data>
+  <data name="IdentityBindings_Th_Issuer" xml:space="preserve">
+    <value>Issuer</value>
+  </data>
+  <data name="IdentityBindings_Th_Fingerprint" xml:space="preserve">
+    <value>Subject fingerprint</value>
+  </data>
+  <data name="IdentityBindings_Th_Reason" xml:space="preserve">
+    <value>Why it waits</value>
+  </data>
+  <data name="IdentityBindings_Th_EmailVerified" xml:space="preserve">
+    <value>Address verified by the provider</value>
+  </data>
+  <data name="IdentityBindings_Th_Expires" xml:space="preserve">
+    <value>Expires</value>
+  </data>
+  <data name="IdentityBindings_Th_Bound" xml:space="preserve">
+    <value>Bound</value>
+  </data>
+  <data name="IdentityBindings_Th_LastSignIn" xml:space="preserve">
+    <value>Last sign-in</value>
+  </data>
+  <data name="IdentityBindings_None_Pending" xml:space="preserve">
+    <value>No sign-in waits for confirmation.</value>
+  </data>
+  <data name="IdentityBindings_None_Bindings" xml:space="preserve">
+    <value>No Google/OIDC identity is bound yet.</value>
+  </data>
+  <data name="IdentityBindings_Yes" xml:space="preserve">
+    <value>yes</value>
+  </data>
+  <data name="IdentityBindings_No" xml:space="preserve">
+    <value>no</value>
+  </data>
+  <data name="IdentityBindings_Reason_email_unverified" xml:space="preserve">
+    <value>Address not verified by the provider</value>
+  </data>
+  <data name="IdentityBindings_Reason_provider_untrusted" xml:space="preserve">
+    <value>Provider not trusted to verify addresses</value>
+  </data>
+  <data name="IdentityBindings_Reason_second_issuer" xml:space="preserve">
+    <value>Second provider for a bound account</value>
+  </data>
+  <data name="IdentityBindings_Reason_subject_changed" xml:space="preserve">
+    <value>New subject from the same provider</value>
+  </data>
+  <data name="IdentityBindings_Reason_nonstandard_email_claim" xml:space="preserve">
+    <value>Address from a non-standard claim</value>
+  </data>
+  <data name="IdentityBindings_Method_verified_email" xml:space="preserve">
+    <value>verified address at sign-in</value>
+  </data>
+  <data name="IdentityBindings_Method_admin" xml:space="preserve">
+    <value>confirmed by an Admin</value>
+  </data>
+  <data name="IdentityBindings_Method_host_cli" xml:space="preserve">
+    <value>confirmed on the host</value>
+  </data>
+  <data name="IdentityBindings_Button_Confirm" xml:space="preserve">
+    <value>Confirm</value>
+  </data>
+  <data name="IdentityBindings_Button_Remove" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="IdentityBindings_Button_RemoveConfirm" xml:space="preserve">
+    <value>Remove binding</value>
+  </data>
+  <data name="IdentityBindings_Button_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="IdentityBindings_Confirm_Remove" xml:space="preserve">
+    <value>The Google/OIDC sessions of this binding end. Removing a binding does not take the access away: while the address is still configured (a role or a whitelist entry), the next sign-in binds again — automatically through a trusted provider with a verified address, otherwise after a confirmation here. To take the access away, remove the address from the roles and the whitelist.</value>
+  </data>
+  <data name="IdentityBindings_Hint" xml:space="preserve">
+    <value>Confirm only a request you expected: it lets that provider's subject sign in as the account. Without an Admin who can sign in, the host operator confirms with: dotnet Whiskers.dll --confirm-identity-binding &lt;address&gt;.</value>
+  </data>
+  <data name="IdentityBindings_Snackbar_Confirmed" xml:space="preserve">
+    <value>The sign-in is bound; the person can sign in now.</value>
+  </data>
+  <data name="IdentityBindings_Snackbar_Removed" xml:space="preserve">
+    <value>Removed.</value>
+  </data>
+  <data name="IdentityBindings_Error_not_authorized" xml:space="preserve">
+    <value>Only an Admin may change sign-in identities.</value>
+  </data>
+  <data name="IdentityBindings_Error_session_invalid" xml:space="preserve">
+    <value>Your session is no longer valid; sign in again.</value>
+  </data>
+  <data name="IdentityBindings_Error_not_found" xml:space="preserve">
+    <value>The request or binding no longer exists, or its address is no longer configured.</value>
+  </data>
+  <data name="IdentityBindings_Error_last_admin" xml:space="preserve">
+    <value>This is the last way the last Admin who can sign in has; it stays.</value>
+  </data>
+  <data name="IdentityBindings_Error_ambiguous" xml:space="preserve">
+    <value>Several requests match; choose one.</value>
+  </data>
+  <data name="IdentityBindings_Error_store_unavailable" xml:space="preserve">
+    <value>The identity bindings could not be read or saved.</value>
+  </data>
+  <data name="IdentityBindings_Error_audit_unavailable" xml:space="preserve">
+    <value>The audit log could not be written; nothing was changed.</value>
+  </data>
+  <data name="IdentityBindings_Error_conflict" xml:space="preserve">
+    <value>This subject is already bound to another account.</value>
+  </data>
+  <data name="IdentityBindings_Error_auth_disabled" xml:space="preserve">
+    <value>Authentication is disabled; sign-in identities cannot be changed here.</value>
+  </data>
+  <data name="IdentityBindings_Error_failed" xml:space="preserve">
+    <value>The action failed ({0}); see the log.</value>
   </data>
 </root>

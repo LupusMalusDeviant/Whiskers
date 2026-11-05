@@ -95,6 +95,8 @@ public sealed class DataPathOptions
     public string AuditCheckpointJson => P("audit-checkpoint.json");
     /// <summary>Emails that had a local account, so a deleted one is noticed with federated sign-in too (R1-04).</summary>
     public string KnownLocalAccountsJson => P("known-local-accounts.json");
+    /// <summary>The Google/OIDC identity bindings and the binding requests waiting for confirmation (R1-27).</summary>
+    public string IdentityBindingsJson => P("identity-bindings.json");
     /// <summary>The day and the start and end of the last nightly AutoPatch cycle, so a restart neither repeats nor loses it
     /// (R1-39).</summary>
     public string AutoPatchNightlyJson => P("autopatch-nightly.json");

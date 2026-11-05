@@ -11,7 +11,9 @@ namespace Whiskers.Startup;
 /// security-sensitive protected layer (docs/ARCHITECTURE.md, ADR-0002): the provider events and the cookie policy were
 /// moved here verbatim from Program.cs. One deliberate change since (user-approved 2026-11-03, R1-26): the cookie's
 /// per-request check is no longer the fail-open whitelist re-check but the fail-closed session check
-/// (<c>SessionCookieValidation</c> → <c>ISessionValidator</c>). The middleware ORDER that enforces auth lives in
+/// (<c>SessionCookieValidation</c> → <c>ISessionValidator</c>). R1-27 (contract 0003, approved 2026-11-04): one claim
+/// action per provider maps <c>email_verified</c>; the gate's body decides through <c>IFederatedAdmission</c> on the
+/// provider's subject. The middleware ORDER that enforces auth lives in
 /// <see cref="WhiskersPipelineExtensions"/> and is unchanged.</summary>
 public static class WhiskersAuthenticationExtensions
 {
@@ -67,6 +69,8 @@ public static class WhiskersAuthenticationExtensions
                 {
                     options.ClientId = googleClientId!;
                     options.ClientSecret = googleAuthSection["ClientSecret"] ?? "";
+                    // R1-27 (contract 0003, approved): the admission binds a new subject only on a verified address.
+                    options.ClaimActions.MapJsonKey(Whiskers.Services.Auth.AuthConstants.EmailVerifiedClaim, "email_verified");
                     options.Events.OnTicketReceived = WhitelistGate;
                     options.Events.OnRemoteFailure = RecordRemoteFailure;
                 });
@@ -112,6 +116,8 @@ public static class WhiskersAuthenticationExtensions
                     var emailClaim = oidcSection["EmailClaim"] ?? "email";
                     options.ClaimActions.MapJsonKey(ClaimTypes.Email, emailClaim);
                     options.TokenValidationParameters.NameClaimType = emailClaim;
+                    // R1-27 (contract 0003, approved): email_verified from userinfo; it vouches for "email" only.
+                    options.ClaimActions.MapUniqueJsonKey(Whiskers.Services.Auth.AuthConstants.EmailVerifiedClaim, "email_verified");
 
                     options.Events = new Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectEvents
                     {

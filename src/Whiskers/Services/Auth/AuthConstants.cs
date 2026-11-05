@@ -21,4 +21,18 @@ public static class AuthConstants
     /// <summary>Claim carrying the local account's security stamp at sign-in (R1-26). ASP.NET Identity's own claim
     /// type, so a stamp change (password change, R1-49) ends every cookie issued before it. Never logged.</summary>
     public const string SecurityStampClaim = "AspNet.Identity.SecurityStamp";
+
+    /// <summary>The authentication type of the principal a Google/OIDC sign-in is issued after its admission (R1-27):
+    /// the account handle and the binding id, nothing else from the provider. Any other non-local authentication type is
+    /// refused by the session check (<see cref="SessionRevocationReasons.BindingMissing"/>).</summary>
+    public const string FederatedScheme = "Federated";
+
+    /// <summary>Claim carrying the id of the identity binding a federated session was admitted on (R1-27).</summary>
+    public const string BindingIdClaim = "whiskers:binding";
+
+    /// <summary>The claim type the Google and OIDC handlers map the provider's <c>email_verified</c> to (R1-27).</summary>
+    public const string EmailVerifiedClaim = "email_verified";
+
+    /// <summary>The issuer of every Google subject: the OAuth handler has no token issuer of its own (R1-27).</summary>
+    public const string GoogleIssuer = "https://accounts.google.com";
 }

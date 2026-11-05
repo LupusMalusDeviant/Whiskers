@@ -56,6 +56,7 @@ public static class SelfBackupLayout
         Rel(Probe.AutomationOwnersJson),
         Rel(Probe.AuditCheckpointJson),
         Rel(Probe.KnownLocalAccountsJson),
+        Rel(Probe.IdentityBindingsJson),   // R1-27
         "git-deploys.json",   // GitDeployService
         "registries.json",    // RegistryConfigService
     ];

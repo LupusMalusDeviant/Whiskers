@@ -29,7 +29,9 @@ if (args is ["--migrate-to-postgres", ..])
 // The account-recovery CLI (R1-49) runs next to the live instance (`docker compose exec`): it must never apply one.
 var restoreCli = RestoreCli.Requested(args);
 var recoveryCli = Whiskers.Services.Auth.LocalAccountRecoveryCli.Requested(args);
-if (!restoreCli && !recoveryCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
+// The identity-binding CLI (R1-27) runs the same way next to the live instance.
+var bindingCli = Whiskers.Services.Auth.IdentityBindingCli.Requested(args);
+if (!restoreCli && !recoveryCli && !bindingCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
 
 builder.AddWhiskersConfiguration(dataPaths);   // UI-writable config layers + data-protection keys
 // R1-43: the configuration has read the environment; VPN keys leave it now, so no child process inherits them.
@@ -57,6 +59,14 @@ if (recoveryCli)
 {
     return await Whiskers.Services.Auth.LocalAccountRecoveryCli.RunAsync(app.Services,
         Whiskers.Services.Auth.LocalAccountRecoveryCli.Arguments(args), Console.Out);
+}
+
+// R1-27 host-level confirmation: `dotnet Whiskers.dll --confirm-identity-binding <email> [--issuer <issuer>]` binds the
+// newest pending Google/OIDC sign-in request of a configured address and exits without starting the web host.
+if (bindingCli)
+{
+    return await Whiskers.Services.Auth.IdentityBindingCli.RunAsync(app.Services,
+        Whiskers.Services.Auth.IdentityBindingCli.Arguments(args), Console.Out);
 }
 
 app.ConfigureWhiskersHttpPipeline();           // forwarded headers → fixed auth middleware chain → endpoints

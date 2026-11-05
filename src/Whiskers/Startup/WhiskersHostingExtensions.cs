@@ -258,6 +258,11 @@ public static class WhiskersHostingExtensions
         builder.Services.AddHostedService(sp => sp.GetRequiredService<Whiskers.Services.Auth.AuthAuditLog>());
         builder.Services.AddSingleton<Whiskers.Services.Auth.IRoleService, Whiskers.Services.Auth.RoleService>();
         builder.Services.AddSingleton<Whiskers.Services.Setup.ISetupStateService, Whiskers.Services.Setup.SetupStateService>();
+        // R1-27 (contract 0003): Google/OIDC sign-ins are admitted on the provider's stable subject, bound once to a
+        // configured address. The role and whitelist writers prune the bindings of addresses they remove.
+        builder.Services.AddSingleton<Whiskers.Services.Auth.IIdentityBindingStore, Whiskers.Services.Auth.IdentityBindingStore>();
+        builder.Services.AddSingleton<Whiskers.Services.Auth.IFederatedAdmission, Whiskers.Services.Auth.FederatedAdmission>();
+        builder.Services.AddSingleton<Whiskers.Services.Auth.IdentityBindingStartupPrune>();
         // Track B.1/B.2: backend-neutral workload seam. Dispatches per server (Docker hosts vs.
         // Kubernetes clusters). Consumers migrate onto it incrementally.
         builder.Services.AddSingleton<Whiskers.Services.Workloads.IWorkloadProviderFactory, Whiskers.Services.Workloads.WorkloadProviderFactory>();
@@ -315,7 +320,9 @@ public static class WhiskersHostingExtensions
             // so /healthz (the container liveness probe) is unaffected.
             .AddCheck<MaintenanceReadyCheck>("maintenance", tags: new[] { "ready" })
             // R1-19: Degraded (still ready) while an audit event is incomplete.
-            .AddCheck<AuditTrailCheck>("audit", tags: new[] { "ready" });
+            .AddCheck<AuditTrailCheck>("audit", tags: new[] { "ready" })
+            // R1-27: Degraded (still ready) while the identity bindings cannot be read.
+            .AddCheck<Whiskers.HealthChecks.IdentityBindingsReadyCheck>("identity-bindings", tags: new[] { "ready" });
         builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
         builder.Services.AddOptions<MetricsSettings>().ValidateInterval(s => s.CollectionIntervalSeconds,
             "Metrics:CollectionIntervalSeconds", IntervalValidation.MinMetricsSeconds, IntervalValidation.MaxMetricsSeconds,
@@ -398,8 +405,10 @@ public static class WhiskersHostingExtensions
         // Startup initializers — the loop after Build() runs each IInitializable's async warm-up in Order,
         // replacing the previously hand-wired InitializeAsync calls. Order values live on the services.
         builder.Services.AddInitializable<Whiskers.Services.Auth.IWhitelistService>();              // 10
+        builder.Services.AddInitializable<Whiskers.Services.Auth.IIdentityBindingStore>();          // 15 (R1-27)
         builder.Services.AddInitializable<Whiskers.Services.Auth.IRoleService>();                   // 20
         builder.Services.AddInitializable<Whiskers.Services.Setup.ISetupStateService>();            // 25 (after roles)
+        builder.Services.AddInitializable<Whiskers.Services.Auth.IdentityBindingStartupPrune>();    // 26 (R1-27, after roles)
         builder.Services.AddInitializable<Whiskers.Services.Notifications.IContainerNotificationPrefsService>(); // 30
         builder.Services.AddInitializable<Whiskers.Services.Vault.IVaultService>();                 // 40
         // R1-34: the pre-upgrade backup, after the vault checked its key and before anything rewrites data in a new format.

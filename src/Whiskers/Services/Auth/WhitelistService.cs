@@ -17,15 +17,23 @@ public class WhitelistService : IWhitelistService, IInitializable
     // round 2: the boundary is shared with the roles and the setup wizard (AccessControlWriteGate).
     private readonly AccessControlWriteGate _gate;
 
+    // R1-27: the identity bindings of addresses that stop being listed are pruned before the write.
+    private readonly IIdentityBindingStore? _bindings;
+
     public WhitelistService(IConfiguration configuration, IRoleService roleService, ILogger<WhitelistService> logger, DataPathOptions? dataPaths = null,
-        AccessControlWriteGate? writeGate = null)
+        AccessControlWriteGate? writeGate = null, IIdentityBindingStore? bindings = null)
     {
         _store = new JsonFileStore<WhitelistData>((dataPaths ?? DataPathOptions.Default).WhitelistJson);
         _configuration = configuration;
         _roles = roleService;
         _logger = logger;
         _gate = writeGate ?? new AccessControlWriteGate();
+        _bindings = bindings;
     }
+
+    /// <summary>The addresses a whitelist makes entries: its list while it is enabled, none otherwise.</summary>
+    private static IEnumerable<string> Listed(WhitelistData data) =>
+        data.Enabled ? data.Emails.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()) : [];
 
     public int Order => 10;
 
@@ -121,9 +129,17 @@ public class WhitelistService : IWhitelistService, IInitializable
             Enabled = data.Enabled,
             Emails = new List<string>(data.Emails)
         };
-        using (await _gate.EnterAsync())
+        using (var lease = await _gate.EnterAsync())
         {
             var before = GetWhitelist();
+            // R1-27 (contract 0003, rule 5): an address that stops being listed loses its identity bindings first, under
+            // the held gate; a failed prune throws and the whitelist stays as it is.
+            // A save that lists a new address prunes first too (contract 0003, amendment c): whatever the bindings hold of an
+            // address that is no entry now goes before it becomes one again.
+            if (_bindings is not null
+                && (Listed(before).Except(Listed(copy), StringComparer.OrdinalIgnoreCase).Any()
+                    || Listed(copy).Except(Listed(before), StringComparer.OrdinalIgnoreCase).Any()))
+                await _bindings.PruneOrphansAsync(lease, nextWhitelist: copy);
             await _store.SaveAsync(copy);
             SetCache(copy);
             Whiskers.Services.Mutations.ConfigChange.Record("whitelist", before, copy);   // R1-22
@@ -144,6 +160,8 @@ public class WhitelistService : IWhitelistService, IInitializable
         if (current.Emails.Contains(email, StringComparer.OrdinalIgnoreCase)) return;
         // Only the address is added; Enabled stays as it is (enabling it would lock out unlisted OIDC users).
         var next = new WhitelistData { Enabled = current.Enabled, Emails = [.. current.Emails, email] };
+        // R1-27 (contract 0003, amendment c): an addition prunes first, under the held gate; a failed prune refuses it.
+        if (_bindings is not null) await _bindings.PruneOrphansAsync(lease, nextWhitelist: next);
         await _store.SaveAsync(next);   // persisted first, published after
         _gate.Demand(lease);
         SetCache(next);
