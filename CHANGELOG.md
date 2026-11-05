@@ -6,6 +6,22 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **New: endpoint checks from the managed host (R1-57).** Under **Checks** (`/checks`) an Admin defines HTTP
+  (status and latency), TCP-connect and TLS-expiry checks that run **on the host** they are bound to, from its side of
+  the network, through the existing host command executor; Whiskers never connects to the target. A name is resolved
+  on the host and every answered address must be public or allowed by an Admin-only exception on the check; at most 4
+  addresses are tried, each run is bounded (1 + 4 calls, timeout × 5 + 10 s, 16 KiB output) and passes only on
+  positive evidence. Every run is one audited `endpointcheck.run` event as the check's owner; a check whose owner is
+  no longer Admin is suspended. A check failing for 5 minutes raises `endpoint_check_failed`, 5 minutes of passing
+  clear it. Results are kept 7 days. All roles can read the page (an HTTP target's query string only for Admins; below
+  Admin, internal addresses in a run's detail and a suspension reason are not shown); the read-only MCP tool
+  `endpoint_checks_list` shows the checks and their last outcome and numbers, never internal addresses or a suspension
+  reason. Alerts show internal addresses as `[internal address]` and never name a suspended check's former owner, in
+  every channel and for every role. "Run now" runs the check as it is stored at that moment, shares the run slots
+  with the background loop, is not offered for a check that is off, and neither moves the loop's schedule nor feeds
+  the alert. **Hosts need `getent`, `curl`, `openssl` and OpenBSD `nc`** — see
+  [docs/operations/endpoint-checks.md](docs/operations/endpoint-checks.md). New tables `EndpointChecks` and
+  `EndpointCheckResults` (migrated automatically on SQLite and PostgreSQL).
 - **New: optional disk-health readings — SMART, md RAID, ZFS (R1-58).** Whiskers can show whether each host's disks
   and arrays are healthy, read only from the host's existing metrics endpoint (node_exporter through VictoriaMetrics).
   It never runs anything on the host. Off by default; an Admin switches it on in Settings → *Disk health (SMART, RAID,

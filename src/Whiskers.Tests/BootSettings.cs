@@ -87,6 +87,7 @@ internal sealed class BootSettings : IDisposable
         AssertAuthenticationSetup(services,
             disabled: given.TryGetValue("Auth:Disabled", out var auth) && auth is not null && bool.Parse(auth));
         AssertSessionRevocationWiring(services, registry.IsEnabled("agent"));
+        AssertEndpointCheckSlotsShared(services);
         // R1-25: every logger of the booted app writes through the redaction.
         Assert.IsType<Whiskers.Utils.RedactingLoggerFactory>(
             services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>());
@@ -131,6 +132,19 @@ internal sealed class BootSettings : IDisposable
                 services.GetRequiredService<Whiskers.Services.Agent.IAgentService>());
             Assert.True(agent.RevalidatesAuthority, "Agent sessions were built without IAgentAuthority.");
         }
+    }
+
+    /// <summary>R1-57 review n6: the endpoint-check monitor and the /checks page ("Run now", resolved per circuit scope)
+    /// take the same run slots — one singleton. Separate instances would let both run the same check at once and break
+    /// the limits of decision 5.</summary>
+    public static void AssertEndpointCheckSlotsShared(IServiceProvider services)
+    {
+        var slots = services.GetRequiredService<Whiskers.Services.EndpointChecks.IEndpointCheckSlots>();
+        using (var scope = services.CreateScope())
+            Assert.Same(slots, scope.ServiceProvider.GetRequiredService<Whiskers.Services.EndpointChecks.IEndpointCheckSlots>());
+        var monitor = Assert.Single(services.GetServices<Microsoft.Extensions.Hosting.IHostedService>()
+            .OfType<Whiskers.Services.EndpointChecks.EndpointCheckMonitor>());
+        Assert.Same(slots, monitor.Slots);
     }
 
     /// <summary>Asserts which authentication setup the booted app registered. The two branches of

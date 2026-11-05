@@ -147,6 +147,7 @@ public static class McpPermissionLevels
         ["get_log_hygiene_report"] = Read,   // Plan-0007 WP-MCP — no write counterpart, by design
         ["get_action_outcomes"] = Read,       // Plan-0006 WP-MCP — no counterpart that clears the record
         ["get_host_load"] = Read,             // Plan-0004 WP-MCP — no threshold-setting counterpart, by design
+        ["endpoint_checks_list"] = Read,      // R1-57 — read only; checks are defined by an Admin in the UI
         ["get_whiskers_self_status"] = Read,   // Plan-0003 WP-MCP — no write counterpart: an agent that
         // could reset these counters could erase the evidence that something has been broken for a week
         ["list_paused_servers"] = Read,
@@ -280,6 +281,7 @@ public static class McpPermissionLevels
         ["get_log_hygiene_report"] = "Logs",
         ["get_action_outcomes"] = "Überwachung",
         ["get_host_load"] = "Überwachung",
+        ["endpoint_checks_list"] = "Überwachung",
         ["get_whiskers_self_status"] = "Überwachung",
         ["list_paused_servers"] = "Überwachung",
         ["pause_server_checks"] = "Überwachung",

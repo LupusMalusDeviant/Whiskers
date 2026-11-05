@@ -23,7 +23,7 @@ public class NavLayoutTests
         var overview = NavLayout.Grouped(Nav).Single(g => g.Name == "Übersicht");
         Assert.Equal(
             // "cves"/"logs" now live in the Cve/LogMonitor modules, not the pseudo-module fixture (RoadToSAP Phase 1).
-            new[] { "", "health", "self-status", "graph", "diff", "notifications", "audit-log" },
+            new[] { "", "health", "self-status", "checks", "graph", "diff", "notifications", "audit-log" },
             overview.Items.Select(i => i.Href).ToArray());
     }
 

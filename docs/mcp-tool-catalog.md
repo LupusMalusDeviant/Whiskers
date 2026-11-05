@@ -29,6 +29,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `deploy_compose` | admin | Deploy an application using a docker-compose.yml content string. Creates and starts all services defined in the compose file. |
 | `detect_database` | read | Detect the database type of a container. Returns the database engine (PostgreSQL, MySQL, MongoDB, Redis, Neo4j) or 'None'. |
 | `disconnect_container_from_network` | admin | Disconnect a container from a Docker network. |
+| `endpoint_checks_list` | read | List the endpoint checks (HTTP status, TCP connect, TLS certificate expiry) that run from the managed hosts, with each check's last result. Use it to see which services a host cannot reach or whose certificate is about to expire. Read-only; checks are defined by an Admin in the UI. |
 | `execute_command` | admin | Execute a shell command on a server. Use with caution. |
 | `execute_query` | admin | Execute a SQL query or database command and return the results. |
 | `get_action_outcomes` | read | Report whether Whiskers' automatic actions actually worked: per action kind, how many were effective, how many changed nothing, and how many could not be measured at all. Read this before repeating an action — a kind with a poor hit rate is one where the cause probably lies elsewhere. A high 'not measurable' count means the checking itself has broken down, which is NOT the same as things being fine. Read-only. |
@@ -161,7 +162,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 
 | Level | Tools |
 |---|---|
-| read | 46 |
+| read | 47 |
 | write | 14 |
 | admin | 31 |
-| **total** | **91** |
+| **total** | **92** |

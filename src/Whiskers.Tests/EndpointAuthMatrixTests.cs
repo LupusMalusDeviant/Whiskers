@@ -152,6 +152,7 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
         ["GET,POST /nginx/{ServerId}"] = new(Access.SignedIn),
         ["GET,POST /notifications"] = new(Access.SignedIn),
         ["GET,POST /self-status"] = new(Access.SignedIn),
+        ["GET,POST /checks"] = new(Access.SignedIn),
         ["GET,POST /server-terminal/{ServerId}"] = new(Access.SignedIn),
         ["GET,POST /servers"] = new(Access.SignedIn),
         ["GET,POST /services/{ServerId}"] = new(Access.SignedIn),

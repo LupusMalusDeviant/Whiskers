@@ -8,6 +8,7 @@
 @inject Whiskers.Services.ImageUpdate.IImageUpdateStore ImageUpdateStore
 @inject Whiskers.Services.AutoUpdate.IAutoUpdateService AutoUpdate
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
+@inject Whiskers.Services.EndpointChecks.IEndpointCheckStore EndpointChecks
 @inject IMetricsQueryService MetricsQuery
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject IUiMutationRunner Mutations
@@ -202,6 +203,17 @@
             <span class="sw-pulse-dot sw-green" style="@(GetServerReachable(serverGroup.ServerId) ? "" : "background: var(--sw-accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.5);")"></span>
             <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
             <MudText Typo="Typo.h6" Style="font-weight: 600;">@serverGroup.ServerName</MudText>
+            @* R1-57: failing endpoint checks of this server, whatever its own state — a check fails exactly when
+               something is wrong, so it is shown for an unreachable server too. *@
+            @if (_failingChecks.TryGetValue(serverGroup.ServerId, out var failingChecks) && failingChecks > 0)
+            {
+                <MudLink Href="@($"checks?server={Uri.EscapeDataString(serverGroup.ServerId)}&failing=true")"
+                         Underline="Underline.None" @onclick:stopPropagation="true">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Icon="@Icons.Material.Filled.NetworkCheck" Class="ml-2">
+                        @L["Dashboard_FailingChecks", failingChecks]
+                    </MudChip>
+                </MudLink>
+            }
             @if (_k8sServerIds.Contains(serverGroup.ServerId))
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined"
@@ -678,8 +690,29 @@
         }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
 
+    /// <summary>R1-57: failing endpoint checks per server (enabled checks whose last run did not pass).</summary>
+    private IReadOnlyDictionary<string, int> _failingChecks = new Dictionary<string, int>();
+
+    private void LoadFailingChecks()
+    {
+        try
+        {
+            var last = EndpointChecks.LastResults();
+            _failingChecks = EndpointChecks.List()
+                .Where(c => c.Enabled && last.TryGetValue(c.Id, out var r) && r.Outcome != Whiskers.Models.EndpointCheckOutcome.Passed)
+                .GroupBy(c => c.ServerId)
+                .ToDictionary(g => g.Key, g => g.Count());
+        }
+        catch (Exception ex)
+        {
+            // The count is a pointer, not the checks themselves: the page renders without it.
+            _logger?.LogWarning(ex, "Counting failing endpoint checks failed");
+        }
+    }
+
     private async Task LoadContainerList()
     {
+        LoadFailingChecks();
         try
         {
             var containers = await DockerService.ListAllContainersAsync();
