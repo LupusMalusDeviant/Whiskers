@@ -134,7 +134,7 @@ public interface IEndpointCheckSlots            // decision 5, shared by the mon
 ### Run
 
 Each run follows R1-57's three steps, inside **one** `IAutomationMutationRunner.RunAsync(actor, "endpointcheck.run",
-new { check = id, server = serverId }, ...)`. That makes it one gateway event with its own operation id.
+new { serverId, checkId }, ...)` (A7). That makes it one gateway event with its own operation id.
 
 1. Re-validate the definition against the current server. A failure is `Refused` and nothing runs.
 2. For a name, run `getent ahosts '<name>'` on the host. An IP literal skips this step.
@@ -262,6 +262,10 @@ the contract already required, or makes an accepted rule enforceable.
 - **A6 `IEndpointCheckSlots`.** Decision 5 (at most 4 runs in flight, 1 per server) now holds on every path, with one
   extra rule: a check never runs twice at once. The monitor and "Run now" take the same slot. When no slot is free,
   "Run now" answers "busy" and does not wait.
+- **A7 gateway arguments `new { serverId, checkId }`** (added 5 November 2026, review round 2; awaiting acceptance).
+  The Run section first named them `new { check = id, server = serverId }`. The gateway resolves the `server` target of
+  `endpointcheck.run` (and of `save` and `delete`) from the argument `serverId`, so every path — monitor, "Run now",
+  save, delete and the refusals — passes `serverId` and `checkId`.
 
 ## Decisions for the maintainer
 

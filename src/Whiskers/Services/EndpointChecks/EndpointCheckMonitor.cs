@@ -41,7 +41,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
 
     public EndpointCheckMonitor(IEndpointCheckStore store, IEndpointCheckRunner runner, IAutomationMutationRunner automation,
         IServerConfigService servers, INotificationService notify, ILogger<EndpointCheckMonitor> logger,
-        DataPathOptions? paths = null, TimeProvider? time = null, IEndpointCheckSlots? slots = null)
+        IEndpointCheckSlots slots, DataPathOptions? paths = null, TimeProvider? time = null)
     {
         _store = store;
         _runner = runner;
@@ -50,13 +50,17 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         _notify = notify;
         _logger = logger;
         _time = time ?? TimeProvider.System;
-        _slots = slots ?? new EndpointCheckSlots();
+        // Review n6: required — a private instance would let "Run now" and the monitor run the same check at once.
+        _slots = slots ?? throw new ArgumentNullException(nameof(slots));
         _breachFile = paths is null ? null : new JsonFileStore<EndpointCheckBreachFile>(paths.EndpointCheckBreachesJson,
             problem: f => f.Breaches is null || f.Breaches.Any(b => b is null) ? "the list of breaches is missing or holds an empty entry" : null);
     }
 
     /// <summary>The rules of <c>endpoint_check_failed</c>: open after 5 minutes of failing runs (two at least — one
     /// reading has no duration), clear after 5 minutes of passing ones. Value 1 = failed or refused, 0 = passed.</summary>
+    /// <summary>The run slots this monitor takes (the boot test checks they are the app's single shared instance).</summary>
+    internal IEndpointCheckSlots Slots => _slots;
+
     public static BreachRules RulesFor(int intervalSeconds) =>
         new(OpenAfter, 0.5, ClearAfter, double.PositiveInfinity,
             BreachRules.GapToleranceFor(TimeSpan.FromSeconds(intervalSeconds)), TimeSpan.Zero);

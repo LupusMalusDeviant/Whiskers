@@ -149,7 +149,7 @@ else
                 else
                 {
                     <MudChip T="string" Size="Size.Small" Color="@OutcomeColor(result.Outcome)">@OutcomeLabel(result.Outcome)</MudChip>
-                    <MudText Typo="Typo.caption">@result.AtUtc.ToLocalTime().ToString("g") — @result.Detail</MudText>
+                    <MudText Typo="Typo.caption">@result.AtUtc.ToLocalTime().ToString("g") — @DisplayDetail(result.Detail, _role)</MudText>
                 }
             </MudTd>
             <MudTd>@(result?.LatencyMs is { } ms ? $"{ms} ms" : "—")</MudTd>
@@ -157,8 +157,9 @@ else
             <MudTd>
                 @if (_role >= AppRole.Admin)
                 {
+                    @* Review n1: a switched-off or suspended check has nothing to run. *@
                     <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" title="@L["Checks_Button_RunNow"]"
-                                   Disabled="_busy" OnClick="() => RunNowAsync(context)" />
+                                   Class="sw-check-run-now" Disabled="@(_busy || !context.Enabled)" OnClick="() => RunNowAsync(context)" />
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="@L["Checks_Button_Edit"]"
                                    OnClick="() => Edit(context)" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" title="@L["Checks_Button_Delete"]"
@@ -248,6 +249,11 @@ else
         }
         return Whiskers.Utils.SecretRedactor.Redact($"{target}:{c.Port}");
     }
+
+    /// <summary>Review n4: a run's detail as the table shows it. It names the addresses the host resolved — for an
+    /// excepted target internal ones — so below Admin every address in a denied range (R1-54) is masked.</summary>
+    internal static string DisplayDetail(string? detail, AppRole role) =>
+        role >= AppRole.Admin ? detail ?? "" : EndpointCheckRunner.MaskInternalAddresses(detail);
 
     private string KindLabel(EndpointCheckKind kind) => kind switch
     {
@@ -356,7 +362,9 @@ else
             // Review M1: only the id; the runner reads the check as it is stored now, inside the decision.
             var checkId = c.Id;
             var run = await Mutations.RunAsync("endpointcheck.run", arguments, ct => Runner.RunInDecisionAsync(checkId, ct));
-            await Store.RecordAsync(run);
+            // Review n1: a check that is gone or off ran nothing and leaves no result. Review n2: a recorded "Run now"
+            // result does not move the monitor's schedule (the run is marked OnDemand).
+            if (!run.NothingRan) await Store.RecordAsync(run);
             Snackbar.Add($"{OutcomeLabel(run.Outcome)}: {run.Detail}",
                 run.Outcome == EndpointCheckOutcome.Passed ? Severity.Success : Severity.Warning);
             Reload();

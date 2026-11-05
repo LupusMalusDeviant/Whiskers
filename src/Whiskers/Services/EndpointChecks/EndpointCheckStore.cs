@@ -27,7 +27,9 @@ public interface IEndpointCheckStore
     /// <paramref name="expectedOwnerId"/> and is on. False when an Admin took it over meanwhile, or it is gone.</summary>
     Task<bool> SuspendAsync(string id, string expectedOwnerId, string reason, CancellationToken ct = default);
 
-    /// <summary>Records one run and the check's last outcome; nothing when the check no longer exists.</summary>
+    /// <summary>Records one run and the check's last outcome; nothing when the check no longer exists or nothing ran
+    /// (<see cref="EndpointCheckRun.NothingRan"/>). Only a monitor run moves the schedule (<c>LastRunUtc</c>); a
+    /// "Run now" result (<see cref="EndpointCheckRun.OnDemand"/>) does not.</summary>
     Task RecordAsync(EndpointCheckRun run, CancellationToken ct = default);
 
     /// <summary>The latest results of a check, newest first.</summary>
@@ -141,6 +143,8 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
     public async Task RecordAsync(EndpointCheckRun run, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(run);
+        // Review n1: "Run now" of a check that is gone or off ran nothing; there is nothing to record.
+        if (run.NothingRan) return;
         using var scope = _scopes.CreateScope();
         var db = Db(scope);
         // Review m8: a check deleted while it ran leaves no result behind (there is no foreign key to clean it up, and
@@ -161,8 +165,15 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
             AddressesNotTried = run.AddressesNotTried,
         });
         await db.SaveChangesAsync(ct);
-        await db.EndpointChecks.Where(c => c.Id == run.CheckId)
-            .ExecuteUpdateAsync(s => s.SetProperty(c => c.LastRunUtc, run.AtUtc).SetProperty(c => c.LastOutcome, run.Outcome), ct);
+        // Review n2: LastRunUtc is the monitor's schedule. A "Run now" result does not move it — otherwise repeated
+        // clicks would keep the check from ever being due, the alert would get no readings, and its gap rule would close
+        // an open endpoint_check_failed as unconfirmed.
+        if (run.OnDemand)
+            await db.EndpointChecks.Where(c => c.Id == run.CheckId)
+                .ExecuteUpdateAsync(s => s.SetProperty(c => c.LastOutcome, run.Outcome), ct);
+        else
+            await db.EndpointChecks.Where(c => c.Id == run.CheckId)
+                .ExecuteUpdateAsync(s => s.SetProperty(c => c.LastRunUtc, run.AtUtc).SetProperty(c => c.LastOutcome, run.Outcome), ct);
     }
 
     public IReadOnlyList<EndpointCheckResultEntity> Results(string checkId, int take = 50)

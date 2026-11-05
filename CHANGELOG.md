@@ -13,9 +13,11 @@ All notable changes to Whiskers are documented here. The format follows
   addresses are tried, each run is bounded (1 + 4 calls, timeout × 5 + 10 s, 16 KiB output) and passes only on
   positive evidence. Every run is one audited `endpointcheck.run` event as the check's owner; a check whose owner is
   no longer Admin is suspended. A check failing for 5 minutes raises `endpoint_check_failed`, 5 minutes of passing
-  clear it. Results are kept 7 days. All roles can read the page (an HTTP target's query string only for Admins); the read-only MCP tool
-  `endpoint_checks_list` shows the checks and their last outcome and numbers, never internal addresses. "Run now" runs
-  the check as it is stored at that moment and shares the run slots with the background loop. **Hosts need `getent`, `curl`, `openssl` and OpenBSD `nc`** — see
+  clear it. Results are kept 7 days. All roles can read the page (an HTTP target's query string only for Admins; below
+  Admin, internal addresses in a run's detail are masked); the read-only MCP tool
+  `endpoint_checks_list` shows the checks and their last outcome and numbers, never internal addresses or a suspension
+  reason. "Run now" runs the check as it is stored at that moment, shares the run slots with the background loop, is
+  not offered for a check that is off, and neither moves the loop's schedule nor feeds the alert. **Hosts need `getent`, `curl`, `openssl` and OpenBSD `nc`** — see
   [docs/operations/endpoint-checks.md](docs/operations/endpoint-checks.md). New tables `EndpointChecks` and
   `EndpointCheckResults` (migrated automatically on SQLite and PostgreSQL).
 - **New: optional disk-health readings — SMART, md RAID, ZFS (R1-58).** Whiskers can show whether each host's disks

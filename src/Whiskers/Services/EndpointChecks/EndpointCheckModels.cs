@@ -112,4 +112,14 @@ public sealed record EndpointCheckRun(
     DateTime? TlsNotAfterUtc = null,
     string? AnsweredAddress = null,
     int AddressesTried = 0,
-    int AddressesNotTried = 0);
+    int AddressesNotTried = 0)
+{
+    /// <summary>Review n2: a "Run now" result. It is recorded (history, last outcome) but does not move the check's
+    /// schedule (<c>LastRunUtc</c>): the monitor keeps sampling at its interval, so clicks cannot starve the alert of
+    /// readings until its gap rule closes it as unconfirmed.</summary>
+    public bool OnDemand { get; init; }
+
+    /// <summary>Review n1: nothing ran because the check is gone or switched off (suspended included) — a no-op answer
+    /// to "Run now", never recorded. A check that no longer validates is a real refusal and is recorded.</summary>
+    public bool NothingRan { get; init; }
+}

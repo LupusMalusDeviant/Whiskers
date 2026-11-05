@@ -329,6 +329,42 @@ public sealed class EndpointCheckGatingTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_now_of_a_switched_off_or_suspended_check_leaves_no_result_but_a_refusal_that_no_longer_validates_does()
+    {
+        // Review n1: the no-op answer for a check that is off (suspended included) is not a run and is not recorded —
+        // also when a page records whatever it got back, as it did before the fix.
+        var (runner, host, _) = RunFixture();
+        var store = Store();
+        var ui = Ui();
+        var off = await Save(ui, store, Draft(EndpointCheckKind.Tcp, "93.184.215.14", 443) with { Enabled = false });
+        var suspended = await Save(ui, store, Draft(EndpointCheckKind.Tcp, "93.184.215.14", 444));
+        Assert.True(await RawStore().SuspendAsync(suspended.Id, AdminId, "Suspended: the owner lost the Admin role."));
+
+        foreach (var check in new[] { off, suspended })
+        {
+            var run = await ui.RunAsync("endpointcheck.run", new { serverId = check.ServerId, checkId = check.Id },
+                ct => runner.RunInDecisionAsync(check.Id, ct));
+            await RawStore().RecordAsync(run);
+
+            Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
+            Assert.True(run.NothingRan);
+            Assert.Empty(RawStore().Results(check.Id));
+            Assert.Null(RawStore().Get(check.Id)!.LastOutcome);
+        }
+        Assert.Empty(host.Calls);
+
+        // A check that is on but no longer passes is a real refusal: recorded.
+        var invalid = await Save(ui, store, Internal());
+        await Save(ui, store, Internal(invalid.Id, withException: false));
+        var refused = await ui.RunAsync("endpointcheck.run", new { serverId = invalid.ServerId, checkId = invalid.Id },
+            ct => runner.RunInDecisionAsync(invalid.Id, ct));
+        await RawStore().RecordAsync(refused);
+        Assert.False(refused.NothingRan);
+        Assert.Equal(EndpointCheckOutcome.Refused, Assert.Single(RawStore().Results(invalid.Id)).Outcome);
+        Assert.Empty(host.Calls);
+    }
+
+    [Fact]
     public async Task Run_now_runs_the_stored_check_inside_the_ui_decision_and_records_its_operation_id()
     {
         // Review T1/m2: one audited UI event; every probe inside it; the result carries its operation id.
@@ -352,6 +388,10 @@ public sealed class EndpointCheckGatingTests : IDisposable
             Assert.Equal(run.OperationId, c.OperationId);
         });
         Assert.Equal(run.OperationId, Assert.Single(RawStore().Results(check.Id)).OperationId);
+        // Review n2: recorded as the last outcome, but the monitor's schedule is not moved.
+        Assert.True(run.OnDemand);
+        Assert.Equal(EndpointCheckOutcome.Passed, RawStore().Get(check.Id)!.LastOutcome);
+        Assert.Null(RawStore().Get(check.Id)!.LastRunUtc);
     }
 
     [Fact]
@@ -378,7 +418,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
             await scope.ServiceProvider.GetRequiredService<Whiskers.Services.Persistence.MetricsDbContext>().EndpointChecks
                 .Where(c => c.Id == check.Id).ExecuteUpdateAsync(s => s.SetProperty(c => c.OwnerId, ""));
         var monitor = new EndpointCheckMonitor(RawStore(), runner, fixture.Runner, _servers, new FakeNotifications(),
-            NullLogger<EndpointCheckMonitor>.Instance);
+            NullLogger<EndpointCheckMonitor>.Instance, new EndpointCheckSlots());
 
         await monitor.CycleAsync(CancellationToken.None);
         await SettleAsync(monitor);
@@ -397,7 +437,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         var store = Store();
         var check = await Save(Ui(), store, Draft(EndpointCheckKind.Tcp, "example.com", 443));
         var monitor = new EndpointCheckMonitor(RawStore(), runner, fixture.Runner, _servers, notes,
-            NullLogger<EndpointCheckMonitor>.Instance);
+            NullLogger<EndpointCheckMonitor>.Instance, new EndpointCheckSlots());
 
         fixture.Roles.Map[Admin] = AppRole.Operator;
         await monitor.CycleAsync(CancellationToken.None);
@@ -427,7 +467,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         var store = Store();
         var check = await Save(Ui(), store, Draft(EndpointCheckKind.Tcp, "example.com", 443));
         var monitor = new EndpointCheckMonitor(RawStore(), runner, fixture.Runner, _servers, new FakeNotifications(),
-            NullLogger<EndpointCheckMonitor>.Instance);
+            NullLogger<EndpointCheckMonitor>.Instance, new EndpointCheckSlots());
 
         await monitor.CycleAsync(CancellationToken.None);
         await SettleAsync(monitor);

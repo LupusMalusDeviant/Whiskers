@@ -33,8 +33,8 @@ public sealed class EndpointCheckTests : IDisposable
     private static readonly IPAddress Public6 = IPAddress.Parse("2606:4700::1111");
 
     /// <summary>A runner whose decision is already open (as "Run now" holds it): the probe logic alone.</summary>
-    private EndpointCheckRunner Runner(Host host) =>
-        new(AutomationMutationRunnerTests.Build().Runner, host, _servers, new EndpointCheckStore(_db.Scopes, _servers));
+    private EndpointCheckRunner Runner(Host host, TimeProvider? time = null) =>
+        new(AutomationMutationRunnerTests.Build().Runner, host, _servers, new EndpointCheckStore(_db.Scopes, _servers), time);
 
     private static IReadOnlyList<string> Errors(EndpointCheckDraft draft) => EndpointCheckValidator.Validate(draft, SshServer());
 
@@ -770,30 +770,64 @@ public sealed class EndpointCheckTests : IDisposable
     {
         // The host honours each call's timeout (as every transport does, #140) but never answers within it. Each call gets
         // the check's timeout + 2 s (review n1: the tool's own limit ends first); five such calls are exactly the run
-        // deadline, so even the worst case of every call running to its end stays inside it.
+        // deadline, so even the worst case of every call — the resolve included — running to its end stays inside it.
+        // The clock is the test's: each call moves it by its whole timeout instead of waiting for it.
+        var time = new ManualTime();
+        var start = time.GetUtcNow();
         var host = new Host
         {
-            Answer = async (command, timeout, ct) =>
+            Answer = (command, timeout, _) =>
             {
-                if (command.Contains("getent", StringComparison.Ordinal))
-                    return new CommandResult { Output = Getent("93.184.215.1", "93.184.215.2", "93.184.215.3", "93.184.215.4", "93.184.215.5") };
-                await Task.Delay(timeout!.Value, ct);
-                return new CommandResult { ExitCode = -1, Error = "Command timed out" };
+                time.Advance(timeout!.Value);
+                return Task.FromResult(command.Contains("getent", StringComparison.Ordinal)
+                    ? new CommandResult { Output = Getent("93.184.215.1", "93.184.215.2", "93.184.215.3", "93.184.215.4", "93.184.215.5") }
+                    : new CommandResult { ExitCode = -1, Error = "Command timed out" });
             },
         };
-        var watch = Stopwatch.StartNew();
 
-        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443, timeout: 1),
+        var run = await Runner(host, time).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443, timeout: 1),
             CancellationToken.None);
 
-        watch.Stop();
         Assert.Equal(EndpointCheckOutcome.Failed, run.Outcome);
         Assert.Equal(5, host.Calls.Count);
         Assert.All(host.Calls, c => Assert.Equal(TimeSpan.FromSeconds(3), c.Timeout));
         Assert.Equal(EndpointCheckValidator.RunDeadline(1), EndpointCheckRunner.AttemptTimeout(1) * 5);
         Assert.Equal(EndpointCheckValidator.RunDeadline(30), EndpointCheckRunner.AttemptTimeout(30) * 5);
-        Assert.True(watch.Elapsed < EndpointCheckValidator.RunDeadline(1), $"took {watch.Elapsed}");
+        Assert.Equal(EndpointCheckValidator.RunDeadline(1), time.GetUtcNow() - start);
         Assert.Contains("timed out", run.Detail);
+        Assert.Equal(4, run.AddressesTried);
+    }
+
+    [Fact]
+    public async Task An_attempt_that_cannot_finish_inside_the_run_deadline_is_not_started()
+    {
+        // Review n3: the calls take longer than their timeout (a slow transport). Before each attempt the runner asks
+        // whether a whole attempt still fits; when it does not, the run ends there and says why, instead of the deadline
+        // cutting a probe off mid-flight. Timeout 1 s: attempts of 3 s, a deadline of 15 s; resolve 3 s, probes 3.5 s
+        // each — after three probes (13 s) only 2 s are left.
+        var time = new ManualTime();
+        var host = new Host
+        {
+            Answer = (command, _, _) =>
+            {
+                var resolve = command.Contains("getent", StringComparison.Ordinal);
+                time.Advance(TimeSpan.FromSeconds(resolve ? 3 : 3.5));
+                return Task.FromResult(resolve
+                    ? new CommandResult { Output = Getent("93.184.215.1", "93.184.215.2", "93.184.215.3", "93.184.215.4", "93.184.215.5") }
+                    : new CommandResult { ExitCode = -1, Error = "Command timed out" });
+            },
+        };
+
+        var run = await Runner(host, time).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443, timeout: 1),
+            CancellationToken.None);
+
+        Assert.Equal(EndpointCheckOutcome.Failed, run.Outcome);
+        Assert.Equal(4, host.Calls.Count);                       // the resolve and three probes; the fourth never started
+        Assert.Contains("Run deadline reached after 3 addresses", run.Detail);
+        Assert.Contains("93.184.215.3", run.Detail);              // the last attempt's answer is kept
+        Assert.Equal(3, run.AddressesTried);
+        Assert.Equal(2, run.AddressesNotTried);
+        Assert.Null(run.AnsweredAddress);
     }
 
     [Fact]
@@ -922,7 +956,7 @@ public sealed class EndpointCheckTests : IDisposable
         var store = new EndpointCheckStore(_db.Scopes, _servers, time);
         var notes = new FakeNotifications();
         var monitor = new EndpointCheckMonitor(store, runner, fixture.Runner, _servers, notes,
-            NullLogger<EndpointCheckMonitor>.Instance, time: time);
+            NullLogger<EndpointCheckMonitor>.Instance, new EndpointCheckSlots(), time: time);
         return (monitor, store, notes);
     }
 
@@ -1053,7 +1087,7 @@ public sealed class EndpointCheckTests : IDisposable
         fixture.Roles.Map[Admin] = AppRole.Admin;
         var store = new EndpointCheckStore(_db.Scopes, _servers, time);
         var monitor = new EndpointCheckMonitor(store, runner, fixture.Runner, _servers, new FakeNotifications(),
-            NullLogger<EndpointCheckMonitor>.Instance, time: time, slots: slots);
+            NullLogger<EndpointCheckMonitor>.Instance, slots, time: time);
         var slow = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443, serverId: "web", name: "slow"), AdminId, default);
         var sameServer = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 444, serverId: "web", name: "same"), AdminId, default);
         var other = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443, serverId: "db", name: "other"), AdminId, default);
@@ -1133,6 +1167,60 @@ public sealed class EndpointCheckTests : IDisposable
         Assert.DoesNotContain("abc123secret", Whiskers.Components.Pages.EndpointChecks.DisplayTarget(check, AppRole.Admin));
         Assert.Equal("db.lan:5432",
             Whiskers.Components.Pages.EndpointChecks.DisplayTarget(Definition(EndpointCheckKind.Tcp, "db.lan", 5432), AppRole.Viewer));
+    }
+
+    [Theory]
+    [InlineData("10.0.0.5: TCP connect succeeded", "[internal address]: TCP connect succeeded")]
+    [InlineData("fd00::1: TCP connect succeeded", "[internal address]: TCP connect succeeded")]
+    [InlineData("::ffff:192.168.1.10: HTTP 200 in 12 ms", "[internal address]: HTTP 200 in 12 ms")]
+    [InlineData("10.0.0.5 (= 10.0.0.5) (private) is an internal address; an Admin can allow it with an exception for db.lan:5432.",
+        "[internal address] (= [internal address]) (private) is an internal address; an Admin can allow it with an exception for db.lan:5432.")]
+    [InlineData("No address answered (127.0.0.1: connection refused).", "No address answered ([internal address]: connection refused).")]
+    [InlineData("an exception for 10.0.0.5:5432.", "an exception for [internal address]:5432.")]
+    [InlineData("[fe80::1]:443 refused", "[[internal address]]:443 refused")]
+    [InlineData("93.184.215.14: HTTP 200 in 0.123 s", "93.184.215.14: HTTP 200 in 0.123 s")]
+    [InlineData("2606:4700::1111: TCP connect succeeded", "2606:4700::1111: TCP connect succeeded")]
+    [InlineData("openssl 3.0.13 at 12:30, version 1.2.3.4.5", "openssl 3.0.13 at 12:30, version 1.2.3.4.5")]
+    public void Internal_addresses_in_a_detail_are_masked_public_ones_and_numbers_are_kept(string detail, string masked)
+    {
+        Assert.Equal(masked, EndpointCheckRunner.MaskInternalAddresses(detail));
+    }
+
+    [Fact]
+    public void The_page_masks_internal_addresses_in_the_detail_below_admin()
+    {
+        // Review n4: the run's detail names the resolved addresses; for an excepted target those are internal ones.
+        const string detail = "10.0.0.5: TCP connect succeeded";
+        foreach (var role in new[] { AppRole.Viewer, AppRole.Operator })
+        {
+            var shown = Whiskers.Components.Pages.EndpointChecks.DisplayDetail(detail, role);
+            Assert.DoesNotContain("10.0.0.5", shown);
+            Assert.Contains("[internal address]", shown);
+        }
+        Assert.Equal(detail, Whiskers.Components.Pages.EndpointChecks.DisplayDetail(detail, AppRole.Admin));
+    }
+
+    [Fact]
+    public async Task The_mcp_list_says_suspended_without_the_reason_or_the_former_owner()
+    {
+        // Review n5: the suspension reason names the former owner's principal id (user:<email>).
+        var store = new EndpointCheckStore(_db.Scopes, _servers);
+        var check = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443), AdminId, default);
+        Assert.True(await store.SuspendAsync(check.Id, AdminId,
+            $"Suspended: the owner {AdminId} ({Admin}) no longer has the Admin role. An Admin can take it over by saving it again."));
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(
+                new System.Security.Claims.ClaimsIdentity([], Whiskers.Services.Auth.AuthConstants.AuthDisabledScheme)),
+        };
+
+        var output = Whiskers.Mcp.Tools.EndpointCheckTools.EndpointChecksList(
+            new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = http }, null!, store, _servers);
+
+        Assert.Contains(": suspended", output);
+        Assert.DoesNotContain("user:", output);
+        Assert.DoesNotContain(Admin, output);
+        Assert.DoesNotContain("@", output);
     }
 
     // ------------------------------------------------------------------------------------------------ orphans (review m8)
@@ -1249,5 +1337,49 @@ public sealed class EndpointCheckTests : IDisposable
         await Minutes(6);
         Assert.Single(notes.Events, e => e.EventType == NotificationEventTypes.Recovered(NotificationEventTypes.EndpointCheckFailed));
         Assert.Equal(12, runner.Ran.Count);
+    }
+
+    [Fact]
+    public async Task Run_now_clicks_do_not_starve_the_monitor_and_an_open_alert_is_not_closed_by_them()
+    {
+        // Review n2: a "Run now" result is recorded but never reaches the alert. If it moved the schedule, clicks every
+        // 30 s would keep the check from ever being due; the alert would get no reading for ten minutes and the gap rule
+        // would close it as unconfirmed on the next monitor run, although the target never stopped failing.
+        var time = new ManualTime();
+        var runner = new ScriptedRunner(time) { Outcome = _ => EndpointCheckOutcome.Failed };
+        var (monitor, store, notes) = Monitor(runner, time);
+        var check = await store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443), AdminId, default);
+
+        async Task Cycle()
+        {
+            await monitor.CycleAsync(CancellationToken.None);
+            await SettleAsync(monitor);
+        }
+
+        for (var i = 0; i < 6; i++)
+        {
+            await Cycle();
+            time.Advance(TimeSpan.FromSeconds(60));
+        }
+        Assert.Single(notes.Events, e => e.EventType == NotificationEventTypes.EndpointCheckFailed);
+        var monitorRuns = runner.Ran.Count;
+
+        for (var i = 0; i < 20; i++)
+        {
+            var scheduled = store.Get(check.Id)!.LastRunUtc;
+            await store.RecordAsync(new EndpointCheckRun(check.Id, time.GetUtcNow().UtcDateTime, EndpointCheckOutcome.Failed,
+                "clicked") { OnDemand = true });
+            Assert.Equal(scheduled, store.Get(check.Id)!.LastRunUtc);       // the schedule stays
+            time.Advance(TimeSpan.FromSeconds(30));
+            await Cycle();
+        }
+        time.Advance(TimeSpan.FromSeconds(60));
+        await Cycle();
+
+        Assert.True(runner.Ran.Count - monitorRuns >= 10, $"the monitor ran {runner.Ran.Count - monitorRuns} times");
+        Assert.Equal(20, store.Results(check.Id, 500).Count(r => r.Detail == "clicked"));   // the clicks are recorded
+        Assert.DoesNotContain(notes.Events, e => e.RecoveryUnconfirmed
+            || e.EventType == NotificationEventTypes.Recovered(NotificationEventTypes.EndpointCheckFailed));
+        Assert.Single(notes.Events, e => e.EventType == NotificationEventTypes.EndpointCheckFailed);
     }
 }

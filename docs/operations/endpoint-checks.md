@@ -13,7 +13,9 @@ and certificate expiry, and the Dashboard shows each server's number of failing 
 `endpoint_checks_list` shows the checks and their last result as outcome, time, latency, HTTP status and certificate
 expiry only — not the run's detail line, which names the address that answered — and the number of internal-target
 exceptions, not their addresses. There is no MCP tool that writes a check. The page shows an HTTP target's query string
-(`?…`) to Admins only, and redacts secrets in every target.
+(`?…`) to Admins only, and redacts secrets in every target. A run's detail line names the addresses the host resolved;
+below Admin, every address in a denied range (the R1-54 list below) is shown as `[internal address]`, public addresses
+stay. For a suspended check the MCP tool says only `suspended`, without the reason (which names the former owner).
 
 ## Required tools on each host
 
@@ -89,7 +91,7 @@ An exception matches only the exact name or literal, port and address. Ranges, w
 |---|---|
 | Executor calls per run | at most 1 + 4 (one `getent`, at most four probes) |
 | One attempt | the tool's own limit is the check's timeout, 1–30 s (default 10 s: `curl --max-time`, `nc -w`); the executor call gets that timeout + 2 s, so the tool's clearer answer arrives first. `openssl s_client` has no limit of its own and is ended by the call's timeout |
-| Whole run | one deadline: timeout × 5 + 10 s (60 s at the default timeout) — exactly five calls of timeout + 2 s |
+| Whole run | one deadline: timeout × 5 + 10 s (60 s at the default timeout) — exactly five calls of timeout + 2 s. A probe is started only when a whole attempt (timeout + 2 s) still fits before the deadline; otherwise the run ends there as failed with "Run deadline reached after N addresses", instead of the deadline cutting a probe off |
 | Output per call | 16 384 bytes, cut on the host with `head -c 16384`; the exit marker `__rc=` is inside that bound. An answer that reaches 16 384 bytes (counted in UTF-8 bytes) is read as cut off and fails, whatever it ends with — a target cannot place a forged marker at the cut |
 | Interval | at least 60 s (validated on save; a stored shorter value still waits 60 s), at most 86 400 s |
 | Concurrency | at most 4 runs at a time across the fleet, 1 per server and 1 per check — shared by the loop (which ticks every 15 s) and "Run now" |
@@ -109,7 +111,10 @@ removed from the whitelist, account deleted), the check is **suspended** instead
 reason shown and an `automation_suspended` notification. An Admin takes it over by saving it again. "Run now" runs in
 the signed-in Admin's own decision: it reads the check as it is stored at that moment (a check deleted, switched off or
 changed meanwhile runs as it is now, or not at all), takes the same run slot as the loop (when the check or its server is
-busy it says so and runs nothing), and its result carries that decision's operation id. A check without an owner never
+busy it says so and runs nothing), and its result carries that decision's operation id. The ▶ button is disabled for a
+check that is switched off or suspended; when one was switched off meanwhile, "Run now" says so and records no result
+(a check that is on but no longer validates is refused, and that refusal is recorded). A "Run now" result is recorded
+but does not move the loop's schedule and does not feed the alert (see Alerts). A check without an owner never
 runs; the loop suspends it. Saving and deleting a check are audited `endpointcheck.save` and
 `endpointcheck.delete` events. The kill switch refuses all three, and an audit failure refuses before anything is
 written or run.
@@ -127,5 +132,7 @@ A check that fails feeds the alert `endpoint_check_failed` (suppressible by quie
 - A *Refused* run (an internal address without an exception, a definition that no longer validates, a gateway refusal)
   counts as failed, and so does a certificate with fewer days left than the check's warning days (default 14).
 - A gap in the runs longer than three intervals (at least 3 minutes) closes an open alert as unconfirmed.
+- Only the background loop feeds the alert. A "Run now" result is recorded and shown, but it neither counts for the
+  alert nor moves the check's schedule, so clicking it does not delay the next loop run.
 - Switching a check off or deleting it closes its open alert. Open alerts are kept across a restart
   (`endpoint-check-breaches.json` in the data directory, part of the self-backup).

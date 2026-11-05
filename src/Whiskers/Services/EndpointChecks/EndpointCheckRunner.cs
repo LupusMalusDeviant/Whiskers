@@ -16,9 +16,11 @@ public interface IEndpointCheckRunner
 
     /// <summary>"Run now": the run of the check <paramref name="checkId"/> as it is stored <b>now</b> (review M1: never a
     /// copy a page loaded earlier), inside an <c>endpointcheck.run</c> decision the caller already holds (the UI's, for
-    /// the signed-in Admin) — no decision of its own, and the result carries that decision's operation id. A check that
-    /// is gone, switched off or no longer validates comes back <c>Refused</c> without running anything. Outside such a
-    /// decision the scope guard refuses the host command.</summary>
+    /// the signed-in Admin) — no decision of its own, and the result carries that decision's operation id and is marked
+    /// <see cref="EndpointCheckRun.OnDemand"/>. A check that is gone, switched off or no longer validates comes back
+    /// <c>Refused</c> without running anything; for one that is gone or off the answer is also marked
+    /// <see cref="EndpointCheckRun.NothingRan"/> and is not recorded. Outside such a decision the scope guard refuses the
+    /// host command.</summary>
     Task<EndpointCheckRun> RunInDecisionAsync(string checkId, CancellationToken ct);
 }
 
@@ -111,11 +113,15 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
         ArgumentException.ThrowIfNullOrEmpty(checkId);
         var operationId = NullIfEmpty(MutationScope.Current?.OperationId);
         var check = _store.Get(checkId);
+        // Review n1: a check that is gone or off (suspended included) runs nothing and leaves no result behind — the
+        // answer only tells the page why.
         if (check is null || !check.Enabled)
             return new EndpointCheckRun(checkId, _time.GetUtcNow().UtcDateTime, Models.EndpointCheckOutcome.Refused,
-                check is null ? "The check no longer exists." : "The check is switched off.", operationId);
+                check is null ? "The check no longer exists." : "The check is switched off.", operationId)
+            { OnDemand = true, NothingRan = true };
         var run = await ProbeDefinitionAsync(check, ct);
-        return run with { OperationId = operationId };
+        // Review n2: recorded, but the monitor's schedule stays where it is.
+        return run with { OperationId = operationId, OnDemand = true };
     }
 
     /// <summary>Validates <paramref name="check"/> against the server as it is now and probes it, in the decision the
@@ -141,8 +147,10 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
     private async Task<EndpointCheckRun> ProbeAsync(EndpointCheckDefinition check, EndpointCheckValidator.Target target,
         DateTime at, CancellationToken ct)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(EndpointCheckValidator.RunDeadline(check.TimeoutSeconds));
+        var runDeadline = EndpointCheckValidator.RunDeadline(check.TimeoutSeconds);
+        var runEnd = _time.GetUtcNow() + runDeadline;
+        using var timer = new CancellationTokenSource(runDeadline, _time);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timer.Token);
         var attempt = AttemptTimeout(check.TimeoutSeconds);
         try
         {
@@ -185,6 +193,14 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
             IPAddress? lastAddress = null;
             for (var i = 0; i < tried.Count; i++)
             {
+                // Review n3: an attempt starts only when it can run to its own end inside the run deadline; otherwise
+                // the run stops here and says so, rather than letting the deadline cut a probe off mid-flight.
+                if (runEnd - _time.GetUtcNow() < attempt)
+                    return Run(check, at, Models.EndpointCheckOutcome.Failed,
+                        $"Run deadline reached after {i} address{(i == 1 ? "" : "es")}; no time was left for another attempt" +
+                        (last is null ? "." : $" ({lastAddress}: {last.Detail})."),
+                        last, null, i, addresses.Count - i);
+
                 var address = tried[i].Answered;
                 var result = await _executor.ExecuteMutationAsync(check.ServerId, CommandFor(check, target, address),
                     attempt, deadline.Token, EndpointCheckCommands.OutputCap + 64);
@@ -246,6 +262,55 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
     {
         var line = SecretRedactor.Redact(detail).ReplaceLineEndings(" ").Trim();
         return line.Length <= MaxDetail ? line : line[..(MaxDetail - 1)] + "…";
+    }
+
+    /// <summary>What an internal address is shown as to a reader below Admin.</summary>
+    public const string MaskedAddress = "[internal address]";
+
+    // An IPv6-looking token (it holds a colon; an embedded IPv4 part included), and a dotted quad that is not part of a
+    // longer dotted number. A dotted quad followed by ":<port>" is still found by the second.
+    private static readonly System.Text.RegularExpressions.Regex V6Like = new(
+        @"(?<![\w.:])[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?!\w)",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    private static readonly System.Text.RegularExpressions.Regex V4Like = new(
+        @"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?!\w|\.\d)",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+
+    /// <summary>Review n4: <paramref name="text"/> with every address in a default-denied range (R1-54's
+    /// <see cref="OutboundAddressPolicy.DeniedRange"/>, judged canonically) replaced by <see cref="MaskedAddress"/>, for a
+    /// reader below Admin — a run's detail names the addresses the host resolved, and for an excepted target those are
+    /// internal ones. Public addresses stay. Only an exact dotted quad or a valid IPv6 form counts as an address, so a
+    /// latency or a version number is left alone.</summary>
+    public static string MaskInternalAddresses(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return text ?? "";
+        try
+        {
+            var masked = V6Like.Replace(text, match =>
+            {
+                // A trailing ':' or '.' may be the sentence's ("fd00::1: …"), not the address's: try the token first,
+                // then shorter by one character at a time.
+                var token = match.Value;
+                for (var length = token.Length; length > 0; length--)
+                {
+                    var candidate = token[..length];
+                    if (IPAddress.TryParse(candidate, out var address)
+                        && address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+                        return OutboundAddressPolicy.DeniedRange(address) is null ? token : MaskedAddress + token[length..];
+                    if (candidate[^1] is not (':' or '.')) break;
+                }
+                return token;
+            });
+            return V4Like.Replace(masked, match =>
+                IPAddress.TryParse(match.Value, out var address) && OutboundAddressPolicy.DeniedRange(address) is not null
+                    ? MaskedAddress
+                    : match.Value);
+        }
+        catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
+        {
+            return MaskedAddress;   // fail closed: show nothing rather than an unmasked line
+        }
     }
 
     private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;

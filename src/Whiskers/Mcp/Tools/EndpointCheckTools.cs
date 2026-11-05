@@ -36,8 +36,9 @@ public class EndpointCheckTools
             if (failingOnly && result is { Outcome: EndpointCheckOutcome.Passed }) continue;
             if (failingOnly && result is null) continue;
             var server = servers.GetServer(check.ServerId)?.Name ?? check.ServerId;
+            // Review n5: only "suspended" — the reason names the former owner's principal id (an email address).
             var state = !check.Enabled
-                ? check.SuspendedReason is { } why ? $"suspended ({why})" : "off"
+                ? check.SuspendedReason is not null ? "suspended" : "off"
                 : result is null ? "not run yet"
                 : Summary(result);
             var exceptions = check.Exceptions.Count == 0 ? "" : $", {check.Exceptions.Count} internal-target exception(s)";
