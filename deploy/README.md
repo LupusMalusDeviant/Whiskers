@@ -5,7 +5,7 @@ Deployment assets — the pieces used to install and run Whiskers, separate from
 | File / dir | What it is |
 |---|---|
 | [`install.sh`](install.sh) | One-command installer (outOfTheBox W2, R1-46). Installs **one released version** of `ghcr.io/lupusmalusdeviant/whiskers` (never `latest`), generates the vault key, verifies the image signature when cosign is installed, writes a small compose file into `./whiskers/`, brings it up, waits for `/healthz`, and prints the URL, the setup token and what to back up. Re-running it upgrades in place. See [Installer](#installer) below. |
-| [`docker-compose.postgres.yml`](docker-compose.postgres.yml) | Overlay that adds a PostgreSQL service and points Whiskers at it. Use with the base file: `docker compose -f docker-compose.yml -f deploy/docker-compose.postgres.yml up -d`. |
+| [`docker-compose.postgres.yml`](docker-compose.postgres.yml) | Overlay that adds a PostgreSQL 18 service and points Whiskers at it. Use with the base file: `docker compose -f docker-compose.yml -f deploy/docker-compose.postgres.yml up -d`. Coming from the PostgreSQL 17 overlay: [`docs/operations/postgres-18-upgrade.md`](../docs/operations/postgres-18-upgrade.md); until then a guard keeps an empty 18 database from starting. |
 | [`helm/whiskers/`](helm/whiskers/) | Helm chart for running Whiskers **on** Kubernetes (Track A): single replica + Recreate, non-root/read-only, PVC data dir, optional Postgres/ingress/Tailscale sidecar. Published as an OCI artifact (`oci://ghcr.io/lupusmalusdeviant/charts/whiskers`) by the release pipeline; linted + render-checked by [`chart-ci.yml`](../.github/workflows/chart-ci.yml). |
 | [`k8s/`](k8s/) | Assets for **managing** a Kubernetes cluster *from* Whiskers (Track B): least-privilege `whiskers-agent` RBAC manifest + kubeconfig onboarding guide. |
 | [`telemetry/`](telemetry/) | mTLS / socket-proxy templates for the hardened remote-monitoring posture. |
@@ -121,7 +121,7 @@ These build inputs are pinned, and each has an update path in [`.github/dependab
 | Base images (SDK, ASP.NET runtime, `docker:<v>-cli`) | `FROM image:tag@sha256:…` in the [`Dockerfile`](../Dockerfile), each a multi-arch index (amd64 + arm64, checked in CI) | Dependabot `docker`: a new digest behind the same tag (OS and runtime fixes) or a new tag |
 | GitHub Actions | full commit SHA + `# vX.Y.Z` comment | Dependabot `github-actions` |
 
-Covered by Dependabot but **not digest-pinned**: the images of the compose files (`postgres:17-alpine`, node-exporter, VictoriaMetrics; the socket-proxy is pinned by digest) and of the Helm chart (the Tailscale sidecar, pinned by digest) — Dependabot `docker-compose` and `helm` propose new versions; a moving tag such as `17-alpine` still resolves to whatever it points at when pulled.
+Covered by Dependabot but **not digest-pinned**: the images of the compose files (`postgres:18-alpine`, node-exporter, VictoriaMetrics; the socket-proxy is pinned by digest) and of the Helm chart (the Tailscale sidecar, pinned by digest) — Dependabot `docker-compose` and `helm` propose new versions; a moving tag such as `18-alpine` still resolves to whatever it points at when pulled.
 
 **Onboarding templates (not seen by Dependabot):** `OnboardingCommands` writes the host-side compose files of the mTLS
 proxy (docker-socket-proxy + ghostunnel) and node_exporter. The socket-proxy and node_exporter images must equal those

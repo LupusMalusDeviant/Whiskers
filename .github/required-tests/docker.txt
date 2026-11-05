@@ -14,6 +14,17 @@
 1 Whiskers.Tests.PostgresSmokeTests.Audit_chain_writes_verifies_prunes_and_exports_on_real_postgres_with_retries_on
 1 Whiskers.Tests.PostgresSmokeTests.The_cli_migration_keeps_the_sqlite_audit_checkpoint_aside
 
-# PostgreSQL backup and restore (pg_dump/pg_restore), on the current server and on the oldest supported one.
+# PostgreSQL backup and restore (pg_dump/pg_restore), on the current server (18), the previous one (17, installs that
+# have not moved yet) and the oldest supported one.
 33 Whiskers.Tests.PostgresBackupRestoreTests
+33 Whiskers.Tests.PostgresBackupRestorePg17Tests
 33 Whiskers.Tests.PostgresBackupRestorePg14Tests
+
+# The PostgreSQL 17 -> 18 upgrade of the overlay: the guard's script from the compose file against prepared volumes
+# (10 normal-run cases, 4 bad dumps, 5 facts), the guide's dump, fingerprint and restore from 17 into 18 with the
+# restore mode's server checks, rollback and marker failure, the pg_control property of a real 17 start, and compose
+# reading the overlay.
+19 Whiskers.Tests.PostgresUpgradeGuardTests
+6 Whiskers.Tests.PostgresUpgradeTests
+1 Whiskers.Tests.PostgresPgControlTests
+1 Whiskers.Tests.PostgresOverlayComposeTests
