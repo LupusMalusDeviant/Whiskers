@@ -8,14 +8,14 @@ using Whiskers.Services.Persistence;
 
 namespace Whiskers.Tests;
 
-/// <summary>Smoke tests of the metrics database against a REAL PostgreSQL 17 (Testcontainers) — the automated
+/// <summary>Smoke tests of the metrics database against a REAL PostgreSQL 18 (Testcontainers) — the automated
 /// counterpart to the manual Docker-host proof (stableDB step 8). Marked <c>RequiresDocker</c>: skipped on a machine
 /// without a Docker daemon, mandatory on CI (R1-47, <see cref="DockerRequirement"/>); run them with Docker up
 /// (<c>dotnet test --filter Category=RequiresDocker</c>).</summary>
 [Trait("Category", DockerRequirement.Category)]
 public sealed class PostgresSmokeTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:18-alpine").Build();
     private bool _up;
     private Exception? _startFailure;
 
