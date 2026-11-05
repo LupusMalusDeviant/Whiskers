@@ -95,7 +95,7 @@ public class ReleaseWorkflowTests
     [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"", "        run: echo skipped")]
     [InlineData("security.yml", "--exit-code 1", "--exit-code 0")]                                                              // secret findings ignored
     [InlineData("security.yml", "-p:CodeAnalysisTreatWarningsAsErrors=true", "-p:CodeAnalysisTreatWarningsAsErrors=false")]
-    [InlineData("security.yml", "          if [ \"$FOUND\" -gt 0 ]; then", "          if false; then")]                     // vulnerable packages pass
+    [InlineData("security.yml", "          if [ \"$FOUND\" -gt 0 ]; then\n", "          if false; then\n")]                 // vulnerable packages pass
     [InlineData("security.yml", "          fail-on-severity: low", "          fail-on-severity: critical")]
     public void A_weakened_integration_or_artifact_gate_is_caught(string file, string from, string to)
     {
@@ -265,8 +265,8 @@ public class ReleaseWorkflowTests
     [InlineData("          trivyignores: .trivyignore\n\n  # GATE (R1-47)", "\n  # GATE (R1-47)")] // exceptions file not used
     [InlineData("          platforms: linux/arm64", "          platforms: linux/amd64,linux/arm64")]
     [InlineData("          platforms: linux/arm64", "          platforms: linux/amd64")]
-    [InlineData("outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true\n          cache-from: type=gha,scope=release-amd64",
-                "push: true\n          tags: ${{ env.IMAGE }}:latest\n          cache-from: type=gha,scope=release-amd64")] // tagged before the scan
+    [InlineData("platforms: linux/amd64\n          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true",
+                "platforms: linux/amd64\n          push: true\n          tags: ${{ env.IMAGE }}:latest")] // tagged before the scan
     [InlineData("      - name: Refuse an already-published image version",
                 "      - name: Rebuild\n        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0\n        with:\n          platforms: linux/amd64\n          push: true\n\n      - name: Refuse an already-published image version")] // rebuild after the scan
     [InlineData("          AMD64_INDEX: ${{ needs.build.outputs.amd64_index }}\n          ARM64_INDEX: ${{ needs.build.outputs.arm64_index }}\n          AMD64_IMAGE",
@@ -873,7 +873,7 @@ internal static class WorkflowPolicy
         // Dependencies, secrets, static analysis, CodeQL (TA-47, F-09).
         var securityRuns = string.Join("\n", security.Values.SelectMany(Steps).Select(s => Scalar(Child(s, "run"))).OfType<string>());
         if (!securityRuns.Contains("--vulnerable --include-transitive", StringComparison.Ordinal)
-            || !Regex.IsMatch(securityRuns, @"if \[ ""\$FOUND"" -gt 0 \]; then[\s\S]*?exit 1"))
+            || !Regex.IsMatch(securityRuns, @"if \[ ""\$FOUND"" -gt 0 \]; then\n[\s\S]*?exit 1"))
             violations.Add("security.yml does not fail on a known-vulnerable package");
         var review = security.Values.SelectMany(Steps).FirstOrDefault(s => Scalar(Child(s, "uses"))?.StartsWith("actions/dependency-review-action@") == true);
         if (review is null || Scalar(Child(Child(review, "with"), "fail-on-severity")) != "low")

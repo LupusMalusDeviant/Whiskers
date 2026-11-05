@@ -25,15 +25,18 @@ COPY src/Whiskers.Migrations.Sqlite/Whiskers.Migrations.Sqlite.csproj src/Whiske
 COPY src/Whiskers.Migrations.Postgres/Whiskers.Migrations.Postgres.csproj src/Whiskers.Migrations.Postgres/packages.lock.json ./Whiskers.Migrations.Postgres/
 # R1-52: locked restore — exactly the packages (and content hashes) in the lock files, or the build fails. Retried (three
 # tries, 20 s apart) only for a failure the next try may not repeat, such as nuget.org resetting the connection; a lock-file
-# or content-hash mismatch and a missing package (NU1004, NU1005, NU1403, NU1101, NU1102) fail at once. No cache mount: a
-# cache hit skips NuGet's content-hash and signature checks. POSIX sh (no pipefail), so the output goes to a file first.
+# or content-hash mismatch (NU1004, NU1005, NU1403) fails at once, and so does a missing package (NU1101, NU1102) unless
+# the log also shows a source failure (NU1301, NU1801). No cache mount, and the CI layer cache skips this stage
+# (no-cache-filters: build): a cache hit skips NuGet's content-hash and signature checks. POSIX sh (no pipefail), so the
+# output goes to a file first. The build stage is discarded, so the log stays.
 RUN for attempt in 1 2 3; do \
       status=0; \
       dotnet restore ./Whiskers/Whiskers.csproj --locked-mode > /tmp/restore.log 2>&1 || status=$?; \
       cat /tmp/restore.log; \
-      if [ "$status" -eq 0 ]; then rm -f /tmp/restore.log; exit 0; fi; \
-      if grep -Eq 'NU1004|NU1005|NU1403|NU1101|NU1102' /tmp/restore.log; then echo "::error::the locked restore failed with a NuGet error that a retry would repeat (exit $status), not retried"; exit 1; fi; \
-      if [ "$attempt" -eq 3 ]; then echo "::error::the locked restore failed three times (last exit $status)"; exit 1; fi; \
+      if [ "$status" -eq 0 ]; then exit 0; fi; \
+      if grep -Eq 'NU1004|NU1005|NU1403' /tmp/restore.log; then echo "the lock file or a content hash does not match (exit $status), not retried"; exit 1; fi; \
+      if grep -Eq 'NU1101|NU1102' /tmp/restore.log && ! grep -Eq 'NU1301|NU1801' /tmp/restore.log; then echo "a locked package is missing on the source (exit $status), not retried"; exit 1; fi; \
+      if [ "$attempt" -eq 3 ]; then echo "the locked restore failed three times (last exit $status)"; exit 1; fi; \
       echo "the locked restore failed (exit $status, attempt $attempt of 3); retrying in 20 s"; \
       sleep 20; \
     done; \
@@ -61,8 +64,8 @@ LABEL io.modelcontextprotocol.server.name="io.github.LupusMalusDeviant/whiskers"
 #                       it — ImageRuntimeToolsTests checks tailscaled comes up in iptables mode)
 #   pg_dump/pg_restore/psql  PostgreSQL self-backup (R1-33)
 #   curl                container HEALTHCHECK
-# The PostgreSQL project's (PGDG) repository signing key is committed and pinned by fingerprint (no download from
-# postgresql.org); the same file as CI's. It is dearmored into the keyring below and removed.
+# The PostgreSQL project's (PGDG) repository signing key is committed and pinned, the whole file by SHA-256 and the key by
+# fingerprint (no download from postgresql.org); the same file as CI's. It is dearmored into the keyring below and removed.
 COPY deploy/keys/pgdg-ACCC4CF8.asc /tmp/pgdg-ACCC4CF8.asc
 # Detect base-image distro codename so Tailscale URLs work whether the
 # .NET runtime image is Debian or Ubuntu (currently mcr.../aspnet:10.0 is noble).
@@ -83,8 +86,9 @@ RUN . /etc/os-release \
     # R1-33: PostgreSQL client tools (pg_dump/pg_restore/psql) for the self-backup of a PostgreSQL database. From the
     # PostgreSQL project's repository: the newest client dumps every older server, the distribution's may be older
     # than the server it has to dump.
+    && echo "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76  /tmp/pgdg-ACCC4CF8.asc" | sha256sum -c - \
     && gpg --show-keys --with-colons /tmp/pgdg-ACCC4CF8.asc \
-        | grep -q '^fpr:::::::::B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8:$' \
+        | grep '^fpr:::::::::B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8:$' >/dev/null \
     && gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg /tmp/pgdg-ACCC4CF8.asc \
     && rm /tmp/pgdg-ACCC4CF8.asc \
     && echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \

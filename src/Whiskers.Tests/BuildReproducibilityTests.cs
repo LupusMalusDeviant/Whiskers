@@ -137,6 +137,7 @@ public class BuildReproducibilityTests
             v => v.Contains("Whiskers.Tests"));
     }
 
+
     [Theory]
     [InlineData("run: bash .github/scripts/restore-locked.sh", "run: dotnet restore Whiskers.slnx")]                 // unlocked restore
     [InlineData("bash .github/scripts/restore-locked.sh\n", "bash .github/scripts/restore-locked.sh || true\n")]     // the script's failure ignored
@@ -147,6 +148,24 @@ public class BuildReproducibilityTests
         var real = Repo(".github", "workflows", "ci.yml");
         Assert.Contains(original, real);
         Assert.NotEmpty(BuildPolicy.WorkflowRestoreViolations(real.Replace(original, mutation), out _));
+    }
+
+    /// <summary>A restore step cannot be told to pass on a failure (continue-on-error, set +e).</summary>
+    [Theory]
+    [MemberData(nameof(Workflows))]
+    public void No_restore_step_ignores_its_failure(string workflow)
+        => Assert.Empty(BuildPolicy.RestoreStepViolations(Repo(".github", "workflows", workflow)));
+
+    [Theory]
+    [InlineData("      - name: Restore\n        run: bash", "      - name: Restore\n        continue-on-error: true\n        run: bash")]
+    [InlineData("          set -euo pipefail\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests",
+                "          set -euo pipefail\n          set +e\n          bash .github/scripts/restore-locked.sh\n          dotnet build src/Whiskers.Tests")]
+    [InlineData("  build-test:\n    runs-on: ubuntu-latest\n", "  build-test:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n")]
+    public void Restore_step_check_finds_an_ignored_failure(string original, string mutation)
+    {
+        var real = Repo(".github", "workflows", "ci.yml");
+        Assert.Contains(original, real);
+        Assert.NotEmpty(BuildPolicy.RestoreStepViolations(real.Replace(original, mutation)));
     }
 
     // ---- the restore script and the Dockerfile's restore retry only what a retry can fix --------------------------
@@ -168,10 +187,16 @@ public class BuildReproducibilityTests
     [Theory]
     [InlineData("then echo \"::error::the locked restore failed three times (last exit $status)\"; exit 1; fi",
                 "then echo \"::error::the locked restore failed three times (last exit $status)\"; break; fi")]     // third failure falls through
-    [InlineData("not retried\"; exit 1; fi", "not retried\"; break; fi")]                                         // a lock mismatch passes
-    [InlineData("not retried\"; exit 1; fi", "not retried\"; continue; fi")]                                      // a lock mismatch is retried
-    [InlineData("NU1004|NU1005|NU1403|NU1101|NU1102", "NU1004|NU1005|NU1101|NU1102")]                             // a hash mismatch is retried
-    [InlineData("NU1004|NU1005|NU1403|NU1101|NU1102", "NU1004|NU1005|NU1403")]                                    // a missing package is retried
+    [InlineData("does not match (exit $status), not retried\"; exit 1; fi", "does not match (exit $status), not retried\"; break; fi")]       // a lock mismatch passes
+    [InlineData("does not match (exit $status), not retried\"; exit 1; fi", "does not match (exit $status), not retried\"; continue; fi")]    // a lock mismatch is retried
+    [InlineData("missing on the source (exit $status), not retried\"; exit 1; fi", "missing on the source (exit $status), not retried\"; continue; fi")] // a missing package is retried
+    [InlineData("'NU1004|NU1005|NU1403'", "'NU1004|NU1005'")]                                                     // a hash mismatch is retried
+    [InlineData("'NU1101|NU1102' \"$log\"", "'NU1101' \"$log\"")]                                                 // an unlisted version is retried
+    [InlineData("&& ! grep -Eq 'NU1301|NU1801'", "&& grep -Eq 'NU1301|NU1801'")]                                  // a missing package is retried without a source failure
+    [InlineData("! grep -Eq 'NU1301|NU1801'", "! grep -Eq 'NU1301|NU1801|NU1102'")]                               // an unlisted version counts as a source failure
+    [InlineData("if [ \"$status\" -eq 0 ]; then exit 0; fi", "if [ \"$status\" -ge 0 ]; then exit 0; fi")]        // every failure succeeds
+    [InlineData("if [ \"$status\" -eq 0 ]; then exit 0; fi", "if true; then exit 0; fi")]                         // every failure succeeds
+    [InlineData("  status=0\n", "  status=0\n  [ -f \"$log\" ] && exit 0\n")]                                     // another way out with success
     [InlineData("done\nexit 1\n", "done\nexit 0\n")]                                                              // the end of the loop succeeds
     [InlineData("for attempt in 1 2 3; do", "for attempt in 1 2 3 4 5 6 7 8 9; do")]                              // retries without bound
     [InlineData("set -euo pipefail", "set -eu")]                                                                  // tee hides the exit code
@@ -190,10 +215,13 @@ public class BuildReproducibilityTests
         => Assert.Empty(BuildPolicy.DockerfileRestoreRetryViolations(Repo("Dockerfile")));
 
     [Theory]
-    [InlineData("then echo \"::error::the locked restore failed three times (last exit $status)\"; exit 1; fi",
-                "then echo \"::error::the locked restore failed three times (last exit $status)\"; break; fi")]
-    [InlineData("not retried\"; exit 1; fi", "not retried\"; break; fi")]
-    [InlineData("NU1004|NU1005|NU1403|NU1101|NU1102", "NU1004|NU1005|NU1101|NU1102")]
+    [InlineData("then echo \"the locked restore failed three times (last exit $status)\"; exit 1; fi",
+                "then echo \"the locked restore failed three times (last exit $status)\"; break; fi")]
+    [InlineData("does not match (exit $status), not retried\"; exit 1; fi", "does not match (exit $status), not retried\"; break; fi")]
+    [InlineData("missing on the source (exit $status), not retried\"; exit 1; fi", "missing on the source (exit $status), not retried\"; continue; fi")]
+    [InlineData("'NU1004|NU1005|NU1403'", "'NU1004|NU1005'")]
+    [InlineData("&& ! grep -Eq 'NU1301|NU1801'", "&& grep -Eq 'NU1301|NU1801'")]
+    [InlineData("if [ \"$status\" -eq 0 ]; then exit 0; fi", "if [ \"$status\" -ge 0 ]; then exit 0; fi")]
     [InlineData("done; \\\n    exit 1", "done; \\\n    exit 0")]
     [InlineData(" || status=$?", "; status=0")]
     [InlineData("RUN for attempt in 1 2 3; do", "RUN --mount=type=cache,target=/root/.nuget/packages for attempt in 1 2 3; do")] // a NuGet cache
@@ -204,12 +232,19 @@ public class BuildReproducibilityTests
         Assert.NotEmpty(BuildPolicy.DockerfileRestoreRetryViolations(real.Replace(original, mutation)));
     }
 
+    // ---- no NuGet cache, in any form ----------------------------------------------------------------------------
+
     /// <summary>No NuGet cache in any workflow: a cache hit skips NuGet's content-hash and signature checks (NuGet checks
-    /// a package only when it downloads and extracts it), so the cache entry would become a trust root nothing re-checks.</summary>
+    /// a package only when it downloads and extracts it), so the cache entry would become a trust root nothing re-checks.
+    /// That includes a BuildKit layer cache holding the Dockerfile's restore layer.</summary>
     [Theory]
     [MemberData(nameof(Workflows))]
     public void No_workflow_caches_nuget_packages(string workflow)
-        => Assert.Empty(BuildPolicy.NuGetCacheViolations(Repo(".github", "workflows", workflow)));
+        => Assert.Empty(BuildPolicy.NuGetCacheViolations(Repo(".github", "workflows", workflow), workflow, Repo("Dockerfile")));
+
+    [Fact]
+    public void The_restore_runs_in_the_build_stage()
+        => Assert.Equal("build", BuildPolicy.RestoreStage(Repo("Dockerfile")));
 
     [Theory]
     [InlineData("          global-json-file: global.json\n", "          global-json-file: global.json\n          cache: true\n")]
@@ -218,11 +253,49 @@ public class BuildReproducibilityTests
                 "      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4\n        with:\n          path: ~/.nuget/packages\n          key: nuget\n\n      - name: Restore\n")]
     [InlineData("      - name: Restore\n",
                 "      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4\n        with:\n          path: |\n            ${{ github.workspace }}/.nuget/packages\n          key: nuget\n\n      - name: Restore\n")]
+    [InlineData("      - name: Restore\n", "      - name: Restore\n        env:\n          NUGET_PACKAGES: /tmp/pkgs\n")]          // packages folder moved
+    [InlineData("          no-cache-filters: build\n", "")]                                                                     // restore layer from the cache
+    [InlineData("          no-cache-filters: build\n", "          no-cache-filters: runtime\n")]                                // the wrong stage
     public void NuGet_cache_check_finds_a_cache(string original, string mutation)
     {
         var real = Repo(".github", "workflows", "ci.yml");
         Assert.Contains(original, real);
-        Assert.NotEmpty(BuildPolicy.NuGetCacheViolations(real.Replace(original, mutation)));
+        Assert.NotEmpty(BuildPolicy.NuGetCacheViolations(real.Replace(original, mutation), "ci.yml", Repo("Dockerfile")));
+    }
+
+    [Theory]
+    [InlineData("          platforms: linux/arm64\n", "          platforms: linux/arm64\n          cache-from: type=gha,scope=release-arm64\n")]
+    [InlineData("          platforms: linux/arm64\n", "          platforms: linux/arm64\n          cache-from: type=gha,scope=release-arm64\n          no-cache-filters: build\n")]
+    [InlineData("          platforms: linux/amd64\n", "          platforms: linux/amd64\n          cache-to: type=gha,scope=release-amd64,mode=max\n")]
+    public void NuGet_cache_check_finds_a_layer_cache_in_a_release(string original, string mutation)
+    {
+        var real = Repo(".github", "workflows", "release.yml");
+        Assert.Contains(original, real);
+        Assert.NotEmpty(BuildPolicy.NuGetCacheViolations(real.Replace(original, mutation), "release.yml", Repo("Dockerfile")));
+    }
+
+    // ---- the vulnerable-packages gate: missing data is retried, a finding never ----------------------------------
+
+    [Fact]
+    public void Vulnerable_gate_retries_only_missing_data()
+        => Assert.Empty(BuildPolicy.VulnerableGateViolations(Repo(".github", "workflows", "security.yml")));
+
+    [Theory]
+    [InlineData("              exit 1\n            fi\n            echo \"::warning::no complete", "              break\n            fi\n            echo \"::warning::no complete")] // missing data passes
+    [InlineData(" && [ \"$PROJECTS\" -ge 5 ]", "")]                                                                    // too few projects pass
+    [InlineData(" && [ \"$PROBLEMS\" -eq 0 ]", "")]                                                                    // problems pass
+    [InlineData("[ \"$status\" -eq 0 ] && [ \"$PROJECTS\"", "[ \"$PROJECTS\"")]                                       // a failed listing passes
+    [InlineData("[ \"$PROJECTS\" -ge 5 ]", "[ \"$PROJECTS\" -ge 0 ]")]                                                 // no projects pass
+    [InlineData("            if [ \"$FOUND\" -gt 0 ]; then break; fi\n", "")]                                         // a finding is retried
+    [InlineData("[ \"$PROJECTS\" -lt 5 ]", "[ \"$PROJECTS\" -lt 0 ]")]                                                 // the assertion after the loop weakened
+    [InlineData("          if [ \"$status\" -ne 0 ] || [ \"$PROJECTS\" -lt 5 ]", "          if false && [ \"$status\" -ne 0 ] || [ \"$PROJECTS\" -lt 5 ]")]
+    [InlineData("--format json > vulnerable.json || status=$?", "--format json > vulnerable.json || true")]             // the exit code is dropped
+    [InlineData("for attempt in 1 2 3; do\n            status=0\n            dotnet list", "for attempt in 1 2 3 4 5; do\n            status=0\n            dotnet list")]
+    public void Vulnerable_gate_check_finds_a_fail_open_loop(string original, string mutation)
+    {
+        var real = Repo(".github", "workflows", "security.yml");
+        Assert.Contains(original, real);
+        Assert.NotEmpty(BuildPolicy.VulnerableGateViolations(real.Replace(original, mutation)));
     }
 
     // ---- the PGDG signing key is committed and pinned, never downloaded ---------------------------------------
@@ -232,8 +305,13 @@ public class BuildReproducibilityTests
         => Assert.Empty(BuildPolicy.PgdgKeyViolations(Repo(".github", "workflows", "ci.yml"), Repo("Dockerfile"), Repo(BuildPolicy.PgdgKeyPath)));
 
     [Fact]
-    public void Committed_pgdg_key_has_the_pinned_fingerprint()
-        => Assert.Equal(BuildPolicy.PgdgFingerprint, BuildPolicy.ArmoredKeyFingerprint(Repo(BuildPolicy.PgdgKeyPath)));
+    public void Committed_pgdg_key_has_the_pinned_fingerprint_and_sha256()
+    {
+        Assert.Equal(BuildPolicy.PgdgFingerprint, BuildPolicy.ArmoredKeyFingerprint(Repo(BuildPolicy.PgdgKeyPath)));
+        // The bytes on disk, as sha256sum sees them in CI and in the image.
+        var bytes = File.ReadAllBytes(DeploymentScripts.RepoFile(BuildPolicy.PgdgKeyPath.Split('/')));
+        Assert.Equal(BuildPolicy.PgdgKeySha256, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant());
+    }
 
     [Fact]
     public void Pgdg_key_check_finds_a_download_and_a_wrong_key()
@@ -253,9 +331,15 @@ public class BuildReproducibilityTests
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace(imageCopy, $"RUN {download} -o /tmp/pgdg-ACCC4CF8.asc"), key));
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace("deploy/keys/pgdg-ACCC4CF8.asc", "pgdg.asc"), key));
 
-        // The fingerprint check dropped.
+        // The fingerprint check or the file's SHA-256 check dropped, or a grep that may cut gpg off.
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(BuildPolicy.PgdgFingerprint, "0000"), dockerfile, key));
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace(BuildPolicy.PgdgFingerprint, "0000"), key));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(BuildPolicy.PgdgKeySha256, new string('0', 64)), dockerfile, key));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace(BuildPolicy.PgdgKeySha256, new string('0', 64)), key));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(" | sha256sum -c -", " | true"), dockerfile, key));
+        Assert.Contains("| grep '^fpr", ci);
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace("| grep '^fpr", "| grep -q '^fpr"), dockerfile, key));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace("| grep '^fpr", "| grep -q '^fpr"), key));
 
         // Not a public key block, or another key.
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile, key.Replace("PUBLIC KEY BLOCK", "PRIVATE KEY BLOCK")));
@@ -266,6 +350,25 @@ public class BuildReproducibilityTests
         var c = lines[body][10] == 'A' ? 'B' : 'A';
         lines[body] = lines[body][..10] + c + lines[body][11..];
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile, string.Join('\n', lines)));
+
+        // Any byte changed — even one the parser ignores (the armor's CRC line, a trailing newline).
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile, key + "\n"));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile, Regex.Replace(key, @"\n=....\n", "\n=AAAA\n")));
+    }
+
+    [Fact]
+    public void A_second_key_appended_inside_the_armor_is_caught()
+    {
+        var key = Repo(BuildPolicy.PgdgKeyPath);
+        var data = BuildPolicy.ArmoredKeyData(key);
+        // Re-armored as it is, the parser still reads the key (the check is not refusing everything) ...
+        Assert.Equal(BuildPolicy.PgdgFingerprint, BuildPolicy.ArmoredKeyFingerprint(BuildPolicy.Armor(data)));
+        // ... and with a second transferable public key appended — here the same key again; the first packet is unchanged.
+        var doubled = BuildPolicy.Armor([.. data, .. data]);
+        Assert.Throws<FormatException>(() => BuildPolicy.ArmoredKeyFingerprint(doubled));
+        var violations = BuildPolicy.PgdgKeyViolations(Repo(".github", "workflows", "ci.yml"), Repo("Dockerfile"), doubled);
+        Assert.Contains(violations, v => v.Contains("SHA-256", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("not exactly one", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -432,10 +535,6 @@ internal static class BuildPolicy
     public const string RestoreScript = ".github/scripts/restore-locked.sh";
     public const string RestoreScriptCall = "bash " + RestoreScript;
 
-    /// <summary>NuGet errors that the next try would repeat: a lock file that does not match (NU1004, NU1005), a content
-    /// hash that differs (NU1403), a package or version that does not exist (NU1101, NU1102). Never retried.</summary>
-    public static readonly IReadOnlyList<string> DeterministicRestoreErrors = ["NU1004", "NU1005", "NU1403", "NU1101", "NU1102"];
-
     /// <summary>Every <c>dotnet restore</c> is locked; every other dotnet verb that would restore implicitly says
     /// <c>--no-restore</c> or <c>--no-build</c>. A call of <see cref="RestoreScript"/> counts as a locked restore when it is
     /// exactly <see cref="RestoreScriptCall"/> (a <c>run:</c> value or a line of a <c>run</c> block): anything appended
@@ -535,15 +634,29 @@ internal static class BuildPolicy
 
     // ---- the restore retry: only what a retry can fix, and the last failure fails ----
 
-    private static readonly Regex DeterministicBranch = new(
-        @"if grep -Eq '(?<codes>[^'\n]+)' [^;\n]+; then echo ""[^""\n]*""; exit 1; fi", RegexOptions.CultureInvariant);
+    /// <summary>Always fail at once: the lock file does not match (NU1004, NU1005), a content hash differs (NU1403).</summary>
+    public static readonly IReadOnlyList<string> MismatchRestoreErrors = ["NU1004", "NU1005", "NU1403"];
+    /// <summary>Fail at once unless the same log shows a source failure (<see cref="SourceFailureErrors"/>): a package or
+    /// the locked version does not exist (NU1101, NU1102).</summary>
+    public static readonly IReadOnlyList<string> MissingPackageErrors = ["NU1101", "NU1102"];
+    /// <summary>A source that could not be reached (NU1301, NU1801): with these in the log, NU1101/NU1102 are retried.</summary>
+    public static readonly IReadOnlyList<string> SourceFailureErrors = ["NU1301", "NU1801"];
+
+    private static readonly Regex SuccessBranch = new(@"if \[ ""\$status"" -eq 0 \]; then exit 0; fi", RegexOptions.CultureInvariant);
+    private static readonly Regex MismatchBranch = new(
+        @"if grep -Eq '(?<codes>[^'\n]+)' [^;&|\n]+; then echo ""[^""\n]*""; exit 1; fi", RegexOptions.CultureInvariant);
+    private static readonly Regex MissingBranch = new(
+        @"if grep -Eq '(?<codes>[^'\n]+)' [^;&|\n]+ && ! grep -Eq '(?<source>[^'\n]+)' [^;&|\n]+; then echo ""[^""\n]*""; exit 1; fi",
+        RegexOptions.CultureInvariant);
     private static readonly Regex LastTryBranch = new(
         @"if \[ ""\$attempt"" -eq 3 \]; then echo ""[^""\n]*""; exit 1; fi", RegexOptions.CultureInvariant);
     private static readonly Regex LoopEndsFailing = new(@"\bdone;?[ \t]*(?:\\?\n[ \t]*)?exit 1[ \t]*\n?$", RegexOptions.CultureInvariant);
 
     /// <summary>A restore retry loop (the script, the Dockerfile's RUN): exactly three tries; the restore's exit code is
-    /// kept (<c>|| status=$?</c>); every <see cref="DeterministicRestoreErrors">deterministic error</see> fails at once with
-    /// <c>exit 1</c>; the third failure exits 1; and the text after the loop exits 1, so no path out of it passes.</summary>
+    /// kept (<c>|| status=$?</c>); the only way out with success is exactly <c>if [ "$status" -eq 0 ]; then exit 0; fi</c>;
+    /// <see cref="MismatchRestoreErrors"/> always fail at once with <c>exit 1</c>; <see cref="MissingPackageErrors"/> fail at
+    /// once unless the log shows exactly the <see cref="SourceFailureErrors"/>; the third failure exits 1; and the text
+    /// after the loop exits 1, so no path out of it passes.</summary>
     private static List<string> RetryLoopViolations(string loop, string where)
     {
         var violations = new List<string>();
@@ -552,14 +665,25 @@ internal static class BuildPolicy
         var restoreLine = loop.Split('\n').FirstOrDefault(l => DotnetCommand.Match(l) is { Success: true } m && m.Groups["verb"].Value == "restore");
         if (restoreLine is null || !restoreLine.Contains(" || status=$?", StringComparison.Ordinal))
             violations.Add($"{where}: the restore's exit code is not kept ('|| status=$?')");
-        var branch = DeterministicBranch.Match(loop);
-        if (!branch.Success)
-            violations.Add($"{where}: no branch that fails at once (exit 1) on a NuGet error a retry would repeat");
+        if (SuccessBranch.Matches(loop).Count != 1 || Regex.Matches(loop, @"\bexit 0\b").Count != 1)
+            violations.Add($"{where}: the only success is not exactly 'if [ \"$status\" -eq 0 ]; then exit 0; fi'");
+
+        static HashSet<string> Codes(Match m, string group) => m.Groups[group].Value.Split('|').ToHashSet(StringComparer.Ordinal);
+        var missing = MissingBranch.Match(loop);
+        var mismatch = MismatchBranch.Matches(loop).FirstOrDefault(m => !missing.Success || m.Index != missing.Index);
+        if (mismatch is null)
+            violations.Add($"{where}: no branch that fails at once (exit 1) on a lock-file or content-hash mismatch");
+        else
+            foreach (var code in MismatchRestoreErrors.Where(c => !Codes(mismatch, "codes").Contains(c)))
+                violations.Add($"{where}: {code} is retried instead of failing at once");
+        if (!missing.Success)
+            violations.Add($"{where}: no branch that fails at once (exit 1) on a missing package without a source failure");
         else
         {
-            var codes = branch.Groups["codes"].Value.Split('|').ToHashSet(StringComparer.Ordinal);
-            foreach (var code in DeterministicRestoreErrors.Where(c => !codes.Contains(c)))
+            foreach (var code in MissingPackageErrors.Where(c => !Codes(missing, "codes").Contains(c)))
                 violations.Add($"{where}: {code} is retried instead of failing at once");
+            if (!Codes(missing, "source").SetEquals(SourceFailureErrors))
+                violations.Add($"{where}: a missing package is retried on '{missing.Groups["source"].Value}', not exactly on {string.Join('|', SourceFailureErrors)}");
         }
         if (!LastTryBranch.IsMatch(loop)) violations.Add($"{where}: the third failure does not end in exit 1");
         if (!LoopEndsFailing.IsMatch(loop)) violations.Add($"{where}: the loop is not followed by exit 1");
@@ -602,11 +726,36 @@ internal static class BuildPolicy
         return violations;
     }
 
-    /// <summary>No workflow caches NuGet packages: no <c>cache</c> input on <c>actions/setup-dotnet</c> (any value — also
-    /// an expression), and no <c>actions/cache</c> step whose path names <c>.nuget</c>.</summary>
-    public static IReadOnlyList<string> NuGetCacheViolations(string workflowYaml)
+    /// <summary>The Dockerfile stage (<c>FROM … AS &lt;stage&gt;</c>) whose RUN does the <c>dotnet restore</c>.</summary>
+    public static string? RestoreStage(string dockerfile)
+    {
+        string? stage = null;
+        foreach (var line in JoinContinuations(dockerfile).Where(l => !l.TrimStart().StartsWith('#')))
+        {
+            if (FromLine.Match(line.Trim()) is { Success: true } from)
+                stage = from.Groups["stage"].Success ? from.Groups["stage"].Value : null;
+            else if (line.TrimStart().StartsWith("RUN ", StringComparison.Ordinal) && line.Contains("dotnet restore", StringComparison.Ordinal))
+                return stage;
+        }
+        return null;
+    }
+
+    /// <summary>No workflow caches NuGet packages, in any form — a cache hit skips NuGet's hash and signature checks:
+    /// <list type="bullet">
+    /// <item>no <c>cache</c> input on <c>actions/setup-dotnet</c> (any value, also an expression);</item>
+    /// <item>no <c>actions/cache</c> step whose path names <c>.nuget</c>, and no <c>NUGET_PACKAGES</c> anywhere (it could
+    /// point the packages folder at any cached directory);</item>
+    /// <item>a <c>docker/build-push-action</c> with a layer cache (<c>cache-from</c>) names the Dockerfile's restore stage in
+    /// <c>no-cache-filters</c>, so the restore layer is never taken from the cache;</item>
+    /// <item><c>release.yml</c> builds have no layer cache at all (<c>cache-from</c>/<c>cache-to</c>): a release builds fresh.</item>
+    /// </list></summary>
+    public static IReadOnlyList<string> NuGetCacheViolations(string workflowYaml, string workflowName, string dockerfile)
     {
         var violations = new List<string>();
+        var restoreStage = RestoreStage(dockerfile);
+        if (restoreStage is null) violations.Add("the Dockerfile's restore is not in a named stage (FROM … AS <stage>)");
+        if (workflowYaml.Replace("\r\n", "\n").Split('\n').Any(l => !l.TrimStart().StartsWith('#') && l.Contains("NUGET_PACKAGES", StringComparison.Ordinal)))
+            violations.Add($"{workflowName} sets NUGET_PACKAGES: the packages folder could be a cached directory");
         var root = (YamlMappingNode)Load(workflowYaml);
         foreach (var (job, steps) in JobSteps(root))
         {
@@ -614,14 +763,102 @@ internal static class BuildPolicy
             {
                 var uses = Scalar(step, "uses") ?? "";
                 var with = step.Children.TryGetValue(new YamlScalarNode("with"), out var w) ? w as YamlMappingNode : null;
-                if (uses.StartsWith("actions/setup-dotnet@", StringComparison.Ordinal) && with is not null
-                    && (with.Children.ContainsKey(new YamlScalarNode("cache")) || with.Children.ContainsKey(new YamlScalarNode("cache-dependency-path"))))
+                bool Has(string key) => with is not null && with.Children.ContainsKey(new YamlScalarNode(key));
+                if (uses.StartsWith("actions/setup-dotnet@", StringComparison.Ordinal) && (Has("cache") || Has("cache-dependency-path")))
                     violations.Add($"job '{job}': actions/setup-dotnet caches NuGet packages (a cache hit skips NuGet's hash and signature checks)");
                 if (uses.StartsWith("actions/cache", StringComparison.Ordinal) && with is not null
                     && (Scalar(with, "path") ?? "").Contains(".nuget", StringComparison.OrdinalIgnoreCase))
                     violations.Add($"job '{job}': {uses.Split('@')[0]} caches NuGet packages (a cache hit skips NuGet's hash and signature checks)");
+                if (!uses.StartsWith("docker/build-push-action@", StringComparison.Ordinal)) continue;
+                var stepName = Scalar(step, "name") ?? uses;
+                if (workflowName == "release.yml" && (Has("cache-from") || Has("cache-to")))
+                    violations.Add($"release.yml job '{job}', '{stepName}': a release build has a layer cache; it must build fresh");
+                if (Has("cache-from"))
+                {
+                    var filters = (Scalar(with!, "no-cache-filters") ?? "").Split([',', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (restoreStage is not null && !filters.Contains(restoreStage, StringComparer.Ordinal))
+                        violations.Add($"job '{job}', '{stepName}': cache-from without no-cache-filters: {restoreStage} — the restore layer would come from the cache");
+                }
             }
         }
+        return violations;
+    }
+
+    /// <summary>A step that restores (the script or <c>dotnet restore</c>) cannot be made to pass on a failure: no
+    /// <c>continue-on-error</c> on the step or its job, and no <c>set +e</c> in its script.</summary>
+    public static IReadOnlyList<string> RestoreStepViolations(string workflowYaml)
+    {
+        var violations = new List<string>();
+        var root = (YamlMappingNode)Load(workflowYaml);
+        if (!root.Children.TryGetValue(new YamlScalarNode("jobs"), out var jobsNode) || jobsNode is not YamlMappingNode jobs) return violations;
+        foreach (var (key, jobNode) in jobs.Children)
+        {
+            if (jobNode is not YamlMappingNode job) continue;
+            var jobName = ((YamlScalarNode)key).Value;
+            var steps = job.Children.TryGetValue(new YamlScalarNode("steps"), out var s) && s is YamlSequenceNode seq
+                ? seq.Children.OfType<YamlMappingNode>().ToList() : [];
+            foreach (var step in steps)
+            {
+                var run = Scalar(step, "run") ?? "";
+                if (!run.Contains(RestoreScript, StringComparison.Ordinal) && !Regex.IsMatch(run, @"\bdotnet\s+restore\b")) continue;
+                var name = Scalar(step, "name") ?? "(unnamed)";
+                if (step.Children.ContainsKey(new YamlScalarNode("continue-on-error")) || job.Children.ContainsKey(new YamlScalarNode("continue-on-error")))
+                    violations.Add($"job '{jobName}', step '{name}': continue-on-error on a restore");
+                if (Regex.IsMatch(run, @"(^|[\s;&|])set\s+(\+e|\+o\s+errexit)\b", RegexOptions.Multiline))
+                    violations.Add($"job '{jobName}', step '{name}': 'set +e' in a restore step");
+            }
+        }
+        return violations;
+    }
+
+    // ---- the vulnerable-packages gate (security.yml) ----
+
+    private const string FoundBreak = "if [ \"$FOUND\" -gt 0 ]; then break; fi";
+    private const string CompleteBreak = "if [ \"$status\" -eq 0 ] && [ \"$PROJECTS\" -ge 5 ] && [ \"$PROBLEMS\" -eq 0 ]; then break; fi";
+    private static readonly Regex CompleteAfterLoop = new(
+        @"^\s*if \[ ""\$status"" -ne 0 \] \|\| \[ ""\$PROJECTS"" -lt 5 \] \|\| \[ ""\$PROBLEMS"" -ne 0 \]; then echo ""[^""\n]*""; exit 1; fi\s*$",
+        RegexOptions.CultureInvariant | RegexOptions.Multiline);
+    private static readonly Regex VulnerableLastTry = new(
+        @"^\s*if \[ ""\$attempt"" -eq 3 \]; then\n(?<body>(?:(?!\s*fi\n)[^\n]*\n)*?)\s*fi\n", RegexOptions.CultureInvariant | RegexOptions.Multiline);
+
+    /// <summary>The <c>Vulnerable packages (gate)</c> step retries only missing data and never a finding: exactly three
+    /// tries; <c>FOUND</c> is computed once per try, inside the loop, and a finding ends the loop at once
+    /// (<c>if [ "$FOUND" -gt 0 ]; then break; fi</c>); otherwise the loop ends only on complete data — exit 0, at least 5
+    /// projects, no problems — or the third try exits 1; after the loop a finding fails, and with no finding the data is
+    /// asserted complete again.</summary>
+    public static IReadOnlyList<string> VulnerableGateViolations(string securityYaml)
+    {
+        var violations = new List<string>();
+        var root = (YamlMappingNode)Load(securityYaml);
+        var run = JobSteps(root).SelectMany(j => j.Steps).Where(s => Scalar(s, "name") == "Vulnerable packages (gate)")
+            .Select(s => Scalar(s, "run")).FirstOrDefault();
+        if (run is null) return ["security.yml has no 'Vulnerable packages (gate)' step"];
+        run = run.Replace("\r\n", "\n");
+        var loopStart = run.IndexOf("for attempt in 1 2 3; do\n", StringComparison.Ordinal);
+        var loopEnd = run.IndexOf("\n          done\n", StringComparison.Ordinal) is var e && e >= 0 ? e : run.IndexOf("\ndone\n", StringComparison.Ordinal);
+        if (loopStart < 0 || loopEnd < loopStart) return ["the vulnerable-packages gate has no 'for attempt in 1 2 3; do … done' loop"];
+        var loop = run[loopStart..loopEnd];
+        var after = run[loopEnd..];
+        var lines = loop.Split('\n').Select(l => l.Trim()).ToList();
+
+        var list = lines.FirstOrDefault(l => l.StartsWith("dotnet list Whiskers.slnx package --vulnerable", StringComparison.Ordinal));
+        if (list is null || !list.EndsWith(" || status=$?", StringComparison.Ordinal))
+            violations.Add("the vulnerability listing's exit code is not kept ('|| status=$?')");
+        if (Regex.Matches(run, @"\bFOUND=").Count != 1 || !Regex.IsMatch(loop, @"\bFOUND="))
+            violations.Add("FOUND is not computed exactly once per try, inside the loop");
+        var foundAt = lines.IndexOf(FoundBreak);
+        if (foundAt < 0) violations.Add($"a finding does not end the loop at once ('{FoundBreak}')");
+        var completeAt = lines.IndexOf(CompleteBreak);
+        if (completeAt < 0) violations.Add($"the loop does not end exactly on complete data ('{CompleteBreak}')");
+        if (foundAt >= 0 && completeAt >= 0 && foundAt > completeAt) violations.Add("the finding check comes after the completeness check");
+        if (lines.Count(l => l.Contains("break", StringComparison.Ordinal)) != 2) violations.Add("the loop has another way out than a finding or complete data");
+        var lastTry = VulnerableLastTry.Match(loop + "\n");
+        if (!lastTry.Success || lastTry.Groups["body"].Value.Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Trim() != "exit 1")
+            violations.Add("the third try without complete data does not end in exit 1");
+        var report = after.IndexOf("if [ \"$FOUND\" -gt 0 ]; then\n", StringComparison.Ordinal);
+        var assert = CompleteAfterLoop.Match(after);
+        if (report < 0) violations.Add("a finding does not fail after the loop");
+        if (!assert.Success || assert.Index < report) violations.Add("with no finding, the data is not asserted complete again after the loop");
         return violations;
     }
 
@@ -629,24 +866,37 @@ internal static class BuildPolicy
 
     public const string PgdgKeyPath = "deploy/keys/pgdg-ACCC4CF8.asc";
     public const string PgdgFingerprint = "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8";
+    /// <summary>SHA-256 of the whole committed key file: a second key appended inside the armor, or any other byte
+    /// changed, does not match. Move it only together with the file, after checking a new key out of band.</summary>
+    public const string PgdgKeySha256 = "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76";
 
-    /// <summary>CI and the image take the PostgreSQL (PGDG) repository key from <see cref="PgdgKeyPath"/>, check its
-    /// fingerprint before trusting it, and download no key from postgresql.org; the committed file is the PGP public key
-    /// with <see cref="PgdgFingerprint"/>.</summary>
+    /// <summary>CI and the image take the PostgreSQL (PGDG) repository key from <see cref="PgdgKeyPath"/>, check the
+    /// whole file's SHA-256 (<c>sha256sum -c</c>) and the key's fingerprint before trusting it, and download no key from
+    /// postgresql.org; the committed file has <see cref="PgdgKeySha256"/> and is exactly one PGP public key with
+    /// <see cref="PgdgFingerprint"/>.</summary>
     public static IReadOnlyList<string> PgdgKeyViolations(string ciYaml, string dockerfile, string key)
     {
         var violations = new List<string>();
-        foreach (var (name, text) in new[] { ("ci.yml", ciYaml), ("Dockerfile", dockerfile) })
+        var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key.Replace("\r\n", "\n")))).ToLowerInvariant();
+        if (sha != PgdgKeySha256) violations.Add($"{PgdgKeyPath} has SHA-256 {sha}, not the pinned {PgdgKeySha256}");
+        foreach (var (name, text, path) in new[] { ("ci.yml", ciYaml, PgdgKeyPath), ("Dockerfile", dockerfile, "/tmp/pgdg-ACCC4CF8.asc") })
         {
             var lines = text.Replace("\r\n", "\n").Split('\n').Where(l => !l.TrimStart().StartsWith('#')).ToList();
+            var check = $"echo \"{PgdgKeySha256}  {path}\" | sha256sum -c -";
+            if (!lines.Any(l => l.Contains(check, StringComparison.Ordinal)))
+                violations.Add($"{name} does not check the key file's SHA-256 ('{check}')");
             foreach (var line in lines.Where(l => Regex.IsMatch(l, @"\b(curl|wget)\b") && l.Contains("postgresql.org", StringComparison.Ordinal)))
                 violations.Add($"{name} downloads from postgresql.org: '{line.Trim()}'");
             if (lines.Any(l => l.Contains("www.postgresql.org", StringComparison.Ordinal) || l.Contains("/media/keys/", StringComparison.Ordinal)))
                 violations.Add($"{name} names the key's download URL");
             if (!lines.Any(l => l.Contains(PgdgKeyPath, StringComparison.Ordinal)))
                 violations.Add($"{name} does not use the committed key {PgdgKeyPath}");
-            if (!lines.Any(l => l.Contains($"'^fpr:::::::::{PgdgFingerprint}:$'", StringComparison.Ordinal)))
+            var fpr = lines.Where(l => l.Contains($"'^fpr:::::::::{PgdgFingerprint}:$'", StringComparison.Ordinal)).ToList();
+            if (fpr.Count == 0)
                 violations.Add($"{name} does not check the key's fingerprint {PgdgFingerprint}");
+            // grep -q may quit before gpg has written everything: gpg then dies of SIGPIPE (exit 141) under pipefail.
+            if (fpr.Any(l => l.Contains("grep -q", StringComparison.Ordinal) || !l.TrimEnd(' ', '\\').EndsWith(">/dev/null", StringComparison.Ordinal)))
+                violations.Add($"{name}: the fingerprint grep must read all of gpg's output ('grep … >/dev/null', not 'grep -q')");
         }
         try
         {
@@ -660,46 +910,77 @@ internal static class BuildPolicy
         return violations;
     }
 
-    /// <summary>The v4 fingerprint (RFC 4880 §12.2: SHA-1 over 0x99, the two-octet length and the body of the primary
-    /// public-key packet) of an ASCII-armored PGP public key block. Throws <see cref="FormatException"/> on anything else.</summary>
-    public static string ArmoredKeyFingerprint(string armored)
+    /// <summary>The binary packets of an ASCII-armored PGP public key block (the armor's CRC line is not part of them).
+    /// Throws <see cref="FormatException"/> when there is no such block or its body is not base64.</summary>
+    public static byte[] ArmoredKeyData(string armored)
     {
         var lines = armored.Replace("\r\n", "\n").Split('\n').Select(l => l.TrimEnd()).ToList();
         var begin = lines.IndexOf("-----BEGIN PGP PUBLIC KEY BLOCK-----");
         var end = lines.IndexOf("-----END PGP PUBLIC KEY BLOCK-----");
         if (begin < 0 || end < begin) throw new FormatException("no PGP PUBLIC KEY BLOCK");
+        if (lines.Count(l => l.StartsWith("-----BEGIN ", StringComparison.Ordinal)) != 1) throw new FormatException("more than one armor block");
         var i = begin + 1;
         while (i < end && lines[i].Length > 0) i++; // armor headers end at the first blank line
         var base64 = string.Concat(lines.Skip(i + 1).Take(end - i - 1).TakeWhile(l => !l.StartsWith('=')));
-        byte[] data;
-        try { data = Convert.FromBase64String(base64); }
+        try { return Convert.FromBase64String(base64); }
         catch (FormatException) { throw new FormatException("the armor body is not base64"); }
-        if (data.Length < 3) throw new FormatException("the key is empty");
+    }
 
-        // The first packet must be a public-key packet (tag 6), old or new packet format.
+    /// <summary>Wraps packets in an armor block (no CRC line; the parser here does not need one).</summary>
+    public static string Armor(byte[] data) =>
+        "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n" + string.Join('\n', Convert.ToBase64String(data).Chunk(64).Select(c => new string(c)))
+        + "\n-----END PGP PUBLIC KEY BLOCK-----\n";
+
+    /// <summary>One OpenPGP packet header at <paramref name="at"/> (old or new format): its tag, and where its body starts
+    /// and how long it is.</summary>
+    private static (int Tag, int Offset, int Length) Packet(byte[] data, int at)
+    {
+        if (at + 2 > data.Length) throw new FormatException("a truncated packet header");
         int tag, length, offset;
-        if ((data[0] & 0xC0) == 0xC0)
+        if ((data[at] & 0xC0) == 0xC0)
         {
-            tag = data[0] & 0x3F;
-            if (data[1] < 192) { length = data[1]; offset = 2; }
-            else if (data[1] < 224) { length = ((data[1] - 192) << 8) + data[2] + 192; offset = 3; }
-            else if (data[1] == 255) { length = (data[2] << 24) | (data[3] << 16) | (data[4] << 8) | data[5]; offset = 6; }
-            else throw new FormatException("partial length on the primary key packet");
+            tag = data[at] & 0x3F;
+            var b = data[at + 1];
+            if (b < 192) { length = b; offset = at + 2; }
+            else if (b < 224 && at + 3 <= data.Length) { length = ((b - 192) << 8) + data[at + 2] + 192; offset = at + 3; }
+            else if (b == 255 && at + 6 <= data.Length) { length = (data[at + 2] << 24) | (data[at + 3] << 16) | (data[at + 4] << 8) | data[at + 5]; offset = at + 6; }
+            else throw new FormatException("a partial or truncated packet length");
         }
-        else if ((data[0] & 0x80) == 0x80)
+        else if ((data[at] & 0x80) == 0x80)
         {
-            tag = (data[0] >> 2) & 0x0F;
-            (length, offset) = (data[0] & 0x03) switch
+            tag = (data[at] >> 2) & 0x0F;
+            (length, offset) = (data[at] & 0x03) switch
             {
-                0 => (data[1], 2),
-                1 => ((data[1] << 8) | data[2], 3),
-                2 => ((data[1] << 24) | (data[2] << 16) | (data[3] << 8) | data[4], 5),
-                _ => throw new FormatException("indeterminate length on the primary key packet"),
+                0 => ((int)data[at + 1], at + 2),
+                1 when at + 3 <= data.Length => ((data[at + 1] << 8) | data[at + 2], at + 3),
+                2 when at + 5 <= data.Length => ((data[at + 1] << 24) | (data[at + 2] << 16) | (data[at + 3] << 8) | data[at + 4], at + 5),
+                _ => throw new FormatException("an indeterminate or truncated packet length"),
             };
         }
         else throw new FormatException("not an OpenPGP packet");
+        if (length < 0 || offset + length > data.Length) throw new FormatException($"a truncated packet (tag {tag})");
+        return (tag, offset, length);
+    }
+
+    /// <summary>The v4 fingerprint (RFC 4880 §12.2: SHA-1 over 0x99, the two-octet length and the body of the primary
+    /// public-key packet) of an ASCII-armored PGP public key block holding exactly one public key: every packet is walked,
+    /// and a second public-key packet (tag 6) — a second key appended inside the armor — is refused. Throws
+    /// <see cref="FormatException"/> on anything else.</summary>
+    public static string ArmoredKeyFingerprint(string armored)
+    {
+        var data = ArmoredKeyData(armored);
+        if (data.Length < 3) throw new FormatException("the key is empty");
+        var packets = new List<(int Tag, int Offset, int Length)>();
+        for (var at = 0; at < data.Length;)
+        {
+            var p = Packet(data, at);
+            packets.Add(p);
+            at = p.Offset + p.Length;
+        }
+        var (tag, offset, length) = packets[0];
         if (tag != 6) throw new FormatException($"the first packet is tag {tag}, not a public key (6)");
-        if (offset + length > data.Length || length > 0xFFFF) throw new FormatException("the primary key packet is truncated");
+        if (packets.Count(p => p.Tag == 6) != 1) throw new FormatException($"{packets.Count(p => p.Tag == 6)} public keys, not exactly one");
+        if (length > 0xFFFF) throw new FormatException("the primary key packet is too long");
         if (data[offset] != 4) throw new FormatException($"key version {data[offset]}, not 4");
 
         var hashed = new byte[3 + length];

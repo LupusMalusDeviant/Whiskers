@@ -47,13 +47,15 @@ jobs:
           set -euo pipefail
           bash .github/scripts/restore-locked.sh
           # The vulnerability data comes live from nuget.org. Retried (3 tries, 20 s apart) only while there is no
-          # complete data: a non-zero exit, unreadable JSON, problems, or fewer than 5 projects. FOUND is evaluated once,
-          # on the first complete data set; a finding is never retried (data that names a vulnerable package ends the loop
-          # whatever else it says, and fails below).
+          # complete data: a non-zero exit, unreadable JSON, problems, or fewer than 5 projects. A finding is never retried:
+          # FOUND > 0 ends the loop at once and fails below. With no finding, the data is asserted complete again after the
+          # loop (BuildReproducibilityTests.VulnerableGateViolations holds this shape).
           for attempt in 1 2 3; do
             status=0
             dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json || status=$?
-            if jq -e '[.. | objects | (.vulnerabilities // empty) | arrays | .[]] | length > 0' vulnerable.json >/dev/null 2>&1; then break; fi
+            FOUND="$(jq '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
+              | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json 2>/dev/null || echo 0)"
+            if [ "$FOUND" -gt 0 ]; then break; fi
             PROJECTS="$(jq '.projects | length' vulnerable.json 2>/dev/null || echo 0)"
             PROBLEMS="$(jq '[.problems // [] | .[]] | length' vulnerable.json 2>/dev/null || echo 1)"
             if [ "$status" -eq 0 ] && [ "$PROJECTS" -ge 5 ] && [ "$PROBLEMS" -eq 0 ]; then break; fi
@@ -65,14 +67,13 @@ jobs:
             echo "::warning::no complete vulnerability data (exit $status, ${PROJECTS} project(s), ${PROBLEMS} problem(s); attempt $attempt of 3); retrying in 20 s"
             sleep 20
           done
-          FOUND="$(jq '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
-            | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json)"
           if [ "$FOUND" -gt 0 ]; then
             jq -r '.projects[] | .path as $p | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
               | select((.vulnerabilities // []) | length > 0)
               | "\($p): \(.id) \(.resolvedVersion) -> \([.vulnerabilities[] | "\(.severity) \(.advisoryurl)"] | join(", "))"' vulnerable.json
             echo "::error::${FOUND} vulnerable package(s)"; exit 1
           fi
+          if [ "$status" -ne 0 ] || [ "$PROJECTS" -lt 5 ] || [ "$PROBLEMS" -ne 0 ]; then echo "::error::no finding, but the data is not complete (exit $status, ${PROJECTS} project(s), ${PROBLEMS} problem(s))"; exit 1; fi
           echo "no known-vulnerable packages in ${PROJECTS} projects"
 
   # A pull request may not add a dependency with a known vulnerability (any severity), in any ecosystem the dependency
