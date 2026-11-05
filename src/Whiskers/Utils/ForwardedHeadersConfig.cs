@@ -36,10 +36,10 @@ public static class ForwardedHeadersConfig
 
     /// <summary>
     /// Parses the configured list into <see cref="IPNetwork"/> entries. A null or empty list (or one holding only
-    /// blank entries) yields loopback; any entry that is neither a CIDR nor a single address throws
-    /// <see cref="InvalidOperationException"/> naming it — the result is never empty and never a guess.
+    /// blank entries) yields loopback; any entry that is not a canonical CIDR or single address throws
+    /// <see cref="InvalidOperationException"/> naming it and the reason — the result is never empty and never a guess.
     /// </summary>
-    public static IReadOnlyList<IPNetwork> ParseTrustedNetworks(IEnumerable<string>? configured)
+    public static IReadOnlyList<IPNetwork> ParseTrustedNetworks(IEnumerable<string?>? configured)
     {
         var networks = new List<IPNetwork>();
         var invalid = new List<string>();
@@ -47,25 +47,16 @@ public static class ForwardedHeadersConfig
         {
             foreach (var entry in configured)
             {
+                if (entry is null) { invalid.Add("(an entry without a value, e.g. a nested object)"); continue; }
                 if (string.IsNullOrWhiteSpace(entry)) continue;
-                var value = entry.Trim();
-                var slash = value.IndexOf('/');
-                // Only the canonical form of an address counts: IPAddress.TryParse also takes "172.18.0" (= 172.18.0.0),
-                // "10" (= 0.0.0.10) or "0x7f000001", so a typo would quietly trust a different address.
-                if (!IsCanonicalAddress(slash < 0 ? value : value[..slash]))
-                    invalid.Add(value);
-                else if (slash >= 0 && IPNetwork.TryParse(value, out var network))
-                    networks.Add(network);
-                else if (slash < 0 && IPAddress.TryParse(value, out var address))
-                    networks.Add(new IPNetwork(address, address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128));
-                else
-                    invalid.Add(value);
+                if (Parse(entry.Trim(), out var network, out var problem)) networks.Add(network);
+                else invalid.Add(problem);
             }
         }
 
         if (invalid.Count > 0)
             throw new InvalidOperationException(
-                $"{SectionName} holds entries that are neither a CIDR nor an address: {string.Join(", ", invalid)}. " +
+                $"{SectionName} holds entries Whiskers cannot read: {string.Join("; ", invalid)}. " +
                 "Whiskers does not start with a trusted-proxy list it cannot read (R1-50).");
 
         if (networks.Count == 0)
@@ -77,30 +68,92 @@ public static class ForwardedHeadersConfig
         return networks;
     }
 
+    private static bool Parse(string value, out IPNetwork network, out string problem)
+    {
+        network = default;
+        var slash = value.IndexOf('/');
+        var addressText = slash < 0 ? value : value[..slash];
+        // Only the canonical form of an address counts: IPAddress.TryParse also takes "172.18.0" (= 172.18.0.0),
+        // "10" (= 0.0.0.10) or "0x7f000001", so a typo would quietly trust a different address.
+        if (!IPAddress.TryParse(addressText, out var address))
+        {
+            problem = $"'{value}' is neither a CIDR nor an address";
+            return false;
+        }
+        if (!string.Equals(address.ToString(), addressText, StringComparison.OrdinalIgnoreCase))
+        {
+            problem = $"'{value}' is not written canonically (write '{address}{(slash < 0 ? "" : value[slash..])}' if that is what you mean)";
+            return false;
+        }
+        var bits = address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128;
+        if (slash < 0)
+        {
+            network = new IPNetwork(address, bits);
+            problem = "";
+            return true;
+        }
+        if (!int.TryParse(value[(slash + 1)..], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var prefix)
+            || prefix > bits)
+        {
+            problem = $"'{value}' has no valid prefix length (0–{bits})";
+            return false;
+        }
+        // Checked here, not left to IPNetwork.TryParse: a CIDR with host bits set (172.18.0.2/16, copied from
+        // `docker network inspect`) must not quietly become a different set of addresses.
+        if (!NetworkOf(address, prefix).Equals(address))
+        {
+            problem = $"'{value}' has host bits set (use '{NetworkOf(address, prefix)}/{prefix}' for the network or '{address}/{bits}' for the one address)";
+            return false;
+        }
+        network = new IPNetwork(address, prefix);
+        problem = "";
+        return true;
+    }
+
+    private static IPAddress NetworkOf(IPAddress address, int prefix)
+    {
+        var bytes = address.GetAddressBytes();
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            var keep = Math.Clamp(prefix - i * 8, 0, 8);
+            bytes[i] &= (byte)(0xFF << (8 - keep));
+        }
+        return new IPAddress(bytes);
+    }
+
     /// <summary>Reads <see cref="SectionName"/> from <paramref name="configuration"/>: the indexed entries
     /// (<c>__0</c>, <c>__1</c>, …), or — when the key is set as one value — a comma-separated list. Parsed by
-    /// <see cref="ParseTrustedNetworks"/>, so an unreadable entry throws.</summary>
+    /// <see cref="ParseTrustedNetworks"/>, so an unreadable entry (also a nested object) throws.</summary>
     public static IReadOnlyList<IPNetwork> FromConfiguration(Microsoft.Extensions.Configuration.IConfiguration configuration)
     {
         var section = configuration.GetSection(SectionName);
         var entries = section.GetChildren().Any()
-            ? section.GetChildren().Select(c => c.Value ?? "")
+            ? section.GetChildren().Select(c => c.Value)
             : (section.Value ?? "").Split(',');
         return ParseTrustedNetworks(entries);
     }
 
-    private static bool IsCanonicalAddress(string text) =>
-        IPAddress.TryParse(text, out var address)
-        && string.Equals(address.ToString(), text, StringComparison.OrdinalIgnoreCase);
+    /// <summary>The framework's own forwarded-headers switch (<c>ASPNETCORE_FORWARDEDHEADERS_ENABLED=true</c>, read as
+    /// <c>FORWARDEDHEADERS_ENABLED</c>) inserts a forwarded-headers step ahead of the pipeline that trusts every peer —
+    /// any client could then claim any address before the R1-50 list is consulted. Throws when it is set (fail closed).</summary>
+    public static void RefuseFrameworkTrustAll(Microsoft.Extensions.Configuration.IConfiguration configuration)
+    {
+        if (string.Equals(configuration["FORWARDEDHEADERS_ENABLED"], "true", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "ASPNETCORE_FORWARDEDHEADERS_ENABLED=true makes ASP.NET Core trust forwarded headers from every peer. " +
+                $"Remove it and list your reverse proxy in {SectionName} instead (R1-50).");
+    }
 
-    /// <summary>Whether <paramref name="peer"/> is one of <paramref name="trusted"/> (an IPv4-mapped IPv6 address
-    /// counts as its IPv4 form, as the forwarded-headers middleware treats it).</summary>
+    /// <summary>Whether <paramref name="peer"/> is one of <paramref name="trusted"/>, judged as the forwarded-headers
+    /// middleware judges it: an IPv4-mapped IPv6 address matches a network of either form. A null peer is not trusted
+    /// here; the pipeline does not mark a request without a peer address (a local transport, where the middleware applies
+    /// the headers).</summary>
     public static bool IsTrusted(IReadOnlyList<IPNetwork> trusted, IPAddress? peer)
     {
         if (peer is null) return false;
-        var address = peer.IsIPv4MappedToIPv6 ? peer.MapToIPv4() : peer;
+        var mapped = peer.IsIPv4MappedToIPv6 ? peer.MapToIPv4() : null;
         foreach (var network in trusted)
-            if (network.Contains(address)) return true;
+            if (network.Contains(peer) || (mapped is not null && network.Contains(mapped))) return true;
         return false;
     }
 }

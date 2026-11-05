@@ -246,10 +246,11 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 "Reverse-Proxy vertraut",
                 false,
                 $"X-Forwarded-Header von Peers, die keine vertrauten Proxys sind, wurden ignoriert (letzte 24 h): {peers}. " +
-                "Ist einer davon Ihr Reverse Proxy, tragen Sie sein Netz in ForwardedHeaders__TrustedNetworks__0 ein " +
-                "(Standard: nur Loopback) — sonst sehen Login-Limit und Audit nur seine Adresse, HTTPS wird als HTTP " +
-                "erkannt (Session-Cookie ohne Secure, Google-/OIDC-Rückruf mit http://) und Auth:Disabled weist die " +
-                "Anfragen ab.",
+                "Ist einer davon Ihr Reverse Proxy, tragen Sie seine Adresse möglichst eng (z. B. /32) in " +
+                "ForwardedHeaders__TrustedNetworks__0 ein (Standard: nur Loopback) — sonst sehen Login-Limit und Audit nur " +
+                "seine Adresse, HTTPS wird als HTTP erkannt (Session-Cookie ohne Secure, Google-/OIDC-Rückruf mit http://) " +
+                "und Auth:Disabled weist die Anfragen ab. Eine öffentliche Adresse ist eher ein Client, der eine fremde " +
+                "Adresse vortäuschen wollte — nicht eintragen.",
                 null, null));
         }
 

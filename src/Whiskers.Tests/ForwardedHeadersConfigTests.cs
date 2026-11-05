@@ -49,6 +49,8 @@ public class ForwardedHeadersConfigTests
     [InlineData("10")]
     [InlineData("0x7f000001")]
     [InlineData("10.1/16")]
+    [InlineData("2001:0db8::/32")]
+    [InlineData("172.18.0.2/16")]
     public void An_entry_that_cannot_be_read_refuses_the_start_instead_of_trusting_another_set(string bad)
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -77,6 +79,55 @@ public class ForwardedHeadersConfigTests
 
         Assert.Throws<InvalidOperationException>(() => Read(("ForwardedHeaders:TrustedNetworks", "10.0.0.0/8,proxy")));
         Assert.True(ForwardedHeadersConfig.IsTrusted(Read(), IPAddress.Loopback));
+    }
+
+    [Theory]
+    [InlineData("172.18.0.2/16", "host bits set", "172.18.0.0/16")]
+    [InlineData("2001:0db8::/32", "not written canonically", "2001:db8::/32")]
+    [InlineData("10.0.0.0/33", "prefix length", null)]
+    public void A_refused_entry_names_the_reason_and_the_spelling_that_works(string bad, string reason, string? hint)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => ForwardedHeadersConfig.ParseTrustedNetworks(new[] { bad }));
+
+        Assert.Contains(reason, ex.Message);
+        if (hint is not null) Assert.Contains(hint, ex.Message);
+    }
+
+    [Fact]
+    public void A_nested_entry_without_a_value_is_refused_not_skipped()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ForwardedHeaders:TrustedNetworks:0:Cidr"] = "10.0.0.0/8",
+        }).Build();
+
+        Assert.Throws<InvalidOperationException>(() => ForwardedHeadersConfig.FromConfiguration(config));
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("TRUE", true)]
+    [InlineData("false", false)]
+    [InlineData(null, false)]
+    public void The_frameworks_trust_all_switch_refuses_the_start(string? value, bool refused)
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["FORWARDEDHEADERS_ENABLED"] = value,
+        }).Build();
+
+        if (refused)
+            Assert.Throws<InvalidOperationException>(() => ForwardedHeadersConfig.RefuseFrameworkTrustAll(config));
+        else
+            ForwardedHeadersConfig.RefuseFrameworkTrustAll(config);
+    }
+
+    [Fact]
+    public void An_ipv4_mapped_peer_matches_a_network_of_either_form()
+    {
+        var result = ForwardedHeadersConfig.ParseTrustedNetworks(new[] { "::ffff:172.18.0.0/112" });
+
+        Assert.True(ForwardedHeadersConfig.IsTrusted(result, IPAddress.Parse("172.18.0.2").MapToIPv6()));
     }
 
     [Fact]

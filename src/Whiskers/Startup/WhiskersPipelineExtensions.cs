@@ -17,10 +17,11 @@ namespace Whiskers.Startup;
 
 /// <summary>The HTTP request pipeline + startup warm-up, moved <b>verbatim</b> from Program.cs. The middleware
 /// ORDER is security-critical (protected layer, docs/ARCHITECTURE.md): the request correlation id (R1-53, decides
-/// nothing) ahead of everything, forwarded headers first among the rest, then the fixed
-/// <c>Antiforgery → Authentication → [LAN bypass] → McpBearer → Authorization</c> chain. This method keeps
-/// every <c>Use*</c>/<c>Map*</c> call in the exact same order as before — nothing is reordered, only relocated
-/// (the McpCallLog middleware still sits between the endpoint maps exactly where it did).</summary>
+/// nothing) ahead of everything, then (R1-50, approved 2026-11-05) the untrusted-forwarded-headers marker and the
+/// response-header registration, forwarded headers first among the rest, then the fixed
+/// <c>Antiforgery → Authentication → [LAN bypass] → McpBearer → Authorization</c> chain. Apart from the R1-50 steps every
+/// <c>Use*</c>/<c>Map*</c> call keeps the order it had in Program.cs (the McpCallLog middleware still sits between the
+/// endpoint maps exactly where it did).</summary>
 public static class WhiskersPipelineExtensions
 {
     /// <summary>The audit action of a self-backup download, handed out or refused (R1-22).</summary>
@@ -47,6 +48,8 @@ public static class WhiskersPipelineExtensions
         // audit. R1-50: defaults to loopback only; override via ForwardedHeaders:TrustedNetworks (CIDRs or addresses).
         // An entry that is neither refuses the start (fail closed) instead of trusting a different set.
         var trustedProxies = ForwardedHeadersConfig.FromConfiguration(app.Configuration);
+        // The framework's own switch adds a forwarded-headers step ahead of this pipeline that trusts EVERY peer.
+        ForwardedHeadersConfig.RefuseFrameworkTrustAll(app.Configuration);
         forwardedHeadersOptions.KnownIPNetworks.Clear();
         forwardedHeadersOptions.KnownProxies.Clear();
         foreach (var network in trustedProxies)
@@ -58,6 +61,7 @@ public static class WhiskersPipelineExtensions
         app.Use(async (ctx, next) =>
         {
             if ((ctx.Request.Headers.ContainsKey("X-Forwarded-For") || ctx.Request.Headers.ContainsKey("X-Forwarded-Proto"))
+                && ctx.Connection.RemoteIpAddress is not null   // a local transport: the middleware applies the headers
                 && !ForwardedHeadersConfig.IsTrusted(trustedProxies, ctx.Connection.RemoteIpAddress))
             {
                 // The Auth:Disabled gate refuses such a request: the peer may be a proxy that is not listed yet, and

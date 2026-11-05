@@ -919,8 +919,8 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 **Acceptance criteria:**
 
 - [x] `HttpSecurityTests` covers framing/content headers, supported TLS cookie policy and cross-site logout prevention.
-- [x] `ForwardedHeadersConfigTests` proves untrusted clients cannot spoof rate-limit/trusted-network identity; invalid explicit configuration fails closed.
-- [x] `EndpointAuthMatrixTests` covers MCP 401 behavior, absent providers, invalid local redirects and access-denied responses.
+- [x] `ForwardedHeadersConfigTests` proves untrusted clients cannot spoof rate-limit/trusted-network identity; invalid explicit configuration fails closed. (Parser there; the pipeline proof is in `HttpSecurityTests`.)
+- [x] `EndpointAuthMatrixTests` covers MCP 401 behavior, absent providers, invalid local redirects and access-denied responses. (Local redirects: `HttpSecurityTests`.)
 - [x] Pin unknown-user password work with an appropriate test; avoid claiming exact timing equality from the lockout test alone.
 
 > Implemented (2026-11-05; middleware and auth integration approved by the maintainer the same day):

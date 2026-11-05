@@ -93,8 +93,9 @@ only, so no client can pose as another with its own `X-Forwarded-For`; a proxy i
 must be listed, or every visitor counts as that proxy (Settings → production readiness then names the proxy). Do not
 list whole private ranges: anything in a listed range can claim any address, and the per-client limit and the bounded
 audit trail of refusals no longer hold for it (the per-account limit and the lockout still do). Example:
-`ForwardedHeaders__TrustedNetworks__0=172.18.0.2/32` for a single proxy container. An entry that is neither a CIDR
-nor an address stops the start.
+`ForwardedHeaders__TrustedNetworks__0=172.18.0.2/32` for a single proxy container. An entry that is not a canonical CIDR
+or address stops the start, naming the reason (for example host bits set in `172.18.0.2/16`). Do not set
+`ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`: it makes ASP.NET Core trust every peer, so Whiskers refuses to start with it.
 
 The recovery page and the host CLI are not stopped by the kill switch (a person recovering their own access is not
 a write to managed infrastructure). Adding, resetting and deleting accounts — and redeeming a code — are refused while

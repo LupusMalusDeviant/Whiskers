@@ -225,6 +225,7 @@ for every visitor and plain HTTP behind a TLS-terminating proxy (session cookie 
 fails because the callback is built with `http://`), `AUTH_DISABLED=true` refuses the proxied requests, and
 Settings → production readiness names the proxy. An entry that is not a canonical CIDR or address stops the start;
 a single value without index (`ForwardedHeaders__TrustedNetworks=10.0.0.0/8,172.18.0.2`) is read as a comma-separated list.
+Do not set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` instead: it trusts every peer, and Whiskers refuses to start with it.
 </details>
 
 <details>

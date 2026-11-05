@@ -144,6 +144,9 @@ public sealed class HttpSecurityTests
     // A listed proxy: its clients' addresses decide — a public one is refused, a LAN one is served.
     [InlineData("10.0.0.5", "203.0.113.9", "10.0.0.0/8", HttpStatusCode.Forbidden)]
     [InlineData("10.0.0.5", "192.168.1.7", "10.0.0.0/8", HttpStatusCode.OK)]
+    // The default proxy (loopback, also IPv4-mapped) is honoured: its public client is refused, its LAN client served.
+    [InlineData("127.0.0.1", "203.0.113.9", null, HttpStatusCode.Forbidden)]
+    [InlineData("::ffff:127.0.0.1", "192.168.1.7", null, HttpStatusCode.OK)]
     public async Task Auth_disabled_serves_only_the_trusted_network_also_behind_a_proxy(
         string peer, string? forwardedFor, string? trusted, HttpStatusCode expected)
     {
@@ -158,7 +161,7 @@ public sealed class HttpSecurityTests
             var response = await client.SendAsync(request);
 
             Assert.Equal(expected, response.StatusCode);
-            if (expected == HttpStatusCode.Forbidden && trusted is null)
+            if (expected == HttpStatusCode.Forbidden && trusted is null && !IPAddress.Parse(peer).Equals(IPAddress.Loopback))
                 Assert.Contains("ForwardedHeaders:TrustedNetworks", await response.Content.ReadAsStringAsync());
         }, extra.ToArray());
     }

@@ -17,7 +17,8 @@ All notable changes to Whiskers are documented here. The format follows
   proxy's private address. Settings → production readiness names the ignored peers. An entry that is not a canonical
   CIDR or address (`172.18.0` or `10` no longer pass) stops the start; a single value without index is read as a
   comma-separated list. Helm: set `trustedProxyCidrs` to your ingress controller's pods (`NOTES.txt` warns when an
-  ingress is enabled and the list is empty).
+  ingress is enabled and the list is empty). **Do not** set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` as a shortcut:
+  it makes ASP.NET Core trust forwarded headers from every peer, and Whiskers now refuses to start with it.
 - **Security: HTTP hardening (R1-50).** Every answer forbids framing by another site and MIME sniffing and keeps the
   referrer on the site. Signing out is a POST with an antiforgery token (another site can no longer sign you out with a
   link or image; opening `/logout` shows a sign-out button). The session cookie's flags are stated (HttpOnly,
