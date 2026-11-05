@@ -19,9 +19,11 @@ public sealed class HostShellDeadlineTests
     private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan Cleanup = TimeSpan.FromMilliseconds(500);
     /// <summary>Timeout + clean-up budget + scheduling slack. A stalled step never completes, so one that held the caller
-    /// would cross any finite bound; the slack is wide (5 s) because a shared CI runner under the parallel suite has been
-    /// seen to delay timer callbacks by more than 2 s. A run that crosses it fails (it does not hang the suite).</summary>
-    private static readonly TimeSpan Bound = Timeout + Cleanup + TimeSpan.FromSeconds(5);
+    /// would cross any finite bound. The slack is 4 s: a shared CI runner under the parallel suite has been seen to delay
+    /// timer callbacks by more than 2 s, and the bound (5 s) must stay below timeout + the production clean-up budget
+    /// (0.5 s + 5 s), so a caller held for the default budget instead of the injected one still fails. A run that crosses
+    /// it fails (it does not hang the suite).</summary>
+    private static readonly TimeSpan Bound = Timeout + Cleanup + TimeSpan.FromSeconds(4);
 
     private readonly FakeDocker _docker = new();
 
@@ -72,7 +74,7 @@ public sealed class HostShellDeadlineTests
 
         var label = _docker.Containers.Values.Single().Labels[HostShellOperations.DeadlineLabel];
         var end = DateTimeOffset.FromUnixTimeSeconds(long.Parse(label, CultureInfo.InvariantCulture));
-        Assert.InRange(end, before + TimeSpan.FromMinutes(2), before + TimeSpan.FromMinutes(2) + Cleanup + TimeSpan.FromSeconds(5));
+        Assert.InRange(end, before + TimeSpan.FromMinutes(2), before + TimeSpan.FromMinutes(2) + Cleanup + TimeSpan.FromSeconds(2)); // rounding up + set-up; the 5 s default budget would cross it
         _docker.Release("wait");
         await run;
     }
@@ -650,7 +652,7 @@ public sealed class HostShellDeadlineTests
     public async Task A_local_command_that_runs_past_its_timeout_is_killed_and_reported_as_effect_unknown()
     {
         var (file, args) = OperatingSystem.IsWindows()
-            ? ("cmd", new[] { "/c", "ping -n 8 127.0.0.1 >nul" })
+            ? ("cmd", new[] { "/c", "ping -n 12 127.0.0.1 >nul" })
             : ("sh", new[] { "-c", "sleep 8" });
         Skip.IfNot(OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS());
 
