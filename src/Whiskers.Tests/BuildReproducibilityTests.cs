@@ -138,13 +138,134 @@ public class BuildReproducibilityTests
     }
 
     [Theory]
-    [InlineData("dotnet restore Whiskers.slnx --locked-mode", "dotnet restore Whiskers.slnx")]                       // unlocked restore
+    [InlineData("run: bash .github/scripts/restore-locked.sh", "run: dotnet restore Whiskers.slnx")]                 // unlocked restore
+    [InlineData("bash .github/scripts/restore-locked.sh\n", "bash .github/scripts/restore-locked.sh || true\n")]     // the script's failure ignored
+    [InlineData("bash .github/scripts/restore-locked.sh\n", "bash .github/scripts/restore-locked.sh --no-lock\n")]   // anything but the plain call
     [InlineData("dotnet build Whiskers.slnx --no-restore --configuration Release", "dotnet build Whiskers.slnx --configuration Release")] // implicit restore
     public void Workflow_restore_check_finds_an_unlocked_restore(string original, string mutation)
     {
         var real = Repo(".github", "workflows", "ci.yml");
         Assert.Contains(original, real);
         Assert.NotEmpty(BuildPolicy.WorkflowRestoreViolations(real.Replace(original, mutation), out _));
+    }
+
+    // ---- the restore script and the Dockerfile's restore retry only what a retry can fix --------------------------
+
+    [Fact]
+    public void Restore_script_restores_locked_and_fails_closed()
+        => Assert.Empty(BuildPolicy.RestoreScriptViolations(Repo(".github", "scripts", "restore-locked.sh")));
+
+    [Fact]
+    public void Every_workflow_restore_goes_through_the_script_or_is_locked()
+    {
+        foreach (var workflow in new[] { "ci.yml", "security.yml" })
+        {
+            Assert.Empty(BuildPolicy.WorkflowRestoreViolations(Repo(".github", "workflows", workflow), out var locked));
+            Assert.True(locked > 0, $"{workflow} has no locked restore");
+        }
+    }
+
+    [Theory]
+    [InlineData("then echo \"::error::the locked restore failed three times (last exit $status)\"; exit 1; fi",
+                "then echo \"::error::the locked restore failed three times (last exit $status)\"; break; fi")]     // third failure falls through
+    [InlineData("not retried\"; exit 1; fi", "not retried\"; break; fi")]                                         // a lock mismatch passes
+    [InlineData("not retried\"; exit 1; fi", "not retried\"; continue; fi")]                                      // a lock mismatch is retried
+    [InlineData("NU1004|NU1005|NU1403|NU1101|NU1102", "NU1004|NU1005|NU1101|NU1102")]                             // a hash mismatch is retried
+    [InlineData("NU1004|NU1005|NU1403|NU1101|NU1102", "NU1004|NU1005|NU1403")]                                    // a missing package is retried
+    [InlineData("done\nexit 1\n", "done\nexit 0\n")]                                                              // the end of the loop succeeds
+    [InlineData("for attempt in 1 2 3; do", "for attempt in 1 2 3 4 5 6 7 8 9; do")]                              // retries without bound
+    [InlineData("set -euo pipefail", "set -eu")]                                                                  // tee hides the exit code
+    [InlineData(" || status=$?", "; status=0")]                                                                   // the exit code is dropped
+    [InlineData("dotnet restore Whiskers.slnx --locked-mode", "dotnet restore Whiskers.slnx")]                    // unlocked
+    [InlineData("dotnet restore Whiskers.slnx --locked-mode", "dotnet restore src/Whiskers/Whiskers.csproj --locked-mode")] // not the solution
+    public void Restore_script_check_finds_a_fail_open_or_unlocked_script(string original, string mutation)
+    {
+        var real = Repo(".github", "scripts", "restore-locked.sh");
+        Assert.Contains(original, real);
+        Assert.NotEmpty(BuildPolicy.RestoreScriptViolations(real.Replace(original, mutation)));
+    }
+
+    [Fact]
+    public void Dockerfile_restore_retries_only_what_a_retry_can_fix()
+        => Assert.Empty(BuildPolicy.DockerfileRestoreRetryViolations(Repo("Dockerfile")));
+
+    [Theory]
+    [InlineData("then echo \"::error::the locked restore failed three times (last exit $status)\"; exit 1; fi",
+                "then echo \"::error::the locked restore failed three times (last exit $status)\"; break; fi")]
+    [InlineData("not retried\"; exit 1; fi", "not retried\"; break; fi")]
+    [InlineData("NU1004|NU1005|NU1403|NU1101|NU1102", "NU1004|NU1005|NU1101|NU1102")]
+    [InlineData("done; \\\n    exit 1", "done; \\\n    exit 0")]
+    [InlineData(" || status=$?", "; status=0")]
+    [InlineData("RUN for attempt in 1 2 3; do", "RUN --mount=type=cache,target=/root/.nuget/packages for attempt in 1 2 3; do")] // a NuGet cache
+    public void Dockerfile_restore_retry_check_finds_a_fail_open_loop(string original, string mutation)
+    {
+        var real = Repo("Dockerfile");
+        Assert.Contains(original, real);
+        Assert.NotEmpty(BuildPolicy.DockerfileRestoreRetryViolations(real.Replace(original, mutation)));
+    }
+
+    /// <summary>No NuGet cache in any workflow: a cache hit skips NuGet's content-hash and signature checks (NuGet checks
+    /// a package only when it downloads and extracts it), so the cache entry would become a trust root nothing re-checks.</summary>
+    [Theory]
+    [MemberData(nameof(Workflows))]
+    public void No_workflow_caches_nuget_packages(string workflow)
+        => Assert.Empty(BuildPolicy.NuGetCacheViolations(Repo(".github", "workflows", workflow)));
+
+    [Theory]
+    [InlineData("          global-json-file: global.json\n", "          global-json-file: global.json\n          cache: true\n")]
+    [InlineData("          global-json-file: global.json\n", "          global-json-file: global.json\n          cache: ${{ github.event_name != 'schedule' }}\n")]
+    [InlineData("      - name: Restore\n",
+                "      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4\n        with:\n          path: ~/.nuget/packages\n          key: nuget\n\n      - name: Restore\n")]
+    [InlineData("      - name: Restore\n",
+                "      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4\n        with:\n          path: |\n            ${{ github.workspace }}/.nuget/packages\n          key: nuget\n\n      - name: Restore\n")]
+    public void NuGet_cache_check_finds_a_cache(string original, string mutation)
+    {
+        var real = Repo(".github", "workflows", "ci.yml");
+        Assert.Contains(original, real);
+        Assert.NotEmpty(BuildPolicy.NuGetCacheViolations(real.Replace(original, mutation)));
+    }
+
+    // ---- the PGDG signing key is committed and pinned, never downloaded ---------------------------------------
+
+    [Fact]
+    public void Pgdg_key_is_committed_pinned_and_never_downloaded()
+        => Assert.Empty(BuildPolicy.PgdgKeyViolations(Repo(".github", "workflows", "ci.yml"), Repo("Dockerfile"), Repo(BuildPolicy.PgdgKeyPath)));
+
+    [Fact]
+    public void Committed_pgdg_key_has_the_pinned_fingerprint()
+        => Assert.Equal(BuildPolicy.PgdgFingerprint, BuildPolicy.ArmoredKeyFingerprint(Repo(BuildPolicy.PgdgKeyPath)));
+
+    [Fact]
+    public void Pgdg_key_check_finds_a_download_and_a_wrong_key()
+    {
+        var ci = Repo(".github", "workflows", "ci.yml");
+        var dockerfile = Repo("Dockerfile");
+        var key = Repo(BuildPolicy.PgdgKeyPath);
+        const string download = "curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc";
+
+        // Downloaded again, in CI or in the image.
+        var ciCall = "sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg deploy/keys/pgdg-ACCC4CF8.asc";
+        Assert.Contains(ciCall, ci);
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(
+            ci.Replace(ciCall, $"{download} | sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg"), dockerfile, key));
+        var imageCopy = "COPY deploy/keys/pgdg-ACCC4CF8.asc /tmp/pgdg-ACCC4CF8.asc";
+        Assert.Contains(imageCopy, dockerfile);
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace(imageCopy, $"RUN {download} -o /tmp/pgdg-ACCC4CF8.asc"), key));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace("deploy/keys/pgdg-ACCC4CF8.asc", "pgdg.asc"), key));
+
+        // The fingerprint check dropped.
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(BuildPolicy.PgdgFingerprint, "0000"), dockerfile, key));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace(BuildPolicy.PgdgFingerprint, "0000"), key));
+
+        // Not a public key block, or another key.
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile, key.Replace("PUBLIC KEY BLOCK", "PRIVATE KEY BLOCK")));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile, "not a key"));
+        var lines = key.Replace("\r\n", "\n").Split('\n');
+        var body = Array.FindIndex(lines, l => l.Length == 64);
+        Assert.True(body > 0, "no base64 line in the key");
+        var c = lines[body][10] == 'A' ? 'B' : 'A';
+        lines[body] = lines[body][..10] + c + lines[body][11..];
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile, string.Join('\n', lines)));
     }
 
     [Fact]
@@ -156,7 +277,7 @@ public class BuildReproducibilityTests
     }
 
     [Theory]
-    [InlineData("RUN dotnet restore ./Whiskers/Whiskers.csproj --locked-mode", "RUN dotnet restore ./Whiskers/Whiskers.csproj")]
+    [InlineData("dotnet restore ./Whiskers/Whiskers.csproj --locked-mode >", "dotnet restore ./Whiskers/Whiskers.csproj >")]
     [InlineData("--no-restore -o /app/publish", "-o /app/publish")]
     [InlineData(" src/Whiskers.Data/packages.lock.json ./Whiskers.Data/", " ./Whiskers.Data/")]
     [InlineData("COPY Directory.Build.props ./\n", "")]
@@ -306,8 +427,19 @@ internal static class BuildPolicy
 
     // ---- restores in workflows and the Dockerfile ----
 
+    /// <summary>The locked restore of the whole solution, retried only for transient failures
+    /// (<see cref="RestoreScriptViolations"/>). A workflow calls it exactly as this command, alone on its line.</summary>
+    public const string RestoreScript = ".github/scripts/restore-locked.sh";
+    public const string RestoreScriptCall = "bash " + RestoreScript;
+
+    /// <summary>NuGet errors that the next try would repeat: a lock file that does not match (NU1004, NU1005), a content
+    /// hash that differs (NU1403), a package or version that does not exist (NU1101, NU1102). Never retried.</summary>
+    public static readonly IReadOnlyList<string> DeterministicRestoreErrors = ["NU1004", "NU1005", "NU1403", "NU1101", "NU1102"];
+
     /// <summary>Every <c>dotnet restore</c> is locked; every other dotnet verb that would restore implicitly says
-    /// <c>--no-restore</c> or <c>--no-build</c>.</summary>
+    /// <c>--no-restore</c> or <c>--no-build</c>. A call of <see cref="RestoreScript"/> counts as a locked restore when it is
+    /// exactly <see cref="RestoreScriptCall"/> (a <c>run:</c> value or a line of a <c>run</c> block): anything appended
+    /// (<c>|| true</c>, arguments) is a violation.</summary>
     public static IReadOnlyList<string> WorkflowRestoreViolations(string text, out int lockedRestores)
     {
         var violations = new List<string>();
@@ -315,6 +447,14 @@ internal static class BuildPolicy
         foreach (var line in JoinContinuations(text))
         {
             if (line.TrimStart().StartsWith('#')) continue;
+            if (line.Contains(RestoreScript, StringComparison.Ordinal))
+            {
+                var command = line.Trim();
+                if (command.StartsWith("- ", StringComparison.Ordinal)) command = command[2..].TrimStart();
+                if (command.StartsWith("run:", StringComparison.Ordinal)) command = command[4..].Trim();
+                if (command == RestoreScriptCall) lockedRestores++;
+                else violations.Add($"the restore script is not called as exactly '{RestoreScriptCall}': '{line.Trim()}'");
+            }
             foreach (Match m in DotnetCommand.Matches(line))
             {
                 var verb = m.Groups["verb"].Value;
@@ -375,6 +515,8 @@ internal static class BuildPolicy
             }
         }
         if (restores == 0) violations.Add("the Dockerfile has no dotnet restore");
+        if (dockerfile.Contains("type=cache", StringComparison.Ordinal))
+            violations.Add("the Dockerfile mounts a build cache: a cached NuGet package skips NuGet's hash and signature checks");
 
         // What the restore layer sees: the COPY sources before the first restore.
         var copies = lines.TakeWhile(l => !(l.TrimStart().StartsWith("RUN ", StringComparison.Ordinal) && l.Contains("dotnet restore", StringComparison.Ordinal)))
@@ -389,6 +531,185 @@ internal static class BuildPolicy
             if (!copies.Contains(lockFile)) violations.Add($"the Dockerfile does not copy {lockFile} into the restore layer");
         }
         return violations;
+    }
+
+    // ---- the restore retry: only what a retry can fix, and the last failure fails ----
+
+    private static readonly Regex DeterministicBranch = new(
+        @"if grep -Eq '(?<codes>[^'\n]+)' [^;\n]+; then echo ""[^""\n]*""; exit 1; fi", RegexOptions.CultureInvariant);
+    private static readonly Regex LastTryBranch = new(
+        @"if \[ ""\$attempt"" -eq 3 \]; then echo ""[^""\n]*""; exit 1; fi", RegexOptions.CultureInvariant);
+    private static readonly Regex LoopEndsFailing = new(@"\bdone;?[ \t]*(?:\\?\n[ \t]*)?exit 1[ \t]*\n?$", RegexOptions.CultureInvariant);
+
+    /// <summary>A restore retry loop (the script, the Dockerfile's RUN): exactly three tries; the restore's exit code is
+    /// kept (<c>|| status=$?</c>); every <see cref="DeterministicRestoreErrors">deterministic error</see> fails at once with
+    /// <c>exit 1</c>; the third failure exits 1; and the text after the loop exits 1, so no path out of it passes.</summary>
+    private static List<string> RetryLoopViolations(string loop, string where)
+    {
+        var violations = new List<string>();
+        if (!loop.Contains("for attempt in 1 2 3; do", StringComparison.Ordinal))
+            violations.Add($"{where}: the retry loop is not exactly three tries ('for attempt in 1 2 3; do')");
+        var restoreLine = loop.Split('\n').FirstOrDefault(l => DotnetCommand.Match(l) is { Success: true } m && m.Groups["verb"].Value == "restore");
+        if (restoreLine is null || !restoreLine.Contains(" || status=$?", StringComparison.Ordinal))
+            violations.Add($"{where}: the restore's exit code is not kept ('|| status=$?')");
+        var branch = DeterministicBranch.Match(loop);
+        if (!branch.Success)
+            violations.Add($"{where}: no branch that fails at once (exit 1) on a NuGet error a retry would repeat");
+        else
+        {
+            var codes = branch.Groups["codes"].Value.Split('|').ToHashSet(StringComparer.Ordinal);
+            foreach (var code in DeterministicRestoreErrors.Where(c => !codes.Contains(c)))
+                violations.Add($"{where}: {code} is retried instead of failing at once");
+        }
+        if (!LastTryBranch.IsMatch(loop)) violations.Add($"{where}: the third failure does not end in exit 1");
+        if (!LoopEndsFailing.IsMatch(loop)) violations.Add($"{where}: the loop is not followed by exit 1");
+        return violations;
+    }
+
+    /// <summary><see cref="RestoreScript"/>: strict mode (with <c>pipefail</c>, or <c>| tee</c> would hide the restore's
+    /// exit code), exactly one restore — <c>dotnet restore Whiskers.slnx --locked-mode</c> — and a retry loop that fails
+    /// closed (<see cref="RetryLoopViolations"/>).</summary>
+    public static IReadOnlyList<string> RestoreScriptViolations(string script)
+    {
+        var violations = new List<string>();
+        var code = string.Join('\n', script.Replace("\r\n", "\n").Split('\n').Where(l => !l.TrimStart().StartsWith('#'))) + "\n";
+        if (!code.Split('\n').Any(l => l.Trim() == "set -euo pipefail")) violations.Add("the script does not run with 'set -euo pipefail'");
+        violations.AddRange(WorkflowRestoreViolations(code, out var locked));
+        if (locked != 1) violations.Add($"the script has {locked} locked restores, not exactly one");
+        if (!code.Contains("dotnet restore Whiskers.slnx --locked-mode", StringComparison.Ordinal))
+            violations.Add("the script does not restore the whole solution ('dotnet restore Whiskers.slnx --locked-mode')");
+        violations.AddRange(RetryLoopViolations(code.TrimEnd('\n') + "\n", "restore-locked.sh"));
+        return violations;
+    }
+
+    /// <summary>The Dockerfile's restore RUN, from <c>RUN</c> to its last continuation line, checked like the script.</summary>
+    public static IReadOnlyList<string> DockerfileRestoreRetryViolations(string dockerfile)
+    {
+        var lines = dockerfile.Replace("\r\n", "\n").Split('\n');
+        string? run = null;
+        for (var start = 0; start < lines.Length && run is null; start++)
+        {
+            if (!lines[start].StartsWith("RUN ", StringComparison.Ordinal)) continue;
+            var end = start;
+            while (end < lines.Length - 1 && lines[end].TrimEnd().EndsWith('\\')) end++;
+            var block = string.Join('\n', lines[start..(end + 1)]) + "\n";
+            if (block.Contains("dotnet restore", StringComparison.Ordinal)) run = block;
+        }
+        if (run is null) return ["the Dockerfile has no RUN with a restore"];
+        var violations = RetryLoopViolations(run, "Dockerfile");
+        if (run.Contains("--mount", StringComparison.Ordinal))
+            violations.Add("Dockerfile: the restore mounts a cache: a cached NuGet package skips NuGet's hash and signature checks");
+        return violations;
+    }
+
+    /// <summary>No workflow caches NuGet packages: no <c>cache</c> input on <c>actions/setup-dotnet</c> (any value — also
+    /// an expression), and no <c>actions/cache</c> step whose path names <c>.nuget</c>.</summary>
+    public static IReadOnlyList<string> NuGetCacheViolations(string workflowYaml)
+    {
+        var violations = new List<string>();
+        var root = (YamlMappingNode)Load(workflowYaml);
+        foreach (var (job, steps) in JobSteps(root))
+        {
+            foreach (var step in steps)
+            {
+                var uses = Scalar(step, "uses") ?? "";
+                var with = step.Children.TryGetValue(new YamlScalarNode("with"), out var w) ? w as YamlMappingNode : null;
+                if (uses.StartsWith("actions/setup-dotnet@", StringComparison.Ordinal) && with is not null
+                    && (with.Children.ContainsKey(new YamlScalarNode("cache")) || with.Children.ContainsKey(new YamlScalarNode("cache-dependency-path"))))
+                    violations.Add($"job '{job}': actions/setup-dotnet caches NuGet packages (a cache hit skips NuGet's hash and signature checks)");
+                if (uses.StartsWith("actions/cache", StringComparison.Ordinal) && with is not null
+                    && (Scalar(with, "path") ?? "").Contains(".nuget", StringComparison.OrdinalIgnoreCase))
+                    violations.Add($"job '{job}': {uses.Split('@')[0]} caches NuGet packages (a cache hit skips NuGet's hash and signature checks)");
+            }
+        }
+        return violations;
+    }
+
+    // ---- the PGDG repository key ----
+
+    public const string PgdgKeyPath = "deploy/keys/pgdg-ACCC4CF8.asc";
+    public const string PgdgFingerprint = "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8";
+
+    /// <summary>CI and the image take the PostgreSQL (PGDG) repository key from <see cref="PgdgKeyPath"/>, check its
+    /// fingerprint before trusting it, and download no key from postgresql.org; the committed file is the PGP public key
+    /// with <see cref="PgdgFingerprint"/>.</summary>
+    public static IReadOnlyList<string> PgdgKeyViolations(string ciYaml, string dockerfile, string key)
+    {
+        var violations = new List<string>();
+        foreach (var (name, text) in new[] { ("ci.yml", ciYaml), ("Dockerfile", dockerfile) })
+        {
+            var lines = text.Replace("\r\n", "\n").Split('\n').Where(l => !l.TrimStart().StartsWith('#')).ToList();
+            foreach (var line in lines.Where(l => Regex.IsMatch(l, @"\b(curl|wget)\b") && l.Contains("postgresql.org", StringComparison.Ordinal)))
+                violations.Add($"{name} downloads from postgresql.org: '{line.Trim()}'");
+            if (lines.Any(l => l.Contains("www.postgresql.org", StringComparison.Ordinal) || l.Contains("/media/keys/", StringComparison.Ordinal)))
+                violations.Add($"{name} names the key's download URL");
+            if (!lines.Any(l => l.Contains(PgdgKeyPath, StringComparison.Ordinal)))
+                violations.Add($"{name} does not use the committed key {PgdgKeyPath}");
+            if (!lines.Any(l => l.Contains($"'^fpr:::::::::{PgdgFingerprint}:$'", StringComparison.Ordinal)))
+                violations.Add($"{name} does not check the key's fingerprint {PgdgFingerprint}");
+        }
+        try
+        {
+            var fingerprint = ArmoredKeyFingerprint(key);
+            if (fingerprint != PgdgFingerprint) violations.Add($"{PgdgKeyPath} has fingerprint {fingerprint}, not {PgdgFingerprint}");
+        }
+        catch (FormatException e)
+        {
+            violations.Add($"{PgdgKeyPath} is not an armored PGP public key: {e.Message}");
+        }
+        return violations;
+    }
+
+    /// <summary>The v4 fingerprint (RFC 4880 §12.2: SHA-1 over 0x99, the two-octet length and the body of the primary
+    /// public-key packet) of an ASCII-armored PGP public key block. Throws <see cref="FormatException"/> on anything else.</summary>
+    public static string ArmoredKeyFingerprint(string armored)
+    {
+        var lines = armored.Replace("\r\n", "\n").Split('\n').Select(l => l.TrimEnd()).ToList();
+        var begin = lines.IndexOf("-----BEGIN PGP PUBLIC KEY BLOCK-----");
+        var end = lines.IndexOf("-----END PGP PUBLIC KEY BLOCK-----");
+        if (begin < 0 || end < begin) throw new FormatException("no PGP PUBLIC KEY BLOCK");
+        var i = begin + 1;
+        while (i < end && lines[i].Length > 0) i++; // armor headers end at the first blank line
+        var base64 = string.Concat(lines.Skip(i + 1).Take(end - i - 1).TakeWhile(l => !l.StartsWith('=')));
+        byte[] data;
+        try { data = Convert.FromBase64String(base64); }
+        catch (FormatException) { throw new FormatException("the armor body is not base64"); }
+        if (data.Length < 3) throw new FormatException("the key is empty");
+
+        // The first packet must be a public-key packet (tag 6), old or new packet format.
+        int tag, length, offset;
+        if ((data[0] & 0xC0) == 0xC0)
+        {
+            tag = data[0] & 0x3F;
+            if (data[1] < 192) { length = data[1]; offset = 2; }
+            else if (data[1] < 224) { length = ((data[1] - 192) << 8) + data[2] + 192; offset = 3; }
+            else if (data[1] == 255) { length = (data[2] << 24) | (data[3] << 16) | (data[4] << 8) | data[5]; offset = 6; }
+            else throw new FormatException("partial length on the primary key packet");
+        }
+        else if ((data[0] & 0x80) == 0x80)
+        {
+            tag = (data[0] >> 2) & 0x0F;
+            (length, offset) = (data[0] & 0x03) switch
+            {
+                0 => (data[1], 2),
+                1 => ((data[1] << 8) | data[2], 3),
+                2 => ((data[1] << 24) | (data[2] << 16) | (data[3] << 8) | data[4], 5),
+                _ => throw new FormatException("indeterminate length on the primary key packet"),
+            };
+        }
+        else throw new FormatException("not an OpenPGP packet");
+        if (tag != 6) throw new FormatException($"the first packet is tag {tag}, not a public key (6)");
+        if (offset + length > data.Length || length > 0xFFFF) throw new FormatException("the primary key packet is truncated");
+        if (data[offset] != 4) throw new FormatException($"key version {data[offset]}, not 4");
+
+        var hashed = new byte[3 + length];
+        hashed[0] = 0x99;
+        hashed[1] = (byte)(length >> 8);
+        hashed[2] = (byte)length;
+        Array.Copy(data, offset, hashed, 3, length);
+#pragma warning disable CA5350 // SHA-1 is what defines an OpenPGP v4 fingerprint; this identifies a key, it secures nothing
+        return Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(hashed));
+#pragma warning restore CA5350
     }
 
     // ---- base images ----

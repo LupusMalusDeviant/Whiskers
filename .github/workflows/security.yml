@@ -41,26 +41,30 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          # Packages from the cache when the lock files are unchanged: a nuget.org outage then fails no job. The lock
-          # files pin each package by content hash, and --locked-mode checks them on every restore.
-          cache: true
-          cache-dependency-path: "**/packages.lock.json"
 
       - name: Vulnerable packages (gate)
         run: |
           set -euo pipefail
-          # A brief nuget.org outage (connection reset) is retried; a lock-file mismatch fails all three tries.
+          bash .github/scripts/restore-locked.sh
+          # The vulnerability data comes live from nuget.org. Retried (3 tries, 20 s apart) only while there is no
+          # complete data: a non-zero exit, unreadable JSON, problems, or fewer than 5 projects. FOUND is evaluated once,
+          # on the first complete data set; a finding is never retried (data that names a vulnerable package ends the loop
+          # whatever else it says, and fails below).
           for attempt in 1 2 3; do
-            dotnet restore Whiskers.slnx --locked-mode && break
-            if [ "$attempt" = 3 ]; then exit 1; fi
-            echo "::warning::the NuGet restore failed (attempt $attempt of 3); retrying in 20 s"
+            status=0
+            dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json || status=$?
+            if jq -e '[.. | objects | (.vulnerabilities // empty) | arrays | .[]] | length > 0' vulnerable.json >/dev/null 2>&1; then break; fi
+            PROJECTS="$(jq '.projects | length' vulnerable.json 2>/dev/null || echo 0)"
+            PROBLEMS="$(jq '[.problems // [] | .[]] | length' vulnerable.json 2>/dev/null || echo 1)"
+            if [ "$status" -eq 0 ] && [ "$PROJECTS" -ge 5 ] && [ "$PROBLEMS" -eq 0 ]; then break; fi
+            if [ "$attempt" -eq 3 ]; then
+              if [ "$PROBLEMS" -gt 0 ]; then jq '.problems' vulnerable.json || true; fi
+              echo "::error::no complete vulnerability data after 3 tries (last exit $status, ${PROJECTS} project(s) checked, ${PROBLEMS} problem(s))"
+              exit 1
+            fi
+            echo "::warning::no complete vulnerability data (exit $status, ${PROJECTS} project(s), ${PROBLEMS} problem(s); attempt $attempt of 3); retrying in 20 s"
             sleep 20
           done
-          dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json
-          PROJECTS="$(jq '.projects | length' vulnerable.json)"
-          if [ "$PROJECTS" -lt 5 ]; then echo "::error::only ${PROJECTS} project(s) were checked"; exit 1; fi
-          PROBLEMS="$(jq '[.problems // [] | .[]] | length' vulnerable.json)"
-          if [ "$PROBLEMS" -gt 0 ]; then jq '.problems' vulnerable.json; echo "::error::the check reported problems"; exit 1; fi
           FOUND="$(jq '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
             | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json)"
           if [ "$FOUND" -gt 0 ]; then
@@ -123,21 +127,11 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          # Packages from the cache when the lock files are unchanged: a nuget.org outage then fails no job. The lock
-          # files pin each package by content hash, and --locked-mode checks them on every restore.
-          cache: true
-          cache-dependency-path: "**/packages.lock.json"
 
       - name: Security analyzers (gate)
         run: |
           set -euo pipefail
-          # A brief nuget.org outage (connection reset) is retried; a lock-file mismatch fails all three tries.
-          for attempt in 1 2 3; do
-            dotnet restore Whiskers.slnx --locked-mode && break
-            if [ "$attempt" = 3 ]; then exit 1; fi
-            echo "::warning::the NuGet restore failed (attempt $attempt of 3); retrying in 20 s"
-            sleep 20
-          done
+          bash .github/scripts/restore-locked.sh
           dotnet build src/Whiskers/Whiskers.csproj --no-restore --configuration Release --no-incremental \
             -p:AnalysisModeSecurity=All -p:CodeAnalysisTreatWarningsAsErrors=true
 

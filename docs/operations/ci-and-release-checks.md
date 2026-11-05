@@ -34,7 +34,7 @@ staged digest it publishes instead (`artifact-test`, below).
 
 | Job | What it checks | Fails when |
 |---|---|---|
-| `dependency-vulnerabilities` | `dotnet list package --vulnerable --include-transitive` over every project of the solution | any known-vulnerable package (any severity), the check reports problems, or fewer than 5 projects were checked |
+| `dependency-vulnerabilities` | `dotnet list package --vulnerable --include-transitive` over every project of the solution | any known-vulnerable package (any severity), the check reports problems, or fewer than 5 projects were checked (no complete data is retried up to three times; a finding never — see [External downloads](#external-downloads-retries-no-nuget-cache-the-committed-pgdg-key)) |
 | `dependency-review` (pull requests) | the dependency changes of the pull request (NuGet, Actions, Docker) | the pull request adds a dependency with a known vulnerability (`fail-on-severity: low`) |
 | `secret-scan` | gitleaks 8.30.1 (pinned by digest) over the whole history and the working tree, default rules + `.gitleaks.toml` | any finding outside the exceptions in `.gitleaks.toml`. Every exception names its rule, its file and the exact value (two identifiers in vendored bundles, two names the rules mistake for credentials, the test fixtures); no directory and no line pattern is exempt, so a real credential in a test, in a vendored bundle or next to an excepted value, or an excepted value in another file, fails |
 | `static-analysis` | the .NET security analyzers (`AnalysisModeSecurity=All`) over the shipped projects, as errors | any security analyzer warning; a reviewed false positive is suppressed at its method with a justification |
@@ -50,6 +50,20 @@ that will be published passed the artifact checks. The arm64 image is scanned bu
 ### `chart-ci.yml`
 
 Lint and render invariants of the Helm chart on chart changes; the kind install smoke stays manual (`workflow_dispatch`).
+
+## External downloads: retries, no NuGet cache, the committed PGDG key
+
+nuget.org and postgresql.org have bad minutes. A job must survive a reset connection, but it must never retry its way past
+a real failure, and it must never trade a check for speed. `BuildReproducibilityTests` holds each point below, with
+negative tests that mutate the real files.
+
+| What | How | Why |
+|---|---|---|
+| NuGet restore in the workflows | Every workflow restores with `bash .github/scripts/restore-locked.sh`: the locked restore of `Whiskers.slnx`, up to three tries 20 s apart. Each warning names the exit code. | A connection reset passes on the next try. NU1004/NU1005 (the lock file does not match), NU1403 (a content hash differs) and NU1101/NU1102 (the package or the locked version is gone from nuget.org) would fail the same way every time. These fail **at once**, without retries, so a supply-chain signal is not hidden behind network-sounding warnings. The third failure fails the step. |
+| NuGet restore in the image | The Dockerfile's restore `RUN` has the same loop, in POSIX `sh`. | `image-runtime` and `artifact` build the image without a NuGet cache, so every image build restores from nuget.org. |
+| **No NuGet cache** | Not in `setup-dotnet` (`cache:`), not through `actions/cache`, not as a BuildKit cache mount. | NuGet hashes a package and checks its signature only when it downloads and extracts it. For a package that is already in the global-packages folder, it trusts the recorded hash and checks nothing. A cache hit would make the cache entry a trust root that nothing re-checks, and would keep a package nuget.org has removed. |
+| Vulnerability data (`security.yml`) | `dotnet list package --vulnerable` is retried (three tries) only while it has no complete data: a non-zero exit, problems, or fewer than 5 projects. | The data comes live from nuget.org. The result is evaluated once, on the first complete data set. Data that names a vulnerable package ends the loop at once and fails the job; a finding is never retried. |
+| PostgreSQL (PGDG) repository key | Committed as `deploy/keys/pgdg-ACCC4CF8.asc`. CI and the Dockerfile use this file and check its fingerprint `B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8` before apt trusts it; nothing downloads a key from postgresql.org. The test computes the fingerprint of the committed file itself. | No download that can fail. The key is pinned exactly: a changed file fails the tests and the fingerprint check. When PGDG rotates its key, replace the file and the fingerprint together, after checking the new key out of band. |
 
 ## Artifact checks
 
