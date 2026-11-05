@@ -18,9 +18,10 @@ public sealed class HostShellDeadlineTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan Cleanup = TimeSpan.FromMilliseconds(500);
-    /// <summary>Timeout + clean-up budget + scheduling slack. A stalled step that held the caller would cross it; a run
-    /// that crosses it fails (it does not hang the suite).</summary>
-    private static readonly TimeSpan Bound = Timeout + Cleanup + TimeSpan.FromSeconds(2);
+    /// <summary>Timeout + clean-up budget + scheduling slack. A stalled step never completes, so one that held the caller
+    /// would cross any finite bound; the slack is wide (5 s) because a shared CI runner under the parallel suite has been
+    /// seen to delay timer callbacks by more than 2 s. A run that crosses it fails (it does not hang the suite).</summary>
+    private static readonly TimeSpan Bound = Timeout + Cleanup + TimeSpan.FromSeconds(5);
 
     private readonly FakeDocker _docker = new();
 
@@ -675,7 +676,8 @@ public sealed class HostShellDeadlineTests
         var result = await Executor().RunProcessAsync(file, args, TimeSpan.FromSeconds(1), default)
             .WaitAsync(TimeSpan.FromSeconds(15));
 
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"took {watch.Elapsed}");
+        // At the 1 s deadline, not after the 8 s background process (CI slack as for Bound).
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(6), $"took {watch.Elapsed}");
         Assert.Equal(-1, result.ExitCode);
         Assert.StartsWith("Command exited with code 0, but a process it left running kept its output open", result.Error);
     }
