@@ -108,7 +108,7 @@ Every run is a privileged execution and appears in the audit log as one `endpoin
 operation id; the recorded result carries the same id. A run by the background loop acts as the check's **owner** (the
 Admin who saved it last), whose authority is read again on every run. When the owner is no longer Admin (demoted,
 removed from the whitelist, account deleted), the check is **suspended** instead of run: it is switched off with the
-reason shown and an `automation_suspended` notification. An Admin takes it over by saving it again. "Run now" runs in
+reason shown to Admins (it names the former owner; other roles see only "suspended") and an `automation_suspended` notification. An Admin takes it over by saving it again. "Run now" runs in
 the signed-in Admin's own decision: it reads the check as it is stored at that moment (a check deleted, switched off or
 changed meanwhile runs as it is now, or not at all), takes the same run slot as the loop (when the check or its server is
 busy it says so and runs nothing), and its result carries that decision's operation id. The ▶ button is disabled for a

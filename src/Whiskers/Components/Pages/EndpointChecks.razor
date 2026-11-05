@@ -140,7 +140,7 @@ else
                 @if (!context.Enabled)
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Default">@(context.SuspendedReason is null ? L["Checks_State_Off"] : L["Checks_State_Suspended"])</MudChip>
-                    @if (context.SuspendedReason is { } why) { <MudText Typo="Typo.caption">@why</MudText> }
+                    @if (context.SuspendedReason is { } why && _role >= AppRole.Admin) { <MudText Typo="Typo.caption">@why</MudText> }
                 }
                 else if (result is null)
                 {

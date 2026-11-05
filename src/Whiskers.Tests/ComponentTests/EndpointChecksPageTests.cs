@@ -109,6 +109,22 @@ public sealed class EndpointChecksPageTests : BunitContext, IAsyncLifetime
         Assert.True(buttons[2].HasAttribute("disabled"));
     }
 
+    [Theory]
+    [InlineData(AppRole.Viewer, false)]
+    [InlineData(AppRole.Operator, false)]
+    [InlineData(AppRole.Admin, true)]
+    public async Task The_suspension_reason_naming_the_former_owner_is_shown_to_admins_only(AppRole role, bool shown)
+    {
+        var check = await _store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443), AdminId, default);
+        Assert.True(await _store.SuspendAsync(check.Id, AdminId, $"Suspended: {AdminId} is no longer Admin."));
+        _user.Role = role;
+
+        var cut = Render<EndpointChecks>();
+
+        Assert.Contains("Checks_State_Suspended", cut.Markup);
+        Assert.Equal(shown, cut.Markup.Contains(Admin, StringComparison.Ordinal));
+    }
+
     private sealed class User : ICurrentUserService
     {
         public AppRole Role { get; set; } = AppRole.Admin;
