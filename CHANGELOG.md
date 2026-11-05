@@ -6,6 +6,24 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **PostgreSQL 18 for the database overlay (`deploy/docker-compose.postgres.yml`) — action needed when you come from
+  17.**
+  - **What changes:** the overlay runs `postgres:18-alpine` on a new volume `whiskers-db18-data`, mounted at
+    `/var/lib/postgresql`. The 18 image refuses the old mount at `/var/lib/postgresql/data`, even for an empty volume,
+    and PostgreSQL does not read a 17 data directory.
+  - **The guard:** the new service `db-upgrade-guard` stops the start while the old `whiskers-db-data` volume holds
+    PostgreSQL 17 data and the 18 volume is empty. A pulled overlay therefore never starts as an empty, fresh-looking
+    install; Whiskers stays down with a message that points to the guide.
+  - **Upgrade and rollback:** `docs/operations/postgres-18-upgrade.md` covers it: dump on 17, restore on 18 in one
+    transaction, start. The 17 volume is only read, so going back is switching the overlay back. Tested end to end with
+    Docker:
+    - 17.11 → 18.6 with data, migration history and sequences carried over;
+    - the guard refusing a blind pull;
+    - a fresh install starting directly on 18;
+    - rollback to 17.
+  - **Not affected:** SQLite installs and Helm installs with an external database.
+  - **Tests:** the PostgreSQL suites run on 18; the self-backup suite also runs on 17 and 14.
+
 - **Security: dependencies on the latest patches of their supported lines.** .NET SDK 10.0.403 (`global.json`, build
   image) with the 10.0.14 runtime; Entity Framework Core, Identity and `System.Security.Cryptography.Pkcs` 10.0.14,
   MailKit 4.18.2, Markdig 1.6.0, MudBlazor 9.12.0; lock files refreshed (`dotnet list package --vulnerable

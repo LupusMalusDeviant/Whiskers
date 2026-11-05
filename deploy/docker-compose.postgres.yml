@@ -7,18 +7,42 @@
 # SQLite stays the zero-config default whenever this overlay is NOT used.
 # Set WHISKERS_DB_PASSWORD in your .env; the other DB_* values have defaults.
 # See docs/adr/0004-postgres-provider-support.md for the provider architecture.
+#
+# PostgreSQL 18. Coming from the PostgreSQL 17 overlay (volume whiskers-db-data)? Follow
+# docs/operations/postgres-18-upgrade.md. Until you do, db-upgrade-guard keeps the database (and so Whiskers) from
+# starting on an empty PostgreSQL 18 volume while your data still sits in the 17 one. The 17 volume is never
+# touched: it stays as your way back.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
+  # Refuses to let PostgreSQL 18 start empty next to a PostgreSQL 17 cluster: a blind pull of this file must not look
+  # like a fresh install. Both volumes are mounted read-only; it only reads two PG_VERSION files.
+  db-upgrade-guard:
+    image: postgres:18-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -s /old/PG_VERSION ] && [ ! -s /new/18/docker/PG_VERSION ]; then
+          echo "whiskers: PostgreSQL $$(cat /old/PG_VERSION) data found in the volume whiskers-db-data, and the PostgreSQL 18 volume whiskers-db18-data is empty." >&2
+          echo "whiskers: not starting an empty database. Follow docs/operations/postgres-18-upgrade.md (dump, restore, start)." >&2
+          exit 1
+        fi
+    volumes:
+      - whiskers-db-data:/old:ro
+      - whiskers-db18-data:/new:ro
+    restart: "no"
+
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: whiskers-db
     environment:
       - POSTGRES_DB=${WHISKERS_DB_NAME:-whiskers}
       - POSTGRES_USER=${WHISKERS_DB_USER:-whiskers}
       - POSTGRES_PASSWORD=${WHISKERS_DB_PASSWORD:?set WHISKERS_DB_PASSWORD in your .env}
     volumes:
-      - whiskers-db-data:/var/lib/postgresql/data
+      # 18+: one mount at /var/lib/postgresql (the data lives in 18/docker below it), so a later major upgrade can use
+      # pg_upgrade --link inside one volume. The image refuses a mount at /var/lib/postgresql/data.
+      - whiskers-db18-data:/var/lib/postgresql
     healthcheck:
       # Gate the app's depends_on on a genuinely accepting server, not just a running container.
       test: ["CMD-SHELL", "pg_isready -U ${WHISKERS_DB_USER:-whiskers} -d ${WHISKERS_DB_NAME:-whiskers}"]
@@ -26,6 +50,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    depends_on:
+      db-upgrade-guard:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # Must match the app service name in docker-compose.yml (pre-rebrand `serverwatch`, kept for existing installs).
@@ -38,4 +65,7 @@ services:
         condition: service_healthy
 
 volumes:
+  # PostgreSQL 17 data of installs from before the move to 18: only read by db-upgrade-guard, never written. Remove it
+  # yourself once the upgrade is verified (docs/operations/postgres-18-upgrade.md).
   whiskers-db-data:
+  whiskers-db18-data:

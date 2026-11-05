@@ -20,7 +20,12 @@ namespace Whiskers.Tests;
 /// database and an empty data directory, the refusal of a files-only archive and the all-or-nothing restore. Skipped
 /// without Docker; without the client tools skipped locally and failed on CI, which installs them.</summary>
 [Trait("Category", "RequiresDocker")]
-public class PostgresBackupRestoreTests() : PostgresBackupRestoreTestsBase("postgres:17-alpine");
+public class PostgresBackupRestoreTests() : PostgresBackupRestoreTestsBase("postgres:18-alpine");
+
+/// <summary>The same against PostgreSQL 17: installs that have not moved to 18 yet (docs/operations/postgres-18-upgrade.md)
+/// keep their backups, and the upgrade dump itself is restored into 18.</summary>
+[Trait("Category", "RequiresDocker")]
+public class PostgresBackupRestorePg17Tests() : PostgresBackupRestoreTestsBase("postgres:17-alpine");
 
 /// <summary>The same against an older server line than the image's client tools: the script of the newer client must
 /// not use settings this server lacks.</summary>

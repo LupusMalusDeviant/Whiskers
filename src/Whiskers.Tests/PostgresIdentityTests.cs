@@ -27,7 +27,7 @@ public sealed class PostgresIdentityTests : IAsyncLifetime
 {
     private const string Admin = "admin@pg.test";
     private const string Password = "CorrectHorse12!!";
-    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:18-alpine").Build();
     private Exception? _startFailure;
 
     public async Task InitializeAsync() => _startFailure = await DockerRequirement.TryStartAsync(_pg);

@@ -15,7 +15,7 @@ namespace Whiskers.Tests;
 [Trait("Category", DockerRequirement.Category)]
 public sealed class PostgresSmokeTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:18-alpine").Build();
     private bool _up;
     private Exception? _startFailure;
 
