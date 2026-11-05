@@ -123,6 +123,13 @@ These build inputs are pinned, and each has an update path in [`.github/dependab
 
 Covered by Dependabot but **not digest-pinned**: the images of the compose files (`postgres:17-alpine`, node-exporter, VictoriaMetrics; the socket-proxy is pinned by digest) and of the Helm chart (the Tailscale sidecar, pinned by digest) — Dependabot `docker-compose` and `helm` propose new versions; a moving tag such as `17-alpine` still resolves to whatever it points at when pulled.
 
+**Onboarding templates (not seen by Dependabot):** `OnboardingCommands` writes the host-side compose files of the mTLS
+proxy (docker-socket-proxy + ghostunnel) and node_exporter. The socket-proxy and node_exporter images must equal those
+in `docker-compose.hardened.yml` and `deploy/telemetry/host/docker-compose.yml` (`OnboardingCommandsTests` fails
+otherwise), so a Dependabot bump there is completed in the template in the same PR. **ghostunnel** has no compose file
+Dependabot scans: check its releases by hand with every dependency refresh and move `ghostunnel/ghostunnel:vX.Y.Z@sha256:…`
+in the template (protected mTLS layer — the maintainer approves the change; the flags are pinned by a test).
+
 **Not pinned — mutable inputs of the image build:** the runtime stage runs `apt-get install` against the live Ubuntu, Tailscale (`pkgs.tailscale.com`) and PostgreSQL (`apt.postgresql.org`) repositories without version numbers (`openssh-client`, `sshpass`, `iptables`, `curl`, `ca-certificates`, `tailscale`, `postgresql-client-18`). The same commit and base digests can therefore install newer package versions on a later build. What a release actually shipped is recorded in its SBOMs (one per architecture, attached to the GitHub release).
 
 **Moving a digest by hand:** `docker buildx imagetools inspect <image:tag>` prints the multi-arch index digest (the `Digest:` line); write it as `image:tag@sha256:<digest>`. Use the index digest, not a per-architecture one, or the arm64 build gets the amd64 image.
