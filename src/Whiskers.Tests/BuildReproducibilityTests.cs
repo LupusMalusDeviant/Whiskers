@@ -368,7 +368,7 @@ public class BuildReproducibilityTests
         Assert.Equal(BuildPolicy.PgdgFingerprint, BuildPolicy.ArmoredKeyFingerprint(Repo(BuildPolicy.PgdgKeyPath)));
         // The bytes on disk, as sha256sum sees them in CI and in the image.
         var bytes = File.ReadAllBytes(DeploymentScripts.RepoFile(BuildPolicy.PgdgKeyPath.Split('/')));
-        Assert.Equal(BuildPolicy.PgdgKeySha256, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant());
+        Assert.Equal(BuildPolicy.PgdgFileSha256, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant());
     }
 
     [Fact]
@@ -392,8 +392,8 @@ public class BuildReproducibilityTests
         // The fingerprint check or the file's SHA-256 check dropped, or a grep that may cut gpg off.
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(BuildPolicy.PgdgFingerprint, "0000"), dockerfile, key));
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace(BuildPolicy.PgdgFingerprint, "0000"), key));
-        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(BuildPolicy.PgdgKeySha256, new string('0', 64)), dockerfile, key));
-        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace(BuildPolicy.PgdgKeySha256, new string('0', 64)), key));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(BuildPolicy.PgdgFileSha256, new string('0', 64)), dockerfile, key));
+        Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci, dockerfile.Replace(BuildPolicy.PgdgFileSha256, new string('0', 64)), key));
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace(" | sha256sum -c -", " | true"), dockerfile, key));
         // The check swallowed, or run after the key is dearmored.
         Assert.NotEmpty(BuildPolicy.PgdgKeyViolations(ci.Replace("| sha256sum -c -\n", "| sha256sum -c - || true\n"), dockerfile, key));
@@ -990,23 +990,23 @@ internal static class BuildPolicy
     public const string PgdgFingerprint = "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8";
     /// <summary>SHA-256 of the whole committed key file: a second key appended inside the armor, or any other byte
     /// changed, does not match. Move it only together with the file, after checking a new key out of band.</summary>
-    public const string PgdgKeySha256 = "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76";
+    public const string PgdgFileSha256 = "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76";
 
     /// <summary>CI and the image take the PostgreSQL (PGDG) repository key from <see cref="PgdgKeyPath"/>, check the
     /// whole file's SHA-256 (<c>sha256sum -c</c>) and the key's fingerprint before trusting it, and download no key from
-    /// postgresql.org; the committed file has <see cref="PgdgKeySha256"/> and is exactly one PGP public key with
+    /// postgresql.org; the committed file has <see cref="PgdgFileSha256"/> and is exactly one PGP public key with
     /// <see cref="PgdgFingerprint"/>.</summary>
     public static IReadOnlyList<string> PgdgKeyViolations(string ciYaml, string dockerfile, string key)
     {
         var violations = new List<string>();
         var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key.Replace("\r\n", "\n")))).ToLowerInvariant();
-        if (sha != PgdgKeySha256) violations.Add($"{PgdgKeyPath} has SHA-256 {sha}, not the pinned {PgdgKeySha256}");
+        if (sha != PgdgFileSha256) violations.Add($"{PgdgKeyPath} has SHA-256 {sha}, not the pinned {PgdgFileSha256}");
         foreach (var (name, text, path) in new[] { ("ci.yml", ciYaml, PgdgKeyPath), ("Dockerfile", dockerfile, "/tmp/pgdg-ACCC4CF8.asc") })
         {
             var lines = text.Replace("\r\n", "\n").Split('\n').Where(l => !l.TrimStart().StartsWith('#')).ToList();
             // The check is its own command, ending in `sha256sum -c -` (in the Dockerfile before its `\` continuation): nothing
             // after it (`|| true`) may swallow a mismatch. And it runs before the key is dearmored.
-            var check = $"echo \"{PgdgKeySha256}  {path}\" | sha256sum -c -";
+            var check = $"echo \"{PgdgFileSha256}  {path}\" | sha256sum -c -";
             var checkAt = lines.FindIndex(l => l.Contains(check, StringComparison.Ordinal));
             var dearmorAt = lines.FindIndex(l => l.Contains("--dearmor", StringComparison.Ordinal));
             if (checkAt < 0)
