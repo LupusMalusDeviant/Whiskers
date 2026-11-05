@@ -259,8 +259,9 @@ gateway's Denied event (`RequireAsync` → `IUiMutationRunner.RefuseAsync`); a f
 `Executed`; what the page knows about the result (backup file, deployment output, template or registry, previous
 owner) is added to the event (`MutationScope.Note`, or as an argument). `GW ✅` below = migrated so. Migrated handlers:
 `Dashboard` Start/Stop/RestartContainer (container and K8s workload), RemoveContainer, UpdateContainer,
-RollbackContainer; `ContainerDetail` Start, Stop, Restart, Remove, SaveEnvAndRestart, RunMigration, RollbackMigration,
-ExecuteMigrationFile, ExecuteSeedFile, ExecuteQuery, BackupDatabase; `Deploy` DeployFromForm, DeployFromCompose;
+RollbackContainer; `ContainerDetail` Start, Stop, Restart, Remove, SaveEnvAndRestart; its database tab
+`ContainerDatabasePanel` RunMigration, RollbackMigration, ExecuteMigrationFile, ExecuteSeedFile, ExecuteQuery,
+BackupDatabase; `Deploy` DeployFromForm, DeployFromCompose;
 `AppStore` DeployTemplate, DeployRegistryImage; `ComposeEditor` Deploy; `Networks` CreateNetwork, DeleteNetwork;
 `Firewall` ToggleFirewall, DeleteRule, OpenAddDialog and the dialog `AddFirewallRuleDialog` Submit; `NginxManager`
 SaveConfig, ToggleSite, ReloadNginx; `SystemdManager` ManageService; `SslCerts` RenewCert, RenewAll; `CloudView` Act;

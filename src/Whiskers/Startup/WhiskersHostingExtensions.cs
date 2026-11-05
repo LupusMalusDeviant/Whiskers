@@ -135,11 +135,13 @@ public static class WhiskersHostingExtensions
                 options.ServerInfo = new ModelContextProtocol.Protocol.Implementation
                 {
                     Name = "whiskers",
-                    Title = "Whiskers",
+                    Title = "Whiskers — Zero-Trust MCP Control Plane",
                     Version = Whiskers.Utils.AppVersion.Display,
-                    Description = "Governed infrastructure operations for AI agents: Docker hosts, Kubernetes "
-                        + "workloads, logs, CVEs and cloud servers through scoped tools (Read/Write/Admin), "
-                        + "code-enforced guardrails and human approvals. Self-hosted, SSH-key-free (mesh + mTLS).",
+                    Description = "Zero-trust MCP control plane for Docker & Kubernetes: AI agents operate Docker "
+                        + "hosts, logs, CVEs and cloud servers through scoped tools (Read/Write/Admin) instead of a "
+                        + "raw socket; Kubernetes workloads are managed in the governed UI. Code-enforced "
+                        + "guardrails, human-in-the-loop approvals, hash-chained audit. Self-hosted, SSH-key-free "
+                        + "in steady state (mesh + mTLS).",
                     WebsiteUrl = "https://github.com/LupusMalusDeviant/Whiskers",
                     Icons =
                     [

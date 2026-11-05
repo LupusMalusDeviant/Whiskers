@@ -1,6 +1,6 @@
 apiVersion: v2
 name: whiskers
-description: Whiskers — self-hosted Docker fleet control plane with MCP/AI agent, CVE scanning and zero-SSH operation. Single-replica by design (Blazor Server + stateful background loops).
+description: Whiskers — Zero-Trust MCP Control Plane for Docker & Kubernetes (mTLS mesh, scoped keys, guardrails, human-in-the-loop approvals, CVE scanning, SSH-key-free in steady state). Single-replica by design (Blazor Server + stateful background loops).
 type: application
 icon: https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/src/Whiskers/wwwroot/brand.png
 home: https://github.com/LupusMalusDeviant/Whiskers

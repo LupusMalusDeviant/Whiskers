@@ -1,10 +1,14 @@
 ![Whiskers logo](https://raw.githubusercontent.com/LupusMalusDeviant/Whiskers/main/src/Whiskers/wwwroot/brand.png)
 
-# Whiskers
+# Whiskers — Zero-Trust MCP Control Plane for Docker & Kubernetes
+
+> *"In the dark, predators don't rely on sight. They rely on their whiskers to sense the slightest vibration in the
+> air before striking — or stepping into a trap. **Whiskers** is the tactile sensory layer and zero-trust execution
+> mesh between hallucinating AI agents and your production infrastructure."*
 
 **Controlled infrastructure operations for humans and AI agents.**
 
-Whiskers is a **self-hosted control plane** for Docker hosts and Kubernetes workloads.
+Whiskers is a **self-hosted, zero-trust MCP control plane** for Docker hosts and Kubernetes workloads.
 Instead of handing operators or AI agents unrestricted SSH access, it exposes explicit tools
 governed by **permissions, code-enforced guardrails, approvals and a complete action history**.
 
@@ -25,12 +29,30 @@ governed by **permissions, code-enforced guardrails, approvals and a complete ac
 
 ## Why Whiskers
 
+The common pattern for a Docker or Kubernetes MCP server is to run it over `stdio` next to the agent and give it the
+raw `/var/run/docker.sock` or a kubeconfig. Whatever the model hallucinates, the socket executes. Whiskers is the
+antidote:
+
+| | Typical Docker/K8s MCP server | Whiskers control plane |
+|---|---|---|
+| **Access** | Raw `docker.sock` or kubeconfig in the agent's process | The agent never touches the socket or the kubeconfig (encrypted in the vault) — it calls scoped tools; Kubernetes workloads are operated from the governed UI today, MCP pod tools are on the roadmap |
+| **Reach** | `stdio`, one host | Agent ↔ Whiskers over Streamable HTTP; Whiskers ↔ many hosts over mesh + mTLS — no standing SSH key once a host is onboarded |
+| **Permissions** | Everything the socket allows | Per key: Read, Write or Admin scope, optionally narrowed to an explicit tool list — checked on every call |
+| **Risky actions** | Executed as requested | Guardrails (core, always on) allow, deny or pause for human approval; blast-radius and update-risk assessment tools available before an update (`get_blast_radius`, `assess_update_risk`; the `plan_safe_update` prompt chains them) |
+| **Afterwards** | Usually no record | Hash-chained audit trail (checkpoints signed, and the trail tamper-evident, when `VAULT_KEY` is set) plus Agent History |
+
+**Zero-trust here means:** no caller is trusted by default — every call is authenticated (API key or signed-in user),
+scope-checked and guardrail-evaluated in code, and every onboarded Docker host is reached over a private WireGuard mesh, with
+the Docker and host-control planes on mTLS (client certificate, CN-pinned). The opt-in `Auth:Disabled` LAN mode
+switches authentication off.
+
 AI agents can operate infrastructure — but the usual way to let them is to hand over an SSH key or a
 shell, which grants far more power than any single task needs. Whiskers puts a governed layer in
 between:
 
 - **Limit what an operator or agent can do.** API keys, roles and explicit tool access define the
-  available capability set — no arbitrary shell.
+  available capability set — no arbitrary shell below Admin scope; the Admin-only `execute_command` is
+  guardrail-checked and audited.
 - **Require approval before impact.** Code-enforced guardrails allow, block, or pause sensitive
   operations for human confirmation.
 - **Know exactly what happened.** Agent History and the Audit Log record actor, decision, target,
@@ -137,7 +159,40 @@ Whiskers is **self-hosted**: there is no hosted or cloud endpoint. Your MCP clie
 }
 ```
 
-Details, scopes and the guardrail behaviour are in [MCP server](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#mcp-server).
+The client snippets below read the key from the environment, so it never lands in a config file — export it first
+(`export WHISKERS_MCP_API_KEY=…`, or from your shell profile or secret manager).
+
+**Claude Code** — the single quotes keep `${WHISKERS_MCP_API_KEY}` literal in `.mcp.json`; Claude Code expands it when
+it loads the file:
+
+```bash
+claude mcp add --transport http --scope project whiskers http://localhost:5100/mcp --header 'Authorization: Bearer ${WHISKERS_MCP_API_KEY}'
+```
+
+**Crush** ([charmbracelet/crush](https://github.com/charmbracelet/crush)) — add this line to `./crushrc` (project) or
+`~/.config/crush/crushrc` (global); Crush expands `$WHISKERS_MCP_API_KEY` when it loads the config:
+
+```
+mcp add whiskers --type http --url "http://localhost:5100/mcp" --header Authorization "Bearer $WHISKERS_MCP_API_KEY"
+```
+
+Still on the legacy JSON config? The same entry in `crush.json`:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "mcp": {
+    "whiskers": {
+      "type": "http",
+      "url": "http://localhost:5100/mcp",
+      "headers": { "Authorization": "Bearer $WHISKERS_MCP_API_KEY" }
+    }
+  }
+}
+```
+
+Use your instance's URL instead of `localhost:5100` when Whiskers runs elsewhere. Details, scopes and the guardrail
+behaviour are in [MCP server](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#mcp-server).
 
 ### More install options
 
@@ -418,8 +473,8 @@ in a prompt, so no model output can talk its way past it.
 | In-process agent (triggered from the UI **or** via MCP `instruct_agent`) | ✅ capped at the triggering user's / key's scope | ✅ every call; `Confirm` pauses the run until a human approves the exact action + parameters | Agent History |
 
 Approvals are resolved on the *Approvals* page; approving requires at least the level the action needs.
-The guardrail engine is part of the agent module (on by default). With that module switched off there is
-no Approvals page either, and direct calls are bounded by their scope alone.
+The guardrail engine and approvals are core: they also govern direct MCP calls when the agent module is
+switched off.
 
 ---
 
@@ -541,8 +596,6 @@ Beta is feature-rich but not finished. Planned / not-yet-implemented:
 
 **Agent governance** (building on the shipped Agent-History, approvals/human-in-the-loop and rich
 chat widgets)
-- Extend approvals to **block external/direct MCP calls** too — today the human-in-the-loop gate
-  covers the in-process agent; direct `tools/call` requests are recorded but not held for approval.
 - Real per-tool **diffs** in the approval card (show exactly what a write would change).
 - A fuller **rich-widget / MCP-Apps** catalog beyond the curated chart + status card.
 

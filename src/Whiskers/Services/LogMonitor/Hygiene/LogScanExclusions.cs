@@ -73,7 +73,7 @@ public sealed class LogScanExclusions : ILogScanExclusions
     private LogScanExclusion? Classify(Models.ServerConfig server, ContainerInfo container)
     {
         // 1. Named in the configuration, and on the host Whiskers itself runs on. Both halves matter, and the
-        //    host restriction is the pre-existing rule kept verbatim: a container that shares our name on a
+        //    host restriction is the one carried over from the former LogMonitorService.IsSelfContainer: a container that shares our name on a
         //    REMOTE host is a different process, and its logs are real evidence about somebody else's system.
         //    Takes precedence over detection — an operator naming a container knows about hops the port table
         //    cannot show, such as a socket proxy sitting behind the tunnel.

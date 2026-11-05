@@ -80,8 +80,8 @@ built in).
   clients**. For the agent, `Confirm` pauses the run until an authorized human approves the exact action
   and parameters. For a direct call it raises the same approval and refuses the call; once approved, the
   identical call (same caller, tool and arguments) runs exactly once within 10 minutes. Approving requires
-  at least the level the action needs. The engine ships with the agent module (on by default); with that
-  module disabled, direct calls are bounded by their scope alone.
+  at least the level the action needs. The guardrail engine and approvals are core: they also govern
+  direct MCP calls when the agent module is switched off.
 - **MCP API keys** are created in the web UI (*Settings → MCP*) with an explicit scope and can be disabled
   or deleted there. A key is 256 bits from a CSPRNG, shown once at creation, and **stored only as its
   SHA-256 hash**; presented keys are hashed and compared in constant time. The ServerWatch-era flat key file
