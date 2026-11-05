@@ -26,6 +26,7 @@ public sealed class EndpointChecksPageTests : BunitContext, IAsyncLifetime
     private readonly User _user = new();
     private readonly FakeServerConfig _servers = new(SshServer());
     private readonly EndpointCheckStore _store;
+    private readonly CountingRunner _runner = new();
 
     public EndpointChecksPageTests()
     {
@@ -35,7 +36,7 @@ public sealed class EndpointChecksPageTests : BunitContext, IAsyncLifetime
         Services.AddMudServices();
         Services.AddSingleton<IKeyInterceptorService>(ServersKubeconfigSaveTests.NullProxy<IKeyInterceptorService>.Create());
         Services.AddSingleton<IEndpointCheckStore>(_store);
-        Services.AddSingleton<IEndpointCheckRunner>(ServersKubeconfigSaveTests.NullProxy<IEndpointCheckRunner>.Create());
+        Services.AddSingleton<IEndpointCheckRunner>(_runner);
         Services.AddSingleton<IEndpointCheckSlots>(new EndpointCheckSlots());
         Services.AddSingleton<IServerConfigService>(_servers);
         Services.AddSingleton<ICurrentUserService>(_user);
@@ -123,6 +124,39 @@ public sealed class EndpointChecksPageTests : BunitContext, IAsyncLifetime
 
         Assert.Contains("Checks_State_Suspended", cut.Markup);
         Assert.Equal(shown, cut.Markup.Contains(Admin, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Run_now_on_a_check_suspended_since_the_page_loaded_opens_no_decision()
+    {
+        var check = await _store.SaveAsync(Draft(EndpointCheckKind.Tcp, "example.com", 443), AdminId, default);
+        _user.Role = AppRole.Admin;
+        var cut = Render<EndpointChecks>();
+        var button = cut.Find("button.sw-check-run-now");
+        Assert.False(button.HasAttribute("disabled"));
+
+        // Another path suspends the check while this page still shows it as on.
+        Assert.True(await _store.SuspendAsync(check.Id, AdminId, "Suspended: the owner lost the Admin role."));
+        await button.ClickAsync(new());
+
+        Assert.Equal(0, _runner.Calls);                       // no decision opened, so nothing reached the runner
+        Assert.Empty(_store.Results(check.Id));
+        cut.WaitForAssertion(() => Assert.Contains("Checks_State_Suspended", cut.Markup));
+    }
+
+    private sealed class CountingRunner : IEndpointCheckRunner
+    {
+        public int Calls;
+
+        public Task<EndpointCheckRun> RunAsync(EndpointCheckDefinition check, CancellationToken ct) =>
+            throw new NotSupportedException("the page never runs a check outside a decision");
+
+        public Task<EndpointCheckRun> RunInDecisionAsync(string checkId, CancellationToken ct)
+        {
+            Interlocked.Increment(ref Calls);
+            return Task.FromResult(new EndpointCheckRun(checkId, DateTime.UtcNow, EndpointCheckOutcome.Refused,
+                "The check is switched off.") { NothingRan = true });
+        }
     }
 
     private sealed class User : ICurrentUserService

@@ -363,13 +363,14 @@ else
             var checkId = c.Id;
             // Review round 3 N2: a check switched off since the page loaded opens no decision (no "Executed" audit
             // event for a run that would do nothing). The runner checks again inside the decision.
-            if (Store.Get(checkId) is not { Enabled: true })
+            var now = Store.Get(checkId);
+            if (now is not { Enabled: true })
             {
-                Snackbar.Add(L["Checks_State_Off"].Value, Severity.Info);
+                Snackbar.Add(L[now?.SuspendedReason is null ? "Checks_State_Off" : "Checks_State_Suspended"].Value, Severity.Info);
                 Reload();
                 return;
             }
-            var run =await Mutations.RunAsync("endpointcheck.run", arguments, ct => Runner.RunInDecisionAsync(checkId, ct));
+            var run = await Mutations.RunAsync("endpointcheck.run", arguments, ct => Runner.RunInDecisionAsync(checkId, ct));
             // Review n1: a check that is gone or off ran nothing and leaves no result. Review n2: a recorded "Run now"
             // result does not move the monitor's schedule (the run is marked OnDemand).
             if (!run.NothingRan) await Store.RecordAsync(run);
