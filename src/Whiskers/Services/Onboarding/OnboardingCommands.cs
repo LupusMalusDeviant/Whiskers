@@ -59,7 +59,7 @@ public static class OnboardingCommands
     public static string NodeExporterCompose(string tsIp) =>
 $@"services:
   node-exporter:
-    image: quay.io/prometheus/node-exporter:v1.8.2
+    image: quay.io/prometheus/node-exporter:v1.12.1
     container_name: node-exporter
     restart: unless-stopped
     network_mode: host
@@ -74,7 +74,7 @@ $@"services:
     public static string DockerProxyCompose(string tsIp) =>
 $@"services:
   socket-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     container_name: socket-proxy
     restart: unless-stopped
     environment:
@@ -95,7 +95,7 @@ $@"services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
   ghostunnel:
-    image: ghostunnel/ghostunnel:v1.8.2
+    image: ghostunnel/ghostunnel:v1.11.5@sha256:65c4e34ec0ee0f30ea1f72b7411ec70a91c32fc50f067a8466ad2adb1e7420f2
     container_name: ghostunnel
     restart: unless-stopped
     command:
