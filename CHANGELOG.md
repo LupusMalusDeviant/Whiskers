@@ -17,6 +17,35 @@ All notable changes to Whiskers are documented here. The format follows
   the checks and their last result. **Hosts need `getent`, `curl`, `openssl` and OpenBSD `nc`** — see
   [docs/operations/endpoint-checks.md](docs/operations/endpoint-checks.md). New tables `EndpointChecks` and
   `EndpointCheckResults` (migrated automatically on SQLite and PostgreSQL).
+- **Security: dependencies on the latest patches of their supported lines.** .NET SDK 10.0.403 (`global.json`, build
+  image) with the 10.0.14 runtime; Entity Framework Core, Identity and `System.Security.Cryptography.Pkcs` 10.0.14,
+  MailKit 4.18.2, Markdig 1.6.0, MudBlazor 9.12.0; lock files refreshed (`dotnet list package --vulnerable
+  --include-transitive`: none). Test-only: Microsoft.NET.Test.Sdk 18.11.0, Testcontainers 4.16.0 (it now brings the
+  fixed SSH.NET 2026.0.0 itself, so the separate pin is gone), Xunit.SkippableFact 1.5.85; bUnit still pulls the
+  10.0.13 Blazor component packages into the test project (test-only: the Components packages come from the shared
+  framework at run time, the WebAssembly ones are not used by the tests).
+- **docker-socket-proxy v0.5.0** (HAProxy 3.x; 0.3.0 shipped the end-of-life HAProxy 2.2). The verb whitelist is
+  unchanged — a test now pins it exactly, in the hardened profile and in the onboarding template — and, measured by
+  hand against a real Docker engine, 24 endpoints answered with the same status as under 0.3.0. Whiskers does not use
+  the new pause/unpause switches and does not set them (with `POST: 1` they would not narrow anything).
+  **Fix:** the hardened profile's socket proxy did not start on its read-only root — 0.3.0 exited with "can't create
+  /usr/local/etc/haproxy/haproxy.cfg", v0.5.0 with "can't create /tmp/haproxy.cfg"; it now has a `/tmp` tmpfs.
+  **Upgrade note:** if you keep your own copy of `docker-compose.hardened.yml`, add `- /tmp` under the socket proxy's
+  `tmpfs:` together with the new image.
+- **Onboarding** rolls out the socket proxy pinned by digest (it used `:latest`) and **ghostunnel v1.11.5** (was v1.8.2)
+  for **new** hosts; hosts already onboarded keep their running ghostunnel until they are updated. Tested end to end
+  with a step-ca-shaped chain (root + intermediate, leaf bundle, root-owned 0600 key): the `serverwatch-client`
+  certificate reaches the Docker API (`/version` 200, `/secrets` 403 by the whitelist), another CN and a client without
+  a certificate are refused in the handshake — the same as v1.8.2; v1.11.5 additionally negotiates hybrid
+  post-quantum key exchange (X25519MLKEM768). A test keeps the templates' socket-proxy and node_exporter images equal to
+  the compose files Dependabot updates.
+- **Telemetry:** node_exporter v1.12.1, VictoriaMetrics v1.155.0. **Upgrade note (VictoriaMetrics):** since v1.133 the
+  storage uses a per-partition index; the first start after the upgrade registers every active series once (slower
+  ingestion and queries for a while). Take a snapshot of `vm-storage` before upgrading: going back to a release
+  before v1.133 means restoring that snapshot.
+- **Release workflow:** cosign-installer v3.10.1 with cosign pinned to v2.6.1 explicitly (cosign v3 changes the
+  signature format and is its own change), sbom-action v0.24.3; chart CI: kind-action v1.15.1.
+
 - **Security: proxy trust defaults to loopback only — check your reverse proxy (R1-50).** Whiskers used to believe
   `X-Forwarded-For` from every private network (RFC 1918 and Tailscale's range), so any client in the LAN or tailnet
   could claim another address and slip past the per-client sign-in limit. Now only loopback is trusted unless
