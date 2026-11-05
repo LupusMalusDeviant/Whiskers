@@ -76,6 +76,48 @@ public sealed class DiskHealthMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task Off_and_on_again_while_a_cycle_runs_still_forgets()
+    {
+        // Review round 2 (NIT): the clean-up waits for the running cycle; the Admin has switched on again by then.
+        var inner = StubPromClient.From(_ => Queries(smart: SmartFailed));
+        var block = false;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new StubPromClient(async (endpoint, promql, ct) =>
+        {
+            if (Volatile.Read(ref block)) await release.Task;
+            return await inner.QueryAsync(endpoint, promql, ct);
+        });
+        var rig = Make(client, [Server("badwolf", "http://tsdb:8428")]);
+        for (var i = 0; i < 3; i++) { await rig.Monitor.RunCycleAsync(CancellationToken.None); rig.Clock.Utc += DiskHealthMonitor.Interval; }
+        Assert.Single(rig.Notifications.Events);
+
+        Volatile.Write(ref block, true);
+        var cycle = rig.Monitor.RunCycleAsync(CancellationToken.None);       // holds the gate while its queries hang
+        await rig.Setting.SaveAsync(false);
+        await rig.Setting.SaveAsync(true);
+        release.SetResult();
+        await cycle.WaitAsync(TimeSpan.FromSeconds(10));
+        await rig.Monitor.SwitchedOff.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Empty(rig.Readings.All());
+        Assert.Equal("disk_failing_recovered", rig.Notifications.Events[^1].EventType);
+        Assert.True(rig.Notifications.Events[^1].RecoveryUnconfirmed);
+    }
+
+    [Fact]
+    public async Task Switching_off_with_the_flow_already_suppressed_still_forgets()
+    {
+        var rig = Make(StubPromClient.From(_ => Queries(smart: SmartFailed)), [Server("badwolf", "http://tsdb:8428")]);
+        for (var i = 0; i < 3; i++) { await rig.Monitor.RunCycleAsync(CancellationToken.None); rig.Clock.Utc += DiskHealthMonitor.Interval; }
+
+        using (ExecutionContext.SuppressFlow())
+            _ = rig.Setting.SaveAsync(false);       // raises Changed with the flow already suppressed
+        await rig.Monitor.SwitchedOff.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Empty(rig.Readings.All());
+    }
+
+    [Fact]
     public async Task One_failed_send_does_not_lose_the_next_finding_of_the_same_reading()
     {
         var client = StubPromClient.From(_ => Queries(smart: SmartFailed, md: MdFailedDisk));

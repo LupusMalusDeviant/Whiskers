@@ -597,6 +597,30 @@ public sealed class DiskHealthReadingTests
     }
 
     [Fact]
+    public void Items_of_one_kind_and_name_collapse_into_one_line_that_is_never_better_than_the_worst()
+    {
+        // Review round 2 (N1): /dev/sda twice, with type "sat" and "scsi" — one line, Unknown (conflicting).
+        var r = Read(Queries(smart: DiskHealthAlertTests.SmartFailingNvmeWithDuplicateSda));
+        var sda = Item(r, DiskHealthKinds.Smart, "/dev/sda");
+        Assert.Equal(DiskHealthState.Unknown, sda.State);
+        Assert.Contains("conflicting", sda.Reason);
+        Assert.Equal(DiskHealthState.DegradedOrFailing, Item(r, DiskHealthKinds.Smart, "/dev/nvme0").State);
+
+        // A failing copy keeps the line failing: a bad value is never hidden by a duplicate.
+        var failingCopy = DiskHealthAlertTests.SmartFailingNvmeWithDuplicateSda.Replace(
+            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"scsi\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"scsi\"},\"value\":[1793880000.123,\"0\"]");
+        Assert.Equal(DiskHealthState.DegradedOrFailing, Item(Read(Queries(smart: failingCopy)), DiskHealthKinds.Smart, "/dev/sda").State);
+
+        // Two md names that only become equal once shortened for display: one line, Unknown.
+        var longName = new string('m', 80);
+        var twoLong = Duplicated(MdHealthy, l => l.Replace("\"device\":\"md0\"", $"\"device\":\"{longName}x\""))
+            .Replace("\"device\":\"md0\"", $"\"device\":\"{longName}y\"");
+        var md = Assert.Single(Read(Queries(md: twoLong)).Items, i => i.Kind == DiskHealthKinds.Md);
+        Assert.Equal(DiskHealthState.Unknown, md.State);
+    }
+
+    [Fact]
     public void A_first_read_whose_queries_failed_says_not_read_yet_and_a_server_without_endpoint_says_nothing()
     {
         var failed = Read(DiskHealthQueries.AllFailed("the metrics endpoint could not be reached (ConnectionError)"));

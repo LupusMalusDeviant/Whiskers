@@ -67,12 +67,15 @@ public sealed class DiskHealthAlerts
             _ => $"{serverName}: every md array and ZFS pool reads healthy again.");
 
         // An item is lost while it reads Unknown after it read Healthy or DegradedOrFailing (it stays lost while Unknown).
-        var before = previous?.Items.ToDictionary(Key, i => i.State, StringComparer.Ordinal) ?? [];
+        // Review round 2 (N1): a set, never a dictionary — a reading with two items of one key (a state file written before
+        // the parser made keys unique) must not throw and stop the alerts for the host.
+        var readBefore = previous?.Items
+            .Where(i => i.State is DiskHealthState.Healthy or DiskHealthState.DegradedOrFailing)
+            .Select(Key).ToHashSet(StringComparer.Ordinal) ?? [];
         var wasLost = _lost.TryGetValue(serverId, out var known) ? known : [];
         var lost = current.Items
             .Where(i => i.State == DiskHealthState.Unknown)
-            .Where(i => wasLost.Contains(Key(i))
-                        || before.GetValueOrDefault(Key(i), DiskHealthState.Unsupported) is DiskHealthState.Healthy or DiskHealthState.DegradedOrFailing)
+            .Where(i => wasLost.Contains(Key(i)) || readBefore.Contains(Key(i)))
             .ToList();
         if (lost.Count > 0) _lost[serverId] = lost.Select(Key).ToHashSet(StringComparer.Ordinal);
         else _lost.Remove(serverId);

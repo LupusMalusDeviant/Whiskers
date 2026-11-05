@@ -1447,8 +1447,10 @@ smartctl output); that setup is the operator's, documented in the package, and n
 >   queried or shown, open alerts are closed unconfirmed; a removed server likewise.
 > - **Alerts (decision 4):** `disk_failing`, `array_degraded`, `disk_health_unknown` — recoverable, never suppressed by quiet
 >   hours (nor their `_recovered`) — on `BreachTracker` as 1/0 against 1: raised after 10 minutes, cleared after 10 minutes
->   of good readings, no gap reset. A group neither clearly bad nor clearly good feeds nothing, so Unknown and Unsupported
->   never clear an open alert; `disk_health_unknown` is armed only by a transition out of Healthy or Degraded/Failing.
+>   of good readings, no gap reset. A group neither clearly bad nor clearly good feeds nothing but holds the tracker
+>   (`BreachTracker.Hold`: a pending raise or clear starts again), so Unknown and Unsupported never clear an open alert;
+>   `disk_health_unknown` is armed per disk, array and pool, only by that item's transition out of Healthy or
+>   Degraded/Failing.
 > - **UI (decision 5):** the *Disks* block (`DiskHealthBlock`) in each server's expanded dashboard panel, read-only for every
 >   signed-in role, hidden while off. **node_exporter (decision 3):** the deploy compose and the onboarding template add
 >   `--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector` (existing read-only `/:/host` mount).
@@ -1467,6 +1469,12 @@ smartctl output); that setup is the operator's, documented in the package, and n
 >   until then. Every collector sample must be 1; disagreeing duplicates are Unknown; SMART fails only with available and
 >   enabled = 1. Per-finding send, per-host read time, `TimeoutStartSec` in the guide, env-set value read-only in
 >   Settings. **Follow-up (needs a contract change):** a per-server "forget missing items" action.
+> - **Review round 2 (2026-11-05):** items of one kind and name (e.g. `/dev/sda` with two `type` labels) collapse into
+>   one line — failing if a copy fails, Unknown otherwise — and the alerts key previous items through a set, so a
+>   duplicate (also from an older `disk-health.json`) no longer throws and stops a host's alerting. A switch-off sets a
+>   "forget pending" flag that the next holder of the gate honours, also when it is on again by then; `SuppressFlow` is
+>   guarded by `IsFlowSuppressed`. The guide documents the per-host reset (disable the server for one cycle), the
+>   environment case and the brief stale-Unknown in a large, slow fleet.
 
 **Out of scope:** Running smartctl or package managers through Whiskers' own command channel; a general package-update
 inventory beyond the existing security-update findings; GPU readings.
@@ -1518,5 +1526,5 @@ These do not reopen PC-D1…PC-D8 or the accepted automation decisions:
 5. **Kubeconfig exec plugins:** Source confirms unrestricted handoff to the client builder; actual plugin execution was not reproduced. Select rejection or explicitly documented Admin-only support after the required test establishes behavior.
 6. **Local MFA:** Select supported local MFA or an explicit production requirement for IdP-enforced MFA; password rotation/recovery still needs a supported path.
 7. **P2 disposition:** Record whether R1-52/53 and R1-55/56/57 ship in 1.0 or remain documented follow-ups
-   (R1-58 is planned after 1.0).
+   (R1-58 is part of 1.0 by the decision of 5 November 2026).
 8. **External release controls:** Branch/tag protection, registry immutability and GitHub-hosted scanning settings were not verifiable from this checkout and need recorded release evidence.

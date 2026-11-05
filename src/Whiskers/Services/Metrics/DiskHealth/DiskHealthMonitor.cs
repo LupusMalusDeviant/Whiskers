@@ -36,6 +36,9 @@ public sealed class DiskHealthMonitor : FleetBackgroundService
     // One cycle or one switch-off clean-up at a time (review round 1, m2).
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CancellationToken _stopping;
+    // Review round 2 (NIT): set by every switch-off, taken by the next holder of the gate — a quick off-and-on while a
+    // cycle runs still forgets.
+    private int _forgetPending;
 
     public DiskHealthMonitor(IServerConfigService servers, IPrometheusQueryClient query, IDiskHealthSettingsService settings,
         DiskHealthService readings, INotificationService notify, ILogger<DiskHealthMonitor> logger,
@@ -85,11 +88,9 @@ public sealed class DiskHealthMonitor : FleetBackgroundService
         {
             await RestoreAsync(Now());
 
-            if (!_settings.Enabled)
-            {
+            if (Interlocked.Exchange(ref _forgetPending, 0) == 1 || !_settings.Enabled)
                 await ForgetAllAsync(ct);
-                return;
-            }
+            if (!_settings.Enabled) return;
 
             var servers = _servers.GetEnabledServers();
             foreach (var server in servers)
@@ -132,16 +133,18 @@ public sealed class DiskHealthMonitor : FleetBackgroundService
     private void OnSettingChanged(bool enabled)
     {
         if (enabled) return;
+        Interlocked.Exchange(ref _forgetPending, 1);
         // Raised inside the config.save decision that switched it off: the clean-up must not inherit that scope (it would
-        // run on after the decision closed) — it is the monitor's own work.
-        using var noFlow = ExecutionContext.SuppressFlow();
+        // run on after the decision closed) — it is the monitor's own work. SuppressFlow throws when it already is.
+        using var noFlow = ExecutionContext.IsFlowSuppressed() ? default(AsyncFlowControl?) : ExecutionContext.SuppressFlow();
         SwitchedOff = Task.Run(async () =>
         {
             await _gate.WaitAsync(_stopping);
             try
             {
                 await RestoreAsync(Now());
-                if (!_settings.Enabled) await ForgetAllAsync(_stopping);
+                // Forget whenever a switch-off came in — even when it is on again by now (the Admin was told "Saved").
+                if (Interlocked.Exchange(ref _forgetPending, 0) == 1) await ForgetAllAsync(_stopping);
             }
             catch (Exception ex) when (!IsHostStopping(ex, _stopping))
             {

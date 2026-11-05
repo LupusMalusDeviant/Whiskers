@@ -56,6 +56,9 @@ public static class DiskHealthParser
         if (!results.Zfs.Success) failed[DiskHealthKinds.Zfs] = results.Zfs.Error ?? "query failed";
         else items.AddRange(Zfs(results.Zfs.Samples, Evidence(collectors, collectorsError, "zfs")));
 
+        // Review round 2 (N1): one line per kind and name — the alerts and the state file key on it.
+        items = Unique(items);
+
         // What the last reading had and this one lacks is Unknown — never silently dropped, never healthy.
         if (previous is { HadReading: true })
         {
@@ -289,6 +292,30 @@ public static class DiskHealthParser
     /// device reported by two sources (instance/job) that disagree.</summary>
     private static bool Conflicting(IEnumerable<PromSample> samples, Func<PromSample, string> series) =>
         samples.GroupBy(series, StringComparer.Ordinal).Any(g => g.Select(s => s.Value).Distinct().Count() > 1);
+
+    /// <summary>Review round 2 (N1): items that share a kind and name — /dev/sda with two <c>type</c> labels, two names
+    /// equal once shortened for display — become one line. It is never better than the worst of them: a failing copy keeps
+    /// the line failing (a bad value counts), anything else is Unknown, since Whiskers cannot tell which copy is right.</summary>
+    private static List<DiskHealthItem> Unique(List<DiskHealthItem> items)
+    {
+        var result = new List<DiskHealthItem>(items.Count);
+        foreach (var group in items.GroupBy(Key, StringComparer.Ordinal))
+        {
+            var copies = group.ToList();
+            if (copies.Count == 1) { result.Add(copies[0]); continue; }
+            var collected = copies.Min(i => i.CollectedUtc);
+            var bad = copies.FirstOrDefault(i => i.State == DiskHealthState.DegradedOrFailing);
+            result.Add(bad is not null
+                ? bad with { Reason = $"{bad.Reason} (reported more than once)", CollectedUtc = collected }
+                : copies[0] with
+                {
+                    State = DiskHealthState.Unknown,
+                    Reason = $"conflicting series: {copies[0].Name} is reported {copies.Count} times",
+                    CollectedUtc = collected,
+                });
+        }
+        return result;
+    }
 
     private static string? FirstError(params PromQueryResult[] results) =>
         results.FirstOrDefault(r => !r.Success) is { } f ? f.Error ?? "query failed" : null;

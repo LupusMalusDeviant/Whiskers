@@ -274,6 +274,50 @@ public sealed class DiskHealthAlertTests
         Assert.Equal(Now.AddMinutes(15), raised.AtUtc);      // all lost from minute 5, held 10 minutes
     }
 
+    /// <summary>Review round 2 (N1): /dev/sda reported twice with different <c>type</c> labels (a second textfile, a
+    /// smartmon variant) — and a failing nvme0 next to it. Two items of one name must not stop the alerts for the host.</summary>
+    internal static string SmartFailingNvmeWithDuplicateSda => SmartHealthy
+        .Replace(
+            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/nvme0\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"nvme\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/nvme0\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"nvme\"},\"value\":[1793880000.123,\"0\"]")
+        .Replace("\"result\":[", """
+            "result":[
+              {"metric":{"__name__":"smartmon_device_smart_available","disk":"/dev/sda","instance":"100.64.0.7:9100","job":"node","server":"badwolf","type":"scsi"},"value":[1793880000.123,"1"]},
+              {"metric":{"__name__":"smartmon_device_smart_enabled","disk":"/dev/sda","instance":"100.64.0.7:9100","job":"node","server":"badwolf","type":"scsi"},"value":[1793880000.123,"1"]},
+              {"metric":{"__name__":"smartmon_device_smart_healthy","disk":"/dev/sda","instance":"100.64.0.7:9100","job":"node","server":"badwolf","type":"scsi"},"value":[1793880000.123,"1"]},
+            """);
+
+    [Fact]
+    public void Two_entries_of_one_disk_with_different_types_do_not_stop_disk_failing_for_another_disk()
+    {
+        var alerts = new DiskHealthAlerts();
+
+        var findings = DriveFresh(alerts,
+            Enumerable.Repeat<Func<DateTime, DiskHealthQueries>>(at => FreshAt(at, smart: SmartFailingNvmeWithDuplicateSda), 4));
+
+        var raised = Assert.Single(findings, f => f.EventType == NotificationEventTypes.DiskFailing);
+        Assert.Equal(Now.AddMinutes(10), raised.AtUtc);
+        Assert.Contains("/dev/nvme0", raised.Summary);
+    }
+
+    [Fact]
+    public void A_saved_reading_with_two_items_of_one_name_is_evaluated_without_throwing()
+    {
+        // A disk-health.json written before review round 2 can hold two items with the same kind and name.
+        var duplicate = new DiskHealthReading("badwolf", DiskHealthState.Healthy,
+        [
+            new DiskHealthItem(DiskHealthKinds.Smart, "/dev/sda", DiskHealthState.Healthy, "SMART overall-health passed", Now),
+            new DiskHealthItem(DiskHealthKinds.Smart, "/dev/sda", DiskHealthState.Unknown, "no smartctl run time", Now),
+        ], Now.AddMinutes(-5));
+        var alerts = new DiskHealthAlerts();
+
+        var findings = Drive(alerts, Repeat(DiskHealthQueries.AllFailed("the read failed (HttpRequestException)"), 3), previous: duplicate);
+
+        // sda read Healthy before and is lost now: disk_health_unknown after 10 minutes.
+        var raised = Assert.Single(findings, f => f.EventType == NotificationEventTypes.DiskHealthUnknown);
+        Assert.Equal(Now.AddMinutes(10), raised.AtUtc);
+    }
+
     [Fact]
     public void A_good_reading_Unknown_for_hours_and_one_good_reading_does_not_clear_at_once()
     {
