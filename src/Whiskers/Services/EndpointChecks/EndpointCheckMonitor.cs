@@ -285,6 +285,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
 
     private async Task SaveBreachesLockedAsync()
     {
+        if (_breachFile is null) return;
         var state = new EndpointCheckBreachFile { Breaches = [.. _tracker.Snapshot()] };
         var json = System.Text.Json.JsonSerializer.Serialize(state);
         if (json == _savedBreaches) return;

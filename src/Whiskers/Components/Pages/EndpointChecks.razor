@@ -149,11 +149,11 @@ else
             <MudTd>
                 @if (_role >= AppRole.Admin)
                 {
-                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Title="@L["Checks_Button_RunNow"]"
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" title="@L["Checks_Button_RunNow"]"
                                    Disabled="_busy" OnClick="() => RunNowAsync(context)" />
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Title="@L["Checks_Button_Edit"]"
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="@L["Checks_Button_Edit"]"
                                    OnClick="() => Edit(context)" />
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" Title="@L["Checks_Button_Delete"]"
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" title="@L["Checks_Button_Delete"]"
                                    Disabled="_busy" OnClick="() => DeleteAsync(context)" />
                 }
             </MudTd>

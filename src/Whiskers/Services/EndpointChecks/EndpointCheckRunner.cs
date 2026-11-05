@@ -47,10 +47,14 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
         _time = time ?? TimeProvider.System;
     }
 
-    /// <summary>Who a check runs as: its owner, re-checked by the gateway on every run (INV-04).</summary>
-    public static AutomationActor ActorOf(EndpointCheckDefinition check) =>
-        new("check:" + check.Id, $"Endpoint check '{check.Name}'",
-            string.IsNullOrWhiteSpace(check.OwnerId) ? null : check.OwnerId);
+    /// <summary>Who a check runs as: its owner, re-checked by the gateway on every run (INV-04). The owner is also its
+    /// provenance: only an Admin creates or takes over a check, in the UI (there is no MCP write tool). Without it the
+    /// gateway would treat the check as agent-created and refuse every unattended run as needing a confirmation.</summary>
+    public static AutomationActor ActorOf(EndpointCheckDefinition check)
+    {
+        var owner = string.IsNullOrWhiteSpace(check.OwnerId) ? null : check.OwnerId;
+        return new("check:" + check.Id, $"Endpoint check '{check.Name}'", owner, owner);
+    }
 
     public async Task<EndpointCheckRun> RunAsync(EndpointCheckDefinition check, CancellationToken ct)
     {

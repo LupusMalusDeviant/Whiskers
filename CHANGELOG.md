@@ -6,6 +6,17 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **New: endpoint checks from the managed host (R1-57).** Under **Checks** (`/checks`) an Admin defines HTTP
+  (status and latency), TCP-connect and TLS-expiry checks that run **on the host** they are bound to, from its side of
+  the network, through the existing host command executor; Whiskers never connects to the target. A name is resolved
+  on the host and every answered address must be public or allowed by an Admin-only exception on the check; at most 4
+  addresses are tried, each run is bounded (1 + 4 calls, timeout × 5 + 10 s, 16 KiB output) and passes only on
+  positive evidence. Every run is one audited `endpointcheck.run` event as the check's owner; a check whose owner is
+  no longer Admin is suspended. A check failing for 5 minutes raises `endpoint_check_failed`, 5 minutes of passing
+  clear it. Results are kept 7 days. All roles can read the page; the read-only MCP tool `endpoint_checks_list` shows
+  the checks and their last result. **Hosts need `getent`, `curl`, `openssl` and OpenBSD `nc`** — see
+  [docs/operations/endpoint-checks.md](docs/operations/endpoint-checks.md). New tables `EndpointChecks` and
+  `EndpointCheckResults` (migrated automatically on SQLite and PostgreSQL).
 - **Security: proxy trust defaults to loopback only — check your reverse proxy (R1-50).** Whiskers used to believe
   `X-Forwarded-For` from every private network (RFC 1918 and Tailscale's range), so any client in the LAN or tailnet
   could claim another address and slip past the per-client sign-in limit. Now only loopback is trusted unless
