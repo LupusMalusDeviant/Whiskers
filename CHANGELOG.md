@@ -6,6 +6,13 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **An approved call executes only on the approved target.** An approval was bound to the exact call the gateway
+  checked, but the code that then ran was the caller's own delegate, and the scope guard matched only its capability:
+  inside a decision for container `web-1` a delegate could have restarted `db-1`, or `web-1` on another server. Marked
+  operations now declare the parameter that names their target (`[MutationTarget]`: container start/stop/restart/
+  remove, `db.query`, systemd units, nginx sites), and the scope guard refuses such a call unless an open decision
+  covered that identity on the server the call acts on. No behaviour change for calls that act on what was decided.
+
 - **PostgreSQL 18 for the database overlay (`deploy/docker-compose.postgres.yml`) — action needed when you come from
   17.**
   - **What changes:** the overlay runs `postgres:18-alpine` on a new volume `whiskers-db18-data`, mounted at

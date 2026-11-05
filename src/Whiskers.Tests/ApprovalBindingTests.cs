@@ -259,6 +259,74 @@ public class ApprovalBindingTests
         Assert.NotEqual(baseline, Of(Call(principal: Key with { OnBehalfOf = Key with { Id = "user:x" } })));
     }
 
+    public interface IRestartProbe
+    {
+        [MutatingOperation("container.restart")]
+        Task RestartAsync([MutationTarget] string containerId, string serverId);
+    }
+
+    private sealed class RestartProbe : IRestartProbe
+    {
+        public List<string> Restarted { get; } = [];
+
+        public Task RestartAsync(string containerId, string serverId)
+        {
+            Restarted.Add($"{containerId}@{serverId}");
+            return Task.CompletedTask;
+        }
+    }
+
+    public static TheoryData<string, string> SwappedAfterApproval() => new()
+    {
+        { "web-2", "srv1" },   // another container
+        { "web-1", "srv2" },   // the approved container's name on another server
+    };
+
+    [Theory]
+    [MemberData(nameof(SwappedAfterApproval))]
+    public async Task An_approved_call_whose_executor_acts_on_another_target_is_refused(string container, string server)
+    {
+        // The approval binds what the gateway checks; the executor is the caller's delegate. If that delegate acts on
+        // anything but the approved target — a value it captured before the approval, a name it re-resolved since — the
+        // guarded service refuses the call before it runs.
+        var approvals = new ApprovalStore();
+        var gateway = Gateway(approvals);
+        await ApprovedAsync(approvals, gateway, Call());
+        var inner = new RestartProbe();
+        var docker = MutationScopeProxy<IRestartProbe>.Wrap(inner,
+            new MutationScopeMonitor(NullLogger<MutationScopeMonitor>.Instance));
+
+        var outcome = await gateway.ExecuteAsync(Call(), async (_, _) =>
+        {
+            await docker.RestartAsync(container, server);
+            return 1;
+        });
+
+        Assert.NotEqual(MutationStatus.Executed, outcome.Status);
+        Assert.IsType<MutationScopeViolationException>(outcome.Error);
+        Assert.Empty(inner.Restarted);
+    }
+
+    [Fact]
+    public async Task An_approved_call_whose_executor_acts_on_the_approved_target_runs()
+    {
+        var approvals = new ApprovalStore();
+        var gateway = Gateway(approvals);
+        await ApprovedAsync(approvals, gateway, Call());
+        var inner = new RestartProbe();
+        var docker = MutationScopeProxy<IRestartProbe>.Wrap(inner,
+            new MutationScopeMonitor(NullLogger<MutationScopeMonitor>.Instance));
+
+        var outcome = await gateway.ExecuteAsync(Call(), async (context, _) =>
+        {
+            await docker.RestartAsync(context.Request.Target.Id, context.Request.Target.ServerId!);
+            return 1;
+        });
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(["web-1@srv1"], inner.Restarted);
+    }
+
     private sealed class ShiftedClock : TimeProvider
     {
         public TimeSpan Shift { get; set; }
