@@ -56,7 +56,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCustomCommand", "host.exec"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCleanup", "host.prune"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ApplyRetention", "db.backup_delete"),
-        ("Whiskers.Components.Pages.ContainerDetail", "SaveEnvAndRestart", "container.env_file_save"),
+        ("Whiskers.Services.Mutations.ComposeImpact", "SaveEnvAsync", "container.env_file_save"),
         // Two separate calls in one helper: with a capability (migrate, rollback, SQL import) it runs the primitive inside
         // that decision; without one (migrate:status) it reads through the plain executor — so it is in both lists.
         ("Whiskers.Components.Pages.ContainerDatabasePanel", "ExecInContainerViaHost", "container.exec, db.query"),
@@ -291,6 +291,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Mutations.ComposePlanner", "MountsOfContainerAsync", "docker inspect"),
         ("Whiskers.Services.Mutations.ComposePlanner", "ReadAsync", "reads compose files and .env"),
         ("Whiskers.Services.Mutations.ComposePlanner", "WorkingDirectoryAsync", "docker inspect labels"),
+        ("Whiskers.Services.Mutations.ComposeRunner", "CgroupnsDefaultAsync", "docker info / daemon.json: the daemon's default cgroup namespace mode (contract 0006, review M1)"),
         ("Whiskers.Services.Mutations.ComposeRunner", "InspectImagesAsync", "step 4: docker image inspect of the images the run starts (contract 0006)"),
         ("Whiskers.Services.Mutations.ComposeRunner", "RecheckAsync", "docker inspect of the containers the run created (contract 0006); the stop goes through ComposeExposureStopper"),
         ("Whiskers.Services.Mutations.ComposeRunner", "RestoreTagsAsync", "docker image inspect before the tags are put back; the docker tag itself runs through the run's mutate delegate"),
