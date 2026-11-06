@@ -98,8 +98,9 @@ public class ProductionReadinessServiceTests : IDisposable
             .Single(c => c.Title == "Authentifizierung aktiv");
 
         Assert.False(line.Ok);
-        Assert.Contains("Funnel", line.Detail);
         Assert.Contains("TCP-Weiterleitung", line.Detail);
+        Assert.Contains("Funnel", line.Detail);
+        Assert.Contains("Internet", line.Detail);
     }
 
     [Theory]

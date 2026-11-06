@@ -229,13 +229,20 @@ Do not set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` instead: it trusts every p
 
 **Tailscale Serve, Funnel and DockTail.** It depends on the mode.
 
-In HTTP mode, tailscaled acts as a reverse proxy like any other. This covers `tailscale serve --http`/`--https`, Tailscale Services, and DockTail's default `docktail.service.protocol=http`. tailscaled sets `X-Forwarded-For` to the caller's address; for Funnel traffic, that is the visitor's public address. List the address tailscaled connects from in `ForwardedHeaders__TrustedNetworks__0`. For a container, that is usually the gateway of its Docker network, for example `172.18.0.1/32`.
+**HTTP mode.** tailscaled acts as a reverse proxy like any other. This covers `tailscale serve --http`/`--https`, Tailscale Services served over HTTP(S), and DockTail's default `docktail.service.protocol=http`. tailscaled replaces `X-Forwarded-For` with the caller's address; for Funnel traffic, that is the visitor's public address. List the address tailscaled connects from in `ForwardedHeaders__TrustedNetworks__0`:
+- **tailscaled on the same host as a native install:** loopback, which is already trusted.
+- **tailscaled on the host or with host networking, Whiskers in a container** (DockTail's default): the gateway of Whiskers' Docker network, for example `172.18.0.1/32`. Listing the gateway trusts everything that reaches Whiskers from it: host processes, published ports handled by docker-proxy (localhost, hairpin, rootless or userland-proxy setups), and any TCP forward. Do it only when the container publishes no ports and no TCP forward targets it.
+- **The safer layout:** a Tailscale sidecar with `network_mode: service:tailscale`. tailscaled then connects over loopback and nothing needs to be listed.
 
-In TCP mode, no header reaches Whiskers. This covers `--tcp`, `--tls-terminated-tcp` and `docktail.service.protocol=tcp`. Every visitor seems to come from tailscaled's private address, and the client chooses the `Host` header.
+**TCP mode.** This covers `--tcp`, `--tls-terminated-tcp` and `docktail.service.protocol=tcp`. tailscaled adds no forwarded headers; it passes whatever the client sends through unchanged, `Host` and `X-Forwarded-*` included. Whiskers sees tailscaled's address as the peer:
+- **If that address is not trusted:** every visitor appears to come from that one address, and a client that sends forwarded headers is ignored and reported in production readiness.
+- **If that address is trusted** (loopback for a forward to `localhost`, or a gateway you listed): the client picks its own address and scheme. That bypasses the per-client login rate limit and falsifies the audit.
 
-**Never combine `AUTH_DISABLED=true` with a TCP forward or with Funnel.** The private source address passes the trusted-network check, so a visitor from the internet becomes Admin.
+Do not put a TCP forward in front of Whiskers. If you must, make sure the address it comes from is not in `ForwardedHeaders__TrustedNetworks`.
 
-With sign-in enabled, a TCP forward only loses the per-client view: the login rate limit and the audit see a single address.
+**Never combine `AUTH_DISABLED=true` with a TCP forward or with Funnel.**
+- **TCP forward:** every visitor arrives from a private address and names its own `Host`, so a visitor from the internet passes the trusted-network check and becomes Admin.
+- **Funnel:** the instance is on the internet, and a single change of mode makes it Admin for everyone.
 </details>
 
 <details>
