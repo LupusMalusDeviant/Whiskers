@@ -160,7 +160,7 @@ public sealed record ComposePlan(
     }
 
     /// <summary>Step 2 on the paths that pull (contract 0006, Amendment 9): every image, except those of services that
-    /// are built (<c>--ignore-buildable</c>, Compose v2.12 or newer; an older Compose fails the run).</summary>
+    /// are built (<c>--ignore-buildable</c>, Compose v2.15 or newer; an older Compose fails the run).</summary>
     public string PullCommand => Command("pull --ignore-buildable");
 
     /// <summary>Step 2 on the <c>.env</c> paths: only the services whose image is missing locally.</summary>
