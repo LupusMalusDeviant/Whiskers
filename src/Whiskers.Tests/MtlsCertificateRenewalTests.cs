@@ -190,45 +190,6 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
 
     public void Dispose() => _ca.Dispose();
 
-    /// <summary>Root + intermediate, like step-ca's; signs CSRs the way <c>step certificate sign</c> does.</summary>
-    private sealed class TestCa : IDisposable
-    {
-        private readonly ECDsa _rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        private readonly ECDsa _intKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        public X509Certificate2 Root { get; }
-        public X509Certificate2 Intermediate { get; }
-        public string BundlePem => Root.ExportCertificatePem() + "\n" + Intermediate.ExportCertificatePem() + "\n";
-
-        public TestCa()
-        {
-            var now = DateTimeOffset.UtcNow;
-            var rootReq = new CertificateRequest("CN=Test Root", _rootKey, HashAlgorithmName.SHA256);
-            rootReq.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
-            rootReq.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
-            Root = rootReq.CreateSelfSigned(now.AddDays(-1), now.AddYears(10));
-
-            var intReq = new CertificateRequest("CN=Test Intermediate", _intKey, HashAlgorithmName.SHA256);
-            intReq.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
-            intReq.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
-            using var intPublic = intReq.Create(Root, now.AddDays(-1), now.AddYears(5), [1, 2, 3, 4]);
-            Intermediate = intPublic.CopyWithPrivateKey(_intKey);
-        }
-
-        public string Sign(string csrPem, out X509Certificate2 leaf)
-        {
-            var req = CertificateRequest.LoadSigningRequestPem(csrPem, HashAlgorithmName.SHA256,
-                CertificateRequestLoadOptions.UnsafeLoadCertificateExtensions);
-            var now = DateTimeOffset.UtcNow;
-            leaf = req.Create(Intermediate, now.AddMinutes(-5), now.AddDays(365), RandomNumberGenerator.GetBytes(8));
-            return leaf.ExportCertificatePem() + "\n" + Intermediate.ExportCertificatePem() + "\n";
-        }
-
-        public void Dispose()
-        {
-            Root.Dispose(); Intermediate.Dispose(); _rootKey.Dispose(); _intKey.Dispose();
-        }
-    }
-
     /// <summary>A host with a running proxy plus Badwolf's step-ca, answering the scripts by what they do.</summary>
     private sealed class SimulatedFleet(TestCa ca) : IHostCommandExecutor
     {

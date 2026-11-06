@@ -1,0 +1,803 @@
+using System.ComponentModel;
+using System.Net.Sockets;
+using System.Reflection;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Whiskers.Models;
+using Whiskers.Services.Certificates;
+using Whiskers.Services.Docker;
+using Whiskers.Services.Guardrails;
+using Whiskers.Services.Onboarding;
+using Whiskers.Services.Server;
+using Whiskers.Services.Setup;
+
+namespace Whiskers.Tests;
+
+/// <summary>
+/// INV-58 / R1-44 (contract 0007 with amendments 1–7): every managed host gets its own client identity
+/// <c>whiskers-client-{slug}-g{n}</c>; its proxy admits only that name after migration; a credential taken from one host
+/// is refused at every other host, an older generation is refused after a rotation and the shared credential after the
+/// narrowing. Every host step is guarded, confirmed through the new credential only, and resumed from what ghostunnel
+/// runs with.
+/// </summary>
+public sealed class PerHostCredentialTests
+{
+    private const string SharedCn = MtlsCertificateService.SharedClientCommonName;
+
+    // ---- isolation: the property INV-58 states ----
+
+    [Fact]
+    public async Task After_migration_a_hosts_credential_is_refused_at_every_other_host_and_the_shared_one_everywhere()
+    {
+        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        Assert.True((await w.Service.MigrateClientAsync("zirkuswagen", null, default)).Ok);
+
+        var a = w.ConfigPaths("rabenhof");
+        var b = w.ConfigPaths("zirkuswagen");
+        Assert.Equal(MtlsProbeOutcome.Admitted, w.Host("rabenhof").Probe(w.With("rabenhof", a)));
+        Assert.Equal(MtlsProbeOutcome.Admitted, w.Host("zirkuswagen").Probe(w.With("zirkuswagen", b)));
+        // A's key at B and B's key at A: refused.
+        Assert.Equal(MtlsProbeOutcome.Refused, w.Host("zirkuswagen").Probe(w.With("zirkuswagen", a)));
+        Assert.Equal(MtlsProbeOutcome.Refused, w.Host("rabenhof").Probe(w.With("rabenhof", b)));
+        // The shared credential: refused at both.
+        Assert.Equal(MtlsProbeOutcome.Refused, w.Host("rabenhof").Probe(w.With("rabenhof", w.Store.SharedPaths)));
+        Assert.Equal(MtlsProbeOutcome.Refused, w.Host("zirkuswagen").Probe(w.With("zirkuswagen", w.Store.SharedPaths)));
+
+        Assert.Equal(["whiskers-client-rabenhof-g1"], w.Host("rabenhof").RunningAllow);
+        Assert.Equal(["whiskers-client-zirkuswagen-g1"], w.Host("zirkuswagen").RunningAllow);
+    }
+
+    [Fact]
+    public async Task A_migration_widens_switches_narrows_and_records_each_step_confirmed_through_the_new_credential()
+    {
+        using var w = new CredentialWorld();
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.True(result.Ok, result.Error);
+        var host = w.Host("rabenhof");
+        Assert.Equal(
+            ["read", $"apply:r1:{SharedCn},whiskers-client-rabenhof-g1", "read", "confirm:r1", "read", "cleanup:r1",
+             "read", "apply:r2:whiskers-client-rabenhof-g1", "read", "confirm:r2", "read", "cleanup:r2"],
+            host.Log);
+        Assert.True(w.Store.IsManaged(w.Server("rabenhof")));
+        var journal = w.Store.ReadJournal("rabenhof")!;
+        Assert.Equal(5, journal.Phase);
+        Assert.True(journal.NegativeCheckPassed);
+        Assert.True(journal.IsNarrowed);
+        // The phase-record step removed the markers on the host.
+        Assert.Empty(host.Markers);
+    }
+
+    [Fact]
+    public async Task Without_a_shared_credential_the_running_allow_list_is_the_proof()
+    {
+        using var w = new CredentialWorld(withSharedCredential: false);
+        // A record on an operator-free managed slot is needed first: issue and point the record at it.
+        var paths = await w.Store.IssueAsync(w.Server("rabenhof"), 1, default);
+        var record = w.With("rabenhof", paths);
+        await w.Servers.UpdateServerAsync(record);
+        w.Host("rabenhof").RunningAllow = [SharedCn, "whiskers-client-rabenhof-g1"];
+        w.Host("rabenhof").FileAllow = [SharedCn, "whiskers-client-rabenhof-g1"];
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.True(result.Ok, result.Error);
+        var journal = w.Store.ReadJournal("rabenhof")!;
+        Assert.True(journal.SharedCredentialAbsent);
+        Assert.False(journal.NegativeCheckPassed);
+        Assert.True(journal.IsNarrowed);
+        Assert.Equal(["whiskers-client-rabenhof-g1"], w.Host("rabenhof").RunningAllow);
+    }
+
+    // ---- fail closed: nothing is confirmed without proof ----
+
+    [Fact]
+    public async Task A_shared_credential_that_gets_no_tls_alert_is_not_proven_refused_and_nothing_is_confirmed()
+    {
+        using var w = new CredentialWorld();
+        w.Host("rabenhof").NotCheckedFor = SharedCn;
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Equal("narrow", result.Phase);
+        Assert.Contains("no TLS alert", result.Error);
+        Assert.DoesNotContain(w.Host("rabenhof").Log, l => l.StartsWith("confirm:r2", StringComparison.Ordinal));
+        Assert.Equal(3, w.Store.ReadJournal("rabenhof")!.Phase);
+        // The guard on the host restores the widened list by itself.
+        w.Host("rabenhof").FireGuard();
+        Assert.Equal([SharedCn, "whiskers-client-rabenhof-g1"], w.Host("rabenhof").RunningAllow);
+    }
+
+    [Fact]
+    public async Task A_guard_that_fires_between_the_checks_and_the_marker_leaves_no_phase_recorded()
+    {
+        using var w = new CredentialWorld();
+        var host = w.Host("rabenhof");
+        host.BeforeConfirm = () => { if (host.RunningAllow.Count == 1) host.FireGuard(); };
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Equal(3, w.Store.ReadJournal("rabenhof")!.Phase);
+        Assert.Empty(host.Markers);
+        Assert.Equal([SharedCn, "whiskers-client-rabenhof-g1"], host.RunningAllow);
+    }
+
+    [Fact]
+    public async Task A_host_that_shows_the_old_list_after_the_confirmation_is_not_recorded()
+    {
+        using var w = new CredentialWorld();
+        var host = w.Host("rabenhof");
+        host.AfterConfirm = () => { if (host.RunningAllow.Count == 1) host.RunningAllow = [SharedCn, "whiskers-client-rabenhof-g1"]; };
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Contains("nothing was recorded", result.Error);
+        Assert.Equal(3, w.Store.ReadJournal("rabenhof")!.Phase);
+    }
+
+    [Fact]
+    public async Task A_confirmation_killed_inside_the_lock_writes_no_marker_and_the_guard_rolls_back()
+    {
+        using var w = new CredentialWorld();
+        var host = w.Host("rabenhof");
+        host.HangInConfirm = true;
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Equal("widen", result.Phase);
+        Assert.Empty(host.Markers);
+        host.FireGuard();
+        Assert.Equal([SharedCn], host.RunningAllow);
+        Assert.Equal([SharedCn], host.FileAllow);
+    }
+
+    [Fact]
+    public async Task A_resume_after_the_marker_but_before_phase_five_repeats_both_checks()
+    {
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        // As if Whiskers stopped after the narrowing was confirmed but before anything was recorded.
+        var journal = w.Store.ReadJournal("rabenhof")!;
+        await w.Store.WriteJournalAsync("rabenhof", journal with { Phase = 3, NegativeCheckPassed = false }, default);
+        var host = w.Host("rabenhof");
+        host.Log.Clear();
+
+        // The negative check cannot be repeated: the resume must not record phase 5.
+        host.NotCheckedFor = SharedCn;
+        var failed = await w.Service.MigrateClientAsync("rabenhof", null, default);
+        Assert.False(failed.Ok);
+        Assert.False(w.Store.ReadJournal("rabenhof")!.IsNarrowed);
+        Assert.DoesNotContain(host.Log, l => l.StartsWith("apply:", StringComparison.Ordinal));
+
+        host.NotCheckedFor = null;
+        var resumed = await w.Service.MigrateClientAsync("rabenhof", null, default);
+        Assert.True(resumed.Ok, resumed.Error);
+        Assert.True(w.Store.ReadJournal("rabenhof")!.IsNarrowed);
+        Assert.DoesNotContain(host.Log, l => l.StartsWith("apply:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_record_that_does_not_name_the_new_credential_is_never_narrowed()
+    {
+        using var w = new CredentialWorld();
+        var sharedRecord = w.Server("rabenhof").Clone();
+        var calls = 0;
+        w.Service.VerifyConnection = async (id, _) =>
+        {
+            calls++;
+            // The switch is confirmed, then someone puts the shared credential back into the record.
+            await w.Servers.UpdateServerAsync(sharedRecord);
+            return true;
+        };
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Contains("not narrowing", result.Error);
+        Assert.Equal(1, calls);
+        Assert.DoesNotContain(w.Host("rabenhof").Log, l => l.StartsWith("apply:r2", StringComparison.Ordinal));
+    }
+
+    // ---- preflight ----
+
+    [Fact]
+    public async Task A_host_whose_compose_file_and_running_container_differ_is_refused_before_any_change()
+    {
+        using var w = new CredentialWorld();
+        w.Host("rabenhof").ComposeDiffers = true;
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Contains("differ", result.Error);
+        Assert.DoesNotContain(w.Host("rabenhof").Log, l => l.StartsWith("apply:", StringComparison.Ordinal));
+        Assert.Equal(0, w.Fleet.Signed);
+    }
+
+    [Fact]
+    public async Task A_host_that_admits_a_foreign_name_is_refused()
+    {
+        using var w = new CredentialWorld();
+        w.Host("rabenhof").RunningAllow = [SharedCn, "whiskers-client-zirkuswagen-g1"];
+        w.Host("rabenhof").FileAllow = [SharedCn, "whiskers-client-zirkuswagen-g1"];
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Contains("neither the shared client nor this host's own", result.Error);
+    }
+
+    [Fact]
+    public async Task Another_runs_active_guard_refuses_the_step()
+    {
+        using var w = new CredentialWorld();
+        w.Host("rabenhof").ForeignUnits.Add("whiskers-allow-guard-20261106x.timer");
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Contains("guard timer is armed", result.Error);
+        Assert.DoesNotContain(w.Host("rabenhof").Log, l => l.StartsWith("apply:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task An_operator_supplied_credential_is_never_touched()
+    {
+        using var w = new CredentialWorld();
+        var own = Path.Combine(w.Root, "operator");
+        Directory.CreateDirectory(own);
+        File.Copy(Path.Combine(w.MtlsDir, "client.crt"), Path.Combine(own, "client.crt"));
+        File.Copy(Path.Combine(w.MtlsDir, "client.key"), Path.Combine(own, "client.key"));
+        var record = w.Server("rabenhof").Clone();
+        record.TcpClientCertPath = Path.Combine(own, "client.crt");
+        record.TcpClientKeyPath = Path.Combine(own, "client.key");
+        await w.Servers.UpdateServerAsync(record);
+        var before = File.ReadAllBytes(record.TcpClientKeyPath);
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Contains("operator-supplied", result.Error);
+        Assert.Equal(before, File.ReadAllBytes(record.TcpClientKeyPath));
+        Assert.Equal(MtlsClientCredentialKind.OperatorSupplied, w.Store.StatusOf(w.Server("rabenhof")).Kind);
+        Assert.Empty(w.Fleet.Commands);
+    }
+
+    // ---- lock shared with the server-certificate renewal ----
+
+    [Fact]
+    public async Task The_rollout_and_the_server_certificate_renewal_share_one_lock_per_host()
+    {
+        using var w = new CredentialWorld();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var host = w.Host("rabenhof");
+        host.BeforeConfirm = () => { entered.Set(); release.Wait(TimeSpan.FromSeconds(30)); };
+
+        var migration = Task.Run(() => w.Service.MigrateClientAsync("rabenhof", null, default));
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(30)));
+
+        var renewal = await w.Service.RenewAsync("rabenhof", default);
+        var clientRenewal = await w.Service.RenewClientAsync("rabenhof", rotate: false, default);
+        var second = await w.Service.MigrateClientAsync("rabenhof", null, default);
+        release.Set();
+
+        Assert.False(renewal.Success);
+        Assert.Contains("already running", renewal.Message);
+        Assert.False(clientRenewal.Ok);
+        Assert.False(second.Ok);
+        Assert.Contains("already running", second.Error);
+        Assert.True((await migration).Ok);
+    }
+
+    // ---- renewal and rotation: slots, never overwriting the live credential ----
+
+    [Fact]
+    public async Task A_renewal_writes_a_new_slot_switches_the_record_and_leaves_the_host_unchanged()
+    {
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        var before = w.ConfigPaths("rabenhof");
+        var beforeKey = File.ReadAllBytes(before.Key);
+        w.Host("rabenhof").Log.Clear();
+
+        var result = await w.Service.RenewClientAsync("rabenhof", rotate: false, default);
+
+        Assert.True(result.Ok, result.Error);
+        var after = w.ConfigPaths("rabenhof");
+        Assert.NotEqual(before.Cert, after.Cert);
+        Assert.Equal("whiskers-client-rabenhof-g1", MtlsCertificateService.CommonNameOf(after.Cert));
+        Assert.NotEqual(beforeKey, File.ReadAllBytes(after.Key));
+        Assert.DoesNotContain(w.Host("rabenhof").Log, l => l.StartsWith("apply:", StringComparison.Ordinal));
+        Assert.False(File.Exists(before.Key));   // the old slot goes once the new connection is confirmed
+        Assert.Equal(MtlsProbeOutcome.Admitted, w.Host("rabenhof").Probe(w.Server("rabenhof")));
+    }
+
+    [Fact]
+    public async Task A_renewal_whose_connection_cannot_be_confirmed_keeps_the_live_credential_untouched()
+    {
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        var before = w.ConfigPaths("rabenhof");
+        var beforeCert = File.ReadAllText(before.Cert);
+        w.Service.VerifyConnection = (_, _) => Task.FromResult(false);
+
+        var result = await w.Service.RenewClientAsync("rabenhof", rotate: false, default);
+
+        Assert.False(result.Ok);
+        Assert.Equal(before.Cert, w.Server("rabenhof").TcpClientCertPath);
+        Assert.Equal(beforeCert, File.ReadAllText(before.Cert));
+        Assert.Null(w.Store.PendingFor("rabenhof"));
+    }
+
+    [Fact]
+    public async Task A_rotation_moves_to_the_next_generation_and_the_old_one_is_refused_at_the_host()
+    {
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        var g1 = w.ConfigPaths("rabenhof");
+        var g1Cert = File.ReadAllText(g1.Cert);
+        var g1Record = w.With("rabenhof", g1);
+        var g1Copy = Path.Combine(w.Root, "g1");
+        Directory.CreateDirectory(g1Copy);
+        File.Copy(g1.Cert, Path.Combine(g1Copy, "client.crt"));
+        File.Copy(g1.Key, Path.Combine(g1Copy, "client.key"));
+
+        var result = await w.Service.RenewClientAsync("rabenhof", rotate: true, default);
+
+        Assert.True(result.Ok, result.Error);
+        var g2 = w.ConfigPaths("rabenhof");
+        Assert.Equal("whiskers-client-rabenhof-g2", MtlsCertificateService.CommonNameOf(g2.Cert));
+        Assert.Equal(["whiskers-client-rabenhof-g2"], w.Host("rabenhof").RunningAllow);
+        // The g1 credential (kept aside, as an attacker would) is refused; the slot itself is gone.
+        g1Record.TcpClientCertPath = Path.Combine(g1Copy, "client.crt");
+        g1Record.TcpClientKeyPath = Path.Combine(g1Copy, "client.key");
+        Assert.Equal(MtlsProbeOutcome.Refused, w.Host("rabenhof").Probe(g1Record));
+        Assert.False(File.Exists(g1.Key));
+        Assert.NotEqual(g1Cert, File.ReadAllText(g2.Cert));
+        var journal = w.Store.ReadJournal("rabenhof")!;
+        Assert.Equal((MtlsRolloutJournal.Rotate, 2, 5, true), (journal.Kind, journal.Generation, journal.Phase, journal.NegativeCheckPassed));
+    }
+
+    [Fact]
+    public async Task A_crash_between_the_record_save_and_the_store_update_resumes_from_the_record()
+    {
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        var verify = w.Service.VerifyConnection;
+        var crashed = false;
+        w.Service.VerifyConnection = (id, ct) =>
+        {
+            if (!crashed) { crashed = true; throw new OperationCanceledException("crash after the record was saved"); }
+            return verify(id, ct);
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => w.Service.RenewClientAsync("rabenhof", rotate: true, default));
+        // The record names the g2 slot, the store still has it pending: nothing references the g1 slot but the store.
+        Assert.Equal("whiskers-client-rabenhof-g2", MtlsCertificateService.CommonNameOf(w.Server("rabenhof").TcpClientCertPath!));
+        Assert.Equal(1, w.Store.IdentityOf("rabenhof")!.Generation);
+
+        var resumed = await w.Service.RenewClientAsync("rabenhof", rotate: true, default);
+
+        Assert.True(resumed.Ok, resumed.Error);
+        Assert.Equal(2, w.Store.IdentityOf("rabenhof")!.Generation);
+        Assert.Equal(["whiskers-client-rabenhof-g2"], w.Host("rabenhof").RunningAllow);
+        Assert.Equal(2, w.Store.StatusOf(w.Server("rabenhof")).Generation);
+    }
+
+    [Fact]
+    public async Task A_slot_a_server_record_references_is_never_deleted()
+    {
+        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        var g1 = w.ConfigPaths("rabenhof");
+        // Another record (a hand edit) points at the rabenhof slot.
+        var other = w.Server("zirkuswagen").Clone();
+        other.TcpClientCertPath = g1.Cert;
+        other.TcpClientKeyPath = g1.Key;
+        await w.Servers.UpdateServerAsync(other);
+
+        Assert.True((await w.Service.RenewClientAsync("rabenhof", rotate: false, default)).Ok);
+        await w.Store.DiscardPreviousAsync("rabenhof", default);
+
+        Assert.True(File.Exists(g1.Key));
+    }
+
+    // ---- retire (UI only) ----
+
+    [Fact]
+    public async Task Retiring_is_refused_while_a_host_still_uses_the_shared_credential()
+    {
+        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+
+        var result = await w.Service.RetireSharedClientAsync(default);
+
+        Assert.False(result.Success);
+        Assert.Contains("Zirkuswagen (still presents the shared certificate)", result.Message);
+        Assert.True(File.Exists(w.Store.SharedPaths.Key));
+    }
+
+    [Fact]
+    public async Task Retiring_reads_the_live_allow_list_and_ignores_operator_supplied_servers()
+    {
+        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        var foreign = w.Server("zirkuswagen").Clone();
+        foreign.TcpClientCertPath = Path.Combine(w.Root, "elsewhere.crt");
+        foreign.TcpClientKeyPath = Path.Combine(w.Root, "elsewhere.key");
+        await w.Servers.UpdateServerAsync(foreign);
+
+        // The journal says narrowed, the running proxy disagrees: blocked.
+        w.Host("rabenhof").RunningAllow = [SharedCn, "whiskers-client-rabenhof-g1"];
+        var blocked = await w.Service.RetireSharedClientAsync(default);
+        Assert.False(blocked.Success);
+        Assert.Contains("its proxy admits", blocked.Message);
+        Assert.Contains(w.Host("rabenhof").Log, l => l == "args");
+
+        w.Host("rabenhof").RunningAllow = ["whiskers-client-rabenhof-g1"];
+        var retired = await w.Service.RetireSharedClientAsync(default);
+        Assert.True(retired.Success, retired.Message);
+        Assert.Contains("Zirkuswagen", retired.Message);
+        Assert.False(File.Exists(w.Store.SharedPaths.Key));
+        Assert.False(File.Exists(w.Store.SharedPaths.Cert));
+        Assert.True(File.Exists(w.Store.CaPath));
+    }
+
+    [Fact]
+    public async Task Retiring_is_refused_when_a_hosts_running_allow_list_cannot_be_read()
+    {
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        w.Host("rabenhof").Unreachable = true;
+
+        var result = await w.Service.RetireSharedClientAsync(default);
+
+        Assert.False(result.Success);
+        Assert.Contains("could not be read", result.Message);
+        Assert.True(File.Exists(w.Store.SharedPaths.Key));
+    }
+
+    // ---- onboarding: the new host never admits the shared name ----
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Onboarding_writes_the_issued_paths_the_per_host_allow_cn_and_a_phase_five_record(bool sharedExists)
+    {
+        using var w = new CredentialWorld(sharedExists, ("neuhof", "100.64.0.20"));
+        var record = w.Server("neuhof").Clone();
+        record.ConnectionType = ConnectionType.SSH;
+        record.TcpUseTls = false;
+        record.TcpClientCertPath = record.TcpClientKeyPath = record.TcpCaCertPath = null;
+        await w.Servers.UpdateServerAsync(record);
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance)
+        {
+            ProbeCredential = (server, _) => Task.FromResult(MtlsCertificateService.CommonNameOf(server.TcpClientCertPath!) == SharedCn
+                ? MtlsProbeOutcome.Refused
+                : MtlsProbeOutcome.NotChecked),
+        };
+
+        var result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default);
+
+        Assert.True(result.Success, result.Error);
+        var saved = w.Server("neuhof");
+        // Exactly the slot the one issue wrote (no second proposal), in the store's managed layout.
+        var slots = Directory.GetDirectories(Path.Combine(w.MtlsDir, "hosts", "neuhof"));
+        var slot = Assert.Single(slots);
+        Assert.True(MtlsClientCredentialStore.SamePath(saved.TcpClientCertPath, Path.Combine(slot, "client.crt")), saved.TcpClientCertPath);
+        Assert.True(MtlsClientCredentialStore.SamePath(saved.TcpClientKeyPath, Path.Combine(slot, "client.key")), saved.TcpClientKeyPath);
+        Assert.Equal(w.Store.CaPath, saved.TcpCaCertPath);
+        Assert.True(w.Store.IsManaged(saved));
+        var compose = OnboardingCommands.DockerProxyCompose("100.64.0.20", "whiskers-client-neuhof-g1");
+        Assert.Contains(exec.Scripts, s => s.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes(compose)), StringComparison.Ordinal));
+        Assert.DoesNotContain(exec.Scripts, s => s.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes("--allow-cn=" + SharedCn)), StringComparison.Ordinal));
+
+        var journal = w.Store.ReadJournal("neuhof")!;
+        Assert.Equal((MtlsRolloutJournal.Onboard, 5, true), (journal.Kind, journal.Phase, journal.IsNarrowed));
+        Assert.Equal(sharedExists, journal.NegativeCheckPassed);
+        Assert.Equal(!sharedExists, journal.SharedCredentialAbsent);
+    }
+
+    // ---- the store ----
+
+    [Fact]
+    public async Task Issue_writes_exactly_the_proposed_slot_and_a_proposal_creates_nothing()
+    {
+        using var w = new CredentialWorld();
+        var proposed = w.Store.ProposeNewSlot("rabenhof", 1);
+        Assert.False(Directory.Exists(Path.GetDirectoryName(proposed.Cert)));
+
+        var issued = await w.Store.IssueAsync(w.Server("rabenhof"), 1, default);
+
+        Assert.Equal(proposed, issued);
+        Assert.Equal(w.Store.CaPath, issued.Ca);
+        Assert.NotEqual(issued.Cert, w.Store.ProposeNewSlot("rabenhof", 1).Cert);
+        Assert.EndsWith(Path.Combine("hosts", "rabenhof", "g1-s1", "client.crt"), issued.Cert);
+    }
+
+    [SkippableFact]
+    public async Task Keys_are_0600_and_host_and_slot_directories_0700_owned_by_whiskers()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "Unix file modes");
+        using var w = new CredentialWorld();
+        var paths = await w.Store.IssueAsync(w.Server("rabenhof"), 1, default);
+        var slotDir = Path.GetDirectoryName(paths.Key)!;
+        var hostDir = Path.GetDirectoryName(slotDir)!;
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(paths.Key));
+        var dirMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        Assert.Equal(dirMode, File.GetUnixFileMode(slotDir));
+        Assert.Equal(dirMode, File.GetUnixFileMode(hostDir));
+        Assert.Equal(dirMode, File.GetUnixFileMode(Path.Combine(w.MtlsDir, "hosts")));
+        var (_, uid, _) = DeploymentScripts.Run("id", ["-u"]);
+        var (_, owner, _) = DeploymentScripts.Run("stat", ["-c", "%u", paths.Key]);
+        Assert.Equal(uid.Trim(), owner.Trim());
+        Assert.False(ProductionReadinessService.KeyIsExposed(paths.Key));
+        File.SetUnixFileMode(paths.Key, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+        Assert.True(ProductionReadinessService.KeyIsExposed(paths.Key));
+    }
+
+    [SkippableFact]
+    public void On_windows_a_key_readable_by_everyone_is_exposed()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows ACLs");
+        using var w = new CredentialWorld();
+        var key = Path.Combine(w.Root, "probe.key");
+        File.WriteAllText(key, "x");
+        Assert.False(ProductionReadinessService.KeyIsExposed(key));
+#pragma warning disable CA1416
+        var info = new FileInfo(key);
+        var acl = info.GetAccessControl();
+        acl.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+            new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null),
+            System.Security.AccessControl.FileSystemRights.Read, System.Security.AccessControl.AccessControlType.Allow));
+        info.SetAccessControl(acl);
+#pragma warning restore CA1416
+        Assert.True(ProductionReadinessService.KeyIsExposed(key));
+    }
+
+    [Fact]
+    public async Task No_key_material_reaches_the_log()
+    {
+        using var w = new CredentialWorld();
+        var log = new CapturingLogger<MtlsClientCredentialStore>();
+        var store = new MtlsClientCredentialStore(w.Fleet, log, w.Paths, w.Servers);
+        var paths = await store.IssueAsync(w.Server("rabenhof"), 1, default);
+        var key = File.ReadAllText(paths.Key);
+        var body = string.Concat(key.Split('\n').Where(l => !l.StartsWith("-----", StringComparison.Ordinal))).Trim();
+
+        Assert.NotEmpty(log.Lines);
+        Assert.All(log.Lines, l =>
+        {
+            Assert.DoesNotContain("PRIVATE KEY", l);
+            Assert.DoesNotContain(body[..16], l);
+        });
+        // Only the CSR travels to step-ca, never the key.
+        Assert.DoesNotContain(w.Fleet.Commands, c => c.Script.Contains(body[..16], StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Two_servers_never_share_a_name_and_an_overlong_id_gets_the_hash_rule()
+    {
+        using var w = new CredentialWorld(true, ("rabe-hof", "100.64.0.9"), ("rabe_hof", "100.64.0.10"));
+        await w.Store.IssueAsync(w.Server("rabe-hof"), 1, default);
+        await w.Store.IssueAsync(w.Server("rabe_hof"), 1, default);
+
+        var a = w.Store.IdentityOf("rabe-hof")!.CommonName;
+        var b = w.Store.IdentityOf("rabe_hof")!.CommonName;
+        Assert.Equal("whiskers-client-rabe-hof-g1", a);
+        Assert.NotEqual(a, b);
+        Assert.Matches("^whiskers-client-rabe-hof-[0-9a-f]{6}-g1$", b);
+
+        var longId = new string('x', 80);
+        var slug = MtlsClientIdentity.SlugFor(longId, _ => false);
+        Assert.True(MtlsClientIdentity.IsValidCommonName(new MtlsClientIdentity(longId, slug, 9999).CommonName));
+    }
+
+    [Theory]
+    [InlineData("../evil")]
+    [InlineData("a/b")]
+    [InlineData("")]
+    [InlineData(".hidden")]
+    public void A_server_id_that_cannot_be_a_directory_name_is_refused(string id)
+    {
+        Assert.False(MtlsClientCredentialStore.IsValidServerId(id));
+    }
+
+    // ---- validation of the server certificate after each kind of switch ----
+
+    [Fact]
+    public async Task After_migration_renewal_rotation_and_onboarding_the_proxy_certificate_is_still_checked()
+    {
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        AssertServerCheck(w, "rabenhof", "100.64.0.9");
+        Assert.True((await w.Service.RenewClientAsync("rabenhof", rotate: false, default)).Ok);
+        AssertServerCheck(w, "rabenhof", "100.64.0.9");
+        Assert.True((await w.Service.RenewClientAsync("rabenhof", rotate: true, default)).Ok);
+        AssertServerCheck(w, "rabenhof", "100.64.0.9");
+    }
+
+    private static void AssertServerCheck(CredentialWorld w, string id, string ip)
+    {
+        var record = w.Server(id);
+        var credentials = DockerConnectionManager.BuildMtlsCredentials(record);
+        var callback = credentials.ServerCertificateValidationCallback!;
+        using var right = w.Ca.IssueServer(ip);
+        using var wrongIp = w.Ca.IssueServer("100.64.0.99");
+        using var foreignCa = new TestCa();
+        using var foreign = foreignCa.IssueServer(ip);
+        using var chain = new X509Chain();
+        chain.ChainPolicy.ExtraStore.Add(w.Ca.Intermediate);
+
+        Assert.True(callback(record, right, chain, System.Net.Security.SslPolicyErrors.None));
+        Assert.False(callback(record, wrongIp, chain, System.Net.Security.SslPolicyErrors.None));
+        Assert.False(callback(record, foreign, null, System.Net.Security.SslPolicyErrors.None));
+
+        var anchors = new X509Certificate2Collection();
+        anchors.ImportFromPemFile(record.TcpCaCertPath!);
+        Assert.True(MtlsClientProbe.ValidateServer(right, chain, anchors, record.TcpHost));
+        Assert.False(MtlsClientProbe.ValidateServer(wrongIp, chain, anchors, record.TcpHost));
+        Assert.False(MtlsClientProbe.ValidateServer(foreign, null, anchors, record.TcpHost));
+    }
+
+    // ---- what "refused" means ----
+
+    [Fact]
+    public void Only_a_tls_alert_counts_as_refused()
+    {
+        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new AuthenticationException("handshake failed")));
+        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new IOException("read failed", new Win32Exception(-2146893048))));
+        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new IOException("Received an alert: bad certificate")));
+
+        Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new IOException("reset", new SocketException((int)SocketError.ConnectionReset))));
+        Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new TimeoutException()));
+        Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new OperationCanceledException()));
+        Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new IOException("Received an unexpected EOF or 0 bytes from the transport stream.")));
+    }
+
+    // ---- readiness ----
+
+    [Fact]
+    public async Task Readiness_names_shared_hosts_older_generations_and_a_shared_key_left_behind()
+    {
+        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        IReadOnlyList<ReadinessCheck> Checks() =>
+            new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store).MtlsClientCredentialChecks();
+
+        var checks = Checks();
+        Assert.True(checks.Single(c => c.Title.EndsWith("Rabenhof", StringComparison.Ordinal)).Ok);
+        Assert.False(checks.Single(c => c.Title.EndsWith("Zirkuswagen", StringComparison.Ordinal)).Ok);
+        Assert.False(checks.Single(c => c.Title == "Gemeinsamer mTLS-Client-Schlüssel").Ok);
+        Assert.Contains(checks, c => c.Title == "mTLS-Client-Schlüssel geschützt");
+
+        // An older backup restored after a rotation: the record names g1 while the host was narrowed to g2.
+        var g1Record = w.Server("rabenhof").Clone();
+        Assert.True((await w.Service.RenewClientAsync("rabenhof", rotate: true, default)).Ok);
+        Directory.CreateDirectory(Path.GetDirectoryName(g1Record.TcpClientCertPath)!);
+        File.Copy(w.Server("rabenhof").TcpClientCertPath!, g1Record.TcpClientCertPath!, overwrite: true);
+        File.Copy(w.Server("rabenhof").TcpClientKeyPath!, g1Record.TcpClientKeyPath!, overwrite: true);
+        await w.Servers.UpdateServerAsync(g1Record);
+
+        var older = Checks().Single(c => c.Title.EndsWith("Rabenhof", StringComparison.Ordinal));
+        Assert.False(older.Ok);
+        Assert.Contains("älter", older.Detail);
+    }
+
+    [Fact]
+    public async Task Readiness_names_hosts_whose_ghostunnel_is_stopped_or_unreadable_and_narrowed_hosts_running_another_list()
+    {
+        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"), ("burgcloud", "100.64.0.11"));
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store);
+
+        var healthy = await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync);
+        Assert.All(healthy, c => Assert.True(c.Ok, c.Detail));
+
+        w.Host("zirkuswagen").GhostunnelStopped = true;
+        w.Host("burgcloud").Unreachable = true;
+        w.Host("rabenhof").RunningAllow = [SharedCn, "whiskers-client-rabenhof-g1"];
+        var checks = await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync);
+
+        var down = checks.Single(c => c.Title == "mTLS-Proxy (ghostunnel) läuft");
+        Assert.False(down.Ok);
+        Assert.Contains("Zirkuswagen (ghostunnel läuft nicht)", down.Detail);
+        Assert.Contains("Burgcloud (Argumente nicht lesbar)", down.Detail);
+        Assert.Contains("Re-Onboarding per SSH", down.Detail);
+        Assert.DoesNotContain("Rabenhof", down.Detail);
+        var list = checks.Single(c => c.Title == "Laufende --allow-cn-Liste");
+        Assert.False(list.Ok);
+        Assert.Contains("Rabenhof", list.Detail);
+    }
+
+    // ---- registration and documentation ----
+
+    [Fact]
+    public void The_client_credential_tools_and_capabilities_are_part_of_the_protected_control_plane()
+    {
+        foreach (var name in new[]
+                 {
+                     "mtls.client_migrate", "migrate_mtls_client_credential", "mtls.client_renew", "renew_mtls_client_credential",
+                     "mtls.shared_client_retire",
+                 })
+            Assert.Contains(name, ControlPlaneResources.Capabilities);
+
+        // Both tools are Admin; retiring is UI only: no MCP tool.
+        var tools = McpPermissionLevels.DefaultToolLevels;
+        Assert.Equal(McpPermissionLevels.Admin, tools["migrate_mtls_client_credential"]);
+        Assert.Equal(McpPermissionLevels.Admin, tools["renew_mtls_client_credential"]);
+        Assert.DoesNotContain(tools.Keys, t => t.Contains("retire", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_architecture_and_the_invariant_document_the_blast_radius_per_host_after_migration()
+    {
+        var architecture = DeploymentScripts.ReadRepoFile("docs", "ARCHITECTURE.md");
+        Assert.Contains("## Blast radius", architecture);
+        Assert.Contains("whiskers-client-", architecture);
+
+        var invariants = DeploymentScripts.ReadRepoFile("docs", "v1", "SECURITY_INVARIANTS.md");
+        var row = invariants.Split('\n').Single(l => l.StartsWith("| INV-58 |", StringComparison.Ordinal));
+        Assert.Contains("✅", row);
+        Assert.Contains("per host after migration", row);
+        Assert.Contains("`PerHostCredentialTests`", row);
+        Assert.DoesNotContain("planned", row);
+    }
+
+    // ---- doubles ----
+
+    /// <summary>The onboarding's bootstrap and host commands: tailnet up, everything else succeeds; step-ca via the fleet.</summary>
+    private sealed class OnboardingExecutor(SimulatedFleet fleet, string ip) : IHostCommandExecutor
+    {
+        public List<string> Scripts { get; } = new();
+
+        public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
+            CancellationToken ct = default, int? maxOutputChars = null)
+        {
+            Scripts.Add(command);
+            if (command.Contains("BackendState", StringComparison.Ordinal))
+                return Task.FromResult(new CommandResult { ExitCode = 0, Output = "\"BackendState\": \"Running\"," });
+            if (command.Contains("tailscale ip -4", StringComparison.Ordinal))
+                return Task.FromResult(new CommandResult { ExitCode = 0, Output = serverId == "local" ? "100.64.0.1" : ip });
+            if (serverId == "local" && MtlsCertificateRenewalTests.Decode(command).Contains("step certificate sign", StringComparison.Ordinal))
+                return fleet.ExecuteAsync(serverId, command, timeout, ct, maxOutputChars);
+            return Task.FromResult(new CommandResult { ExitCode = 0, Output = "" });
+        }
+    }
+
+    /// <summary>Docker that reports every host reachable over mTLS.</summary>
+    public class ReachableDocker : DispatchProxy
+    {
+        public static IDockerService Create() => DispatchProxy.Create<IDockerService, ReachableDocker>();
+
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            if (method!.Name == nameof(IDockerService.GetServerSystemInfoAsync))
+                return Task.FromResult(new ServerSystemInfo { IsReachable = true, OperatingSystem = "Linux" });
+            throw new NotSupportedException(method.Name);
+        }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Lines { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Lines.Add(formatter(state, exception) + " " + exception);
+    }
+}
