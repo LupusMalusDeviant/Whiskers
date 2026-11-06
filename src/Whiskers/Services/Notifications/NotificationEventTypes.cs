@@ -83,6 +83,14 @@ public static class NotificationEventTypes
     public const string OperationsInterrupted = "operations_interrupted";
     public const string WebhookDisabled = "webhook_disabled";
 
+    /// <summary>Contract 0006: a person's (or a person's automation's) compose deployment made a service public or gave it
+    /// powers of the host — one per deployment, carrying service, kind and key only.</summary>
+    public const string ExposureChange = "exposure_change";
+
+    /// <summary>Contract 0006: after <c>up</c> a container exposed something that was not decided (stopped under the agent
+    /// rule set), or a tag could not be restored. Never held.</summary>
+    public const string ExposureViolation = "exposure_violation";
+
     /// <summary>What quiet hours held back, delivered as one message after the window (R1-56).</summary>
     public const string QuietHoursSummary = "quiet_hours_summary";
 
@@ -161,7 +169,7 @@ public static class NotificationEventTypes
     public static readonly IReadOnlySet<string> UnsuppressibleEvents = new HashSet<string>(StringComparer.Ordinal)
     {
         AutomationSuspended, AutomationRefused, OperationsInterrupted,
-        WebhookDisabled, AgentApproval,
+        WebhookDisabled, AgentApproval, ExposureViolation,
         LoopsPausedReminder, LogScanSuspended, LogScanResumed, MonitoringStalled, MonitoringResumed,
         AutoUpdateFailed, QuietHoursSummary, Test,
         // R1-58 (decision 4): a dying disk does not wait for the morning — and neither does the end of it (IsSuppressible).
@@ -176,7 +184,7 @@ public static class NotificationEventTypes
         HostCpuHigh, HostMemoryHigh, HostCpuUnexplained, HostApiSlow, HostCpuAnomaly, HostCpuBaselineDrifted,
         EndpointCheckFailed,
         ServerUnreachable, ServerRecovered, ServerThrottled, ServerThrottlingEnded, CertificateExpiring, CertificateExpired,
-        LogRotationMissing, LoopsPaused, LoopsResumed, AgentAction,
+        LogRotationMissing, LoopsPaused, LoopsResumed, AgentAction, ExposureChange,
     };
 
     /// <summary>Raise and end of a state: never throttled per channel. Each is announced once by its source (a breach

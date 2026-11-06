@@ -254,29 +254,44 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (resolution.Target is { } pruned && capability.Id == "host.prune")
             return await WithStoppedContainersAsync(pruned,
                 MutationTargets.String(request.Arguments, "containerIds")?.Split('\n', StringSplitOptions.RemoveEmptyEntries), ct);
-        // The mounts of a planned deployment, decided before its containers (ComposeImpact, R1-16): each is
-        // something the deployment touches.
-        if (resolution.Target is { } mounting && capability.Id == "compose.deploy"
-            && MutationTargets.String(request.Arguments, "composeContent") is null
-            && MutationTargets.String(request.Arguments, "mounts") is { } mountList)
+        if (resolution.Target is not { } resolvedHost || capability.Id != "compose.deploy") return resolution;
+        // Contract 0006 (Amendment 7): the containers a planned deployment shares a namespace with, from the nested
+        // decision — whatever else the call carries. A withheld one came from an .env value: decided, never recorded.
+        var related = Lines(request, "related");
+        var relatedWithheld = Lines(request, "relatedWithheld");
+        var host = related.Length + relatedWithheld.Length == 0 ? resolvedHost : resolvedHost with
         {
-            var listed = mountList.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-            return Done(mounting with
+            Related = resolvedHost.Related.Concat(related).Concat(relatedWithheld).Distinct(StringComparer.Ordinal).ToList(),
+            Withheld = resolvedHost.Withheld.Concat(relatedWithheld).ToHashSet(StringComparer.Ordinal),
+        };
+        if (MutationTargets.String(request.Arguments, "composeContent") is not { } content)
+        {
+            // The mounts of a planned deployment, decided before its containers (ComposeImpact, R1-16): each is
+            // something the deployment touches. Whoever planned the list may have filled it from an .env: none of it is
+            // recorded.
+            var mounts = Lines(request, "mounts");
+            // Contract 0006: the exposures of a planned deployment (the nested decision of the UI and automation
+            // paths), as the rule reads them; a withheld one is bound and compared, never written.
+            var exposures = Lines(request, "exposure");
+            var exposuresWithheld = Lines(request, "exposureWithheld");
+            if (mounts.Length + exposures.Length + exposuresWithheld.Length == 0)
+                return ReferenceEquals(host, resolvedHost) ? resolution : Done(host);
+            return Done(host with
             {
-                Related = mounting.Related.Concat(listed).Distinct(StringComparer.Ordinal).ToList(),
-                // Whoever planned the list may have filled it from an .env: none of it is recorded.
-                Withheld = mounting.Withheld.Concat(listed).ToHashSet(StringComparer.Ordinal),
+                Related = host.Related.Concat(mounts).Distinct(StringComparer.Ordinal).ToList(),
+                Withheld = host.Withheld.Concat(mounts).Concat(exposuresWithheld).ToHashSet(StringComparer.Ordinal),
+                Exposures = host.Exposures.Concat(exposures).Concat(exposuresWithheld).Distinct(StringComparer.Ordinal).ToList(),
             });
         }
-        if (resolution.Target is not { } host || capability.Id != "compose.deploy"
-            || MutationTargets.String(request.Arguments, "composeContent") is not { } content)
-            return resolution;
         if (MutationTargets.String(request.Arguments, "projectName") is not { } project
             || !McpInputValidation.IsSafeProjectName(project))
             return Refuse("A compose deployment needs a valid project name.");
         return await WithPlanAsync(host, planner => planner.PlanAsync(
             ComposeDeployment.FromContent(host.ServerId!, ComposeDeployment.DeploymentDirectory(project), content), ct));
     }
+
+    private static string[] Lines(MutationRequest request, string argument) =>
+        MutationTargets.String(request.Arguments, argument)?.Split('\n', StringSplitOptions.RemoveEmptyEntries) ?? [];
 
     /// <param name="named">The containers the cleanup removes by id (the scheduled cleanup lists them first); each
     /// is decided by id and name, and one that is no longer there refuses the run. Without a list every stopped
@@ -321,12 +336,18 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         try
         {
             var made = await plan(planner);
+            // Contract 0006: every plan made here (deploy_compose, set_container_env) carries its exposures into the
+            // target — the rule reads only these — and the containers it shares a namespace with into what it touches.
+            var exposures = made.Exposures();
             return Done(target with
             {
-                Related = target.Related.Concat(made.DecidedIdentities()).Concat(made.Mounts())
+                Related = target.Related.Concat(made.DecidedIdentities()).Concat(made.Mounts()).Concat(made.SharedIdentities())
                     .Distinct(StringComparer.Ordinal).ToList(),
-                Withheld = target.Withheld.Concat(made.WithheldMounts()).ToHashSet(StringComparer.Ordinal),
-                RelatedResources = target.RelatedResources.Concat(made.DecidedResources()).ToList(),
+                Withheld = target.Withheld.Concat(made.WithheldMounts()).Concat(made.WithheldSharedIdentities())
+                    .Concat(exposures.Where(e => e.Withheld).Select(e => e.Identity)).ToHashSet(StringComparer.Ordinal),
+                RelatedResources = target.RelatedResources.Concat(made.DecidedResources())
+                    .Concat(made.SharedContainers.Select(c => (IReadOnlyList<string>)Aliases(c.Id, c.Name))).ToList(),
+                Exposures = target.Exposures.Concat(exposures.Select(e => e.Identity)).Distinct(StringComparer.Ordinal).ToList(),
             });
         }
         catch (ComposePlanException ex)

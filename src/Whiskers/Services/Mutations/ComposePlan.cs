@@ -70,7 +70,27 @@ public sealed record ComposeServicePlan(string Name, string? ContainerName)
 {
     /// <summary>What the service mounts (R1-16): host paths and volumes, interpolated from the <c>.env</c>.</summary>
     public IReadOnlyList<ComposeMount> Mounts { get; init; } = [];
+
+    /// <summary>How the service is reachable or powerful beyond its own network namespace (contract 0006): the plan
+    /// model's reading and <c>docker compose config</c>'s, the labels of its local image, and what it inherits from a
+    /// <c>service:x</c> / <c>container:x</c> namespace. Empty for a service compose will not start.</summary>
+    public IReadOnlyList<ComposeExposure> Exposures { get; init; } = [];
+
+    /// <summary>Compose starts the service: it is in <c>services</c> of <c>docker compose config</c> (an inactive profile
+    /// is not).</summary>
+    public bool Active { get; init; }
+
+    /// <summary>The image compose runs the service from: its <c>image:</c>, or compose's default name for a
+    /// <c>build:</c> service (<c>&lt;project&gt;-&lt;service&gt;</c>).</summary>
+    public string? Image { get; init; }
+
+    /// <summary>The service has a <c>build:</c> section.</summary>
+    public bool Build { get; init; }
 }
+
+/// <summary>A container another service shares a namespace with (<c>network_mode</c> / <c>pid</c> / <c>ipc</c> of the
+/// form <c>container:x</c>, contract 0006): decided with the deployment like a container it touches.</summary>
+public sealed record ComposeSharedContainer(string Id, string Name, bool FromVariable);
 
 /// <summary>The source of one mount: a host path, or a volume. A volume without an explicit top-level <c>name:</c>
 /// (<see cref="ProjectScoped"/>) is created as <c>&lt;project&gt;_&lt;name&gt;</c>.</summary>
@@ -139,28 +159,107 @@ public sealed record ComposePlan(
         return sb.Append(' ').Append(subcommand).ToString();
     }
 
-    public string PullCommand => Command("pull");
+    /// <summary>Step 2 on the paths that pull (contract 0006, Amendment 9): every image, except those of services that
+    /// are built (<c>--ignore-buildable</c>, Compose v2.12 or newer; an older Compose fails the run).</summary>
+    public string PullCommand => Command("pull --ignore-buildable");
 
+    /// <summary>Step 2 on the <c>.env</c> paths: only the services whose image is missing locally.</summary>
+    public string PullServicesCommand(IEnumerable<string> services) =>
+        Command("pull " + string.Join(' ', services.Select(ShellUtils.Quote)));
+
+    /// <summary>Step 3 on the paths that pull: every service with <c>build:</c>, its base images pulled.</summary>
     public string BuildCommand => Command("build --pull");
 
-    public string UpCommand => Command(RemoveOrphans ? "up -d --remove-orphans" : "up -d");
+    /// <summary>Step 3 on the <c>.env</c> paths: only the <c>build:</c> services whose image is missing, without
+    /// <c>--pull</c> (Amendment 7).</summary>
+    public string BuildServicesCommand(IEnumerable<string> services) =>
+        Command("build " + string.Join(' ', services.Select(ShellUtils.Quote)));
 
-    /// <summary>The whole deployment as one host command: write the planned files and <c>.env</c> (exactly the
-    /// content planned), optionally pull, then <c>up</c> — all with the plan's project, directory and files.</summary>
-    public string DeployScript(bool pull)
+    /// <summary>Step 5: <c>up</c> uses exactly the images step 4 inspected — it pulls and builds nothing itself.</summary>
+    public string UpCommand => Command(RemoveOrphans ? "up -d --remove-orphans --pull never --no-build" : "up -d --pull never --no-build");
+
+    /// <summary>The fallback stop of the re-check (contract 0006, Amendment 5): every container of the project.</summary>
+    public string StopCommand => Command("stop");
+
+    /// <summary>The files a deployment writes (the planned compose files, then the <c>.env</c>), with their content.</summary>
+    public IReadOnlyList<(string Path, string Content)> WrittenFiles =>
+        Writes.Select(w => (w.Path, w.Content!))
+            .Concat(EnvFileContent is null ? [] : [(EnvFilePath, EnvFileContent)])
+            .ToList();
+
+    /// <summary>
+    /// Step 1: write the planned files and <c>.env</c> (exactly the content planned). The files they replace are kept in
+    /// <paramref name="backupDirectory"/> (a directory only the host's user can read), so a refusal after the write can
+    /// put them back (<see cref="RestoreScript"/>, contract 0006, Amendment 5).
+    /// </summary>
+    public string WriteScript(string backupDirectory)
     {
         var steps = new List<string> { $"mkdir -p {ShellUtils.Quote(ProjectDirectory)}" };
-        foreach (var file in Writes)
-            steps.Add(WriteCommand(file.Path, file.Content!));
-        if (EnvFileContent is not null)
-            steps.Add(WriteCommand(EnvFilePath, EnvFileContent));
-        if (pull) steps.Add(PullCommand + " 2>&1");
-        steps.Add(UpCommand + " 2>&1");
+        var files = WrittenFiles;
+        if (files.Count > 0) steps.Add($"mkdir -m 700 {ShellUtils.Quote(backupDirectory)}");
+        for (var i = 0; i < files.Count; i++)
+        {
+            var path = ShellUtils.Quote(files[i].Path);
+            var kept = ShellUtils.Quote($"{backupDirectory}/{i}");
+            steps.Add($"{{ if [ -e {path} ]; then cp -p {path} {kept}; fi; }}");
+            steps.Add(WriteCommand(files[i].Path, files[i].Content));
+        }
         return string.Join(" && ", steps);
     }
 
+    /// <summary>Puts back what <see cref="WriteScript"/> replaced (a file that was not there is removed again), then
+    /// removes the kept copies.</summary>
+    public string RestoreScript(string backupDirectory)
+    {
+        var steps = new List<string>();
+        var files = WrittenFiles;
+        for (var i = 0; i < files.Count; i++)
+        {
+            var path = ShellUtils.Quote(files[i].Path);
+            var kept = ShellUtils.Quote($"{backupDirectory}/{i}");
+            steps.Add($"if [ -e {kept} ]; then cp -p {kept} {path}; else rm -f {path}; fi");
+        }
+        steps.Add(CleanupScript(backupDirectory));
+        return string.Join("; ", steps);
+    }
+
+    /// <summary>Removes the copies <see cref="WriteScript"/> kept.</summary>
+    public static string CleanupScript(string backupDirectory) => $"rm -rf {ShellUtils.Quote(backupDirectory)}";
+
     private static string WriteCommand(string path, string content) =>
         $"echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(content))}' | base64 -d > {ShellUtils.Quote(path)}";
+
+    // ------------------------------------------------------------------------------------------- contract 0006
+
+    /// <summary>The label prefixes the plan looked for (the union over the stored presets, contract 0006).</summary>
+    public IReadOnlyList<string> ExposurePrefixes { get; init; } = Whiskers.Configuration.GuardrailPolicy.DefaultExposureLabelPrefixes;
+
+    /// <summary>The containers the plan shares a namespace with (<c>container:x</c>, resolved through the inventory).</summary>
+    public IReadOnlyList<ComposeSharedContainer> SharedContainers { get; init; } = [];
+
+    /// <summary>A <c>service:x</c> or <c>container:x</c> namespace is part of the plan.</summary>
+    public bool SharesNamespaces { get; init; }
+
+    /// <summary>The image id each image of the plan had when it was planned (<c>null</c>: missing on the host then).</summary>
+    public IReadOnlyDictionary<string, string?> PlannedImages { get; init; } = new Dictionary<string, string?>();
+
+    /// <summary>Every exposure of the services compose will start, in a stable order (contract 0006).</summary>
+    public IReadOnlyList<ComposeExposure> Exposures() => Services.SelectMany(s => s.Exposures).ToList();
+
+    /// <summary>The <see cref="Exposures"/> that are withheld (a part from a variable or not safe to show).</summary>
+    public IReadOnlyList<ComposeExposure> WithheldExposures() => Exposures().Where(e => e.Withheld).ToList();
+
+    /// <summary>The ids and names of <see cref="SharedContainers"/>.</summary>
+    public IReadOnlyList<string> SharedIdentities() =>
+        SharedContainers.SelectMany(c => new[] { c.Id, c.Name }).Where(v => v.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>The <see cref="SharedIdentities"/> that came from a variable: decided, never written.</summary>
+    public IReadOnlyList<string> WithheldSharedIdentities() =>
+        SharedContainers.Where(c => c.FromVariable).SelectMany(c => new[] { c.Id, c.Name }).Where(v => v.Length > 0)
+            .Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>The services compose will start.</summary>
+    public IReadOnlyList<ComposeServicePlan> ActiveServices => Services.Where(s => s.Active).ToList();
 
     /// <summary>
     /// Throws unless every container of <see cref="Impact"/> was decided on this server by an enclosing gateway
@@ -174,6 +273,11 @@ public sealed record ComposePlan(
             // A mount from an .env value is never quoted (it can be a secret).
             .Concat(Mounts().Where(m => scope is null || !scope.Covers(ServerId, m))
                 .Select(m => WithheldMounts().Contains(m) ? "mount (withheld)" : $"mount {m}"))
+            // Contract 0006: every exposure, and every container a namespace is shared with, was decided too.
+            .Concat(Exposures().Where(e => scope is null || !scope.CoversExposure(ServerId, e.Identity))
+                .Select(e => e.Withheld ? "exposure (withheld)" : $"exposure {e.Display}"))
+            .Concat(SharedContainers.Where(c => scope is null || !scope.Covers(ServerId, c.Id, c.Name))
+                .Select(c => c.FromVariable ? "shared namespace (withheld)" : $"shared namespace {c.Name}"))
             .Distinct()
             .ToList();
         if (missing.Count > 0)
@@ -229,7 +333,7 @@ internal static class ComposePaths
 /// parsing, variable interpolation, file merging and the impact on existing containers. Anything it cannot work out
 /// for certain throws <see cref="ComposePlanException"/>.
 /// </summary>
-public static class ComposeModel
+public static partial class ComposeModel
 {
     public const string ProjectLabel = "com.docker.compose.project";
     public const string ServiceLabel = "com.docker.compose.service";
@@ -295,7 +399,9 @@ public static class ComposeModel
     /// <summary>The compose switches read from the <c>.env</c> that change what a deployment does. A value Whiskers
     /// cannot work out (it refers to a variable that is not in the file) refuses the plan.</summary>
     private static readonly string[] Switches =
-        ["COMPOSE_PROJECT_NAME", "COMPOSE_FILE", "COMPOSE_PATH_SEPARATOR", "COMPOSE_REMOVE_ORPHANS", "COMPOSE_IGNORE_ORPHANS"];
+        ["COMPOSE_PROJECT_NAME", "COMPOSE_FILE", "COMPOSE_PATH_SEPARATOR", "COMPOSE_REMOVE_ORPHANS", "COMPOSE_IGNORE_ORPHANS",
+            // Contract 0006 (Amendment 8): which services compose starts.
+            "COMPOSE_PROFILES"];
 
     public static void EnsureSwitchesKnown(IReadOnlyDictionary<string, string?> env)
     {

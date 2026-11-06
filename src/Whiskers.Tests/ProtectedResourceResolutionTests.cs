@@ -32,6 +32,7 @@ public sealed partial class ProtectedResourceResolutionTests
         new ContainerInfo { Id = "legacy-id", Name = "legacy-proxy", ServerId = "local" });
 
     private ComposePlanner Planner() => new(_docker, _host);
+    private ComposeRunner Runner() => new(_host, _docker);
 
     // ---------------------------------------------------------------- project name
 
@@ -151,7 +152,7 @@ public sealed partial class ProtectedResourceResolutionTests
 
         Assert.Equal(["payments-web-1"], keep.Containers.Select(c => c.Name));
         Assert.Contains(remove.Impact, i => i.Container.Name == "payments-db" && i.Kind == ComposeImpactKind.RemoveOrphan);
-        Assert.EndsWith("up -d --remove-orphans", remove.UpCommand);
+        Assert.EndsWith("up -d --remove-orphans --pull never --no-build", remove.UpCommand);
     }
 
     [Fact]
@@ -205,12 +206,13 @@ public sealed partial class ProtectedResourceResolutionTests
         _host.Files["/srv/app/compose.override.yml"] = "services:\n  a:\n    container_name: app-a\n";
 
         var plan = await Planner().PlanAsync(ComposeDeployment.FromDirectory("local", "/srv/app"));
-        var script = plan.DeployScript(pull: true);
+        var up = plan.UpCommand;
 
         Assert.Equal(["/srv/app/compose.yaml", "/srv/app/compose.override.yml"], plan.Files);
-        Assert.Contains("docker compose -p 'app' --project-directory '/srv/app' -f '/srv/app/compose.yaml' -f '/srv/app/compose.override.yml' up -d", script);
-        Assert.DoesNotContain("--env-file", script);   // there is no .env: compose has none to read either
-        Assert.DoesNotContain("base64 -d", script);    // nothing is written: the files are the ones planned
+        Assert.Contains("docker compose -p 'app' --project-directory '/srv/app' -f '/srv/app/compose.yaml' -f '/srv/app/compose.override.yml' up -d", up);
+        Assert.DoesNotContain("--env-file", up);   // there is no .env: compose has none to read either
+        Assert.DoesNotContain("base64 -d", plan.WriteScript("/tmp/backup"));    // nothing is written: the files are the ones planned
+        Assert.Empty(plan.WrittenFiles);
     }
 
     [Fact]
@@ -218,12 +220,20 @@ public sealed partial class ProtectedResourceResolutionTests
     {
         var plan = await Planner().PlanAsync(ComposeDeployment.FromContent("local", "/opt/deployments/shop",
             "services:\n  api:\n    image: api\n") with { EnvFileContent = "A=1\n" });
-        var script = plan.DeployScript(pull: false);
+        var write = plan.WriteScript("/tmp/backup");
 
         var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("services:\n  api:\n    image: api\n"));
-        Assert.True(script.IndexOf(b64, StringComparison.Ordinal) < script.IndexOf(" up -d", StringComparison.Ordinal));
-        Assert.Contains("--env-file '/opt/deployments/shop/.env'", script);
-        Assert.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes("A=1\n")), script);
+        Assert.Contains(b64, write);
+        Assert.DoesNotContain(" up -d", write);    // writing and up are separate steps of the run (contract 0006)
+        Assert.Contains("--env-file '/opt/deployments/shop/.env'", plan.UpCommand);
+        Assert.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes("A=1\n")), write);
+
+        // The run writes first and starts last.
+        await Runner().RunAsync(plan, (c, t, k) => _host.ExecuteAsync("local", c, t, k),
+            new ComposeRunOptions(false, TimeSpan.FromMinutes(1)));
+        var writeAt = _host.Executed.FindIndex(c => c.Contains(b64, StringComparison.Ordinal));
+        var upAt = _host.Executed.FindIndex(c => c.Contains(" up -d", StringComparison.Ordinal));
+        Assert.InRange(writeAt, 0, upAt - 1);
     }
 
     // ---------------------------------------------------------------- decisions on every surface
@@ -236,7 +246,7 @@ public sealed partial class ProtectedResourceResolutionTests
         var runner = UiRunner(policy);
 
         await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.DeployAsync(_host, Planner(), "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments));
+            runner.DeployAsync(_host, Planner(), Runner(), "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments));
 
         Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
     }
@@ -270,10 +280,10 @@ public sealed partial class ProtectedResourceResolutionTests
     {
         var runner = UiRunner(GuardrailPolicy.SafeDefault());
 
-        var result = await runner.DeployAsync(_host, Planner(), "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments);
+        var result = await runner.DeployAsync(_host, Planner(), Runner(), "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments);
 
         Assert.True(result.Success);
-        Assert.Contains(_host.Executed, c => c.EndsWith("-p 'payments' --project-directory '/opt/deployments/invoice' -f '/opt/deployments/invoice/docker-compose.yml' up -d 2>&1"));
+        Assert.Contains(_host.Executed, c => c.EndsWith("-p 'payments' --project-directory '/opt/deployments/invoice' -f '/opt/deployments/invoice/docker-compose.yml' up -d --pull never --no-build 2>&1"));
     }
 
     [Fact]
@@ -349,7 +359,7 @@ public sealed partial class ProtectedResourceResolutionTests
         var planner = new ChangingPlanner(Planner(), new ContainerInfo { Id = "late-id", Name = "late-arrival", ServerId = "local" });
 
         await Assert.ThrowsAsync<ComposePlanException>(() =>
-            runner.DeployAsync(_host, planner, "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments));
+            runner.DeployAsync(_host, planner, Runner(), "compose.deploy", new { projectName = "invoice", serverId = "local" }, Payments));
 
         Assert.Equal(2, planner.Calls);
         Assert.DoesNotContain(_host.Executed, c => c.Contains("docker compose"));
@@ -363,7 +373,8 @@ public sealed partial class ProtectedResourceResolutionTests
         try
         {
             var git = new Whiskers.Services.GitDeploy.GitDeployService(_host, new NoVault(), Planner(),
-                NullLogger<Whiskers.Services.GitDeploy.GitDeployService>.Instance, Path.Combine(root, "apps.json"));
+                NullLogger<Whiskers.Services.GitDeploy.GitDeployService>.Instance, Path.Combine(root, "apps.json"),
+                composeRunner: Runner());
             var app = await git.SaveAppAsync(new GitDeployApp
             {
                 Id = "0123456789ab", Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",
@@ -400,7 +411,7 @@ public sealed partial class ProtectedResourceResolutionTests
 
         Assert.Equal(["/srv/payments/compose.yml", "/srv/payments/compose.prod.yml"], plan.Files);
         Assert.True(plan.RemoveOrphans);
-        Assert.EndsWith("up -d --remove-orphans", plan.UpCommand);
+        Assert.EndsWith("up -d --remove-orphans --pull never --no-build", plan.UpCommand);
         Assert.Contains(plan.Impact, i => i.Container.Name == "payments-db" && i.Kind == ComposeImpactKind.RemoveOrphan);
         Assert.Contains(plan.Impact, i => i.Container.Name == "legacy-proxy" && i.Kind == ComposeImpactKind.NameCollision);
     }
@@ -452,7 +463,7 @@ public sealed partial class ProtectedResourceResolutionTests
                 _ => git.DeployAsync(app, runner.GateFor("gitdeploy.deploy")));
 
             Assert.True(success);
-            Assert.Contains(_host.Executed, c => c.Contains("-p 'payments'") && c.EndsWith("up -d --remove-orphans"));
+            Assert.Contains(_host.Executed, c => c.Contains("-p 'payments'") && c.EndsWith("up -d --remove-orphans --pull never --no-build 2>&1"));
         }
         finally
         {
@@ -465,7 +476,8 @@ public sealed partial class ProtectedResourceResolutionTests
         var root = Path.Combine(Path.GetTempPath(), $"gitdeploy-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         var git = new Whiskers.Services.GitDeploy.GitDeployService(_host, new NoVault(), Planner(),
-            NullLogger<Whiskers.Services.GitDeploy.GitDeployService>.Instance, Path.Combine(root, "apps.json"));
+            NullLogger<Whiskers.Services.GitDeploy.GitDeployService>.Instance, Path.Combine(root, "apps.json"),
+            composeRunner: Runner());
         var app = await git.SaveAppAsync(new GitDeployApp
         {
             Id = "0123456789ab", Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",
@@ -590,6 +602,12 @@ public sealed partial class ProtectedResourceResolutionTests
         /// <summary><c>docker inspect … .Mounts</c> per container id; a missing id fails the read.</summary>
         public Dictionary<string, string> Mounts { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>The local images by reference (contract 0006); one not listed is reported missing.</summary>
+        public Dictionary<string, (string Id, string LabelsJson)> Images { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The full <c>docker inspect</c> JSON object per container id (contract 0006); a missing id fails the read.</summary>
+        public Dictionary<string, string> Inspect { get; } = new(StringComparer.Ordinal);
+
         public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
             CancellationToken ct = default, int? maxOutputChars = null)
         {
@@ -600,6 +618,22 @@ public sealed partial class ProtectedResourceResolutionTests
             }
             if (Regex.Match(command, @"^docker inspect --format '\{\{json \.Mounts\}\}' '([^']*)'$") is { Success: true } inspect)
                 return Mounts.TryGetValue(inspect.Groups[1].Value, out var mounts) ? Done(mounts) : Done("", 1);
+            if (command.StartsWith("for i in ", StringComparison.Ordinal) && command.Contains("docker image inspect", StringComparison.Ordinal))
+            {
+                // Contract 0006: the local images (id and labels), or MISSING.
+                var refs = Regex.Matches(command[..command.IndexOf("; do", StringComparison.Ordinal)], "'([^']*)'")
+                    .Select(m => m.Groups[1].Value);
+                return Done(string.Concat(refs.Select(r => Images.TryGetValue(r, out var image)
+                    ? $"{r}\t{image.Id}\t{image.LabelsJson}\n"
+                    : $"{r}\t{ComposeExposures.MissingImage}\n")));
+            }
+            if (Regex.Match(command, @"^docker inspect ('[^']*'(?: '[^']*')*)$") is { Success: true } containers)
+            {
+                // Contract 0006: the full inspect of containers (a namespace shared with one, or the re-check).
+                var ids = Regex.Matches(containers.Groups[1].Value, "'([^']*)'").Select(m => m.Groups[1].Value).ToList();
+                if (ids.Any(id => !Inspect.ContainsKey(id))) return Done("[]", 1);
+                return Done("[" + string.Join(',', ids.Select(id => Inspect[id])) + "]");
+            }
             if (Regex.Match(command, @"^if \[ -e '([^']*)' \]") is { Success: true } read)
             {
                 var path = read.Groups[1].Value;

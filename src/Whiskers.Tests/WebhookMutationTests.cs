@@ -69,7 +69,7 @@ public sealed class WebhookMutationTests : IDisposable
             "name: payments\nservices:\n  web:\n    image: nginx\n";
         _git = new GitDeployService(_host, new ProtectedResourceResolutionTests.NoVault(),
             new ComposePlanner(_docker, _host), NullLogger<GitDeployService>.Instance, Path.Combine(_root, "apps.json"),
-            locks: _locks);
+            locks: _locks, composeRunner: new ComposeRunner(_host, _docker));
         _git.SaveAppAsync(new GitDeployApp
         {
             Id = AppId, Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",

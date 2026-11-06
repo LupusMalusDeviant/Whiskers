@@ -194,7 +194,7 @@ public class ImageRuntimeToolsTests
     }
 
     /// <summary>A compose deployment the way Whiskers runs one on its own host: the production deploy script
-    /// (<see cref="ComposePlan.DeployScript"/>, as used by <c>deploy_compose</c>, the UI and webhooks) through the
+    /// (<see cref="ComposePlan.WriteScript"/> and <see cref="ComposePlan.UpCommand"/>, as <see cref="ComposeRunner"/> runs them for <c>deploy_compose</c>, the UI and webhooks) through the
     /// production local transport (<see cref="HostCommandExecutor.LocalShellArguments"/>: <c>nsenter</c> into PID 1),
     /// started from the built image in the full profile. The workload must run on the host, and the same path
     /// removes it again.</summary>
@@ -221,7 +221,10 @@ public class ImageRuntimeToolsTests
 
         try
         {
-            var (exit, stdout, stderr) = OnHost(image, plan.DeployScript(pull: false));
+            // The commands of ComposeRunner's steps 1 and 5 (contract 0006): write the files, then up without pull or build.
+            var backup = $"/tmp/{project}-backup";
+            var (exit, stdout, stderr) = OnHost(image,
+                $"{plan.WriteScript(backup)} && {plan.UpCommand} && {ComposePlan.CleanupScript(backup)}");
             Assert.True(exit == 0, $"the deploy script failed (exit {exit}):\n{stdout}\n{stderr}");
             Assert.Equal("running", WorkloadStates(project).Single());
 

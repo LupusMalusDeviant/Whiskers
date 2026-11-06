@@ -13,6 +13,13 @@ public sealed record MutationPolicyDecision(MutationVerdict Verdict, string Reas
 {
     /// <summary>The policy version and preset that produced the verdict; null when no policy could be consulted.</summary>
     public PolicySnapshot? Policy { get; init; }
+
+    /// <summary>Contract 0006: the agent rule set (<c>GuardrailEngine.CreateDefault</c>) decided — not the PC-D1 rules of
+    /// a person or a person's automation. The re-check after <c>up</c> stops an undecided exposure only then.</summary>
+    public bool AgentRuleSet { get; init; }
+
+    /// <summary>Contract 0006: the deciding policy's exposure classes that need a confirmation.</summary>
+    public IReadOnlyList<string> ExposureConfirmClasses { get; init; } = [];
 }
 
 /// <summary>Step 3 of the gateway pipeline: may this principal perform this capability on this target now?</summary>
@@ -102,6 +109,8 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         return new MutationPolicyDecision(verdict, decision.Reason, decision.MatchedRuleIds)
         {
             Policy = PolicySnapshot.Of(preset, policy),
+            AgentRuleSet = !ReferenceEquals(engine, HumanEngine),
+            ExposureConfirmClasses = policy.EffectiveExposureConfirmClasses,
         };
     }
 
@@ -125,6 +134,12 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         var args = request.Arguments.Where(a => !a.Key.StartsWith("__", StringComparison.Ordinal))
             .ToDictionary(a => a.Key, a => a.Value);
         args["__resolvedKind"] = JsonSerializer.SerializeToElement(t.Kind);
+        // Contract 0006: the exposures of the resolved target, for ExposureChangeRule only (the other rules skip them); a
+        // withheld one under a prefix of its own.
+        for (var i = 0; i < t.Exposures.Count; i++)
+            args[t.Withheld.Contains(t.Exposures[i])
+                ? $"{ExposureChangeRule.ResolvedWithheldPrefix}{i}"
+                : $"{ExposureChangeRule.ResolvedPrefix}{i}"] = JsonSerializer.SerializeToElement(t.Exposures[i]);
         if (string.IsNullOrEmpty(t.Id) && string.IsNullOrEmpty(t.Name) && names.Count == 0)
             return args;
         if (!string.IsNullOrEmpty(t.Id)) args["__resolvedTargetId"] = JsonSerializer.SerializeToElement(t.Id);

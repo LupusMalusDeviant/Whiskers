@@ -15,6 +15,7 @@
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
 @inject IUiMutationRunner Mutations
 @inject IComposePlanner ComposePlanner
+@inject IComposeRunner ComposeRunner
 @inject IStringLocalizer<SharedResource> L
 @using Whiskers.Models.Cve
 @implements IAsyncDisposable
@@ -992,17 +993,24 @@ else
             var affected = new List<ContainerInfo> { _container };
             affected.AddRange(plan.Containers.Where(c => c.Id != _container.Id));
             // What the project mounts is decided too (R1-16), as for a deployment: compose up recreates it with them.
-            var restartResult = await Mutations.RunMountsAsync(plan, () => ForEachServiceAsync(affected, sid, 0,
-                async () =>
+            // …and its exposure changes (contract 0006), audited with the save and announced; nothing to confirm (PC-D1).
+            var restartResult = await Mutations.RunMountsAsync(plan, () => Mutations.RunExposuresAsync(plan, () =>
+                ForEachServiceAsync(affected, sid, 0, async () =>
                 {
                     // Planned again right before writing: a container that turned up meanwhile was not decided.
                     var current = await ComposePlanner.PlanEnvChangeAsync(_container, sid, _ => envContent);
                     current.EnsureDecided(MutationScope.Current);
-                    var restart = await HostCommandExecutor.ExecuteMutationAsync(sid, current.DeployScript(pull: false),
-                        TimeSpan.FromMinutes(2));
-                    if (!restart.Success) MutationScope.Fail("Writing .env or docker compose up failed.");
-                    return restart;
-                }));
+                    // Write, pull and build only what is missing (no --pull), inspect the images, up, re-check.
+                    var run = await ComposeRunner.RunAsync(current,
+                        (command, timeout, ct) => HostCommandExecutor.ExecuteMutationAsync(sid, command, timeout, ct),
+                        new ComposeRunOptions(Pull: false, TimeSpan.FromMinutes(2)));
+                    if (!run.Success) MutationScope.Fail("Writing .env or docker compose up failed.");
+                    return new Whiskers.Services.Server.CommandResult
+                    {
+                        ExitCode = run.Success ? 0 : 1, Output = run.Output,
+                        Error = run.Refusal ?? (run.Violations.Count > 0 ? string.Join("; ", run.Violations) : run.Error),
+                    };
+                })));
 
             // Each affected container's gateway event records the save; a failed restart is Failed there (R1-21).
             if (restartResult.Success)

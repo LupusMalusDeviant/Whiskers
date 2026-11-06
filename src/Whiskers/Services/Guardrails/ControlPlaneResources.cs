@@ -86,12 +86,13 @@ public static class ControlPlaneResources
             ? k.GetString()
             : null;
         var targetIsResource = resolvedKind is not null && ResourceKinds.Contains(resolvedKind);
-        return key =>
+        // Contract 0006: exposure lists never name a resource (the matcher skips them as well).
+        return key => !ProtectedResourceMatcher.IsExposureArgument(key) && (
             IdentityArguments.Contains(key)
             || ProtectedResourceMatcher.FreeTextArguments.Contains(key)
             || ProtectedResourceMatcher.ReferenceArguments.Contains(key)
             || key.StartsWith(ProtectedResourceMatcher.ResolvedRelatedPrefix, StringComparison.Ordinal)
-            || (targetIsResource && key is "__resolvedTargetId" or "__resolvedTargetName");
+            || (targetIsResource && key is "__resolvedTargetId" or "__resolvedTargetName"));
     }
 
     private static IReadOnlyList<string> BuildNames()

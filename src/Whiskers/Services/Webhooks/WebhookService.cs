@@ -22,6 +22,7 @@ public class WebhookService : IWebhookService
     private readonly IDockerService _docker;
     private readonly IHostCommandExecutor _executor;
     private readonly IComposePlanner _planner;
+    private readonly IComposeRunner? _composeRunner;
     private readonly ILogger<WebhookService> _logger;
     private readonly WebhookOptions _options;
     private readonly TimeProvider _time;
@@ -62,9 +63,12 @@ public class WebhookService : IWebhookService
     public WebhookService(IServiceScopeFactory scopeFactory, IDockerService docker,
         IHostCommandExecutor executor, IComposePlanner planner, ILogger<WebhookService> logger,
         IOptions<WebhookOptions>? options = null, TimeProvider? time = null, IHostApplicationLifetime? lifetime = null,
-        IStringLocalizer<SharedResource>? text = null, ResourceLocks? locks = null, Whiskers.Services.Vault.IVaultService? vault = null)
+        IStringLocalizer<SharedResource>? text = null, ResourceLocks? locks = null, Whiskers.Services.Vault.IVaultService? vault = null,
+        IComposeRunner? composeRunner = null)
     {
         _vault = vault;
+        // Built only when the parts it needs are there; a run without them is refused (fail closed).
+        _composeRunner = composeRunner ?? (executor is null || docker is null ? null : new ComposeRunner(executor, docker));
         _locks = locks ?? new ResourceLocks();
         _scopeFactory = scopeFactory;
         _docker = docker;
@@ -1031,8 +1035,13 @@ public class WebhookService : IWebhookService
             throw Unresolved(ex.Message);   // names only containers
         }
         // The host primitive: it runs only inside the compose.deploy decision of this run (R1-48).
-        var result = await _executor.ExecuteMutationAsync(sid, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5), ct);
-        return (result.Success, result.Success ? result.Output : result.Error);
+        // Contract 0006: write, pull, build, inspect the images, up — then the re-check of what the run created.
+        var runner = _composeRunner ?? throw Unresolved("The compose runner is not available; nothing ran.");
+        var result = await runner.RunAsync(plan,
+            (command, timeout, token) => _executor.ExecuteMutationAsync(sid, command, timeout, token),
+            new ComposeRunOptions(true, TimeSpan.FromMinutes(5)), ct);
+        if (result.Success) return (true, result.Output);
+        return (false, result.Refusal ?? (result.Violations.Count > 0 ? string.Join("; ", result.Violations) : result.Error));
     }
 
     /// <summary>Signs a synthetic test delivery with the stored secret, as the webhook's provider would, and sends it

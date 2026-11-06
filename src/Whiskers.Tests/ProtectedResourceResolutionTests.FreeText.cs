@@ -298,7 +298,7 @@ public sealed partial class ProtectedResourceResolutionTests
     {
         // e.g. through extends or an anchor form the model does not follow: compose's own model counts.
         _host.ComposeConfig = """
-            {"services":{"a":{"volumes":[{"type":"bind","source":"/opt/dockerproxy/certs","target":"/c"},
+            {"services":{"a":{"image":"x","volumes":[{"type":"bind","source":"/opt/dockerproxy/certs","target":"/c"},
               {"type":"volume","source":"data","target":"/d"},{"type":"tmpfs","target":"/t"}]}},
              "volumes":{"data":{"name":"serverwatch-data"}}}
             """;

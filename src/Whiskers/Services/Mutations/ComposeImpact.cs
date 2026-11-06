@@ -23,25 +23,67 @@ public static class ComposeImpact
     /// stops it. A failed <c>docker compose</c> is reported as a failed mutation.
     /// </summary>
     public static async Task<CommandResult> DeployAsync(this IUiMutationRunner runner, IHostCommandExecutor executor,
-        IComposePlanner planner, string capabilityId, object arguments, ComposeDeployment deployment, bool pull = true)
+        IComposePlanner planner, IComposeRunner composeRunner, string capabilityId, object arguments,
+        ComposeDeployment deployment, bool pull = true)
     {
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(composeRunner);
         ArgumentNullException.ThrowIfNull(deployment);
         var plan = await planner.PlanAsync(deployment);
         return await runner.RunAsync(capabilityId, arguments, _ =>
         {
             ReportProject(plan);
-            return runner.RunMountsAsync(plan, () => runner.RunForEachAsync(capabilityId, plan.Containers, plan.ServerId, async () =>
-            {
-                var current = await planner.PlanAsync(deployment);
-                current.EnsureDecided(MutationScope.Current);
-                var r = await executor.ExecuteMutationAsync(current.ServerId, current.DeployScript(pull), TimeSpan.FromMinutes(5));
-                if (!r.Success) MutationScope.Fail("docker compose failed.");
-                return r;
-            }));
+            return runner.RunMountsAsync(plan, () => runner.RunExposuresAsync(plan, () =>
+                runner.RunForEachAsync(capabilityId, plan.Containers, plan.ServerId, async () =>
+                {
+                    var current = await planner.PlanAsync(deployment);
+                    current.EnsureDecided(MutationScope.Current);
+                    // Contract 0006: write, pull, build, inspect the images, up — then the re-check after up.
+                    var run = await composeRunner.RunAsync(current,
+                        (command, timeout, ct) => executor.ExecuteMutationAsync(current.ServerId, command, timeout, ct),
+                        new ComposeRunOptions(pull, TimeSpan.FromMinutes(5)));
+                    return new CommandResult
+                    {
+                        ExitCode = run.Success ? 0 : 1, Output = run.Output,
+                        Error = run.Refusal ?? (run.Violations.Count > 0 ? string.Join("; ", run.Violations) : run.Error),
+                    };
+                })));
         });
     }
+
+    /// <summary>Contract 0006: whether a plan needs the exposure decision — it has exposures, or it shares a namespace
+    /// (<c>service:x</c> / <c>container:x</c>, Amendment 7).</summary>
+    public static bool NeedsExposureDecision(ComposePlan plan) => plan.Exposures().Count > 0 || plan.SharesNamespaces;
+
+    /// <summary>
+    /// The arguments of the exposure decision (contract 0006): <c>exposure</c> holds the literal entries and is audited,
+    /// <c>exposureWithheld</c> the entries with a part from a variable (a payload: the sinks keep only its length),
+    /// <c>exposureClasses</c> is informational, <c>related</c> / <c>relatedWithheld</c> the containers a namespace is
+    /// shared with.
+    /// </summary>
+    public static object ExposureArguments(ComposePlan plan)
+    {
+        var exposures = plan.Exposures();
+        var withheldShared = plan.WithheldSharedIdentities().ToHashSet(StringComparer.Ordinal);
+        return new
+        {
+            serverId = plan.ServerId,
+            exposure = ComposeExposures.Lines(exposures.Where(e => !e.Withheld)),
+            exposureWithheld = ComposeExposures.Lines(exposures.Where(e => e.Withheld)),
+            exposureClasses = ComposeExposures.Classes(exposures, plan.ExposurePrefixes),
+            related = string.Join('\n', plan.SharedIdentities().Where(i => !withheldShared.Contains(i))),
+            relatedWithheld = string.Join('\n', withheldShared),
+        };
+    }
+
+    /// <summary>Contract 0006: decides the plan's exposures (if any, or a shared namespace) as a nested
+    /// <see cref="MountsCapability"/> decision before <paramref name="action"/>, the way <see cref="RunMountsAsync"/> does
+    /// mounts. A person is not asked to confirm their own action (PC-D1): the decision is audited with every exposure.</summary>
+    public static Task<T> RunExposuresAsync<T>(this IUiMutationRunner runner, ComposePlan plan, Func<Task<T>> action) =>
+        NeedsExposureDecision(plan)
+            ? runner.RunAsync(MountsCapability, ExposureArguments(plan), _ => action())
+            : action();
 
     /// <summary>The read-back key of the compose project a deployment ran under (R1-37).</summary>
     public const string ProjectFact = "composeProject";
@@ -74,12 +116,12 @@ public static class ComposeImpact
     /// <paramref name="capabilityId"/> (nested), then runs the deployment, which plans again and checks the result
     /// against these decisions (<see cref="ComposePlan.EnsureDecided"/>).</summary>
     public static ComposePlanGate GateFor(this IUiMutationRunner runner, string capabilityId) =>
-        (plan, proceed) => runner.RunMountsAsync(plan, () => runner.RunForEachAsync(capabilityId, plan.Containers,
-            plan.ServerId, async () =>
+        (plan, proceed) => runner.RunMountsAsync(plan, () => runner.RunExposuresAsync(plan, () =>
+            runner.RunForEachAsync(capabilityId, plan.Containers, plan.ServerId, async () =>
             {
                 await proceed();
                 return true;
-            }));
+            })));
 
     /// <summary>
     /// A <see cref="ComposePlanGate"/> for a deployment without a person at the keyboard (R1-08): each container of
@@ -90,22 +132,30 @@ public static class ComposeImpact
     {
         ArgumentNullException.ThrowIfNull(runner);
         ArgumentNullException.ThrowIfNull(actor);
-        return async (plan, proceed) =>
+        return (plan, proceed) =>
         {
-            if (plan.Mounts() is not { Count: > 0 } mounts)
-            {
-                await NextAutomated(runner, actor, capabilityId, plan, proceed, 0);
-                return;
-            }
-            var outcome = await runner.RunAsync(actor, MountsCapability,
-                new { serverId = plan.ServerId, mounts = string.Join('\n', mounts) },
-                _ => NextAutomated(runner, actor, capabilityId, plan, proceed, 0));
-            if (outcome.Error is { } error)
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
-            if (outcome.Status != MutationStatus.Executed)
-                throw new MutationRefusedException(outcome.Reason ?? "The deployment's mounts were not allowed.",
-                    outcome.Status, outcome.OperationId);
+            // Contract 0006: the exposures are decided like the mounts, nested, on the owner's authority.
+            Task Exposed() => NeedsExposureDecision(plan)
+                ? Nested(runner, actor, ExposureArguments(plan), "The deployment's exposure changes were not allowed.",
+                    () => NextAutomated(runner, actor, capabilityId, plan, proceed, 0))
+                : NextAutomated(runner, actor, capabilityId, plan, proceed, 0);
+            return plan.Mounts() is { Count: > 0 } mounts
+                ? Nested(runner, actor, new { serverId = plan.ServerId, mounts = string.Join('\n', mounts) },
+                    "The deployment's mounts were not allowed.", Exposed)
+                : Exposed();
         };
+    }
+
+    /// <summary>A nested <see cref="MountsCapability"/> decision of an automation: a refusal (or an error of the decision
+    /// itself) stops the deployment with <see cref="MutationRefusedException"/>; an error of the deployment is passed on.</summary>
+    private static async Task Nested(IAutomationMutationRunner runner, AutomationActor actor, object arguments, string refused,
+        Func<Task> inner)
+    {
+        var outcome = await runner.RunAsync(actor, MountsCapability, arguments, _ => inner());
+        if (outcome.Error is { } error)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+        if (outcome.Status != MutationStatus.Executed)
+            throw new MutationRefusedException(outcome.Reason ?? refused, outcome.Status, outcome.OperationId);
     }
 
     private static async Task NextAutomated(IAutomationMutationRunner runner, AutomationActor actor, string capabilityId,
