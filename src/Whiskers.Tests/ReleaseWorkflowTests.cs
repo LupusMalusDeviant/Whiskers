@@ -290,6 +290,10 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "          RELEASE_GATE: ${{ inputs.release-gate }}\n          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASE_GATE: ${{ inputs.release-gate }}\n")]
     [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          GH_TOKEN: ${{ github.token }}\n")] // the tests see the token
     [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "")]                                                                     // the tests see the token
+    [InlineData("ci.yml", "            GH_TOKEN=\"$RELEASES_TOKEN\" gh release list", "            GH_TOKEN=\"${{ github.token }}\" gh release list")] // the token inline in the script
+    // The N-1 checks list the published releases with gh: both need GH_TOKEN (review round 3, M-1).
+    [InlineData("ci.yml", "      - name: N-1 upgrade and recovery\n        env:\n          GH_TOKEN: ${{ github.token }}\n", "      - name: N-1 upgrade and recovery\n        env:\n          RELEASES_TOKEN: ${{ github.token }}\n")]
+    [InlineData("release.yml", "          VER: ${{ needs.prepare.outputs.ver }}\n          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "          VER: ${{ needs.prepare.outputs.ver }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=")]
     [InlineData("ci.yml", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n            export GH_TOKEN=\"$RELEASES_TOKEN\"\n")] // and in a pull request
     // The image-runtime run: from its TRX file, with its manifest.
     [InlineData("ci.yml", " --no-skips --require .github/required-tests/image-runtime.txt", " --no-skips")]
@@ -1079,7 +1083,7 @@ internal static class WorkflowPolicy
                 || Scalar(Child(env, "RELEASES_TOKEN")) != "${{ github.token }}")
                 violations.Add($"ci.yml job '{job}': the release run's base comparison does not fetch the history and the published releases");
             // Review round 2 NIT: the token reaches gh only; the tests (a pull request's own code) never see it.
-            if (Child(env, "GH_TOKEN") is not null || Child(env, "GITHUB_TOKEN") is not null
+            if (Child(env, "GH_TOKEN") is not null || Child(env, "GITHUB_TOKEN") is not null || run.Contains("github.token", StringComparison.Ordinal)
                 || Regex.Matches(run, @"\$RELEASES_TOKEN").Count != 1 || !Regex.IsMatch(run, @"\nfi\nunset RELEASES_TOKEN\n"))
                 violations.Add($"ci.yml job '{job}': the base comparison exposes the token beyond 'gh release list' (unset it before the tests)");
             // Review m3: the step marks itself, so a base lost on the way fails instead of passing without a comparison.
@@ -1089,6 +1093,18 @@ internal static class WorkflowPolicy
                 violations.Add($"ci.yml job '{job}': the base comparison is not checked from its TRX file without skips");
             if (!ci.TryGetValue(job, out var j) || !Steps(j).Any(s => Scalar(Child(s, "run"))?.Contains("--filter \"Category!=RequiresDocker\"", StringComparison.Ordinal) == true))
                 violations.Add($"ci.yml job '{job}': the base comparison does not run in the job that builds and tests");
+        }
+
+        // Review round 3 M-1: the N-1 check lists the published releases with gh, which needs GH_TOKEN in its step; a
+        // rename for the base step once took it away, and the artifact job then failed on every run.
+        foreach (var (file, jobs) in new[] { ("ci.yml", ci), ("release.yml", release) })
+        {
+            var n1 = jobs.SelectMany(j => Steps(j.Value).Select(s => (Job: j.Key, Step: s)))
+                .Where(x => Scalar(Child(x.Step, "run"))?.Contains("artifact-checks.sh previous-release", StringComparison.Ordinal) == true).ToList();
+            if (n1.Count == 0) violations.Add($"{file}: no step runs 'artifact-checks.sh previous-release'");
+            foreach (var (job, step) in n1)
+                if (Scalar(Child(Child(step, "env"), "GH_TOKEN")) != "${{ github.token }}")
+                    violations.Add($"{file} job '{job}' step '{Scalar(Child(step, "name")) ?? "?"}' runs 'artifact-checks.sh previous-release' without GH_TOKEN: ${{{{ github.token }}}}");
         }
 
         // The image-runtime run (D14): from its TRX file, a floor, no skip, its manifest.

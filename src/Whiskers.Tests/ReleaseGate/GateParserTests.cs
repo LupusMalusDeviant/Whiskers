@@ -151,6 +151,16 @@ public class ReleaseGateDocumentTests
     }
 
     [Fact]
+    public void A_fenced_comment_is_no_heading_and_a_fenced_pipe_is_no_row()
+    {
+        // Review round 3 NIT: only '#'..'######' plus a space ends the check, and only outside code fences.
+        const string table = "## H\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n";
+        Assert.Throws<FormatException>(() => MarkdownTables.After(table + "```bash\n# a comment\n```\n| 3 | 4 |\n", "## H"));
+        Assert.Throws<FormatException>(() => MarkdownTables.After(table + "#hashtag, not a heading\n| 3 | 4 |\n", "## H"));
+        Assert.Single(MarkdownTables.After(table + "```\n| a | pipe | in code |\n```\n\n## Next\n\n| 3 | 4 |\n", "## H"));
+    }
+
+    [Fact]
     public void The_decision_table_needs_its_heading_and_columns()
     {
         var contract = GateFiles.Require(GateFiles.Contract);

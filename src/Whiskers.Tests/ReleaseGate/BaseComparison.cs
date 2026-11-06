@@ -35,7 +35,9 @@ public static class BaseComparison
     /// past it (a deleted or demoted release), and a release forged below it could not pick an older base unseen.
     /// </summary>
     /// <param name="published">The published releases, or null when the list is missing (a finding).</param>
-    /// <param name="versionAt">The version in the csproj of a tag's commit, or null when it cannot be read.</param>
+    /// <param name="versionAt">The version in the csproj of a tag's commit, or null when the commit has no csproj. It throws
+    /// <see cref="FormatException"/> when the csproj exists but its version cannot be read: that is a problem, never
+    /// "not a release commit" (review round 3, m-1).</param>
     public static BaseChoice ChooseBase(IEnumerable<string> tags, IEnumerable<string>? published, Func<string, bool> isAncestor,
         Func<string, GateVersion?> versionAt, GateVersion version)
     {
@@ -54,7 +56,16 @@ public static class BaseComparison
         foreach (var t in all.Where(t => !releases.Contains(t)).OrderBy(t => t, StringComparer.Ordinal))
         {
             var v = GateVersion.TryParse(t[1..])!;
-            if (v > chosenVersion && v < version && isAncestor(t) && versionAt(t) == v)
+            if (!(v > chosenVersion && v < version && isAncestor(t))) continue;
+            GateVersion? own;
+            try { own = versionAt(t); }
+            catch (FormatException ex)
+            {
+                problems.Add($"{t} is in the release commit's history above {chosen}, but the version in its csproj cannot be read "
+                             + $"({ex.Message}): what the gate cannot read is a finding");
+                continue;
+            }
+            if (own == v)
                 problems.Add($"{t} is a release commit in the release commit's history (its csproj says {v}) without a published "
                              + $"release: the base would fall back past it to {chosen}; publish that release or delete the tag");
         }

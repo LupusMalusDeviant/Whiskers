@@ -525,6 +525,10 @@ public class ReleaseGateTests
         // ...but not a tag outside the history, or one whose commit carries another version (a failed or forged tag).
         Assert.Empty(BaseComparison.ChooseBase(tags, ["v0.15.0", "v1.0.0"], t => t != "v1.1.0", Own, v120).Problems.Where(p => p.StartsWith("v1.1.0", StringComparison.Ordinal)));
         Assert.Empty(BaseComparison.ChooseBase(tags, ["v0.15.0", "v1.0.0"], All, t => t == "v1.1.0" ? null : Own(t), v120).Problems);
+        // A csproj that exists but cannot be read is a problem, not "no release commit" (review round 3, m-1).
+        var unreadable = BaseComparison.ChooseBase(tags, ["v0.15.0", "v1.0.0"], All,
+            t => t == "v1.1.0" ? throw new FormatException("no <Version> element") : Own(t), v120);
+        Assert.Contains(unreadable.Problems, p => p.StartsWith("v1.1.0 is in the release commit's history", StringComparison.Ordinal) && p.Contains("cannot be read"));
 
         // A tag whose commit does not carry the tag's version is no release commit: refused, never a bootstrap base.
         const string old = "<Project><PropertyGroup><Version>0.9.0</Version></PropertyGroup></Project>";

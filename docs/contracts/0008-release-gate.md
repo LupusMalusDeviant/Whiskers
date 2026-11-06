@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
 review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
-does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 and 2) is pending acceptance. Both are at the end.
+does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 3) is pending acceptance. Both are at the end.
 
 ## Purpose
 
@@ -622,7 +622,7 @@ This amendment takes precedence over the text above. It was accepted on 6 Novemb
 - **`ReleaseGateBaseTests`** passes without comparing when `WHISKERS_GATE_BASE` is unset; the comparison runs in the CI
   step that sets it.
 
-## Amendment 2 — gate review rounds 1 and 2 (6 November 2026)
+## Amendment 2 — gate review rounds 1 to 3 (6 November 2026)
 
 This amendment takes precedence over the text above, Amendment 1 included. It is **pending acceptance** by the
 maintainer.
@@ -653,10 +653,12 @@ maintainer.
   release run failed: anyone who can push a tag can also publish a release by hand. A tag on a commit of another
   version is refused instead of being read as a 0.x bootstrap base. Only in a release run, the CI step fetches the whole
   history and the tags (`--unshallow`) and lists the published releases (`gh release list`). The run's own token is
-  passed to `gh` alone and unset before the tests run, so a pull request's test code never sees it.
+  passed to `gh` alone and unset before the tests run, so it is not in the tests' environment. This does not put it out
+  of their reach: the checkout's persisted credentials hold the same read-only (`contents: read`) token.
 - **Reading the base fails closed.** A file counts as absent from the base only when `git ls-tree` lists no such path at
   the base commit; any failure of `git ls-tree` or `git show` (a missing object after a shallow fetch, a corrupt object,
-  a bad reference) is a finding, never an empty base. A current commit without a csproj is a finding too.
+  a bad reference) is a finding, never an empty base. A current commit without a csproj is a finding too, and so is a
+  tag in the fallback range above whose csproj exists but whose version cannot be read.
 - **A comparing step that lost its base fails.** The CI step exports `WHISKERS_GATE_BASE_REQUIRED=true`. With it set
   and `WHISKERS_GATE_BASE` empty, `ReleaseGateBaseTests` fails instead of passing without a comparison.
 - **R10 covers step conditions.**
@@ -670,7 +672,8 @@ maintainer.
   - the classes `ReleaseGateTests`, `InvariantTableParserTests`, `PathMatrixParserTests` and `ReleaseGateDocumentTests`;
   - `ReleaseGateBaseTests.The_records_keep_every_id_and_decision_of_the_base`.
 - **Table hygiene.** A table ends at its first line that does not start with `|`. Every `|` line after that, up to the
-  next heading, is a parse problem rather than a dropped row. The one exception is a further table with the same header
+  next heading (`#` to `######` followed by a space; lines inside code fences are neither headings nor rows), is a parse
+  problem rather than a dropped row. The one exception is a further table with the same header
   (header row plus separator) where the reader takes every such table (the invariant tables); under a heading that
   holds one table, a second one is a problem too. A §11 count row given twice is an R3 finding.
 - **Patch releases come from `main`.** The tag-on-main check (D16) refuses a tag cut on a `release/*` branch. Land the

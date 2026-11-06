@@ -64,11 +64,9 @@ public class ReleaseGateBaseTests
         throw new InvalidOperationException($"git merge-base failed for {tag} ({output.Trim()}): the ancestry is unknown");
     }
 
+    /// <summary>Null when the tag's commit has no csproj; an unreadable version throws (ChooseBase reports it).</summary>
     private static GateVersion? VersionAt(string tag)
-    {
-        try { return Show(tag, GateFiles.Csproj) is { } csproj ? ReleaseGate.ReadVersion(csproj) : null; }
-        catch (FormatException) { return null; }
-    }
+        => Show(tag, GateFiles.Csproj) is { } csproj ? ReleaseGate.ReadVersion(csproj) : null;
 
     /// <summary>
     /// A file at a commit, or null when the commit's tree has no such path (review round 2 m-A). "Absent" is decided by

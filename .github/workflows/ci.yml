@@ -107,7 +107,8 @@ jobs:
       # release run with the previous release: the highest published GitHub release below the version that is an ancestor
       # of the release commit and carries its tag's version (ancestry and version are the guarantee; the published list only
       # screens out failed releases). History, tags and the release list are fetched only in a release run, and the token
-      # reaches only `gh release list` — it is unset before the tests run.
+      # is passed to `gh release list` alone and unset before the tests run, so it is not in the tests' environment (the
+      # checkout's persisted credentials still hold the same read-only token).
       - name: Release gate (compare with the base)
         if: github.event_name == 'pull_request' || inputs.release-gate == 'release'
         env:
@@ -208,7 +209,7 @@ jobs:
 
       - name: N-1 upgrade and recovery
         env:
-          RELEASES_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # N-1 is the highest published release BELOW this build's version: the same release is rightly no upgrade.

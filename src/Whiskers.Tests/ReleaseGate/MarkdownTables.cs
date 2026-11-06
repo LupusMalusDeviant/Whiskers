@@ -30,6 +30,9 @@ public static class MarkdownTables
     }
 
     /// <summary>Every table in <paramref name="markdown"/> whose header cells equal <paramref name="header"/>.</summary>
+    /// <remarks>A table under its own heading with a different (or no) header row is not seen at all — rows written there
+    /// are not read. For the invariant tables the pinned highest ID (R3) catches a row lost that way; a new caller needs
+    /// its own guard (review round 3 NIT).</remarks>
     public static IReadOnlyList<(int Line, string[] Cells)> WithHeader(string markdown, params string[] header)
     {
         var lines = Lines(markdown);
@@ -65,9 +68,16 @@ public static class MarkdownTables
         var i2 = headerIndex + 1;
         while (i2 < lines.Length && lines[i2].TrimStart().StartsWith('|')) i2++;
         var tableEnd = i2;
-        for (; i2 < lines.Length && !lines[i2].TrimStart().StartsWith('#'); i2++)
+        // Up to the next heading ('#' to '######' and a space), outside code fences: a shell comment in a fenced block is
+        // no heading, and a '|' line in a fence is no table row (review round 3 NIT).
+        var inFence = false;
+        for (; i2 < lines.Length; i2++)
         {
-            if (!lines[i2].TrimStart().StartsWith('|')) continue;
+            var trimmed = lines[i2].TrimStart();
+            if (trimmed.StartsWith("```", StringComparison.Ordinal) || trimmed.StartsWith("~~~", StringComparison.Ordinal)) { inFence = !inFence; continue; }
+            if (inFence) continue;
+            if (IsHeading(trimmed)) break;
+            if (!trimmed.StartsWith('|')) continue;
             var repeat = repeatAllowed && Split(lines[i2]).SequenceEqual(header)
                 && i2 + 1 < lines.Length && IsSeparator(Split(lines[i2 + 1]));
             if (!repeat)
@@ -76,6 +86,8 @@ public static class MarkdownTables
         }
         return rows;
     }
+
+    private static bool IsHeading(string trimmed) => System.Text.RegularExpressions.Regex.IsMatch(trimmed, "^#{1,6} ");
 
     private static bool IsSeparator(string[] cells) => cells.All(c => c.Length > 0 && c.Trim(':', '-').Length == 0);
 
