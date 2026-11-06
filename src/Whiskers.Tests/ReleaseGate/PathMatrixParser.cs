@@ -90,10 +90,14 @@ public static class PathMatrixParser
     public static IReadOnlyDictionary<string, int>? Totals(string contract, List<string> problems)
     {
         var lines = MarkdownTables.Lines(contract);
+        var fenced = MarkdownTables.Fenced(lines); // fenced lines are neither the marker nor the table (review round 5 m-3)
         var at = Array.FindIndex(lines, l => l.StartsWith("**Rows today", StringComparison.Ordinal));
+        while (at >= 0 && fenced[at]) at = Array.FindIndex(lines, at + 1, l => l.StartsWith("**Rows today", StringComparison.Ordinal));
         if (at < 0) { problems.Add("PRODUCT_CONTRACT.md §7.6 has no '**Rows today' table"); return null; }
         var result = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var line in lines.Skip(at + 1).SkipWhile(l => !l.TrimStart().StartsWith('|')).TakeWhile(l => l.TrimStart().StartsWith('|')))
+        var start = at + 1;
+        while (start < lines.Length && (fenced[start] || !lines[start].TrimStart().StartsWith('|'))) start++;
+        foreach (var line in lines.Skip(start).TakeWhile(l => l.TrimStart().StartsWith('|')))
         {
             var cells = MarkdownTables.Split(line);
             if (cells.Length != 2) continue;

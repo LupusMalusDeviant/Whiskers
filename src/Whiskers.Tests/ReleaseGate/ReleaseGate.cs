@@ -18,7 +18,7 @@ public static class ReleaseGate
     public const string BlockEnd = "# END release-gate";
 
     private static readonly Regex InvariantId = new(@"^INV-(\d{2,})$", RegexOptions.CultureInvariant);
-    private static readonly Regex InvariantRowLine = new(@"^\|\s*(INV-\d{2,})\s*\|", RegexOptions.CultureInvariant);
+    private static readonly Regex InvariantInCell = new(@"INV-\d+", RegexOptions.CultureInvariant);
     private static readonly Regex DecisionId = new(@"^RG-([1-9]\d*)$", RegexOptions.CultureInvariant);
     private static readonly Regex Identifier = new(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$", RegexOptions.CultureInvariant);
     private static readonly Regex Ghsa = new(@"^GHSA(-[23456789cfghjmpqrvwx]{4}){3}$", RegexOptions.CultureInvariant);
@@ -260,15 +260,19 @@ public static class ReleaseGate
 
             // Every line that looks like an invariant row must be a parsed row (review round 4 m-1): a table whose header
             // the parser does not recognise (a typo, under a new heading) would otherwise hide its rows, a ❌ among them,
-            // and with the pin and §11 left alone nothing else notices. The same line test the base comparison uses.
+            // and with the pin and §11 left alone nothing else notices. Any line outside a fence that starts with '|' (after
+            // indentation, as the reader and GitHub accept) and names an INV-n in its first cell is meant (review round 5 m-2).
             if (_rows.Count > 0)
             {
                 var parsedLines = _rows.Select(r => r.Line).ToHashSet();
                 var lines = MarkdownTables.Lines(inputs.Invariants);
                 var fenced = MarkdownTables.Fenced(lines);
                 for (var i = 0; i < lines.Length; i++)
-                    if (!fenced[i] && InvariantRowLine.Match(lines[i]) is { Success: true } row && !parsedLines.Contains(i + 1))
-                        Add("R3", row.Groups[1].Value, $"SECURITY_INVARIANTS.md:{i + 1}: an invariant row the gate cannot read (its table's header is not '| {string.Join(" | ", InvariantTableParser.Header)} |')");
+                {
+                    if (fenced[i] || parsedLines.Contains(i + 1) || !lines[i].TrimStart().StartsWith('|')) continue;
+                    if (InvariantInCell.Match(MarkdownTables.Split(lines[i])[0]) is { Success: true } id)
+                        Add("R3", id.Value, $"SECURITY_INVARIANTS.md:{i + 1}: an invariant row the gate cannot read (its table's header is not '| {string.Join(" | ", InvariantTableParser.Header)} |')");
+                }
             }
             var retired = new HashSet<int>();
             foreach (var r in _gate.Retired)

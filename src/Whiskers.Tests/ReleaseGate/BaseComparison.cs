@@ -15,7 +15,8 @@ public static class BaseComparison
     private static readonly Regex Tag = new(@"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$", RegexOptions.CultureInvariant);
     private static readonly Regex InvariantId = new(@"^INV-(\d{2,})$", RegexOptions.CultureInvariant);
     private static readonly Regex DecisionNumber = new(@"^RG-([1-9]\d*)$", RegexOptions.CultureInvariant);
-    private static readonly Regex RowId = new(@"^\|\s*(INV-\d{2,})\s*\|", RegexOptions.CultureInvariant | RegexOptions.Multiline);
+    // Indented rows too (up to any whitespace), as the table reader and GitHub accept them (review round 5 m-2).
+    private static readonly Regex RowId = new(@"^[ \t]*\|\s*(INV-\d{2,})\s*\|", RegexOptions.CultureInvariant | RegexOptions.Multiline);
 
     /// <summary>The invariant IDs of a table's rows, read line by line: a base written before the table's format was
     /// enforced (an unescaped '|' in a cell) still yields its IDs; the format itself is the current gate's R3.</summary>

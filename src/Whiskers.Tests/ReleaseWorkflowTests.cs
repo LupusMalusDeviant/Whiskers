@@ -294,6 +294,12 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "          unset RELEASES_TOKEN\n          echo \"${{ secrets.GITHUB_TOKEN }}\" >/dev/null\n")]  // a secret inline in the script
     [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github.token }}\n")] // the token under another name
     [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ secrets.GITHUB_TOKEN }}\n")] // a secret under another name
+    // Review round 5 NIT b: other spellings, and the job's or the workflow's env.
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github['token'] }}\n")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github . token }}\n")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ secrets['GITHUB_TOKEN'] }}\n")]
+    [InlineData("ci.yml", "  build-test:\n    runs-on: ubuntu-latest\n", "  build-test:\n    runs-on: ubuntu-latest\n    env:\n      T: ${{ github.token }}\n")]
+    [InlineData("ci.yml", "permissions: {}\n\njobs:\n", "permissions: {}\n\nenv:\n  T: ${{ secrets.GITHUB_TOKEN }}\n\njobs:\n")]
     // The N-1 checks list the published releases with gh: both need GH_TOKEN (review round 3, M-1).
     [InlineData("ci.yml", "      - name: N-1 upgrade and recovery\n        env:\n          GH_TOKEN: ${{ github.token }}\n", "      - name: N-1 upgrade and recovery\n        env:\n          RELEASES_TOKEN: ${{ github.token }}\n")]
     [InlineData("release.yml", "          VER: ${{ needs.prepare.outputs.ver }}\n          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "          VER: ${{ needs.prepare.outputs.ver }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=")]
@@ -1087,10 +1093,13 @@ internal static class WorkflowPolicy
                 violations.Add($"ci.yml job '{job}': the release run's base comparison does not fetch the history and the published releases");
             // Review rounds 2-4: the token reaches gh only and is not in the tests' environment. Only RELEASES_TOKEN may carry
             // a token (no other env value, no run text names github.token or a secret).
-            static bool Credential(string? text) => text is not null
-                && (text.Contains("github.token", StringComparison.Ordinal) || text.Contains("secrets.", StringComparison.Ordinal));
             var otherCredential = (env as YamlMappingNode)?.Children
                 .Any(kv => Scalar(kv.Key) != "RELEASES_TOKEN" && Credential(Scalar(kv.Value))) == true;
+            // Review round 5 NIT b: nor the job or the workflow, whose env every step of the job inherits.
+            if (ci.TryGetValue(job, out var baseJob) && EnvCredentials(Child(baseJob, "env")).Any())
+                violations.Add($"ci.yml job '{job}' puts a credential into the environment of every step: {string.Join(", ", EnvCredentials(Child(baseJob, "env")))}");
+            if (EnvCredentials(Child(ciRoot, "env")).Any())
+                violations.Add($"ci.yml puts a credential into the environment of every job: {string.Join(", ", EnvCredentials(Child(ciRoot, "env")))}");
             if (Child(env, "GH_TOKEN") is not null || Child(env, "GITHUB_TOKEN") is not null || otherCredential || Credential(run)
                 || Regex.Matches(run, @"\$RELEASES_TOKEN").Count != 1 || !Regex.IsMatch(run, @"\nfi\nunset RELEASES_TOKEN\n"))
                 violations.Add($"ci.yml job '{job}': the base comparison exposes the token beyond 'gh release list' (unset it before the tests)");
@@ -1154,6 +1163,21 @@ internal static class WorkflowPolicy
         else violations.Add("the release has no 'prepare' job");
         return violations;
     }
+
+    /// <summary>
+    /// An expression that yields the run's token or a secret (review round 5 NIT b): <c>github.token</c> in any spelling
+    /// (<c>github . token</c>, <c>github['token']</c>) or anything under <c>secrets</c>, inside <c>${{ }}</c>; plus the bare
+    /// words in run text. Other <c>github.*</c> context values (an event's SHA) are no credential.
+    /// </summary>
+    private static readonly Regex CredentialExpression = new(
+        @"\$\{\{[^}]*(\bgithub\s*(\.\s*token\b|\[\s*['""]token['""]\s*\])|\bsecrets\b)", RegexOptions.CultureInvariant);
+
+    private static bool Credential(string? text) => text is not null
+        && (CredentialExpression.IsMatch(text) || text.Contains("github.token", StringComparison.Ordinal)
+            || text.Contains("secrets.", StringComparison.Ordinal));
+
+    private static IEnumerable<string> EnvCredentials(YamlNode? env)
+        => (env as YamlMappingNode)?.Children.Where(kv => Credential(Scalar(kv.Value))).Select(kv => Scalar(kv.Key) ?? "?") ?? [];
 
     // ---- YAML helpers ----
 

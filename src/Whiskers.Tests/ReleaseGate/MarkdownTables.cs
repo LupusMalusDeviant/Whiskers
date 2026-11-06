@@ -12,6 +12,14 @@ public static class MarkdownTables
     /// <summary>The data rows of the first table after the line <paramref name="heading"/> (exact, trimmed).</summary>
     /// <exception cref="FormatException">The heading is missing, no table follows it, or a row is malformed.</exception>
     public static IReadOnlyList<(int Line, string[] Cells)> After(string markdown, string heading)
+        => AfterTable(markdown, heading).Rows;
+
+    /// <summary>
+    /// The header cells and data rows of the first table after <paramref name="heading"/>, outside code fences. Callers
+    /// validate exactly the header of the table they read (review round 5 m-1): a fenced example table with the right
+    /// header can no longer pass a header check while a different real table is read.
+    /// </summary>
+    public static (string[] Header, IReadOnlyList<(int Line, string[] Cells)> Rows) AfterTable(string markdown, string heading)
     {
         var lines = Lines(markdown);
         var at = Array.FindIndex(lines, l => l.Trim() == heading);
@@ -29,7 +37,7 @@ public static class MarkdownTables
             start++;
         }
         if (start >= lines.Length) throw new FormatException($"no table follows the heading '{heading}'");
-        return Read(lines, start, heading, repeatAllowed: false);
+        return (Split(lines[start]), Read(lines, start, heading, repeatAllowed: false));
     }
 
     /// <summary>Every table in <paramref name="markdown"/> whose header cells equal <paramref name="header"/>.</summary>
@@ -39,10 +47,11 @@ public static class MarkdownTables
     public static IReadOnlyList<(int Line, string[] Cells)> WithHeader(string markdown, params string[] header)
     {
         var lines = Lines(markdown);
+        var fenced = Fenced(lines); // a fenced example table is no table (review round 5 m-3)
         var rows = new List<(int, string[])>();
         for (var i = 0; i < lines.Length; i++)
         {
-            if (!lines[i].TrimStart().StartsWith('|')) continue;
+            if (fenced[i] || !lines[i].TrimStart().StartsWith('|')) continue;
             if (i > 0 && lines[i - 1].TrimStart().StartsWith('|')) continue; // not the first row of a table
             if (!Split(lines[i]).SequenceEqual(header)) continue;
             rows.AddRange(Read(lines, i, string.Join(" | ", header), repeatAllowed: true));
@@ -92,7 +101,9 @@ public static class MarkdownTables
     /// <summary>
     /// Which lines are code-fence markers or inside a fence (CommonMark): a fence opens with three or more backticks or
     /// tildes and closes only with the same character, at least as many of them, and nothing else on the line (review
-    /// round 4 NIT 1: a '~~~' line inside a '```' block does not close it). An unclosed fence runs to the end.
+    /// round 4 NIT 1: a '~~~' line inside a '```' block does not close it). An unclosed fence runs to the end. Both fence
+    /// lines may be indented by at most three spaces, and a backtick opener's info string may not contain a backtick
+    /// (review round 5 NIT a).
     /// </summary>
     public static bool[] Fenced(string[] lines)
     {
@@ -101,11 +112,17 @@ public static class MarkdownTables
         var length = 0;
         for (var i = 0; i < lines.Length; i++)
         {
-            var trimmed = lines[i].TrimStart();
-            var run = trimmed.Length > 0 && trimmed[0] is '`' or '~' ? trimmed.TakeWhile(c => c == trimmed[0]).Count() : 0;
+            var indent = lines[i].Length - lines[i].TrimStart(' ').Length;
+            var trimmed = lines[i].TrimStart(' ');
+            var run = indent <= 3 && trimmed.Length > 0 && trimmed[0] is '`' or '~' ? trimmed.TakeWhile(c => c == trimmed[0]).Count() : 0;
             if (marker is null)
             {
-                if (run >= 3) { marker = trimmed[0]; length = run; fenced[i] = true; }
+                if (run >= 3 && !(trimmed[0] == '`' && trimmed[run..].Contains('`')))
+                {
+                    marker = trimmed[0];
+                    length = run;
+                    fenced[i] = true;
+                }
                 continue;
             }
             fenced[i] = true;

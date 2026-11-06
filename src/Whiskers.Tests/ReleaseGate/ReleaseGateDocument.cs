@@ -28,12 +28,14 @@ public static class ReleaseGateDocument
         {
             try
             {
-                var rows = MarkdownTables.After(markdown, heading);
-                // The header itself must have the table's column count: read it again through the separator-free path.
-                var headerLine = MarkdownTables.Lines(markdown).SkipWhile(l => l.Trim() != heading).Skip(1)
-                    .FirstOrDefault(l => l.TrimStart().StartsWith('|'));
-                if (headerLine is not null && MarkdownTables.Split(headerLine).Length != columns)
-                    problems.Add($"RELEASE_GATE.md '{heading}' must have {columns} columns");
+                // The header of exactly the table that is read (review round 5 m-1): a fenced example above it is skipped by
+                // the reader, so it cannot stand in for the real header. A wrong column count reads no rows at all.
+                var (header, rows) = MarkdownTables.AfterTable(markdown, heading);
+                if (header.Length != columns)
+                {
+                    problems.Add($"RELEASE_GATE.md '{heading}' must have {columns} columns, the table has {header.Length}");
+                    return [];
+                }
                 return rows;
             }
             catch (FormatException e)
@@ -83,10 +85,10 @@ public static class ReleaseDecisions
             var lines = MarkdownTables.Lines(contract);
             var at = Array.FindIndex(lines, l => l.Trim() == Heading);
             if (at < 0) return ([], $"PRODUCT_CONTRACT.md has no '{Heading}' table");
-            var headerLine = lines.Skip(at + 1).TakeWhile(l => !l.TrimStart().StartsWith('#')).FirstOrDefault(l => l.TrimStart().StartsWith('|'));
-            if (headerLine is null || !MarkdownTables.Split(headerLine).SequenceEqual(Header))
+            // The header of exactly the table that is read (review round 5 m-1).
+            var (header, rows) = MarkdownTables.AfterTable(contract, Heading);
+            if (!header.SequenceEqual(Header))
                 return ([], $"PRODUCT_CONTRACT.md '{Heading}' must have the columns | {string.Join(" | ", Header)} |");
-            var rows = MarkdownTables.After(contract, Heading);
             return (rows.Select(r => new ReleaseDecision(r.Cells[0], r.Cells[1], r.Cells[2], ReleaseGateDocument.Dash(r.Cells[4]),
                 r.Cells[5], ReleaseGateDocument.Date(r.Cells[6]), r.Cells[7], r.Line) { Cells = string.Join(" | ", r.Cells) }).ToList(), null);
         }

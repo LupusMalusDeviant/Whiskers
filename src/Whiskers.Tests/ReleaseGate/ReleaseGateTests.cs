@@ -169,6 +169,13 @@ public class ReleaseGateTests
                 + "| INV-62 | hidden | ❌ | none | — | WP1 |\n\n## 11."),
         };
         Assert.Contains(Evaluate(hidden, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-62" && f.Message.Contains("cannot read"));
+        // Indented by up to three spaces the row still renders as a table row on GitHub (review round 5 m-2).
+        var indented = Real with
+        {
+            Invariants = Mutate(Real.Invariants, "## 11.", "## 12. Something\n\n  | ID | Invariant | Status | Evidence/gap | Test | WP |\n  |---|---|---|---|---|---|\n"
+                + "  | INV-62 | hidden | ❌ | none | — | WP1 |\n\n## 11."),
+        };
+        Assert.Contains(Evaluate(indented, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-62" && f.Message.Contains("cannot read"));
         // ...but a row in a fenced example is no row.
         var example = Real with { Invariants = Mutate(Real.Invariants, "## 11.", "```\n| INV-62 | example |\n```\n\n## 11.") };
         Assert.DoesNotContain(Evaluate(example, GateMode.Development, Dev), f => f.Subject == "INV-62");

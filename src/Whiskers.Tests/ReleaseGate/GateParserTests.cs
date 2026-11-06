@@ -166,6 +166,43 @@ public class ReleaseGateDocumentTests
         var rows = MarkdownTables.After("## H\n\n```\n| X | Y |\n|---|---|\n| no | no |\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n", "## H");
         Assert.Equal(["1", "2"], Assert.Single(rows).Cells);
         Assert.Throws<FormatException>(() => MarkdownTables.After("## H\n\n```\n# not a heading\n| X |\n```\n\n## Next\n", "## H"));
+        // Review round 5 NIT a: an opener indented by four spaces is code, not a fence; a backtick opener whose info string
+        // holds a backtick is no opener; a tilde opener may.
+        Assert.Equal([false, false, false], MarkdownTables.Fenced(["    ```", "| x |", "    ```"]));
+        Assert.Equal([true, true, true], MarkdownTables.Fenced(["   ```", "| x |", "   ```"]));
+        Assert.Equal([false, false], MarkdownTables.Fenced(["``` a`b", "| x |"]));
+        Assert.Equal([true, true, true], MarkdownTables.Fenced(["~~~ a`b", "| x |", "~~~"]));
+    }
+
+    [Fact]
+    public void Every_table_reader_skips_fenced_example_tables()
+    {
+        // Review round 5 m-1: the header checked is the header of the table read, not a fenced example above it.
+        var gate = GateFiles.Require(GateFiles.ReleaseGateDoc);
+        // The real Open table rewritten with four columns, the correct five-column header shown above it in a fence.
+        var lines = MarkdownTables.Lines(gate).ToList();
+        var at = lines.FindIndex(l => l.StartsWith("| Invariant | Status |", StringComparison.Ordinal));
+        var end = at;
+        while (end < lines.Count && lines[end].StartsWith('|')) end++;
+        var fourColumns = lines.Skip(at).Take(end - at).Select(l => "| " + string.Join(" | ", MarkdownTables.Split(l).Take(4)) + " |").ToList();
+        var wrong = lines.Take(at).Concat(["```", lines[at], lines[at + 1], "```", ""]).Concat(fourColumns).Concat(lines.Skip(end));
+        var wrongOpen = string.Join("\n", wrong);
+        var parsed = ReleaseGateDocument.Parse(wrongOpen);
+        Assert.Contains(parsed.Problems, p => p.Contains(ReleaseGateDocument.OpenHeading) && p.Contains("columns"));
+        Assert.Empty(parsed.Open); // no row is read with shifted columns
+        var contract = GateFiles.Require(GateFiles.Contract);
+        var decisionsHeader = "| " + string.Join(" | ", ReleaseDecisions.Header) + " |";
+        var wrongDecisions = contract.Replace(decisionsHeader + "\n", "```\n" + decisionsHeader + "\n```\n\n| ID | Kind | Invariant | Decision | Status | Date | Decided by | Notes |\n");
+        Assert.NotNull(ReleaseDecisions.Parse(wrongDecisions).Problem);
+
+        // Review round 5 m-3: WithHeader and the §7.6 totals skip fenced lines as After does.
+        const string header = "| ID | Invariant | Status | Evidence / gap | Test | WP |\n|---|---|---|---|---|---|\n";
+        Assert.Empty(InvariantTableParser.Parse("```\n" + header + "| INV-01 | a | ✅ | e | `ATests` | WP1 |\n```\n"));
+        var problems = new List<string>();
+        var totals = PathMatrixParser.Totals("```\n**Rows today**\n\n| Class | Rows |\n|---|---|\n| **Total** | **1** |\n```\n\n**Rows today**\n\n| Class | Rows |\n|---|---|\n| **Total** | **7** |\n", problems);
+        Assert.Equal(7, totals!["Total"]);
+        var exampleFirst = PathMatrixParser.Totals("**Rows today**\n\n```\n| Class | Rows |\n|---|---|\n| **Total** | **1** |\n```\n\n| Class | Rows |\n|---|---|\n| **Total** | **7** |\n", problems);
+        Assert.Equal(7, exampleFirst!["Total"]);
     }
 
     [Fact]

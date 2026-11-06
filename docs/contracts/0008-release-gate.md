@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
 review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
-does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 4) is pending acceptance. Both are at the end.
+does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 5) is pending acceptance. Both are at the end.
 
 ## Purpose
 
@@ -622,7 +622,7 @@ This amendment takes precedence over the text above. It was accepted on 6 Novemb
 - **`ReleaseGateBaseTests`** passes without comparing when `WHISKERS_GATE_BASE` is unset; the comparison runs in the CI
   step that sets it.
 
-## Amendment 2 — gate review rounds 1 to 4 (6 November 2026)
+## Amendment 2 — gate review rounds 1 to 5 (6 November 2026)
 
 This amendment takes precedence over the text above, Amendment 1 included. It is **pending acceptance** by the
 maintainer.
@@ -655,7 +655,10 @@ maintainer.
   history and the tags (`--unshallow`) and lists the published releases (`gh release list`). The run's own token is
   passed to `gh` alone and unset before the tests run, so it is not in the tests' environment. This does not put it out
   of their reach: the checkout's persisted credentials hold the same read-only (`contents: read`) token. In that step no
-  other environment value and no line of the script names `github.token` or a secret (`secrets.`).
+  other environment value and no line of the script names the token or a secret: an expression `${{ … }}` with
+  `github.token` in any spelling (`github . token`, `github['token']`) or with `secrets`, or the bare words
+  `github.token` / `secrets.`. Other `github.*` values (the base SHA) are no credential. Neither the job nor the
+  workflow sets such a value in its `env`, which every step would inherit.
 - **Reading the base fails closed.** A file counts as absent from the base only when `git ls-tree` lists no such path at
   the base commit; any failure of `git ls-tree` or `git show` (a missing object after a shallow fetch, a corrupt object,
   a bad reference) is a finding, never an empty base. A current commit without a csproj is a finding too, and so is a
@@ -677,11 +680,15 @@ maintainer.
   problem rather than a dropped row. The one exception is a further table with the same header
   (header row plus separator) where the reader takes every such table (the invariant tables); under a heading that
   holds one table, a second one is a problem too. A §11 count row given twice is an R3 finding.
-  - Code fences follow CommonMark: a fence opens with three or more backticks or tildes and closes only with the same
-    character, at least as many, and nothing else on the line. Fenced lines are skipped everywhere a table is looked
-    for, including the search for the first table under a heading, so a fenced example table is never the table.
-  - R3 also reads `SECURITY_INVARIANTS.md` line by line: every line outside a fence that starts like an invariant row
-    (`| INV-nn |`) but is not a parsed row is a finding ("an invariant row the gate cannot read"), so a table whose
-    header the parser does not recognise cannot hide its rows.
+  - Code fences follow CommonMark: a fence opens with three or more backticks or tildes, indented by at most three
+    spaces (a backtick opener's info string may not contain a backtick), and closes only with the same character, at
+    least as many, at most three spaces of indentation and nothing else on the line. Fenced lines are skipped by every
+    table reader the gate uses: the first table under a heading, every table with a given header (the invariant
+    tables), and the §7.6 row counts. Each header check validates the header of exactly the table that is read, so a
+    fenced example table can neither be read nor stand in for the real header.
+  - R3 also reads `SECURITY_INVARIANTS.md` line by line: every line outside a fence that starts with `|` (after any
+    indentation) and names an `INV-n` in its first cell, but is not a parsed row, is a finding ("an invariant row the
+    gate cannot read"), so a table whose header the parser does not recognise cannot hide its rows. The base
+    comparison reads base IDs from indented rows as well.
 - **Patch releases come from `main`.** The tag-on-main check (D16) refuses a tag cut on a `release/*` branch. Land the
   fix on `main` and tag it there.
