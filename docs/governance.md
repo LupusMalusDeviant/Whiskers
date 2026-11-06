@@ -18,7 +18,7 @@ raw `/var/run/docker.sock` or a kubeconfig. Whatever the model hallucinates, the
 | **Reach** | `stdio`, one host | Agent ↔ Whiskers over Streamable HTTP; Whiskers ↔ many hosts over mesh + mTLS — no standing SSH key once a host is onboarded |
 | **Permissions** | Everything the socket allows | Per key: Read, Write or Admin scope, optionally narrowed to an explicit tool list — checked on every call |
 | **Risky actions** | Executed as requested | Guardrails (core, always on) allow, deny or pause for human approval; blast-radius and update-risk assessment tools available before an update (`get_blast_radius`, `assess_update_risk`; the `plan_safe_update` prompt chains them) |
-| **Afterwards** | Usually no record | Hash-chained audit trail (checkpoints signed, and the trail tamper-evident, when `VAULT_KEY` is set) plus Agent History |
+| **Afterwards** | Usually no record | Hash-chained audit trail (checkpoints signed, and the trail tamper-evident, when a vault key — `VAULT_KEY` or `VAULT_KEY_FILE` — is set) plus Agent History |
 
 **Zero-trust here means:** no caller is trusted by default — every call is authenticated (API key or signed-in user),
 scope-checked and guardrail-evaluated in code, and every onboarded Docker host is reached over a private WireGuard

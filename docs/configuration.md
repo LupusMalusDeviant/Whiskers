@@ -3,13 +3,20 @@
 Whiskers is configured entirely through environment variables. Every setting is optional. The full, commented list
 is [../.env.example](../.env.example).
 
-- **Release `docker-compose.yml`:** the keys below go into a `.env` beside it, and the compose file maps them to the
-  container variables, for example `OIDC_ENABLED` → `Oidc__Enabled` and `PATH_BASE` → `PathBase`. Keys it does not map
-  include `ForwardedHeaders__*` and `WHISKERS_DB_*`; set those as `environment:` entries, or use the
-  `deploy/docker-compose.postgres.yml` overlay for the database.
-- **Installer or `docker run`:** the generated compose file passes only `TZ` and `VAULT_KEY_FILE`. Add the container
-  variables (`Oidc__Enabled`, `PathBase`, …) as `environment:` entries in `./whiskers/docker-compose.yml`, or as `-e`
-  flags.
+The app reads container environment variables; it does not read a `.env` file itself.
+
+- **Release `docker-compose.yml`:** it maps `.env` names to container variables, for example `OIDC_ENABLED` →
+  `Oidc__Enabled`, `PATH_BASE` → `PathBase`, `AUTH_DISABLED` → `Auth__Disabled`, `GOOGLE_CLIENT_ID` →
+  `GoogleAuth__ClientId`. **Not mapped**, so putting them in `.env` does nothing: `WHISKERS_SETUP_TOKEN`,
+  `WHISKERS_DATA_DIR`, `WHISKERS_DB_PROVIDER` / `WHISKERS_DB_CONNECTION` / `WHISKERS_DB_CONNECTION_FILE`,
+  `Auth__LocalLogin__Enabled`, `Auth__DisabledAllowedNetworks__*`, `Auth__DisabledAllowedHosts__*` and
+  `ForwardedHeaders__*`. Set those as `environment:` entries; for PostgreSQL use the `deploy/docker-compose.postgres.yml`
+  overlay (it is in the repository, not a release asset, and fits only the release compose file, service
+  `serverwatch`). `HOST_BIND` / `HOST_PORT` are read by compose for the port mapping.
+- **Installer:** its compose file sets `TZ`, `VAULT_KEY_FILE` (installers after 0.15.0) and, with `--data`,
+  `WHISKERS_DATA_HOST_DIR`. Add container variables (`Oidc__Enabled`, `PathBase`, …) as `environment:` entries in
+  `./whiskers/docker-compose.yml`.
+- **`docker run`:** nothing is set; pass container variables with `-e`.
 
 | Group | Keys | Notes |
 |---|---|---|

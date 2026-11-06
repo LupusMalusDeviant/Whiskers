@@ -14,14 +14,25 @@ curl -fsSLO "https://github.com/LupusMalusDeviant/Whiskers/releases/download/v${
 sha256sum --check --ignore-missing checksums.txt && bash install.sh
 ```
 
-- The installer of a release installs exactly that release, generates the vault key, verifies the image signature if
-  cosign is installed, writes `./whiskers/` and waits until the app is healthy.
-- The checksum catches a broken download; the signature check inside the installer protects the image.
-- Flags: `--version`, `--port`, `--bind`, `--data`, `--verify`, `--yes` (`install.sh --help`).
-- It never installs `latest`. Installers attached to releases up to 0.15.0 still default to `latest`; this applies
-  from the next release on.
-- It prints where the vault key is and what to back up. Keep the key and the backups apart, off the host.
-- Re-running it with a newer release upgrades in place (only the image line changes); downgrades are refused.
+Every installer writes `./whiskers/`, starts the container and waits until the app is healthy. The checksum catches a
+broken download. The rest depends on the release:
+
+**Installers of releases after 0.15.0:**
+
+- install exactly that release, never `latest`;
+- generate the vault key (`VAULT_KEY_FILE`) and print where it is and what to back up. Keep the key and the backups
+  apart, off the host;
+- verify the image signature if cosign is installed;
+- flags: `--version`, `--image`, `--verify`, `--port`, `--bind`, `--data`, `--dir`, `--install-docker`, `--yes` (`install.sh --help`);
+- re-running with a newer release upgrades in place (only the image line changes); downgrades are refused.
+
+**Installers of 0.15.0 and older:**
+
+- default to `latest`: pass `--image "ghcr.io/lupusmalusdeviant/whiskers:${VER}"`;
+- generate no vault key: set `VAULT_KEY_FILE` as for [`docker run`](#plain-docker-run);
+- verify no signature: run the cosign command from the README's
+  [Verifying the image](../README.md#verifying-the-image);
+- flags: `--port`, `--bind`, `--data`, `--dir`, `--image`, `--install-docker`, `--yes`.
 
 Details: [deploy/README.md → Installer](../deploy/README.md#installer).
 
@@ -45,7 +56,7 @@ Download `docker-compose.yml` from the [latest release](https://github.com/Lupus
 docker compose up -d
 ```
 
-Optional settings go in a `.env` beside it. Every setting is optional (see [../.env.example](../.env.example)). The app
+Optional settings go in a `.env` beside it; not every key is mapped (see [configuration.md](configuration.md)). The app
 listens on `127.0.0.1:5100` by default (`HOST_BIND` / `HOST_PORT`) and binds publicly only if you change the bind.
 
 ## First sign-in
@@ -55,7 +66,8 @@ Whoever completes the wizard becomes Admin, so it first asks for a one-time setu
 to the server can read:
 
 ```bash
-docker exec whiskers cat /app/data/setup-token.txt
+docker exec whiskers cat /app/data/setup-token.txt      # installer or docker run
+docker exec serverwatch cat /app/data/setup-token.txt   # release docker-compose.yml (container keeps its pre-rebrand name)
 ```
 
 - The installer prints the token. Helm users `kubectl exec` the same path, or preset it with `WHISKERS_SETUP_TOKEN`.
@@ -151,7 +163,7 @@ location /whiskers/ {
 }
 ```
 
-When serving under a subpath, set `PATH_BASE=/whiskers` in `.env`.
+When serving under a subpath, set `PATH_BASE=/whiskers` in `.env` (release compose file) or the container variable `PathBase=/whiskers` (installer, `docker run`).
 
 **Name your proxy.** Whiskers believes `X-Forwarded-For` / `X-Forwarded-Proto` only from loopback unless you list the
 proxy: `ForwardedHeaders__TrustedNetworks__0=172.18.0.2/32` (a CIDR or a single address; more entries with `__1`, …).

@@ -530,7 +530,7 @@ ${B}Back up — two things, kept apart, off this host${N}
 ${B}Later${N}
   • Upgrade:  bash install.sh --version <X.Y.Z>   (or the install.sh of the newer release; downgrades are refused)
   • Logs:     ( cd $DIR && ${DC[*]} logs -f )
-  • Hardened/K8s:  see the README, docker-compose.hardened.yml and the Helm chart
+  • Hardened/K8s:  see docs/installation.md, docker-compose.hardened.yml and the Helm chart
   • Before production use:  https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md
   • When something is wrong: https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/troubleshooting.md
 EOF
