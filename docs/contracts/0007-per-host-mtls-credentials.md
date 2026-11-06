@@ -3,7 +3,7 @@
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
 and the whiskers.site host. **Amendments 1–9** (review rounds 1–8 and implementation alignment, at the end) were accepted by
-the maintainer as one set on 6 November 2026. **Amendment 10** (implementation review) is pending acceptance.
+the maintainer as one set on 6 November 2026. **Amendment 10** (implementation review) was accepted on 6 November 2026.
 
 ## Purpose
 
@@ -575,8 +575,8 @@ R1-44 implementation needs more surface than the text names; the behaviour is un
 
 ## Amendment 10 — implementation review (6 November 2026)
 
-This amendment takes precedence over Amendments 1–9. It follows from the R1-44 code review rounds 1–2 and is to be
-accepted by the maintainer.
+This amendment takes precedence over Amendments 1–9. It follows from the R1-44 code review rounds 1–5 and was
+accepted by the maintainer on 6 November 2026.
 
 - **One lock per host, owned by the store.** `IMtlsClientCredentialStore` gains `HostLock(serverId)`. Every
   certificate step (server-certificate renewal, client migration, renewal, rotation, retirement, onboarding issue) and

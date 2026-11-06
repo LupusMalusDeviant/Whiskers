@@ -763,7 +763,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [ ] The rollout has run on the real fleet (Bifröst first, then the whiskers.site host, then host by host) and the
       shared credential is retired.
 
-> Implemented per contract 0007 (amendments 1–9). Verified against simulated hosts and, on Linux, the host scripts run
+> Implemented per contract 0007 (amendments 1–10). Verified against simulated hosts and, on Linux, the host scripts run
 > under `sh`/`flock`/`timeout` with stubbed `systemctl`/`docker`. Not yet verified on a real ghostunnel: the TLS-alert
 > classification of a refused client (TLS 1.3 reports it on the first read), and that step-ca's leaf template adds no
 > CN-as-SAN (until then `ValidateIssuedClient` accepts at most one DNS SAN equal to the CN). Guide:
