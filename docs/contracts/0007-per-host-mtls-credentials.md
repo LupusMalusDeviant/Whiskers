@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendments 1–6** (review rounds 1–6, at the end) are to be accepted by
+and the whiskers.site host. **Amendments 1–7** (review rounds 1–7, at the end) are to be accepted by
 the maintainer as one set.
 
 ## Purpose
@@ -94,8 +94,8 @@ public sealed record MtlsClientIdentity(string ServerId, string Slug, int Genera
 ```csharp
 public interface IMtlsClientCredentialStore
 {
-    /// <summary>{MtlsDir}/hosts/{serverId}/: client.key (0600), client.crt, generation; directory 0700.</summary>
-    MtlsClientCredentialPaths PathsFor(string serverId);
+    /// <summary>{MtlsDir}/hosts/{serverId}/g{n}-s{k}/: client.key (0600), client.crt; directories 0700. Proposal only (Amendment 6/7).</summary>
+    MtlsClientCredentialPaths ProposeNewSlot(string serverId, int generation);
     bool IsManaged(ServerConfig server);          // paths point into {MtlsDir}/hosts/{server.Id}/
     Task<MtlsClientCredentialPaths> IssueAsync(ServerConfig server, int generation, CancellationToken ct);
     Task RemoveAsync(string serverId, CancellationToken ct);   // on server removal
@@ -130,7 +130,7 @@ public sealed record MtlsClientMigrationResult(bool Ok, string Phase, string? Er
 ### Onboarding (`OnboardingCommands`)
 
 `DockerProxyCompose(tsIp, string allowedClientCn)`. A new host gets its own identity from the start, and onboarding
-writes `PathsFor(serverId)` into the `ServerConfig`.
+writes the paths returned by `IssueAsync` into the `ServerConfig`.
 
 ### Tools and UI
 
@@ -274,7 +274,7 @@ This amendment is binding where it differs from the text above. Decisions D1–D
   credentials that are built validate through `ValidateMtlsServerCert` with `TcpCaCertPath`. A server certificate for the
   wrong IP, or one from a foreign CA, is refused.
 - **Store.** Owner uid, key 0600 and directory 0700 (Unix).
-- **Enrollment.** `OnboardServerAsync` writes `PathsFor(id)` and the per-host `--allow-cn`.
+- **Enrollment.** `OnboardServerAsync` writes the paths returned by `IssueAsync` and the per-host `--allow-cn`.
 - **Identity.** Two servers whose names collide get different CNs.
 - **Docs.** A doc check confirms the blast-radius section in ARCHITECTURE and INV-58.
 - **Fixture.** `TestCa` moves to a shared test fixture.
@@ -378,7 +378,7 @@ them. All amendments are to be accepted together.
 - The credentials live in `hosts/{id}/g{n}-s{k}/client.{key,crt}`: generation plus serial. A renewal (same generation)
   gets a new serial and never overwrites the active slot.
 - `identity` (JSON) records the CN stem, the active slot and the pending slot.
-- `PathsFor` returns the active slot.
+- `ProposeNewSlot` proposes a new slot; no method returns the active slot (connections use `ServerConfig`).
 - `IsManaged` accepts every slot under `hosts/{id}/`.
 - Slot directories have 0700.
 
@@ -489,7 +489,7 @@ This amendment takes precedence over Amendments 1–4. All five amendments are t
   the retirement (with a test).
 - **Recreate form.** The fixed recreate form, the guard's included, carries `--pull never`. The command-line test checks
   for it.
-- **Paths.** `PathsFor` only proposes paths for onboarding and new slots. Connections always use `ServerConfig`.
+- **Paths.** `ProposeNewSlot` only proposes paths for onboarding and new slots. Connections always use `ServerConfig`.
 - **Additional tests:**
   - retiring reads the live args;
   - a referenced slot is never deleted;
@@ -509,3 +509,25 @@ This amendment takes precedence over Amendments 1–5. All amendments are to be 
 - **Marker.** Whiskers' phase-record step removes the marker on the host.
 - **Unit names.** The detached recreate unit of the guard is called `whiskers-allow-guard-recreate-<suffix>`, so it falls
   under the refusal "guard active".
+
+## Amendment 7 — review round 7 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–6. All amendments are to be accepted together.
+
+- **Bounded confirmation (review MINOR-7).** The confirmation runs its locked section under `timeout 20`; the guard's
+  `flock` has no timeout. After its recreate, the guard checks that `docker inspect ghostunnel` reports running with the
+  `.prev` args, retries the recreate once, and logs the result to the journal. Tests: a confirmation that hangs inside
+  the lock is killed after 20 s and the guard then rolls back; the guard's command line has no `-w`.
+- **`ProposeNewSlot` and `IssueAsync` (review MINOR-8).** `IssueAsync` calls `ProposeNewSlot` under the per-host lock
+  and returns the slot it wrote. Onboarding, phase 3 and renewal write exactly the paths `IssueAsync` returned into
+  `ServerConfig`; nobody calls `ProposeNewSlot` a second time for the same issuance. Test: onboarding's `ServerConfig`
+  paths equal the paths `IssueAsync` returned.
+- **Stale references (review NIT-1).** The base text and Amendments 1 and 3 now name `ProposeNewSlot` and the paths
+  returned by `IssueAsync` instead of `PathsFor`.
+- **Guard wording (review NIT-2).** Amendment 6's "never skips the rollback" reads: the guard never skips because the
+  lock is held; it rolls back unless the marker of its own run is present.
+- **Crash between "stop timer" and "write marker" (review NIT-3).** Such a crash leaves the new state with no guard and
+  no marker, so "the last confirmed state" does not hold there. A resume derives the state from the live `.Args` of
+  ghostunnel (the allowed CNs it actually runs with), never from the record of the last phase.
+- **Missing tests (review MINOR-6):** a guard blocked on the lock still rolls back after the lock is released unless
+  its marker is present; the phase-record step removes the marker.

@@ -1,7 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1–6** (review rounds 1–6, at the end) are to be accepted by the
+**Amendments 1–7** (review rounds 1–7, at the end) are to be accepted by the
 maintainer as one set.
 
 ## Purpose
@@ -525,3 +525,110 @@ This amendment takes precedence over Amendments 1–5. All amendments are to be 
   compose capability, and only under the agent rule set. It has a test.
 - **README.** It names the window in which a re-tag between the inspection and `up --pull never` is caught only by the
   re-check after `up`.
+
+## Amendment 7 — review round 7 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–6. All amendments are to be accepted together.
+
+### Building without pulling on `.env` paths (review MAJOR-1)
+
+Step 3 of Amendment 6 is replaced by:
+
+> 3\. Build.
+> - On paths that pull (`compose.deploy`, `app.deploy`, webhook compose deploys, git deploy): every service with
+>   `build:`, using `BuildCommand` (`build --pull`), as today.
+> - On `container.env_set` and `container.env_file_save`: only the services with `build:` whose image is missing
+>   locally, using `build` **without** `--pull`. A service whose image exists is not rebuilt. These paths keep
+>   `pull: false` (Amendment 3); step 2 pulls only images that are missing locally.
+>
+> Step 4 inspects the image that `up --no-build` will use, on every path.
+
+- **Tests:**
+  - `env_set` on a project with a `build:` service whose image exists runs no build and no pull;
+  - `env_set` with a missing `build:` image runs `build` without `--pull`.
+
+### Traefik rules as a positive allow-list (review MAJOR-2)
+
+The Traefik clause of Amendments 5 and 6 is replaced by:
+
+> A literal Traefik `rule` value is shown only when every matcher in it is `Host`, `HostSNI`, `HostRegexp` or `Method`,
+> combined only with `&&`, `||`, `!` and parentheses. Any other matcher (including `Path*`, `Header*`, `Query*`,
+> `ClientIP`), or a value that cannot be parsed, makes the whole value `Withheld`.
+
+The rest of the allow-list (`true`/`false`, a port number) and the rule that values from variables are always
+`Withheld` stay.
+
+- **Tests:**
+  - a literal rule ``Host(`api.x`) && Header(`X-Api-Key`, `s3cr3t`)`` appears neither in the audit, nor in the
+    `exposure` argument, nor on the approval card;
+  - a literal ``Host(`a.x`) || Host(`b.x`)`` is shown;
+  - an unparseable rule is `Withheld`.
+
+### Which images are inspected (review MINOR-1)
+
+- **The set.** Step 4 inspects the image reference compose resolves for each service that `up` will create: `docker
+  compose config --images` for the plan's real project. A `build:` service has `image:` if set, otherwise
+  `<project>-<service>`, as compose resolves it.
+- **Profiles.** A service compose will not start (an inactive profile) is neither inspected nor counted as an exposure.
+- **Missing image.** A missing image of a service that will start is a refusal, before `up`.
+- **Test:** a profile-gated service with a Funnel label in an inactive profile does not refuse the deploy.
+
+### Comparison key per kind (review MINOR-2)
+
+| Kind | key | value |
+|---|---|---|
+| `RouteLabel`, `ExposureLabel` | label key | label value (subject to `Withheld`) |
+| `PublishedPort` | `<containerPort>/<proto>` | `<hostIp>:<hostPort>`; empty host IP is `0.0.0.0`; an ephemeral host port is `*` |
+| `HostNetwork` | `network_mode` | `host` |
+| `HostNamespace` | `pid` / `ipc` / `uts` / `userns_mode` | the value (`host`, `service:x`, `container:x`) |
+| `AddedCapability` | the capability, upper case, without `CAP_` | empty |
+| `Privileged` | `privileged` | `true` |
+| `Device` | the host path | the container path and permissions |
+| `SecurityOpt` | the option name (`seccomp`, `apparmor`, …) | the option value |
+
+A change of host IP or host port of a published port is a changed value and therefore a violation under the agent rule
+set, like a changed label value.
+
+### `related` and `relatedWithheld` (review MINOR-3)
+
+- **Mechanism.** `HostAsync` adds `related` to `Target.Related`, and `relatedWithheld` to both `Related` and
+  `Withheld`, independent of `mounts` and of `composeContent`. (The earlier text, "as it does `mounts`", is withdrawn.)
+- **Decision.** The exposure decision (`RunExposuresAsync` and its automation counterpart) runs whenever the plan has
+  exposures **or** `container:`/`service:` targets.
+- **Tests:**
+  - a plan with only `network_mode: container:x` (no mounts, no exposures) decides x and deploys;
+  - a withheld `container:${X}` is bound but never written.
+
+### Fallback stop under git deploy (review MINOR-4)
+
+- **`compose.deploy`, `app.deploy`, `container.env_set`, `container.env_file_save`:** the fallback stop runs through
+  `IHostCommandExecutor.ExecuteMutationAsync` under the enclosing capability (all are in
+  `MutationCompositions.RawHostCommands`).
+- **Git deploy:** the fallback stop runs through the same `ExecuteAsync` path as git deploy's own `up`, inside the
+  `gitdeploy.deploy` decision. `RawHostCommands` is not widened.
+- **Command.** The command is always built with `ComposePlan.Command("stop")`, which quotes `-p` and the files.
+- **Test:** an API-key-owned git-deploy webhook whose run hits a violation stops the created containers.
+
+### A refused run restores the previous image tag (review MINOR-5)
+
+- **Re-tag.** Before step 2, the run records the image ID each tag of the plan points to (or that the tag is absent).
+  On a refusal in step 4, it re-tags each recorded ID; a tag that was absent is removed (`docker image rm` of the tag
+  only, never of the image ID).
+- **README.** The remaining risks name `container.update` and `autopatch.run`: they recreate containers from an image
+  tag without an exposure check.
+- **Test:** a refused `deploy_compose` leaves the tag on the previous image ID.
+
+### Missing tests (review MINOR-6)
+
+The following tests are added:
+
+- a variable value of an allowed shape (`${X:-true}`) is `Withheld`;
+- a literal `Path` rule is `Withheld`;
+- the stop set is never read by `Covers` / `EnsureDecided`;
+- `IsPayload("relatedWithheld")` is true, and a hit on it is not quoted;
+- the same key with a changed value is a violation.
+
+### Wording (review NIT-4)
+
+"Normalised: `relatedwithheld`" applies to `SinkRedaction.PayloadNames` only. `ProtectedResourceMatcher.PayloadArguments`
+is a raw-name set that ignores case and holds `relatedWithheld`.
