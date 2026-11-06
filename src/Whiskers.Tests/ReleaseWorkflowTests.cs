@@ -323,6 +323,13 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        run: |\n          echo \"${{ secrets.DEPLOY_KEY }}\" > \"$RUNNER_TEMP/k\"\n", "holds a credential in its script before the base comparison")]
     [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        run: |\n          gh auth login --with-token <<< \"${{ github.token }}\"\n", "holds a credential in its script before the base comparison")]
     [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        env:\n          T:\n            - x\n        run: |\n", "holds a credential in its env: T")]
+    // Review round 9 n-3: nodes of the wrong kind before the base comparison cannot be checked, so they are findings.
+    [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        env:\n          T:\n            a: b\n        run: |\n", "holds a credential in its env: T")]
+    [InlineData("ci.yml", "      - name: Setup .NET\n        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0\n        with:\n          global-json-file: global.json\n", "      - name: Setup .NET\n        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0\n        with:\n          global-json-file:\n            - global.json\n", "passes a credential to an action before the base comparison: its with is global-json-file")]
+    [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: Odd action\n        uses: actions/odd@0123456789abcdef0123456789abcdef01234567\n        with:\n          - x\n      - name: PostgreSQL client tools\n        run: |\n", "passes a credential to an action before the base comparison: its with is not a mapping")]
+    [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: Odd script\n        run:\n          - echo x\n      - name: PostgreSQL client tools\n        run: |\n", "step 'Odd script' has a script that is not text")]
+    // Review round 9 m-1: a value of the base step's env that is not a scalar cannot be checked either.
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          FOO: [\"${{ secrets.X }}\"]\n", "exposes the token beyond 'gh release list'")]
     // The N-1 checks list the published releases with gh: both need GH_TOKEN (review round 3, M-1).
     [InlineData("ci.yml", "      - name: N-1 upgrade and recovery\n        env:\n          GH_TOKEN: ${{ github.token }}\n", "      - name: N-1 upgrade and recovery\n        env:\n          RELEASES_TOKEN: ${{ github.token }}\n", "runs 'artifact-checks.sh previous-release' without GH_TOKEN")]
     [InlineData("release.yml", "          VER: ${{ needs.prepare.outputs.ver }}\n          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "          VER: ${{ needs.prepare.outputs.ver }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "runs 'artifact-checks.sh previous-release' without GH_TOKEN")]
@@ -1119,7 +1126,7 @@ internal static class WorkflowPolicy
             // Review rounds 2-4: the token reaches gh only and is not in the tests' environment. Only RELEASES_TOKEN may carry
             // a token (no other env value, no run text names github.token or a secret).
             var otherCredential = (env as YamlMappingNode)?.Children
-                .Any(kv => Scalar(kv.Key) != "RELEASES_TOKEN" && Credential(Scalar(kv.Value))) == true;
+                .Any(kv => Scalar(kv.Key) != "RELEASES_TOKEN" && (kv.Value is not YamlScalarNode || Credential(Scalar(kv.Value)))) == true;
             // Review round 5 NIT b: nor the job or the workflow, whose env every step of the job inherits.
             ci.TryGetValue(job, out var baseJob);
             if (baseJob is not null && EnvFinding(Child(baseJob, "env")) is { } jobEnv)
@@ -1138,6 +1145,9 @@ internal static class WorkflowPolicy
                     // Review round 7 m-1 c: an action handed a credential before the base comparison could pass it on.
                     if (EnvFinding(Child(earlier, "with")) is { } with)
                         violations.Add($"ci.yml job '{job}' step '{name}' passes a credential to an action before the base comparison: its with is {with}");
+                    // Review round 9 n-3: a run node that is present but not text cannot be checked.
+                    if (Child(earlier, "run") is { } and not YamlScalarNode)
+                        violations.Add($"ci.yml job '{job}' step '{name}' has a script that is not text, so it cannot be checked before the base comparison");
                     var earlierRun = Scalar(Child(earlier, "run")) ?? "";
                     // Review round 8 m-1: nor in its script, which could leave it in a file for the base comparison.
                     if (Credential(earlierRun))

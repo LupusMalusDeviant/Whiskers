@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
 review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
-does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 8) is pending acceptance. Both are at the end.
+does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 9) is pending acceptance. Both are at the end.
 
 ## Purpose
 
@@ -622,7 +622,7 @@ This amendment takes precedence over the text above. It was accepted on 6 Novemb
 - **`ReleaseGateBaseTests`** passes without comparing when `WHISKERS_GATE_BASE` is unset; the comparison runs in the CI
   step that sets it.
 
-## Amendment 2 — gate review rounds 1 to 8 (6 November 2026)
+## Amendment 2 — gate review rounds 1 to 9 (6 November 2026)
 
 This amendment takes precedence over the text above, Amendment 1 included. It is **pending acceptance** by the
 maintainer.
@@ -673,13 +673,14 @@ maintainer.
     mapping), because it cannot be checked either.
 
   The following is refused:
-  - in the base step, any environment value other than `RELEASES_TOKEN` that is a credential, and a credential in its
-    script;
+  - in the base step, any environment value other than `RELEASES_TOKEN` that is a credential or is not a scalar (a
+    sequence or a mapping, which cannot be checked), and a credential in its script;
   - a credential in the `env` of the job that runs the base step, of that job's `container`, or of the workflow;
   - in a step of that job before the base step:
     - a credential in the step's `env`;
     - a credential in the step's script (`run`), for example `echo "${{ secrets.DEPLOY_KEY }}" > "$RUNNER_TEMP/k"` or
       `--with-token <<< "${{ github.token }}"`;
+    - a script (`run`) that is present but not a scalar, because it cannot be checked;
     - a credential in the `with` of a step that uses an action;
     - a write to `$GITHUB_ENV` in a step whose script or `env` holds any `${{ … }}` expression, because later steps
       would inherit it.
@@ -713,15 +714,23 @@ maintainer.
     for the real header.
   - The §7 path matrix reader takes every `|` line between `## 7.` and `## 8.` outside a fence, indented or not and
     with or without a space after the bar. A fenced `## 7.` or `## 8.` does not bound the section.
-    - A first cell that is exactly a row ID (`[MASTU]-n`) is a row.
-    - A near miss is a problem, never a skipped line. A first cell is a near miss when one of these holds:
-      - anywhere in it, a class letter (`M`, `A`, `S`, `T`, `U`) in any case, also right after other letters, is
-        followed by any run of whitespace and dashes (the ASCII `-`, U+2010 to U+2015 and the minus sign U+2212),
-        possibly empty, and then a digit: `**U-40**`, `U-40a`, `u-40`, `U–40`, `U−40`, `U40`, `**U 40**`, `MU-40`,
-        `XU-40`, `U-4O`;
-      - anywhere in it, the same, followed by a capital letter O that no letter follows (`U-O`, `U-O4`); a lower-case
-        `o` does not count, so words such as `tools` or `Total` are not near misses;
-      - it starts with a class letter and a character that is not a letter, a digit or `_` (`U:40`).
+    - A first cell that is exactly a row ID is a row: an ASCII class letter (`M`, `A`, `S`, `T`, `U`), an ASCII `-`
+      and ASCII digits `0`–`9` only.
+    - A near miss is a problem, never a skipped line. A first cell that is not exactly a row ID is a near miss when
+      one of these holds:
+      - it contains any numeric character (Unicode category N: ASCII, fullwidth, other scripts' digits): `**U-40**`,
+        `U-40a`, `u-40`, `U–40`, `U−40`, `U40`, `**U 40**`, `MU-40`, `XU-40`, `U-4O`, `U-o1`, a Cyrillic `Т-40`, a
+        fullwidth `Ｕ-４０`, `U-４０`, or `U-40` written with a soft hyphen, a zero-width character, U+FE63 or U+FF0D;
+      - anywhere in it, a class letter in any case (also right after other letters) is followed by any run, possibly
+        empty, of whitespace, zero-width characters (U+200B to U+200D, U+2060) and dashes (the ASCII `-`, the soft
+        hyphen U+00AD, U+2010 to U+2015, the minus sign U+2212, U+FE58, U+FE63, U+FF0D), and then a capital `O` that
+        no letter follows (`**U-O**`, `UO`);
+      - anywhere in it, a class letter is followed by at least one of those dashes (with any whitespace or zero-width
+        characters around it) and then one of the digit-like letters `O`, `o`, `I`, `l`, or the Cyrillic `О`, `о`
+        (`**U-OI**`, `U-lO`);
+      - it starts with a class letter and a character that is not a letter, a digit or `_` (`U:x`).
+      Words that hold a class letter and a lower-case `o` but no digit and no dash, such as `MCP tools` or `Total`, are
+      not near misses.
     - In §7.6, a class or the total counted twice is a problem.
   - R3 also reads `SECURITY_INVARIANTS.md` line by line: every line outside a fence that starts with `|` (after any
     indentation) and names an `INV-n` in its first cell, but is not a parsed row, is a finding ("an invariant row the

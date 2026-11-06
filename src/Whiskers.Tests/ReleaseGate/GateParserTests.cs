@@ -120,13 +120,24 @@ public class PathMatrixParserTests
         // Review round 8 n-2: no dash or spaces, a minus sign, a class letter after other letters are near misses too;
         // words with a class letter and a lower-case 'o' ('MCP tools', 'Total') are not.
         const string wider = "## 7. Paths\n\n| ID | Handler |\n|---|---|\n| U-01 | a |\n| U40 | b |\n| **U 41** | c |\n| U−42 | d |\n"
-            + "| MU-43 | e |\n| XU-44 | f |\n| MCP tools (M) | g |\n| **Total** | h |\n\n## 8. End\n";
+            + "| MU-43 | e |\n| XU-44 | f |\n| MCP tools (M) | g |\n| **Total** | h |\n"
+            // Review round 9 n-1/n-2: a letter O or o, or I, for a digit.
+            + "| **U-O** | i |\n| **U-O4** | j |\n| **U-o1** | k |\n| **U-OI** | l |\n"
+            // Review round 9 n-4: lookalikes — a Cyrillic class letter, zero-width and soft hyphens, small and fullwidth
+            // hyphen-minus, fullwidth letters and digits (a fullwidth-digit ID is no row either).
+            + "| Т-45 | m |\n| U​-46 | n |\n| U­47 | o |\n| U﹣48 | p |\n| U－49 | q |\n"
+            + "| Ｕ-５０ | r |\n| U-５１ | s |\n\n## 8. End\n";
         const string widerMapping = "## Rows and capabilities\n\n| Row | Capabilities |\n|---|---|\n| U-01 | x.a |\n";
         var widerProblems = new List<string>();
         Assert.Equal(["U-01"], PathMatrixParser.Parse(wider, widerMapping, widerProblems).Select(r => r.Id));
-        foreach (var miss in new[] { "U40", "**U 41**", "U−42", "MU-43", "XU-44" })
+        string[] misses =
+        [
+            "U40", "**U 41**", "U−42", "MU-43", "XU-44", "**U-O**", "**U-O4**", "**U-o1**", "**U-OI**",
+            "Т-45", "U​-46", "U­47", "U﹣48", "U－49", "Ｕ-５０", "U-５１",
+        ];
+        foreach (var miss in misses)
             Assert.Contains(widerProblems, p => p.Contains($"'{miss}' looks like a §7 row ID"));
-        Assert.Equal(5, widerProblems.Count);
+        Assert.Equal(misses.Length, widerProblems.Count);
 
         // Review round 8 n-3: a fenced '## 7. Example' before the real §7 does not start it, so a row-like line between
         // the two is neither a row nor a problem.
