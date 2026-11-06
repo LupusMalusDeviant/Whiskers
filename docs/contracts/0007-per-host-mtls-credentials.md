@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendments 1–3** (review rounds 1–3, at the end) are pending acceptance.
+and the whiskers.site host. **Amendments 1–4** (review rounds 1–4, at the end) are pending the maintainer's acceptance as one set.
 
 ## Purpose
 
@@ -200,7 +200,7 @@ to run while any `ServerConfig` still points to the shared paths.
   host.
 - **D6 New hosts.** Recommended: onboarding uses its own identity right away (generation 1), with no shared phase.
 
-## Amendment 1 — review round 1 (6 November 2026, pending acceptance)
+## Amendment 1 — review round 1 (6 November 2026)
 
 This amendment is binding where it differs from the text above. Decisions D1–D6 are unchanged.
 
@@ -289,7 +289,7 @@ This amendment is binding where it differs from the text above. Decisions D1–D
 "Operator-supplied paths" are paths that are neither the shared `{MtlsDir}/client.*` nor the managed
 `{MtlsDir}/hosts/{id}/*`. Migrating a server that is on the shared paths is the normal case.
 
-## Amendment 2 — review round 2 (6 November 2026, pending acceptance together with Amendment 1)
+## Amendment 2 — review round 2 (6 November 2026)
 
 ### Recreating ghostunnel (review BL-1)
 
@@ -430,3 +430,37 @@ Additional tests:
 ### NIT
 
 Line references: `MtlsCertificateCommands.cs:90-126`; tests `OnboardingCommandsTests.cs:176-190`, `:104-112`.
+
+## Amendment 4 — review round 4 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–3. All four amendments are accepted together.
+
+### Guard and confirmation (review 0007-A)
+
+- **The confirmation is one script on the host.** It:
+  1. checks that its own guard timer is still waiting (`systemctl is-active`);
+  2. stops that timer — this is mandatory, not "may";
+  3. only then writes the marker.
+
+  If the timer is no longer waiting, the confirmation fails.
+- **Before phase 5.** Whiskers reads `.Args` again and repeats the negative check.
+- **Retiring** reads the live `--allow-cn` of every host it requires (`docker inspect`), not the record alone.
+- **Test:** the guard fires between the checks and the marker, so no phase-5 record is written.
+
+### Active slot (review 0007-B)
+
+- **`ServerConfig` is authoritative.** `identity.active` is written only after `ServerConfig` has been saved and a
+  connection through it has been confirmed.
+- **Before phase 4.** It is checked that the main connection uses the new slot.
+- **Never delete a referenced slot.** A slot that any `ServerConfig` points to is never deleted.
+- **Test:** a crash between saving `ServerConfig` and writing `identity`, followed by a resume.
+
+### Smaller points
+
+- **`ControlPlaneResources.Capabilities`** also holds the MCP tool names `migrate_mtls_client_credential` and
+  `renew_mtls_client_credential` (the rule compares `ToolName = McpTool ?? Id`), as `renew_mtls_certificate` already does.
+- **Preflight.** The list in Amendment 3 is added to the earlier checks. The command still equals the approved list
+  except for `--allow-cn`. Without a digest pin in the file (older hosts), the image reference and the running image ID
+  are compared; the operator guide says so.
+- **Readiness.** A line appears when the generation of the active slot is older than the one the host was narrowed to,
+  for example after restoring an older backup following a rotation.

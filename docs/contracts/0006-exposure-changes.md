@@ -1,7 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1–3** (review rounds 1–3, at the end) are pending acceptance.
+**Amendments 1–4** (review rounds 1–4, at the end) are pending the maintainer's acceptance as one set.
 
 ## Purpose
 
@@ -169,7 +169,7 @@ operator choice.
 - **D6: `app.deploy`** (single container) is out of scope. It has no labels; its ports and `network_mode` could follow
   later through the same rule.
 
-## Amendment 1 — review round 1 (6 November 2026, pending acceptance)
+## Amendment 1 — review round 1 (6 November 2026)
 
 This amendment is binding where it differs from the text above. Decisions D1–D6 are unchanged, and D6 is made more
 precise below.
@@ -255,7 +255,7 @@ precise below.
   - `ComposeImpact.cs:65-71`;
   - `ContainerTools.cs:450-495`.
 
-## Amendment 2 — review round 2 (6 November 2026, pending acceptance together with Amendment 1)
+## Amendment 2 — review round 2 (6 November 2026)
 
 ### Re-check after `up` (review MA-1, MI-2, MI-4 — replaces "Checked again after `up`" in Amendment 1)
 
@@ -390,3 +390,55 @@ Additional tests:
 - a `__resolvedExposure*` key sent by a caller is stripped;
 - a pinned preset classifies with its own prefixes;
 - an image label before `up`.
+
+## Amendment 4 — review round 4 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–3. All four amendments are accepted together.
+
+### No `.env` values in sinks and reasons (review 0006-A)
+
+- **Payload lists.** `exposureWithheld` is added to `SinkRedaction.PayloadNames` and
+  `ProtectedResourceMatcher.PayloadArguments`.
+- **Rules skip the nested arguments.** `ProtectedResourceMatcher`, `ControlPlaneResources` and `ForbiddenArgumentRule`
+  skip the nested arguments `exposure` and `exposureWithheld`. The resolved target already carries them.
+- **Tests:**
+  - `IsPayload("exposureWithheld")` is true;
+  - a hit on it is never quoted.
+
+### Image labels (review 0006-B)
+
+- **Agent path: inspected while planning.** The local images (`docker image inspect`, no pull) are inspected while the
+  plan is built. Their labels enter `MutationTarget.Exposures`, so D1's Confirm works.
+- **Image missing locally at planning time.** Its labels are inspected again after the pull, before `up`. A new hit is a
+  Deny, with a reason that names the label key.
+- **Persons.** Exposures from image labels found before `up` are added to that run's decided set, then audited and
+  notified as `exposure_change`. The re-check does not count them as a violation.
+
+### Shared namespaces and protected resources (review 0006-C)
+
+- **Related, as with `volumes_from`.** The resolved x of a `container:<x>` / `service:<x>` (for `network_mode`, `pid`,
+  `ipc`) goes into `Related` / `RelatedResources`, as with `volumes_from: container:`, and `EnsureDecided` covers it.
+- **Test:** `network_mode: container:whiskers` through a webhook is refused; for an interactive Admin it ends in
+  Confirm.
+
+### A run that cannot be checked (review 0006-D)
+
+- **Class `public`.** A container that cannot be inspected counts as an undecided exposure of class `public`.
+- **"Created or recreated by this run"** means container IDs that were not in the plan's `Impact` before `up`, or whose
+  `Created` is later than the start of `up`.
+- **Fallback.** If even that cannot be listed, every container of the project counts.
+
+### Smaller points
+
+- **Registering `container.disable_restart`.** It is registered in `CapabilityCatalog`, `VerificationContracts` and
+  `MutationGatewayCoverageTests`. Its level is not higher than that of the operations that compose it.
+- **Pull.** The `pull` step stays (redeploys keep updating images). The image inspection runs after the pull and before
+  `up`.
+- **`AgentRuleSet`.** It means: some enclosing scope was decided by `CreateDefault`.
+- **Additional rows, class `host`:** `security_opt: label=disable` and `systempaths=unconfined`, and
+  `device_cgroup_rules`.
+- **Additional tests:**
+  - a failed stop is retried, then reported as "container still running";
+  - a run that cannot be checked;
+  - git deploy inspects the images it built;
+  - `pid`/`ipc` with `service:x`.
