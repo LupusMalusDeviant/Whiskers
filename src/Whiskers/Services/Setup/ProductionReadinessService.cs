@@ -302,6 +302,20 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                   "zurück geht es über das Notfall-Re-Onboarding per SSH (docs/operations/per-host-mtls-migration.md).",
             down.Count == 0 ? null : "/servers", down.Count == 0 ? null : "Server"));
 
+        // Every readable host whose running ghostunnel still admits the shared name, whatever its record uses —
+        // operator-supplied credentials included (contract 0007, amendment 3 m-9; review r1 M1): a stolen shared key opens it.
+        var sharedCn = Whiskers.Services.Certificates.MtlsCertificateService.CommonNameOf(store.SharedPaths.Cert)
+                       ?? Whiskers.Services.Certificates.MtlsCertificateService.SharedClientCommonName;
+        var admitShared = results.Where(r => r.Live is { Readable: true, Running: true } && r.Live.AllowedCommonNames.Contains(sharedCn))
+            .Select(r => r.Server.Name).ToList();
+        checks.Add(new ReadinessCheck("Gemeinsame Client-Identität im laufenden ghostunnel", admitShared.Count == 0,
+            admitShared.Count == 0
+                ? $"Kein lesbarer mTLS-Host nimmt laut docker inspect noch {sharedCn} an."
+                : $"Nimmt laut docker inspect noch {sharedCn} an: " + string.Join(", ", admitShared) +
+                  ". Ein gestohlener gemeinsamer Schlüssel öffnet diese Hosts. Von Whiskers verwaltete Hosts: „Migrieren“; " +
+                  "Hosts mit selbst gesetzten Zertifikaten: --allow-cn dort von Hand einengen (docs/operations/per-host-mtls-migration.md).",
+            admitShared.Count == 0 ? null : "/servers", admitShared.Count == 0 ? null : "Server"));
+
         var mismatched = new List<string>();
         foreach (var (server, live) in results.Where(r => r.Live is { Readable: true, Running: true }))
         {
@@ -344,6 +358,15 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             var journal = store.ReadJournal(server.Id);
             switch (status.Kind)
             {
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared when journal is { IsNarrowed: true }:
+                    // An older self-backup restored after the migration: the record names the shared key again, but the
+                    // host admits only its own name — Whiskers cannot reach it (review r1 MINOR 6).
+                    narrowedHosts++;
+                    checks.Add(new ReadinessCheck(title, false,
+                        $"Der Eintrag nennt wieder die gemeinsame Client-Identität (älteres Backup zurückgespielt?), der Host nimmt aber nur {journal.CommonName} an: " +
+                        "Whiskers erreicht ihn so nicht. Zurück über das Notfall-Re-Onboarding per SSH " +
+                        "(docs/operations/per-host-mtls-migration.md, „Älteres Backup“).", "/servers", "Server"));
+                    break;
                 case Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared:
                     checks.Add(new ReadinessCheck(title, false,
                         "Nutzt noch die gemeinsame Client-Identität: ein gestohlener Schlüssel öffnet jeden Host, der sie annimmt. " +
@@ -354,7 +377,8 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                     checks.Add(new ReadinessCheck(title, false,
                         $"Die aktive Identität (Generation {status.Generation}) ist älter als die, auf die der Host eingeengt wurde " +
                         $"(Generation {journal.Generation}) — vermutlich wurde nach einer Rotation ein älteres Backup zurückgespielt. " +
-                        "Der Host lehnt diese Identität ab; erneut rotieren.", "/servers", "Server"));
+                        "Der Host lehnt diese Identität ab, Whiskers erreicht ihn so nicht; zurück über das Notfall-Re-Onboarding per SSH " +
+                        "(docs/operations/per-host-mtls-migration.md, „Älteres Backup“).", "/servers", "Server"));
                     break;
                 case Whiskers.Services.Certificates.MtlsClientCredentialKind.Own when journal is { IsNarrowed: true }:
                     narrowedHosts++;
@@ -370,7 +394,8 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                     break;
                 default:
                     checks.Add(new ReadinessCheck(title, true,
-                        "Vom Betreiber gesetzte Client-Zertifikatspfade; Whiskers verwaltet und prüft sie nicht.", null, null));
+                        "Vom Betreiber gesetzte Client-Zertifikatspfade; Whiskers verwaltet sie nicht. Ob der ghostunnel des Hosts " +
+                        "die gemeinsame Identität noch annimmt, zeigt die Zeile „Gemeinsame Client-Identität im laufenden ghostunnel“.", null, null));
                     break;
             }
         }
@@ -379,7 +404,8 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         if (File.Exists(shared.Key) && narrowedHosts > 0)
             checks.Add(new ReadinessCheck("Gemeinsamer mTLS-Client-Schlüssel", false,
                 $"Der gemeinsame Client-Schlüssel liegt noch im Datenverzeichnis, obwohl {narrowedHosts} Host(s) ihn nicht mehr annehmen — " +
-                "vor dem Stilllegen, oder nach dem Zurückspielen eines älteren Backups. Sind alle Hosts migriert: auf der Server-Seite stilllegen.",
+                "vor dem Stilllegen, oder nach dem Zurückspielen eines älteren Backups (ältere Self-Backups enthalten ihn noch). " +
+                "Sind alle Hosts migriert: auf der Server-Seite stilllegen. Ist ein Host so nicht mehr erreichbar: Notfall-Re-Onboarding per SSH.",
                 "/servers", "Server"));
 
         var keys = store.KeyFiles();

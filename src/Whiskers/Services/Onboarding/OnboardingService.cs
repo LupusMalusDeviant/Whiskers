@@ -232,6 +232,10 @@ public class OnboardingService : IOnboardingService
                 progress.Report($"⚠️ Onboarding fertig, aber mTLS-Verbindung noch nicht erreichbar: {info.Error}");
                 return Fail(progress, completed, step, info.Error ?? "mTLS-Verbindung nicht erreichbar.");
             }
+            // The issued slot was pending; the record names it and the connection through it works: now it is active.
+            if (_clientCredentials.PendingFor(serverId) is { } pendingSlot
+                && MtlsClientCredentialStore.SamePath(server.TcpClientCertPath, pendingSlot.Cert))
+                await _clientCredentials.ActivatePendingAsync(serverId, CancellationToken.None);
             await RecordClientIdentityAsync(server, clientIdentity, progress, ct);
             completed.Add(step);
 

@@ -970,11 +970,23 @@
 
     private bool _mtlsBusy;
 
+    // The status reads and parses certificate files; once per record (id + certificate path) instead of every render
+    // (review r1 NIT). Cleared after a migration or retirement, which change the phase.
+    private readonly Dictionary<string, Whiskers.Services.Certificates.MtlsClientCredentialStatus> _mtlsStatus = new(StringComparer.Ordinal);
+
+    private Whiskers.Services.Certificates.MtlsClientCredentialStatus MtlsStatus(Whiskers.Models.ServerConfig server)
+    {
+        var key = server.Id + "\n" + server.TcpClientCertPath;
+        if (!_mtlsStatus.TryGetValue(key, out var status))
+            _mtlsStatus[key] = status = ClientCredentials.StatusOf(server);
+        return status;
+    }
+
     /// <summary>The client-credential status line of an mTLS server (null for anything else).</summary>
     private (string Text, bool Ok)? MtlsStatusText(Whiskers.Models.ServerConfig server)
     {
         if (!server.TcpUseTls || !Whiskers.Services.Certificates.MtlsClientCredentialStore.IsValidServerId(server.Id)) return null;
-        var status = ClientCredentials.StatusOf(server);
+        var status = MtlsStatus(server);
         var expires = status.NotAfterUtc is { } until ? until.ToString("yyyy-MM-dd") : "?";
         return status.Kind switch
         {
@@ -990,7 +1002,7 @@
 
     private bool CanMigrate(Whiskers.Models.ServerConfig server) =>
         server.TcpUseTls && Whiskers.Services.Certificates.MtlsClientCredentialStore.IsValidServerId(server.Id)
-        && ClientCredentials.StatusOf(server) is { } s
+        && MtlsStatus(server) is { } s
         && (s.Kind == Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared
             || (s.Kind == Whiskers.Services.Certificates.MtlsClientCredentialKind.Own && s.Phase < 5));
 
@@ -1023,6 +1035,7 @@
         finally
         {
             _mtlsBusy = false;
+            _mtlsStatus.Clear();
             _servers = ServerConfigService.GetServers();
             await InvokeAsync(StateHasChanged);
         }
@@ -1055,6 +1068,7 @@
         finally
         {
             _mtlsBusy = false;
+            _mtlsStatus.Clear();
             await InvokeAsync(StateHasChanged);
         }
     }

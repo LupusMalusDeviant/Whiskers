@@ -146,8 +146,19 @@ shared key still opens it.
   `- --allow-cn=serverwatch-client` into the host's compose file on the host (provider console or SSH) and run
   `docker compose -p dockerproxy --project-directory /opt/dockerproxy -f /opt/dockerproxy/docker-compose.yml up -d --pull never --no-deps --force-recreate ghostunnel`.
   Then point the record back as above.
-- **A backup restored after a rotation** can bring back an older generation than the one the host admits. The readiness
-  line says so. Rotate again.
+- **An older backup ("Älteres Backup").** Self-backups taken before a host's migration still contain the shared key
+  `{MtlsDir}/client.key`. Keep them as safely as the key itself, or delete them after retiring.
+  - **What a restore does:** restoring such a backup, or one taken before a rotation, brings back server records that
+    name the shared credential or an older generation. The host admits only its newer name, so Whiskers can no longer
+    reach it. Rotating again does not help, because a rotation needs a working connection.
+  - **What readiness shows:** it names such hosts: the record is shared or older than the narrowed generation, and the
+    host's ghostunnel arguments cannot be read.
+  - **The way back** is the break-glass re-onboarding over SSH:
+    1. In the server dialog, set the connection back to SSH and give it a bootstrap key or root password.
+    2. Run *Speichern & Onboarden*. The run writes the proxy's compose file again with the client name Whiskers holds
+       for the host, and switches the record back to TCP+mTLS.
+    3. Alternatively, on the host (provider console or SSH), put the restored record's name back into `--allow-cn` and
+       recreate ghostunnel as under phase 4 above.
 
 ## Verifying a host
 

@@ -50,31 +50,38 @@ public interface IMtlsClientCredentialStore
     MtlsClientCredentialPaths? PreviousFor(string serverId);
 
     /// <summary>Generates a key in-process, has step-ca sign a CSR for the server's identity of
-    /// <paramref name="generation"/>, validates the result and writes it into a new slot that becomes the active one
-    /// (first issue, or a host whose record does not use the store yet). The slug is fixed at the first issue.</summary>
+    /// <paramref name="generation"/>, validates the result and writes it into a new slot, returned. The slot is
+    /// <b>pending</b>: it becomes active only through <see cref="ActivatePendingAsync"/>, once the server record names it
+    /// and a connection through it was confirmed (review r1 MINOR 1). Works for a server without any slot yet (first
+    /// issue: onboarding, migration); the slug is fixed then.</summary>
     [MutatingOperation("certificate.issue_mtls")]
     Task<MtlsClientCredentialPaths> IssueAsync(Models.ServerConfig server, int generation, CancellationToken ct);
 
-    /// <summary>As <see cref="IssueAsync"/>, but the new slot becomes the pending one; the active credential is untouched.</summary>
+    /// <summary>As <see cref="IssueAsync"/> for a server that already has an active credential (renewal, rotation).</summary>
     [MutatingOperation("certificate.issue_mtls")]
     Task<MtlsClientCredentialPaths> IssuePendingAsync(Models.ServerConfig server, int generation, CancellationToken ct);
 
-    /// <summary>Records the pending slot as the active one and the replaced slot as the previous one (files untouched).</summary>
-    [MutatingOperation("mtls.client_renew")]
+    /// <summary>Records the pending slot as the active one and the replaced slot as the previous one (files untouched).
+    /// The completion of an issue, so it runs inside every decision that issues (migrate, renew, onboard).</summary>
+    [MutatingOperation("certificate.issue_mtls")]
     Task ActivatePendingAsync(string serverId, CancellationToken ct);
 
     /// <summary>Deletes the pending slot (a switch that did not work).</summary>
-    [MutatingOperation("mtls.client_renew")]
+    [MutatingOperation("certificate.issue_mtls")]
     Task DiscardPendingAsync(string serverId, CancellationToken ct);
 
-    /// <summary>Deletes the previous slot once nothing needs it.</summary>
-    [MutatingOperation("mtls.client_renew")]
+    /// <summary>Deletes every slot that is neither active nor pending once nothing needs it (never one a record names).</summary>
+    [MutatingOperation("certificate.issue_mtls")]
     Task DiscardPreviousAsync(string serverId, CancellationToken ct);
 
     /// <summary>Removes a server's directory when the server is removed. The parameter is deliberately not named
     /// <c>serverId</c>: the record is already gone when this runs, so it could not be bound to a registered server.</summary>
     [MutatingOperation("server.remove")]
     Task RemoveAsync(string hostId, CancellationToken ct);
+
+    /// <summary>The in-process lock of one host, shared by every certificate step on it (server-certificate renewal,
+    /// client rollout) and by server removal, which refuses while it is held.</summary>
+    SemaphoreSlim HostLock(string serverId);
 
     /// <summary>The rollout journal of <paramref name="serverId"/>, or null.</summary>
     MtlsRolloutJournal? ReadJournal(string serverId);

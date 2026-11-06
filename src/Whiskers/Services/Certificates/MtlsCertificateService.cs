@@ -62,6 +62,11 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
     private readonly ILogger<MtlsCertificateService> _logger;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
 
+    /// <summary>The one per-host lock of every certificate step (server certificate, client rollout) — the store's, so
+    /// that server removal takes the same one (review r1 MINOR 8); a local one only without a store.</summary>
+    private SemaphoreSlim HostGate(string serverId) =>
+        _clientCredentials?.HostLock(serverId) ?? _locks.GetOrAdd(serverId, _ => new SemaphoreSlim(1, 1));
+
     // Seams for tests: the real handshake and the real wait for ghostunnel to come back.
     internal Func<string, int, CancellationToken, Task<X509Certificate2?>> FetchPresented { get; set; }
     internal TimeSpan RestartGrace { get; set; } = TimeSpan.FromSeconds(8);
@@ -96,11 +101,17 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
         if (!server.TcpUseTls || string.IsNullOrWhiteSpace(server.TcpHost))
             return new(false, $"{server.Name} is not connected over mTLS — there is no proxy certificate to renew.");
 
-        var gate = _locks.GetOrAdd(serverId, _ => new SemaphoreSlim(1, 1));
+        var gate = HostGate(serverId);
         if (!await gate.WaitAsync(0, ct))
             return new(false, $"A renewal for {server.Name} is already running.");
         try
         {
+            // No step while any Whiskers guard is armed on the host (amendment 1; review r1 NIT): an allow-list run of
+            // another Whiskers process, or an earlier renewal, still waits for its confirmation. Unknown counts as armed.
+            var guards = await RunAsync(serverId, MtlsAllowListCommands.ListGuardUnits(), ct);
+            if (!string.IsNullOrWhiteSpace(guards.Output))
+                return new(false, $"A Whiskers guard timer is armed on {server.Name} ({guards.Output.Trim()}); try again once it has fired, at most 3 minutes from its start.");
+
             // Keep the identity the proxy has today: its name was chosen at onboarding and need not match the
             // display name any more, and Whiskers checks the IP SAN against TcpHost on every connection.
             using var current = await FetchPresented(server.TcpHost, server.TcpPort, ct)

@@ -99,7 +99,21 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
     {
         if (Unreachable) throw new HttpRequestException("host unreachable");
         if (script.Contains("ghostunneldigests=", StringComparison.Ordinal)) { Log.Add("read"); return Ok(StateOutput()); }
-        if (script.Contains("echo applied", StringComparison.Ordinal)) return Ok(Apply(script));
+        if (script.Contains("echo applied", StringComparison.Ordinal))
+        {
+            // As the script: a .prev left by another run while a guard is armed is never overwritten.
+            if (_prev is not null && ArmedUnits().Any())
+            {
+                Log.Add("apply-refused");
+                return new CommandResult { ExitCode = 1, Error = "another run left the .prev while a guard is armed" };
+            }
+            return Ok(Apply(script));
+        }
+        if (script.Contains("systemctl list-units", StringComparison.Ordinal))
+        {
+            Log.Add("guards");
+            return Ok(string.Join('\n', ArmedUnits()));
+        }
         if (script.Contains("echo cleaned", StringComparison.Ordinal))
         {
             var run = Regex.Match(script, @"\.allow-ok-([a-z0-9]+)").Groups[1].Value;
@@ -122,7 +136,8 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
         var cns = Regex.Match(script, "cns='([a-z0-9 .-]+)'").Groups[1].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
         var run = Regex.Match(script, @"--unit=whiskers-allow-guard-([a-z0-9]+) ").Groups[1].Value;
         Log.Add($"apply:{run}:{string.Join(",", cns)}");
-        Markers.Clear();
+        Assert.Contains("rm -f /opt/dockerproxy/.allow-ok-" + run + "\n", script.Replace("\r\n", "\n"));
+        Markers.Remove(run);   // only this run's marker
         _prev = [.. FileAllow];
         _pendingRun = run;
         Timers[run] = "waiting";
@@ -159,7 +174,12 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
             Regex.Match(confirmScript, @"echo (\S+) \| base64 -d \| timeout").Groups[1].Value));
 
     /// <summary>ghostunnel's decision for a client credential.</summary>
-    public MtlsProbeOutcome Probe(ServerConfig server)
+    public MtlsProbeOutcome Probe(ServerConfig server) => Probe(server, simulateNoAlert: true);
+
+    /// <summary>Whether the host admits the credential at all (the connection Whiskers itself runs over).</summary>
+    public bool Admits(ServerConfig server) => Probe(server, simulateNoAlert: false) == MtlsProbeOutcome.Admitted;
+
+    private MtlsProbeOutcome Probe(ServerConfig server, bool simulateNoAlert)
     {
         if (Unreachable) return MtlsProbeOutcome.NotChecked;
         X509Certificate2 cert;
@@ -174,7 +194,7 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
         using (cert)
         {
             var cn = cert.GetNameInfo(X509NameType.SimpleName, false);
-            if (cn == NotCheckedFor) return MtlsProbeOutcome.NotChecked;
+            if (simulateNoAlert && cn == NotCheckedFor) return MtlsProbeOutcome.NotChecked;
             var signedByFleet = IssuedBy(cert, ca);
             return signedByFleet && RunningAllow.Contains(cn) ? MtlsProbeOutcome.Admitted : MtlsProbeOutcome.Refused;
         }
@@ -189,6 +209,9 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
         chain.ChainPolicy.CustomTrustStore.Add(fleet.Root);
         return chain.Build(leaf);
     }
+
+    private IEnumerable<string> ArmedUnits() =>
+        ForeignUnits.Concat(Timers.Where(t => t.Value == "waiting").Select(t => MtlsAllowListCommands.GuardUnitPrefix + t.Key + ".timer"));
 
     private static List<string> Args(IEnumerable<string> allow) =>
         [.. ApprovedArgs, .. allow.Select(n => MtlsAllowListCommands.AllowCnFlag + n)];
@@ -243,7 +266,7 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
                 Mounts = new[] { new { Source = "/var/run/docker.sock", Destination = "/var/run/docker.sock", RW = false } },
             },
         };
-        var units = ForeignUnits.Concat(Timers.Where(t => t.Value == "waiting").Select(t => MtlsAllowListCommands.GuardUnitPrefix + t.Key + ".timer"));
+        var units = ArmedUnits();
         return string.Join('\n',
             "ghostunnel=" + B64(JsonSerializer.Serialize(gu)),
             "socketproxy=" + B64(JsonSerializer.Serialize(sp)),
@@ -263,6 +286,10 @@ internal sealed class SimulatedFleet(TestCa ca) : IHostCommandExecutor
     public Dictionary<string, SimulatedProxyHost> Hosts { get; } = new();
     public List<(string Server, string Script)> Commands { get; } = new();
     public int Signed { get; private set; }
+    /// <summary>The server record each host command travels with (its own client credential).</summary>
+    public Func<string, ServerConfig?>? Records { get; set; }
+    /// <summary>Hosts a command could not reach because the record's own credential was refused.</summary>
+    public List<string> LockedOut { get; } = new();
 
     public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
         CancellationToken ct = default, int? maxOutputChars = null)
@@ -277,9 +304,16 @@ internal sealed class SimulatedFleet(TestCa ca) : IHostCommandExecutor
             Signed++;
             return Task.FromResult(new CommandResult { ExitCode = 0, Output = SimulatedProxyHost.B64(bundle) });
         }
-        return Task.FromResult(Hosts.TryGetValue(serverId, out var host)
-            ? host.Execute(script)
-            : new CommandResult { ExitCode = 1, Error = "no such host" });
+        if (!Hosts.TryGetValue(serverId, out var host))
+            return Task.FromResult(new CommandResult { ExitCode = 1, Error = "no such host" });
+        // Every host command travels over the record's own credential: if the host does not admit it, Whiskers has
+        // locked itself out and nothing gets through (review r1 MINOR 7).
+        if (!host.Unreachable && Records?.Invoke(serverId) is { } record && !host.Admits(record))
+        {
+            LockedOut.Add(serverId);
+            return Task.FromResult(new CommandResult { ExitCode = 1, Error = "handshake refused: the record's own credential is not admitted" });
+        }
+        return Task.FromResult(host.Execute(script));
     }
 }
 
@@ -320,6 +354,7 @@ internal sealed class CredentialWorld : IDisposable
             }).GetAwaiter().GetResult();
         }
 
+        Fleet.Records = Servers.GetServer;
         Store = new MtlsClientCredentialStore(Fleet, NullLogger<MtlsClientCredentialStore>.Instance, Paths, Servers);
         Service = new MtlsCertificateService(Fleet, Servers, NullLogger<MtlsCertificateService>.Instance, Store)
         {

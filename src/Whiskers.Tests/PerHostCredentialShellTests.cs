@@ -35,7 +35,10 @@ public sealed class PerHostCredentialShellTests : IDisposable
             ["serverwatch-client", "whiskers-client-rabenhof-g1"], "r1"));
 
         Assert.Contains("cns='serverwatch-client whiskers-client-rabenhof-g1'", script);
-        Assert.Contains("rm -f /opt/dockerproxy/.allow-ok-*", script);
+        // Only this run's marker; never the markers of other runs (review r1 MINOR 3).
+        Assert.Contains("rm -f /opt/dockerproxy/.allow-ok-r1\n", script.Replace("\r\n", "\n"));
+        Assert.DoesNotContain(".allow-ok-*", script);
+        Assert.Contains("another run left /opt/dockerproxy/docker-compose.yml.prev while a guard is armed", script);
         var guard = script.IndexOf("systemd-run --collect --unit=whiskers-allow-guard-r1 --on-active=180 /bin/sh /opt/dockerproxy/allow-guard-r1.sh", StringComparison.Ordinal);
         var swap = script.IndexOf("mv -f /opt/dockerproxy/docker-compose.yml.new /opt/dockerproxy/docker-compose.yml", StringComparison.Ordinal);
         var recreate = script.IndexOf("systemd-run --collect --unit=whiskers-ghostunnel-recreate-r1 --on-active=3 " + MtlsAllowListCommands.Recreate(Target), StringComparison.Ordinal);
@@ -186,6 +189,109 @@ public sealed class PerHostCredentialShellTests : IDisposable
         Assert.Contains("logger -p user.err", log);
     }
 
+    [Fact]
+    public void Reading_the_host_fails_closed_when_systemd_cannot_list_the_guards()
+    {
+        var read = MtlsCertificateRenewalTests.Decode(MtlsAllowListCommands.ReadHostState());
+        Assert.Contains("listed=$(systemctl list-units --no-legend --plain --state=active,activating 'whiskers-*-guard*') || { echo", read);
+        Assert.DoesNotContain("2>/dev/null | awk", read);
+    }
+
+    [SkippableFact]
+    public void The_guard_listing_exits_non_zero_when_systemctl_fails()
+    {
+        RequireShell();
+        Arrange("loaded", "waiting");
+        File.WriteAllText(State("list-fails"), "");
+
+        var (code, stdout, stderr) = RunScript(MtlsCertificateRenewalTests.Decode(MtlsAllowListCommands.ListGuardUnits()));
+
+        Assert.NotEqual(0, code);
+        Assert.Equal("", stdout.Trim());
+        Assert.Contains("unknown", stderr);
+    }
+
+    [SkippableFact]
+    public void Apply_rewrites_only_the_allow_cn_items_arms_the_guard_before_the_swap_and_keeps_other_runs_markers()
+    {
+        RequireShell();
+        Arrange("loaded", "waiting");
+        File.Delete(Compose() + ".prev");
+        File.WriteAllText(Compose(), OnboardingCompose("serverwatch-client"));
+        var before = File.ReadAllText(Compose());
+        File.WriteAllText(Marker(), "");                                  // a stale marker of this run
+        File.WriteAllText(Path.Combine(_dir, ".allow-ok-r9"), "");        // another run's marker
+
+        var (code, stdout, stderr) = RunScript(ApplyScript(["serverwatch-client", "whiskers-client-rabenhof-g1"]));
+
+        Assert.True(code == 0, stderr);
+        Assert.Contains("applied", stdout);
+        Assert.Equal(OnboardingCompose("serverwatch-client", "whiskers-client-rabenhof-g1"), File.ReadAllText(Compose()));
+        Assert.Equal(before, File.ReadAllText(Compose() + ".prev"));
+        Assert.False(File.Exists(Marker()));
+        Assert.True(File.Exists(Path.Combine(_dir, ".allow-ok-r9")));
+        Assert.True(File.Exists(Path.Combine(_dir, "allow-guard-r1.sh")));
+        var log = File.ReadAllLines(State("log")).Where(l => l.StartsWith("systemd-run", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, log.Count);
+        Assert.Contains("--unit=whiskers-allow-guard-r1 --on-active=180", log[0]);
+        Assert.Contains("--unit=whiskers-ghostunnel-recreate-r1 --on-active=3 docker compose -p dockerproxy", log[1]);
+    }
+
+    [SkippableFact]
+    public void Apply_refuses_a_compose_file_with_an_allow_cn_line_it_cannot_edit_safely()
+    {
+        RequireShell();
+        Arrange("loaded", "waiting");
+        File.Delete(Compose() + ".prev");
+        var odd = OnboardingCompose("serverwatch-client").Replace("- --allow-cn=serverwatch-client", "- --allow-cn=serverwatch-client # keep", StringComparison.Ordinal);
+        File.WriteAllText(Compose(), odd);
+
+        var (code, _, stderr) = RunScript(ApplyScript(["whiskers-client-rabenhof-g1"]));
+
+        Assert.NotEqual(0, code);
+        Assert.Contains("unexpected --allow-cn lines", stderr);
+        Assert.Equal(odd, File.ReadAllText(Compose()));
+        Assert.False(File.Exists(Compose() + ".prev"));
+        Assert.DoesNotContain("systemd-run", File.ReadAllText(State("log")));
+    }
+
+    [SkippableFact]
+    public void Apply_refuses_a_patch_that_would_change_more_than_the_allow_cn_items()
+    {
+        RequireShell();
+        Arrange("loaded", "waiting");
+        File.Delete(Compose() + ".prev");
+        File.WriteAllText(Compose(), OnboardingCompose("serverwatch-client"));
+        var before = File.ReadAllText(Compose());
+        // An awk that also changes another line (a broken or tampered tool): the check after the patch must stop it.
+        var awk = DeploymentScripts.FindOnPath("awk")!;
+        Stub("awk", awk + " \"$@\" | sed -e 's/--unsafe-target/--unsafe-target-x/'");
+
+        var (code, _, stderr) = RunScript(ApplyScript(["whiskers-client-rabenhof-g1"]));
+
+        Assert.NotEqual(0, code);
+        Assert.Contains("the patch would change more than --allow-cn", stderr);
+        Assert.Equal(before, File.ReadAllText(Compose()));
+        Assert.False(File.Exists(Compose() + ".new"));
+        Assert.False(File.Exists(Compose() + ".prev"));
+        Assert.DoesNotContain("systemd-run", File.ReadAllText(State("log")));
+    }
+
+    [SkippableFact]
+    public void Apply_never_overwrites_another_runs_prev_while_a_guard_is_armed()
+    {
+        RequireShell();
+        Arrange("loaded", "waiting");   // leaves a .prev of run r1
+        var prev = File.ReadAllText(Compose() + ".prev");
+        File.WriteAllText(State("units"), "whiskers-allow-guard-r1.timer loaded active waiting\n");
+
+        var (code, _, stderr) = RunScript(ApplyScript(["whiskers-client-rabenhof-g1"], "r2"));
+
+        Assert.NotEqual(0, code);
+        Assert.Contains("while a guard is armed", stderr);
+        Assert.Equal(prev, File.ReadAllText(Compose() + ".prev"));
+    }
+
     // ---- harness ----
 
     private static void RequireShell()
@@ -210,6 +316,7 @@ public sealed class PerHostCredentialShellTests : IDisposable
         File.WriteAllText(State("load"), load);
         File.WriteAllText(State("sub"), sub);
         File.WriteAllText(State("log"), "");
+        File.WriteAllText(State("units"), "");
         File.WriteAllText(State("args"), "--allow-cn=serverwatch-client\n--allow-cn=whiskers-client-rabenhof-g1\n");
         var sleep = DeploymentScripts.FindOnPath("sleep")!;
         Stub("systemctl", $$"""
@@ -221,6 +328,7 @@ public sealed class PerHostCredentialShellTests : IDisposable
                   SubState) if [ -f "$STUB/hang" ]; then {{sleep}} 60; fi; cat "$STUB/sub" ;;
                 esac ;;
               is-active) [ -f "$STUB/active" ] && exit 0; exit 3 ;;
+              list-units) [ -f "$STUB/list-fails" ] && exit 1; cat "$STUB/units" ;;
               stop) echo stopped > "$STUB/sub" ;;
             esac
             """);
@@ -258,6 +366,9 @@ public sealed class PerHostCredentialShellTests : IDisposable
         var moved = Convert.ToBase64String(Encoding.UTF8.GetBytes(Moved(body)));
         return Moved(Regex.Replace(outer, @"echo \S+ \| base64 -d \| timeout", "echo " + moved + " | base64 -d | timeout"));
     }
+
+    private string ApplyScript(string[] allow, string run = "r1") =>
+        Moved(MtlsCertificateRenewalTests.Decode(MtlsAllowListCommands.Apply(Target, allow, run)));
 
     private string GuardScript() => Moved(MtlsAllowListCommands.GuardBody(Target, "r1"));
 

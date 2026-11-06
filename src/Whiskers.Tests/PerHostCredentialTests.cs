@@ -71,6 +71,8 @@ public sealed class PerHostCredentialTests
         Assert.True(journal.IsNarrowed);
         // The phase-record step removed the markers on the host.
         Assert.Empty(host.Markers);
+        // Every host command travelled over a credential the host admitted: Whiskers never locked itself out.
+        Assert.Empty(w.Fleet.LockedOut);
     }
 
     [Fact]
@@ -278,25 +280,145 @@ public sealed class PerHostCredentialTests
     public async Task The_rollout_and_the_server_certificate_renewal_share_one_lock_per_host()
     {
         using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         var host = w.Host("rabenhof");
         host.BeforeConfirm = () => { entered.Set(); release.Wait(TimeSpan.FromSeconds(30)); };
 
-        var migration = Task.Run(() => w.Service.MigrateClientAsync("rabenhof", null, default));
+        // A rotation holds the host's lock (blocked inside its confirmation) — every other step reaches the lock and
+        // is refused there, server removal included (review r1 MINOR 7, 8).
+        var rotation = Task.Run(() => w.Service.RenewClientAsync("rabenhof", rotate: true, default));
         Assert.True(entered.Wait(TimeSpan.FromSeconds(30)));
 
         var renewal = await w.Service.RenewAsync("rabenhof", default);
         var clientRenewal = await w.Service.RenewClientAsync("rabenhof", rotate: false, default);
         var second = await w.Service.MigrateClientAsync("rabenhof", null, default);
+        var removal = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(w.Servers,
+                ComponentTests.ServersKubeconfigSaveTests.NullProxy<Whiskers.Services.Vault.IVaultService>.Create(), w.Server("rabenhof"), w.Store));
         release.Set();
 
         Assert.False(renewal.Success);
         Assert.Contains("already running", renewal.Message);
         Assert.False(clientRenewal.Ok);
+        Assert.Contains("already running", clientRenewal.Error);
         Assert.False(second.Ok);
         Assert.Contains("already running", second.Error);
-        Assert.True((await migration).Ok);
+        Assert.Contains("is running", removal.Message);
+        Assert.NotNull(w.Servers.GetServer("rabenhof"));
+        Assert.True(Directory.Exists(Path.Combine(w.MtlsDir, "hosts", "rabenhof")));
+        Assert.True((await rotation).Ok);
+        Assert.Empty(w.Fleet.LockedOut);
+    }
+
+    // ---- review r1: resume from the file, pending until verified, unknown confirmations, cancellation ----
+
+    [Fact]
+    public async Task A_running_list_narrowed_while_the_file_still_admits_the_shared_name_is_applied_again_before_phase_five()
+    {
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        // The guard restored the file but both of its recreates failed: the container runs [cn], the file says [shared, cn].
+        var host = w.Host("rabenhof");
+        host.FileAllow = [SharedCn, "whiskers-client-rabenhof-g1"];
+        var journal = w.Store.ReadJournal("rabenhof")!;
+        await w.Store.WriteJournalAsync("rabenhof", journal with { Phase = 3, NegativeCheckPassed = false }, default);
+        host.Log.Clear();
+
+        var resumed = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.True(resumed.Ok, resumed.Error);
+        var applies = host.Log.Where(l => l.StartsWith("apply:", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, applies.Count);
+        Assert.EndsWith(":" + SharedCn + ",whiskers-client-rabenhof-g1", applies[0]);
+        Assert.EndsWith(":whiskers-client-rabenhof-g1", applies[1]);
+        Assert.Equal(["whiskers-client-rabenhof-g1"], host.FileAllow);
+        Assert.True(w.Store.ReadJournal("rabenhof")!.IsNarrowed);
+    }
+
+    [Fact]
+    public async Task A_file_that_still_admits_the_shared_name_is_never_recorded_without_a_confirmed_narrowing()
+    {
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        var host = w.Host("rabenhof");
+        host.FileAllow = [SharedCn, "whiskers-client-rabenhof-g1"];
+        await w.Store.WriteJournalAsync("rabenhof", w.Store.ReadJournal("rabenhof")! with { Phase = 3, NegativeCheckPassed = false }, default);
+        host.NotCheckedFor = SharedCn;   // the negative check of the new narrowing cannot be made
+
+        var resumed = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(resumed.Ok);
+        Assert.False(w.Store.ReadJournal("rabenhof")!.IsNarrowed);
+    }
+
+    [Fact]
+    public async Task An_issued_slot_stays_pending_until_the_switch_is_verified_and_leftover_slots_go_after_phase_five()
+    {
+        using var w = new CredentialWorld();
+        var issued = await w.Store.IssueAsync(w.Server("rabenhof"), 1, default);
+        Assert.Equal(issued, w.Store.PendingFor("rabenhof"));
+        Assert.Null(w.Store.PreviousFor("rabenhof"));
+        Assert.Equal("whiskers-client-rabenhof-g1", w.Store.IdentityOf("rabenhof")!.CommonName);
+
+        // A first run whose switch cannot be verified: the record goes back, the slot stays pending.
+        w.Service.VerifyConnection = (_, _) => Task.FromResult(false);
+        Assert.False((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        Assert.True(w.Store.IsShared(w.Server("rabenhof")));
+        Assert.NotNull(w.Store.PendingFor("rabenhof"));
+        // A stray slot of an interrupted run.
+        var stray = Path.Combine(w.MtlsDir, "hosts", "rabenhof", "g1-s9");
+        Directory.CreateDirectory(stray);
+        File.WriteAllText(Path.Combine(stray, "client.key"), "x");
+
+        w.Service.VerifyConnection = (id, _) => Task.FromResult(w.Host(id).Probe(w.Server(id)) == MtlsProbeOutcome.Admitted);
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+
+        Assert.Null(w.Store.PendingFor("rabenhof"));
+        var slot = Assert.Single(Directory.GetDirectories(Path.Combine(w.MtlsDir, "hosts", "rabenhof")));
+        Assert.True(MtlsClientCredentialStore.SamePath(w.Server("rabenhof").TcpClientCertPath, Path.Combine(slot, "client.crt")));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_confirmation_whose_outcome_is_unknown_promises_no_rollback(bool throws)
+    {
+        using var w = new CredentialWorld();
+        var confirm = w.Service.RunConfirmation;
+        w.Service.RunConfirmation = async (server, command, ct) =>
+        {
+            await confirm(server, command, ct);   // the script ran on the host …
+            if (throws) throw new IOException("connection reset after the script ran");
+            return ("", "", 124);                 // … or was stopped by its time limit
+        };
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.StartsWith("State unknown", result.Error);
+        Assert.DoesNotContain("restores its previous allow-list on its own", result.Error);
+        Assert.Equal(1, w.Store.ReadJournal("rabenhof")!.Phase);
+    }
+
+    [Fact]
+    public async Task A_caller_cancelled_after_the_record_save_still_verifies_and_activates_the_switch()
+    {
+        using var w = new CredentialWorld();
+        using var cts = new CancellationTokenSource();
+        var tokens = new List<CancellationToken>();
+        var verify = w.Service.VerifyConnection;
+        w.Service.VerifyConnection = (id, ct) => { tokens.Add(ct); return verify(id, ct); };
+        w.Servers.BeforeSave = s => { if (w.Store.IsManaged(s)) cts.Cancel(); };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => w.Service.MigrateClientAsync("rabenhof", null, cts.Token));
+
+        Assert.NotEmpty(tokens);
+        Assert.All(tokens, t => Assert.False(t.CanBeCanceled));
+        Assert.True(w.Store.IsManaged(w.Server("rabenhof")));
+        Assert.Null(w.Store.PendingFor("rabenhof"));   // verified, then made active
+        Assert.Equal(3, w.Store.ReadJournal("rabenhof")!.Phase);
     }
 
     // ---- renewal and rotation: slots, never overwriting the live credential ----
@@ -366,6 +488,7 @@ public sealed class PerHostCredentialTests
         Assert.NotEqual(g1Cert, File.ReadAllText(g2.Cert));
         var journal = w.Store.ReadJournal("rabenhof")!;
         Assert.Equal((MtlsRolloutJournal.Rotate, 2, 5, true), (journal.Kind, journal.Generation, journal.Phase, journal.NegativeCheckPassed));
+        Assert.Empty(w.Fleet.LockedOut);
     }
 
     [Fact]
@@ -505,6 +628,7 @@ public sealed class PerHostCredentialTests
         Assert.Contains(exec.Scripts, s => s.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes(compose)), StringComparison.Ordinal));
         Assert.DoesNotContain(exec.Scripts, s => s.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes("--allow-cn=" + SharedCn)), StringComparison.Ordinal));
 
+        Assert.Null(w.Store.PendingFor("neuhof"));   // verified over mTLS, then made active
         var journal = w.Store.ReadJournal("neuhof")!;
         Assert.Equal((MtlsRolloutJournal.Onboard, 5, true), (journal.Kind, journal.Phase, journal.IsNarrowed));
         Assert.Equal(sharedExists, journal.NegativeCheckPassed);
@@ -659,9 +783,25 @@ public sealed class PerHostCredentialTests
     [Fact]
     public void Only_a_tls_alert_counts_as_refused()
     {
-        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new AuthenticationException("handshake failed")));
-        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new IOException("read failed", new Win32Exception(-2146893048))));
+        // OpenSSL: the alert reason in the inner error, during the handshake (TLS 1.2) or on the first read (TLS 1.3).
+        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new AuthenticationException("Authentication failed, see inner exception.",
+            new Exception("SSL Handshake failed with OpenSSL error - SSL_ERROR_SSL.", new Exception("error:0A000412:SSL routines::sslv3 alert bad certificate")))));
+        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new IOException("Unable to read data from the transport connection.",
+            new Exception("error:0A00045C:SSL routines::tlsv13 alert certificate required"))));
+        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new Exception("error:0A000418:SSL routines::tlsv1 alert unknown ca")));
+        // SChannel: the statuses a received alert maps to.
+        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new IOException("read failed", new Win32Exception(unchecked((int)0x80090327)))));
+        Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new AuthenticationException("failed", new Win32Exception(unchecked((int)0x80090326)))));
         Assert.Equal(MtlsProbeOutcome.Refused, MtlsClientProbe.Classify(new IOException("Received an alert: bad certificate")));
+
+        // A bare TLS failure, an OpenSSL error that is no alert, an end of stream and other SChannel errors prove nothing.
+        Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new AuthenticationException("handshake failed")));
+        Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new AuthenticationException("Authentication failed, see inner exception.",
+            new Exception("SSL Handshake failed with OpenSSL error - SSL_ERROR_SSL.", new Exception("error:0A000126:SSL routines::unexpected eof while reading")))));
+        Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new IOException("x",
+            new Exception("SSL Handshake failed with OpenSSL error - SSL_ERROR_SYSCALL."))));
+        Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new IOException("read failed", new Win32Exception(unchecked((int)0x80090304)))));
+        Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new IOException("Authentication failed because the remote party has closed the transport stream.")));
 
         Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new IOException("reset", new SocketException((int)SocketError.ConnectionReset))));
         Assert.Equal(MtlsProbeOutcome.NotChecked, MtlsClientProbe.Classify(new TimeoutException()));
@@ -705,8 +845,14 @@ public sealed class PerHostCredentialTests
         Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
         var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store);
 
-        var healthy = await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync);
-        Assert.All(healthy, c => Assert.True(c.Ok, c.Detail));
+        // Everything runs; the two hosts not yet migrated still admit the shared name and are named for it.
+        var before = await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync);
+        Assert.True(before.Single(c => c.Title == "mTLS-Proxy (ghostunnel) läuft").Ok);
+        Assert.True(before.Single(c => c.Title == "Laufende --allow-cn-Liste").Ok);
+        var shared = before.Single(c => c.Title == "Gemeinsame Client-Identität im laufenden ghostunnel");
+        Assert.False(shared.Ok);
+        Assert.Contains("Zirkuswagen, Burgcloud", shared.Detail);
+        Assert.DoesNotContain("Rabenhof", shared.Detail);
 
         w.Host("zirkuswagen").GhostunnelStopped = true;
         w.Host("burgcloud").Unreachable = true;
@@ -722,6 +868,51 @@ public sealed class PerHostCredentialTests
         var list = checks.Single(c => c.Title == "Laufende --allow-cn-Liste");
         Assert.False(list.Ok);
         Assert.Contains("Rabenhof", list.Detail);
+    }
+
+    [Fact]
+    public async Task Readiness_names_every_host_whose_running_ghostunnel_admits_the_shared_name_operator_supplied_included()
+    {
+        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("handmade", "100.64.0.12"));
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        // A hand-made host on operator paths whose ghostunnel admits the shared name besides the operator's own.
+        var own = Path.Combine(w.Root, "operator");
+        Directory.CreateDirectory(own);
+        File.Copy(w.Store.SharedPaths.Cert, Path.Combine(own, "client.crt"));
+        File.Copy(w.Store.SharedPaths.Key, Path.Combine(own, "client.key"));
+        var record = w.Server("handmade").Clone();
+        record.TcpClientCertPath = Path.Combine(own, "client.crt");
+        record.TcpClientKeyPath = Path.Combine(own, "client.key");
+        await w.Servers.UpdateServerAsync(record);
+        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store);
+
+        Assert.Equal(MtlsClientCredentialKind.OperatorSupplied, w.Store.StatusOf(w.Server("handmade")).Kind);
+        var line = (await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync))
+            .Single(c => c.Title == "Gemeinsame Client-Identität im laufenden ghostunnel");
+        Assert.False(line.Ok);
+        Assert.Contains("Handmade", line.Detail);
+        Assert.DoesNotContain("Rabenhof", line.Detail);
+
+        // Narrowed by hand: the line turns green.
+        w.Host("handmade").RunningAllow = ["operator-client"];
+        line = (await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync))
+            .Single(c => c.Title == "Gemeinsame Client-Identität im laufenden ghostunnel");
+        Assert.True(line.Ok, line.Detail);
+    }
+
+    [Fact]
+    public async Task Readiness_points_a_host_restored_onto_the_shared_record_to_the_break_glass_re_onboarding()
+    {
+        using var w = new CredentialWorld();
+        var sharedRecord = w.Server("rabenhof").Clone();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        // An older self-backup restored: the record names the shared files again; the journal still says narrowed.
+        await w.Servers.UpdateServerAsync(sharedRecord);
+
+        var line = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store)
+            .MtlsClientCredentialChecks().Single(c => c.Title.EndsWith("Rabenhof", StringComparison.Ordinal));
+        Assert.False(line.Ok);
+        Assert.Contains("Notfall-Re-Onboarding per SSH", line.Detail);
     }
 
     // ---- registration and documentation ----

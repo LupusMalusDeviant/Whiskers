@@ -25,6 +25,24 @@ public static class ServerRemoval
         ArgumentNullException.ThrowIfNull(vault);
         ArgumentNullException.ThrowIfNull(server);
 
+        // R1-44 (review r1 MINOR 8): never while a certificate step holds the host — a running migration would lose
+        // its slot or journal. Refused before anything is removed.
+        var gate = clientCredentials?.HostLock(server.Id);
+        if (gate is not null && !await gate.WaitAsync(0))
+            throw new InvalidOperationException($"A certificate operation for {server.Name} is running; remove the server once it has finished.");
+        try
+        {
+            return await RemoveLockedAsync(servers, vault, server, clientCredentials);
+        }
+        finally
+        {
+            gate?.Release();
+        }
+    }
+
+    private static async Task<bool> RemoveLockedAsync(IServerConfigService servers, IVaultService vault, Models.ServerConfig server,
+        Whiskers.Services.Certificates.IMtlsClientCredentialStore? clientCredentials)
+    {
         // The record as stored when it was removed: a page showing an older copy may name a kubeconfig that a
         // rotation has replaced meanwhile.
         var removed = await servers.TakeServerAsync(server.Id) ?? server;

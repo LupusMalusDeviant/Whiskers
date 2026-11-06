@@ -30,6 +30,9 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
     private readonly ILogger<MtlsClientCredentialStore> _logger;
     private readonly string _mtlsDir;
     private readonly SemaphoreSlim _write = new(1, 1);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _hostLocks = new(StringComparer.Ordinal);
+
+    public SemaphoreSlim HostLock(string serverId) => _hostLocks.GetOrAdd(serverId, _ => new SemaphoreSlim(1, 1));
 
     private readonly Whiskers.Services.ServerConfig.IServerConfigService? _servers;
 
@@ -115,8 +118,12 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
         }
     }
 
+    /// <summary>The active identity; before the first activation, the identity of the pending slot (the name the host is
+    /// being moved to). Null when the store holds no slot for the server.</summary>
     public MtlsClientIdentity? IdentityOf(string serverId) =>
-        ReadState(serverId) is { } s ? MtlsClientIdentity.FromStem(serverId, s.Stem, GenerationOf(s.ActiveSlot)) : null;
+        ReadState(serverId) is { } s && (s.ActiveSlot ?? s.PendingSlot) is { } slot
+            ? MtlsClientIdentity.FromStem(serverId, s.Stem, GenerationOf(slot))
+            : null;
 
     public MtlsClientIdentity? PendingIdentityOf(string serverId) =>
         ReadState(serverId) is { PendingSlot: { } p } s ? MtlsClientIdentity.FromStem(serverId, s.Stem, GenerationOf(p)) : null;
@@ -140,8 +147,8 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
         ArgumentNullException.ThrowIfNull(server);
         var dir = HostDir(server.Id);
         var state = ReadState(server.Id);
-        if (pending && state is null)
-            throw new InvalidOperationException($"'{server.Id}' has no client credential yet; a pending one needs an active one.");
+        if (pending && state?.ActiveSlot is null)
+            throw new InvalidOperationException($"'{server.Id}' has no active client credential yet; renew or rotate needs one.");
         // The stem is fixed at the first issue and only ever read back afterwards (amendments 1 and 3).
         var identity = state is null
             ? MtlsClientIdentity.For(server, generation, SlugTakenByAnother(server.Id))
@@ -177,18 +184,14 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
             WriteAtomic(Path.Combine(slotDir, KeyFile), key.ExportPkcs8PrivateKeyPem(), secret: true);
             WriteAtomic(Path.Combine(slotDir, CertFile), bundlePem, secret: false);
 
+            // Every issue is pending until the server record names it and a connection through it is confirmed
+            // (amendment 4, 0007-B; review r1 MINOR 1): only then does ActivatePendingAsync make it active. A pending
+            // slot replaced by a newer one is no longer needed (never deleted while a record names it).
             var current = ReadState(server.Id);
-            StoredState next;
-            if (pending)
-            {
-                // A pending slot replaced by a newer one is no longer needed.
-                if (current!.PendingSlot is { } stale && stale != current.ActiveSlot) DeleteSlot(dir, stale);
-                next = current with { PendingSlot = slot };
-            }
-            else
-            {
-                next = new StoredState(server.Id, identity.Stem, slot, null, current?.ActiveSlot);
-            }
+            if (current?.PendingSlot is { } stale && stale != current.ActiveSlot) DeleteSlot(dir, stale);
+            var next = current is null
+                ? new StoredState(server.Id, identity.Stem, null, slot, null)
+                : current with { PendingSlot = slot };
             WriteState(dir, next);
         }
         finally
@@ -373,10 +376,11 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
         {
             var s = JsonSerializer.Deserialize<StoredState>(File.ReadAllText(path));
             // The name is read from the store, never re-derived — but what is read must still be a valid name and slots.
-            if (s is null || !SlotRegex().IsMatch(s.ActiveSlot ?? "")) return null;
+            if (s is null) return null;
+            if (s.ActiveSlot is not null && !SlotRegex().IsMatch(s.ActiveSlot)) return null;
             if (s.PendingSlot is not null && !SlotRegex().IsMatch(s.PendingSlot)) return null;
             if (s.PreviousSlot is not null && !SlotRegex().IsMatch(s.PreviousSlot)) return null;
-            _ = MtlsClientIdentity.FromStem(s.ServerId, s.Stem, GenerationOf(s.ActiveSlot!));
+            _ = MtlsClientIdentity.FromStem(s.ServerId, s.Stem, 1);
             return s;
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException or IOException)
@@ -437,7 +441,7 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
     }
 
     /// <summary>The <c>identity</c> file: the client-name stem and which slot is active, pending and previous.</summary>
-    private sealed record StoredState(string ServerId, string Stem, string ActiveSlot, string? PendingSlot, string? PreviousSlot);
+    private sealed record StoredState(string ServerId, string Stem, string? ActiveSlot, string? PendingSlot, string? PreviousSlot);
 
     [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")]
     private static partial Regex ServerIdRegex();

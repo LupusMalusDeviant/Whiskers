@@ -97,7 +97,25 @@ public static class MtlsCertificateValidator
         catch (CryptographicException ex) { throw new InvalidOperationException("step-ca returned no readable certificate.", ex); }
         if (chain.Count == 0) throw new InvalidOperationException("step-ca returned no certificate.");
         var leaf = chain[0];
+        var anchors = new X509Certificate2Collection();
+        var handedOut = false;
+        try
+        {
+            CheckIssuedClient(chain, leaf, anchors, caBundlePem, subjectPublicKeyInfo, expectedCommonName, nowUtc);
+            handedOut = true;
+            return leaf;
+        }
+        finally
+        {
+            // Everything but the returned leaf is disposed here (review r1 NIT); the leaf too when the check failed.
+            foreach (var c in chain) if (!handedOut || !ReferenceEquals(c, leaf)) c.Dispose();
+            foreach (var a in anchors) a.Dispose();
+        }
+    }
 
+    private static void CheckIssuedClient(X509Certificate2Collection chain, X509Certificate2 leaf, X509Certificate2Collection anchors,
+        string caBundlePem, byte[] subjectPublicKeyInfo, string expectedCommonName, DateTime? nowUtc)
+    {
         if (!leaf.PublicKey.ExportSubjectPublicKeyInfo().AsSpan().SequenceEqual(subjectPublicKeyInfo))
             throw new InvalidOperationException("The issued client certificate does not belong to the generated key.");
         if (leaf.SubjectName.Name != $"CN={expectedCommonName}")
@@ -125,7 +143,6 @@ public static class MtlsCertificateValidator
         if (leaf.NotBefore.ToUniversalTime() > now.AddMinutes(5) || leaf.NotAfter.ToUniversalTime() <= now)
             throw new InvalidOperationException("The issued client certificate is not valid now.");
 
-        var anchors = new X509Certificate2Collection();
         anchors.ImportFromPem(caBundlePem);
         if (anchors.Count == 0) throw new InvalidOperationException("The CA bundle holds no certificate.");
         using var built = new X509Chain();
@@ -135,8 +152,6 @@ public static class MtlsCertificateValidator
         foreach (var c in chain.Skip(1)) built.ChainPolicy.ExtraStore.Add(c);
         if (!built.Build(leaf))
             throw new InvalidOperationException("The issued client certificate does not chain to the fleet CA.");
-
-        return leaf;
     }
 
     /// <summary>The number of GeneralName entries in a SubjectAltName value (URIs and e-mail addresses included, which the

@@ -27,7 +27,7 @@ public enum MtlsProbeOutcome
 /// (<see cref="DockerConnectionManager.ValidateMtlsServerCert"/>: chain to the configured CA, the host's IP or name);
 /// nothing is cached and the connection pool is not touched.
 /// </summary>
-public static class MtlsClientProbe
+public static partial class MtlsClientProbe
 {
     private static readonly byte[] PingRequest = Encoding.ASCII.GetBytes("GET /_ping HTTP/1.1\r\nHost: docker\r\nConnection: close\r\n\r\n");
 
@@ -95,13 +95,17 @@ public static class MtlsClientProbe
         finally
         {
             clientCert.Dispose();
+            foreach (var anchor in anchors) anchor.Dispose();
         }
     }
 
     /// <summary>
-    /// Classifies a failed probe. Refused only for a TLS-level rejection: an <see cref="AuthenticationException"/>, or an
-    /// <see cref="IOException"/> that carries the platform's TLS error (an alert read after the handshake). A timeout, a
-    /// cancellation, a socket error such as a reset, or a plain end of stream is <see cref="MtlsProbeOutcome.NotChecked"/>.
+    /// Classifies a failed probe — narrowly (contract 0007 MI-8, review r1 MINOR 2): <see cref="MtlsProbeOutcome.Refused"/>
+    /// only when the chain carries evidence of a received TLS alert — OpenSSL's alert reason
+    /// (<c>sslv3 alert …</c>, <c>tlsv1 alert …</c>, <c>tlsv13 alert …</c>, <c>SSL_R_*_ALERT_*</c>) or an SChannel status
+    /// that a received alert maps to (<see cref="AlertStatusCodes"/>). Anything else is
+    /// <see cref="MtlsProbeOutcome.NotChecked"/>: a timeout, a cancellation, a socket error such as a reset, an end of
+    /// stream (OpenSSL 3's "unexpected eof while reading" included), and a bare TLS failure without an alert.
     /// </summary>
     internal static MtlsProbeOutcome Classify(Exception ex)
     {
@@ -111,16 +115,22 @@ public static class MtlsClientProbe
         }
         for (var e = (Exception?)ex; e is not null; e = e.InnerException)
         {
-            if (e is AuthenticationException) return MtlsProbeOutcome.Refused;
-            var type = e.GetType().FullName ?? "";
-            // OpenSSL (Linux) and SChannel (Windows) report a received alert as their own exception types.
-            if (e != ex && (type.Contains("OpenSsl", StringComparison.Ordinal) || type.Contains("SslException", StringComparison.Ordinal)
-                            || e is System.ComponentModel.Win32Exception))
+            if (e is System.ComponentModel.Win32Exception w && AlertStatusCodes.Contains(unchecked((uint)w.NativeErrorCode)))
                 return MtlsProbeOutcome.Refused;
-            if (e.Message.Contains("alert", StringComparison.OrdinalIgnoreCase)) return MtlsProbeOutcome.Refused;
+            if (AlertMessage().IsMatch(e.Message)) return MtlsProbeOutcome.Refused;
         }
         return MtlsProbeOutcome.NotChecked;
     }
+
+    /// <summary>SChannel statuses for a received alert: <c>SEC_E_UNTRUSTED_ROOT</c> (unknown_ca),
+    /// <c>SEC_E_ILLEGAL_MESSAGE</c> (handshake_failure, certificate_required), <c>SEC_E_CERT_UNKNOWN</c>
+    /// (bad_certificate, certificate_unknown), <c>SEC_E_CERT_EXPIRED</c> (certificate_expired). The server's own
+    /// certificate is checked by Whiskers' callback, not by SChannel, so these come from the peer.</summary>
+    internal static readonly IReadOnlySet<uint> AlertStatusCodes = new HashSet<uint> { 0x80090325, 0x80090326, 0x80090327, 0x80090328 };
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\b(sslv3|tlsv1|tlsv13) alert \w|SSL_R_(SSLV3|TLSV1|TLSV13)_ALERT_|received an alert:? (bad certificate|certificate required|certificate unknown|unknown ca|handshake failure|access denied)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex AlertMessage();
 
     /// <summary>The server check of the one-off connection: exactly <see cref="DockerConnectionManager.ValidateMtlsServerCert"/>.</summary>
     internal static bool ValidateServer(X509Certificate? cert, X509Chain? chain, X509Certificate2Collection anchors, string? host)

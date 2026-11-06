@@ -72,13 +72,22 @@ public static partial class MtlsAllowListCommands
           *,*) ;;
           *) if [ -f "$files" ]; then compose=$(base64 -w0 < "$files"); fi ;;
         esac
-        units=$(systemctl list-units --no-legend --plain --state=active,activating 'whiskers-*-guard*' 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
+        listed=$(systemctl list-units --no-legend --plain --state=active,activating 'whiskers-*-guard*') || { echo 'systemctl list-units failed: whether a guard is armed is unknown' >&2; exit 1; }
+        units=$(printf '%s\n' "$listed" | awk 'NF {print $1}' | tr '\n' ' ')
         printf 'ghostunnel=%s\n' "$gu"
         printf 'socketproxy=%s\n' "$sp"
         printf 'ghostunneldigests=%s\n' "$gudig"
         printf 'socketproxydigests=%s\n' "$spdig"
         printf 'compose=%s\n' "$compose"
         printf 'units=%s\n' "$units"
+        """);
+
+    /// <summary>The active Whiskers guard units (<c>whiskers-*-guard*</c>), one per line; exits non-zero when systemd
+    /// cannot be asked (a failed answer must not read as "none armed").</summary>
+    public static string ListGuardUnits() => MtlsCertificateCommands.AsRootScript("""
+        set -e
+        listed=$(systemctl list-units --no-legend --plain --state=active,activating 'whiskers-*-guard*') || { echo 'systemctl list-units failed: whether a guard is armed is unknown' >&2; exit 1; }
+        printf '%s\n' "$listed" | awk 'NF {print $1}'
         """);
 
     /// <summary>
@@ -101,12 +110,14 @@ public static partial class MtlsAllowListCommands
             total=$(grep -c -e 'allow-cn' {{f}} || true)
             plain=$(grep -c -E '^[[:space:]]*- --allow-cn=[a-z0-9.-]+[[:space:]]*$' {{f}} || true)
             if [ "$total" -lt 1 ] || [ "$total" != "$plain" ]; then echo 'unexpected --allow-cn lines in {{f}}' >&2; exit 1; fi
+            listed=$(systemctl list-units --no-legend --plain --state=active,activating 'whiskers-*-guard*') || { echo 'systemctl list-units failed: whether a guard is armed is unknown' >&2; exit 1; }
+            if [ -f {{f}}.prev ] && [ -n "$(printf '%s\n' "$listed" | awk 'NF {print $1}')" ]; then echo 'another run left {{f}}.prev while a guard is armed' >&2; exit 1; fi
             rm -f {{f}}.new
-            rm -f {{MarkerPrefix}}*
+            rm -f {{MarkerPrefix}}{{run}}
             cp -p {{f}} {{f}}.prev
             awk -v cns='{{string.Join(" ", cns)}}' '/allow-cn/ { if (!done) { ind = $0; sub(/-.*/, "", ind); n = split(cns, a, " "); for (i = 1; i <= n; i++) print ind "- --allow-cn=" a[i]; done = 1 } next } { print }' {{f}}.prev > {{f}}.new
-            [ "$(grep -v -e 'allow-cn' {{f}}.prev)" = "$(grep -v -e 'allow-cn' {{f}}.new)" ] || { rm -f {{f}}.new; echo 'the patch would change more than --allow-cn' >&2; exit 1; }
-            [ "$(grep -e 'allow-cn' {{f}}.new | sed -e 's/^[[:space:]]*- --allow-cn=//' -e 's/[[:space:]]*$//' | tr '\n' ' ')" = "{{expected}}" ] || { rm -f {{f}}.new; echo 'the patch did not produce the expected --allow-cn list' >&2; exit 1; }
+            [ "$(grep -v -e 'allow-cn' {{f}}.prev)" = "$(grep -v -e 'allow-cn' {{f}}.new)" ] || { rm -f {{f}}.new {{f}}.prev; echo 'the patch would change more than --allow-cn' >&2; exit 1; }
+            [ "$(grep -e 'allow-cn' {{f}}.new | sed -e 's/^[[:space:]]*- --allow-cn=//' -e 's/[[:space:]]*$//' | tr '\n' ' ')" = "{{expected}}" ] || { rm -f {{f}}.new {{f}}.prev; echo 'the patch did not produce the expected --allow-cn list' >&2; exit 1; }
             chmod --reference={{f}}.prev {{f}}.new
             mkdir -p {{WorkDir}}
             echo {{guard}} | base64 -d > {{guardScript}}

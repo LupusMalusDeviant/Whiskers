@@ -66,7 +66,7 @@ public sealed partial class MtlsCertificateService
         if (!MtlsClientCredentialStore.SamePath(server!.TcpCaCertPath, store.SharedPaths.Ca))
             return Failed(run, $"{server.Name} trusts an operator-supplied CA bundle ({server.TcpCaCertPath}); Whiskers does not touch it.");
 
-        var gate = _locks.GetOrAdd(server.Id, _ => new SemaphoreSlim(1, 1));
+        var gate = HostGate(server.Id);
         if (!await gate.WaitAsync(0, ct))
             return Failed(run, $"A certificate operation for {server.Name} is already running.");
         try
@@ -137,7 +137,8 @@ public sealed partial class MtlsCertificateService
         var current = _servers.GetServer(id)?.Clone() ?? throw new RolloutFailure($"{server.Name} was removed meanwhile.");
         if (!store.IsManaged(current))
             await SwitchRecordAsync(current, paths, onFailure: null, ct);
-        journal = await AdvanceAsync(store, id, journal, 3, ct);
+        await ActivateIfRecordNamesPendingAsync(store, id, verified: !store.IsManaged(current));
+        journal = await AdvanceAsync(store, id, journal, 3, CancellationToken.None);
 
         // 4 Narrow -----------------------------------------------------------------------------------------------------
         run.Enter("narrow", $"④ The proxy admits only {cn}…");
@@ -151,6 +152,8 @@ public sealed partial class MtlsCertificateService
         // 5 Record -----------------------------------------------------------------------------------------------------
         run.Enter("record", "⑤ Recording the result…");
         await AdvanceAsync(store, id, journal, 5, ct);
+        // Slots of earlier attempts (a re-issue on a resume) hold keys the host would admit: gone once phase 5 is recorded.
+        await store.DiscardPreviousAsync(id, CancellationToken.None);
         _logger.LogInformation("{Server} now admits only its own client credential {CommonName} (INV-58)", server.Name, cn);
         run.Enter("done", previous is null
             ? $"✅ {server.Name} admits only {cn} (there is no shared credential left to try)."
@@ -169,7 +172,7 @@ public sealed partial class MtlsCertificateService
         if (store.IdentityOf(server!.Id) is null)
             return Failed(run, $"The store holds no identity for {server.Name}; migrate it again.");
 
-        var gate = _locks.GetOrAdd(server.Id, _ => new SemaphoreSlim(1, 1));
+        var gate = HostGate(server.Id);
         if (!await gate.WaitAsync(0, ct))
             return Failed(run, $"A certificate operation for {server.Name} is already running.");
         try
@@ -205,7 +208,7 @@ public sealed partial class MtlsCertificateService
                 // A crash between the record save and the store update: the record wins once the connection is confirmed.
                 if (!await VerifyConnection(id, ct))
                     throw new RolloutFailure($"The server record of {server.Name} names the new certificate, but no connection through it could be confirmed.");
-                await store.ActivatePendingAsync(id, ct);
+                await store.ActivatePendingAsync(id, CancellationToken.None);
             }
             else if (stale.Generation != generation)
             {
@@ -223,9 +226,9 @@ public sealed partial class MtlsCertificateService
         var pending = await store.IssuePendingAsync(server, identity.Generation, ct);   // exactly these paths go into the record
 
         run.Enter("switch", "Switching to the new certificate…");
-        await SwitchRecordAsync(server, pending, onFailure: () => store.DiscardPendingAsync(id, ct), ct);
-        await store.ActivatePendingAsync(id, ct);
-        await store.DiscardPreviousAsync(id, ct);
+        await SwitchRecordAsync(server, pending, onFailure: () => store.DiscardPendingAsync(id, CancellationToken.None), ct);
+        await store.ActivatePendingAsync(id, CancellationToken.None);
+        await store.DiscardPreviousAsync(id, CancellationToken.None);
         run.Enter("done", $"Client certificate of {server.Name} renewed ({identity.CommonName}).");
         return new(true, "done", null, identity);
     }
@@ -272,7 +275,7 @@ public sealed partial class MtlsCertificateService
         {
             if (!await VerifyConnection(id, ct))
                 throw new RolloutFailure($"The server record of {server.Name} names the new generation, but no connection through it could be confirmed.");
-            await store.ActivatePendingAsync(id, ct);
+            await store.ActivatePendingAsync(id, CancellationToken.None);
             pending = null;
         }
         var switched = recordGeneration == next.Generation;
@@ -296,11 +299,11 @@ public sealed partial class MtlsCertificateService
         run.Enter("switch", "③ Switching Whiskers to the new generation…");
         if (!switched)
         {
-            await SwitchRecordAsync(server, targetPaths, onFailure: () => store.DiscardPendingAsync(id, ct), ct);
-            await store.ActivatePendingAsync(id, ct);
+            await SwitchRecordAsync(server, targetPaths, onFailure: () => store.DiscardPendingAsync(id, CancellationToken.None), ct);
+            await store.ActivatePendingAsync(id, CancellationToken.None);
             previousPaths = store.PreviousFor(id);
         }
-        journal = await AdvanceAsync(store, id, journal, 3, ct);
+        journal = await AdvanceAsync(store, id, journal, 3, CancellationToken.None);
 
         // 4 Narrow -----------------------------------------------------------------------------------------------------
         run.Enter("narrow", $"④ The proxy admits only {next.CommonName}…");
@@ -385,6 +388,15 @@ public sealed partial class MtlsCertificateService
             var widened = host.AllowedCommonNames.Append(cn).ToList();
             await ApplyGuardedAsync(server, store, sharedCn, run, host.Compose!, widened, target, mustFail: null);
         }
+        else if (!FileMatchesRunning(host))
+        {
+            // Running and file disagree (a guard restored the file but its recreate failed): nothing counts as done until
+            // the file says the same, so the widened list — what the file admits plus the new name — goes through a
+            // guarded apply again; the narrowing then removes the rest with its negative check (review r1 M2).
+            var widened = host.FileAllowedCommonNames.Union(host.AllowedCommonNames, StringComparer.Ordinal)
+                .Append(cn).Distinct(StringComparer.Ordinal).ToList();
+            await ApplyGuardedAsync(server, store, sharedCn, run, host.Compose!, widened, target, mustFail: null);
+        }
         else if (await ProbeCredential(target, CancellationToken.None) != MtlsProbeOutcome.Admitted)
         {
             throw new RolloutFailure($"The proxy of {server.Name} lists {cn} but does not admit the new credential.");
@@ -395,12 +407,13 @@ public sealed partial class MtlsCertificateService
         string cn, Models.ServerConfig target, Models.ServerConfig? previous, CancellationToken ct)
     {
         var host = await ReadHostAsync(current, store, sharedCn, run, requireNoForeignGuards: true, ct);
-        if (host.AllowedCommonNames.Count != 1 || host.AllowedCommonNames[0] != cn)
+        if (host.AllowedCommonNames.Count != 1 || host.AllowedCommonNames[0] != cn || !FileMatchesRunning(host))
         {
+            // Also when only the file still admits more (review r1 M2): the next `docker compose up` would bring it back.
             await ApplyGuardedAsync(current, store, sharedCn, run, host.Compose!, [cn], target, previous);
             return;
         }
-        // Already narrowed (a resumed run): both checks are made again before phase 4 is recorded.
+        // Already narrowed in the container and the file (a resumed run): both checks are made again before phase 4.
         if (await ProbeCredential(target, ct) != MtlsProbeOutcome.Admitted)
             throw new RolloutFailure($"The proxy of {current.Name} admits only {cn} but does not admit that credential.");
         if (previous is not null)
@@ -413,6 +426,16 @@ public sealed partial class MtlsCertificateService
         }
     }
 
+    /// <summary>A confirmation whose outcome is unknown (review r1 MINOR 4): it may have stopped the guard, so no rollback
+    /// is promised; the next run reads the state from ghostunnel's live arguments (amendment 7).</summary>
+    private static RolloutFailure StateUnknown(Models.ServerConfig server, string detail) =>
+        new($"State unknown: whether {server.Name} took the confirmation could not be told ({Trim(detail)}). The host may keep " +
+            "the new allow-list with no guard left, or restore the previous one. Run the step again; it reads the state from " +
+            "ghostunnel's live arguments. Nothing was recorded.");
+
+    private static bool FileMatchesRunning(MtlsHostState host) =>
+        host.FileAllowedCommonNames.SequenceEqual(host.AllowedCommonNames, StringComparer.Ordinal);
+
     /// <summary>Record switch: one save of the server record to <paramref name="paths"/>, then the cached Docker client is
     /// rebuilt and the connection checked; a failed check puts the record back.</summary>
     private async Task SwitchRecordAsync(Models.ServerConfig server, MtlsClientCredentialPaths paths, Func<Task>? onFailure, CancellationToken ct)
@@ -423,13 +446,29 @@ public sealed partial class MtlsCertificateService
         current.TcpClientKeyPath = paths.Key;
         current.TcpCaCertPath = paths.Ca;
         await _servers.UpdateServerAsync(current);
-        if (await VerifyConnection(server.Id, ct)) return;
+        // From the save onward the caller's token no longer applies (review r1 MINOR 5): a cancelled check would leave
+        // the record switched but unverified and never put back.
+        if (await VerifyConnection(server.Id, CancellationToken.None)) return;
 
         await _servers.UpdateServerAsync(before);
         _connections?.InvalidateClient(server.Id);
         if (onFailure is not null) await onFailure();
         throw new RolloutFailure($"The connection to {server.Name} with the new credential could not be verified; the previous " +
                                  "credential is back in place (the proxy still admits it).");
+    }
+
+    /// <summary>The record is authoritative (amendment 4): once it names the pending slot and a connection through it was
+    /// confirmed (<paramref name="verified"/>, or checked here), the store makes that slot active. Nothing to do when the
+    /// record names another slot.</summary>
+    private async Task ActivateIfRecordNamesPendingAsync(IMtlsClientCredentialStore store, string id, bool verified)
+    {
+        var record = _servers.GetServer(id);
+        if (record is null || store.PendingFor(id) is not { } pending
+            || !MtlsClientCredentialStore.SamePath(record.TcpClientCertPath, pending.Cert))
+            return;
+        if (!verified && !await VerifyConnection(id, CancellationToken.None))
+            throw new RolloutFailure($"The server record of {record.Name} names the new credential, but no connection through it could be confirmed.");
+        await store.ActivatePendingAsync(id, CancellationToken.None);
     }
 
     /// <summary>Applies an allow-list under the guard and confirms it — one script through a one-off connection with the
@@ -463,7 +502,18 @@ public sealed partial class MtlsCertificateService
                         if (negative == MtlsProbeOutcome.NotChecked) { stop = "gave no TLS alert for the previous credential (not checked)"; continue; }
                     }
                     // One script through the NEW credential: own guard still pending → stop it → marker.
-                    var confirmed = await RunConfirmation(target, MtlsAllowListCommands.Confirm(compose, suffix), CancellationToken.None);
+                    (string Output, string Error, int ExitCode) confirmed;
+                    try
+                    {
+                        confirmed = await RunConfirmation(target, MtlsAllowListCommands.Confirm(compose, suffix), CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        // The script may have run (timer stopped, perhaps the marker written) before the answer was lost.
+                        throw StateUnknown(server, ex.Message);
+                    }
+                    if (confirmed.ExitCode is 124 or 137)
+                        throw StateUnknown(server, "the confirmation was stopped by its 20-second limit inside the lock");
                     if (confirmed.ExitCode != 0)
                     {
                         stop = "did not take the confirmation (" + Trim(confirmed.Error.Trim()) + ")";

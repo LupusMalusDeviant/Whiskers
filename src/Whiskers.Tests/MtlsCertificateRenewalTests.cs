@@ -152,6 +152,18 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     }
 
     [Fact]
+    public async Task No_renewal_starts_while_a_whiskers_guard_is_armed_on_the_host()
+    {
+        // R1-44 review r1: an allow-list run (or another renewal) still waits for its confirmation there.
+        var host = new SimulatedFleet(_ca) { GuardUnits = "whiskers-allow-guard-r7.timer" };
+        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("guard timer is armed", result.Message);
+        Assert.Equal(["guard-armed"], host.Steps);
+    }
+
+    [Fact]
     public async Task A_server_without_mtls_has_nothing_to_renew()
     {
         var host = new SimulatedFleet(_ca);
@@ -206,6 +218,8 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
         };
         public string[] CsrIps { get; init; } = [Ip];
         public bool ProxyComesBack { get; init; } = true;
+        /// <summary>Active Whiskers guard units on the host (null: none).</summary>
+        public string? GuardUnits { get; init; }
         public List<string> Steps => _log.Select(l => l.Step).ToList();
         public string ServerOf(string step) => _log.First(l => l.Step == step).Server;
 
@@ -233,6 +247,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
                 _ when script.Contains("echo staged") => Step("stage", "staged"),
                 _ when script.Contains("whiskers-cert-guard-") => Activate(),
                 _ when script.Contains("touch .renew-ok") => Step("confirm", "confirmed"),
+                _ when script.Contains("systemctl list-units") => GuardUnits is null ? "" : Step("guard-armed", GuardUnits),
                 _ => Step("unexpected", ""),
             };
             return Task.FromResult(new CommandResult { ExitCode = 0, Output = output });
