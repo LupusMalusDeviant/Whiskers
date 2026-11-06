@@ -141,7 +141,7 @@ guarded migration in `docs/operations/per-host-mtls-migration.md`, which edits o
 
 **Runtime tools in the image.** The image ships what Whiskers starts as a process and nothing of the Docker engine: the static docker CLI (local terminal `docker exec`), `nsenter` (host shell of the full profile), `ssh`/`sshpass`, `tailscale`/`tailscaled` with `iptables`, the PostgreSQL 18 client tools and `curl` (health probe). `ImageRuntimeToolsTests` keeps that list in step with the source and checks a built image in CI (`image-runtime` job, x64 and arm64): tools, terminal, host shell, a compose deployment on the runner host and its cleanup, a VPN runtime smoke, multi-arch base digests and the boot. The deployment test needs `docker compose` in PID 1's namespaces of the Docker host (a Linux host or a docker:dind container; Docker Desktop's VM has none, so it skips there unless `WHISKERS_IMAGE_TESTS_REQUIRED=true`). Run them locally against an image with `WHISKERS_IMAGE=<image> dotnet test src/Whiskers.Tests --filter Category=ImageRuntime`. The Tailscale and PostgreSQL packages come from their apt repositories at their current version.
 
-See the [README quick start](../README.md#quick-start) for the user-facing install paths.
+See the [README install section](../README.md#install) and [docs/installation.md](../docs/installation.md) for the user-facing install paths.
 
 ## `tailnet-guard.sh` — for hosts that reach their fleet over Tailscale
 

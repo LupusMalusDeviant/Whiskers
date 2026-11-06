@@ -25,7 +25,7 @@ kubectl create secret generic whiskers-vault --from-file=vaultKey=vault.key
 # unreadable — then remove the local copy:
 shred -u vault.key   # or: rm -f vault.key
 
-# Verify the image signature of the release you install (keyless cosign, see the README "Supply chain"):
+# Verify the image signature of the release you install (keyless cosign, see docs/security-architecture.md "Supply chain"):
 cosign verify ghcr.io/lupusmalusdeviant/whiskers:X.Y.Z \
   --certificate-identity-regexp '^https://github\.com/LupusMalusDeviant/Whiskers/\.github/workflows/release\.yml@refs/tags/vX\.Y\.Z$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com

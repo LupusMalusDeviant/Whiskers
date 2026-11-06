@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please check the roadmap section of the README and existing issues first —
+        Please check docs/roadmap.md and existing issues first —
         some gaps (e.g. git-based deploys, registry management UI) are known and planned.
   - type: textarea
     id: problem

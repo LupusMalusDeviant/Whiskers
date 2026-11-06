@@ -6,6 +6,10 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
+  settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
+  `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,
+  `security-architecture.md`, `screenshots.md`, `roadmap.md` and `project-structure.md` (indexed in `docs/README.md`).
 - **Exposure changes in compose deployments are decided as such (contract 0006, INV-62).** A compose deployment that
   publishes a port, uses the host network, runs privileged, adds capabilities, shares host namespaces, mounts devices,
   weakens a security option, shares a namespace with another container or carries a route label (Tailscale
