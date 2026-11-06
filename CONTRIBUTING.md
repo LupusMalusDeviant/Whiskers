@@ -27,7 +27,7 @@ For local development without SSO, set `Auth__Disabled=true` and
 
 **Windows:** C# sources, `.razor` files and everything under `deploy/` are checked out with LF line endings
 (`.gitattributes`), because raw and verbatim strings in them become shell scripts and compose files on Linux hosts.
-A checkout made before that rule still has CRLF files; `SourceLineEndingTests` and the Docker build then fail.
+A checkout made before that rule still has CRLF files; `SourceLineEndingTests` and, for C# sources, the Docker build then fail.
 Commit or stash your work first, then refresh the checkout once:
 
 ```bash

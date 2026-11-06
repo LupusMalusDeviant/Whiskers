@@ -47,8 +47,8 @@ COPY src/Whiskers.Migrations.Sqlite/ ./Whiskers.Migrations.Sqlite/
 COPY src/Whiskers.Migrations.Postgres/ ./Whiskers.Migrations.Postgres/
 # Raw/verbatim C# strings become host scripts; a CR in them breaks sh (e.g. the mTLS renewal guard). A stale CRLF
 # checkout on Windows must not build an image: refresh it once (see SourceLineEndingTests).
-RUN if grep -rlI --include='*.cs' --include='*.razor' "$(printf '\r')" /src; then \
-      echo "CR line endings in the sources above: refresh the checkout before building"; exit 1; fi
+RUN rc=0; grep -rl --include='*.cs' --include='*.razor' "$(printf '\r')" /src || rc=$?; \
+    if [ "$rc" -ne 1 ]; then echo "CR line endings in the sources above (or grep failed, exit $rc): refresh the checkout"; exit 1; fi
 WORKDIR /src/Whiskers
 RUN dotnet publish -c Release --no-restore -o /app/publish
 

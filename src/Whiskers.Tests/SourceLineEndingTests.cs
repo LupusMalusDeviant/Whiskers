@@ -13,11 +13,16 @@ public sealed class SourceLineEndingTests
     public void No_compiled_source_file_contains_a_carriage_return()
     {
         var root = DeploymentScripts.RepoRoot();
-        var offenders = Directory.EnumerateFiles(Path.Combine(root, "src"), "*.*", SearchOption.AllDirectories)
+        var sources = Directory.EnumerateFiles(Path.Combine(root, "src"), "*.*", SearchOption.AllDirectories)
             .Where(p => p.EndsWith(".cs", StringComparison.Ordinal) || p.EndsWith(".razor", StringComparison.Ordinal))
-            .Where(p => !IsBuildOutput(p))
-            .Where(p => File.ReadAllBytes(p).Contains((byte)'\r'))
-            .Select(p => Path.GetRelativePath(root, p).Replace('\\', '/'))
+            .Select(p => (Full: p, Relative: Path.GetRelativePath(root, p).Replace('\\', '/')))
+            .Where(f => !IsBuildOutput(f.Relative))
+            .ToList();
+        Assert.True(sources.Count > 500, $"only {sources.Count} source files found under src/ — the scan is not looking at the sources");
+
+        var offenders = sources
+            .Where(f => File.ReadAllBytes(f.Full).Contains((byte)'\r'))
+            .Select(f => f.Relative)
             .Order(StringComparer.Ordinal)
             .ToList();
 
@@ -27,9 +32,22 @@ public sealed class SourceLineEndingTests
             + string.Join('\n', offenders.Take(20)));
     }
 
-    private static bool IsBuildOutput(string path)
+    [Fact]
+    public void The_image_build_refuses_CR_sources_before_publishing()
     {
-        var p = path.Replace('\\', '/');
-        return p.Contains("/bin/", StringComparison.Ordinal) || p.Contains("/obj/", StringComparison.Ordinal);
+        var lines = File.ReadAllLines(Path.Combine(DeploymentScripts.RepoRoot(), "Dockerfile"));
+        var guard = Array.FindIndex(lines, l => l.Contains("grep -rl --include='*.cs' --include='*.razor'", StringComparison.Ordinal)
+                                                && l.Contains("printf '\\r'", StringComparison.Ordinal));
+        var lastSourceCopy = Array.FindLastIndex(lines, l => l.StartsWith("COPY src/", StringComparison.Ordinal));
+        var publish = Array.FindIndex(lines, l => l.Contains("dotnet publish", StringComparison.Ordinal));
+
+        Assert.True(guard > lastSourceCopy && guard < publish,
+            $"the CR guard must run after the last 'COPY src/' (line {lastSourceCopy + 1}) and before 'dotnet publish' (line {publish + 1}); found at line {guard + 1}");
+        Assert.Contains("-ne 1 ]", lines[guard + 1], StringComparison.Ordinal);   // only "no match" passes; grep errors fail
     }
+
+    // Relative to the repository root, so a clone under a directory called bin/ or obj/ is still scanned.
+    private static bool IsBuildOutput(string relativePath) =>
+        relativePath.StartsWith("bin/", StringComparison.Ordinal) || relativePath.Contains("/bin/", StringComparison.Ordinal)
+        || relativePath.StartsWith("obj/", StringComparison.Ordinal) || relativePath.Contains("/obj/", StringComparison.Ordinal);
 }
