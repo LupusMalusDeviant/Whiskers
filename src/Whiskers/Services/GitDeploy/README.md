@@ -2,7 +2,9 @@
 
 **Git-based deployments** (missingFeatures F5, deliberately lean — no buildpacks, no PR previews):
 a repo is cloned/updated **on the target server** via `IHostCommandExecutor`, built with its own
-compose file and brought up with `docker compose up -d`.
+compose file and brought up with `docker compose up -d` — since contract 0006 through `IComposeRunner`: pull
+(`--ignore-buildable`, new), build with `--pull`, inspect the images it built, `up -d --pull never --no-build`, then
+the re-check of the containers it created (budgets 300 s / 600 s / 300 s).
 
 ## Files
 

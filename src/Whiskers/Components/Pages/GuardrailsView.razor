@@ -407,7 +407,7 @@
         Presets = s.Presets.Select(p => new GuardrailPreset { Name = p.Name, Policy = ClonePolicy(p.Policy) }).ToList(),
     };
 
-    private static GuardrailPolicy ClonePolicy(GuardrailPolicy s) => new()
+    internal static GuardrailPolicy ClonePolicy(GuardrailPolicy s) => new()
     {
         MaxAutonomousLevel = s.MaxAutonomousLevel,
         ReadOnlyMode = s.ReadOnlyMode,
@@ -419,5 +419,8 @@
         ToolAllowList = new(s.ToolAllowList),
         ProtectedResources = new(s.ProtectedResources),
         ForbiddenArgPatterns = new(s.ForbiddenArgPatterns),
+        // Contract 0006: not edited on this page, but a save must keep them (null = the default stays null).
+        ExposureLabelPrefixes = s.ExposureLabelPrefixes is null ? null : new(s.ExposureLabelPrefixes),
+        ExposureConfirmClasses = s.ExposureConfirmClasses is null ? null : new(s.ExposureConfirmClasses),
     };
 }

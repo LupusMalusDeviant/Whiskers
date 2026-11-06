@@ -15,6 +15,7 @@
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
 @inject IUiMutationRunner Mutations
 @inject IComposePlanner ComposePlanner
+@inject IComposeRunner ComposeRunner
 @inject IStringLocalizer<SharedResource> L
 @using Whiskers.Models.Cve
 @implements IAsyncDisposable
@@ -988,21 +989,10 @@ else
             // then recreates or collides with — each is decided (protected resources, kill switch) before anything is
             // written, and exactly the planned .env and files are used. The content stays inside the delegate.
             var envContent = sb.ToString();
-            var plan = await ComposePlanner.PlanEnvChangeAsync(_container, sid, _ => envContent);
-            var affected = new List<ContainerInfo> { _container };
-            affected.AddRange(plan.Containers.Where(c => c.Id != _container.Id));
-            // What the project mounts is decided too (R1-16), as for a deployment: compose up recreates it with them.
-            var restartResult = await Mutations.RunMountsAsync(plan, () => ForEachServiceAsync(affected, sid, 0,
-                async () =>
-                {
-                    // Planned again right before writing: a container that turned up meanwhile was not decided.
-                    var current = await ComposePlanner.PlanEnvChangeAsync(_container, sid, _ => envContent);
-                    current.EnsureDecided(MutationScope.Current);
-                    var restart = await HostCommandExecutor.ExecuteMutationAsync(sid, current.DeployScript(pull: false),
-                        TimeSpan.FromMinutes(2));
-                    if (!restart.Success) MutationScope.Fail("Writing .env or docker compose up failed.");
-                    return restart;
-                }));
+            // Mounts, exposures (contract 0006, audited, nothing to confirm — PC-D1), then each affected container,
+            // planned again before writing, run and re-checked (ComposeImpact.SaveEnvAsync).
+            var restartResult = await Mutations.SaveEnvAsync(HostCommandExecutor, ComposePlanner, ComposeRunner,
+                _container, sid, envContent);
 
             // Each affected container's gateway event records the save; a failed restart is Failed there (R1-21).
             if (restartResult.Success)
@@ -1031,16 +1021,6 @@ else
             _envSaving = false;
         }
     }
-
-    /// <summary>Runs <paramref name="action"/> inside one <c>container.env_file_save</c> decision per affected
-    /// container (nested), so a single refusal stops the whole save.</summary>
-    private Task<T> ForEachServiceAsync<T>(IReadOnlyList<ContainerInfo> services, string serverId, int index,
-        Func<Task<T>> action) =>
-        index >= services.Count
-            ? action()
-            : Mutations.RunAsync("container.env_file_save",
-                new { containerId = services[index].Id, name = services[index].Name, serverId },
-                _ => ForEachServiceAsync(services, serverId, index + 1, action));
 
 
     public async ValueTask DisposeAsync()

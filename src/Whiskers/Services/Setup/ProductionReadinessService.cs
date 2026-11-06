@@ -35,14 +35,22 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     private readonly Whiskers.Configuration.DataPathOptions? _dataPaths;
     private readonly Whiskers.Utils.ForwardedHeadersObserver? _forwarded;
     private readonly Whiskers.Services.Certificates.IMtlsClientCredentialStore? _clientCredentials;
+    private readonly Whiskers.Services.Docker.IDockerService? _docker;
+    private readonly Whiskers.Services.Guardrails.IGuardrailStore? _guardrails;
+    private readonly IReadOnlySet<string> _selfContainerNames;
 
     public ProductionReadinessService(IConfiguration config, IVaultService vault, IServiceScopeFactory scopeFactory,
         IServerConfigService? servers = null, IAppSettingsStore? appSettings = null,
         Whiskers.Services.Agent.IAgentSettingsStore? agentSettings = null, Whiskers.Configuration.DataPathOptions? dataPaths = null,
         VaultKeyRingRepository? keyRing = null, Whiskers.Utils.ForwardedHeadersObserver? forwarded = null,
-        Whiskers.Services.Certificates.IMtlsClientCredentialStore? clientCredentials = null)
+        Whiskers.Services.Certificates.IMtlsClientCredentialStore? clientCredentials = null,
+        Whiskers.Services.Docker.IDockerService? docker = null, Whiskers.Services.Guardrails.IGuardrailStore? guardrails = null,
+        IReadOnlySet<string>? selfContainerNames = null)
     {
         _clientCredentials = clientCredentials;
+        _docker = docker;
+        _guardrails = guardrails;
+        _selfContainerNames = selfContainerNames ?? Whiskers.Services.LogMonitor.Hygiene.LogScanExclusions.ManualNamesFromEnvironment();
         _forwarded = forwarded;
         _keyRing = keyRing;
         _dataPaths = dataPaths;
@@ -71,6 +79,9 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                   "Internet stellt."
                 : "Login ist erforderlich (lokal, Google oder OIDC).",
             null, null));
+        // 1b) Contract 0006: with sign-in off, Whiskers' own container must not be published through a route label.
+        if (authDisabled && await SelfExposureCheckAsync() is { } selfExposure)
+            checks.Add(selfExposure);
 
         // 2) Vault — without VAULT_KEY stored secrets are unavailable/plaintext-blocked.
         checks.Add(new ReadinessCheck(
@@ -268,6 +279,52 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         }
 
         return checks;
+    }
+
+    /// <summary>The title of the line <see cref="SelfExposureCheckAsync"/> adds (contract 0006).</summary>
+    internal const string SelfExposureTitle = "Whiskers not published with sign-in turned off";
+
+    private static readonly TimeSpan SelfExposureReadTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Contract 0006 (synergy with H2), called only with <c>Auth:Disabled</c>: reads Whiskers' own container on its own
+    /// host (<see cref="Whiskers.Services.LogMonitor.LogMonitorService.ResolveSelfServerIds"/>), found by the names in
+    /// <c>WHISKERS_SELF_CONTAINERS</c> as <see cref="Whiskers.Services.LogMonitor.Hygiene.LogScanExclusions"/> does. A label
+    /// with an exposure prefix is not OK and the line quotes only its key; a container that cannot be found or read is
+    /// "unknown", not OK. No label: no line.
+    /// </summary>
+    internal async Task<ReadinessCheck?> SelfExposureCheckAsync()
+    {
+        const string unknown = "Unknown: Whiskers' own container could not be found or read, so it is not known whether it is " +
+                               "published through a route label (Tailscale Funnel, Traefik, Caddy) with sign-in turned off. " +
+                               "WHISKERS_SELF_CONTAINERS names it.";
+        if (_docker is null || _servers is null) return new ReadinessCheck(SelfExposureTitle, false, unknown, null, null);
+        var prefixes = _guardrails?.Current.EffectiveExposureLabelPrefixes
+                       ?? Whiskers.Configuration.GuardrailPolicy.DefaultExposureLabelPrefixes;
+        var found = false;
+        try
+        {
+            foreach (var serverId in Whiskers.Services.LogMonitor.LogMonitorService.ResolveSelfServerIds(_servers))
+            {
+                using var cts = new CancellationTokenSource(SelfExposureReadTimeout);
+                var containers = await _docker.ListContainersAsync(all: true, serverId, cts.Token).WaitAsync(cts.Token);
+                foreach (var container in containers.Where(c => _selfContainerNames.Contains(c.Name.TrimStart('/'))))
+                {
+                    found = true;
+                    var label = container.Labels.Keys
+                        .Where(k => prefixes.Any(p => k.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                        .Order(StringComparer.Ordinal).FirstOrDefault();
+                    if (label is not null)
+                        return new ReadinessCheck(SelfExposureTitle, false,
+                            $"Whiskers itself is published through `{label}` with sign-in turned off.", null, null);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return new ReadinessCheck(SelfExposureTitle, false, unknown, null, null);
+        }
+        return found ? null : new ReadinessCheck(SelfExposureTitle, false, unknown, null, null);
     }
 
     /// <summary>

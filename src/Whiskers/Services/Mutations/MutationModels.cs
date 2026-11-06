@@ -80,6 +80,17 @@ public sealed record MutationTarget(string Kind, string Id, string? Name = null,
     /// stored name and repository. Never a name the caller supplied.</summary>
     public IReadOnlyList<string> Aliases { get; init; } = Array.Empty<string>();
 
+    /// <summary>Contract 0006: the exposures a compose deployment adds (<see cref="ComposeExposure.Identity"/>: service,
+    /// kind, key and value), from the plan the resolver made or from the nested decision's <c>exposure</c> and
+    /// <c>exposureWithheld</c> arguments. A withheld one is also in <see cref="Withheld"/>: compared and bound, never
+    /// written. <c>ExposureChangeRule</c> reads only these.</summary>
+    public IReadOnlyList<string> Exposures { get; init; } = Array.Empty<string>();
+
+    /// <summary>Contract 0006 (review m1): the withheld <see cref="Exposures"/> whose key may be shown — only the value
+    /// is withheld (a value from a variable, or a literal value that could be a secret). The reason names their key;
+    /// an entry withheld and not listed here is named by its kind only.</summary>
+    public IReadOnlySet<string> ExposureKeysShown { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;
+
     /// <summary>The resolver found the target in the inventory and <see cref="Id"/> is canonical. False for a
     /// target that is created by the operation or whose kind is resolved by its own service.</summary>
     public bool Resolved { get; init; }

@@ -298,7 +298,7 @@ public sealed partial class ProtectedResourceResolutionTests
     {
         // e.g. through extends or an anchor form the model does not follow: compose's own model counts.
         _host.ComposeConfig = """
-            {"services":{"a":{"volumes":[{"type":"bind","source":"/opt/dockerproxy/certs","target":"/c"},
+            {"services":{"a":{"image":"x","volumes":[{"type":"bind","source":"/opt/dockerproxy/certs","target":"/c"},
               {"type":"volume","source":"data","target":"/d"},{"type":"tmpfs","target":"/t"}]}},
              "volumes":{"data":{"name":"serverwatch-data"}}}
             """;
@@ -411,11 +411,18 @@ public sealed partial class ProtectedResourceResolutionTests
     public async Task The_mounts_decision_of_a_planned_deployment_covers_each_mount()
     {
         var h = new ProtectionHarness();
-        var refused = await AsKey(h, "compose.deploy", new { serverId = "local", mounts = "/srv/a\nserverwatch-data" });
-        var allowed = await AsKey(h, "compose.deploy", new { serverId = "local", mounts = "/srv/a\nweb-cache" });
+        // The nested mounts decision is made on the automation surface (a key-owned gate); a caller over MCP may not bring
+        // `mounts` at all (contract 0006, review N3).
+        var refused = await h.RunAsync("compose.deploy", new { serverId = "local", mounts = "/srv/a\nserverwatch-data" },
+            ProtectionHarness.AdminKey, MutationSurface.Automation);
+        var allowed = await h.RunAsync("compose.deploy", new { serverId = "local", mounts = "/srv/a\nweb-cache" },
+            ProtectionHarness.AdminKey, MutationSurface.Automation);
+        var brought = await AsKey(h, "compose.deploy", new { serverId = "local", mounts = "/srv/a\nweb-cache" });
 
         Assert.Equal(MutationStatus.Denied, refused.Status);
         Assert.Equal(MutationStatus.Executed, allowed.Status);
+        Assert.Equal(MutationStatus.Denied, brought.Status);
+        Assert.Contains("'mounts'", brought.Reason);
     }
 
     [Fact]

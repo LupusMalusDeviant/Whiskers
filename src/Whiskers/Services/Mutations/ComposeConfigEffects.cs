@@ -104,6 +104,55 @@ public static class ComposeConfigEffects
         }
     }
 
+    /// <summary>One service compose will start (contract 0006): its image, whether it is built, what it exposes and
+    /// which namespaces it shares.</summary>
+    public sealed record ActiveService(string Name, string Image, bool Build, IReadOnlyList<ComposeExposure> Exposures,
+        IReadOnlyList<(string Field, string Reference)> Shared)
+    {
+        /// <summary>The service sets <c>cgroup</c> (contract 0006, review M1).</summary>
+        public bool DeclaresCgroup { get; init; }
+    }
+
+    /// <summary>
+    /// The services compose will start, as its resolved model lists them (contract 0006, Amendment 8): a service of an
+    /// inactive profile is not in it. The image is <c>services.&lt;s&gt;.image</c>, or compose's default name for a
+    /// <c>build:</c> service (<c>&lt;project&gt;-&lt;service&gt;</c>). Every exposure here counts as possibly from a
+    /// variable (withheld); the planner keeps what the plan model read itself as the model read it.
+    /// </summary>
+    public static IReadOnlyList<ActiveService> ActiveServices(string json, string projectName, IReadOnlyList<string> prefixes)
+    {
+        JsonElement root;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            root = document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            throw new ComposePlanException("docker compose did not return a readable model of the deployment.");
+        }
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("services", out var services)
+            || services.ValueKind != JsonValueKind.Object)
+            throw new ComposePlanException("docker compose did not return the deployment's services.");
+        var networks = Section(root, "networks");
+        var active = new List<ActiveService>();
+        foreach (var service in services.EnumerateObject())
+        {
+            var build = service.Value.TryGetProperty("build", out var b) && b.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined);
+            var image = String(service.Value, "image") is { Length: > 0 } named ? named
+                : build ? $"{projectName}-{service.Name}"
+                : throw new ComposePlanException("docker compose resolves a service without an image.");
+            active.Add(new ActiveService(service.Name, image, build,
+                ComposeExposures.FromConfig(service.Name, service.Value, networks, prefixes),
+                ComposeExposures.SharedNamespaces(service.Value).ToList())
+            {
+                DeclaresCgroup = service.Value.TryGetProperty("cgroup", out var cgroup)
+                                 && cgroup.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined),
+            });
+        }
+        return active;
+    }
+
     private static IEnumerable<ComposeMount> MountsOf(JsonElement service,
         IReadOnlyDictionary<string, JsonElement> volumes, IReadOnlyDictionary<string, string> files, string projectName)
     {

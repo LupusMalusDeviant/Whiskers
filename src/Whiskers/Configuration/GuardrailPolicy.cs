@@ -43,6 +43,37 @@ public class GuardrailPolicy
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool RequireSecondApprover { get; set; }
 
+    /// <summary>The label prefixes Whiskers built in for exposure changes (contract 0006): a tool on the host turns a label
+    /// with one of them into a route (Tailscale Funnel or Serve through DockTail, Traefik, caddy-docker-proxy).</summary>
+    public static IReadOnlyList<string> DefaultExposureLabelPrefixes { get; } =
+        ["docktail.funnel.", "docktail.service.", "traefik.http.routers.", "traefik.tcp.routers.", "caddy"];
+
+    /// <summary>The exposure classes the agent and API keys need a confirmation for by default (contract 0006, D1).</summary>
+    public static IReadOnlyList<string> DefaultExposureConfirmClasses { get; } = ["public", "host"];
+
+    /// <summary>Contract 0006: label key prefixes (case-insensitive) that make a compose label an exposure change. Optional
+    /// in <c>guardrails.json</c>; <c>null</c> means the default.</summary>
+    public List<string>? ExposureLabelPrefixes { get; set; } = [.. DefaultExposureLabelPrefixes];
+
+    /// <summary>Contract 0006: the exposure classes (<c>public</c>, <c>host</c>, <c>published</c>) for which the agent and
+    /// API keys need a confirmation. Optional in <c>guardrails.json</c>; <c>null</c> means the default, an empty list turns
+    /// the confirmation off (an explicit operator choice).</summary>
+    public List<string>? ExposureConfirmClasses { get; set; } = [.. DefaultExposureConfirmClasses];
+
+    /// <summary>The prefixes in force: <see cref="ExposureLabelPrefixes"/>, or the default when it is <c>null</c>.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> EffectiveExposureLabelPrefixes =>
+        ExposureLabelPrefixes is { } prefixes
+            ? prefixes.Where(p => !string.IsNullOrWhiteSpace(p)).ToList()
+            : DefaultExposureLabelPrefixes;
+
+    /// <summary>The classes in force: <see cref="ExposureConfirmClasses"/>, or the default when it is <c>null</c>.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> EffectiveExposureConfirmClasses =>
+        ExposureConfirmClasses is { } classes
+            ? classes.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim().ToLowerInvariant()).ToList()
+            : DefaultExposureConfirmClasses;
+
     /// <summary>A deep copy: callers that edit it never change a live policy.</summary>
     public GuardrailPolicy Clone() => new()
     {
@@ -57,6 +88,9 @@ public class GuardrailPolicy
         ForbiddenArgPatterns = ForbiddenArgPatterns is null ? null! : [.. ForbiddenArgPatterns],
         MaxActionsPerSession = MaxActionsPerSession,
         RequireSecondApprover = RequireSecondApprover,
+        // null (the default) stays null.
+        ExposureLabelPrefixes = ExposureLabelPrefixes is null ? null : [.. ExposureLabelPrefixes],
+        ExposureConfirmClasses = ExposureConfirmClasses is null ? null : [.. ExposureConfirmClasses],
     };
 
     /// <summary>What applies while no valid policy could be loaded (INV-25): every mutation refused (kill switch),

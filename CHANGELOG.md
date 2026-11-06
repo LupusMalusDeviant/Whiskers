@@ -6,6 +6,36 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Exposure changes in compose deployments are decided as such (contract 0006, INV-62).** A compose deployment that
+  publishes a port, uses the host network, runs privileged, adds capabilities, shares host namespaces, mounts devices,
+  weakens a security option, shares a namespace with another container or carries a route label (Tailscale
+  Funnel/serve via DockTail, Traefik, Caddy) is decided on each of these on every compose path (Compose editor, app
+  templates, `deploy_compose`, `set_container_env`, the `.env` save, compose webhooks, Git deploy), and what starts is
+  checked against the decision. New policy fields `ExposureLabelPrefixes` and `ExposureConfirmClasses`; new
+  capability `container.disable_restart` (only composed); new notifications `exposure_change` (suppressible) and
+  `exposure_violation` (never suppressed); a readiness line for Whiskers' own container published with sign-in off.
+  **Behaviour changes:**
+  - An agent's or API key's deployment with Funnel (or another `public` route label) or the host network (class
+    `host`) now waits for a confirmation **even under a policy that lets Admin act autonomously**; an unattended run
+    owned by a key is refused. An empty `ExposureConfirmClasses` turns this off.
+  - The new defaults change every policy's `VersionHash`: open approvals and the policy snapshots of pinned runs
+    expire at the upgrade.
+  - Unresolved variables are now refused: a label key, a label value under an exposure prefix, a port, network or
+    privilege field, a relative `label_file` or `COMPOSE_PROFILES` from a variable the `.env` does not set refuses the
+    plan (compose would also read the host's environment).
+  - Redeploys of projects with `build:` services now rebuild with `--pull` (compose deploys, app templates, compose
+    webhooks); the `.env` paths build only missing images, without `--pull`.
+  - Git deploys now pull images (`pull --ignore-buildable`) before building.
+  - Every compose run starts with `up -d --pull never --no-build` after the images were inspected.
+  - `docker compose pull --ignore-buildable` needs **Docker Compose v2.15 or newer** on every managed host; an older
+    Compose fails the run.
+  - Under the agent rule set a container a run created with an exposure nobody decided is stopped and its restart
+    policy set to `no`. A host cgroup namespace the compose file did not ask for counts only when it is not the
+    daemon's default (read from `daemon.json` / `docker info`; unreadable → it counts; on cgroup v1 a privileged
+    container's default is `host` whatever `daemon.json` says).
+  - A `compose.deploy` call that brings the nested decisions' own arguments (`exposure…`, `related…`, `mounts`) is
+    refused on every surface except UI and automation.
+
 - **Every managed host gets its own mTLS client identity (R1-44, INV-58): action needed after the upgrade.**
   - **Before:** one client certificate (`serverwatch-client`) opened every host. Its key, if stolen, opened the whole
     fleet.

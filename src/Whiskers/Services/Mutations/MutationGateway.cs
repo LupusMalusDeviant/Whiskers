@@ -595,6 +595,8 @@ public sealed class MutationGateway : IMutationGateway
                 IReadOnlyDictionary<string, string> facts;
                 using (var scope = MutationScope.Begin(capability.Id, operationId, context.Request.Principal, context.Request))
                 {
+                    // Contract 0006: which rule set decided, for the re-check after a compose run.
+                    scope.SetDecision(decision.AgentRuleSet, decision.ExposureConfirmClasses);
                     // The person whose approval was used for this run (approvers are always people, by email).
                     if (approval is { Approved: true, ApprovedBy: { } approver } && approver.Contains('@'))
                         scope.ApprovedBy = PrincipalIds.User(approver);
