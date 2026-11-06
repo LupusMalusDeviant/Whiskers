@@ -1,7 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1–5** (review rounds 1–5, at the end) are to be accepted by the
+**Amendments 1–6** (review rounds 1–6, at the end) are to be accepted by the
 maintainer as one set.
 
 ## Purpose
@@ -489,3 +489,39 @@ This amendment takes precedence over Amendments 1–4. All five amendments are t
 - **Additional tests:**
   - a local image's label found while planning gives Confirm over MCP;
   - for persons, image labels do not count as a violation.
+
+## Amendment 6 — review round 6 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–5. All amendments are to be accepted together.
+
+### Build before inspecting (review MAJOR-A)
+
+- **Order on every path that runs a `ComposePlan`:**
+  1. write the files;
+  2. `pull` (images missing locally, or all images on paths that pull);
+  3. build every service with `build:` (`BuildCommand`);
+  4. inspect every image of the plan;
+  5. `up --pull never --no-build`.
+- **The window is gone.** The window for `build:` services named in Amendment 2 is withdrawn.
+- **Test:** `deploy_compose` with a `dockerfile_inline` that sets a Funnel `LABEL` ends in Deny under the agent rule set,
+  before `up`.
+
+### Values from variables (review MAJOR-B)
+
+- **Only literal values.** The allow-list of shapes in Amendment 5 applies only to values written literally in the
+  compose file. A value that comes wholly or partly from a variable is always `Withheld`, whatever its shape.
+- **Traefik paths.** Literal Traefik `rule` values with a `Path`/`PathPrefix` matcher are also `Withheld`.
+
+### Smaller points
+
+- **Stop set.** The IDs created by this run go into their own set. Only `container.disable_restart` and
+  `container.stop` read it; `Covers` / `EnsureDecided` never do.
+- **`relatedWithheld`.** Withheld `container:<x>` entries travel in `relatedWithheld`, which joins `PayloadNames` and
+  `ProtectedResourceMatcher.PayloadArguments` (normalised: `relatedwithheld`). `HostAsync` splits `related` /
+  `relatedWithheld` as it does `mounts`.
+- **Comparison key.** Comparison and binding use `(service, kind, key, value)`. A value may be withheld. Withheld values
+  travel in `exposureWithheld` / `__resolvedExposureWithheld*`.
+- **Fallback stop.** The fallback `docker compose -p <project> stop` runs as a raw host command under the enclosing
+  compose capability, and only under the agent rule set. It has a test.
+- **README.** It names the window in which a re-tag between the inspection and `up --pull never` is caught only by the
+  re-check after `up`.

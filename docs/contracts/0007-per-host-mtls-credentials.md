@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendments 1–5** (review rounds 1–5, at the end) are to be accepted by
+and the whiskers.site host. **Amendments 1–6** (review rounds 1–6, at the end) are to be accepted by
 the maintainer as one set.
 
 ## Purpose
@@ -496,3 +496,16 @@ This amendment takes precedence over Amendments 1–4. All five amendments are t
   - the check before phase 4;
   - the tool names in `ControlPlaneResources.Capabilities`;
   - the readiness line for an older active generation.
+
+## Amendment 6 — review round 6 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–5. All amendments are to be accepted together.
+
+- **`PathsFor` is replaced** by `ProposeNewSlot(serverId, generation)`, which is used for onboarding, rotation and
+  renewal. No method "returns the active slot"; connections always use `ServerConfig`.
+- **Guard lock.** The guard waits for the lock (a blocking `flock`) and never skips the rollback. The confirmation waits
+  for a bounded time (`flock -w 30`). The confirmation also fails when the timer is `dead` or no longer loaded, because
+  transient `--collect` timers are unloaded after they fire. Tests cover `dead` and not loaded.
+- **Marker.** Whiskers' phase-record step removes the marker on the host.
+- **Unit names.** The detached recreate unit of the guard is called `whiskers-allow-guard-recreate-<suffix>`, so it falls
+  under the refusal "guard active".
