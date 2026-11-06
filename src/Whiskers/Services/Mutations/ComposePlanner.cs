@@ -190,7 +190,7 @@ public sealed class ComposePlanner : IComposePlanner
         var services = new List<ComposeServicePlan>();
         foreach (var s in plan.Services)
             services.Add(byName.TryGetValue(s.Name, out var a)
-                ? s with { Active = true, Image = a.Image, Build = a.Build, Exposures = ComposeModel.Distinct(await Resolve(s.Name, 0)) }
+                ? s with { Active = true, Image = a.Image, Build = a.Build, DeclaresCgroup = a.DeclaresCgroup, Exposures = ComposeModel.Distinct(await Resolve(s.Name, 0)) }
                 : s with { Active = false, Exposures = [] });
         return plan with
         {

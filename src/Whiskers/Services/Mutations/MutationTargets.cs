@@ -255,6 +255,12 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             return await WithStoppedContainersAsync(pruned,
                 MutationTargets.String(request.Arguments, "containerIds")?.Split('\n', StringSplitOptions.RemoveEmptyEntries), ct);
         if (resolution.Target is not { } resolvedHost || capability.Id != "compose.deploy") return resolution;
+        // Contract 0006 (review B1): the nested decision's lists are Whiskers' own — a page or an automation gate fills
+        // them from the plan it made. A caller on any other surface (MCP, the agent) could mark an exposure or a shared
+        // container as decided with them, so such a call is refused.
+        if (request.Surface is not (MutationSurface.Ui or MutationSurface.Automation)
+            && request.Arguments.Keys.FirstOrDefault(k => NestedDecisionArguments.Contains(k, StringComparer.OrdinalIgnoreCase)) is { } injected)
+            return Refuse($"The argument '{injected}' is set by Whiskers itself for a planned deployment; a call may not bring it.");
         // Contract 0006 (Amendment 7): the containers a planned deployment shares a namespace with, from the nested
         // decision — whatever else the call carries. A withheld one came from an .env value: decided, never recorded.
         var related = Lines(request, "related");
@@ -274,13 +280,19 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             // paths), as the rule reads them; a withheld one is bound and compared, never written.
             var exposures = Lines(request, "exposure");
             var exposuresWithheld = Lines(request, "exposureWithheld");
-            if (mounts.Length + exposures.Length + exposuresWithheld.Length == 0)
+            // Review m1: an entry whose value only is withheld — its key may be named in the reason.
+            var valuesWithheld = Lines(request, "exposureValueWithheld");
+            if (mounts.Length + exposures.Length + exposuresWithheld.Length + valuesWithheld.Length == 0)
                 return ReferenceEquals(host, resolvedHost) ? resolution : Done(host);
             return Done(host with
             {
                 Related = host.Related.Concat(mounts).Distinct(StringComparer.Ordinal).ToList(),
-                Withheld = host.Withheld.Concat(mounts).Concat(exposuresWithheld).ToHashSet(StringComparer.Ordinal),
-                Exposures = host.Exposures.Concat(exposures).Concat(exposuresWithheld).Distinct(StringComparer.Ordinal).ToList(),
+                Withheld = host.Withheld.Concat(mounts).Concat(exposuresWithheld).Concat(valuesWithheld)
+                    .ToHashSet(StringComparer.Ordinal),
+                Exposures = host.Exposures.Concat(exposures).Concat(exposuresWithheld).Concat(valuesWithheld)
+                    .Distinct(StringComparer.Ordinal).ToList(),
+                ExposureKeysShown = host.ExposureKeysShown.Concat(valuesWithheld.Except(exposuresWithheld, StringComparer.Ordinal))
+                    .ToHashSet(StringComparer.Ordinal),
             });
         }
         if (MutationTargets.String(request.Arguments, "projectName") is not { } project
@@ -289,6 +301,11 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         return await WithPlanAsync(host, planner => planner.PlanAsync(
             ComposeDeployment.FromContent(host.ServerId!, ComposeDeployment.DeploymentDirectory(project), content), ct));
     }
+
+    /// <summary>Contract 0006 (review B1): the arguments of the nested exposure decision, accepted only from the UI and
+    /// automation surfaces (<see cref="ComposeImpact.ExposureArguments"/>).</summary>
+    internal static readonly IReadOnlyList<string> NestedDecisionArguments =
+        ["exposure", "exposureShown", "exposureWithheld", "exposureValueWithheld", "exposureClasses", "related", "relatedWithheld"];
 
     private static string[] Lines(MutationRequest request, string argument) =>
         MutationTargets.String(request.Arguments, argument)?.Split('\n', StringSplitOptions.RemoveEmptyEntries) ?? [];
@@ -348,6 +365,9 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
                 RelatedResources = target.RelatedResources.Concat(made.DecidedResources())
                     .Concat(made.SharedContainers.Select(c => (IReadOnlyList<string>)Aliases(c.Id, c.Name))).ToList(),
                 Exposures = target.Exposures.Concat(exposures.Select(e => e.Identity)).Distinct(StringComparer.Ordinal).ToList(),
+                ExposureKeysShown = target.ExposureKeysShown
+                    .Concat(exposures.Where(e => e is { ValueWithheld: true, KeyWithheld: false }).Select(e => e.Identity))
+                    .ToHashSet(StringComparer.Ordinal),
             });
         }
         catch (ComposePlanException ex)

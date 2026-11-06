@@ -31,7 +31,7 @@ public static class SinkRedaction
     {
         "env", "envvars", "environment", "volumes",
         // Contract 0006: exposures and shared-namespace containers of a deployment that came from an .env value.
-        "exposurewithheld", "relatedwithheld",
+        "exposurewithheld", "exposurevaluewithheld", "relatedwithheld",
     };
 
     /// <summary>Words that contain a part above without being a payload (<c>de·script·ion</c>). Only whole names: a

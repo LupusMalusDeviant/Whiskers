@@ -86,6 +86,10 @@ public sealed record ComposeServicePlan(string Name, string? ContainerName)
 
     /// <summary>The service has a <c>build:</c> section.</summary>
     public bool Build { get; init; }
+
+    /// <summary>Contract 0006 (review M1): compose's model of the service sets <c>cgroup</c> — then the re-check compares
+    /// the container's cgroup namespace even when it equals the daemon's default.</summary>
+    public bool DeclaresCgroup { get; init; }
 }
 
 /// <summary>A container another service shares a namespace with (<c>network_mode</c> / <c>pid</c> / <c>ipc</c> of the
@@ -276,7 +280,7 @@ public sealed record ComposePlan(
             // Contract 0006: every exposure, and every container a namespace is shared with, was decided too.
             .Concat(Exposures().Where(e => scope is null || !scope.CoversExposure(ServerId, e.Identity))
                 .Select(e => e.Withheld ? "exposure (withheld)" : $"exposure {e.Display}"))
-            .Concat(SharedContainers.Where(c => scope is null || !scope.Covers(ServerId, c.Id, c.Name))
+            .Concat(SharedContainers.Where(c => scope is null || !scope.CoversRelated(ServerId, c.Id, c.Name))
                 .Select(c => c.FromVariable ? "shared namespace (withheld)" : $"shared namespace {c.Name}"))
             .Distinct()
             .ToList();

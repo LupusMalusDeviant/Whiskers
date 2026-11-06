@@ -136,10 +136,11 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         args["__resolvedKind"] = JsonSerializer.SerializeToElement(t.Kind);
         // Contract 0006: the exposures of the resolved target, for ExposureChangeRule only (the other rules skip them); a
         // withheld one under a prefix of its own.
+        // Review m1: an entry whose value only is withheld under a prefix of its own, so the reason can name its key.
         for (var i = 0; i < t.Exposures.Count; i++)
-            args[t.Withheld.Contains(t.Exposures[i])
-                ? $"{ExposureChangeRule.ResolvedWithheldPrefix}{i}"
-                : $"{ExposureChangeRule.ResolvedPrefix}{i}"] = JsonSerializer.SerializeToElement(t.Exposures[i]);
+            args[!t.Withheld.Contains(t.Exposures[i]) ? $"{ExposureChangeRule.ResolvedPrefix}{i}"
+                : t.ExposureKeysShown.Contains(t.Exposures[i]) ? $"{ExposureChangeRule.ResolvedValueWithheldPrefix}{i}"
+                : $"{ExposureChangeRule.ResolvedWithheldPrefix}{i}"] = JsonSerializer.SerializeToElement(t.Exposures[i]);
         if (string.IsNullOrEmpty(t.Id) && string.IsNullOrEmpty(t.Name) && names.Count == 0)
             return args;
         if (!string.IsNullOrEmpty(t.Id)) args["__resolvedTargetId"] = JsonSerializer.SerializeToElement(t.Id);

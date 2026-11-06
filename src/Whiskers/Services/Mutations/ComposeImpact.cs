@@ -52,15 +52,53 @@ public static class ComposeImpact
         });
     }
 
+    /// <summary>
+    /// The container page's <c>.env</c> save (R1-07, R1-16, contract 0006): plans the project with the new
+    /// <paramref name="envContent"/>, decides its mounts and its exposures (nested <c>compose.deploy</c>), then each
+    /// affected container under <c>container.env_file_save</c> (nested, the saved one first), plans again right before
+    /// writing and runs it through <paramref name="composeRunner"/> — pulling and building only what is missing (no
+    /// <c>--pull</c>), with the re-check after <c>up</c>. A refusal throws <see cref="MutationRefusedException"/>.
+    /// </summary>
+    public static async Task<CommandResult> SaveEnvAsync(this IUiMutationRunner runner, IHostCommandExecutor executor,
+        IComposePlanner planner, IComposeRunner composeRunner, ContainerInfo container, string serverId, string envContent)
+    {
+        ArgumentNullException.ThrowIfNull(executor);
+        ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(composeRunner);
+        ArgumentNullException.ThrowIfNull(container);
+        var plan = await planner.PlanEnvChangeAsync(container, serverId, _ => envContent);
+        var affected = new List<ContainerInfo> { container };
+        affected.AddRange(plan.Containers.Where(c => c.Id != container.Id));
+        return await runner.RunMountsAsync(plan, () => runner.RunExposuresAsync(plan, () =>
+            runner.RunForEachAsync("container.env_file_save", affected, serverId, async () =>
+            {
+                // Planned again right before writing: a container or an exposure that turned up meanwhile was not decided.
+                var current = await planner.PlanEnvChangeAsync(container, serverId, _ => envContent);
+                current.EnsureDecided(MutationScope.Current);
+                var run = await composeRunner.RunAsync(current,
+                    (command, timeout, ct) => executor.ExecuteMutationAsync(serverId, command, timeout, ct),
+                    new ComposeRunOptions(Pull: false, TimeSpan.FromMinutes(2)));
+                if (!run.Success) MutationScope.Fail("Writing .env or docker compose up failed.");
+                return new CommandResult
+                {
+                    ExitCode = run.Success ? 0 : 1, Output = run.Output,
+                    Error = run.Refusal ?? (run.Violations.Count > 0 ? string.Join("; ", run.Violations) : run.Error),
+                };
+            })));
+    }
+
     /// <summary>Contract 0006: whether a plan needs the exposure decision — it has exposures, or it shares a namespace
     /// (<c>service:x</c> / <c>container:x</c>, Amendment 7).</summary>
     public static bool NeedsExposureDecision(ComposePlan plan) => plan.Exposures().Count > 0 || plan.SharesNamespaces;
 
     /// <summary>
     /// The arguments of the exposure decision (contract 0006): <c>exposure</c> holds the literal entries and is audited,
-    /// <c>exposureWithheld</c> the entries with a part from a variable (a payload: the sinks keep only its length),
+    /// <c>exposureShown</c> what may be shown of every entry (audited: the key, never a value; the kind only for a key
+    /// from a variable), <c>exposureWithheld</c> the entries whose key came from a variable and
+    /// <c>exposureValueWithheld</c> those whose value only is withheld (both payloads: the sinks keep only their length),
     /// <c>exposureClasses</c> is informational, <c>related</c> / <c>relatedWithheld</c> the containers a namespace is
-    /// shared with.
+    /// shared with. Whiskers sets them; a call on the MCP, agent, webhook or terminal surface may not bring them
+    /// (review B1).
     /// </summary>
     public static object ExposureArguments(ComposePlan plan)
     {
@@ -70,7 +108,11 @@ public static class ComposeImpact
         {
             serverId = plan.ServerId,
             exposure = ComposeExposures.Lines(exposures.Where(e => !e.Withheld)),
-            exposureWithheld = ComposeExposures.Lines(exposures.Where(e => e.Withheld)),
+            // Review m1: what may be shown of every exposure (service and detail: the key, never a value; the kind only
+            // for a key from a variable) — audited, so a person's decision keeps every exposure's key.
+            exposureShown = string.Join('\n', exposures.Select(ComposeExposures.Shown).Distinct(StringComparer.Ordinal)),
+            exposureWithheld = ComposeExposures.Lines(exposures.Where(e => e.KeyWithheld)),
+            exposureValueWithheld = ComposeExposures.Lines(exposures.Where(e => e is { KeyWithheld: false, ValueWithheld: true })),
             exposureClasses = ComposeExposures.Classes(exposures, plan.ExposurePrefixes),
             related = string.Join('\n', plan.SharedIdentities().Where(i => !withheldShared.Contains(i))),
             relatedWithheld = string.Join('\n', withheldShared),

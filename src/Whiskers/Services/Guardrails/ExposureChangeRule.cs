@@ -22,6 +22,10 @@ public sealed class ExposureChangeRule : IGuardrailRule
     /// <summary>The prefix of a resolved exposure that is withheld: classified by its real key, never quoted.</summary>
     public const string ResolvedWithheldPrefix = "__resolvedExposureWithheld";
 
+    /// <summary>The prefix of a resolved exposure whose value only is withheld (review m1): its key is named, never its
+    /// value.</summary>
+    public const string ResolvedValueWithheldPrefix = "__resolvedExposureValueWithheld";
+
     public string Id => RuleId;
 
     public GuardrailVerdict Evaluate(GuardrailRequest request, out string reason)
@@ -34,6 +38,7 @@ public sealed class ExposureChangeRule : IGuardrailRule
         foreach (var (key, value) in request.Arguments)
         {
             if (!key.StartsWith(ResolvedPrefix, StringComparison.Ordinal) || value.ValueKind != JsonValueKind.String) continue;
+            // A value-only withheld entry is named by its key (Amendment 5); the Reason below never quotes a value.
             var withheld = key.StartsWith(ResolvedWithheldPrefix, StringComparison.Ordinal);
             if (ComposeExposures.Parse(value.GetString() ?? "") is not { } exposure)
             {

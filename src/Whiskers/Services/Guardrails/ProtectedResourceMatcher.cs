@@ -151,14 +151,16 @@ public static class ProtectedResourceMatcher
     public static readonly IReadOnlySet<string> PayloadArguments = new HashSet<string>(
         FreeTextArguments.Concat(["env", "envVars", "password", "secret", "token", "mounts",
             // Contract 0006: exposures and shared-namespace containers that came from an .env value.
-            "exposureWithheld", "relatedWithheld"]), StringComparer.OrdinalIgnoreCase);
+            "exposureWithheld", "exposureValueWithheld", "relatedWithheld"]), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Contract 0006: the nested decision's exposure lists and the resolved target's exposures, which the
     /// resource matchers and the forbidden-argument patterns skip (only <c>ExposureChangeRule</c> reads them).</summary>
     public static bool IsExposureArgument(string key) =>
         key.StartsWith(ExposureChangeRule.ResolvedPrefix, StringComparison.Ordinal)
         || key.Equals("exposure", StringComparison.OrdinalIgnoreCase)
-        || key.Equals("exposureWithheld", StringComparison.OrdinalIgnoreCase);
+        || key.Equals("exposureWithheld", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("exposureValueWithheld", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("exposureShown", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Free text that is a compose file.</summary>
     public static readonly IReadOnlySet<string> ComposeArguments = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

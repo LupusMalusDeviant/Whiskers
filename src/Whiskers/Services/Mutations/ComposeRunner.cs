@@ -81,6 +81,8 @@ public sealed class ComposeRunner : IComposeRunner
         public IReadOnlySet<string> Confirm { get; init; } = new HashSet<string>();
         public HashSet<string> Decided { get; } = new(StringComparer.Ordinal);
         public List<ComposeExposure> FromImages { get; } = [];
+        /// <summary>The label keys of the images step 4 inspected, per service (review m3: such a key is no .env value).</summary>
+        public HashSet<(string Service, string Key)> ImageLabelKeys { get; } = [];
         public List<string> Violations { get; } = [];
         public List<string> Output { get; } = [];
     }
@@ -195,12 +197,26 @@ public sealed class ComposeRunner : IComposeRunner
 
             // 5) Up — nothing pulled or built inside it.
             Report(run, "⑤ docker compose up -d…");
-            var up = await mutate(plan.UpCommand + " 2>&1", options.UpTimeout ?? options.Timeout, ct);
+            CommandResult up;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo? upThrew = null;
+            try
+            {
+                up = await mutate(plan.UpCommand + " 2>&1", options.UpTimeout ?? options.Timeout, ct);
+            }
+            catch (Exception ex)
+            {
+                // Review m2: an up that threw (a timeout, a cancellation, the executor) may still have created
+                // containers — the re-check runs all the same, then the exception goes on.
+                upThrew = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex);
+                up = new CommandResult { ExitCode = -1, Error = "docker compose up did not complete." };
+            }
             Keep(run, up);
             // The re-check runs also when up failed: it may have created some containers.
             await RecheckAsync(run, ct);
-            await NotifyChangeAsync(run);
+            // Review NIT: nothing was deployed when up failed — no exposure_change then.
+            if (up.Success) await NotifyChangeAsync(run);
             if (run.Violations.Count > 0) await NotifyViolationAsync(run);
+            upThrew?.Throw();
             var success = up.Success && run.Violations.Count == 0;
             if (!up.Success) MutationScope.Fail("docker compose up failed.");
             return new ComposeRunResult(success, string.Join('\n', run.Output), up.Error) { Violations = run.Violations };
@@ -233,6 +249,7 @@ public sealed class ComposeRunner : IComposeRunner
         foreach (var service in active)
         {
             var image = inspected[service.Image!]!.Value;
+            foreach (var label in image.Labels.Keys) run.ImageLabelKeys.Add((service.Name, label.ToLowerInvariant()));
             foreach (var exposure in ComposeExposures.FromImageLabels(service.Name, image.Labels, run.Plan.ExposurePrefixes))
             {
                 if (run.Decided.Contains(ComposeExposures.ComparisonKey(exposure.Identity))) continue;
@@ -336,12 +353,22 @@ public sealed class ComposeRunner : IComposeRunner
             {
                 if (run.Decided.Contains(ComposeExposures.ComparisonKey(exposure.Identity))) continue;
                 if (ExposureClasses.Of(exposure.Kind, exposure.Key, plan.ExposurePrefixes) is not { } cls) continue;
-                Undecided(container, cls, $"undecided {ExposureClasses.Noun(exposure.Kind)} {exposure.Key} (class '{cls}')");
+                var note = "";
+                if (exposure is { Kind: ExposureKind.HostNamespace, Key: "cgroup" }
+                    && !plan.Services.Any(s => s.Name == service && s.DeclaresCgroup))
+                {
+                    // Review M1: a cgroup namespace the plan did not set is the daemon's default — not an exposure of the
+                    // deployment when it equals that default. A default that cannot be read fails closed.
+                    var daemonDefault = await CgroupnsDefaultAsync(plan.ServerId);
+                    if (string.Equals(daemonDefault, "host", StringComparison.Ordinal)) continue;
+                    if (daemonDefault is null) note = "; the daemon's default cgroup namespace mode could not be read";
+                }
+                Undecided(container, cls, $"undecided {Named(run, exposure)} (class '{cls}'){note}");
             }
             // Amendment 9: a namespace shared at run time must be a decided container or one this run created.
             foreach (var (field, id) in shared)
                 if (run.Scope is not { } scope
-                    || !(scope.Covers(plan.ServerId, id) || scope.CreatedByRun(plan.ServerId, id)))
+                    || !(scope.CoversRelated(plan.ServerId, id) || scope.CreatedByRun(plan.ServerId, id)))
                     Undecided(container, ExposureClasses.Host, $"shares the {field} namespace of a container that was not decided (class 'host')");
         }
 
@@ -353,6 +380,54 @@ public sealed class ComposeRunner : IComposeRunner
                 Violation(run, $"{name}: container still running");
             else
                 MutationScope.Note($"stopped {name}: an exposure it was started with was not decided", success: false);
+        }
+    }
+
+    /// <summary>
+    /// Review m3: how a violation names an exposure the re-check found — its kind and key, unless the key could be an
+    /// <c>.env</c> value: the plan withheld a key of that service and kind, or a label key is neither one the plan read
+    /// literally nor one of the inspected image's labels. Then the kind only.
+    /// </summary>
+    private static string Named(Run run, ComposeExposure exposure)
+    {
+        var planned = run.Plan.Exposures().Where(p => p.Service == exposure.Service && p.Kind == exposure.Kind).ToList();
+        var hidden = planned.Any(p => p.KeyWithheld)
+                     || (exposure.Kind == ExposureKind.RouteLabel
+                         && !planned.Any(p => string.Equals(p.Key, exposure.Key, StringComparison.OrdinalIgnoreCase))
+                         && !run.ImageLabelKeys.Contains((exposure.Service, exposure.Key.ToLowerInvariant())));
+        return hidden
+            ? $"{ExposureClasses.Noun(exposure.Kind)} (withheld)"
+            : $"{ExposureClasses.Noun(exposure.Kind)} {exposure.Key}";
+    }
+
+    // ------------------------------------------------------------------------------------------- cgroup default
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _cgroupnsDefaults =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Review M1: the daemon's default cgroup namespace mode — <c>host</c> or <c>private</c> — read once per server and
+    /// kept (a failed read is tried again next time): <c>default-cgroupns-mode</c> of <c>/etc/docker/daemon.json</c> when
+    /// it sets one, otherwise <c>host</c> for cgroup v1 and <c>private</c> for v2 (<c>docker info</c>'s
+    /// <c>CgroupVersion</c>). <c>null</c> when it cannot be read: a daemon.json that is not JSON, an unknown cgroup
+    /// version, a failed command.
+    /// </summary>
+    private async Task<string?> CgroupnsDefaultAsync(string serverId)
+    {
+        if (_cgroupnsDefaults.TryGetValue(serverId, out var known)) return known;
+        try
+        {
+            var result = await _reader.ExecuteAsync(serverId, ComposeExposures.CgroupnsDefaultCommand, ReadTimeout,
+                CancellationToken.None, 64_000);
+            if (!result.Success || result.OutputTruncated) return null;
+            if (ComposeExposures.ParseCgroupnsDefault(result.Output) is not { } mode) return null;
+            _cgroupnsDefaults[serverId] = mode;
+            return mode;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger?.LogWarning(ex, "The default cgroup namespace mode of server {Server} could not be read", serverId);
+            return null;
         }
     }
 

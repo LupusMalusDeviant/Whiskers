@@ -152,6 +152,11 @@ public static class ComposeExposures
         };
     }
 
+    /// <summary>What may be shown of an exposure (review m1): <c>&lt;service&gt;: &lt;detail&gt;</c> — the key, never a
+    /// value — or only its kind when the key itself is withheld.</summary>
+    public static string Shown(ComposeExposure exposure) =>
+        exposure.KeyWithheld ? $"{exposure.Service}: {ExposureClasses.Noun(exposure.Kind)} (withheld)" : exposure.Display;
+
     /// <summary>The identities of <paramref name="exposures"/> as one line each.</summary>
     public static string Lines(IEnumerable<ComposeExposure> exposures) =>
         string.Join('\n', exposures.Select(e => e.Identity).Distinct(StringComparer.Ordinal));
@@ -484,6 +489,41 @@ public static class ComposeExposures
     }
 
     // ------------------------------------------------------------------------------------------- images
+
+    /// <summary>Review M1: the daemon's cgroup version (<c>docker info</c>), a separator line, then
+    /// <c>/etc/docker/daemon.json</c> if there is one. Fails when <c>docker info</c> fails.</summary>
+    public const string CgroupnsDefaultCommand =
+        "v=$(docker info --format '{{.CgroupVersion}}') || exit 1; printf '%s\\n---\\n' \"$v\"; " +
+        "cat /etc/docker/daemon.json 2>/dev/null; true";
+
+    /// <summary>Reads <see cref="CgroupnsDefaultCommand"/>: the daemon.json's <c>default-cgroupns-mode</c>
+    /// (<c>host</c> / <c>private</c>) when set, otherwise <c>host</c> for cgroup v1 and <c>private</c> for v2; <c>null</c>
+    /// for anything it cannot read (fail closed: the caller then counts a host cgroup namespace).</summary>
+    public static string? ParseCgroupnsDefault(string output)
+    {
+        var lines = output.Replace("\r\n", "\n").Split('\n');
+        var separator = Array.FindIndex(lines, l => l.Trim() == "---");
+        if (separator < 0) return null;
+        var version = string.Join('\n', lines[..separator]).Trim();
+        var config = string.Join('\n', lines[(separator + 1)..]).Trim();
+        if (config.Length > 0)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(config);
+                if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
+                if (document.RootElement.TryGetProperty("default-cgroupns-mode", out var mode))
+                    return mode.ValueKind == JsonValueKind.String && mode.GetString() is "host" or "private"
+                        ? mode.GetString()
+                        : null;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+        return version switch { "1" => "host", "2" => "private", _ => null };
+    }
 
     /// <summary>The marker <see cref="InspectImagesCommand"/> prints for an image that is not on the host.</summary>
     public const string MissingImage = "MISSING";

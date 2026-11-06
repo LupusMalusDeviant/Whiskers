@@ -58,16 +58,33 @@ public sealed class MutationScope : IDisposable
                 if (value.ValueKind == System.Text.Json.JsonValueKind.String && value.GetString() is { Length: > 0 } s)
                     _decided.Add(s);
             _decided.Remove("");
-            // Contract 0006: the exposures this decision covers — the resolved target's, and the nested decision's
-            // arguments (each line one exposure) as policy saw them.
+            // Contract 0006 (review B1): the exposures and the related containers this decision covers come from the
+            // resolved target only — never from a caller's argument (the resolver folds the nested decision's lists into
+            // the target, and only on the UI and automation surfaces).
             _exposures.UnionWith(request.Target.Exposures);
-            foreach (var key in (string[])["exposure", "exposureWithheld"])
-                if (MutationTargets.String(request.Arguments, key) is { } lines)
-                    _exposures.UnionWith(lines.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+            _related.Add(request.Target.Id);
+            if (request.Target.Name is { } targetName) _related.Add(targetName);
+            _related.UnionWith(request.Target.Related);
+            _related.Remove("");
         }
     }
 
     private readonly HashSet<string> _exposures = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _related = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Contract 0006 (review B1): whether this scope or an enclosing one decided one of <paramref name="identities"/> on
+    /// <paramref name="serverId"/> as its resolved target or a related resource of it — never because a caller passed
+    /// the name as an argument (<see cref="Covers"/> also counts argument values). The shared-namespace containers of a
+    /// plan and of the re-check after <c>up</c> are checked with this.
+    /// </summary>
+    public bool CoversRelated(string serverId, params string[] identities)
+    {
+        for (var scope = this; scope is not null; scope = scope._parent)
+            if (scope._serverId == serverId && identities.Any(i => i.Length > 0 && scope._related.Contains(i)))
+                return true;
+        return false;
+    }
     private readonly HashSet<(string Server, string Id)> _createdByRun = [];
     private bool _agentRuleSet;
     private IReadOnlyList<string> _exposureConfirmClasses = [];
