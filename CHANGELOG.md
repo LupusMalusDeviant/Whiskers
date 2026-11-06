@@ -6,6 +6,20 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Tailscale Serve, Funnel and DockTail in front of Whiskers: documented.**
+  - In TCP mode tailscaled adds no forwarded headers. This covers `tailscale serve --tcp`/`--tls-terminated-tcp` and
+    DockTail with `protocol=tcp`.
+  - What the client sends passes through unchanged, `Host` and `X-Forwarded-*` included. Every visitor arrives from
+    tailscaled's private address.
+  - So `AUTH_DISABLED=true` behind such a forward makes every visitor Admin; with Funnel, that is anyone on the
+    internet.
+  - With sign-in enabled, a forward from a trusted proxy address lets the client choose its own address. That defeats
+    the per-client login rate limit and the audit.
+  - The README ("Name your proxy") covers both modes, which address to trust, what trusting the Docker gateway also
+    trusts, and the sidecar layout that needs no entry.
+  - The production-readiness line for disabled authentication warns against TCP forwards and Funnel.
+  - No behaviour change.
+
 - **An approved call executes only on the approved target.** An approval was bound to the exact call the gateway
   checked, but the code that then ran was the caller's own delegate, and the scope guard matched only its capability:
   inside a decision for container `web-1` a delegate could have restarted `db-1`, or `web-1` on another server. Marked
