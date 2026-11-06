@@ -87,11 +87,36 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
         VerifyConnection = DefaultVerifyConnectionAsync;
     }
 
+    /// <summary>
+    /// The server certificate of a host being onboarded. With a client-credential store, the caller (onboarding) holds
+    /// the store's <see cref="IMtlsClientCredentialStore.HostLock"/> for the whole issue (contract 0007, amendment 10;
+    /// review r3 MAJOR 1): a free lock means nobody guards the step, so it is refused. Without a store it takes the
+    /// local per-host lock itself.
+    /// </summary>
     public async Task<X509Certificate2> IssueForNewHostAsync(string serverId, MtlsIdentity identity, CancellationToken ct)
     {
-        var cert = await IssueAndStageAsync(serverId, identity, ct);
-        await RunAsync(serverId, MtlsCertificateCommands.ActivateFresh(), ct);
-        return cert;
+        SemaphoreSlim? own = null;
+        if (_clientCredentials is { } store)
+        {
+            if (store.HostLock(serverId).CurrentCount != 0)
+                throw new InvalidOperationException("The server certificate of a new host is issued only under the host's certificate lock.");
+        }
+        else
+        {
+            own = HostGate(serverId);
+            if (!await own.WaitAsync(0, ct))
+                throw new InvalidOperationException("A certificate operation for this server is running.");
+        }
+        try
+        {
+            var cert = await IssueAndStageAsync(serverId, identity, ct);
+            await RunAsync(serverId, MtlsCertificateCommands.ActivateFresh(), ct);
+            return cert;
+        }
+        finally
+        {
+            own?.Release();
+        }
     }
 
     public async Task<MtlsRenewalResult> RenewAsync(string serverId, CancellationToken ct)

@@ -5,7 +5,7 @@ using Whiskers.Services.Docker;
 namespace Whiskers.Services.Certificates;
 
 /// <summary>
-/// R1-44 (contract 0007, amendments 1–9): the per-host client credential rollout of <see cref="MtlsCertificateService"/>.
+/// R1-44 (contract 0007, amendments 1–10): the per-host client credential rollout of <see cref="MtlsCertificateService"/>.
 ///
 /// <list type="number">
 /// <item><b>Issue</b> — the host's own credential in a new store slot (nothing on the host changes).</item>
@@ -525,17 +525,32 @@ public sealed partial class MtlsCertificateService
                         throw StateUnknown(server, "the confirmation was stopped by its 20-second limit inside the lock");
                     if (confirmed.ExitCode == MtlsAllowListCommands.ConfirmFailedAfterStop)
                         // The guard timer is already stopped, so no rollback is coming (review r2 NIT 1).
-                        throw StateUnknown(server, "the guard was stopped, but the marker could not be written: " + confirmed.Error.Trim());
+                        throw StateUnknown(server, "the confirmation failed after stopping the guard: " + confirmed.Error.Trim());
                     if (confirmed.ExitCode != 0)
                     {
                         stop = "did not take the confirmation (" + Trim(confirmed.Error.Trim()) + ")";
                         continue;
                     }
+                    // Exit 0: the guard is stopped and the marker written. From here on there is no new attempt and no
+                    // rollback promise (review r3 MINOR 1a); the run's marker and lock are cleaned up whatever follows.
+                    run.Confirmed.Add(suffix);
                     // The guard may have fired between the checks and the marker: read the host again and repeat the
                     // checks before anything is recorded (amendment 4, 0007-A).
-                    await Task.Delay(RestartGrace);
-                    await RecheckAsync(server, store, sharedCn, run, allow, target, mustFail);
-                    run.Confirmed.Add(suffix);
+                    try
+                    {
+                        await Task.Delay(RestartGrace);
+                        await RecheckAsync(server, store, sharedCn, run, allow, target, mustFail);
+                    }
+                    catch (RolloutFailure)
+                    {
+                        await CleanupConfirmedAsync(server.Id, run);
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        await CleanupConfirmedAsync(server.Id, run);
+                        throw StateUnknown(server, "the confirmation went through, but the host could not be checked again: " + ex.Message);
+                    }
                     return;
                 }
             }

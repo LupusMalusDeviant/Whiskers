@@ -18,7 +18,7 @@ using Whiskers.Services.Setup;
 namespace Whiskers.Tests;
 
 /// <summary>
-/// INV-58 / R1-44 (contract 0007 with amendments 1–7): every managed host gets its own client identity
+/// INV-58 / R1-44 (contract 0007 with amendments 1–10): every managed host gets its own client identity
 /// <c>whiskers-client-{slug}-g{n}</c>; its proxy admits only that name after migration; a credential taken from one host
 /// is refused at every other host, an older generation is refused after a rotation and the shared credential after the
 /// narrowing. Every host step is guarded, confirmed through the new credential only, and resumed from what ghostunnel
@@ -177,6 +177,29 @@ public sealed class PerHostCredentialTests
         Assert.Contains("the marker could not be written", result.Error);
         Assert.DoesNotContain("restores its previous allow-list on its own", result.Error);
         Assert.Single(host.Log, l => l.StartsWith("confirm:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_host_briefly_unreachable_right_after_the_confirmation_is_an_unknown_state_and_never_retried()
+    {
+        // Review r3 MINOR 1a: the confirmation exited 0 (guard stopped, marker written); the recheck's read is lost.
+        using var w = new CredentialWorld();
+        var host = w.Host("rabenhof");
+        host.AfterConfirm = () => host.UnreachableNextCommands = 1;
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Equal("widen", result.Phase);
+        Assert.StartsWith("State unknown", result.Error);
+        Assert.Contains("could not be checked again", result.Error);
+        Assert.DoesNotContain("restores its previous allow-list on its own", result.Error);
+        var confirm = Assert.Single(host.Log, l => l.StartsWith("confirm:", StringComparison.Ordinal));   // no new attempt
+        Assert.Contains("unreachable", host.Log);
+        // The confirmed run's marker and lock are cleaned up, and the widened list stays.
+        Assert.Contains("cleanup:" + confirm["confirm:".Length..], host.Log);
+        Assert.Empty(host.Markers);
+        Assert.Equal([SharedCn, "whiskers-client-rabenhof-g1"], host.RunningAllow);
     }
 
     [Fact]
@@ -708,6 +731,84 @@ public sealed class PerHostCredentialTests
         Assert.Equal(!sharedExists, journal.SharedCredentialAbsent);
     }
 
+    [Fact]
+    public async Task While_onboarding_holds_the_host_lock_removal_and_migration_are_refused()
+    {
+        // Review r3 MAJOR 1: the break-glass re-onboarding of an existing mTLS host holds the store's per-host lock from
+        // the server certificate to the journal; the probe in step 9 runs inside it.
+        using var w = new CredentialWorld();
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.9");
+        Exception? removal = null;
+        MtlsClientMigrationResult? migration = null;
+        MtlsClientMigrationResult? renewal = null;
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance)
+        {
+            ProbeCredential = async (server, _) =>
+            {
+                Assert.Equal(0, w.Store.HostLock("rabenhof").CurrentCount);
+                migration = await w.Service.MigrateClientAsync("rabenhof", null, default);
+                renewal = await w.Service.RenewClientAsync("rabenhof", rotate: true, default);
+                removal = await Record.ExceptionAsync(() => Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(w.Servers,
+                    ComponentTests.ServersKubeconfigSaveTests.NullProxy<Whiskers.Services.Vault.IVaultService>.Create(), w.Server("rabenhof"), w.Store));
+                return MtlsProbeOutcome.Refused;
+            },
+        };
+
+        var result = await onboarding.OnboardServerAsync("rabenhof", new Progress<string>(), default);
+
+        Assert.True(result.Success, result.Error);
+        Assert.False(migration!.Ok);
+        Assert.Contains("already running", migration.Error);
+        Assert.False(renewal!.Ok);
+        Assert.Contains("already running", renewal.Error);
+        Assert.IsType<InvalidOperationException>(removal);
+        Assert.Contains("is running", removal!.Message);
+        Assert.NotNull(w.Servers.GetServer("rabenhof"));
+        Assert.Empty(w.Host("rabenhof").Log);   // the refused steps never reached the host's proxy
+        Assert.True(Directory.Exists(Path.Combine(w.MtlsDir, "hosts", "rabenhof")));   // removal deleted nothing
+        Assert.Equal(1, w.Store.HostLock("rabenhof").CurrentCount);   // released after the run
+    }
+
+    [Fact]
+    public async Task Onboarding_is_refused_while_another_certificate_step_holds_the_host_lock()
+    {
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var record = w.Server("neuhof").Clone();
+        record.ConnectionType = ConnectionType.SSH;
+        record.TcpUseTls = false;
+        record.TcpClientCertPath = record.TcpClientKeyPath = record.TcpCaCertPath = null;
+        await w.Servers.UpdateServerAsync(record);
+        var onboarding = new OnboardingService(new OnboardingExecutor(w.Fleet, "100.64.0.20"), w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var gate = w.Store.HostLock("neuhof");
+        Assert.True(await gate.WaitAsync(0));   // e.g. a removal or a migration of the same id
+        OnboardingResult result;
+        try { result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default); }
+        finally { gate.Release(); }
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.Certificate, result.FailedStep);
+        Assert.Contains("Zertifikatsschritt", result.Error);
+        Assert.False(Directory.Exists(Path.Combine(w.MtlsDir, "hosts", "neuhof")));   // no key issued
+        Assert.Equal(ConnectionType.SSH, w.Server("neuhof").ConnectionType);
+    }
+
+    [Fact]
+    public async Task The_server_certificate_of_a_new_host_is_issued_only_under_the_host_lock()
+    {
+        using var w = new CredentialWorld();
+        var identity = MtlsIdentity.ForNewHost("rabenhof", "100.64.0.9");
+
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => w.Service.IssueForNewHostAsync("rabenhof", identity, default));
+
+        Assert.Contains("only under the host's certificate lock", refused.Message);
+        Assert.Empty(w.Fleet.Commands);
+    }
+
     // ---- the store ----
 
     [Fact]
@@ -985,7 +1086,8 @@ public sealed class PerHostCredentialTests
         var line = Line(checks, "Rabenhof");
         Assert.False(line.Ok);
         Assert.Contains("Notfall-Re-Onboarding per SSH", line.Detail);
-        Assert.Contains("„Migrieren“ erreicht ihn so nicht", line.Detail);
+        Assert.Contains("„Migrieren“ erreicht ihn dann nicht", line.Detail);
+        Assert.Contains("nur gerade nicht erreichbar", line.Detail);
         Assert.Contains("rabenhof", w.Fleet.LockedOut);
         Assert.Contains("Rabenhof (Argumente nicht lesbar)", checks.Single(c => c.Title == "mTLS-Proxy (ghostunnel) läuft").Detail);
         // The reachable host still on the shared credential keeps the plain „Migrieren“ advice.

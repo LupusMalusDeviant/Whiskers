@@ -78,6 +78,10 @@ public sealed class PerHostCredentialShellTests : IDisposable
         Assert.Contains("systemctl is-active --quiet whiskers-allow-guard-r1.service", body);
         Assert.True(body.IndexOf("systemctl stop whiskers-allow-guard-r1.timer", StringComparison.Ordinal)
                     < body.IndexOf("touch /opt/dockerproxy/.allow-ok-r1", StringComparison.Ordinal));
+        // Every exit 1 comes before the stop (review r3 MINOR 1b): the .prev check, too.
+        var stop = body.IndexOf("systemctl stop", StringComparison.Ordinal);
+        Assert.True(body.IndexOf(".prev ] ||", StringComparison.Ordinal) < stop);
+        Assert.DoesNotContain("exit 1", body[stop..]);
         // Everything from the stop on fails with the distinct code, never with the "rolls back" exit 1 (review r2 NIT 1).
         Assert.Contains("systemctl stop whiskers-allow-guard-r1.timer || { echo 'stopping the guard timer failed' >&2; exit 75; }", body);
         Assert.Contains("touch /opt/dockerproxy/.allow-ok-r1 || { echo 'the marker could not be written' >&2; exit 75; }", body);
@@ -121,6 +125,22 @@ public sealed class PerHostCredentialShellTests : IDisposable
         Assert.Equal(exit != 0, File.Exists(Compose() + ".prev"));
         if (exit == 0) Assert.Contains("systemctl stop whiskers-allow-guard-r1.timer", File.ReadAllText(State("log")));
         else Assert.NotEmpty(stderr);
+    }
+
+    [SkippableFact]
+    public void A_missing_prev_file_fails_the_confirmation_before_the_timer_is_stopped()
+    {
+        // Review r3 MINOR 1b: exit 1 ("the guard rolls back") only while the guard timer still runs.
+        RequireShell();
+        Arrange("loaded", "waiting");
+        File.Delete(Compose() + ".prev");
+
+        var (code, _, stderr) = RunScript(ConfirmScript());
+
+        Assert.Equal(1, code);
+        Assert.Contains("previous allow-list file is gone", stderr);
+        Assert.DoesNotContain("systemctl stop", File.Exists(State("log")) ? File.ReadAllText(State("log")) : "");
+        Assert.False(File.Exists(Marker()));
     }
 
     [SkippableFact]

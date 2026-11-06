@@ -100,9 +100,18 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
         Log.Add("guard-fired:" + run);
     }
 
+    /// <summary>The next this many host commands fail as unreachable (a brief outage).</summary>
+    public int UnreachableNextCommands { get; set; }
+
     public CommandResult Execute(string script)
     {
         if (Unreachable) throw new HttpRequestException("host unreachable");
+        if (UnreachableNextCommands > 0)
+        {
+            UnreachableNextCommands--;
+            Log.Add("unreachable");
+            throw new HttpRequestException("host briefly unreachable");
+        }
         if (script.Contains("ghostunneldigests=", StringComparison.Ordinal))
         {
             if (_unusableReads > 0)
@@ -173,8 +182,8 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
         if (HangInConfirm) return ("", "the confirmation did not finish within 20 seconds inside the lock", 124);
         if (!Timers.TryGetValue(run, out var state) || state != "waiting")
             return ("", "the guard timer of this run is no longer waiting", 1);
+        if (_prev is null) return ("", "the previous allow-list file is gone (the guard already restored it?)", 1);
         Timers[run] = "stopped";
-        if (_prev is null) return ("", "the guard already restored the previous allow-list", 1);
         if (ConfirmFailsAfterStop) return ("", "the marker could not be written", MtlsAllowListCommands.ConfirmFailedAfterStop);
         Markers.Add(run);
         _prev = null;

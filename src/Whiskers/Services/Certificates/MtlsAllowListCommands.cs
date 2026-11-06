@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace Whiskers.Services.Certificates;
 
 /// <summary>
-/// Host scripts that change which client names a host's ghostunnel admits (R1-44, contract 0007 with amendments 1–9).
+/// Host scripts that change which client names a host's ghostunnel admits (R1-44, contract 0007 with amendments 1–10).
 /// Pure builders, so every line that reaches a host is asserted in a test.
 ///
 /// <para>Protected mTLS layer: these scripts edit the <c>--allow-cn</c> items under ghostunnel's <c>command:</c> and
@@ -176,9 +176,11 @@ public static partial class MtlsAllowListCommands
     /// The confirmation of a run, as one script, sent through a one-off connection with the NEW credential (amendments
     /// 4–7). Its locked section runs under <c>timeout 20</c> (a hang inside the lock is killed, the lock released, and the
     /// guard then rolls back): it requires the guard timer to be loaded and still waiting (<c>SubState=waiting</c>; a
-    /// <c>dead</c>, elapsed or not-loaded timer fails) and the guard service not active, stops the timer, requires
-    /// <c>.prev</c> (the guard has not restored anything), writes the marker and drops <c>.prev</c>. The guard never runs
-    /// after that; the marker is removed by <see cref="Cleanup"/> once Whiskers has recorded the phase.
+    /// <c>dead</c>, elapsed or not-loaded timer fails), the guard service not active and <c>.prev</c> present (the guard
+    /// has not restored anything; it cannot run while the lock is held), then stops the timer, writes the marker and drops
+    /// <c>.prev</c>. Anything failing from the stop on exits with <see cref="ConfirmFailedAfterStop"/> (amendment 10).
+    /// The guard never runs after that; the marker is removed by <see cref="Cleanup"/> once Whiskers has recorded the
+    /// phase.
     /// </summary>
     public static string Confirm(ComposeTarget target, string runSuffix)
     {
@@ -204,8 +206,8 @@ public static partial class MtlsAllowListCommands
             [ "$(systemctl show -p LoadState --value {{GuardUnitPrefix}}{{run}}.timer)" = "loaded" ] || { echo 'the guard timer of this run is not loaded' >&2; exit 1; }
             [ "$(systemctl show -p SubState --value {{GuardUnitPrefix}}{{run}}.timer)" = "waiting" ] || { echo 'the guard timer of this run is no longer waiting' >&2; exit 1; }
             if systemctl is-active --quiet {{GuardUnitPrefix}}{{run}}.service; then echo 'the guard of this run is running' >&2; exit 1; fi
+            [ -f {{t.File}}.prev ] || { echo 'the previous allow-list file is gone (the guard already restored it?)' >&2; exit 1; }
             systemctl stop {{GuardUnitPrefix}}{{run}}.timer || { echo 'stopping the guard timer failed' >&2; exit {{ConfirmFailedAfterStop}}; }
-            [ -f {{t.File}}.prev ] || { echo 'the guard already restored the previous allow-list' >&2; exit 1; }
             touch {{MarkerPrefix}}{{run}} || { echo 'the marker could not be written' >&2; exit {{ConfirmFailedAfterStop}}; }
             rm -f {{t.File}}.prev {{GuardScriptPath(run)}} || { echo 'the previous file could not be removed' >&2; exit {{ConfirmFailedAfterStop}}; }
             echo confirmed

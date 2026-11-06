@@ -399,9 +399,10 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                         (status.Kind == Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared
                             ? "Der Eintrag nennt die gemeinsame Client-Identität"
                             : $"Der Eintrag nennt {status.CommonName} (Generation {status.Generation})") +
-                        ", aber die laufenden ghostunnel-Argumente des Hosts sind nicht lesbar — vermutlich nimmt er diese Identität " +
-                        "nicht mehr an (älteres Backup zurückgespielt?). „Migrieren“ erreicht ihn so nicht; zurück über das " +
-                        "Notfall-Re-Onboarding per SSH (docs/operations/per-host-mtls-migration.md, „Älteres Backup“).", "/servers", "Server"));
+                        ", aber die laufenden ghostunnel-Argumente des Hosts sind nicht lesbar. Ist der Host nur gerade nicht " +
+                        "erreichbar, später erneut prüfen. Bleibt es so, nimmt er diese Identität vermutlich nicht mehr an (älteres " +
+                        "Backup zurückgespielt?): „Migrieren“ erreicht ihn dann nicht; zurück über das Notfall-Re-Onboarding per SSH " +
+                        "(docs/operations/per-host-mtls-migration.md, „Älteres Backup“).", "/servers", "Server"));
                     break;
                 case Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared:
                     checks.Add(new ReadinessCheck(title, false,

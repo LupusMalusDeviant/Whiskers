@@ -73,6 +73,7 @@ public class OnboardingService : IOnboardingService
         }
 
         var slug = OnboardingCommands.Slug(server.Name);
+        SemaphoreSlim? hostLock = null;
         try
         {
             // 0) Bootstrap reachability ------------------------------------------------------------
@@ -169,6 +170,17 @@ public class OnboardingService : IOnboardingService
             // the CSR travels to step-ca (on local) and the signed certificate travels back. It used to be the
             // other way round — key made on Badwolf, shipped base64 through the command channel.
             step = OnboardingStep.Certificate;
+            // R1-44 (contract 0007, amendment 10; review r3 MAJOR 1): steps 5–9 — from the server certificate to the
+            // journal — hold the store's per-host lock, the one every certificate step and server removal take. A
+            // running migration, renewal, rotation or removal makes onboarding refuse instead of interleaving slots.
+            var gate = _clientCredentials.HostLock(serverId);
+            if (!await gate.WaitAsync(0, ct))
+                return Fail(progress, completed, step,
+                    $"Für {server.Name} läuft gerade ein Zertifikatsschritt (Migration, Erneuerung, Rotation oder Entfernen); " +
+                    "Onboarding erneut starten, sobald er fertig ist.");
+            hostLock = gate;
+            if (_serverConfig.GetServer(serverId) is null)
+                return Fail(progress, completed, step, $"{server.Name} wurde inzwischen entfernt.");
             progress.Report("⑥ Server-Zertifikat ausstellen (Schlüssel auf dem Host, step-ca signiert)…");
             await _certificates.IssueForNewHostAsync(serverId, MtlsIdentity.ForNewHost(slug, tsIp), ct);
             // R1-44 (D6): the host gets its own client identity right away (generation 1); its proxy never admits the
@@ -256,6 +268,10 @@ public class OnboardingService : IOnboardingService
         {
             _logger.LogError(ex, "Onboarding failed for {ServerId} at step {Step}", serverId, step);
             return Fail(progress, completed, step, ex.Message);
+        }
+        finally
+        {
+            hostLock?.Release();
         }
     }
 
