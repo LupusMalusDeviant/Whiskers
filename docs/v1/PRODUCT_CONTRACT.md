@@ -348,8 +348,8 @@ S-09…S-15 (R1-34, R1-48, R1-49, R1-27), U-35 and U-36 (R1-49, R1-27).
 | UI handler groups (U) | 36 |
 | **Total** | **105** |
 
-The gap column per row is not recounted here: the release gate (contract 0008, proposed) is to count rows and gaps
-from the tables and fail when this section disagrees.
+The gap column per row is not recounted here, and the release gate (contract 0008, proposed) does not count gaps either: it
+counts the rows per class and fails when the table above disagrees (R15); the 90-row baseline stays as history.
 
 ## 8. How this document is maintained
 
