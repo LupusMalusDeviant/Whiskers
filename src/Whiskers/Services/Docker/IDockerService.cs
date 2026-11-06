@@ -35,6 +35,11 @@ public interface IDockerService
     Task StopContainerAsync([MutationTarget] string containerId, string? serverId = null);
     [MutatingOperation("container.restart")]
     Task RestartContainerAsync([MutationTarget] string containerId, string? serverId = null);
+
+    /// <summary>Contract 0006: <c>docker update --restart=no</c> — the first half of stopping a container whose exposure
+    /// was not decided; composed only by the compose paths that may stop what their run created.</summary>
+    [MutatingOperation("container.disable_restart")]
+    Task DisableRestartAsync([MutationTarget] string containerId, string? serverId = null);
     [MutatingOperation("container.remove")]
     Task RemoveContainerAsync([MutationTarget] string containerId, bool force = false, string? serverId = null);
     Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null, CancellationToken ct = default);

@@ -75,6 +75,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("container.stop", "stop_container", W, "container", Dis, Normal);
         yield return Tool("container.restart", "restart_container", W, "container", Dis, Normal);
         yield return Tool("container.update", "update_container", W, "container", Dis, Long);
+        // Contract 0006: `docker update --restart=no` before a container whose exposure was not decided is stopped. Only
+        // composed (compose.deploy, gitdeploy.deploy, container.env_set), never decided on its own; not above them.
+        yield return Ui("container.disable_restart", W, "container", Dis, Short);
         // R1-05: writes the compose .env (any key: image, command, bind paths) and runs `docker compose up -d` — the
         // same as the container page's .env save, root-equivalent on the host.
         yield return Tool("container.env_set", "set_container_env", A, "container", Root, Normal);

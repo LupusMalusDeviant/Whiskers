@@ -22,7 +22,12 @@ public static class MutationCompositions
     [
         // Deployments: a form deployment is pull + create; a compose file deploys each of its services as a form.
         ("app.deploy", ["image.pull", "container.create"]),
-        ("compose.deploy", ["app.deploy"]),
+        // Contract 0006: a compose run decided by the agent rule set stops a container it created whose exposure was not
+        // decided (no restart, then stop). The UI-only app.deploy and container.env_file_save are decided for persons
+        // only and never stop.
+        ("compose.deploy", ["app.deploy", "container.disable_restart", "container.stop"]),
+        ("gitdeploy.deploy", ["container.disable_restart", "container.stop"]),
+        ("container.env_set", ["container.disable_restart", "container.stop"]),
         // A volume restore takes a safety backup of the volume first.
         ("volume.restore", ["volume.backup"]),
         // A Git-deploy app's token and saved credentials live in the vault.

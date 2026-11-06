@@ -270,6 +270,7 @@ internal sealed class FakeDocker : IDockerService
     public Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task StartContainerAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task StopContainerAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
+    public Task DisableRestartAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task RestartContainerAsync(string containerId, string? serverId = null) =>
         Act("restart", containerId, serverId, Task.CompletedTask);
     public Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null) => throw new NotSupportedException();

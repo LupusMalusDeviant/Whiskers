@@ -42,6 +42,7 @@ public static class VerificationContracts
             ["container.remove"] = VerificationContract.ReadBack("the container is gone."),
             ["container.create"] = VerificationContract.ReadBack("the container the call returned runs."),
             ["container.rollback"] = VerificationContract.ReadBack("the container of the snapshot runs again."),
+            ["container.disable_restart"] = VerificationContract.None(NestedOnly),
             ["container.env_set"] = VerificationContract.None(
                 "compose recreates the container from the .env; the new variables are read by its process, not by Whiskers."),
             ["container.env_file_save"] = VerificationContract.None(
