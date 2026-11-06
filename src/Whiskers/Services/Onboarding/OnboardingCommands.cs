@@ -57,7 +57,7 @@ public static class OnboardingCommands
     }
 
     // Host files are LF: normalise, so a CRLF checkout of this source cannot put CR characters into them.
-    public static string NodeExporterCompose(string tsIp) => NodeExporterComposeFor(tsIp).ReplaceLineEndings("\n");
+    public static string NodeExporterCompose(string tsIp) => NodeExporterComposeFor(tsIp).Replace("\r\n", "\n", StringComparison.Ordinal);
 
     private static string NodeExporterComposeFor(string tsIp) =>
 $@"services:
@@ -80,7 +80,7 @@ $@"services:
     /// approved one (<see cref="Whiskers.Services.Certificates.MtlsAllowListCommands.ApprovedArgsWithoutAllowCn"/>).</summary>
     public static string DockerProxyCompose(string tsIp, string allowedClientCn) =>
         Whiskers.Services.Certificates.MtlsClientIdentity.IsValidCommonName(allowedClientCn)
-            ? DockerProxyComposeFor(tsIp, allowedClientCn).ReplaceLineEndings("\n")
+            ? DockerProxyComposeFor(tsIp, allowedClientCn).Replace("\r\n", "\n", StringComparison.Ordinal)
             : throw new ArgumentException($"'{allowedClientCn}' is not an allowed client name.", nameof(allowedClientCn));
 
     private static string DockerProxyComposeFor(string tsIp, string allowedClientCn) =>

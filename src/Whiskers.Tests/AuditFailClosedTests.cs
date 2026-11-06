@@ -662,7 +662,7 @@ public sealed class AuditFailClosedTests : IDisposable
     [Fact]
     public async Task An_outbox_that_cannot_be_listed_is_not_empty()
     {
-        var outbox = new AuditOutbox(new DataPathOptions(Path.Combine(_root, "bad dir")));
+        var outbox = new AuditOutbox(new DataPathOptions(Path.Combine(_root, "bad\0dir")));
         Assert.Equal(1, outbox.Count);
         var recovery = new AuditRecovery(Sink(), _scopes, NullLogger<AuditRecovery>.Instance,
             new DbOperationJournal(_scopes), _time, outbox);
