@@ -19,11 +19,40 @@ public interface IMtlsCertificateService
     /// Whiskers cannot confirm the new certificate within <see cref="MtlsCertificateCommands.GuardDelay"/>.</summary>
     [MutatingOperation("certificate.renew_mtls")]
     Task<MtlsRenewalResult> RenewAsync(string serverId, CancellationToken ct);
+
+    /// <summary>Moves one host from the shared to its own client identity (R1-44, contract 0007): issue, widen, switch,
+    /// narrow, record. Every host step is guarded and confirmed through the new credential; a failed phase leaves the host
+    /// in its last confirmed state, and a second call resumes from there. Admin, capability <c>mtls.client_migrate</c>.</summary>
+    [MutatingOperation("mtls.client_migrate")]
+    Task<MtlsClientMigrationResult> MigrateClientAsync(string serverId, IProgress<string>? progress, CancellationToken ct);
+
+    /// <summary>A new client certificate for a migrated host: the same generation (<paramref name="rotate"/> false, the
+    /// host is unchanged), or the next one (true: widen, switch, narrow — the old certificate is dead at that host
+    /// afterwards). Capability <c>mtls.client_renew</c>.</summary>
+    [MutatingOperation("mtls.client_renew")]
+    Task<MtlsClientMigrationResult> RenewClientAsync(string serverId, bool rotate, CancellationToken ct);
+
+    /// <summary>Deletes the shared <c>client.key</c> / <c>client.crt</c> once every mTLS host has been narrowed to its own
+    /// identity with the shared credential proven refused. UI only, Admin, capability <c>mtls.shared_client_retire</c>.</summary>
+    [MutatingOperation("mtls.shared_client_retire")]
+    Task<MtlsRenewalResult> RetireSharedClientAsync(CancellationToken ct);
+
+    /// <summary>Read only: whether ghostunnel runs on <paramref name="serverId"/> and which <c>--allow-cn</c> values it
+    /// runs with (<c>docker inspect</c>). Never throws for an unreachable host; the result says so.</summary>
+    Task<MtlsLiveAllowList> ReadLiveAllowListAsync(string serverId, CancellationToken ct);
 }
+
+/// <summary>What a host's ghostunnel runs with. <see cref="Readable"/> false: the host or its <c>.Args</c> could not be
+/// read (<see cref="Error"/>); <see cref="Running"/> false: the container exists but is stopped.</summary>
+public sealed record MtlsLiveAllowList(bool Readable, bool Running, IReadOnlyList<string> AllowedCommonNames, string? Error);
 
 public sealed record MtlsRenewalResult(bool Success, string Message, DateTime? NotAfterUtc = null);
 
-public sealed class MtlsCertificateService : IMtlsCertificateService
+/// <summary>The outcome of a client-credential rollout step: <see cref="Phase"/> names the phase that ended the run
+/// (the failed one, or "done").</summary>
+public sealed record MtlsClientMigrationResult(bool Ok, string Phase, string? Error, MtlsClientIdentity? Identity);
+
+public sealed partial class MtlsCertificateService : IMtlsCertificateService
 {
     private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
@@ -39,12 +68,18 @@ public sealed class MtlsCertificateService : IMtlsCertificateService
     internal int ConfirmAttempts { get; set; } = 6;
     internal TimeSpan ConfirmInterval { get; set; } = TimeSpan.FromSeconds(5);
 
-    public MtlsCertificateService(IHostCommandExecutor exec, IServerConfigService servers, ILogger<MtlsCertificateService> logger)
+    public MtlsCertificateService(IHostCommandExecutor exec, IServerConfigService servers, ILogger<MtlsCertificateService> logger,
+        IMtlsClientCredentialStore? clientCredentials = null, Whiskers.Services.Docker.IDockerConnectionManager? connections = null)
     {
         _exec = exec;
         _servers = servers;
         _logger = logger;
+        _clientCredentials = clientCredentials;
+        _connections = connections;
         FetchPresented = (host, port, ct) => CertificateProbe.FetchServerCertificateAsync(host, port, HandshakeTimeout, ct);
+        ProbeCredential = (server, ct) => MtlsClientProbe.ProbeAsync(server, HandshakeTimeout, ct);
+        RunConfirmation = (server, script, ct) => MtlsClientProbe.RunConfirmationAsync(server, script, StepTimeout, ct);
+        VerifyConnection = DefaultVerifyConnectionAsync;
     }
 
     public async Task<X509Certificate2> IssueForNewHostAsync(string serverId, MtlsIdentity identity, CancellationToken ct)

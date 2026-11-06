@@ -1688,6 +1688,42 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Servers_Action_TestConnection" xml:space="preserve">
     <value>Test connection</value>
   </data>
+  <data name="Servers_Mtls_Shared" xml:space="preserve">
+    <value>Shared client credential (expires {0}) — not isolated</value>
+  </data>
+  <data name="Servers_Mtls_Own" xml:space="preserve">
+    <value>Own client credential (generation {0}), expires {1}</value>
+  </data>
+  <data name="Servers_Mtls_OwnUnfinished" xml:space="preserve">
+    <value>Own client credential (generation {0}), migration unfinished (phase {1} of 5)</value>
+  </data>
+  <data name="Servers_Mtls_Operator" xml:space="preserve">
+    <value>Operator-supplied client credential (expires {0})</value>
+  </data>
+  <data name="Servers_Mtls_Migrate" xml:space="preserve">
+    <value>Migrate to its own client credential</value>
+  </data>
+  <data name="Servers_Mtls_MigrateTitle" xml:space="preserve">
+    <value>Migrate {0} to its own client credential?</value>
+  </data>
+  <data name="Servers_Mtls_MigrateMessage" xml:space="preserve">
+    <value>Whiskers issues this host its own client certificate, lets the host's proxy admit it besides the shared one, switches over, and then narrows the proxy to the new identity once the shared one is proven refused. Each host step rolls back by itself after 3 minutes unless confirmed. This takes a few minutes.</value>
+  </data>
+  <data name="Servers_Mtls_Migrated" xml:space="preserve">
+    <value>{0} now admits only its own client identity {1}.</value>
+  </data>
+  <data name="Servers_Mtls_MigrateFailed" xml:space="preserve">
+    <value>Migration of {0} stopped in phase "{1}": {2} Starting it again resumes there.</value>
+  </data>
+  <data name="Servers_Mtls_Retire" xml:space="preserve">
+    <value>Retire shared client key</value>
+  </data>
+  <data name="Servers_Mtls_RetireTitle" xml:space="preserve">
+    <value>Retire the shared client credential?</value>
+  </data>
+  <data name="Servers_Mtls_RetireMessage" xml:space="preserve">
+    <value>Deletes the shared client key and certificate. Whiskers refuses while any host still uses or admits them. This cannot be undone except from a backup.</value>
+  </data>
   <data name="Servers_Button_Add" xml:space="preserve">
     <value>Add server</value>
   </data>

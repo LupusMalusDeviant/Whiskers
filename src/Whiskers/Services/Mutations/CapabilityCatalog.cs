@@ -139,6 +139,12 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("ssl.renew", "renew_ssl_certificate", A, "host", Rev, Normal);
         yield return Tool("certificate.renew_mtls", "renew_mtls_certificate", A, "host", Root, Normal);
         yield return Ui("certificate.issue_mtls", A, "host", Root, Normal);
+        // R1-44 (contract 0007): per-host client credentials. Migration and renewal change which client a host's proxy
+        // admits (every command to that host passes through it); each guarded host step may wait for its 3-minute
+        // rollback, so the deadline is the long one. Retiring the shared key is UI-only and Admin.
+        yield return Tool("mtls.client_migrate", "migrate_mtls_client_credential", A, "host", Root, Long);
+        yield return Tool("mtls.client_renew", "renew_mtls_client_credential", A, "host", Root, Long);
+        yield return Ui("mtls.shared_client_retire", A, "whiskers", Des, Short);
 
         // Databases
         yield return Tool("db.query", "execute_query", A, "container", Root, Normal);

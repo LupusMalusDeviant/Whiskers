@@ -34,12 +34,15 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     private readonly VaultKeyRingRepository? _keyRing;
     private readonly Whiskers.Configuration.DataPathOptions? _dataPaths;
     private readonly Whiskers.Utils.ForwardedHeadersObserver? _forwarded;
+    private readonly Whiskers.Services.Certificates.IMtlsClientCredentialStore? _clientCredentials;
 
     public ProductionReadinessService(IConfiguration config, IVaultService vault, IServiceScopeFactory scopeFactory,
         IServerConfigService? servers = null, IAppSettingsStore? appSettings = null,
         Whiskers.Services.Agent.IAgentSettingsStore? agentSettings = null, Whiskers.Configuration.DataPathOptions? dataPaths = null,
-        VaultKeyRingRepository? keyRing = null, Whiskers.Utils.ForwardedHeadersObserver? forwarded = null)
+        VaultKeyRingRepository? keyRing = null, Whiskers.Utils.ForwardedHeadersObserver? forwarded = null,
+        Whiskers.Services.Certificates.IMtlsClientCredentialStore? clientCredentials = null)
     {
+        _clientCredentials = clientCredentials;
         _forwarded = forwarded;
         _keyRing = keyRing;
         _dataPaths = dataPaths;
@@ -254,7 +257,180 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 null, null));
         }
 
+        // 8) R1-44 (INV-58): per-host mTLS client identities.
+        checks.AddRange(MtlsClientCredentialChecks());
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            if (scope.ServiceProvider.GetService<Whiskers.Services.Certificates.IMtlsCertificateService>() is { } certificates)
+                checks.AddRange(await LiveAllowListChecksAsync(certificates.ReadLiveAllowListAsync));
+        }
+
         return checks;
+    }
+
+    /// <summary>
+    /// R1-44 (contract 0007, review m-9 and amendment 8): what each mTLS host's ghostunnel actually runs with, read live
+    /// (<c>docker inspect</c>, one bounded read per host, in parallel). One line names every host whose ghostunnel is not
+    /// running or whose arguments cannot be read — the mTLS channel is then the broken management path and the way back is
+    /// the break-glass re-onboarding over SSH; another names every narrowed host whose running <c>--allow-cn</c> list is
+    /// not exactly its own name (a hand edit, a restored compose file).
+    /// </summary>
+    internal async Task<IReadOnlyList<ReadinessCheck>> LiveAllowListChecksAsync(
+        Func<string, CancellationToken, Task<Whiskers.Services.Certificates.MtlsLiveAllowList>> read)
+    {
+        var checks = new List<ReadinessCheck>();
+        if (_clientCredentials is not { } store || _servers is null) return checks;
+        var hosts = _servers.GetServers()
+            .Where(s => s.TcpUseTls && !string.IsNullOrWhiteSpace(s.TcpHost) && !string.IsNullOrWhiteSpace(s.TcpClientCertPath))
+            .ToList();
+        if (hosts.Count == 0) return checks;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var results = await Task.WhenAll(hosts.Select(async s =>
+        {
+            try { return (Server: s, Live: await read(s.Id, cts.Token)); }
+            catch (Exception ex) { return (Server: s, Live: new Whiskers.Services.Certificates.MtlsLiveAllowList(false, false, [], ex.Message)); }
+        }));
+
+        var down = results.Where(r => !r.Live.Readable || !r.Live.Running)
+            .Select(r => r.Server.Name + (r.Live.Readable ? " (ghostunnel läuft nicht)" : " (Argumente nicht lesbar)"))
+            .ToList();
+        checks.Add(new ReadinessCheck("mTLS-Proxy (ghostunnel) läuft", down.Count == 0,
+            down.Count == 0
+                ? $"Auf allen {hosts.Count} mTLS-Hosts läuft ghostunnel; die laufenden Argumente sind lesbar."
+                : "Nicht erreichbar über mTLS: " + string.Join(", ", down) + ". Der mTLS-Kanal ist der einzige Verwaltungsweg; " +
+                  "zurück geht es über das Notfall-Re-Onboarding per SSH (docs/operations/per-host-mtls-migration.md).",
+            down.Count == 0 ? null : "/servers", down.Count == 0 ? null : "Server"));
+
+        var mismatched = new List<string>();
+        foreach (var (server, live) in results.Where(r => r.Live is { Readable: true, Running: true }))
+        {
+            if (!Whiskers.Services.Certificates.MtlsClientCredentialStore.IsValidServerId(server.Id)) continue;
+            var status = store.StatusOf(server);
+            if (status.Kind != Whiskers.Services.Certificates.MtlsClientCredentialKind.Own || store.ReadJournal(server.Id) is not { IsNarrowed: true })
+                continue;
+            if (live.AllowedCommonNames.Count != 1 || live.AllowedCommonNames[0] != status.CommonName)
+                mismatched.Add($"{server.Name} (läuft mit {string.Join(", ", live.AllowedCommonNames)})");
+        }
+        checks.Add(new ReadinessCheck("Laufende --allow-cn-Liste", mismatched.Count == 0,
+            mismatched.Count == 0
+                ? "Jeder eingeengte Host nimmt laut docker inspect genau seine eigene Client-Identität an."
+                : "Eingeengt, aber der laufende ghostunnel nimmt anderes an: " + string.Join(", ", mismatched) + ". „Migrieren“ erneut starten.",
+            mismatched.Count == 0 ? null : "/servers", mismatched.Count == 0 ? null : "Server"));
+        return checks;
+    }
+
+    /// <summary>
+    /// R1-44 (contract 0007): one line per mTLS host about its client credential — a host on the shared credential, a
+    /// migration that is not finished and a store whose active generation is older than the one the host was narrowed to
+    /// (an older backup restored after a rotation) are not OK — plus the shared key still lying around while hosts no
+    /// longer accept it, and the modes (Unix) or ACLs (Windows) of every client key file.
+    /// </summary>
+    internal IReadOnlyList<ReadinessCheck> MtlsClientCredentialChecks()
+    {
+        var checks = new List<ReadinessCheck>();
+        if (_clientCredentials is not { } store || _servers is null) return checks;
+
+        var narrowedHosts = 0;
+        foreach (var server in _servers.GetServers().Where(s => s.TcpUseTls && !string.IsNullOrWhiteSpace(s.TcpClientCertPath)))
+        {
+            var title = $"mTLS-Client-Identität: {server.Name}";
+            if (!Whiskers.Services.Certificates.MtlsClientCredentialStore.IsValidServerId(server.Id))
+            {
+                checks.Add(new ReadinessCheck(title, false, $"Die Server-ID '{server.Id}' taugt nicht als Verzeichnisname; dieser Host kann keine eigene Identität bekommen.", null, null));
+                continue;
+            }
+            var status = store.StatusOf(server);
+            var journal = store.ReadJournal(server.Id);
+            switch (status.Kind)
+            {
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared:
+                    checks.Add(new ReadinessCheck(title, false,
+                        "Nutzt noch die gemeinsame Client-Identität: ein gestohlener Schlüssel öffnet jeden Host, der sie annimmt. " +
+                        "Auf der Server-Seite „Migrieren“ (Anleitung: docs/operations/per-host-mtls-migration.md).", "/servers", "Server"));
+                    break;
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Own when journal is { IsNarrowed: true } && journal.Generation > status.Generation:
+                    narrowedHosts++;
+                    checks.Add(new ReadinessCheck(title, false,
+                        $"Die aktive Identität (Generation {status.Generation}) ist älter als die, auf die der Host eingeengt wurde " +
+                        $"(Generation {journal.Generation}) — vermutlich wurde nach einer Rotation ein älteres Backup zurückgespielt. " +
+                        "Der Host lehnt diese Identität ab; erneut rotieren.", "/servers", "Server"));
+                    break;
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Own when journal is { IsNarrowed: true }:
+                    narrowedHosts++;
+                    checks.Add(new ReadinessCheck(title, true,
+                        $"Eigene Identität {status.CommonName} (Generation {status.Generation})" +
+                        (status.NotAfterUtc is { } until ? $", gültig bis {until:yyyy-MM-dd}" : "") +
+                        "; der Host nimmt nur sie an.", null, null));
+                    break;
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Own:
+                    checks.Add(new ReadinessCheck(title, false,
+                        $"Eigene Identität {status.CommonName}, aber die Umstellung ist nicht abgeschlossen (Phase {journal?.Phase ?? 0} von 5): " +
+                        "der Host nimmt womöglich noch die gemeinsame Identität an. „Migrieren“ erneut starten — es setzt an der Stelle fort.", "/servers", "Server"));
+                    break;
+                default:
+                    checks.Add(new ReadinessCheck(title, true,
+                        "Vom Betreiber gesetzte Client-Zertifikatspfade; Whiskers verwaltet und prüft sie nicht.", null, null));
+                    break;
+            }
+        }
+
+        var shared = store.SharedPaths;
+        if (File.Exists(shared.Key) && narrowedHosts > 0)
+            checks.Add(new ReadinessCheck("Gemeinsamer mTLS-Client-Schlüssel", false,
+                $"Der gemeinsame Client-Schlüssel liegt noch im Datenverzeichnis, obwohl {narrowedHosts} Host(s) ihn nicht mehr annehmen — " +
+                "vor dem Stilllegen, oder nach dem Zurückspielen eines älteren Backups. Sind alle Hosts migriert: auf der Server-Seite stilllegen.",
+                "/servers", "Server"));
+
+        var keys = store.KeyFiles();
+        if (keys.Count > 0)
+        {
+            var exposed = keys.Where(KeyIsExposed).Select(k => Path.GetRelativePath(Path.GetDirectoryName(shared.Key)!, k).Replace('\\', '/')).ToList();
+            checks.Add(new ReadinessCheck("mTLS-Client-Schlüssel geschützt", exposed.Count == 0,
+                exposed.Count == 0
+                    ? (OperatingSystem.IsWindows()
+                        ? "Keiner der Client-Schlüssel ist für Jeder, Benutzer oder authentifizierte Benutzer lesbar."
+                        : "Alle Client-Schlüssel haben den Modus 0600.")
+                    : (OperatingSystem.IsWindows()
+                        ? "Für alle Benutzer lesbar: "
+                        : "Nicht 0600: ") + string.Join(", ", exposed) + ".",
+                null, null));
+        }
+        return checks;
+    }
+
+    /// <summary>Unix: anything but 0600. Windows: a read grant to Everyone, Users or Authenticated Users.</summary>
+    internal static bool KeyIsExposed(string path)
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+                return File.GetUnixFileMode(path) != (UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            return WindowsKeyIsExposed(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static bool WindowsKeyIsExposed(string path)
+    {
+        var broad = new[]
+        {
+            new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null),
+            new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null),
+            new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.AuthenticatedUserSid, null),
+        };
+        var rules = new FileInfo(path).GetAccessControl()
+            .GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier));
+        foreach (System.Security.AccessControl.FileSystemAccessRule rule in rules)
+            if (rule.AccessControlType == System.Security.AccessControl.AccessControlType.Allow
+                && (rule.FileSystemRights & System.Security.AccessControl.FileSystemRights.ReadData) != 0
+                && broad.Contains(rule.IdentityReference))
+                return true;
+        return false;
     }
 
     /// <summary>The unreadable store copies (<c>*.corrupt-*</c>, R1-35; the guardrails' <c>*.unreadable-*</c>) in the

@@ -13,6 +13,8 @@
 @inject Whiskers.Services.Observability.ILoopSuspensionService Suspension
 @inject Whiskers.Services.Docker.Budget.IServerCircuitBreaker Circuit
 @inject IUiMutationRunner Mutations
+@inject Whiskers.Services.Certificates.IMtlsClientCredentialStore ClientCredentials
+@inject Whiskers.Services.Certificates.IMtlsCertificateService Certificates
 @inject IStringLocalizer<SharedResource> L
 @using Whiskers.Services.Observability
 
@@ -41,6 +43,11 @@
                     <MudMenuItem OnClick="@(() => PauseAll(option))">@option.Label</MudMenuItem>
                 }
             </MudMenu>
+            @if (File.Exists(ClientCredentials.SharedPaths.Key) || File.Exists(ClientCredentials.SharedPaths.Cert))
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.KeyOff" Class="mr-2"
+                           Disabled="_mtlsBusy" OnClick="RetireSharedClient">@L["Servers_Mtls_Retire"]</MudButton>
+            }
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                        OnClick="ShowAddDialog">@L["Servers_Button_Add"]</MudButton>
         }
@@ -72,6 +79,11 @@
                     break;
                 case Whiskers.Models.ConnectionType.TCP:
                     @($"{context.TcpHost}:{context.TcpPort}")
+                    @if (MtlsStatusText(context) is { } mtls)
+                    {
+                        <MudText Typo="Typo.caption" Color="@(mtls.Ok ? Color.Default : Color.Warning)"
+                                 Style="font-family: inherit; display: block;">@mtls.Text</MudText>
+                    }
                     break;
                 case Whiskers.Models.ConnectionType.SSH:
                     @($"{context.SshUser}@{context.SshHost}:{context.SshPort}")
@@ -138,6 +150,11 @@
                         }
                     </MudMenu>
                 }
+            }
+            @if (_role >= AppRole.Admin && CanMigrate(context))
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.Key" Size="Size.Small" Color="Color.Warning" Disabled="_mtlsBusy"
+                               OnClick="@(() => MigrateClientCredential(context))" title="@L["Servers_Mtls_Migrate"]" />
             }
             @if (context.ConnectionType == Whiskers.Models.ConnectionType.SSH && _role >= AppRole.Admin)
             {
@@ -840,7 +857,7 @@
                 // The server record first, then its kubeconfig and cloud API key, as one decision (R1-11): a failed
                 // removal leaves a working server, a failed cleanup at most an unused secret.
                 ConnectionManager.InvalidateClient(server.Id);
-                return Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(ServerConfigService, Vault, server);
+                return Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(ServerConfigService, Vault, server, ClientCredentials);
             });
             _servers = ServerConfigService.GetServers();
             Snackbar.Add(L["Servers_Snackbar_Removed", server.Name].Value, Severity.Success);
@@ -947,6 +964,99 @@
         await file.OpenReadStream(maxAllowedSize: 1024 * 100).CopyToAsync(ms);
         _sshKeyData = ms.ToArray();
         _sshKeyFileName = file.Name;
+    }
+
+    // ---- R1-44: per-host mTLS client credentials ---------------------------------------------------------------------
+
+    private bool _mtlsBusy;
+
+    /// <summary>The client-credential status line of an mTLS server (null for anything else).</summary>
+    private (string Text, bool Ok)? MtlsStatusText(Whiskers.Models.ServerConfig server)
+    {
+        if (!server.TcpUseTls || !Whiskers.Services.Certificates.MtlsClientCredentialStore.IsValidServerId(server.Id)) return null;
+        var status = ClientCredentials.StatusOf(server);
+        var expires = status.NotAfterUtc is { } until ? until.ToString("yyyy-MM-dd") : "?";
+        return status.Kind switch
+        {
+            Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared => (L["Servers_Mtls_Shared", expires].Value, false),
+            Whiskers.Services.Certificates.MtlsClientCredentialKind.Own when status.Phase >= 5 =>
+                (L["Servers_Mtls_Own", status.Generation, expires].Value, true),
+            Whiskers.Services.Certificates.MtlsClientCredentialKind.Own =>
+                (L["Servers_Mtls_OwnUnfinished", status.Generation, status.Phase].Value, false),
+            Whiskers.Services.Certificates.MtlsClientCredentialKind.OperatorSupplied => (L["Servers_Mtls_Operator", expires].Value, true),
+            _ => null,
+        };
+    }
+
+    private bool CanMigrate(Whiskers.Models.ServerConfig server) =>
+        server.TcpUseTls && Whiskers.Services.Certificates.MtlsClientCredentialStore.IsValidServerId(server.Id)
+        && ClientCredentials.StatusOf(server) is { } s
+        && (s.Kind == Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared
+            || (s.Kind == Whiskers.Services.Certificates.MtlsClientCredentialKind.Own && s.Phase < 5));
+
+    private async Task MigrateClientCredential(Whiskers.Models.ServerConfig server)
+    {
+        if (!await RequireAsync(AppRole.Admin, "mtls.client_migrate", new { serverId = server.Id })) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            L["Servers_Mtls_MigrateTitle", server.Name].Value,
+            L["Servers_Mtls_MigrateMessage"].Value,
+            yesText: L["Servers_Mtls_Migrate"].Value, cancelText: L["Servers_Button_Cancel"].Value);
+        if (confirmed != true) return;
+
+        _mtlsBusy = true;
+        StateHasChanged();
+        try
+        {
+            var result = await Mutations.RunAsync("mtls.client_migrate", new { serverId = server.Id },
+                token => Certificates.MigrateClientAsync(server.Id, null, token));
+            if (result.Ok) Snackbar.Add(L["Servers_Mtls_Migrated", server.Name, result.Identity?.CommonName ?? ""].Value, Severity.Success);
+            else Snackbar.Add(L["Servers_Mtls_MigrateFailed", server.Name, result.Phase, result.Error ?? ""].Value, Severity.Warning);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _mtlsBusy = false;
+            _servers = ServerConfigService.GetServers();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RetireSharedClient()
+    {
+        if (!await RequireAsync(AppRole.Admin, "mtls.shared_client_retire", new { section = "mtls" })) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            L["Servers_Mtls_RetireTitle"].Value, L["Servers_Mtls_RetireMessage"].Value,
+            yesText: L["Servers_Mtls_Retire"].Value, cancelText: L["Servers_Button_Cancel"].Value);
+        if (confirmed != true) return;
+
+        _mtlsBusy = true;
+        StateHasChanged();
+        try
+        {
+            var result = await Mutations.RunAsync("mtls.shared_client_retire", new { section = "mtls" },
+                token => Certificates.RetireSharedClientAsync(token));
+            Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Warning);
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _mtlsBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private class TestResult

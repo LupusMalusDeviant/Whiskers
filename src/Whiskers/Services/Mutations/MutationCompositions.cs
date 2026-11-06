@@ -40,6 +40,10 @@ public static class MutationCompositions
         ("server.remove", ["vault.secret_delete"]),
         // Onboarding issues the server's mTLS client certificate and switches its record to the managed transport.
         ("server.onboard", ["certificate.issue_mtls", "server.save"]),
+        // R1-44: a client-credential migration issues the host's own credential and switches its record to it; a
+        // renewal or rotation issues the next certificate into a slot of its own and switches the record to it.
+        ("mtls.client_migrate", ["certificate.issue_mtls", "server.save"]),
+        ("mtls.client_renew", ["certificate.issue_mtls", "server.save"]),
         // On a Docker server a workload is a container.
         ("workload.start", ["container.start"]),
         ("workload.stop", ["container.stop"]),

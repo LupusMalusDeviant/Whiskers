@@ -1688,6 +1688,42 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Action_TestConnection" xml:space="preserve">
     <value>Verbindung testen</value>
   </data>
+  <data name="Servers_Mtls_Shared" xml:space="preserve">
+    <value>Gemeinsame Client-Identität (gültig bis {0}) — nicht isoliert</value>
+  </data>
+  <data name="Servers_Mtls_Own" xml:space="preserve">
+    <value>Eigene Client-Identität (Generation {0}), gültig bis {1}</value>
+  </data>
+  <data name="Servers_Mtls_OwnUnfinished" xml:space="preserve">
+    <value>Eigene Client-Identität (Generation {0}), Umstellung nicht abgeschlossen (Phase {1} von 5)</value>
+  </data>
+  <data name="Servers_Mtls_Operator" xml:space="preserve">
+    <value>Vom Betreiber gesetzte Client-Identität (gültig bis {0})</value>
+  </data>
+  <data name="Servers_Mtls_Migrate" xml:space="preserve">
+    <value>Auf eigene Client-Identität umstellen</value>
+  </data>
+  <data name="Servers_Mtls_MigrateTitle" xml:space="preserve">
+    <value>{0} auf eine eigene Client-Identität umstellen?</value>
+  </data>
+  <data name="Servers_Mtls_MigrateMessage" xml:space="preserve">
+    <value>Whiskers stellt diesem Host ein eigenes Client-Zertifikat aus, lässt den Proxy des Hosts es neben dem gemeinsamen zu, stellt um und engt den Proxy danach auf die neue Identität ein, sobald die gemeinsame nachweislich abgelehnt wird. Jeder Schritt auf dem Host nimmt sich nach 3 Minuten selbst zurück, wenn er nicht bestätigt wird. Das dauert einige Minuten.</value>
+  </data>
+  <data name="Servers_Mtls_Migrated" xml:space="preserve">
+    <value>{0} lässt nur noch die eigene Client-Identität {1} zu.</value>
+  </data>
+  <data name="Servers_Mtls_MigrateFailed" xml:space="preserve">
+    <value>Umstellung von {0} in Phase „{1}“ angehalten: {2} Ein erneuter Start setzt dort fort.</value>
+  </data>
+  <data name="Servers_Mtls_Retire" xml:space="preserve">
+    <value>Gemeinsamen Client-Schlüssel stilllegen</value>
+  </data>
+  <data name="Servers_Mtls_RetireTitle" xml:space="preserve">
+    <value>Gemeinsame Client-Identität stilllegen?</value>
+  </data>
+  <data name="Servers_Mtls_RetireMessage" xml:space="preserve">
+    <value>Löscht den gemeinsamen Client-Schlüssel und das Zertifikat. Whiskers verweigert das, solange ein Host sie noch nutzt oder zulässt. Rückgängig nur aus einem Backup.</value>
+  </data>
   <data name="Servers_Button_Add" xml:space="preserve">
     <value>Server hinzufügen</value>
   </data>
