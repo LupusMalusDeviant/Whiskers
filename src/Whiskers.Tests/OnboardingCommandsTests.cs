@@ -36,6 +36,15 @@ public class OnboardingCommandsTests
         Assert.Matches("^[a-z0-9-]+$", slug);
     }
 
+    // --- Host files are LF, whatever the line endings of this source checkout --------------------------
+
+    [Fact]
+    public void Generated_compose_files_contain_no_carriage_returns()
+    {
+        Assert.DoesNotContain('\r', OnboardingCommands.DockerProxyCompose("100.64.0.1", "whiskers-client-web-g1"));
+        Assert.DoesNotContain('\r', OnboardingCommands.NodeExporterCompose("100.64.0.1"));
+    }
+
     // --- Command builders only ever see the slug ---------------------------------------------------
 
     [Fact]
