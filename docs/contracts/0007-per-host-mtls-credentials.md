@@ -3,7 +3,7 @@
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
 and the whiskers.site host. **Amendments 1–9** (review rounds 1–8 and implementation alignment, at the end) were accepted by
-the maintainer as one set on 6 November 2026.
+the maintainer as one set on 6 November 2026. **Amendment 10** (implementation review) is pending acceptance.
 
 ## Purpose
 
@@ -572,3 +572,24 @@ R1-44 implementation needs more surface than the text names; the behaviour is un
   `logger -t whiskers-allow-guard`. The confirmation runs as `timeout -k 5 20 flock -w 30 …`.
 - **Onboarding without a clear negative check.** When the shared probe during onboarding gives neither a TLS alert nor
   `sharedCredentialAbsent`, the onboarding record stays at phase 4 (not narrowed). A later migration closes it.
+
+## Amendment 10 — implementation review (6 November 2026)
+
+This amendment takes precedence over Amendments 1–9. It follows from the R1-44 code review rounds 1–2 and is to be
+accepted by the maintainer.
+
+- **One lock per host, owned by the store.** `IMtlsClientCredentialStore` gains `HostLock(serverId)`. Every
+  certificate step (server-certificate renewal, client migration, renewal, rotation, retirement, onboarding issue) and
+  server removal take it. Removal refuses while a step holds it.
+- **Capability of the slot steps.** `ActivatePendingAsync`, `DiscardPendingAsync` and `DiscardPreviousAsync` are
+  decided as `certificate.issue_mtls` (not `mtls.client_renew`), because they also run inside migration and onboarding.
+  Every composition that calls them includes `certificate.issue_mtls`.
+- **Pending until verified.** Every issue writes a pending slot. It becomes active only after `ServerConfig` names it and
+  a connection over it is verified. Leftover slots are deleted after phase 5.
+- **Server-certificate renewal and the guard.** `RenewAsync` first lists the host's `whiskers-allow-guard-*` units
+  (read-only) and refuses while one is armed. A failing listing refuses too (fail closed).
+- **Confirmation exit code.** A confirmation that fails after `systemctl stop` exits with 75. Whiskers maps 75, 124 and
+  137 (and an exception after the script ran) to "state unknown": it promises no rollback and tells the operator to
+  re-run, which reads the state from the live `.Args`.
+- **Names in the compose file.** The preflight checks the compose file's `--allow-cn` list like the running one: only the
+  shared name and this host's own names.
