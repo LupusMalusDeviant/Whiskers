@@ -269,8 +269,16 @@ internal sealed class FakeDocker : IDockerService
     public Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null) => throw new NotSupportedException();
     public Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task StartContainerAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
-    public Task StopContainerAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
-    public Task DisableRestartAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
+    public Task StopContainerAsync(string containerId, string? serverId = null) =>
+        StopFailures-- > 0 ? Task.FromException(new InvalidOperationException("stop failed")) : Act("stop", containerId, serverId, Task.CompletedTask);
+
+    /// <summary>How many of the next stops fail (contract 0006: the re-check retries once).</summary>
+    public int StopFailures { get; set; }
+    public Task DisableRestartAsync(string containerId, string? serverId = null) =>
+        Act("disable_restart", containerId, serverId, Task.CompletedTask);
+
+    /// <summary>Adds a container, as a compose run would create one (contract 0006).</summary>
+    public void Add(ContainerInfo container) => _containers.Add(container);
     public Task RestartContainerAsync(string containerId, string? serverId = null) =>
         Act("restart", containerId, serverId, Task.CompletedTask);
     public Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null) => throw new NotSupportedException();

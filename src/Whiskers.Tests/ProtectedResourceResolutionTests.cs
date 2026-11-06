@@ -608,6 +608,12 @@ public sealed partial class ProtectedResourceResolutionTests
         /// <summary>The full <c>docker inspect</c> JSON object per container id (contract 0006); a missing id fails the read.</summary>
         public Dictionary<string, string> Inspect { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>What a recorded command does (contract 0006); a result ends it so, <c>null</c> succeeds with "ok".</summary>
+        public Func<string, CommandResult?>? Effect { get; set; }
+
+        /// <summary>Called after each image inspection (contract 0006: another run moving a tag in between).</summary>
+        public Action? ImageInspected { get; set; }
+
         public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
             CancellationToken ct = default, int? maxOutputChars = null)
         {
@@ -623,9 +629,11 @@ public sealed partial class ProtectedResourceResolutionTests
                 // Contract 0006: the local images (id and labels), or MISSING.
                 var refs = Regex.Matches(command[..command.IndexOf("; do", StringComparison.Ordinal)], "'([^']*)'")
                     .Select(m => m.Groups[1].Value);
-                return Done(string.Concat(refs.Select(r => Images.TryGetValue(r, out var image)
+                var lines = string.Concat(refs.Select(r => Images.TryGetValue(r, out var image)
                     ? $"{r}\t{image.Id}\t{image.LabelsJson}\n"
-                    : $"{r}\t{ComposeExposures.MissingImage}\n")));
+                    : $"{r}\t{ComposeExposures.MissingImage}\n"));
+                ImageInspected?.Invoke();
+                return Done(lines);
             }
             if (Regex.Match(command, @"^docker inspect ('[^']*'(?: '[^']*')*)$") is { Success: true } containers)
             {
@@ -634,7 +642,9 @@ public sealed partial class ProtectedResourceResolutionTests
                 if (ids.Any(id => !Inspect.ContainsKey(id))) return Done("[]", 1);
                 return Done("[" + string.Join(',', ids.Select(id => Inspect[id])) + "]");
             }
-            if (Regex.Match(command, @"^if \[ -e '([^']*)' \]") is { Success: true } read)
+            // A read of a planned file — not the restore of contract 0006, which starts the same way and copies back.
+            if (!command.Contains("cp -p", StringComparison.Ordinal)
+                && Regex.Match(command, @"^if \[ -e '([^']*)' \]") is { Success: true } read)
             {
                 var path = read.Groups[1].Value;
                 if (Failing.Contains(path)) return Done("", 1);
@@ -653,6 +663,8 @@ public sealed partial class ProtectedResourceResolutionTests
             if (Regex.Match(command, @"^test -f '([^']*)' && echo yes") is { Success: true } test)
                 return Files.ContainsKey(test.Groups[1].Value) ? Done("yes") : Done("", 1);
             Executed.Add(command);
+            // Contract 0006: what a command does on the host (pull, build, up, tag) and how it ends.
+            if (Effect?.Invoke(command) is { } effect) return Task.FromResult(effect);
             return Done("ok");
         }
 
