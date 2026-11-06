@@ -189,7 +189,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
         return Encoding.UTF8.GetString(Convert.FromBase64String(b64));
     }
 
-    private static string Csr(ECDsa key, string cn, string[] dns, string[] ips, bool asCa = false)
+    internal static string Csr(ECDsa key, string cn, string[] dns, string[] ips, bool asCa = false)
     {
         var req = new CertificateRequest($"CN={cn}", key, HashAlgorithmName.SHA256);
         var san = new SubjectAlternativeNameBuilder();

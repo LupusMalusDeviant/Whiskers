@@ -179,8 +179,11 @@ public class OnboardingService : IOnboardingService
                     $"Für {server.Name} läuft gerade ein Zertifikatsschritt (Migration, Erneuerung, Rotation oder Entfernen); " +
                     "Onboarding erneut starten, sobald er fertig ist.");
             hostLock = gate;
-            if (_serverConfig.GetServer(serverId) is null)
+            // Steps 0–4 can take minutes (Tailscale login): continue with the record as it is now, under the lock, so a
+            // change finished meanwhile (a rotation, an edit) is not overwritten at the switchover (review r4 MINOR 2).
+            if (_serverConfig.GetServer(serverId)?.Clone() is not { } current)
                 return Fail(progress, completed, step, $"{server.Name} wurde inzwischen entfernt.");
+            server = current;
             progress.Report("⑥ Server-Zertifikat ausstellen (Schlüssel auf dem Host, step-ca signiert)…");
             await _certificates.IssueForNewHostAsync(serverId, MtlsIdentity.ForNewHost(slug, tsIp), ct);
             // R1-44 (D6): the host gets its own client identity right away (generation 1); its proxy never admits the

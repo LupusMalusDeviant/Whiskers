@@ -341,6 +341,9 @@ public sealed partial class MtlsCertificateService
         var shared = store.SharedPaths;
         var gate = _locks.GetOrAdd("\0shared-client", _ => new SemaphoreSlim(1, 1));
         if (!await gate.WaitAsync(0, ct)) return new(false, "The shared client credential is already being retired.");
+        // Contract 0007 amendment 10 (review r4 MINOR 1): every managed host considered is held under its per-host lock
+        // until the shared files are gone, so no migration, renewal, rotation, onboarding or removal runs meanwhile.
+        var held = new List<SemaphoreSlim>();
         try
         {
             if (!File.Exists(shared.Key) && !File.Exists(shared.Cert))
@@ -360,6 +363,9 @@ public sealed partial class MtlsCertificateService
                 var managed = MtlsClientCredentialStore.IsValidServerId(s.Id) && (store.IsManaged(s) || store.IdentityOf(s.Id) is not null);
                 if (usesShared) { blocked.Add($"{s.Name} (still presents the shared certificate)"); continue; }
                 if (!managed) { ignored.Add(s.Name); continue; }
+                var hostLock = store.HostLock(s.Id);
+                if (!await hostLock.WaitAsync(0, ct)) { blocked.Add($"{s.Name} (a certificate step is running)"); continue; }
+                held.Add(hostLock);
                 var journal = store.ReadJournal(s.Id);
                 if (journal is not { IsNarrowed: true }) { blocked.Add($"{s.Name} (not narrowed to its own credential)"); continue; }
                 if (name is null || name != journal.CommonName) { blocked.Add($"{s.Name} (presents another name than its journal records)"); continue; }
@@ -382,6 +388,7 @@ public sealed partial class MtlsCertificateService
         }
         finally
         {
+            foreach (var hostLock in held) hostLock.Release();
             gate.Release();
         }
     }
@@ -598,7 +605,7 @@ public sealed partial class MtlsCertificateService
         }
         if (!state.AllowedCommonNames.SequenceEqual(allow, StringComparer.Ordinal)
             || !state.FileAllowedCommonNames.SequenceEqual(allow, StringComparer.Ordinal))
-            throw new RolloutFailure($"The guard on {server.Name} restored the previous allow-list after all; nothing was recorded. Run the step again.");
+            throw new RolloutFailure($"The proxy's allow-list on {server.Name} changed after the confirmation; nothing was recorded. Run the step again; it reads the state from ghostunnel's live arguments.");
         if (await ProbeCredential(target, CancellationToken.None) != MtlsProbeOutcome.Admitted)
             throw new RolloutFailure($"After the confirmation {server.Name} no longer admits the new credential; nothing was recorded.");
         if (mustFail is not null && await ProbeCredential(mustFail, CancellationToken.None) != MtlsProbeOutcome.Refused)

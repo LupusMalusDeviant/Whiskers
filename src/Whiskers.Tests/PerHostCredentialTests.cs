@@ -797,6 +797,98 @@ public sealed class PerHostCredentialTests
         Assert.Equal(ConnectionType.SSH, w.Server("neuhof").ConnectionType);
     }
 
+    private static async Task<ServerConfig> SshRecordAsync(CredentialWorld w, string id)
+    {
+        var record = w.Server(id).Clone();
+        record.ConnectionType = ConnectionType.SSH;
+        record.TcpUseTls = false;
+        record.TcpClientCertPath = record.TcpClientKeyPath = record.TcpCaCertPath = null;
+        await w.Servers.UpdateServerAsync(record);
+        return record;
+    }
+
+    [Fact]
+    public async Task Onboarding_with_the_real_certificate_service_issues_the_server_certificate_under_the_host_lock()
+    {
+        // Review r4 NIT 2: the lock check of IssueForNewHostAsync together with OnboardingService.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20", w.Ca);
+        var certificates = new MtlsCertificateService(exec, w.Servers, NullLogger<MtlsCertificateService>.Instance, w.Store);
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(), certificates, w.Store,
+            NullLogger<OnboardingService>.Instance)
+        {
+            ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
+        };
+
+        var result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default);
+
+        Assert.True(result.Success, result.Error);
+        Assert.True(exec.ServerCertificateActivated);
+        Assert.Equal(1, w.Store.HostLock("neuhof").CurrentCount);
+    }
+
+    [Fact]
+    public async Task Onboarding_continues_with_the_record_as_it_is_when_it_takes_the_host_lock()
+    {
+        // Review r4 MINOR 2: a change finished during steps 0–4 (before the lock) is not overwritten at the switchover.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var changed = false;
+        exec.OnCommand = command =>
+        {
+            if (changed || !command.Contains("BackendState", StringComparison.Ordinal)) return;
+            changed = true;
+            var edited = w.Server("neuhof").Clone();
+            edited.Group = "Produktion";
+            w.Servers.UpdateServerAsync(edited).GetAwaiter().GetResult();
+        };
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance)
+        {
+            ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
+        };
+
+        var result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default);
+
+        Assert.True(result.Success, result.Error);
+        Assert.True(changed);
+        var saved = w.Server("neuhof");
+        Assert.Equal("Produktion", saved.Group);
+        Assert.True(saved.TcpUseTls);
+        Assert.Equal(ConnectionType.TCP, saved.ConnectionType);
+    }
+
+    [Fact]
+    public async Task Retiring_is_blocked_while_a_migration_holds_a_hosts_lock()
+    {
+        // Review r4 MINOR 1 (contract 0007 amendment 10): retirement takes the per-host lock of every managed host.
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        // A resumed migration (the file still admits the shared name) blocks inside its confirmation, holding the lock.
+        var host = w.Host("rabenhof");
+        host.FileAllow = [SharedCn, "whiskers-client-rabenhof-g1"];
+        await w.Store.WriteJournalAsync("rabenhof", w.Store.ReadJournal("rabenhof")! with { Phase = 3, NegativeCheckPassed = false }, default);
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        host.BeforeConfirm = () => { if (!entered.IsSet) { entered.Set(); release.Wait(TimeSpan.FromSeconds(30)); } };
+        var migration = Task.Run(() => w.Service.MigrateClientAsync("rabenhof", null, default));
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(30)));
+
+        var retired = await w.Service.RetireSharedClientAsync(default);
+        release.Set();
+
+        Assert.False(retired.Success);
+        Assert.Contains("Rabenhof (a certificate step is running)", retired.Message);
+        Assert.True(File.Exists(w.Store.SharedPaths.Key));
+        Assert.True((await migration).Ok);
+        // Once the migration is done, the retirement goes through and leaves no lock behind.
+        Assert.True((await w.Service.RetireSharedClientAsync(default)).Success);
+        Assert.Equal(1, w.Store.HostLock("rabenhof").CurrentCount);
+    }
+
     [Fact]
     public async Task The_server_certificate_of_a_new_host_is_issued_only_under_the_host_lock()
     {
@@ -1178,14 +1270,38 @@ public sealed class PerHostCredentialTests
     // ---- doubles ----
 
     /// <summary>The onboarding's bootstrap and host commands: tailnet up, everything else succeeds; step-ca via the fleet.</summary>
-    private sealed class OnboardingExecutor(SimulatedFleet fleet, string ip) : IHostCommandExecutor
+    private sealed class OnboardingExecutor(SimulatedFleet fleet, string ip, TestCa? ca = null) : IHostCommandExecutor
     {
         public List<string> Scripts { get; } = new();
+        /// <summary>Runs before each command (e.g. a record change while onboarding is in its first steps).</summary>
+        public Action<string>? OnCommand { get; set; }
+        /// <summary>Whether the host was asked to activate a freshly staged server certificate.</summary>
+        public bool ServerCertificateActivated { get; private set; }
 
         public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
             CancellationToken ct = default, int? maxOutputChars = null)
         {
             Scripts.Add(command);
+            OnCommand?.Invoke(command);
+            if (ca is not null && serverId != "local")
+            {
+                // The server-certificate steps of the real MtlsCertificateService on the new host (key and CSR made there).
+                var script = Plain(command);
+                if (script.Contains("openssl req -new", StringComparison.Ordinal))
+                {
+                    using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+                    var identity = MtlsIdentity.ForNewHost(OnboardingCommands.Slug(serverId), ip);
+                    var csr = MtlsCertificateRenewalTests.Csr(key, identity.CommonName, [.. identity.DnsNames], [.. identity.IpAddresses]);
+                    return Task.FromResult(new CommandResult { ExitCode = 0, Output = SimulatedProxyHost.B64(csr) });
+                }
+                if (script.Contains("echo staged", StringComparison.Ordinal))
+                    return Task.FromResult(new CommandResult { ExitCode = 0, Output = "staged" });
+            }
+            if (ca is not null && serverId == "local"
+                && Plain(command).StartsWith("cat /opt/step-ca/certs/root_ca.crt", StringComparison.Ordinal))
+                return Task.FromResult(new CommandResult { ExitCode = 0, Output = SimulatedProxyHost.B64(ca.BundlePem) });
+            if (ca is not null && command == MtlsCertificateCommands.ActivateFresh())
+                ServerCertificateActivated = true;
             if (command.Contains("BackendState", StringComparison.Ordinal))
                 return Task.FromResult(new CommandResult { ExitCode = 0, Output = "\"BackendState\": \"Running\"," });
             if (command.Contains("tailscale ip -4", StringComparison.Ordinal))
@@ -1193,6 +1309,13 @@ public sealed class PerHostCredentialTests
             if (serverId == "local" && MtlsCertificateRenewalTests.Decode(command).Contains("step certificate sign", StringComparison.Ordinal))
                 return fleet.ExecuteAsync(serverId, command, timeout, ct, maxOutputChars);
             return Task.FromResult(new CommandResult { ExitCode = 0, Output = "" });
+        }
+
+        /// <summary>The script inside an <c>echo b64 | base64 -d | sh</c> wrapper; any other command as it is.</summary>
+        private static string Plain(string command)
+        {
+            try { return MtlsCertificateRenewalTests.Decode(command); }
+            catch (FormatException) { return command; }
         }
     }
 

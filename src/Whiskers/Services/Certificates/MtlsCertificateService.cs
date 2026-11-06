@@ -88,10 +88,11 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
     }
 
     /// <summary>
-    /// The server certificate of a host being onboarded. With a client-credential store, the caller (onboarding) holds
-    /// the store's <see cref="IMtlsClientCredentialStore.HostLock"/> for the whole issue (contract 0007, amendment 10;
-    /// review r3 MAJOR 1): a free lock means nobody guards the step, so it is refused. Without a store it takes the
-    /// local per-host lock itself.
+    /// The server certificate of a host being onboarded. With a client-credential store, the caller (onboarding) is
+    /// expected to hold the store's <see cref="IMtlsClientCredentialStore.HostLock"/> for the whole issue (contract 0007,
+    /// amendment 10; review r3 MAJOR 1). The check here is only a backstop: it refuses when the lock is free, but a
+    /// semaphore cannot tell whether the caller or another step holds it. Without a store it takes the local per-host
+    /// lock itself.
     /// </summary>
     public async Task<X509Certificate2> IssueForNewHostAsync(string serverId, MtlsIdentity identity, CancellationToken ct)
     {
