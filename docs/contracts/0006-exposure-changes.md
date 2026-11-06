@@ -1,7 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1 and 2** (review rounds 1 and 2, at the end) are pending acceptance.
+**Amendments 1–3** (review rounds 1–3, at the end) are pending acceptance.
 
 ## Purpose
 
@@ -315,3 +315,78 @@ precise below.
   - `env_set` and `env_file_save` produce the decision;
   - the re-check runs on every path, git deploy included;
   - the readiness line says "unknown" when the own container cannot be read.
+
+## Amendment 3 — review round 3 (6 November 2026)
+
+Amendment 2 is binding where it differs from Amendment 1 or the original text. Amendment 3 is binding over all of them.
+All three amendments are accepted together.
+
+### Paths (review M-1, M-2)
+
+- The re-check from Amendment 2 also runs on MCP `deploy_compose` (`ContainerTools.DeployCompose`). That tool runs
+  `plan.DeployScript` itself.
+- `WithPlanAsync` fills `MutationTarget.Exposures` for every plan it builds: `compose.deploy` with `composeContent`, and
+  `container.env_set` (resolved in `ContainerAsync`).
+- Test: the agent's `set_container_env`, with a Funnel label that comes from a variable, ends in Confirm.
+
+### Target and binding (review M-3, M-4, m-6)
+
+- **What the target holds.** The normalised `Detail` of every exposure. An entry that comes from a variable is held in
+  full and marked `Withheld`: it is compared and bound, but never written anywhere, as with the mounts
+  (`MutationTargets.cs:326-328`).
+- **Nested arguments in two parts:**
+  - `exposure` holds only literal entries and is audited;
+  - `exposureWithheld` holds the entries that come from variables. `SinkRedaction.IsPayload` covers it, so the sinks keep
+    only its length. `HostAsync` marks these entries `Withheld`.
+- **Classification.** The rule classifies by the real key, so a withheld key is classified correctly too. Display only
+  ever shows `label (withheld)`.
+- **Matchers skip exposures.** `ProtectedResourceMatcher`, `ControlPlaneResources` and `ForbiddenArgumentRule` skip
+  `__resolvedExposure*`. Withheld exposures use their own prefix, `__resolvedExposureWithheld*`.
+- Test: a key from `.env` appears neither in the audit nor on the approval card.
+
+### Comparison in the re-check (review M-5, m-8)
+
+- **How.** The detection table (including the rows added in Amendment 1) is applied to the inspected containers. The
+  comparison is on `(service, kind, normalised detail)`. Loopback bindings and labels outside `ExposureLabelPrefixes` are
+  dropped beforehand.
+- **Image label hit before `up`.**
+  - Agent rule set: the deployment is refused before it runs.
+  - Persons: the deployment continues, with an audit entry and a notification.
+- **Run that cannot be checked.** Every container of the project that this run created or recreated counts as
+  undecided.
+- **Git deploy.** Built images are inspected between `build` and `up`.
+- **Inspected locally.** "Pulled first" means: inspected locally, pulled only if the image is missing. `env_set` and
+  `env_file_save` keep `pull: false`.
+
+### Stopping (review M-6, m-7)
+
+- **Primitive.** A new marked operation `container.disable_restart` (`docker update --restart=no`) on `IDockerService`,
+  followed by `container.stop`.
+- **Compositions.** `compose.deploy`, `gitdeploy.deploy` and `container.env_set` → `container.disable_restart`,
+  `container.stop`. The UI-only `app.deploy` and `container.env_file_save` are dropped from this list, because they are
+  decided by `CreateForHumans()`.
+- **Engine flag.** `MutationPolicyDecision` carries `AgentRuleSet` (true when `CreateDefault` decided). The re-check
+  reads it.
+- **Failed stop.** It is retried once, then reported as `exposure_violation` with "container still running".
+- **Notification type.** A violation is always `exposure_violation` (not suppressible), even when the container keeps
+  running.
+- **Boundaries.** The boundary "stopped" in the boundary section means: refused before the run. After `up`, Amendment 2
+  applies.
+
+### Shared namespaces (review M-7)
+
+- `pid`, `ipc` and `network_mode` in the forms `container:<x>` and `service:<x>` are resolved transitively, to a depth of
+  at most 5, and inherit x's exposures. An x that cannot be resolved is refused.
+- Test: `pid: container:node-exporter` (`pid: host`) ends in the class `host`.
+
+### Tests (review m-11)
+
+Additional tests:
+
+- stopping under the agent rule set versus continuing to run for persons;
+- `exposure_violation` is classified as not suppressible;
+- the re-check on MCP `deploy_compose`;
+- normalisation (`CAP_`, `container:` / `service:`, ephemeral ports, loopback);
+- a `__resolvedExposure*` key sent by a caller is stripped;
+- a pinned preset classifies with its own prefixes;
+- an image label before `up`.

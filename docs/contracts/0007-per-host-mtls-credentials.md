@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendments 1 and 2** (review rounds 1 and 2, at the end) are pending acceptance.
+and the whiskers.site host. **Amendments 1–3** (review rounds 1–3, at the end) are pending acceptance.
 
 ## Purpose
 
@@ -366,3 +366,67 @@ These tests are added:
 - **Operator guide.** Before a server that was never migrated is removed, its ghostunnel is narrowed or removed.
 - **[braucht Hardware]** Check that step's leaf template adds no SAN to a client certificate. Until that is verified,
   `ValidateIssuedClient` accepts at most one DNS SAN equal to the CN, and refuses any other SAN.
+
+## Amendment 3 — review round 3 (6 November 2026)
+
+Amendment 2 is binding where it differs from Amendment 1 or the original text. Amendment 3 is binding over all of
+them. All three amendments are accepted together.
+
+### Slots (review M-8)
+
+- The credentials live in `hosts/{id}/g{n}-s{k}/client.{key,crt}`: generation plus serial. A renewal (same generation)
+  gets a new serial and never overwrites the active slot.
+- `identity` (JSON) records the CN stem, the active slot and the pending slot.
+- `PathsFor` returns the active slot.
+- `IsManaged` accepts every slot under `hosts/{id}/`.
+- Slot directories have 0700.
+
+### Shared credential missing (review M-9)
+
+When there is no shared credential (fresh install, or after retiring), the onboarding record and migration phase 4 note
+`sharedCredentialAbsent`. The `.Args` check (only the host's own CN is allowed) is then the proof. Retiring and readiness
+accept this record. A rotation always checks against the previous generation, which exists until it is deleted.
+
+### Execution and preflight (review m-2, m-3, MI-9)
+
+- **Detached recreate.** Every recreate, including the guard's, runs detached through `systemd-run`, in the form given
+  in Amendment 2.
+- **Preflight checks:**
+  - the environment declared in the file ⊆ the running environment;
+  - the `RepoDigests` of the running image contain the file's digest;
+  - the normalised `PortBindings` and `Mounts` are equal;
+  - exactly one config file;
+  - a foreign CN in the running allow list is refused.
+
+### Marker per run (review m-4)
+
+- The marker carries the unit suffix of the run. It is deleted when the guard is armed, and the guard consumes it when
+  it fires.
+- A successful confirmation may stop its own guard timer (`systemctl stop`).
+- The refusal "guard active" applies only to the units of *other* runs.
+
+### CN stem (review m-5)
+
+- `identity` stores the stem `whiskers-client-{slug}`. The generation `-g{n}` is appended to it.
+- The stem leaves room for `-g` plus four digits within 63 characters.
+- The hash shortening from Amendment 2 applies to the stem.
+
+### Readiness for hosts the operator manages (review m-9)
+
+For every TCP+TLS host, readiness reads `--allow-cn` from `docker inspect ghostunnel` and names every host that still
+allows the shared CN. Hosts with operator-supplied credentials are included.
+
+### Tests (review m-10)
+
+Additional tests:
+
+- no live overwrite on renewal or rotation;
+- the modes of the slot directories;
+- the onboarding record with and without a shared key;
+- retiring ignores foreign servers;
+- the exact recreate and guard command lines (`-p`, `--project-directory`, a single `-f`, `--no-deps`, `systemd-run`);
+- in the negative check, a TLS alert and a connection reset are classified apart.
+
+### NIT
+
+Line references: `MtlsCertificateCommands.cs:90-126`; tests `OnboardingCommandsTests.cs:176-190`, `:104-112`.
