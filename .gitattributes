@@ -15,4 +15,10 @@ deploy/borg-fleet/** text eol=lf
 
 # Default: let Git handle detection.
 *              text=auto
-*.sh text eol=lf
+
+# C# sources build verbatim/raw strings into host scripts and compose files; a CRLF checkout
+# would put CR characters into them (Windows builds, tests). Keep them LF everywhere.
+*.cs           text eol=lf
+*.razor        text eol=lf
+# Files Whiskers copies or edits on Linux hosts (scrape config, helm/k8s manifests).
+deploy/**      text eol=lf
