@@ -1,7 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1–7** (review rounds 1–7, at the end) are to be accepted by the
+**Amendments 1–8** (review rounds 1–8, at the end) are to be accepted by the
 maintainer as one set.
 
 ## Purpose
@@ -17,16 +17,16 @@ A compose deployment can make a container reachable from outside its host in way
 Each deployment path should name such a change, so that it is never decided without being seen. On the agent's path it
 must be confirmed (DockTail evaluation, 6 November 2026, H1).
 
-## Current state (verified at `25797a37`)
+## Current state (verified at `25797a37`, re-verified at `2a47d8d1`)
 
 - **One plan for every path.** `ComposePlan` / `IComposePlanner` plans every compose deployment: UI editor and App Store
-  (`ComposeImpact.DeployAsync`, `GateFor(IUiMutationRunner)`), MCP `deploy_compose` (`ContainerTools.cs:460ff`),
+  (`ComposeImpact.DeployAsync`, `GateFor(IUiMutationRunner)`), MCP `deploy_compose` (`ContainerTools.cs:450-495`),
   webhook (`WebhookService.cs:826`, `GateFor(IAutomationMutationRunner)`) and git deploy (`GitDeployOwners.cs:51`).
 - **What the plan analyses.** It knows the services and their mounts (R1-16, `ComposeServicePlan.Mounts`). It interpolates
   from the `.env`, and it refuses a value it cannot determine. Its impact covers existing containers (R1-07). It does not
   look at ports, labels, `network_mode`, `privileged` or `cap_add`.
 - **How mounts are decided.** They get a decision of their own: a nested decision under `compose.deploy` with the argument
-  `mounts` (`ComposeImpact.RunMountsAsync`, `ComposeImpact.cs:63-70` and the automation variant). `ProtectedResourceRule`
+  `mounts` (`ComposeImpact.RunMountsAsync`, `ComposeImpact.cs:65-71` and the automation variant). `ProtectedResourceRule`
   reads them.
 - **Which rules apply.** `compose.deploy` requires Admin and is risk Root (`CapabilityCatalog.cs:103`). The agent's or an API
   key's call is evaluated by `GuardrailEngine.CreateDefault()`; under the standard policy (`MaxAutonomousLevel = "read"`)
@@ -632,3 +632,58 @@ The following tests are added:
 
 "Normalised: `relatedwithheld`" applies to `SinkRedaction.PayloadNames` only. `ProtectedResourceMatcher.PayloadArguments`
 is a raw-name set that ignores case and holds `relatedWithheld`.
+
+## Amendment 8 — review round 8 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–7. All amendments are to be accepted together.
+
+### Active services and their images (review MINOR-1)
+
+- **One source.** A service is active exactly when it appears in `services` of the `docker compose config --format json`
+  output for the same `-p`, `--project-directory`, `-f` and `--env-file` that `up` uses (`ComposeConfigEffects.Command`).
+- **Exposures.** Services only the plan model knows are dropped from the exposures, not added to them (this narrows the
+  union of Amendment 1 to active services).
+- **Images.** The image of each service is read from that JSON (`services.<s>.image`, or compose's default name for a
+  `build:` service). `config --images` is not used.
+- **`COMPOSE_PROFILES`** joins `ComposeModel.Switches`, so a value the plan cannot determine is refused.
+- **Test:** `COMPOSE_PROFILES=${UNSET}` in the `.env` is refused.
+
+### Behaviour changes on the paths that pull (review MINOR-2)
+
+- **Wording.** In Amendment 7, "as today" is replaced by: new for `compose.deploy`, `app.deploy` and webhook compose
+  deploys; git deploy, which already builds with `--pull`, gains a `pull` step.
+- **CHANGELOG.** The change note names both: redeploys of projects with `build:` services now rebuild with
+  `--pull`, and git deploys now pull images.
+- **Timeout.** The 5-minute budget of `ExecuteMutationAsync` stays. A build that exceeds it fails the run like any
+  other timeout; the README names this for large builds.
+
+### Kinds and comparison keys (review MINOR-3)
+
+- **Enum.** `ExposureKind` becomes
+  `{ PublishedPort, HostNetwork, Privileged, AddedCapability, HostNamespace, RouteLabel, Device, SecurityOpt,
+  DeviceCgroupRule }`. `ExposureLabel` in Amendment 7's table is a typo for `RouteLabel` and is withdrawn.
+- **Rows added to the key table of Amendment 7:**
+
+  | Kind | key | value |
+  |---|---|---|
+  | `HostNamespace` | also `cgroup` (`CgroupnsMode`) | `host` |
+  | `DeviceCgroupRule` | the rule | empty |
+  | `HostNetwork` | `networks` (an external network named `host`) | `host` |
+
+- **Inherited targets.** `network_mode` / `pid` / `ipc` of the form `container:x` or `service:x` have no row of their
+  own: they are compared through the inherited rows of x.
+
+### Restoring the image tag (review MINOR-4)
+
+- **Compare-and-swap.** The restore of Amendment 7 runs under the server lock, and only for tags that still point to
+  the image ID this run inspected. A tag another run has moved since is left alone.
+- **Failure.** A failed restore, or a run that ends between step 2 and step 4 for any reason (cancellation included),
+  is reported as `exposure_violation` "tag not restored". The report names the tag, never a label value.
+- **Test:** a concurrent re-tag by another run is not undone.
+
+### Wording (review NITs)
+
+- The "Current state" references are re-verified at `2a47d8d1`; `ContainerTools.cs:450-495` and
+  `ComposeImpact.cs:65-71` replace the older line ranges.
+- The fallback stop runs only under the agent rule set. `app.deploy` and `container.env_file_save` are decided for
+  persons only, so their fallback stop never runs; they stay in Amendment 7's list only for completeness.

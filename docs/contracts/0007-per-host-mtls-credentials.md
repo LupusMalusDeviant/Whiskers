@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendments 1–7** (review rounds 1–7, at the end) are to be accepted by
+and the whiskers.site host. **Amendments 1–8** (review rounds 1–8, at the end) are to be accepted by
 the maintainer as one set.
 
 ## Purpose
@@ -17,7 +17,7 @@ R1-44:
 
 Sources: INV-58, TA-44, E-06 (`docs/v1/audit/E-exec-injection.md:121-135`), WORK_PACKAGES R1-44.
 
-## Current state (verified at `25797a37`)
+## Current state (verified at `25797a37`, re-verified at `2a47d8d1`)
 
 ### The shared client credential
 
@@ -138,7 +138,7 @@ writes the paths returned by `IssueAsync` into the `ServerConfig`.
 - On the server page, a status line: "shared client credential / own credential (generation n), expires …".
 - A **Migrate** button for Admins. The click goes through the gateway like any mutation.
 
-## Rollout per host (`MigrateClientAsync`)
+## Rollout per host (`MigrateClientAsync`; details superseded by Amendments 1–8)
 
 | Phase | Step | Undo |
 |---|---|---|
@@ -531,3 +531,21 @@ This amendment takes precedence over Amendments 1–6. All amendments are to be 
   ghostunnel (the allowed CNs it actually runs with), never from the record of the last phase.
 - **Missing tests (review MINOR-6):** a guard blocked on the lock still rolls back after the lock is released unless
   its marker is present; the phase-record step removes the marker.
+
+## Amendment 8 — review round 8 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–7. All amendments are to be accepted together.
+
+- **No raw host command allowance (review MINOR-5).** The clause "raw host command allowance, the same way as
+  `certificate.renew_mtls`" is replaced by: `mtls.client_migrate`, `mtls.client_renew` and `mtls.shared_client_retire`
+  are **not** added to `MutationCompositions.RawHostCommands`. Their host steps run through `ExecuteAsync` inside the
+  capability's decision, as `MtlsCertificateService.RenewAsync` does today. `MutationGatewayCoverageTests` pins the
+  callers.
+- **Guard failure is visible (review NIT).** When the guard's recreate still fails after its retry, the host's next
+  connection test fails, and readiness (the `--allow-cn` check of review m-9) also names every host whose ghostunnel is not
+  running or whose `.Args` cannot be read, with a pointer to break-glass re-onboarding over SSH (operator guide). The
+  journal entry is additional, not the only signal. Test: a host with a stopped ghostunnel appears in that readiness
+  line.
+- **Rollout table.** Its caption now says it is superseded in detail by Amendments 1–8 (compose recreate instead of
+  restart; state read from the live `.Args`).
+- **Current state** re-verified at `2a47d8d1`.
