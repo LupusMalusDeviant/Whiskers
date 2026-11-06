@@ -1,7 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1–10** (review rounds 1–10, at the end) are to be accepted by the
+**Amendments 1–11** (review rounds 1–11, at the end) are to be accepted by the
 maintainer as one set.
 
 ## Purpose
@@ -766,3 +766,17 @@ and `label_file` path in planned content, independent of what `docker compose co
   Compose v2 version that supports it.
 - **Late daemon work.** The README's remaining risks add: after a timeout, the daemon may finish a pull or build after
   the restore and move the tag again; the next guarded deploy inspects again at step 4.
+
+## Amendment 11 — review round 11 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–10. All amendments are to be accepted together.
+
+- **`label_file` after interpolation (review MINOR-1).** The relative-path rule of Amendment 10 is decided after
+  interpolation with the plan's `.env`. A `label_file` entry, in string or list form, that contains a variable is
+  refused unless its interpolated value is absolute. Test: `label_file: ${LF}` with a relative value is refused before
+  `config` runs.
+- **`include` and `extends.file` stay refused entirely (review NIT-1).** The existing refusal of every `include` and
+  every `extends.file` (`ComposePlan.cs:480-481`, `:529-531`) stays, absolute or relative. Of the three, only
+  `label_file` is new, and it is refused when relative.
+- **Restore inside the lock (review NIT-2).** On git deploy and webhook compose deploys, the restore runs before the
+  lock's scope ends (for example in a `finally` within it), never in the method's outer `catch` blocks.
