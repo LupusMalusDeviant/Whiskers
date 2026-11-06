@@ -23,7 +23,7 @@ dotnet run            # or: docker compose up -d --build  (from the repo root)
 ```
 
 For local development without SSO, set `Auth__Disabled=true` and
-`ASPNETCORE_ENVIRONMENT=Development`. See [README.md](README.md#configuration) for configuration.
+`ASPNETCORE_ENVIRONMENT=Development`. See [docs/configuration.md](docs/configuration.md) for configuration.
 
 **Windows:** C# sources, `.razor` files and everything under `deploy/` are checked out with LF line endings
 (`.gitattributes`), because raw and verbatim strings in them become shell scripts and compose files on Linux hosts.
