@@ -22,7 +22,8 @@ public sealed class SourceLineEndingTests
             .ToList();
 
         Assert.True(offenders.Count == 0,
-            "CR line endings in source files (refresh the checkout: git rm --cached -r -q . && git reset --hard):\n"
+            "CR line endings in source files. Commit or stash your work first, then refresh the checkout once: "
+            + "git rm --cached -r -q . && git reset --hard\n"
             + string.Join('\n', offenders.Take(20)));
     }
 

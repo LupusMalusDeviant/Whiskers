@@ -25,6 +25,15 @@ dotnet run            # or: docker compose up -d --build  (from the repo root)
 For local development without SSO, set `Auth__Disabled=true` and
 `ASPNETCORE_ENVIRONMENT=Development`. See [README.md](README.md#configuration) for configuration.
 
+**Windows:** C# sources, `.razor` files and everything under `deploy/` are checked out with LF line endings
+(`.gitattributes`), because raw and verbatim strings in them become shell scripts and compose files on Linux hosts.
+A checkout made before that rule still has CRLF files; `SourceLineEndingTests` and the Docker build then fail.
+Commit or stash your work first, then refresh the checkout once:
+
+```bash
+git rm --cached -r -q . && git reset --hard
+```
+
 ## Before you open a pull request
 
 - **Build clean:** `dotnet build` with **0 warnings / 0 errors**.
