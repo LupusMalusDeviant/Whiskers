@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
 review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
-does not depend on it and is done on the same branch.
+does not depend on it and is done on the same branch. **Amendment 1** (implementation, at the end) is pending acceptance.
 
 ## Purpose
 
@@ -603,3 +603,21 @@ repository except a `.actual` file on a snapshot difference.
     down are checked there too. In addition, `prepare` in `release.yml` requires the tag commit to be reachable from
     `origin/main` (`git merge-base --is-ancestor <tag commit> origin/main`); a tag on a side branch fails before
     anything is built. Both are `ReleaseWorkflowTests` cases.
+
+
+## Amendment 1 — implementation (6 November 2026)
+
+This amendment takes precedence over the text above and is to be accepted by the maintainer.
+
+- **Bootstrap for 0.x bases (R18).** A base tag below 1.0.0 that lacks `docs/v1/SECURITY_INVARIANTS.md` or
+  `docs/v1/PRODUCT_CONTRACT.md` counts as an empty base, like a 0.x base without the tables. A missing file stays a
+  finding when the base is 1.0.0 or above. (v0.14.1, the base of the next 0.x release, has neither file.)
+- **Base comparison reads IDs line by line.** The comparison with the base extracts invariant IDs, the pin and §6.1
+  rows line by line rather than with the strict table parser, because an older base may not satisfy today's format.
+  The format of the current files stays enforced by R3.
+- **`PATH_CAPABILITIES.md`** has an extra table "Capabilities without a path" for capabilities no §7 row uses
+  (`autoupdate.policy_set`), so every catalog capability is accounted for.
+- **§7 rows added.** Five paths that existed in code but in no §7 row (M-48, M-49, S-16, U-37, U-38) are added; §7 now
+  counts 110 rows.
+- **`ReleaseGateBaseTests`** passes without comparing when `WHISKERS_GATE_BASE` is unset; the comparison runs in the CI
+  step that sets it.
