@@ -657,8 +657,15 @@ public class VpnSecretHandlingTests : IDisposable
     {
         Skip.If(OperatingSystem.IsWindows(), "the entrypoint is POSIX sh; POSIX signals");
         var (bin, secrets, record) = EntrypointDirs("stop");
+        // `tailscale up` runs until the test has sent the stop and released it, not for a fixed time: with a fixed
+        // sleep a slow runner could let the call finish before the stop arrived, and the entrypoint then ended
+        // normally (exit 0). The 30 s bound only keeps a broken test from hanging.
         WriteScript(Path.Combine(bin, "tailscale"), $$"""
-            if [ "$1" = "up" ]; then touch '{{record}}/up-started'; sleep 3; fi
+            if [ "$1" = "up" ]; then
+                touch '{{record}}/up-started'
+                i=0
+                while [ ! -f '{{record}}/release' ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+            fi
             exit 0
             """);
 
@@ -669,6 +676,8 @@ public class VpnSecretHandlingTests : IDisposable
         Assert.True(File.Exists(started), "tailscale up never started");
         using (var kill = Process.Start(new ProcessStartInfo("kill", ["-TERM", proc.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)]))!)
             await kill.WaitForExitAsync();
+        // The shell runs its TERM trap once the foreground `tailscale up` returns; let it return now.
+        File.WriteAllText(Path.Combine(record, "release"), "");
         await proc.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token);
 
         Assert.Equal(143, proc.ExitCode);                                   // the stop is passed on
