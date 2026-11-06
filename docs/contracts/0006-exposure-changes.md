@@ -1,7 +1,8 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1–4** (review rounds 1–4, at the end) are pending the maintainer's acceptance as one set.
+**Amendments 1–5** (review rounds 1–5, at the end) are to be accepted by the
+maintainer as one set.
 
 ## Purpose
 
@@ -319,7 +320,7 @@ precise below.
 ## Amendment 3 — review round 3 (6 November 2026)
 
 Amendment 2 is binding where it differs from Amendment 1 or the original text. Amendment 3 is binding over all of them.
-All three amendments are accepted together.
+All amendments are to be accepted together.
 
 ### Paths (review M-1, M-2)
 
@@ -393,7 +394,7 @@ Additional tests:
 
 ## Amendment 4 — review round 4 (6 November 2026)
 
-This amendment takes precedence over Amendments 1–3. All four amendments are accepted together.
+This amendment takes precedence over Amendments 1–3. All amendments are to be accepted together.
 
 ### No `.env` values in sinks and reasons (review 0006-A)
 
@@ -442,3 +443,49 @@ This amendment takes precedence over Amendments 1–3. All four amendments are a
   - a run that cannot be checked;
   - git deploy inspects the images it built;
   - `pid`/`ipc` with `service:x`.
+
+## Amendment 5 — review round 5 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–4. All five amendments are to be accepted together.
+
+### Stopping containers this run created (review MAJOR-1)
+
+- **The new IDs join the decided set.** Before stopping, the re-check adds the container IDs this run created or
+  recreated to the decided set of the enclosing scope. They are identified by these labels on the plan's server:
+  - `com.docker.compose.project` = the plan's real project;
+  - `com.docker.compose.service` ∈ the plan's services.
+- **Narrow API.** This goes through a narrow `MutationScope` API that authorises only `container.disable_restart` and
+  `container.stop`. No other target binding changes.
+- **Test:** the stop of a container created by this run passes the scope guard; one from another project does not.
+
+### Images between planning and `up` (review MAJOR-2)
+
+- **Inspected again.** After the pull or the `build`, every image of the plan is inspected again, comparing image ID and
+  labels. A hit of a Confirm class that is not in the decided set is a Deny under the agent rule set, whether or not the
+  image was present locally when the plan was made.
+- **No pull inside `up`.** Every `up` that follows an inspection runs with `--pull never`, and with `--no-build` after an
+  explicit build. That way `up` pulls nothing itself (`env_set` and `env_file_save` included).
+- **Files already written.** A refusal after the files were written restores the previous `.env` and compose files.
+- **Tests:**
+  - an image present locally whose pull brings a Funnel label: Deny before `up`;
+  - `env_set` with a missing image does not pull inside `up`.
+
+### Label values (review MAJOR-4)
+
+- **Key only.** `Detail` and the reason hold the label key only.
+- **When the value is shown.** Only for a fixed allow-list of shapes that are not secret: `true`/`false`, a port
+  number, a Traefik `rule`. Every other value is `Withheld`: compared and bound, never written.
+- **Test:** a literal `caddy.tls.dns` token appears neither in the audit nor on the approval card.
+
+### Smaller points
+
+- **`container:<x>` on nested decisions.** x is added to the plan's decided identities and carried in the nested
+  decision's `related` argument. It is `Withheld` when it comes from a variable, and `EnsureDecided` checks it.
+- **Containers that cannot be listed.** `docker update --restart=no` for every container that can be listed, then
+  `docker compose -p <project> stop`. Anything that still cannot be stopped is reported as `exposure_violation` "not
+  stopped".
+- **The `Created` time clause is dropped.** The ID rule alone decides.
+- **Payload name.** The `SinkRedaction.PayloadNames` entry is written normalised: `exposurewithheld`.
+- **Additional tests:**
+  - a local image's label found while planning gives Confirm over MCP;
+  - for persons, image labels do not count as a violation.

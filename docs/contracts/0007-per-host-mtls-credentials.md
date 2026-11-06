@@ -2,7 +2,8 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendments 1–4** (review rounds 1–4, at the end) are pending the maintainer's acceptance as one set.
+and the whiskers.site host. **Amendments 1–5** (review rounds 1–5, at the end) are to be accepted by
+the maintainer as one set.
 
 ## Purpose
 
@@ -370,7 +371,7 @@ These tests are added:
 ## Amendment 3 — review round 3 (6 November 2026)
 
 Amendment 2 is binding where it differs from Amendment 1 or the original text. Amendment 3 is binding over all of
-them. All three amendments are accepted together.
+them. All amendments are to be accepted together.
 
 ### Slots (review M-8)
 
@@ -433,7 +434,7 @@ Line references: `MtlsCertificateCommands.cs:90-126`; tests `OnboardingCommandsT
 
 ## Amendment 4 — review round 4 (6 November 2026)
 
-This amendment takes precedence over Amendments 1–3. All four amendments are accepted together.
+This amendment takes precedence over Amendments 1–3. All amendments are to be accepted together.
 
 ### Guard and confirmation (review 0007-A)
 
@@ -464,3 +465,34 @@ This amendment takes precedence over Amendments 1–3. All four amendments are a
   are compared; the operator guide says so.
 - **Readiness.** A line appears when the generation of the active slot is older than the one the host was narrowed to,
   for example after restoring an older backup following a rotation.
+
+## Amendment 5 — review round 5 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–4. All five amendments are to be accepted together.
+
+### Serialising guard and confirmation (review MAJOR-3)
+
+- **Lock.** Guard and confirmation take the same per-run `flock` (`/opt/dockerproxy/.migrate-<suffix>.lock`).
+- **Before confirming,** the confirmation requires, under that lock:
+  - `systemctl show -p SubState --value <unit>.timer` = `waiting`;
+  - `<unit>.service` is not active.
+
+  Only then does it stop the timer and write the marker.
+- **Guard.** The guard reads the marker only under the lock.
+- **Deleting the marker.** Once the confirmation has stopped the timer, it removes the marker itself after Whiskers has
+  recorded the phase.
+- **Test:** an elapsed timer (`SubState=elapsed`) makes the confirmation fail.
+
+### Smaller points
+
+- **Retiring with a host that cannot be read.** An unreachable host, or a `docker inspect` that cannot be read, refuses
+  the retirement (with a test).
+- **Recreate form.** The fixed recreate form, the guard's included, carries `--pull never`. The command-line test checks
+  for it.
+- **Paths.** `PathsFor` only proposes paths for onboarding and new slots. Connections always use `ServerConfig`.
+- **Additional tests:**
+  - retiring reads the live args;
+  - a referenced slot is never deleted;
+  - the check before phase 4;
+  - the tool names in `ControlPlaneResources.Capabilities`;
+  - the readiness line for an older active generation.
