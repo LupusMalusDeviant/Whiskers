@@ -226,6 +226,16 @@ fails because the callback is built with `http://`), `AUTH_DISABLED=true` refuse
 Settings → production readiness names the proxy. An entry that is not a canonical CIDR or address stops the start;
 a single value without index (`ForwardedHeaders__TrustedNetworks=10.0.0.0/8,172.18.0.2`) is read as a comma-separated list.
 Do not set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` instead: it trusts every peer, and Whiskers refuses to start with it.
+
+**Tailscale Serve, Funnel and DockTail.** It depends on the mode.
+
+In HTTP mode, tailscaled acts as a reverse proxy like any other. This covers `tailscale serve --http`/`--https`, Tailscale Services, and DockTail's default `docktail.service.protocol=http`. tailscaled sets `X-Forwarded-For` to the caller's address; for Funnel traffic, that is the visitor's public address. List the address tailscaled connects from in `ForwardedHeaders__TrustedNetworks__0`. For a container, that is usually the gateway of its Docker network, for example `172.18.0.1/32`.
+
+In TCP mode, no header reaches Whiskers. This covers `--tcp`, `--tls-terminated-tcp` and `docktail.service.protocol=tcp`. Every visitor seems to come from tailscaled's private address, and the client chooses the `Host` header.
+
+**Never combine `AUTH_DISABLED=true` with a TCP forward or with Funnel.** The private source address passes the trusted-network check, so a visitor from the internet becomes Admin.
+
+With sign-in enabled, a TCP forward only loses the per-client view: the login rate limit and the audit see a single address.
 </details>
 
 <details>
