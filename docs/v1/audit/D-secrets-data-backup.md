@@ -258,6 +258,11 @@ Restore validates archive containment (no zip-slip, no symlinks) but has no entr
   - `docs/adr/0002-…md`: the status says "UMGESETZT" (implemented) while the Decision section still says "Option 2 — zurückgestellt" (deferred).
   - The comment in `VaultService.cs:13` hard-codes `/app/data`.
 - **Recommendation:** Update the READMEs and ADR-0002. Add an operator doc covering what is and is not encrypted (see the inventory above).
+- **Status (R1-51):** fixed. The Vault README links the self-backup instead of the removed `ConfigExport/`; the Backup
+  README opens with the self-backup; ADR-0002 states the decision that was implemented (`accept-new`, 2026-07-11) and
+  keeps the deferral as history; the `VaultService` comment names the data directory, not `/app/data`; sixteen other
+  broken relative links in folder READMEs were fixed. What is and is not encrypted is in
+  `docs/operations/production-checklist.md` ("What the data directory holds").
 
 ## Specific questions answered
 

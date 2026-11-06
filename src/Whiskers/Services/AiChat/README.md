@@ -20,6 +20,6 @@ its `Settings.razor` panel) instead of throwing on every page.
 
 ## Related
 
-- Config: `AICHAT_*` in [`../../../.env.example`](../../../.env.example)
+- Config: `AICHAT_*` in [`../../../.env.example`](../../../../.env.example)
 - UI: [`../../Components/Shared/AiChat.razor`](../../Components/Shared/AiChat.razor)
 - The acting agent (distinct): [`../Agent/`](../Agent/)

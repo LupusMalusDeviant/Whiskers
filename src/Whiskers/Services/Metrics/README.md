@@ -1,6 +1,6 @@
 # Services/Metrics
 
-Metric collection, storage and querying (CPU, RAM, disk, container stats). The design **decouples the collector from where metrics come from** so a server can use live Docker stats *or* a push/scrape telemetry pipeline (VictoriaMetrics) without the collector caring, see [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md).
+Metric collection, storage and querying (CPU, RAM, disk, container stats). The design **decouples the collector from where metrics come from** so a server can use live Docker stats *or* a push/scrape telemetry pipeline (VictoriaMetrics) without the collector caring, see [docs/ARCHITECTURE.md](../../../../docs/ARCHITECTURE.md).
 
 A background collector samples on a schedule and writes time-series to SQLite ([`../Persistence/`](../Persistence/)); the query service reads it back for charts and reports.
 
@@ -32,5 +32,5 @@ A background collector samples on a schedule and writes time-series to SQLite ([
 
 - Storage: [`../Persistence/`](../Persistence/) (SQLite or PostgreSQL); the roll-up tables are copied by `--migrate-to-postgres`
 - Settings panel: [`../../Components/Shared/MetricRetentionPanel.razor`](../../Components/Shared/MetricRetentionPanel.razor)
-- Telemetry deploy templates: [`../../../deploy/telemetry/`](../../../deploy/telemetry/)
+- Telemetry deploy templates: [`../../../deploy/telemetry/`](../../../../deploy/telemetry/)
 - MCP tools: `get_server_metrics`, `get_container_metrics`

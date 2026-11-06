@@ -96,16 +96,21 @@ built in).
   narrows the API surface but does not change that. Consequently, **an Admin-scoped key, an Admin user or
   a compromised Whiskers instance is root on every managed host.** The controls above decide who reaches
   that capability; they do not reduce what it is.
-- **The Whiskers instance is the crown jewel.** Its data directory holds the mTLS client key, the vault,
+- **The Whiskers instance is the crown jewel.** Its data directory holds the mTLS client keys (the shared one and one per host), the vault,
   the MCP key hashes (`mcp-permissions.json`), provider tokens and the database. Vault-stored secrets are
   encrypted at rest (AES-256-GCM, key derived from `VAULT_KEY` or `VAULT_KEY_FILE`): cloud API keys, the DNS token,
   the notification channels' credentials (SMTP password, chat and bot tokens, webhook URLs and secrets, the ntfy topic
   and token), the AI chat's and the agent's API keys, kubeconfigs, registry and Git credentials. Encrypted with a key
   derived from the vault's: the inbound webhooks' signing secrets and the rollback snapshots (a container's full
   configuration, its environment included) in the database, and the data-protection key ring (`keys/`, sign-in cookies
-  and antiforgery). The SSH private keys (`ssh-keys/`) and the mTLS client key are still stored in plaintext; those and
+  and antiforgery). The SSH private keys (`ssh-keys/`) and the mTLS client keys (`mtls/`, shared and per host) are still stored in plaintext (file mode 0600); those and
   the other files in the data directory rely on file-system and volume protection. Whoever can read that directory, or run code in the Whiskers
   container, can act as Whiskers.
+- **Not covered in 1.0, by design** (product contract §5): roles and key levels are global (no per-server or tenant
+  scoping); commands typed inside a terminal session are neither policy-checked nor recorded (the session's opening
+  and closing are); changes made on a host, in a cloud console or by another tool outside Whiskers are not governed or
+  attributed; a shell on the Whiskers host is outside the contract. The operator view of these limits is in
+  [docs/operations/production-checklist.md](docs/operations/production-checklist.md#accepted-limits-10).
 - **The default `docker-compose.yml` profile is privileged** (host PID namespace) so it can manage its own
   host. Use `docker-compose.hardened.yml` when Whiskers only manages remote hosts.
 - **Secrets** (`.env`, API keys, tokens, certificates, the encrypted vault, the SQLite DB) live under

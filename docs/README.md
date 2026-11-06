@@ -6,7 +6,9 @@
 | [product/README.md](product/README.md) | **Product strategy** — canonical positioning, the one-liner and pitch, target audience, the three product pillars, and the hero workflow ([product/POSITIONING.md](product/POSITIONING.md)) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The SSH-key-free design, mesh + mTLS, the three planes, PKI, onboarding |
 | [container-hardening.md](container-hardening.md) | Full vs. locked-down container profiles, per-mode privilege matrix, socket-proxy, distroless roadmap |
-| [operations/backup-and-recovery.md](operations/backup-and-recovery.md) | Self-backup contents, keeping copies off the volume, restore on the same host and recovery onto a new one (SQLite and PostgreSQL) |
+| [operations/](operations/README.md) | **Operator guides**: production checklist (with the accepted limits of 1.0), upgrade and rollback, backup and recovery, troubleshooting, observability, and one guide per feature that needs host-side setup |
+| [contracts/](contracts/) | Accepted interface contracts per work package (and proposed ones awaiting the maintainer) |
+| [v1/](v1/) | The 1.0 product contract, security invariants, technical audit and work packages |
 | [adr/](adr/) | Architecture decision records |
 | [modules/](modules/) | One page per optional module: what it adds, its toggle, its dependencies |
 | [reviews/](reviews/) | The security-fix history and incident reports, including [the 2026-08-26 log-monitor incident](reviews/2026-08-26-logmonitor-dockerd-cpu-incident.md) that drove the self-protection work |

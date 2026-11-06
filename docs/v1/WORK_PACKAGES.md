@@ -971,9 +971,26 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 
 - [ ] `ReleaseGateTests` fails on non-✅ invariants, missing named tests, unsuccessful mandatory suites or undocumented exceptions.
 - [ ] Generate/check the capability/path inventory so the 90-row historical matrix cannot silently drift.
-- [ ] Publish upgrade/rollback, backup/restore, troubleshooting and production-checklist guides.
-- [ ] State accepted limits: single instance, global roles, root-equivalent administration, no terminal transcript and out-of-band changes.
-- [ ] Correct folder README links, ADR-0002 wording and readiness/UI claims.
+- [x] Publish upgrade/rollback, backup/restore, troubleshooting and production-checklist guides.
+- [x] State accepted limits: single instance, global roles, root-equivalent administration, no terminal transcript and out-of-band changes.
+- [x] Correct folder README links, ADR-0002 wording and readiness/UI claims.
+
+> **Status (R1-51 branch, documentation part):** the release gate itself waits for contract 0008
+> (`docs/contracts/0008-release-gate.md`, proposed). Done: `docs/operations/production-checklist.md` (with "What the
+> data directory holds" and the accepted limits), `upgrade-and-rollback.md`, `troubleshooting.md` beside the existing
+> `backup-and-recovery.md`; the operations index, the README ("Accepted limits (1.0)", "Operating it"), SECURITY.md and
+> the installer's closing output link them. The limits are stated in the README, SECURITY.md, the checklist and
+> PRODUCT_CONTRACT §5 (item 3 now states PC-D2: no transcript). Corrections: seventeen broken relative links in eleven folder
+> READMEs (`../../../` one level short, the removed `ConfigExport/` and `DockerConnectionFactory.cs`, moved entity
+> files), the Backup README's opening, the `VaultService` comment, ADR-0002 (decision = what was implemented, the
+> deferral kept as history). Readiness: the vault line named one plaintext mTLS client key; since R1-44 every host
+> has its own, so it now names all of them and the SSH keys as protected by file mode only
+> (`ProductionReadinessServiceTests.The_vault_line_names_every_plaintext_key_kind_and_claims_no_more_than_file_protection`);
+> SECURITY.md and INV-52 say the same. The line `:54` the audit named had been corrected by R1-29. Contract rows:
+> U-15 and U-22 run through the gateway at the click (not "markup only"), S-05's policy and approval cells match the
+> gateway path, §7.6 counts today's 105 rows beside the 90-row baseline; Kubernetes actions were already shown as
+> migrated (U-01). INV-17 stays ⚠️ (no handler-level test for these pages), INV-56 stays ⚠️ (the readiness lines
+> are German only; no test compares README/SECURITY.md claims with the code).
 
 **Out of scope:** Treating documentation as proof that an implementation invariant holds.
 

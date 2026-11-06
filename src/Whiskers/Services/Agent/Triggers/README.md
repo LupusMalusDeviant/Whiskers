@@ -63,7 +63,7 @@ concurrency cap. Runs only when the agent is enabled.
 ## Related
 
 - Model + event catalog: [`../../../Models/AiTrigger.cs`](../../../Models/AiTrigger.cs)
-- Guardrail presets that bound each run: [`../Guardrails/`](../Guardrails/)
+- Guardrail presets that bound each run: [`../../Guardrails/`](../../Guardrails/)
 - Event source / hook: [`../../Notifications/`](../../Notifications/)
 - Metric-threshold events (`high_cpu` / `high_memory` / `metric_anomaly`): [`../../Metrics/MetricsCollectorService.cs`](../../Metrics/MetricsCollectorService.cs)
 - UI: [`../../../Components/Pages/AiTriggers.razor`](../../../Components/Pages/AiTriggers.razor)

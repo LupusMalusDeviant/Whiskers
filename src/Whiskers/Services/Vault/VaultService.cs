@@ -10,7 +10,7 @@ namespace Whiskers.Services.Vault;
 /// <summary>
 /// Authenticated encrypted secret vault (AES-256-GCM). The master key is derived from the VAULT_KEY
 /// passphrase with PBKDF2 (600k iterations) over a persisted per-vault salt. Secrets are stored encrypted
-/// at rest in /app/data/vault.json as "g1:" + base64(nonce ‖ tag ‖ ciphertext). Legacy AES-CBC entries
+/// at rest in vault.json in the data directory (DataPathOptions; /app/data in the image) as "g1:" + base64(nonce ‖ tag ‖ ciphertext). Legacy AES-CBC entries
 /// (unauthenticated, key = SHA256(passphrase)) are migrated on load, after an untouched copy of the file is kept.
 /// R1-28 (INV-54): the key is checked at start against a key check stored in the file (or, on an older vault, an
 /// existing authenticated entry). A key that does not match reads, writes and migrates nothing and leaves the file

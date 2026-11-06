@@ -394,8 +394,28 @@ with it. The full design, PKI (step-ca), onboarding flow and trade-offs are in
 - **No standing SSH key** for managed hosts in steady state; management ports are **mesh-bound**, nothing management-related is exposed to the public internet by design.
 - **Deterministic policy enforcement, not prompt instructions.** Every MCP tool call — from a signed-in web user, an external MCP client or the in-process agent — passes the same scope check in code (Read / Write / Admin, or an explicit per-key tool list). Every one of them then also passes the same guardrail engine: action classification (Allow / Confirm / Block, protected resources, forbidden arguments, read-only kill switch) and human-in-the-loop approval for `Confirm`. See [How the policy layer applies](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#how-the-policy-layer-applies).
 - **MCP API keys** are created in the web UI with an explicit scope; the ServerWatch-era unscoped key file `api-keys.json` no longer exists (see the [MCP server](https://github.com/LupusMalusDeviant/Whiskers/blob/main/README.md#mcp-server) section).
-- **Secrets** (`.env`, the encrypted vault, the DB) live under `/app/data` / `.env`, both gitignored and volume-mounted — never baked into the image or committed.
+- **Secrets** (`.env`, the encrypted vault, the DB) live under `/app/data` / `.env`, both gitignored and volume-mounted — never baked into the image or committed. Not everything there is encrypted: the SSH private keys and the mTLS client keys are protected by file permissions only ([what the data directory holds](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md#what-the-data-directory-holds)).
 - **Full-repo security review & remediation** (see the [security-fixes changelog](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/reviews/2026-07-07-security-fixes-changelog.md)): all critical and high findings, plus most medium/low issues, are fixed — per-key RBAC on **every** path (including the agent and MCP), the vault on **AES-256-GCM + PBKDF2**, schema via **EF Core migrations**, trust-critical images **pinned by digest**, restricted forwarded-header trust, and a scrape-token-gated `/metrics`.
+
+### Accepted limits (1.0)
+
+Deliberate limits of Whiskers 1.0, stated so nobody reads more into the controls above than they give
+([product contract §5](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/v1/PRODUCT_CONTRACT.md#5-scope-and-stated-limits)):
+
+- **Root-equivalent administration.** An Admin, an Admin-level key or a compromised instance is root on every managed host. Whiskers governs who reaches that power and records it; it does not make it smaller. A shell on the Whiskers host itself is outside the contract.
+- **Single instance.** One process and one data directory; no replica, no failover. Recovery comes from self-backups kept off the host.
+- **Global roles.** Viewer, Operator and Admin (and key levels) apply to every managed server; there is no per-server or tenant scoping.
+- **No terminal transcript.** Opening a terminal is authorized, kill-switch-checked and audited; what is typed inside is neither policy-checked nor recorded.
+- **Out-of-band changes are invisible.** Changes made directly on a host, in a cloud console or by another tool are not governed or attributed.
+- **No second factor for local accounts.** Production sign-in goes through your identity provider with MFA.
+
+### Operating it
+
+[Production checklist](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md) ·
+[Upgrade and rollback](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/upgrade-and-rollback.md) ·
+[Backup and recovery](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/backup-and-recovery.md) ·
+[Troubleshooting](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/troubleshooting.md) ·
+[all operations guides](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/README.md)
 
 ### Supply chain
 

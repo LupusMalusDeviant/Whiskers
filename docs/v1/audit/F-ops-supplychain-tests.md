@@ -129,6 +129,9 @@ All evidence was checked by reading the files. Where a claim depends on somethin
 ### F-18 — Documentation gaps — Medium, Documentation, v1-blocker: yes (upgrade + backup minimum)
 **Evidence:** README sections (`README.md:96-192,418-448`) cover install, profiles, Helm and config. There is no upgrade guide (version policy, migration irreversibility, rollback procedure, `latest` vs pinned), no troubleshooting (healthz vs readyz, circuit/budget, VPN/tailnet issues — deploy/README has tailnet-guard only), no production checklist (bind/TLS/proxy, VAULT_KEY backup, setup token, profile choice, backups off-volume, metrics token), and no backup/restore operator guide beyond one feature bullet (`README.md:243`) and the Helm README §Backup. Postgres backup is undocumented (F-05). Helm NOTES.txt is German only (`deploy/helm/whiskers/templates/NOTES.txt`).
 **Recommendation:** add `docs/operations/{upgrade,backup-restore,troubleshooting,production-checklist}.md` and link them from the README and install.sh output.
+**Status (R1-51):** fixed. `docs/operations/upgrade-and-rollback.md`, `troubleshooting.md` and `production-checklist.md`
+join `backup-and-recovery.md` (PostgreSQL since R1-33); the README and the installer's closing output link them. The
+Helm NOTES are English since R1-46.
 
 ### F-19 — Dependency update coverage — Low, Supply chain, v1-blocker: no
 **Evidence:** `.github/dependabot.yml:4-17` covers only `/src/Whiskers` and `/src/Whiskers.Tests`, missing `src/Whiskers.Data` (EF Core, Identity), `Whiskers.Migrations.Postgres` (Npgsql) and `Whiskers.Migrations.Sqlite`. The docker ecosystem covers only `/` (Dockerfile). Not covered: compose images (`postgres:17-alpine`, socket-proxy digest), the telemetry stacks, or the Helm chart. There are no `packages.lock.json` files, no `Directory.Packages.props`, no `global.json` (CI uses `10.0.x`).

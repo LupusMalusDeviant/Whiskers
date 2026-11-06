@@ -268,4 +268,22 @@ public class ProductionReadinessServiceTests : IDisposable
         Assert.False(vaultCheck.Ok);
         Assert.Contains("passt nicht", vaultCheck.Detail);
     }
+
+    [Fact]
+    public async Task The_vault_line_names_every_plaintext_key_kind_and_claims_no_more_than_file_protection()
+    {
+        // R1-51 (INV-56): since R1-44 there is one mTLS client key per host besides the shared one, all of them in
+        // plaintext like the SSH keys; the line must not read as if one key were left or as if the vault held them.
+        var (vault, servers) = await Stores("readiness-test-passphrase");
+
+        var vaultCheck = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == VaultTitle);
+
+        Assert.True(vaultCheck.Ok);
+        Assert.Contains("ssh-keys/", vaultCheck.Detail);
+        Assert.Contains("alle mTLS-Client-Schlüssel", vaultCheck.Detail);
+        Assert.Contains("eigene jedes Hosts", vaultCheck.Detail);
+        Assert.Contains("Dateirechte", vaultCheck.Detail);
+        Assert.DoesNotContain("der mTLS-Client-Schlüssel im", vaultCheck.Detail);
+        Assert.DoesNotContain("alle Secrets", vaultCheck.Detail);
+    }
 }

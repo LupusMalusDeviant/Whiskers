@@ -1,6 +1,6 @@
 # Services/Backup
 
-Docker **volume backups**: create and manage backups of container volumes. Backups are written to `/app/data/backups` on the target host as `tar.gz` archives; metadata rows live in the SQLite DB.
+Two kinds of backup live here: **Whiskers' own self-backup and restore** of its data directory and database (F3: `BackupService`, the archive format and cipher, the deferred restore at the next start — operator guide: [`docs/operations/backup-and-recovery.md`](../../../../docs/operations/backup-and-recovery.md)), and Docker **volume backups** of managed containers, written to `/app/data/backups` on the target host as `tar.gz` archives with metadata rows in the database.
 
 **Restore safety (2026-07):** `RestoreVolumeAsync` no longer wipes the target volume before it has verified the restore can succeed. The sequence is now: (1) verify the archive exists and is an intact gzip tar (`tar tzf` in a read-only alpine container) and abort untouched if not; (2) take an automatic pre-restore safety backup of the current volume so the wipe is reversible; (3) clear the volume (including dotfiles, via `find /data -mindepth 1 -delete`) and extract. A missing/corrupt archive can no longer destroy the live volume.
 
