@@ -52,7 +52,7 @@ never a pass.
   result named `Class.Method`, not one per data row, and an `InlineData` row can carry its own `Skip =`. Classes named by ✅ rows that contain runtime skips: `HostShellDeadlineTests`
   (3 calls), `PerHostCredentialShellTests` (1), `PerHostCredentialTests` (2 — for example
   `On_windows_a_key_readable_by_everyone_is_exposed`, `:946`, which skips on every non-Windows run),
-  `SecretEnvironmentTests` (1), `VpnSecretHandlingTests` (11). Every CI test job runs on Linux (`ci.yml:33`, `:118`,
+  `SecretEnvironmentTests` (1), `VpnSecretHandlingTests` (11). Every CI test job runs on Linux (`build-test`, `ci.yml:33`, and
   the `image-runtime` matrix on x64 and arm64 Linux runners), so a Windows-only test never runs unskipped in CI.
   `check-test-results.sh:103–105` counts a skipped result as "did not pass".
 - **Exceptions.** There is no exception register. `PRODUCT_CONTRACT.md` §6 (`:112`) holds PC-D1…PC-D8; its header
@@ -104,8 +104,8 @@ There are three modes, each strictly stricter than the one before:
 | Mode | When | Non-✅ invariants |
 |---|---|---|
 | **Development** | `<Version>` below 1.0.0 — pull requests, `main` and 0.x release runs | allowed when listed under *Open invariants* (R2) |
-| **Line** | `<Version>` 1.0.0 or later: every pull request and every push to `main` | ⚠️ with an accepted exception (R11), or any non-✅ listed under *Open invariants* with an advisory or issue reference (D15 (a) or (c); with (b) the Release rules) |
-| **Release** | `<Version>` 1.0.0 or later **and** the run is a release run (below); or a local `dry-run` | ✅, or ⚠️ with an accepted exception; ❌/❓ only through a time-boxed known-violation record with D15 (b) or (c), else never |
+| **Line** | `<Version>` 1.0.0 or later: every pull request and every push to `main` | every non-✅ listed under *Open invariants* (R2), with an advisory or issue reference unless an accepted exception covers it (D15 (a), (c) or (d); with (b) the Release rules) |
+| **Release** | `<Version>` 1.0.0 or later **and** the run is a release run (below); or a local `dry-run` | ✅, or ⚠️ with an accepted exception; ❌/❓ only through a known-violation record for exactly this patch release (R17) with D15 (b), (c) or (d), else never — never at X.Y.0 |
 
 - **The version is `<Version>` in `src/Whiskers/Whiskers.csproj`.** `release.yml` already proves that a release tag
   equals it (`:100–107`), on a pushed tag and on `workflow_dispatch` alike, so the gate needs no tag input to know
@@ -145,8 +145,8 @@ Highest invariant ID: INV-61
 | INV-nn | RG-n | 2027-01-15 |
 
 ## Known violations
-| Invariant | Status | Decision | Advisory | Review by |
-| INV-nn | ❌ | RG-n | GHSA-xxxx-xxxx-xxxx | 1.0.2 |
+| Invariant | Status | Decision | Advisory | Limitation | Release | Review by |
+| INV-nn | ❌ | RG-n | GHSA-xxxx-xxxx-xxxx | docs/operations/production-checklist.md#known-violations | 1.0.1 | 1.0.2 |
 
 ## Accepted exceptions
 | Invariant | Status shipped | Decision | Limitation | Review by |
@@ -162,16 +162,22 @@ Highest invariant ID: INV-61
 …
 ```
 
-*Reference* is `—` in Development mode and must name a published advisory (`GHSA-…`) or an issue URL of this
-repository for a ❌/❓ row in Line mode (D15). *Known violations* exists only with D15 (b) or (c).
+*Reference* is `—` in Development mode and must name an advisory or an issue of this repository for a ❌/❓ row in
+Line mode (D15). The gate checks the **format only** — `GHSA-xxxx-xxxx-xxxx` or
+`https://github.com/LupusMalusDeviant/Whiskers/issues/<n>` — and makes no network call, so offline and fork builds
+behave the same; whether the advisory is published (for an unfixed vulnerability it is often still a private draft)
+is left to review. The same holds for *Advisory* under *Known violations*. *Known violations* exists only with D15
+(b), (c) or (d).
 
 ### `PRODUCT_CONTRACT.md` §6.1 "Release decisions" (new table, D5)
 
-`| ID | Kind | Invariant | Decision | Status | Date | Decided by |` with IDs `RG-1`, `RG-2`, … *Kind* is `exception`,
-`retirement` or `known violation`; *Status* is `Proposed` or `Accepted`; *Date* is the ISO date of acceptance;
-*Decided by* names the maintainer who accepted it. Every rule that relies on a decision (R3 retirements, R11
-exceptions, R17 known violations) requires the matching *Kind*, the same invariant, *Status* `Accepted`, a date not
-in the future and a non-empty *Decided by*. A retirement that an earlier PC-D decision already settled is recorded
+`| ID | Kind | Invariant | Decision | Release | Status | Date | Decided by |` with IDs `RG-1`, `RG-2`, … *Kind* is
+`exception`, `retirement` or `known violation`; *Release* is the exact version a `known violation` covers and `—`
+for the other kinds; *Status* is `Proposed` or `Accepted`; *Date* is the ISO date of acceptance; *Decided by* names
+the maintainer who accepted it. Every rule that relies on a decision (R3 retirements, R11 exceptions, R17 known
+violations) requires the matching *Kind*, the same invariant, *Status* `Accepted`, a date not in the future and a
+non-empty *Decided by*. **An `Accepted` row is immutable** (R18): it is never edited or deleted, and an ID is never
+reused; a changed decision is a new row with a new ID. A retirement that an earlier PC-D decision already settled is recorded
 as an `RG-n` of kind `retirement` that cites it: the PC-D rows carry no per-row status, date or decider, so they
 cannot be checked themselves.
 
@@ -201,17 +207,19 @@ public sealed record InvariantRow(string Id, InvariantStatus Status, string Stat
 
 public sealed record OpenInvariant(string Id, InvariantStatus Status, string Package, string Reason, string? Reference);
 public sealed record RetiredInvariant(string Id, string DecisionId, DateOnly? Date);
-public sealed record KnownViolation(string Id, InvariantStatus Status, string DecisionId, string Advisory, string ReviewBy);
+public sealed record KnownViolation(string Id, InvariantStatus Status, string DecisionId, string Advisory,
+                                    string LimitationLink, string Release, string ReviewBy);
 public sealed record AcceptedException(string Id, InvariantStatus Shipped, string DecisionId,
                                        string LimitationLink, string ReviewBy);
-public sealed record ReleaseDecision(string Id, string Kind, string Invariant, string Status, DateOnly? Date, string DecidedBy);
+public sealed record ReleaseDecision(string Id, string Kind, string Invariant, string? Release, string Status,
+                                     DateOnly? Date, string DecidedBy);
 public sealed record PlatformSkip(string Test, string SkipsWhen, string? RunsUnskippedIn, string Why);
 public sealed record MandatorySuite(string Workflow, string Job, string? Step, string Proves);
 
 public sealed record PathRow(string Id, string Class /* M A S T U */, string? McpTool,
                              IReadOnlyList<string> Capabilities, int Line);
 
-public sealed record GateFinding(string Rule, string Subject, string Message);   // Rule = R1…R17 below
+public sealed record GateFinding(string Rule, string Subject, string Message);   // Rule = R1…R18 below
 
 public enum GateMode { Development, Line, Release }                              // each strictly stricter
 public sealed record GateVersion(int Major, int Minor, int Patch);
@@ -255,15 +263,15 @@ The test reads the real files, determines version and mode (above), runs `Releas
 ### Invariant status
 
 - **R1 — Release mode:** every invariant's status cell is exactly `✅`, or the invariant is ⚠️ and has an accepted
-  exception (R11), or — only with D15 (b) or (c) — it is ❌/❓ and has a valid *Known violations* record (R17). Nothing
+  exception (R11), or — only with D15 (b), (c) or (d) and only in a patch release — it is ❌/❓ and has a valid *Known violations* record for exactly this version (R17). Nothing
   else passes; in particular no exception is ever accepted for ❌ or ❓ (D11).
 - **R2 — Development and Line mode (ratchet, D3):** every non-✅ invariant has a row in *Open invariants* with the
   same status and package; a row there for an invariant that is ✅ now fails as stale (the list may only shrink
-  honestly). In **Line** mode additionally (D15 (a) or (c); with D15 (b) Line mode applies the Release rules of R1), every *Open invariants* row of a non-✅ invariant that has no accepted
-  exception must carry a *Reference* (a published advisory `GHSA-…` or an issue URL of this repository, D15). A newly
+  honestly). In **Line** mode additionally (D15 (a), (c) or (d); with D15 (b) Line mode applies the Release rules of R1), every *Open invariants* row of a non-✅ invariant that has no accepted
+  exception must carry a *Reference* (`GHSA-…` or an issue URL of this repository, format check only, D15). A newly
   found gap can therefore be recorded honestly — ❌, ❓ or ⚠️, whichever is true — in the pull request that finds it
   and stays mergeable; there is never a reason to write a better status than the true one. It cannot be released:
-  Release mode (R1) still needs ✅, an accepted exception for ⚠️, or — only with D15 (b) or (c) — a known-violation record.
+  Release mode (R1) still needs ✅, an accepted exception for ⚠️, or — only with D15 (b), (c) or (d), in a patch release — a known-violation record.
 - **R3 — Format and completeness, all modes:**
   - every `INV-nn` in the table appears once and §11's counts equal the table's;
   - `RELEASE_GATE.md` pins `Highest invariant ID: INV-nn`. Every ID from INV-01 up to the pinned one is either a
@@ -353,13 +361,32 @@ The test reads the real files, determines version and mode (above), runs `Releas
   The gate cannot prove who edited a file: that the *Decided by* entry is genuine rests on review and branch
   protection, like every other accepted contract. What the gate guarantees is that no exception ships without an
   explicit, dated acceptance on record.
-- **R17 — Known violations (only with D15 (b) or (c)).** A *Known violations* row lets **one** release ship while a ❌/❓
-  invariant is still open. It must name an invariant whose status is ❌ or ❓; an `RG-n` of kind `known violation` for
-  it (Accepted, dated, decided by); a *Status* equal to the table's; a published advisory (`GHSA-…`) that the
-  release notes link; and a *Review by* equal to the **next patch version** after the current `<Version>`. In every
-  mode a row whose *Review by* is not greater than the current `<Version>` fails, so the record covers exactly one
-  release and cannot be renewed by editing the date: a second release with the same violation needs a new
-  decision with a new ID, which review sees. Without D15 (b) or (c) the table must be absent or empty.
+- **R17 — Known violations (only with D15 (b), (c) or (d)).** A *Known violations* row lets **one patch release** ship
+  while a ❌/❓ invariant is still open. Each row must:
+  - name an invariant whose status is ❌ or ❓, with a *Status* equal to the table's;
+  - name an `RG-n` of kind `known violation` for that invariant (Accepted, dated, decided by, §6.1) whose *Release*
+    equals the row's *Release*;
+  - have *Release* equal to the current `<Version>`, and that version must be a **patch release** (patch number ≥ 1):
+    a record at `X.Y.0` — 1.0.0 itself, or any minor or major release — fails, so no X.Y.0 ships with a ❌/❓;
+  - have *Review by* equal to the next patch after *Release*;
+  - carry an *Advisory* in `GHSA-xxxx-xxxx-xxxx` form (format check only; that the release notes link it is left to
+    review, or to `release.yml` if it is later taught to check);
+  - link a limitation section in the product documents that names the invariant ID, exactly as R11 requires for an
+    exception, so the accepted release rule (`SECURITY_INVARIANTS.md:14–16`: every deliberate gap is documented) and
+    the gate agree;
+  - with D15 (d) only, checked in release runs: name an invariant that was ✅ or ⚠️ in the previous release tag
+    (`git show <previous tag>:docs/v1/SECURITY_INVARIANTS.md`, from the `prepare` job's full-history checkout).
+
+  In every mode a row whose *Release* is not the current `<Version>` fails. Consequences: the record must be written
+  in the pull request that bumps `<Version>` to the patch it covers (a record written while `main` is still at the
+  previous version fails at once, and one left behind fails the next bump); and renewing it by editing only *Review by* or *Release*
+  fails, because *Release* must equal both `<Version>` and the decision's *Release*, and the decision itself cannot
+  be edited (R18). A second release with the same violation needs a new decision with a new ID. Without D15 (b), (c)
+  or (d) the table must be absent or empty.
+- **R18 — Accepted decisions are immutable (with D16 (a)).** The base-diff step of D16 also compares §6.1 with the
+  pull request's base commit: an `Accepted` row that changes in any cell or disappears fails, an ID that reappears
+  with different content fails, and a new row must use an ID above every ID in the base. Within one commit the gate
+  can only check that IDs are unique; without D16 (a) immutability rests on review.
 
 ### Capability/path inventory and drift
 
@@ -397,9 +424,9 @@ generated, and the two are joined by tests.
 | `ReleaseGateTests.The_repository_passes_the_gate_in_its_mode` | the real files pass every rule of the mode `<Version>` selects; every finding listed |
 | `ReleaseGateTests.The_mode_follows_the_version_and_the_run_and_can_only_get_stricter` | 0.15.0 → Development, also with `release`; 1.0.0, 1.2.3 and 2.0.0 → Line; `release` at ≥ 1.0.0 → Release; `dry-run` → Release at any version; `Release`, `true`, `off` and a typo are findings; no value yields a mode below the one the version gives |
 | `ReleaseGateTests.An_unresolvable_version_fails` | no `<Version>`, two of them, `1.0`, `1.0.0-rc.1` |
-| `ReleaseGateTests.A_non_green_invariant_fails_the_release` | R1: ⚠️ without exception fails Release; ❌ fails Release even with a complete exception row; ❌ with a valid known-violation record passes only with D15 (c) |
-| `ReleaseGateTests.An_open_list_that_is_missing_or_stale_fails` | R2: an unlisted ⚠️ fails; a listed ✅ fails |
-| `ReleaseGateTests.A_new_violation_is_mergeable_after_1_0_only_with_a_reference` | R2 in Line mode: a ❌ with an *Open invariants* row and a `GHSA-…` or issue reference passes the pull request; without a reference it fails; the same files fail in Release mode |
+| `ReleaseGateTests.A_non_green_invariant_fails_the_release` | R1: ⚠️ without exception fails Release; ❌ fails Release even with a complete exception row; ❌ with a valid known-violation record passes only with D15 (b), (c) or (d) and only in a patch release |
+| `ReleaseGateTests.An_open_list_that_is_missing_or_stale_fails` | R2: an unlisted ⚠️ fails, also when an accepted exception covers it (the exception only waives the *Reference*); a listed ✅ fails |
+| `ReleaseGateTests.A_new_violation_is_mergeable_after_1_0_only_with_a_reference` | R2 in Line mode: a ❌ with an *Open invariants* row and a `GHSA-…` or issue reference passes the pull request; without a reference, or with a reference in neither format, it fails (no network call); the same files fail in Release mode |
 | `ReleaseGateTests.A_malformed_qualified_or_miscounted_table_fails` | R3: duplicate ID, unknown symbol, `✅ per host after migration`, §11 count off by one |
 | `ReleaseGateTests.A_deleted_invariant_is_caught_even_with_the_count_adjusted` | R3: delete the INV-61 row and change §11 to match — fails (pinned ID missing, not retired); a row above the pin fails; a *Retired invariants* row without an accepted `retirement` decision fails; a retired ID that is also a row fails; a pin below the highest retired ID fails |
 | `ReleaseGateTests.Every_backticked_name_in_the_test_column_resolves` | R4: renamed method, removed class, `PrincipalPropagationTest` typo, a non-test type in backticks |
@@ -410,12 +437,13 @@ generated, and the two are joined by tests.
 | `ReleaseGateTests.A_named_test_outside_every_checked_run_fails` | R9: an ImageRuntime test without D14, a test no filter selects |
 | `ReleaseGateTests.A_mandatory_suite_that_cannot_block_the_release_fails` | R10: job removed, `continue-on-error` added, dropped from `needs`, `--no-skips` removed |
 | `ReleaseGateTests.An_exception_needs_an_accepted_dated_decision_and_a_limitation` | R11: `Proposed` decision, missing date or decider, decision of another kind or for another invariant, dead link, section that does not name the invariant, exception for ❌ or ✅, review version not newer (in Development mode too) |
-| `ReleaseGateTests.A_known_violation_covers_exactly_one_release` | R17 (D15 (b) or (c)): accepted record lets Release pass; *Review by* other than the next patch fails; after the version bump the same row fails every mode; a record for a ⚠️ or ✅ fails; without D15 (b) or (c) any row fails |
+| `ReleaseGateTests.A_known_violation_covers_exactly_one_release` | R17 (D15 (b), (c) or (d)): an accepted record at 1.0.1 with *Release* 1.0.1 lets Release pass; *Release* other than `<Version>` fails; *Release* differing from the decision's *Release* fails; *Review by* other than the next patch fails; a renewal at 1.0.2 that changes only *Review by* fails; a record at 1.1.0 (X.Y.0) fails; a record without a limitation section naming the invariant fails; an advisory not in `GHSA-` form fails; a record for a ⚠️ or ✅ fails; with D15 (d), an invariant already ❌ in the previous tag fails; without D15 (b), (c) or (d) any row fails |
+| `ReleaseGateTests.An_accepted_decision_cannot_change` | R18 (D16 (a)), against an in-memory base: an `Accepted` §6.1 row edited in one cell fails; a deleted one fails; a reused ID fails; a new ID at or below the base's highest fails; a new row passes |
 | `ReleaseGateTests.The_capability_inventory_matches_the_code` | R12 (snapshot, `.actual`) |
 | `ReleaseGateTests.Matrix_and_catalog_name_each_other` | R13/R14: a new capability without a row, a row naming an unknown capability or tool |
 | `ReleaseGateTests.The_totals_match_the_rows` | R15 |
 | `InvariantTableParserTests`, `PathMatrixParserTests`, `ReleaseGateDocumentTests` | parsing of the real files and of edge cases (prose in the test column, escaped `\|`, planned entries with and without a name, a missing table heading) |
-| `ReleaseWorkflowTests` (extended) | `release.yml` passes `release-gate: release` and `ci.yml` sets the variable only from that input; with D8, `publish-image` needs the called `security.yml`; with D14, the image-runtime step writes TRX and checks its manifest; with D16, the base-diff step exists on pull requests |
+| `ReleaseWorkflowTests` (extended) | `release.yml` passes `release-gate: release` and `ci.yml` sets the variable only from that input; with D8, `publish-image` needs the called `security.yml`; with D14, the image-runtime step writes TRX and checks its manifest; with D16, the base-diff step exists on pull requests and its checkout has `fetch-depth: 0` (or fetches the base SHA) |
 | `RequiredTestsManifestTests` (extended) | still green with the generated blocks; uses the shared `TestCatalog` |
 
 Negative tests mutate the text of the real files in memory, as `ReleaseWorkflowTests` does; nothing is written to the
@@ -464,7 +492,7 @@ repository except a `.actual` file on a snapshot difference.
    (a) A row in `RELEASE_GATE.md` *Accepted exceptions* + an `RG-n` decision of kind `exception` in a new
    `PRODUCT_CONTRACT.md` §6.1 "Release decisions" with *Status* `Accepted`, *Date* and *Decided by* + a limitation
    section in the product docs that names the invariant + a mandatory *Review by* version, checked in all modes. The
-   same §6.1 table carries retirements (R3) and known violations (R17). (b) The same without *Review by*. (c) Exceptions as PC-D rows only, no separate
+   same §6.1 table carries retirements (R3) and known violations (R17, with their *Release*); accepted rows are immutable (R18). (b) The same without *Review by*. (c) Exceptions as PC-D rows only, no separate
    table and no acceptance fields. *Recommended: (a).* The release rule asks for a *recorded decision*; (c) would accept
    any row that merely exists, and an exception without an end tends to become permanent.
 6. **D6 — How a §7 row names its capabilities.**
@@ -495,7 +523,9 @@ repository except a `.actual` file on a snapshot difference.
     with the same decision record. *Recommended: (a).* A ❌ is a known violation (today INV-18: a Viewer can change
     shared state); making it a standing product limitation would turn the release rule into a formality. Whether a
     release may still go out while a ❌/❓ is open, for one patch release under an advisory, is a separate and much
-    narrower question: D15.
+    narrower question: D15. R17 enforces that narrowness: a known-violation record is tied to one exact patch version
+    (never X.Y.0, so 1.0.0 cannot ship with today's INV-18 ❌), needs a documented limitation and cannot be renewed
+    without a new decision.
 12. **D12 — INV-58's qualified ✅ ("✅ per host after migration").**
     (a) Set it to ⚠️, move "per host after migration" into the evidence column, and — if 1.0 is to ship with the
     shared credential still supported — accept an `RG-n` exception whose limitation says that a host still on the
@@ -518,26 +548,35 @@ repository except a `.actual` file on a snapshot difference.
 15. **D15 — A ❌/❓ found after 1.0.**
     Example: after 1.0.0 a report shows that a Viewer can start a scan through a new path.
     (a) **Record and merge, never release.** In Line mode a ❌/❓ (or a new ⚠️) passes when it has an *Open
-    invariants* row with a reference to a published advisory or an issue of this repository; Release mode refuses it.
+    invariants* row with an advisory or issue reference (format check only); Release mode refuses it.
     The fix, or an honest narrowing to a stated ⚠️ with an accepted exception, has to land before the next release —
     also a patch release that fixes something unrelated waits.
-    (b) **A time-boxed known-violation record in releases, without (a).** A *Known violations* row (R17) lets exactly
-    one release ship with the ❌/❓, under an accepted `RG-n`, a published advisory and *Review by* = the next patch;
-    pull requests and `main` stay as strict as Release mode otherwise, so the honest ❌ cannot be merged until the
-    record exists.
+    (b) **A known-violation record for one patch release, without (a).** A *Known violations* row (R17) lets exactly
+    one patch release (patch ≥ 1, never X.Y.0) ship with the ❌/❓: *Release* = that version = the decision's
+    *Release*, an accepted `RG-n`, a `GHSA-…` advisory and a documented limitation naming the invariant. Pull requests
+    and `main` stay as strict as Release mode otherwise, so the honest ❌ cannot be merged until the record exists.
     (c) **(a) and (b) together.** Line mode records and merges as in (a); a release run passes only with a valid R17
-    record, which covers one release and must be decided again (new ID) for the next.
+    record for exactly its version.
+    (d) **(c) plus a first-occurrence check.** As (c), but a release run also requires that the invariant was ✅ or ⚠️
+    in the previous release tag, so a given violation can ship under a record at most once; a second patch with the
+    same ❌ must wait for the fix.
     *Recommended: (c).* (a) alone blocks an urgent unrelated fix — for instance a second security fix — behind the
     first one, which helps nobody: the shipped release has the violation either way, and the advisory tells users.
     (b) alone leaves the honest ❌ unmergeable until the maintainer has written a decision, which invites writing ⚠️ in
-    the meantime. (c) never rewards a better status than the true one, keeps every shipped violation tied to an
-    accepted decision and a public advisory, and cannot drift: the record expires with the next version bump in every
-    mode.
+    the meantime. What (c) guarantees is only what R17 and R18 check: no X.Y.0 ships with a ❌/❓; each patch release
+    that does names its exact version in an accepted decision with an advisory and a documented limitation; the record
+    cannot be stretched to a later version by editing a cell, because *Release* must equal the current version and the
+    decision's *Release*, and an accepted decision cannot change (R18, with D16 (a); without it, review). It does
+    **not** stop the maintainer from accepting a new decision for the next patch: consecutive patches may ship the
+    same violation, each under its own visible ID. (d) closes that too, at the cost of a check against the previous
+    tag in release runs and of blocking a second urgent patch while a hard fix is still in progress; take (d) if a
+    violation should never ship twice.
 16. **D16 — Removed invariant IDs, beyond the pin.**
     The pinned highest ID (R3) catches a deleted row unless the same pull request also lowers the pin. (a) Add a CI
     step on pull requests that compares the invariant IDs of the table plus *Retired invariants* with those of the
     pull request's base commit (`git show <base>:docs/v1/SECURITY_INVARIANTS.md`) and fails when an ID disappears
-    without a new *Retired invariants* row or when the pin goes down. (b) Rely on the pin and on review (with
-    CODEOWNERS on `docs/v1/` recommended). *Recommended: (a).* It turns the remaining three-file edit into a CI failure;
-    the step needs only the base commit, which `actions/checkout` with `fetch-depth: 0` already provides in `release.yml`
-    and can provide in `ci.yml`.
+    without a new *Retired invariants* row or when the pin goes down. The same step compares §6.1 of
+    `PRODUCT_CONTRACT.md` with the base and enforces R18 (accepted decisions immutable, IDs never reused). (b) Rely on
+    the pin and on review (with CODEOWNERS on `docs/v1/` recommended). *Recommended: (a).* It turns the remaining
+    three-file edit and any silent edit of an accepted decision into a CI failure. The step runs on pull requests in
+    `ci.yml`, whose checkout then needs `fetch-depth: 0` or an explicit fetch of the base SHA.
