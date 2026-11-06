@@ -1,4 +1,5 @@
 using System.Reflection;
+using Whiskers.Tests.ReleaseGate;
 
 namespace Whiskers.Tests;
 
@@ -12,10 +13,12 @@ public class RequiredTestsManifestTests
 {
     private const string InProcess = "in-process.txt";
     private const string Docker = "docker.txt";
+    private const string ImageRuntime = "image-runtime.txt";
 
     [Theory]
     [InlineData(InProcess)]
     [InlineData(Docker)]
+    [InlineData(ImageRuntime)]
     public void Every_entry_names_tests_of_its_run(string manifest)
     {
         var entries = Entries(manifest);
@@ -30,7 +33,7 @@ public class RequiredTestsManifestTests
                 continue;
             }
             foreach (var (type, method) in tests)
-                if (IsDocker(type, method) != (manifest == Docker))
+                if (TestCatalog.Instance.RunOf(type, method) != RunOf(manifest))
                     problems.Add($"{name}: {type.Name}.{method.Name} does not run in the {manifest} run");
             // A single [Fact] yields one result: a higher minimum could never be met.
             if (tests.Count == 1 && tests[0].Method.GetCustomAttribute<TheoryAttribute>() is null && minimum > 1)
@@ -46,10 +49,23 @@ public class RequiredTestsManifestTests
     {
         var required = Entries(Docker).SelectMany(e => Resolve(e.Name)).Select(t => (t.Type, t.Method.Name)).ToHashSet();
         var missing = TestClasses()
-            .SelectMany(type => TestMethods(type).Where(m => IsDocker(type, m)).Select(m => (type, m)))
+            .SelectMany(type => TestMethods(type).Where(m => TestCatalog.Instance.RunOf(type, m) == TestRun.Docker).Select(m => (type, m)))
             .Where(t => !required.Contains((t.type, t.m.Name)))
             .Select(t => $"{t.type.FullName}.{t.m.Name}")
             .ToList();
+        Assert.Empty(missing);
+    }
+
+    [Fact]
+    public void Every_image_runtime_test_is_required_in_the_image_runtime_run()
+    {
+        var required = Entries(ImageRuntime).SelectMany(e => Resolve(e.Name)).Select(t => (t.Type, t.Method.Name)).ToHashSet();
+        var missing = TestClasses()
+            .SelectMany(type => TestMethods(type).Where(m => TestCatalog.Instance.RunOf(type, m) == TestRun.ImageRuntime).Select(m => (type, m)))
+            .Where(t => !required.Contains((t.type, t.m.Name)))
+            .Select(t => $"{t.type.FullName}.{t.m.Name}")
+            .ToList();
+        Assert.NotEmpty(required);
         Assert.Empty(missing);
     }
 
@@ -109,16 +125,14 @@ public class RequiredTestsManifestTests
             ? []
             : type.GetMethods(BindingFlags.Public | BindingFlags.Instance).Where(m => m.GetCustomAttribute<FactAttribute>(inherit: true) is not null);
 
-    private static bool IsDocker(Type type, MethodInfo method)
+    /// <summary>The run a manifest belongs to, the same classification the release gate uses (contract 0008, R8).</summary>
+    private static TestRun RunOf(string manifest) => manifest switch
     {
-        static bool Has(IEnumerable<CustomAttributeData> attributes) => attributes.Any(a =>
-            a.AttributeType == typeof(TraitAttribute)
-            && a.ConstructorArguments is [{ Value: "Category" }, { Value: string value }]
-            && value == DockerRequirement.Category);
-        for (var t = type; t is not null; t = t.BaseType)
-            if (Has(t.GetCustomAttributesData())) return true;
-        return Has(method.GetCustomAttributesData());
-    }
+        InProcess => TestRun.InProcess,
+        Docker => TestRun.Docker,
+        ImageRuntime => TestRun.ImageRuntime,
+        _ => throw new ArgumentOutOfRangeException(nameof(manifest), manifest, "no run for this manifest"),
+    };
 
     private static string RepoRoot()
     {
