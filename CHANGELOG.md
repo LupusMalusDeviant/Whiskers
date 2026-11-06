@@ -11,7 +11,8 @@ All notable changes to Whiskers are documented here. The format follows
     DockTail with `protocol=tcp`.
   - What the client sends passes through unchanged, `Host` and `X-Forwarded-*` included. Every visitor arrives from
     tailscaled's private address.
-  - So `AUTH_DISABLED=true` behind such a forward makes a visitor from the internet Admin.
+  - So `AUTH_DISABLED=true` behind such a forward makes every visitor Admin; with Funnel, that is anyone on the
+    internet.
   - With sign-in enabled, a forward from a trusted proxy address lets the client choose its own address. That defeats
     the per-client login rate limit and the audit.
   - The README ("Name your proxy") covers both modes, which address to trust, what trusting the Docker gateway also

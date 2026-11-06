@@ -63,7 +63,7 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             !authDisabled,
             authDisabled
                 ? "AUTH_DISABLED=true — jeder mit Netzwerkzugriff ist Admin. Nur für isolierte LAN-Setups vertretbar; " +
-                  "nie hinter einer TCP-Weiterleitung (Tailscale Serve --tcp, DockTail mit protocol=tcp) – dort kommt " +
+                  "nie hinter einer TCP-Weiterleitung (Tailscale Serve --tcp/--tls-terminated-tcp, DockTail mit protocol=tcp) – dort kommt " +
                   "jeder Besucher von einer privaten Adresse – und nie hinter Tailscale Funnel, das die Instanz ins " +
                   "Internet stellt."
                 : "Login ist erforderlich (lokal, Google oder OIDC).",
