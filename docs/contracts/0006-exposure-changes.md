@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
 **Amendments 1–11** (review rounds 1–11, at the end) were accepted by the
-maintainer as one set on 6 November 2026. **Amendment 12** (implementation review) is pending acceptance.
+maintainer as one set on 6 November 2026. **Amendment 12** (implementation review) was accepted on 6 November 2026.
 
 ## Purpose
 
@@ -783,8 +783,8 @@ This amendment takes precedence over Amendments 1–10. All amendments are to be
 
 ## Amendment 12 — implementation review (6 November 2026)
 
-This amendment takes precedence over Amendments 1–11. It follows from the code review of the implementation and is to
-be accepted by the maintainer.
+This amendment takes precedence over Amendments 1–11. It follows from the code review of the implementation and was
+accepted by the maintainer on 6 November 2026.
 
 ### Decided exposures come from Whiskers only (review B1)
 
