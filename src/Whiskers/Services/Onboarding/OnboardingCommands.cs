@@ -56,7 +56,10 @@ public static class OnboardingCommands
         return $"echo {b64} | base64 -d | python3 -";
     }
 
-    public static string NodeExporterCompose(string tsIp) =>
+    // Host files are LF: normalise, so a CRLF checkout of this source cannot put CR characters into them.
+    public static string NodeExporterCompose(string tsIp) => NodeExporterComposeFor(tsIp).ReplaceLineEndings("\n");
+
+    private static string NodeExporterComposeFor(string tsIp) =>
 $@"services:
   node-exporter:
     image: quay.io/prometheus/node-exporter:v1.12.1
@@ -77,7 +80,7 @@ $@"services:
     /// approved one (<see cref="Whiskers.Services.Certificates.MtlsAllowListCommands.ApprovedArgsWithoutAllowCn"/>).</summary>
     public static string DockerProxyCompose(string tsIp, string allowedClientCn) =>
         Whiskers.Services.Certificates.MtlsClientIdentity.IsValidCommonName(allowedClientCn)
-            ? DockerProxyComposeFor(tsIp, allowedClientCn)
+            ? DockerProxyComposeFor(tsIp, allowedClientCn).ReplaceLineEndings("\n")
             : throw new ArgumentException($"'{allowedClientCn}' is not an allowed client name.", nameof(allowedClientCn));
 
     private static string DockerProxyComposeFor(string tsIp, string allowedClientCn) =>
