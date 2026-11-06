@@ -2,8 +2,8 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendments 1–9** (review rounds 1–8 and implementation alignment, at the end) are to be accepted by
-the maintainer as one set.
+and the whiskers.site host. **Amendments 1–9** (review rounds 1–8 and implementation alignment, at the end) were accepted by
+the maintainer as one set on 6 November 2026.
 
 ## Purpose
 

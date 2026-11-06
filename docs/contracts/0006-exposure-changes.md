@@ -1,8 +1,8 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1–11** (review rounds 1–11, at the end) are to be accepted by the
-maintainer as one set.
+**Amendments 1–11** (review rounds 1–11, at the end) were accepted by the
+maintainer as one set on 6 November 2026.
 
 ## Purpose
 
