@@ -11,9 +11,9 @@ The app reads container environment variables; it does not read a `.env` file it
   `WHISKERS_DATA_DIR`, `WHISKERS_DB_PROVIDER` / `WHISKERS_DB_CONNECTION` / `WHISKERS_DB_CONNECTION_FILE`,
   `Auth__LocalLogin__Enabled`, `Auth__DisabledAllowedNetworks__*`, `Auth__DisabledAllowedHosts__*` and
   `ForwardedHeaders__*`. Set those as `environment:` entries; for PostgreSQL use the `deploy/docker-compose.postgres.yml`
-  overlay (it is in the repository, not a release asset, and fits only the release compose file, service
+  overlay (it is in the repository, not a release asset; it fits the release or repository `docker-compose.yml`, service
   `serverwatch`). `HOST_BIND` / `HOST_PORT` are read by compose for the port mapping.
-- **Installer:** its compose file sets `TZ`, `VAULT_KEY_FILE` (installers after 0.15.0) and, with `--data`,
+- **Installer:** on a new install its compose file sets `TZ`, `VAULT_KEY_FILE` and, with `--data`,
   `WHISKERS_DATA_HOST_DIR`. Add container variables (`Oidc__Enabled`, `PathBase`, …) as `environment:` entries in
   `./whiskers/docker-compose.yml`.
 - **`docker run`:** nothing is set; pass container variables with `-e`.

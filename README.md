@@ -11,6 +11,10 @@ of holding SSH keys or the Docker socket. Every call is authenticated, scope-che
 
 **Status: beta.** Not API-stable before 1.0. Run it on a trusted network and read [SECURITY.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md).
 
+**Scope of this README:** `main`, i.e. the first release after 0.15.0. Releases up to 0.15.0 differ (installer defaults
+to `latest`, no generated vault key, no `VAULT_KEY_FILE`, no setup token); for those use the
+[README at v0.15.0](https://github.com/LupusMalusDeviant/Whiskers/blob/v0.15.0/README.md).
+
 ## Facts
 
 | | |
@@ -22,7 +26,7 @@ of holding SSH keys or the Docker socket. Every call is authenticated, scope-che
 | Records | Agent History (every tool call) and a hash-chained Audit Log. Checkpoints are signed, and the trail is tamper-evident, only when a vault key (`VAULT_KEY` or `VAULT_KEY_FILE`) is set. |
 | Host access | Onboarding uses SSH once. Onboarded hosts then run over a WireGuard mesh (Tailscale/NetBird), the Docker API over mTLS behind a verb-whitelisting socket proxy, and host commands via a one-shot `nsenter` container, with no standing SSH key. A server added as a plain SSH connection and never onboarded keeps using SSH (its key in `ssh-keys/`) until it is migrated. |
 | Targets | Docker hosts, k3s/Kubernetes clusters (kubeconfig), Hetzner and Hostinger cloud APIs. |
-| Storage | `/app/data` (`WHISKERS_DATA_DIR`). SQLite by default, PostgreSQL optional. Secrets vault AES-256-GCM with `VAULT_KEY`; SSH and mTLS client keys are protected by file permissions only. |
+| Storage | `/app/data` (`WHISKERS_DATA_DIR`). SQLite by default, PostgreSQL optional. Secrets vault AES-256-GCM with `VAULT_KEY` / `VAULT_KEY_FILE`; SSH and mTLS client keys are protected by file permissions only. |
 | Images | `ghcr.io/lupusmalusdeviant/whiskers`, amd64 + arm64, Trivy-gated, SBOM + provenance, keyless cosign signature. |
 | Stack | C# / .NET 10, ASP.NET Core, MudBlazor, EF Core, SignalR. License Apache 2.0. |
 
@@ -37,15 +41,9 @@ curl -fsSLO "https://github.com/LupusMalusDeviant/Whiskers/releases/download/v${
 sha256sum --check --ignore-missing checksums.txt && bash install.sh
 ```
 
-It writes `./whiskers/`, starts the container and waits until healthy. The UI is at `http://127.0.0.1:5100`. Flags:
-`install.sh --help`.
-
-What the installer does depends on the release:
-
-| Installer | Image | Vault key | Signature check |
-|---|---|---|---|
-| Releases after 0.15.0 | exactly that release | generated (`VAULT_KEY_FILE`) | cosign, if installed |
-| 0.15.0 and older | `latest` unless you pass `--image "ghcr.io/lupusmalusdeviant/whiskers:${VER}"` | none: set `VAULT_KEY_FILE` yourself | none: run the cosign command below |
+The installer installs exactly that release, generates the vault key on a new install (`VAULT_KEY_FILE`), verifies the
+image signature if cosign is installed, writes `./whiskers/` and waits until healthy. The UI is at
+`http://127.0.0.1:5100`. Flags: `install.sh --help`.
 
 Without the installer:
 
@@ -114,14 +112,14 @@ Everything is optional. Where a setting goes depends on the install path:
 
 - **Release `docker-compose.yml`:** put the `.env` names below in a `.env` beside it; the compose file maps them to the
   container variables.
-- **Installer:** its compose file sets `TZ`, `VAULT_KEY_FILE` (installers after 0.15.0) and, with `--data`,
+- **Installer:** on a new install its compose file sets `TZ`, `VAULT_KEY_FILE` and, with `--data`,
   `WHISKERS_DATA_HOST_DIR`. Add container variables as `environment:` entries in `./whiskers/docker-compose.yml`.
 - **`docker run`:** nothing is set; pass container variables with `-e`.
 
 | `.env` name (release compose) | Container variable | Effect |
 |---|---|---|
-| `VAULT_KEY_FILE` / `VAULT_KEY` | same | Encrypts stored secrets. Losing it makes them unreadable. The installer sets `VAULT_KEY_FILE`. |
-| — (release compose: `deploy/docker-compose.postgres.yml` overlay from the repository; installer: `environment:` entries) | `WHISKERS_DB_PROVIDER`, `WHISKERS_DB_CONNECTION_FILE` | `sqlite` (default) or `postgres`. |
+| `VAULT_KEY_FILE` / `VAULT_KEY` | same | Encrypts stored secrets. Losing it makes them unreadable. The installer sets `VAULT_KEY_FILE` on a new install. |
+| — (release or repository compose file: `deploy/docker-compose.postgres.yml` overlay from the repository; installer: `environment:` entries) | `WHISKERS_DB_PROVIDER`, `WHISKERS_DB_CONNECTION` (or `_FILE`) | `sqlite` (default) or `postgres`. The overlay needs `WHISKERS_DB_PASSWORD` in `.env`. |
 | `OIDC_ENABLED`, `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `Oidc__Enabled`, `Oidc__Authority`, `Oidc__ClientId`, `Oidc__ClientSecret` | Sign-in through your identity provider. |
 | `HOST_BIND`, `HOST_PORT` | — (port mapping; installer: `--bind`, `--port`) | Published address; default `127.0.0.1:5100`. |
 | `PATH_BASE` | `PathBase` | Subpath behind a reverse proxy. |

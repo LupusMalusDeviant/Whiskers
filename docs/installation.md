@@ -3,7 +3,7 @@
 All install paths. The short version is in the [README](../README.md#install).
 
 Prebuilt multi-arch images (amd64 / arm64) are published to `ghcr.io/lupusmalusdeviant/whiskers` from v0.12.0. For
-older versions use [From source](#from-source-development).
+older versions use [From source](#from-source-development). This page describes the releases after 0.15.0 (`main`).
 
 ## Installer
 
@@ -20,19 +20,15 @@ broken download. The rest depends on the release:
 **Installers of releases after 0.15.0:**
 
 - install exactly that release, never `latest`;
-- generate the vault key (`VAULT_KEY_FILE`) and print where it is and what to back up. Keep the key and the backups
+- generate the vault key on a new install (`VAULT_KEY_FILE`; an upgrade of an older install only warns) and print where it is and what to back up. Keep the key and the backups
   apart, off the host;
 - verify the image signature if cosign is installed;
-- flags: `--version`, `--image`, `--verify`, `--port`, `--bind`, `--data`, `--dir`, `--install-docker`, `--yes` (`install.sh --help`);
+- flags: `--version`, `--image`, `--verify`, `--port`, `--bind`, `--data`, `--dir`, `--install-docker`, `--allow-unknown-current` (upgrade an older `latest` install), `--yes` (`install.sh --help`);
 - re-running with a newer release upgrades in place (only the image line changes); downgrades are refused.
 
-**Installers of 0.15.0 and older:**
-
-- default to `latest`: pass `--image "ghcr.io/lupusmalusdeviant/whiskers:${VER}"`;
-- generate no vault key: set `VAULT_KEY_FILE` as for [`docker run`](#plain-docker-run);
-- verify no signature: run the cosign command from the README's
-  [Verifying the image](../README.md#verifying-the-image);
-- flags: `--port`, `--bind`, `--data`, `--dir`, `--image`, `--install-docker`, `--yes`.
+**Installers of 0.15.0 and older** default to `latest`, generate no vault key, verify no signature and print no setup
+token; those images do not read `VAULT_KEY_FILE` either. Use the
+[README at v0.15.0](https://github.com/LupusMalusDeviant/Whiskers/blob/v0.15.0/README.md) for them.
 
 Details: [deploy/README.md → Installer](../deploy/README.md#installer).
 
@@ -84,7 +80,7 @@ Alternatives:
 
 - Seed the admin unattended with `WHISKERS_ADMIN_EMAIL` + `WHISKERS_ADMIN_PASSWORD_FILE`.
 - Use Google or generic OIDC ([Configuration](configuration.md)).
-- For a trial on a trusted network, `AUTH_DISABLED=true`. Every request is then an Admin, so Whiskers only answers
+- For a trial on a trusted network, `AUTH_DISABLED=true` (container variable `Auth__Disabled`). Every request is then an Admin, so Whiskers only answers
   clients from private networks, with an IP or `localhost` as host name and without a foreign `Origin`.
 
 ## MCP clients
