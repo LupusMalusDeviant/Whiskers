@@ -664,21 +664,36 @@ public class VpnSecretHandlingTests : IDisposable
             if [ "$1" = "up" ]; then
                 touch '{{record}}/up-started'
                 i=0
-                while [ ! -f '{{record}}/release' ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+                while [ ! -f '{{record}}/release' ] && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
             fi
             exit 0
             """);
 
+        var release = Path.Combine(record, "release");
         using var proc = Process.Start(Entrypoint(bin, secrets,
             new Dictionary<string, string> { ["TAILSCALE_AUTHKEY"] = TailscaleKey }))!;
-        var started = Path.Combine(record, "up-started");
-        for (var i = 0; i < 200 && !File.Exists(started); i++) await Task.Delay(50);
-        Assert.True(File.Exists(started), "tailscale up never started");
-        using (var kill = Process.Start(new ProcessStartInfo("kill", ["-TERM", proc.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)]))!)
-            await kill.WaitForExitAsync();
-        // The shell runs its TERM trap once the foreground `tailscale up` returns; let it return now.
-        File.WriteAllText(Path.Combine(record, "release"), "");
-        await proc.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token);
+        try
+        {
+            var started = Path.Combine(record, "up-started");
+            for (var i = 0; i < 200 && !File.Exists(started); i++) await Task.Delay(50);
+            Assert.True(File.Exists(started), "tailscale up never started");
+            using (var kill = Process.Start(new ProcessStartInfo("kill", ["-TERM", proc.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)]))!)
+            {
+                await kill.WaitForExitAsync();
+                Assert.Equal(0, kill.ExitCode);                             // the stop was delivered
+            }
+            // The shell runs its TERM trap once the foreground `tailscale up` returns; let it return now.
+            File.WriteAllText(release, "");
+            using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            await proc.WaitForExitAsync(wait.Token);
+        }
+        finally
+        {
+            // On a failed assertion above, neither the shell nor the fake may outlive the test and write into its
+            // directory while it is being deleted.
+            if (!File.Exists(release)) File.WriteAllText(release, "");
+            if (!proc.HasExited) proc.Kill(entireProcessTree: true);
+        }
 
         Assert.Equal(143, proc.ExitCode);                                   // the stop is passed on
         Assert.False(File.Exists(Path.Combine(record, "env")));             // Whiskers was not started after it
