@@ -1,7 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1–9** (review rounds 1–9, at the end) are to be accepted by the
+**Amendments 1–10** (review rounds 1–10, at the end) are to be accepted by the
 maintainer as one set.
 
 ## Purpose
@@ -725,3 +725,44 @@ This amendment takes precedence over Amendments 1–8. All amendments are to be 
 - **Staged files.** "The same `-f` and `--env-file` that `up` uses" in Amendment 8 reads: the same project, project
   directory, file contents and env content, with planned files staged as `ComposeConfigEffects.Command` does. Relative
   `include`, `extends.file` and `label_file` paths in planned content are therefore refused (fail closed).
+
+## Amendment 10 — review round 10 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–9. All amendments are to be accepted together.
+
+### The server lock that exists (review m1)
+
+Amendment 9's "No lock" bullet is replaced by:
+
+- **Git deploy and webhook compose deploys** run the restore under the `ResourceLocks.ServerKey` lock they already hold.
+- **The other paths** (`compose.deploy` from MCP and UI, `app.deploy`, `env_set`, `env_file_save`) take no lock; this
+  contract does not change their locking. For them the compare-and-swap is a check followed by a tag.
+- **Races.** A concurrent run whose `up` follows the restore is caught by its own re-check. A concurrent run that has
+  already finished can have its tag reverted without a report; the README names this race, and that the next guarded
+  deploy inspects again at step 4.
+
+### IDs this run created, on every path (review m2)
+
+- **Computed always.** The IDs this run created or recreated (Amendment 5 rule) are computed on every path and under
+  both rule sets, before the namespace check of Amendment 9.
+- **Readers.** Amendment 6's stop-set sentence reads: only `container.disable_restart`, `container.stop` and the
+  re-check's namespace rule read it; `Covers` / `EnsureDecided` never do.
+- **Test:** `network_mode: service:vpn`, where this run recreates `vpn`, passes the re-check under both rule sets.
+
+### Relative paths refused by the plan model (review m3)
+
+Amendment 9's "Staged files" bullet ends instead with: the plan model refuses every relative `include`, `extends.file`
+and `label_file` path in planned content, independent of what `docker compose config` returns.
+
+- **Test:** a planned file with `extends.file: 1.yml` is refused before `config` runs.
+
+### Wording (review NITs)
+
+- **Start of the window.** In Amendment 9, "on any exit after step 2" reads "on any exit from the start of step 2".
+- **Restore timeout.** The restore commands run with `CancellationToken.None` and a timeout of 30 s each, as
+  `HostCommandExecutor` requires a finite timeout.
+- **Git deploy pull.** Git deploy's new `pull` step has a timeout of 300 s, like its `up`.
+- **Compose version.** An unknown `--ignore-buildable` flag fails the run (fail closed); the README names the minimum
+  Compose v2 version that supports it.
+- **Late daemon work.** The README's remaining risks add: after a timeout, the daemon may finish a pull or build after
+  the restore and move the tag again; the next guarded deploy inspects again at step 4.
