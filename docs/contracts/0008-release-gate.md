@@ -1,8 +1,8 @@
 # Contract 0008 — Mechanical release gate (R1-51)
 
-Status: **Proposed** · 6 November 2026, revised after review rounds 1 to 4. Waits for the maintainer's decisions
-D1–D16 at the end. Nothing of the gate is implemented before this contract is accepted; the documentation
-part of R1-51 (operator guides, accepted limits, corrections) does not depend on it and is done on the same branch.
+Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
+review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
+does not depend on it and is done on the same branch.
 
 ## Purpose
 
