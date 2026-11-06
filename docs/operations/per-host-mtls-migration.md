@@ -151,8 +151,11 @@ shared key still opens it.
   - **What a restore does:** restoring such a backup, or one taken before a rotation, brings back server records that
     name the shared credential or an older generation. The host admits only its newer name, so Whiskers can no longer
     reach it. Rotating again does not help, because a rotation needs a working connection.
-  - **What readiness shows:** it names such hosts: the record is shared or older than the narrowed generation, and the
-    host's ghostunnel arguments cannot be read.
+  - **What readiness shows:** a restore brings back the whole `{MtlsDir}` (rollout journals included) together with the
+    records, so the restored record and journal agree with each other. Only the live read tells the host apart: its
+    ghostunnel arguments cannot be read. The line *mTLS-Proxy (ghostunnel) läuft* names it with *(Argumente nicht
+    lesbar)*, and the host's own *mTLS-Client-Identität* line points to the break-glass re-onboarding, not to
+    „Migrieren“, which cannot reach it either.
   - **The way back** is the break-glass re-onboarding over SSH:
     1. In the server dialog, set the connection back to SSH and give it a bootstrap key or root password.
     2. Run *Speichern & Onboarden*. The run writes the proxy's compose file again with the client name Whiskers holds

@@ -4,7 +4,7 @@ namespace Whiskers.Services.Certificates;
 
 /// <summary>
 /// The per-host mTLS client credentials Whiskers keeps in its data directory (R1-44, contract 0007 with amendments
-/// 1–8). <c>{MtlsDir}/hosts/{serverId}/</c> (0700) holds <c>identity</c> (the name stem plus the active, pending and
+/// 1–9). <c>{MtlsDir}/hosts/{serverId}/</c> (0700) holds <c>identity</c> (the name stem plus the active, pending and
 /// previous slot), <c>rollout.json</c> (the rollout journal) and one slot directory <c>g{n}-s{k}/</c> (0700) per issued
 /// certificate with <c>client.key</c> (0600) and <c>client.crt</c>. The CA bundle is the existing
 /// <c>{MtlsDir}/ca.crt</c>: no new trust anchor. The server record, not this store, is authoritative for the slot in use.

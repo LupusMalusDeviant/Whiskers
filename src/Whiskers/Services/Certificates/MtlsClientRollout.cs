@@ -5,7 +5,7 @@ using Whiskers.Services.Docker;
 namespace Whiskers.Services.Certificates;
 
 /// <summary>
-/// R1-44 (contract 0007, amendments 1–3): the per-host client credential rollout of <see cref="MtlsCertificateService"/>.
+/// R1-44 (contract 0007, amendments 1–9): the per-host client credential rollout of <see cref="MtlsCertificateService"/>.
 ///
 /// <list type="number">
 /// <item><b>Issue</b> — the host's own credential in a new store slot (nothing on the host changes).</item>
@@ -39,7 +39,15 @@ public sealed partial class MtlsCertificateService
     internal Func<string, CancellationToken, Task<bool>> VerifyConnection { get; set; }
     internal Func<string> UnitSuffix { get; set; } = () => DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
 
-    private sealed class RolloutFailure(string message) : InvalidOperationException(message);
+    private class RolloutFailure(string message) : InvalidOperationException(message);
+
+    /// <summary>The host's proxy state could not be parsed or failed a preflight rule (<see cref="MtlsHostState.Problem"/>).
+    /// Before an apply nothing was changed; after one it is a failed confirmation attempt (review r2 C).</summary>
+    private sealed class HostStateProblem(string serverName, string problem)
+        : RolloutFailure($"{serverName}: {problem} Nothing was changed.")
+    {
+        public string Problem { get; } = problem;
+    }
 
     private sealed class RolloutRun(IProgress<string>? progress)
     {
@@ -487,6 +495,7 @@ public sealed partial class MtlsCertificateService
         // that still gets through is the better outcome.
         await Task.Delay(RestartGrace);
         string? stop = null;
+        string? stateProblem = null;
         for (var attempt = 0; attempt < ConfirmAttempts && stop is null; attempt++)
         {
             try
@@ -514,6 +523,9 @@ public sealed partial class MtlsCertificateService
                     }
                     if (confirmed.ExitCode is 124 or 137)
                         throw StateUnknown(server, "the confirmation was stopped by its 20-second limit inside the lock");
+                    if (confirmed.ExitCode == MtlsAllowListCommands.ConfirmFailedAfterStop)
+                        // The guard timer is already stopped, so no rollback is coming (review r2 NIT 1).
+                        throw StateUnknown(server, "the guard was stopped, but the marker could not be written: " + confirmed.Error.Trim());
                     if (confirmed.ExitCode != 0)
                     {
                         stop = "did not take the confirmation (" + Trim(confirmed.Error.Trim()) + ")";
@@ -526,6 +538,13 @@ public sealed partial class MtlsCertificateService
                     run.Confirmed.Add(suffix);
                     return;
                 }
+            }
+            catch (HostStateProblem problem)
+            {
+                // The new file is in place and the guard is armed: a half-recreated ghostunnel can briefly read as
+                // unparseable, so this is a failed attempt, not "nothing was changed" (review r2 C).
+                stateProblem = problem.Problem;
+                _logger.LogDebug("Allow-list confirmation attempt {Attempt} on {Server}: host state not usable: {Error}", attempt + 1, server.Name, problem.Problem);
             }
             catch (RolloutFailure)
             {
@@ -542,8 +561,9 @@ public sealed partial class MtlsCertificateService
         throw new RolloutFailure(stop is not null
             ? $"The proxy of {server.Name} {stop}, so the change was not confirmed. The host restores its previous allow-list " +
               $"on its own by about {rollbackAt:HH:mm} UTC."
-            : $"The new allow-list of {server.Name} could not be confirmed through the new credential. The host restores its " +
-              $"previous allow-list on its own by about {rollbackAt:HH:mm} UTC; run the step again after that.");
+            : $"The new allow-list of {server.Name} could not be confirmed through the new credential" +
+              (stateProblem is not null ? $" (the proxy's state was not usable: {Trim(stateProblem)})" : "") +
+              $". The host restores its previous allow-list on its own by about {rollbackAt:HH:mm} UTC; run the step again after that.");
     }
 
     /// <summary>After a confirmation: the running ghostunnel and the file must still hold exactly <paramref name="allow"/>,
@@ -551,7 +571,16 @@ public sealed partial class MtlsCertificateService
     private async Task RecheckAsync(Models.ServerConfig server, IMtlsClientCredentialStore store, string sharedCn, RolloutRun run,
         IReadOnlyList<string> allow, Models.ServerConfig target, Models.ServerConfig? mustFail)
     {
-        var state = await ReadHostAsync(server, store, sharedCn, run, requireNoForeignGuards: false, CancellationToken.None);
+        MtlsHostState state;
+        try
+        {
+            state = await ReadHostAsync(server, store, sharedCn, run, requireNoForeignGuards: false, CancellationToken.None);
+        }
+        catch (HostStateProblem problem)
+        {
+            // The confirmation went through (guard stopped, marker written): not a retryable attempt, and something did change.
+            throw StateUnknown(server, "after the confirmation the proxy's state was not usable: " + problem.Problem);
+        }
         if (!state.AllowedCommonNames.SequenceEqual(allow, StringComparer.Ordinal)
             || !state.FileAllowedCommonNames.SequenceEqual(allow, StringComparer.Ordinal))
             throw new RolloutFailure($"The guard on {server.Name} restored the previous allow-list after all; nothing was recorded. Run the step again.");
@@ -572,7 +601,7 @@ public sealed partial class MtlsCertificateService
 
         var state = MtlsHostState.Parse((await RunAsync(server.Id, MtlsAllowListCommands.ReadHostState(), ct)).Output, Permitted, run.OwnRuns);
         if (state.Problem is not null)
-            throw new RolloutFailure($"{server.Name}: {state.Problem} Nothing was changed.");
+            throw new HostStateProblem(server.Name, state.Problem);
         if (requireNoForeignGuards && state.ForeignGuardUnits.Count > 0)
             throw new RolloutFailure($"A Whiskers guard timer is armed on {server.Name} ({string.Join(", ", state.ForeignGuardUnits)}): " +
                                      "another renewal or allow-list change awaits confirmation. Try again once it has fired, at most 3 minutes from its start.");

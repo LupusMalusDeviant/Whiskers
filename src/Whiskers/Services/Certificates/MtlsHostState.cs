@@ -89,6 +89,12 @@ public sealed record MtlsHostState(
             var fileAllowLines = composeText.Split('\n').Count(l => l.Contains("allow-cn", StringComparison.Ordinal));
             if (fileAllow.Count == 0 || fileAllow.Count != fileAllowLines)
                 return Fail(allow, units, $"{target.File} mentions --allow-cn outside ghostunnel's command items.");
+            if (fileAllow.Any(n => !MtlsClientIdentity.IsValidCommonName(n)) || fileAllow.Distinct().Count() != fileAllow.Count)
+                return Fail(allow, units, $"the --allow-cn values in {target.File} are not a plain list of client names.");
+            // The widen step of a resume builds on the file's list, so the file is held to the same rule as the
+            // running list (review r2 B): Whiskers never carries a foreign name into the running ghostunnel.
+            if (fileAllow.FirstOrDefault(n => !permittedName(n)) is { } foreignInFile)
+                return Fail(allow, units, $"{target.File} admits '{foreignInFile}', which is neither the shared client nor this host's own.");
 
             return new MtlsHostState(allow, target, units, null) { FileAllowedCommonNames = fileAllow };
         }

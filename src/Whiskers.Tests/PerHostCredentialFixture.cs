@@ -75,6 +75,11 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
     public Action? AfterConfirm { get; set; }
     /// <summary>The Apply step does not take effect on the running container.</summary>
     public bool ApplyIgnored { get; set; }
+    /// <summary>After each apply, this many state reads return nothing usable (ghostunnel half-recreated).</summary>
+    public int UnusableReadsAfterApply { get; set; }
+    /// <summary>The confirmation stops the timer and then fails (e.g. <c>touch</c> on a full disk).</summary>
+    public bool ConfirmFailsAfterStop { get; set; }
+    private int _unusableReads;
 
     private List<string>? _prev;
     private string? _pendingRun;
@@ -98,7 +103,17 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
     public CommandResult Execute(string script)
     {
         if (Unreachable) throw new HttpRequestException("host unreachable");
-        if (script.Contains("ghostunneldigests=", StringComparison.Ordinal)) { Log.Add("read"); return Ok(StateOutput()); }
+        if (script.Contains("ghostunneldigests=", StringComparison.Ordinal))
+        {
+            if (_unusableReads > 0)
+            {
+                _unusableReads--;
+                Log.Add("read-unusable");
+                return Ok("");
+            }
+            Log.Add("read");
+            return Ok(StateOutput());
+        }
         if (script.Contains("echo applied", StringComparison.Ordinal))
         {
             // As the script: a .prev left by another run while a guard is armed is never overwritten.
@@ -143,6 +158,7 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
         Timers[run] = "waiting";
         FileAllow = cns;
         if (!ApplyIgnored) RunningAllow = [.. cns];
+        _unusableReads = UnusableReadsAfterApply;
         return "applied";
     }
 
@@ -159,6 +175,7 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
             return ("", "the guard timer of this run is no longer waiting", 1);
         Timers[run] = "stopped";
         if (_prev is null) return ("", "the guard already restored the previous allow-list", 1);
+        if (ConfirmFailsAfterStop) return ("", "the marker could not be written", MtlsAllowListCommands.ConfirmFailedAfterStop);
         Markers.Add(run);
         _prev = null;
         AfterConfirm?.Invoke();

@@ -78,6 +78,10 @@ public sealed class PerHostCredentialShellTests : IDisposable
         Assert.Contains("systemctl is-active --quiet whiskers-allow-guard-r1.service", body);
         Assert.True(body.IndexOf("systemctl stop whiskers-allow-guard-r1.timer", StringComparison.Ordinal)
                     < body.IndexOf("touch /opt/dockerproxy/.allow-ok-r1", StringComparison.Ordinal));
+        // Everything from the stop on fails with the distinct code, never with the "rolls back" exit 1 (review r2 NIT 1).
+        Assert.Contains("systemctl stop whiskers-allow-guard-r1.timer || { echo 'stopping the guard timer failed' >&2; exit 75; }", body);
+        Assert.Contains("touch /opt/dockerproxy/.allow-ok-r1 || { echo 'the marker could not be written' >&2; exit 75; }", body);
+        Assert.Contains("|| { echo 'the previous file could not be removed' >&2; exit 75; }", body);
     }
 
     [Fact]
@@ -117,6 +121,22 @@ public sealed class PerHostCredentialShellTests : IDisposable
         Assert.Equal(exit != 0, File.Exists(Compose() + ".prev"));
         if (exit == 0) Assert.Contains("systemctl stop whiskers-allow-guard-r1.timer", File.ReadAllText(State("log")));
         else Assert.NotEmpty(stderr);
+    }
+
+    [SkippableFact]
+    public void A_confirmation_that_fails_after_stopping_the_timer_exits_with_its_own_code()
+    {
+        // Review r2 NIT 1: the timer is already stopped, so no guard is left to roll back — the caller must not promise one.
+        RequireShell();
+        Arrange("loaded", "waiting");
+        Stub("touch", "exit 1");
+
+        var (code, _, stderr) = RunScript(ConfirmScript());
+
+        Assert.Equal(MtlsAllowListCommands.ConfirmFailedAfterStop, code);
+        Assert.Contains("the marker could not be written", stderr);
+        Assert.Contains("systemctl stop whiskers-allow-guard-r1.timer", File.ReadAllText(State("log")));
+        Assert.False(File.Exists(Marker()));
     }
 
     [SkippableFact]

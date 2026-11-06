@@ -258,13 +258,29 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         }
 
         // 8) R1-44 (INV-58): per-host mTLS client identities.
-        checks.AddRange(MtlsClientCredentialChecks());
         using (var scope = _scopeFactory.CreateScope())
         {
-            if (scope.ServiceProvider.GetService<Whiskers.Services.Certificates.IMtlsCertificateService>() is { } certificates)
-                checks.AddRange(await LiveAllowListChecksAsync(certificates.ReadLiveAllowListAsync));
+            var certificates = scope.ServiceProvider.GetService<Whiskers.Services.Certificates.IMtlsCertificateService>();
+            checks.AddRange(await MtlsChecksAsync(certificates is null ? null : certificates.ReadLiveAllowListAsync));
         }
 
+        return checks;
+    }
+
+    /// <summary>
+    /// R1-44 (contract 0007): the per-host credential lines and the live lines together. The live arguments are read
+    /// first so the per-host line of a host whose arguments cannot be read points to the break-glass re-onboarding
+    /// instead of „Migrieren“ (review r2 A: a restored older self-backup brings back the record and the journal
+    /// together, so only the live read shows that the host no longer admits what the record names).
+    /// </summary>
+    internal async Task<IReadOnlyList<ReadinessCheck>> MtlsChecksAsync(
+        Func<string, CancellationToken, Task<Whiskers.Services.Certificates.MtlsLiveAllowList>>? read)
+    {
+        if (read is null) return MtlsClientCredentialChecks();
+        var results = await ReadLiveAllowListsAsync(read);
+        var unreadable = results.Where(r => !r.Live.Readable).Select(r => r.Server.Id).ToHashSet(StringComparer.Ordinal);
+        var checks = new List<ReadinessCheck>(MtlsClientCredentialChecks(unreadable));
+        checks.AddRange(LiveAllowListChecks(results));
         return checks;
     }
 
@@ -277,20 +293,31 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     /// </summary>
     internal async Task<IReadOnlyList<ReadinessCheck>> LiveAllowListChecksAsync(
         Func<string, CancellationToken, Task<Whiskers.Services.Certificates.MtlsLiveAllowList>> read)
+        => LiveAllowListChecks(await ReadLiveAllowListsAsync(read));
+
+    private async Task<(Whiskers.Models.ServerConfig Server, Whiskers.Services.Certificates.MtlsLiveAllowList Live)[]> ReadLiveAllowListsAsync(
+        Func<string, CancellationToken, Task<Whiskers.Services.Certificates.MtlsLiveAllowList>> read)
     {
-        var checks = new List<ReadinessCheck>();
-        if (_clientCredentials is not { } store || _servers is null) return checks;
+        if (_clientCredentials is null || _servers is null) return [];
         var hosts = _servers.GetServers()
             .Where(s => s.TcpUseTls && !string.IsNullOrWhiteSpace(s.TcpHost) && !string.IsNullOrWhiteSpace(s.TcpClientCertPath))
             .ToList();
-        if (hosts.Count == 0) return checks;
+        if (hosts.Count == 0) return [];
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var results = await Task.WhenAll(hosts.Select(async s =>
+        return await Task.WhenAll(hosts.Select(async s =>
         {
             try { return (Server: s, Live: await read(s.Id, cts.Token)); }
             catch (Exception ex) { return (Server: s, Live: new Whiskers.Services.Certificates.MtlsLiveAllowList(false, false, [], ex.Message)); }
         }));
+    }
+
+    private List<ReadinessCheck> LiveAllowListChecks(
+        IReadOnlyList<(Whiskers.Models.ServerConfig Server, Whiskers.Services.Certificates.MtlsLiveAllowList Live)> results)
+    {
+        var checks = new List<ReadinessCheck>();
+        if (_clientCredentials is not { } store || results.Count == 0) return checks;
+        var hosts = results;
 
         var down = results.Where(r => !r.Live.Readable || !r.Live.Running)
             .Select(r => r.Server.Name + (r.Live.Readable ? " (ghostunnel läuft nicht)" : " (Argumente nicht lesbar)"))
@@ -335,12 +362,14 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     }
 
     /// <summary>
-    /// R1-44 (contract 0007): one line per mTLS host about its client credential — a host on the shared credential, a
-    /// migration that is not finished and a store whose active generation is older than the one the host was narrowed to
-    /// (an older backup restored after a rotation) are not OK — plus the shared key still lying around while hosts no
-    /// longer accept it, and the modes (Unix) or ACLs (Windows) of every client key file.
+    /// R1-44 (contract 0007): one line per mTLS host about its client credential — a host on the shared credential and a
+    /// migration that is not finished are not OK, and so is a host whose live ghostunnel arguments could not be read
+    /// (<paramref name="unreadable"/>): after an older self-backup was restored, the record and the journal come back
+    /// together and name a credential the host no longer admits, so the way back is the break-glass re-onboarding, not
+    /// „Migrieren“ — plus the shared key still lying around while hosts no longer accept it, and the modes (Unix) or
+    /// ACLs (Windows) of every client key file.
     /// </summary>
-    internal IReadOnlyList<ReadinessCheck> MtlsClientCredentialChecks()
+    internal IReadOnlyList<ReadinessCheck> MtlsClientCredentialChecks(IReadOnlySet<string>? unreadable = null)
     {
         var checks = new List<ReadinessCheck>();
         if (_clientCredentials is not { } store || _servers is null) return checks;
@@ -358,27 +387,23 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             var journal = store.ReadJournal(server.Id);
             switch (status.Kind)
             {
-                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared when journal is { IsNarrowed: true }:
-                    // An older self-backup restored after the migration: the record names the shared key again, but the
-                    // host admits only its own name — Whiskers cannot reach it (review r1 MINOR 6).
-                    narrowedHosts++;
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared or Whiskers.Services.Certificates.MtlsClientCredentialKind.Own
+                    when unreadable?.Contains(server.Id) == true:
+                    // E.g. an older self-backup restored after a migration or rotation (review r2 A): the record and the
+                    // journal name a credential the host no longer admits, so „Migrieren“ cannot reach it either.
+                    if (journal is { IsNarrowed: true }) narrowedHosts++;
                     checks.Add(new ReadinessCheck(title, false,
-                        $"Der Eintrag nennt wieder die gemeinsame Client-Identität (älteres Backup zurückgespielt?), der Host nimmt aber nur {journal.CommonName} an: " +
-                        "Whiskers erreicht ihn so nicht. Zurück über das Notfall-Re-Onboarding per SSH " +
-                        "(docs/operations/per-host-mtls-migration.md, „Älteres Backup“).", "/servers", "Server"));
+                        (status.Kind == Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared
+                            ? "Der Eintrag nennt die gemeinsame Client-Identität"
+                            : $"Der Eintrag nennt {status.CommonName} (Generation {status.Generation})") +
+                        ", aber die laufenden ghostunnel-Argumente des Hosts sind nicht lesbar — vermutlich nimmt er diese Identität " +
+                        "nicht mehr an (älteres Backup zurückgespielt?). „Migrieren“ erreicht ihn so nicht; zurück über das " +
+                        "Notfall-Re-Onboarding per SSH (docs/operations/per-host-mtls-migration.md, „Älteres Backup“).", "/servers", "Server"));
                     break;
                 case Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared:
                     checks.Add(new ReadinessCheck(title, false,
                         "Nutzt noch die gemeinsame Client-Identität: ein gestohlener Schlüssel öffnet jeden Host, der sie annimmt. " +
                         "Auf der Server-Seite „Migrieren“ (Anleitung: docs/operations/per-host-mtls-migration.md).", "/servers", "Server"));
-                    break;
-                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Own when journal is { IsNarrowed: true } && journal.Generation > status.Generation:
-                    narrowedHosts++;
-                    checks.Add(new ReadinessCheck(title, false,
-                        $"Die aktive Identität (Generation {status.Generation}) ist älter als die, auf die der Host eingeengt wurde " +
-                        $"(Generation {journal.Generation}) — vermutlich wurde nach einer Rotation ein älteres Backup zurückgespielt. " +
-                        "Der Host lehnt diese Identität ab, Whiskers erreicht ihn so nicht; zurück über das Notfall-Re-Onboarding per SSH " +
-                        "(docs/operations/per-host-mtls-migration.md, „Älteres Backup“).", "/servers", "Server"));
                     break;
                 case Whiskers.Services.Certificates.MtlsClientCredentialKind.Own when journal is { IsNarrowed: true }:
                     narrowedHosts++;

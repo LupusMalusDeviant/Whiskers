@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace Whiskers.Services.Certificates;
 
 /// <summary>
-/// Host scripts that change which client names a host's ghostunnel admits (R1-44, contract 0007 with amendments 1–4).
+/// Host scripts that change which client names a host's ghostunnel admits (R1-44, contract 0007 with amendments 1–9).
 /// Pure builders, so every line that reaches a host is asserted in a test.
 ///
 /// <para>Protected mTLS layer: these scripts edit the <c>--allow-cn</c> items under ghostunnel's <c>command:</c> and
@@ -204,13 +204,19 @@ public static partial class MtlsAllowListCommands
             [ "$(systemctl show -p LoadState --value {{GuardUnitPrefix}}{{run}}.timer)" = "loaded" ] || { echo 'the guard timer of this run is not loaded' >&2; exit 1; }
             [ "$(systemctl show -p SubState --value {{GuardUnitPrefix}}{{run}}.timer)" = "waiting" ] || { echo 'the guard timer of this run is no longer waiting' >&2; exit 1; }
             if systemctl is-active --quiet {{GuardUnitPrefix}}{{run}}.service; then echo 'the guard of this run is running' >&2; exit 1; fi
-            systemctl stop {{GuardUnitPrefix}}{{run}}.timer
+            systemctl stop {{GuardUnitPrefix}}{{run}}.timer || { echo 'stopping the guard timer failed' >&2; exit {{ConfirmFailedAfterStop}}; }
             [ -f {{t.File}}.prev ] || { echo 'the guard already restored the previous allow-list' >&2; exit 1; }
-            touch {{MarkerPrefix}}{{run}}
-            rm -f {{t.File}}.prev {{GuardScriptPath(run)}}
+            touch {{MarkerPrefix}}{{run}} || { echo 'the marker could not be written' >&2; exit {{ConfirmFailedAfterStop}}; }
+            rm -f {{t.File}}.prev {{GuardScriptPath(run)}} || { echo 'the previous file could not be removed' >&2; exit {{ConfirmFailedAfterStop}}; }
             echo confirmed
             """;
     }
+
+    /// <summary>
+    /// The exit code of <see cref="Confirm"/> when something failed once the guard timer was being stopped (review r2
+    /// NIT 1): no guard may be left to restore the previous allow-list, so the outcome is unknown, not a rollback.
+    /// </summary>
+    public const int ConfirmFailedAfterStop = 75;
 
     /// <summary>After Whiskers recorded the phase: removes the run's marker and lock.</summary>
     public static string Cleanup(string runSuffix)

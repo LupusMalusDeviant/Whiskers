@@ -163,6 +163,58 @@ public sealed class PerHostCredentialTests
     }
 
     [Fact]
+    public async Task A_confirmation_that_fails_after_stopping_the_timer_reports_an_unknown_state_and_no_rollback()
+    {
+        using var w = new CredentialWorld();
+        var host = w.Host("rabenhof");
+        host.ConfirmFailsAfterStop = true;
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Equal("widen", result.Phase);
+        Assert.StartsWith("State unknown", result.Error);
+        Assert.Contains("the marker could not be written", result.Error);
+        Assert.DoesNotContain("restores its previous allow-list on its own", result.Error);
+        Assert.Single(host.Log, l => l.StartsWith("confirm:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task An_unusable_host_state_right_after_the_apply_is_a_failed_attempt_and_retried()
+    {
+        // Review r2 C: ghostunnel half-recreated reads as unparseable once; the next attempt confirms.
+        using var w = new CredentialWorld();
+        var host = w.Host("rabenhof");
+        host.UnusableReadsAfterApply = 1;
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.True(result.Ok, result.Error);
+        Assert.Equal(2, host.Log.Count(l => l == "read-unusable"));   // once after the widening, once after the narrowing
+        Assert.Equal(["whiskers-client-rabenhof-g1"], host.RunningAllow);
+    }
+
+    [Fact]
+    public async Task A_host_state_that_stays_unusable_after_the_apply_ends_with_the_rollback_time_not_nothing_changed()
+    {
+        using var w = new CredentialWorld();
+        var host = w.Host("rabenhof");
+        host.UnusableReadsAfterApply = 1000;
+
+        var result = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(result.Ok);
+        Assert.Equal("widen", result.Phase);
+        Assert.Contains("restores its previous allow-list on its own by about", result.Error);
+        Assert.Contains("the proxy's state was not usable", result.Error);
+        Assert.DoesNotContain("Nothing was changed", result.Error);
+        Assert.True(host.Log.Count(l => l == "read-unusable") > 1);   // retried, not given up at the first parse problem
+        Assert.DoesNotContain(host.Log, l => l.StartsWith("confirm:", StringComparison.Ordinal));
+        host.FireGuard();
+        Assert.Equal([SharedCn], host.RunningAllow);
+    }
+
+    [Fact]
     public async Task A_resume_after_the_marker_but_before_phase_five_repeats_both_checks()
     {
         using var w = new CredentialWorld();
@@ -236,6 +288,27 @@ public sealed class PerHostCredentialTests
 
         Assert.False(result.Ok);
         Assert.Contains("neither the shared client nor this host's own", result.Error);
+    }
+
+    [Fact]
+    public async Task A_compose_file_that_admits_a_foreign_name_is_refused_before_a_resume_widens_onto_it()
+    {
+        // Review r2 B: the running list is fine, but the file drifted by hand to a foreign name. The widen step of a
+        // resume builds on the file's list, so the preflight refuses the host before anything is applied.
+        using var w = new CredentialWorld();
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        var host = w.Host("rabenhof");
+        host.RunningAllow = [SharedCn, "whiskers-client-rabenhof-g1"];
+        host.FileAllow = [SharedCn, "whiskers-client-rabenhof-g1", "whiskers-client-zirkuswagen-g1"];
+        await w.Store.WriteJournalAsync("rabenhof", w.Store.ReadJournal("rabenhof")! with { Phase = 2, NegativeCheckPassed = false }, default);
+        host.Log.Clear();
+
+        var resumed = await w.Service.MigrateClientAsync("rabenhof", null, default);
+
+        Assert.False(resumed.Ok);
+        Assert.Contains("admits 'whiskers-client-zirkuswagen-g1'", resumed.Error);
+        Assert.DoesNotContain(host.Log, l => l.StartsWith("apply:", StringComparison.Ordinal));
+        Assert.DoesNotContain("whiskers-client-zirkuswagen-g1", host.RunningAllow);
     }
 
     [Fact]
@@ -812,7 +885,7 @@ public sealed class PerHostCredentialTests
     // ---- readiness ----
 
     [Fact]
-    public async Task Readiness_names_shared_hosts_older_generations_and_a_shared_key_left_behind()
+    public async Task Readiness_names_shared_hosts_and_a_shared_key_left_behind()
     {
         using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
         Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
@@ -824,18 +897,6 @@ public sealed class PerHostCredentialTests
         Assert.False(checks.Single(c => c.Title.EndsWith("Zirkuswagen", StringComparison.Ordinal)).Ok);
         Assert.False(checks.Single(c => c.Title == "Gemeinsamer mTLS-Client-Schlüssel").Ok);
         Assert.Contains(checks, c => c.Title == "mTLS-Client-Schlüssel geschützt");
-
-        // An older backup restored after a rotation: the record names g1 while the host was narrowed to g2.
-        var g1Record = w.Server("rabenhof").Clone();
-        Assert.True((await w.Service.RenewClientAsync("rabenhof", rotate: true, default)).Ok);
-        Directory.CreateDirectory(Path.GetDirectoryName(g1Record.TcpClientCertPath)!);
-        File.Copy(w.Server("rabenhof").TcpClientCertPath!, g1Record.TcpClientCertPath!, overwrite: true);
-        File.Copy(w.Server("rabenhof").TcpClientKeyPath!, g1Record.TcpClientKeyPath!, overwrite: true);
-        await w.Servers.UpdateServerAsync(g1Record);
-
-        var older = Checks().Single(c => c.Title.EndsWith("Rabenhof", StringComparison.Ordinal));
-        Assert.False(older.Ok);
-        Assert.Contains("älter", older.Detail);
     }
 
     [Fact]
@@ -901,18 +962,81 @@ public sealed class PerHostCredentialTests
     }
 
     [Fact]
-    public async Task Readiness_points_a_host_restored_onto_the_shared_record_to_the_break_glass_re_onboarding()
+    public async Task Readiness_points_a_host_behind_a_restored_older_backup_to_the_break_glass_re_onboarding()
     {
-        using var w = new CredentialWorld();
+        // A real restore brings back the whole mtls/ directory (journals included) together with the records
+        // (review r2 A), so only the live read shows that the host no longer admits what the record names.
+        using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
+        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store);
+        ReadinessCheck Line(IReadOnlyList<ReadinessCheck> checks, string name) =>
+            checks.Single(c => c.Title == $"mTLS-Client-Identität: {name}");
+
+        // 1) A backup taken before the migration: shared record, no hosts/ directory, no journal.
+        var beforeMigration = Snapshot(w.MtlsDir, Path.Combine(w.Root, "backup-1"));
         var sharedRecord = w.Server("rabenhof").Clone();
         Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
-        // An older self-backup restored: the record names the shared files again; the journal still says narrowed.
-        await w.Servers.UpdateServerAsync(sharedRecord);
+        Assert.True(Line(await readiness.MtlsChecksAsync(w.Service.ReadLiveAllowListAsync), "Rabenhof").Ok);
 
-        var line = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store)
-            .MtlsClientCredentialChecks().Single(c => c.Title.EndsWith("Rabenhof", StringComparison.Ordinal));
+        Restore(beforeMigration, w.MtlsDir);
+        await w.Servers.UpdateServerAsync(sharedRecord);
+        Assert.Null(w.Store.ReadJournal("rabenhof"));
+
+        var checks = await readiness.MtlsChecksAsync(w.Service.ReadLiveAllowListAsync);
+        var line = Line(checks, "Rabenhof");
         Assert.False(line.Ok);
         Assert.Contains("Notfall-Re-Onboarding per SSH", line.Detail);
+        Assert.Contains("„Migrieren“ erreicht ihn so nicht", line.Detail);
+        Assert.Contains("rabenhof", w.Fleet.LockedOut);
+        Assert.Contains("Rabenhof (Argumente nicht lesbar)", checks.Single(c => c.Title == "mTLS-Proxy (ghostunnel) läuft").Detail);
+        // The reachable host still on the shared credential keeps the plain „Migrieren“ advice.
+        var zirkuswagen = Line(checks, "Zirkuswagen");
+        Assert.False(zirkuswagen.Ok);
+        Assert.Contains("Auf der Server-Seite „Migrieren“", zirkuswagen.Detail);
+        Assert.DoesNotContain("Notfall-Re-Onboarding", zirkuswagen.Detail);
+    }
+
+    [Fact]
+    public async Task Readiness_points_a_host_behind_a_backup_restored_after_a_rotation_to_the_break_glass_re_onboarding()
+    {
+        using var w = new CredentialWorld();
+        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store);
+        Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+
+        // 2) A backup taken after the migration (g1, narrowed), restored after a rotation to g2.
+        var afterMigration = Snapshot(w.MtlsDir, Path.Combine(w.Root, "backup-g1"));
+        var g1Record = w.Server("rabenhof").Clone();
+        Assert.True((await w.Service.RenewClientAsync("rabenhof", rotate: true, default)).Ok);
+
+        Restore(afterMigration, w.MtlsDir);
+        await w.Servers.UpdateServerAsync(g1Record);
+        Assert.Equal(1, w.Store.ReadJournal("rabenhof")!.Generation);
+
+        var line = (await readiness.MtlsChecksAsync(w.Service.ReadLiveAllowListAsync))
+            .Single(c => c.Title == "mTLS-Client-Identität: Rabenhof");
+        Assert.False(line.Ok);
+        Assert.Contains("whiskers-client-rabenhof-g1", line.Detail);
+        Assert.Contains("Notfall-Re-Onboarding per SSH", line.Detail);
+    }
+
+    private static string Snapshot(string source, string target)
+    {
+        CopyTree(source, target);
+        return target;
+    }
+
+    private static void Restore(string snapshot, string target)
+    {
+        Directory.Delete(target, recursive: true);
+        CopyTree(snapshot, target);
+    }
+
+    private static void CopyTree(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (var file in Directory.GetFiles(source))
+            File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+        foreach (var dir in Directory.GetDirectories(source))
+            CopyTree(dir, Path.Combine(target, Path.GetFileName(dir)));
     }
 
     // ---- registration and documentation ----
