@@ -1,7 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendments 1–8** (review rounds 1–8, at the end) are to be accepted by the
+**Amendments 1–9** (review rounds 1–9, at the end) are to be accepted by the
 maintainer as one set.
 
 ## Purpose
@@ -32,7 +32,7 @@ must be confirmed (DockTail evaluation, 6 November 2026, H1).
   key's call is evaluated by `GuardrailEngine.CreateDefault()`; under the standard policy (`MaxAutonomousLevel = "read"`)
   that means Confirm, and the starter presets refuse it outright. A person in the UI and an automation owned by a person
   are evaluated by `CreateForHumans()` (principal ceiling, kill switch, protected resources). There, forbidden-argument
-  patterns and confirmation do not apply (PC-D1, `MutationPolicy.cs:79-85`).
+  patterns and confirmation do not apply (PC-D1, `MutationPolicy.cs:74-92`).
 - **No built-in rule for exposure changes** (`GuardrailEngine.cs:17-26`). The only lever is `ForbiddenArgPatterns`, and
   only on the agent's path, where the YAML is the `composeContent` argument.
 - **`app.deploy`** (single container, `ComposeFileParser`) parses ports and `network_mode`, but has no labels. It is out
@@ -687,3 +687,41 @@ This amendment takes precedence over Amendments 1–7. All amendments are to be 
   `ComposeImpact.cs:65-71` replace the older line ranges.
 - The fallback stop runs only under the agent rule set. `app.deploy` and `container.env_file_save` are decided for
   persons only, so their fallback stop never runs; they stay in Amendment 7's list only for completeness.
+
+## Amendment 9 — review round 9 (6 November 2026)
+
+This amendment takes precedence over Amendments 1–8. All amendments are to be accepted together.
+
+### Tag restore without a lock (review MINOR-1)
+
+- **No lock.** "Under the server lock" in Amendment 8 is withdrawn; there is no such lock. The compare-and-swap is a
+  check followed by a tag. A run that moves the same tag in that window is caught by the re-check after `up`, and the
+  README names this race in the remaining risks.
+- **Which ID.** "The image ID this run inspected" is replaced by: the image ID the tag pointed to after this run's own
+  pull and build (read after step 3, or at exit when step 3 did not finish).
+- **Early exit.** On any exit after step 2 without a passed step 4 (refusal, failure, timeout, cancellation), the
+  restore is attempted with `CancellationToken.None`. `tag not restored` is reported only for tags whose restore failed
+  or could not run; a tag that never moved raises nothing.
+- **Test:** a pull failure that moved no tag reports no violation.
+
+### Namespace targets at run time (review MINOR-2)
+
+- **Re-check.** The re-check after `up` requires the container ID in `NetworkMode`, `PidMode` and `IpcMode`
+  (`container:<id>`) to be a decided `Related` identity or a member of this run's stop set. Anything else is a
+  violation.
+- **Values.** The `HostNamespace` value list of Amendment 7 is narrowed to `host`; `container:`/`service:` forms are
+  checked by the rule above and through the inherited rows of their target (Amendment 8).
+- **Test:** `pid: container:helper`, where `helper` resolves at `up` to a container that was not decided, is a
+  violation.
+
+### Wording (review NITs)
+
+- The base text's `MutationPolicy.cs:74-92` reads `MutationPolicy.cs:74-92`.
+- **Timeouts.** Amendment 8's timeout sentence is replaced by: each path keeps its current per-command timeouts
+  (2 minutes for `env_set` / `env_file_save`; 600 s build and 300 s `up` for git deploy; the existing budget for UI, MCP
+  and webhook deploys). The script split around step 4 gives each command the same budget it had.
+- **Pull on paths that build.** Step 2 uses `pull --ignore-buildable`, so a `build:` service with `image:` set is not
+  pulled from a registry.
+- **Staged files.** "The same `-f` and `--env-file` that `up` uses" in Amendment 8 reads: the same project, project
+  directory, file contents and env content, with planned files staged as `ComposeConfigEffects.Command` does. Relative
+  `include`, `extends.file` and `label_file` paths in planned content are therefore refused (fail closed).
