@@ -383,8 +383,8 @@ The test reads the real files, determines version and mode (above), runs `Releas
 
   In every mode a row whose *Release* is not the current `<Version>` fails. Consequences: the record must be written
   in the pull request that bumps `<Version>` to the patch it covers (a record written while `main` is still at the
-  previous version fails at once, and one left behind fails the next bump); and renewing it by editing only *Review by* or *Release*
-  fails, because *Release* must equal both `<Version>` and the decision's *Release*, and the decision itself cannot
+  previous version fails at once, and one left behind fails the next bump); and renewing it by editing only
+  *Review by* or *Release* fails, because *Release* must equal both `<Version>` and the decision's *Release*, and the decision itself cannot
   be edited (R18). A second release with the same violation needs a new decision with a new ID. Without D15 (b), (c)
   or (d) the table must be absent or empty.
 - **R18 — Accepted decisions are immutable (with D16 (a)).** The base-diff step of D16 also compares §6.1 with a
@@ -395,8 +395,12 @@ The test reads the real files, determines version and mode (above), runs `Releas
   was published for it). In release runs `build-test` fetches the tags (`git fetch --tags`, only when `release-gate`
   is `release`); for 1.0.0 that is the highest 0.x tag. A previous tag that is missing (no such tag found, for example
   because the fetch failed) or whose files cannot be read is a finding, never a pass.
+  **Bootstrap rule.** A base whose `<Version>` is below 1.0.0 (a 0.x tag, or a pull request's base commit before the
+  1.0 bump) and whose `SECURITY_INVARIANTS.md` and `PRODUCT_CONTRACT.md` exist but lack §6.1, the pin or *Retired
+  invariants* counts as an **empty** base for the missing parts: no decisions, no retired IDs, no pin. A base file
+  that is missing, or a base at 1.0.0 or above without these tables, is a finding.
   Together with the `origin/main` reachability check in `prepare` (D16), a tag cannot carry an edited decision past
-  the gate. Within one commit the gate can only check that IDs are unique; without D16 (a) immutability rests on
+  the gate, assuming release tags are not moved (tag protection or immutable releases recommended). Within one commit the gate can only check that IDs are unique; without D16 (a) immutability rests on
   review.
 
 ### Capability/path inventory and drift
@@ -449,7 +453,7 @@ generated, and the two are joined by tests.
 | `ReleaseGateTests.A_mandatory_suite_that_cannot_block_the_release_fails` | R10: job removed, `continue-on-error` added, dropped from `needs`, `--no-skips` removed |
 | `ReleaseGateTests.An_exception_needs_an_accepted_dated_decision_and_a_limitation` | R11: `Proposed` decision, missing date or decider, decision of another kind or for another invariant, dead link, section that does not name the invariant, exception for ❌ or ✅, review version not newer (in Development mode too) |
 | `ReleaseGateTests.A_known_violation_covers_exactly_one_release` | R17 (D15 (b), (c) or (d)): an accepted record at 1.0.1 with *Release* 1.0.1 lets Release pass; *Release* other than `<Version>` fails; *Release* differing from the decision's *Release* fails; *Review by* other than the next patch fails; a renewal at 1.0.2 that changes only *Review by* fails; a record at 1.1.0 (X.Y.0) fails; a record without a limitation section naming the invariant fails; an advisory not in `GHSA-` form fails; a record for a ⚠️ or ✅ fails; with D15 (d), an invariant already ❌ in the previous tag fails; without D15 (b), (c) or (d) any row fails |
-| `ReleaseGateTests.An_accepted_decision_cannot_change` | R18 (D16 (a)), against an in-memory base: an `Accepted` §6.1 row edited in one cell fails; a deleted one fails; a reused ID fails; a new ID at or below the base's highest fails; a new row passes; the same checks against a previous-tag base in a release run; the previous tag is the highest `vX.Y.Z` strictly below `<Version>` (1.0.2 → v1.0.1 even if v1.1.0 exists; 1.0.0 → highest 0.x); no previous tag or an unreadable file is a finding |
+| `ReleaseGateTests.An_accepted_decision_cannot_change` | R18 (D16 (a)), against an in-memory base: an `Accepted` §6.1 row edited in one cell fails; a deleted one fails; a reused ID fails; a new ID at or below the base's highest fails; a new row passes; the same checks against a previous-tag base in a release run; the previous tag is the highest `vX.Y.Z` strictly below `<Version>` (1.0.2 → v1.0.1 even if v1.1.0 exists; 1.0.0 → highest 0.x); no previous tag or an unreadable file is a finding; bootstrap: a base below 1.0.0 whose files exist but lack §6.1, the pin or *Retired invariants* is an empty base and passes, a missing base file fails, a base at 1.0.0 or above without the tables fails |
 | `ReleaseGateTests.The_capability_inventory_matches_the_code` | R12 (snapshot, `.actual`) |
 | `ReleaseGateTests.Matrix_and_catalog_name_each_other` | R13/R14: a new capability without a row, a row naming an unknown capability or tool |
 | `ReleaseGateTests.The_totals_match_the_rows` | R15 |
@@ -589,7 +593,8 @@ repository except a `.actual` file on a snapshot difference.
     pull request's base commit (`git show <base>:docs/v1/SECURITY_INVARIANTS.md`) and fails when an ID disappears
     without a new *Retired invariants* row or when the pin goes down. The same step compares §6.1 of
     `PRODUCT_CONTRACT.md` with the base and enforces R18 (accepted decisions immutable, IDs never reused). (b) Rely on
-    the pin and on review (with CODEOWNERS on `docs/v1/` recommended). *Recommended: (a).* It turns the remaining
+    the pin and on review (with CODEOWNERS on `docs/v1/` recommended). Either way the release-run comparison assumes
+    release tags are not moved (tag protection or immutable releases recommended). *Recommended: (a).* It turns the remaining
     three-file edit and any silent edit of an accepted decision into a CI failure. The step runs on pull requests in
     `ci.yml`, whose checkout then needs `fetch-depth: 0` or an explicit fetch of the base SHA.
     A release tag can be pushed on a commit that never went through a pull request, so with (a) the comparison also
