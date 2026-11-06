@@ -31,7 +31,8 @@ All notable changes to Whiskers are documented here. The format follows
     Compose fails the run.
   - Under the agent rule set a container a run created with an exposure nobody decided is stopped and its restart
     policy set to `no`. A host cgroup namespace the compose file did not ask for counts only when it is not the
-    daemon's default (read from `daemon.json` / `docker info`; unreadable → it counts).
+    daemon's default (read from `daemon.json` / `docker info`; unreadable → it counts; on cgroup v1 a privileged
+    container's default is `host` whatever `daemon.json` says).
   - A `compose.deploy` call that brings the nested decisions' own arguments (`exposure…`, `related…`, `mounts`) is
     refused on every surface except UI and automation.
 

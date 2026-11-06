@@ -301,6 +301,42 @@ public sealed partial class ComposeImpactExposureTests
     }
 
     [Fact]
+    public async Task One_run_reads_the_default_once_and_still_decides_per_container_whether_it_is_privileged()
+    {
+        _host.CgroupnsOutput = "1\n---\n{\"default-cgroupns-mode\":\"private\"}\n";
+        var plan = await PlanAsync("name: shop\nservices:\n  web:\n    image: nginx\n    privileged: true\n  db:\n    image: nginx\n",
+            """{"services":{"web":{"image":"nginx","privileged":true},"db":{"image":"nginx"}}}""");
+        _upCreates.Add(("new-web", "web", """{"NetworkMode":"shop_default","Privileged":true,"CgroupnsMode":"host"}""", ""));
+        _upCreates.Add(("new-db", "db", CgroupHost, ""));
+        using var _ = Decide(plan, agent: true);
+
+        var result = await RunAsync(plan);
+
+        Assert.Equal(1, _host.CgroupnsReads);
+        Assert.Single(result.Violations, v => v.Contains("host namespace cgroup", StringComparison.Ordinal));
+        Assert.Equal([("disable_restart", "new-db"), ("stop", "new-db")], _docker.Actions.Select(a => (a.Op, a.ContainerId)));
+    }
+
+    [Fact]
+    public async Task The_cgroup_cache_keeps_the_parsed_pair_and_no_text_of_daemon_json()
+    {
+        const string secret = "http://user:s3cr3t@proxy.example.org:3128";
+        _host.CgroupnsOutput = "1\n---\n{\"default-cgroupns-mode\":\"private\",\"proxies\":{\"http-proxy\":\"" + secret + "\"}}\n";
+        var runner = Runner();
+        var plan = await PlanAsync(PlainYaml, PlainConfig);
+        _upCreates.Add(("new-web", "web", CgroupHost, ""));
+        using var _ = Decide(plan, agent: true);
+
+        await runner.RunAsync(plan, (c, t, k) => _host.ExecuteAsync("local", c, t, k), new ComposeRunOptions(true, TimeSpan.FromMinutes(1)));
+
+        Assert.Equal(new CgroupnsDaemon(1, CgroupnsConfig.Private), Assert.Single(runner.CgroupnsCache).Value);
+        // The cached value type has no room for text: only the version and an enum.
+        var fields = typeof(CgroupnsDaemon).GetFields(System.Reflection.BindingFlags.Instance
+                                                      | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+        Assert.All(fields, f => Assert.True(f.FieldType == typeof(int) || f.FieldType == typeof(CgroupnsConfig), f.Name));
+    }
+
+    [Fact]
     public async Task An_unprivileged_service_on_cgroup_v1_with_a_private_daemon_default_is_still_stopped()
     {
         _host.CgroupnsOutput = "1\n---\n{\"default-cgroupns-mode\":\"private\"}\n";

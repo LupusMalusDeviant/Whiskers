@@ -404,8 +404,12 @@ public sealed class ComposeRunner : IComposeRunner
 
     // ------------------------------------------------------------------------------------------- cgroup default
 
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _cgroupnsDefaults =
+    // Only the parsed pair is kept, never the command's text: daemon.json can hold proxy credentials (review N4).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CgroupnsDaemon> _cgroupnsDefaults =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>What the runner keeps per server (tests: it holds no raw output).</summary>
+    internal IReadOnlyDictionary<string, CgroupnsDaemon> CgroupnsCache => _cgroupnsDefaults;
 
     /// <summary>
     /// Review M1: the daemon's default cgroup namespace mode — <c>host</c> or <c>private</c> — read once per server and
@@ -413,20 +417,20 @@ public sealed class ComposeRunner : IComposeRunner
     /// it sets one, otherwise <c>host</c> for cgroup v1 and <c>private</c> for v2 (<c>docker info</c>'s
     /// <c>CgroupVersion</c>). <c>null</c> when it cannot be read: a daemon.json that is not JSON, an unknown cgroup
     /// version, a failed command. On cgroup v1 a <paramref name="privileged"/> container's default is <c>host</c>
-    /// whatever daemon.json says (review N1). The command's output is kept once it parsed for either kind.
+    /// whatever daemon.json says (review N1). The parsed pair (<see cref="CgroupnsDaemon"/>) is kept once it gives an
+    /// unprivileged container a default; the command's text never (review N4).
     /// </summary>
     private async Task<string?> CgroupnsDefaultAsync(string serverId, bool privileged)
     {
-        if (_cgroupnsDefaults.TryGetValue(serverId, out var known))
-            return ComposeExposures.ParseCgroupnsDefault(known, privileged);
+        if (_cgroupnsDefaults.TryGetValue(serverId, out var known)) return known.DefaultMode(privileged);
         try
         {
             var result = await _reader.ExecuteAsync(serverId, ComposeExposures.CgroupnsDefaultCommand, ReadTimeout,
                 CancellationToken.None, 64_000);
             if (!result.Success || result.OutputTruncated) return null;
-            var mode = ComposeExposures.ParseCgroupnsDefault(result.Output, privileged);
-            if (ComposeExposures.ParseCgroupnsDefault(result.Output) is not null) _cgroupnsDefaults[serverId] = result.Output;
-            return mode;
+            if (ComposeExposures.ParseCgroupnsDaemon(result.Output) is not { } daemon) return null;
+            if (daemon.DefaultMode(privileged: false) is not null) _cgroupnsDefaults[serverId] = daemon;
+            return daemon.DefaultMode(privileged);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

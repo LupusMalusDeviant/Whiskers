@@ -501,31 +501,33 @@ public static class ComposeExposures
     /// for anything it cannot read (fail closed: the caller then counts a host cgroup namespace). On cgroup v1 a
     /// <paramref name="privileged"/> container's default is <c>host</c> whatever daemon.json says: Docker forces it
     /// (review N1).</summary>
-    public static string? ParseCgroupnsDefault(string output, bool privileged = false)
+    public static string? ParseCgroupnsDefault(string output, bool privileged = false) =>
+        ParseCgroupnsDaemon(output)?.DefaultMode(privileged);
+
+    /// <summary>The parsed pair of <see cref="CgroupnsDefaultCommand"/> — the cgroup version and daemon.json's
+    /// <c>default-cgroupns-mode</c> — with nothing of the raw text (daemon.json can hold proxy credentials, review N4);
+    /// <c>null</c> without the separator line.</summary>
+    public static CgroupnsDaemon? ParseCgroupnsDaemon(string output)
     {
         var lines = output.Replace("\r\n", "\n").Split('\n');
         var separator = Array.FindIndex(lines, l => l.Trim() == "---");
         if (separator < 0) return null;
-        var version = string.Join('\n', lines[..separator]).Trim();
-        if (privileged && version == "1") return "host";
+        var version = string.Join('\n', lines[..separator]).Trim() switch { "1" => 1, "2" => 2, _ => 0 };
         var config = string.Join('\n', lines[(separator + 1)..]).Trim();
-        if (config.Length > 0)
+        if (config.Length == 0) return new CgroupnsDaemon(version, CgroupnsConfig.None);
+        try
         {
-            try
-            {
-                using var document = JsonDocument.Parse(config);
-                if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
-                if (document.RootElement.TryGetProperty("default-cgroupns-mode", out var mode))
-                    return mode.ValueKind == JsonValueKind.String && mode.GetString() is "host" or "private"
-                        ? mode.GetString()
-                        : null;
-            }
-            catch (JsonException)
-            {
-                return null;
-            }
+            using var document = JsonDocument.Parse(config);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return new CgroupnsDaemon(version, CgroupnsConfig.Invalid);
+            if (!document.RootElement.TryGetProperty("default-cgroupns-mode", out var mode))
+                return new CgroupnsDaemon(version, CgroupnsConfig.None);
+            return new CgroupnsDaemon(version, mode.ValueKind != JsonValueKind.String ? CgroupnsConfig.Invalid
+                : mode.GetString() switch { "host" => CgroupnsConfig.Host, "private" => CgroupnsConfig.Private, _ => CgroupnsConfig.Invalid });
         }
-        return version switch { "1" => "host", "2" => "private", _ => null };
+        catch (JsonException)
+        {
+            return new CgroupnsDaemon(version, CgroupnsConfig.Invalid);
+        }
     }
 
     /// <summary>The marker <see cref="InspectImagesCommand"/> prints for an image that is not on the host.</summary>
@@ -613,4 +615,34 @@ public static class ComposeExposures
     public static bool HasVariable(string? raw) => raw is not null && VariablePattern.IsMatch(raw.Replace("$$", ""));
 
     private static readonly Regex VariablePattern = new(@"\$", RegexOptions.CultureInvariant);
+}
+
+/// <summary>What daemon.json says about <c>default-cgroupns-mode</c> (review N4): not set, <c>host</c>,
+/// <c>private</c>, or something that cannot be read (not a JSON object, another value).</summary>
+public enum CgroupnsConfig
+{
+    None,
+    Host,
+    Private,
+    Invalid,
+}
+
+/// <summary>
+/// The daemon's cgroup facts a re-check needs (review M1, N1, N4): the cgroup version (1, 2, or 0 when unknown) and
+/// daemon.json's <c>default-cgroupns-mode</c>. Holds no text of the command's output.
+/// </summary>
+public readonly record struct CgroupnsDaemon(int Version, CgroupnsConfig Config)
+{
+    /// <summary>The default cgroup namespace mode of a container — <c>host</c> or <c>private</c>, <c>null</c> when it
+    /// cannot be known (fail closed). On cgroup v1 a <paramref name="privileged"/> container's is <c>host</c> whatever
+    /// daemon.json says: Docker forces it.</summary>
+    public string? DefaultMode(bool privileged) =>
+        privileged && Version == 1 ? "host"
+        : Config switch
+        {
+            CgroupnsConfig.Host => "host",
+            CgroupnsConfig.Private => "private",
+            CgroupnsConfig.Invalid => null,
+            _ => Version switch { 1 => "host", 2 => "private", _ => null },
+        };
 }

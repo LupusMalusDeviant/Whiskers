@@ -404,7 +404,8 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   `Impact`; `MutationScope.AddCreatedByRun`) and compares their exposures on (service, kind, key, value); a
   namespace shared at run time must be decided or created by the run; a container that cannot be inspected counts as
   `public`. A `CgroupnsMode: host` whose service does not set `cgroup` is the daemon's default, not the deployment's
-  (review M1): the runner reads the default once per server (`default-cgroupns-mode` of `/etc/docker/daemon.json`,
+  (review M1): the runner reads the default once per server and keeps only the parsed version and mode, never the
+  text (`default-cgroupns-mode` of `/etc/docker/daemon.json`,
   otherwise `host` for cgroup v1 and `private` for v2 from `docker info`; a successful read is kept for the runner's
   lifetime) and skips the entry when the default is `host`; a default that cannot be read counts it as a violation
   and says so. On cgroup v1 a privileged container's default is `host` whatever daemon.json says (Docker forces
