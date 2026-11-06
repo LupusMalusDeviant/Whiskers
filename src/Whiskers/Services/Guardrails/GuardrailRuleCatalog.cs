@@ -26,6 +26,10 @@ public sealed class GuardrailRuleCatalog : IGuardrailRuleCatalog
             GuardrailVerdict.Deny, EmptySchema),
         new GuardrailRuleDescriptor("forbidden-argument", "Forbidden argument patterns",
             "Regexes against destructive shell/SQL arguments.", GuardrailVerdict.Deny, EmptySchema),
+        new GuardrailRuleDescriptor(ExposureChangeRule.RuleId, "Exposure changes",
+            "A compose deployment that publishes a service (Tailscale Funnel, Traefik, caddy-docker-proxy) or gives it the " +
+            "host's network, privileges or namespaces needs a confirmation from the agent and API keys.",
+            GuardrailVerdict.Confirm, EmptySchema),
         new GuardrailRuleDescriptor("confirmation", "Confirmation required",
             "Actions above the autonomous level require a UI confirmation.",
             GuardrailVerdict.Confirm, EmptySchema),

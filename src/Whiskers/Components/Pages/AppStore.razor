@@ -5,6 +5,7 @@
 @inject Whiskers.Services.Server.IHostCommandExecutor Executor
 @inject IUiMutationRunner Mutations
 @inject IComposePlanner ComposePlanner
+@inject IComposeRunner ComposeRunner
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
@@ -683,7 +684,7 @@
     private async Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string yaml, string appName,
         string source)
     {
-        return await Mutations.DeployAsync(Executor, ComposePlanner, "app.deploy",
+        return await Mutations.DeployAsync(Executor, ComposePlanner, ComposeRunner, "app.deploy",
             new { projectName = _deployProjectName, appName, serverId, source },
             ComposeDeployment.FromContent(serverId, ComposeDeployment.DeploymentDirectory(_deployProjectName), yaml));
     }

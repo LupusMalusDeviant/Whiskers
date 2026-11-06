@@ -41,7 +41,8 @@ public class DockerBudgetCoverageTests
     /// <summary>Deliberate bypasses, per file, each with its reason. Shrink these; never grow them.</summary>
     private static readonly Dictionary<string, int> AllowedDirectClientUses = new(StringComparer.Ordinal)
     {
-        ["ContainerOperations.cs"] = 5,           // start/stop/restart/remove + env read; see the note in that file
+        ["ContainerOperations.cs"] = 6,           // start/stop/restart/remove + env read + disable_restart (contract 0006: the
+                                                  // stop of an undecided exposure must not be refused by the circuit); see the note in that file
         ["ContainerLifecycleOperations.cs"] = 4,  // recreate/rollback: minutes long, and mutating
         ["NetworkOperations.cs"] = 5,             // all interactive; a circuit refusal would block the operator
         ["ImageOperations.cs"] = 1,             // the pull only: minutes-long, would starve the other loops

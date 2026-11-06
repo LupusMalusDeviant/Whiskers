@@ -340,6 +340,52 @@ for you:
 - **Host management** — firewall (ufw), Nginx sites, systemd services, SSL certificates and an integrated web terminal (host and container).
 - **Deployments** — a deploy form, Compose upload, curated app templates, image search across registries, and **git deploy** (repo → cloned/built/composed on the target host; push-triggered redeploys via HMAC-signed webhooks).
 
+#### Compose deployments and exposure changes
+
+A compose deployment that changes how a service is reachable or what it may do on its host is decided **as such**
+(contract 0006, INV-62): a published port, the host network, `privileged`, added capabilities, host namespaces
+(`pid`/`ipc`/`uts`/`userns_mode`/`cgroup`), devices, unconfined security options, device cgroup rules, a namespace shared
+with another container, and route labels — Tailscale Funnel/serve (DockTail), Traefik routers and caddy-docker-proxy
+(`ExposureLabelPrefixes` in the guardrail policy). This holds for the Compose editor, the app templates, MCP
+`deploy_compose`, `set_container_env`, the container page's `.env` save, compose webhooks and Git deploy.
+
+- **Agents and API keys** need a confirmation for the classes in `ExposureConfirmClasses` (default `public` and
+  `host`) — also under a policy that lets Admin act autonomously. An unattended run owned by a key cannot get one and
+  is refused. **Persons** are not asked to confirm their own action; their decision is audited with every exposure,
+  and a `public` or `host` exposure sends an `exposure_change` notification.
+- **Every run** writes the files, pulls (`--ignore-buildable`), builds (`--pull`), inspects every image it is about to
+  start (a label of a confirm class that nobody decided refuses an agent's run before anything starts; the previous
+  image tags are put back), starts with `up -d --pull never --no-build`, and then checks the containers it created
+  against what was decided. Under the agent rule set an undecided exposure is stopped and its restart policy switched
+  off; every such finding sends `exposure_violation`.
+- Values that come from the `.env`, and label values that could be secrets, are never written to the audit, an
+  approval card, a reason or a notification — only the service, the kind and the key.
+
+**Upgrade note.** The new policy defaults change every policy's version hash, so open approvals and the policy
+snapshots of pinned runs expire at the upgrade. `docker compose pull --ignore-buildable` needs **Docker Compose v2.15 or
+newer** on every managed host. A label key, a port, a network or a privilege field from an `.env` variable that is not
+set now refuses the plan (compose would read it from the host's environment). Redeploys of projects with `build:`
+services rebuild with `--pull`, and Git deploys now pull images as well. With sign-in turned off, the readiness card
+checks whether Whiskers' own container carries a route label.
+
+**Remaining risks** (not caught, or caught only after `up`):
+
+- **Traefik `exposedByDefault`**: a Traefik that routes every container without a label publishes services this check
+  never sees.
+- **Tailscale sidecar `serve`/Funnel** configured inside a sidecar's own state or `serve.json`, and **cloudflared**
+  tunnels, publish without a label on the deployed service.
+- **The re-tag window**: an image re-tagged by someone else between the image inspection and `up --pull never` is caught
+  only by the re-check after `up`.
+- **The tag race**: putting a tag back after a refused run checks that it still points where this run left it; a tag
+  moved by another run in between is left alone (and so not restored).
+- **`container.update` and `autopatch.run`** recreate containers from new images without this check.
+- **Late daemon work after a timeout**: a pull, build or `up` the daemon finishes after Whiskers stopped waiting is not
+  re-checked.
+- **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own
+  300 s / 600 s / 300 s.
+- **Out of scope**: the Deploy page's compose mode (`ComposeFileParser`) and `DeploymentRequest` / `deploy_app` are not
+  decided on their exposures.
+
 ### Security
 
 - **CVE scanning** — OS and container images (Trivy) with a deduplicated findings dashboard, severity and age.

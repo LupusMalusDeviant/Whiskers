@@ -166,19 +166,19 @@ public class ReleaseGateTests
         var hidden = Real with
         {
             Invariants = Mutate(Real.Invariants, "## 11.", "## 12. Something\n\n| ID | Invariant | Status | Evidence/gap | Test | WP |\n|---|---|---|---|---|---|\n"
-                + "| INV-62 | hidden | ❌ | none | — | WP1 |\n\n## 11."),
+                + "| INV-63 | hidden | ❌ | none | — | WP1 |\n\n## 11."),
         };
-        Assert.Contains(Evaluate(hidden, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-62" && f.Message.Contains("cannot read"));
+        Assert.Contains(Evaluate(hidden, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-63" && f.Message.Contains("cannot read"));
         // Indented by up to three spaces the row still renders as a table row on GitHub (review round 5 m-2).
         var indented = Real with
         {
             Invariants = Mutate(Real.Invariants, "## 11.", "## 12. Something\n\n  | ID | Invariant | Status | Evidence/gap | Test | WP |\n  |---|---|---|---|---|---|\n"
-                + "  | INV-62 | hidden | ❌ | none | — | WP1 |\n\n## 11."),
+                + "  | INV-63 | hidden | ❌ | none | — | WP1 |\n\n## 11."),
         };
-        Assert.Contains(Evaluate(indented, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-62" && f.Message.Contains("cannot read"));
+        Assert.Contains(Evaluate(indented, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-63" && f.Message.Contains("cannot read"));
         // ...but a row in a fenced example is no row.
-        var example = Real with { Invariants = Mutate(Real.Invariants, "## 11.", "```\n| INV-62 | example |\n```\n\n## 11.") };
-        Assert.DoesNotContain(Evaluate(example, GateMode.Development, Dev), f => f.Subject == "INV-62");
+        var example = Real with { Invariants = Mutate(Real.Invariants, "## 11.", "```\n| INV-63 | example |\n```\n\n## 11.") };
+        Assert.DoesNotContain(Evaluate(example, GateMode.Development, Dev), f => f.Subject == "INV-63");
 
         var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 49 |", "| ✅ | 50 |") };
         Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 50, the table has 49"));
@@ -192,14 +192,14 @@ public class ReleaseGateTests
     {
         var deleted = Real with
         {
-            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 49 |", "| ✅ | 48 |"), "| **Total** | **61** |", "| **Total** | **60** |"),
+            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 49 |", "| ✅ | 48 |"), "| **Total** | **62** |", "| **Total** | **61** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
         Assert.Contains(findings, f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("neither a row of the table nor retired"));
 
-        var abovePin = Real with { ReleaseGate = Mutate(Real.ReleaseGate, "Highest invariant ID: INV-61", "Highest invariant ID: INV-60") };
-        Assert.Contains(Evaluate(abovePin, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("above the pinned"));
+        var abovePin = Real with { ReleaseGate = Mutate(Real.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61") };
+        Assert.Contains(Evaluate(abovePin, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-62" && f.Message.Contains("above the pinned"));
 
         // Retired properly: a 'Retired invariants' row with an accepted retirement decision.
         var retired = deleted with
@@ -221,8 +221,8 @@ public class ReleaseGateTests
 
         var pinBelowRetired = Real with
         {
-            ReleaseGate = Mutate(Real.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-62 | RG-1 | 2026-01-01 |\n"),
-            Contract = WithDecision(Real.Contract, "RG-1", "retirement", "INV-62"),
+            ReleaseGate = Mutate(Real.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-63 | RG-1 | 2026-01-01 |\n"),
+            Contract = WithDecision(Real.Contract, "RG-1", "retirement", "INV-63"),
         };
         Assert.Contains(Evaluate(pinBelowRetired, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("below the highest retired ID"));
     }
@@ -476,7 +476,7 @@ public class ReleaseGateTests
         var deleted = Snapshot(Real with
         {
             Invariants = RemoveLine(Real.Invariants, "| INV-61 |"),
-            ReleaseGate = Mutate(Real.ReleaseGate, "Highest invariant ID: INV-61", "Highest invariant ID: INV-60"),
+            ReleaseGate = Mutate(Real.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61"),
         });
         var lost = BaseComparison.Compare(deleted, Snapshot(Real), "the base");
         Assert.Contains(lost, f => f.Rule == "D16" && f.Subject == "INV-61");

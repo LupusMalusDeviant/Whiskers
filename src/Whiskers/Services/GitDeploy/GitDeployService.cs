@@ -21,6 +21,7 @@ public class GitDeployService : IGitDeployService
     private readonly IVaultService _vault;
     private readonly ResourceLocks _locks;
     private readonly IComposePlanner _planner;
+    private readonly IComposeRunner? _composeRunner;
     private readonly ILogger<GitDeployService> _logger;
     private GitDeployData _cached = new();
     private bool _loaded;
@@ -28,9 +29,10 @@ public class GitDeployService : IGitDeployService
 
     public GitDeployService(IHostCommandExecutor executor, IVaultService vault, IComposePlanner planner,
         ILogger<GitDeployService> logger, string? storePath = null, DataPathOptions? dataPaths = null,
-        ResourceLocks? locks = null)
+        ResourceLocks? locks = null, IComposeRunner? composeRunner = null)
     {
         _locks = locks ?? new ResourceLocks();
+        _composeRunner = composeRunner;
         _executor = executor;
         _vault = vault;
         _planner = planner;
@@ -348,15 +350,24 @@ public class GitDeployService : IGitDeployService
                 await EnsureUnchangedAsync(app);
                 plan = await _planner.PlanAsync(deployment, ct);
                 plan.EnsureDecided(MutationScope.Current);
-                // 4) Build
-                Report("③ docker compose build…");
-                var build = await Sh(app.ServerId, plan.BuildCommand, 600, ct);
-                Report(Tail(build.Output, 15));
-
-                // 5) Up
-                Report("④ docker compose up -d…");
-                var up = await Sh(app.ServerId, plan.UpCommand, 300, ct);
-                Report(Tail(up.Output + up.Error, 10));
+                // 4) Pull, build, inspect the images, up — then the re-check of what the run created (contract 0006).
+                //    Without a runner nothing runs (fail closed).
+                var runner = _composeRunner
+                    ?? throw new InvalidOperationException("The compose runner is not available; nothing ran.");
+                var serverId = app.ServerId;
+                var run = await runner.RunAsync(plan,
+                    async (command, timeout, token) => await _executor.ExecuteAsync(serverId, command, timeout, token),
+                    new ComposeRunOptions(true, TimeSpan.FromSeconds(300))
+                    {
+                        PullTimeout = TimeSpan.FromSeconds(300),
+                        BuildTimeout = TimeSpan.FromSeconds(600),
+                        UpTimeout = TimeSpan.FromSeconds(300),
+                        Progress = new LineProgress(Report),
+                    }, ct);
+                Report(Tail(run.Output, 15));
+                if (!run.Success)
+                    throw new InvalidOperationException(run.Refusal
+                        ?? (run.Violations.Count > 0 ? string.Join("; ", run.Violations) : $"Command failed: {Tail(run.Error, 10)}"));
             }
             await gate(plan, BuildAndUp);
 
@@ -393,6 +404,12 @@ public class GitDeployService : IGitDeployService
             throw new InvalidOperationException(
                 $"Command failed (exit {r.ExitCode}): {Tail(r.Error, 10)}{Tail(r.Output, 5)}");
         return r;
+    }
+
+    /// <summary>Progress that reports each line at once, on the caller's thread (unlike <see cref="Progress{T}"/>).</summary>
+    private sealed class LineProgress(Action<string> report) : IProgress<string>
+    {
+        public void Report(string value) => report(value);
     }
 
     private static string Tail(string? s, int lines)

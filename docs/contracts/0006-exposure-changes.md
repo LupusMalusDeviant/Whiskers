@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
 **Amendments 1–11** (review rounds 1–11, at the end) were accepted by the
-maintainer as one set on 6 November 2026.
+maintainer as one set on 6 November 2026. **Amendment 12** (implementation review) was accepted on 6 November 2026.
 
 ## Purpose
 
@@ -780,3 +780,49 @@ This amendment takes precedence over Amendments 1–10. All amendments are to be
   `label_file` is new, and it is refused when relative.
 - **Restore inside the lock (review NIT-2).** On git deploy and webhook compose deploys, the restore runs before the
   lock's scope ends (for example in a `finally` within it), never in the method's outer `catch` blocks.
+
+## Amendment 12 — implementation review (6 November 2026)
+
+This amendment takes precedence over Amendments 1–11. It follows from the code review of the implementation and was
+accepted by the maintainer on 6 November 2026.
+
+### Decided exposures come from Whiskers only (review B1)
+
+- **Scope.** The decided exposures of a scope come only from `request.Target.Exposures`; shared namespace targets only
+  from `Target.Id`, `Target.Name` and `Target.Related` (walking the parent chain). Raw arguments never count as decided.
+- **Refusal.** `compose.deploy` refuses the arguments `exposure`, `exposureShown`, `exposureWithheld`,
+  `exposureValueWithheld`, `exposureClasses`, `related`, `relatedWithheld` and `mounts` on every surface except Ui and
+  Automation (the surfaces whose nested decisions write them).
+
+### The daemon's default cgroup namespace (review M1)
+
+Amendment 2's field list is narrowed for `CgroupnsMode`:
+
+- When the re-check finds `CgroupnsMode = host` on a container the run created, and the service's `compose config` has
+  no `cgroup` key, Whiskers reads the server's daemon default once (`docker info` cgroup version, and
+  `/etc/docker/daemon.json` `default-cgroupns-mode`). daemon.json wins when it says `host` or `private`; otherwise
+  cgroup v1 means `host` and v2 means `private`. Only successful reads are cached, per server.
+- Default `host`: the entry is not an exposure. Default `private`: a violation as before. Unreadable: a violation, with
+  the note that the daemon default could not be read (fail closed).
+- A service that sets `cgroup` is compared as before; the default is never consulted.
+- On cgroup v1, a privileged service's default is `host` whatever `daemon.json` says (Docker forces it).
+- A dockerd command-line `--default-cgroupns-mode` is not detected; it can only cause a false violation, never a miss.
+
+### Shown keys and withheld values (review m1, m3)
+
+- **`exposureShown`** (audited) carries the label key of every entry whose key is literal, never a value; for a key that
+  comes from a variable only the kind.
+- **`exposureValueWithheld`** (payload, in `SinkRedaction` and `ProtectedResourceMatcher`) carries entries whose key is
+  shown and whose value is withheld. The policy passes them as `__resolvedExposureValueWithheld<i>`, so the reason names
+  the key and never the value.
+- A violation names a key only when the plan read it literally or the inspected image carries it; otherwise it says
+  "label (withheld)".
+
+### Smaller points
+
+- **`up` that throws.** The re-check and the stop run whenever `up` was attempted; the exception is rethrown afterwards.
+- **No `exposure_change` after a failed `up`.**
+- **Container page.** The `.env` save runs through `ComposeImpact.SaveEnvAsync`; the page keeps the role check and the
+  dialog.
+- **`Covers`.** Impact containers and mounts are still covered by argument values as in R1-07; only exposures and shared
+  namespaces use the target-only checks above.

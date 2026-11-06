@@ -315,8 +315,14 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     ];
 
     /// <summary>Policy fields a file may leave out (added after the format was fixed); when present they are kept,
-    /// never dropped — a legacy file that turns one on must not lose it in the migration.</summary>
-    private static readonly string[] OptionalPolicyFields = [nameof(GuardrailPolicy.RequireSecondApprover)];
+    /// never dropped — a legacy file that turns one on must not lose it in the migration.
+    /// Contract 0006: the exposure label prefixes and confirm classes are optional too (<c>null</c> or missing = the
+    /// default), so preset files written before them stay complete.</summary>
+    private static readonly string[] OptionalPolicyFields =
+    [
+        nameof(GuardrailPolicy.RequireSecondApprover), nameof(GuardrailPolicy.ExposureLabelPrefixes),
+        nameof(GuardrailPolicy.ExposureConfirmClasses),
+    ];
 
     private static JsonNode? Field(JsonObject obj, string name, out bool present)
     {

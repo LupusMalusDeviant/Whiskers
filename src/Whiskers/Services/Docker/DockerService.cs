@@ -88,6 +88,9 @@ public class DockerService : IDockerService
     public Task StopContainerAsync(string containerId, string? serverId = null)
         => _containers.StopContainerAsync(containerId, serverId);
 
+    public Task DisableRestartAsync(string containerId, string? serverId = null)
+        => _containers.DisableRestartAsync(containerId, serverId);
+
     public Task RestartContainerAsync(string containerId, string? serverId = null)
         => _containers.RestartContainerAsync(containerId, serverId);
 

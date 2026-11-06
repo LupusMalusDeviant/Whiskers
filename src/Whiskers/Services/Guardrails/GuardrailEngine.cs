@@ -22,6 +22,8 @@ public sealed class GuardrailEngine : IAgentGuardrailEngine
         new ToolAllowListRule(),
         new ProtectedResourceRule(),
         new ForbiddenArgumentRule(),
+        // Contract 0006: agent and API keys only (PC-D1 keeps it out of CreateForHumans).
+        new ExposureChangeRule(),
         new ConfirmationRule(),
     });
 

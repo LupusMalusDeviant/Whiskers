@@ -289,4 +289,71 @@ public class ProductionReadinessServiceTests : IDisposable
         Assert.DoesNotContain("der mTLS-Client-Schlüssel im", vaultCheck.Detail);
         Assert.DoesNotContain("alle Secrets", vaultCheck.Detail);
     }
+
+    // ---------------------------------------------------------------- contract 0006: the own container's exposure
+
+    private async Task<ReadinessCheck?> SelfExposureLine(bool authDisabled, bool withDocker,
+        Func<string, ContainerInfo[]>? containers = null, bool listThrows = false)
+    {
+        var (vault, servers) = await Stores(null);
+        var self = Whiskers.Services.LogMonitor.LogMonitorService.ResolveSelfServerIds(servers).Single();
+        var docker = withDocker ? new FakeDocker(containers?.Invoke(self) ?? []) { ListContainersThrows = listThrows } : null;
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:Disabled"] = authDisabled ? "true" : "false" }).Build();
+        var checks = await new ProductionReadinessService(config, vault, _sp.GetRequiredService<IServiceScopeFactory>(),
+            servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths, docker: docker,
+            selfContainerNames: new HashSet<string>(["whiskers"], StringComparer.OrdinalIgnoreCase)).GetChecksAsync(isHttps: true);
+        return checks.SingleOrDefault(c => c.Title == ProductionReadinessService.SelfExposureTitle);
+    }
+
+    private static ContainerInfo Self(string serverId, string name, params (string Key, string Value)[] labels) => new()
+    {
+        Id = name + "-id", Name = name, ServerId = serverId,
+        Labels = labels.ToDictionary(l => l.Key, l => l.Value),
+    };
+
+    [Fact]
+    public async Task The_own_container_published_through_funnel_with_sign_in_off_is_not_ok_and_quotes_only_the_key()
+    {
+        var line = await SelfExposureLine(true, true, id =>
+            [Self(id, "whiskers", ("docktail.funnel.enable", "true"), ("docktail.funnel.port", "secret-value-443"))]);
+
+        Assert.NotNull(line);
+        Assert.False(line!.Ok);
+        Assert.Contains("Whiskers itself is published through `docktail.funnel.", line.Detail);
+        Assert.Contains("with sign-in turned off", line.Detail);
+        Assert.DoesNotContain("secret-value", line.Detail);
+        Assert.DoesNotContain("true", line.Detail);
+    }
+
+    [Fact]
+    public async Task Without_a_label_or_with_sign_in_on_there_is_no_line()
+    {
+        Assert.Null(await SelfExposureLine(true, true, id =>
+            [Self(id, "whiskers", ("com.docker.compose.project", "whiskers"))]));
+        Assert.Null(await SelfExposureLine(false, true, id =>
+            [Self(id, "whiskers", ("docktail.funnel.enable", "true"))]));
+    }
+
+    [Fact]
+    public async Task Another_container_with_a_route_label_is_not_the_own_one()
+    {
+        Assert.Null(await SelfExposureLine(true, true, id =>
+            [Self(id, "whiskers"), Self(id, "blog", ("traefik.http.routers.blog.rule", "Host(`blog.example.org`)"))]));
+    }
+
+    [Fact]
+    public async Task An_own_container_that_cannot_be_found_or_read_is_unknown_not_ok()
+    {
+        var missing = await SelfExposureLine(true, true, id => [Self(id, "something-else")]);
+        var unreadable = await SelfExposureLine(true, true, listThrows: true);
+        var noDocker = await SelfExposureLine(true, false);
+
+        foreach (var line in new[] { missing, unreadable, noDocker })
+        {
+            Assert.NotNull(line);
+            Assert.False(line!.Ok);
+            Assert.StartsWith("Unknown", line.Detail);
+        }
+    }
 }

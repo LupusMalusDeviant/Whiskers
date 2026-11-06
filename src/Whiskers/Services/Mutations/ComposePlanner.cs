@@ -37,11 +37,14 @@ public sealed class ComposePlanner : IComposePlanner
 
     private readonly IDockerService _docker;
     private readonly IHostCommandExecutor _executor;
+    private readonly Whiskers.Services.Guardrails.IGuardrailStore? _guardrails;
 
-    public ComposePlanner(IDockerService docker, IHostCommandExecutor executor)
+    public ComposePlanner(IDockerService docker, IHostCommandExecutor executor,
+        Whiskers.Services.Guardrails.IGuardrailStore? guardrails = null)
     {
         _docker = docker ?? throw new ArgumentNullException(nameof(docker));
         _executor = executor ?? throw new ArgumentNullException(nameof(executor));
+        _guardrails = guardrails;
     }
 
     public async Task<ComposePlan> PlanAsync(ComposeDeployment deployment, CancellationToken ct = default)
@@ -80,6 +83,10 @@ public sealed class ComposePlanner : IComposePlanner
                 ?? throw new ComposePlanException($"Compose file '{file.Path}' does not exist.")));
 
         var (declared, declaredSource, services) = ComposeModel.MergeWithSource(files, env, directory);
+        // Contract 0006: what the files themselves expose, read before compose runs (a value the plan cannot interpolate
+        // and a relative label_file refuse the plan here).
+        var prefixes = ExposurePrefixes();
+        var (modelExposures, modelShared) = ComposeModel.ExposuresOf(files, env, prefixes);
         var project = ComposeModel.EffectiveProjectName(deployment.ProjectName, env, declared, directory);
         // COMPOSE_REMOVE_ORPHANS in the .env makes a plain `up` remove orphans: planned (and passed explicitly) too.
         var removeOrphans = deployment.RemoveOrphans || ComposeModel.RemovesOrphans(env);
@@ -92,7 +99,9 @@ public sealed class ComposePlanner : IComposePlanner
                 declaredSource),
         };
         // What the deployment mounts as compose itself resolves it on the server, besides the model's own reading.
-        services = ComposeModel.WithEffects(services, await ConfigEffectsAsync(plan, ct));
+        var config = await ConfigAsync(plan, ct);
+        services = ComposeModel.WithEffects(services, ComposeConfigEffects.Parse(config, plan.ProjectName));
+        var active = ComposeConfigEffects.ActiveServices(config, plan.ProjectName, prefixes);
 
         var existing = await _docker.ListContainersAsync(all: true, serverId: serverId, ct);
         // A container volumes_from takes over brings its own mounts along.
@@ -101,19 +110,140 @@ public sealed class ComposePlanner : IComposePlanner
             inherited[source.Id] = await MountsOfContainerAsync(serverId, source.Id, ct);
         services = ComposeModel.ResolveContainers(services, existing, inherited);
         var impact = ComposeModel.Impact(project, services, removeOrphans, existing);
-        return plan with { Services = services, Impact = impact };
+        var exposed = await ExposuresAsync(plan with { Services = services }, active, modelExposures, modelShared,
+            existing, prefixes, ct);
+        return exposed with { Impact = impact };
+    }
+
+    /// <summary>
+    /// Contract 0006: the exposures of every service compose will start — the model's reading and compose's, united (an
+    /// entry only compose reports is withheld); the labels of each service's image as it is on the host now (inspected
+    /// locally, nothing pulled); and, through a <c>service:x</c> / <c>container:x</c> namespace, the exposures of x, to a
+    /// depth of 5. An x that cannot be resolved refuses the plan. Services compose will not start expose nothing.
+    /// </summary>
+    private async Task<ComposePlan> ExposuresAsync(ComposePlan plan, IReadOnlyList<ComposeConfigEffects.ActiveService> active,
+        IReadOnlyDictionary<string, IReadOnlyList<ComposeExposure>> model, IReadOnlyList<ComposeSharedNamespace> modelShared,
+        IList<ContainerInfo> existing, IReadOnlyList<string> prefixes, CancellationToken ct)
+    {
+        var known = plan.Services.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        if (active.Any(a => !known.Contains(a.Name)))
+            throw new ComposePlanException("docker compose resolves a service the deployment's files do not show.");
+        var byName = active.ToDictionary(a => a.Name, StringComparer.Ordinal);
+
+        // Own exposures: the model's entry where it read one, compose's (withheld) otherwise.
+        var own = new Dictionary<string, IReadOnlyList<ComposeExposure>>(StringComparer.Ordinal);
+        foreach (var service in active)
+        {
+            var read = model.GetValueOrDefault(service.Name) ?? [];
+            var ids = read.Select(e => e.Identity).ToHashSet(StringComparer.Ordinal);
+            own[service.Name] = ComposeModel.Distinct(read.Concat(service.Exposures.Where(e => !ids.Contains(e.Identity))));
+        }
+
+        // The images as they are on the host now: their labels count as the services' own (contract 0006, Amendment 4).
+        var images = active.Select(a => a.Image).Distinct(StringComparer.Ordinal).ToList();
+        var inspected = images.Count == 0
+            ? new Dictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?>()
+            : await InspectImagesAsync(plan.ServerId, images, ct);
+
+        var shared = new List<ComposeSharedContainer>();
+        var inspectedContainers = new Dictionary<string, (IReadOnlyList<ComposeExposure>, IReadOnlyList<(string, string)>)>(StringComparer.Ordinal);
+
+        async Task<IReadOnlyList<ComposeExposure>> Resolve(string service, int depth)
+        {
+            var result = new List<ComposeExposure>(own[service]);
+            if (inspected.GetValueOrDefault(byName[service].Image) is { } image)
+                result.AddRange(ComposeExposures.FromImageLabels(service, image.Labels, prefixes));
+            foreach (var (field, reference) in byName[service].Shared)
+            {
+                var fromVariable = modelShared.FirstOrDefault(m => m.Service == service && m.Field == field) is not { } read
+                                   || read.FromVariable;
+                var inherited = await SharedAsync(reference, fromVariable, depth + 1);
+                result.AddRange(inherited.Select(e => fromVariable
+                    ? e with { Service = service, KeyWithheld = true, ValueWithheld = true, Detail = $"{ExposureClasses.Noun(e.Kind)} (withheld)" }
+                    : e with { Service = service }));
+            }
+            return result;
+        }
+
+        async Task<IReadOnlyList<ComposeExposure>> SharedAsync(string reference, bool fromVariable, int depth)
+        {
+            if (depth > 5) throw new ComposePlanException("A shared namespace chain is too deep.");
+            if (reference.StartsWith("service:", StringComparison.Ordinal))
+            {
+                var other = reference["service:".Length..];
+                if (!byName.ContainsKey(other))
+                    throw new ComposePlanException("A service shares the namespace of a service that does not run.");
+                return await Resolve(other, depth);
+            }
+            var named = reference["container:".Length..];
+            var container = ComposeModel.FindShared(named, existing);
+            shared.Add(new ComposeSharedContainer(container.Id, container.Name.TrimStart('/'), fromVariable));
+            if (!inspectedContainers.TryGetValue(container.Id, out var read))
+                inspectedContainers[container.Id] = read = await InspectContainerAsync(plan.ServerId, container.Id, prefixes, ct);
+            var (exposures, nested) = read;
+            var result = new List<ComposeExposure>(exposures);
+            foreach (var (_, id) in nested)
+                result.AddRange(await SharedAsync($"container:{id}", fromVariable, depth + 1));
+            return result;
+        }
+
+        var services = new List<ComposeServicePlan>();
+        foreach (var s in plan.Services)
+            services.Add(byName.TryGetValue(s.Name, out var a)
+                ? s with { Active = true, Image = a.Image, Build = a.Build, DeclaresCgroup = a.DeclaresCgroup, Exposures = ComposeModel.Distinct(await Resolve(s.Name, 0)) }
+                : s with { Active = false, Exposures = [] });
+        return plan with
+        {
+            Services = services,
+            ExposurePrefixes = prefixes,
+            SharedContainers = shared.DistinctBy(c => c.Id).Select(c => shared.Where(x => x.Id == c.Id).Any(x => x.FromVariable)
+                ? c with { FromVariable = true } : c).ToList(),
+            SharesNamespaces = active.Any(a => a.Shared.Count > 0),
+            PlannedImages = inspected.ToDictionary(i => i.Key, i => i.Value?.Id, StringComparer.Ordinal),
+        };
+    }
+
+    /// <summary>The label prefixes a plan looks for: those of every stored preset (a pinned run's preset was one of them),
+    /// so the rule can classify with the policy that decides (contract 0006, Amendment 2).</summary>
+    private IReadOnlyList<string> ExposurePrefixes()
+    {
+        if (_guardrails is null) return Whiskers.Configuration.GuardrailPolicy.DefaultExposureLabelPrefixes;
+        var policies = _guardrails.Config.Presets.Where(p => p?.Policy is not null).Select(p => p.Policy).Append(_guardrails.Current);
+        return policies.SelectMany(p => p.EffectiveExposureLabelPrefixes).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>The images on the host, inspected locally (nothing is pulled): id and labels, or missing.</summary>
+    private async Task<IReadOnlyDictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?>> InspectImagesAsync(
+        string serverId, IReadOnlyList<string> images, CancellationToken ct)
+    {
+        var result = await _executor.ExecuteAsync(serverId, ComposeExposures.InspectImagesCommand(images), ConfigTimeout, ct, MaxFileChars);
+        if (!result.Success || result.OutputTruncated)
+            throw new ComposePlanException("The images of the deployment could not be read on the server.");
+        return ComposeExposures.ParseImages(result.Output, images);
+    }
+
+    /// <summary>A container another service shares a namespace with: its exposures and its own shared namespaces.</summary>
+    private async Task<(IReadOnlyList<ComposeExposure>, IReadOnlyList<(string, string)>)> InspectContainerAsync(string serverId,
+        string id, IReadOnlyList<string> prefixes, CancellationToken ct)
+    {
+        var result = await _executor.ExecuteAsync(serverId, ComposeExposures.InspectContainersCommand([id]), ReadTimeout, ct, MaxFileChars);
+        if (!result.Success || result.OutputTruncated)
+            throw new ComposePlanException("A container whose namespace is shared cannot be read.");
+        var documents = ComposeExposures.ParseInspect(result.Output);
+        if (documents.Count != 1) throw new ComposePlanException("A container whose namespace is shared cannot be read.");
+        // Its exposures are attributed to the service that shares it; the key of a label is shown, never its value.
+        return ComposeExposures.FromInspect("shared", documents[0], prefixes);
     }
 
     /// <summary>The deployment's mounts per service from <c>docker compose config</c> on the server (fail closed: a
     /// model compose cannot produce refuses the plan; its output is never quoted, it can hold .env values).</summary>
-    private async Task<IReadOnlyDictionary<string, IReadOnlyList<ComposeMount>>> ConfigEffectsAsync(ComposePlan plan,
-        CancellationToken ct)
+    private async Task<string> ConfigAsync(ComposePlan plan, CancellationToken ct)
     {
         var result = await _executor.ExecuteAsync(plan.ServerId, ComposeConfigEffects.Command(plan), ConfigTimeout, ct,
             MaxFileChars);
         if (!result.Success || result.OutputTruncated)
             throw new ComposePlanException("docker compose could not resolve the deployment on the server.");
-        return ComposeConfigEffects.Parse(result.Output, plan.ProjectName);
+        return result.Output;
     }
 
     /// <summary>The host paths and volume names a container mounts (<c>docker inspect</c>); unreadable refuses the plan.</summary>

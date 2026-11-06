@@ -8,7 +8,7 @@ its compositions (`MutationCompositions`) and the rows of [`PRODUCT_CONTRACT.md`
 that name it (M rows through their tool, the others through [`PATH_CAPABILITIES.md`](PATH_CAPABILITIES.md)).
 Contract 0008, D7: §7 stays hand-written; this file is generated and the release gate joins the two (R12–R15).
 
-110 capabilities, 47 of them with an MCP tool; by level: admin 86, read 1, write 23.
+111 capabilities, 47 of them with an MCP tool; by level: admin 86, read 1, write 24.
 
 | Capability | Level | Target | Risk | MCP tool | Verification | Surfaces | Composes | Composed by | §7 rows |
 |---|---|---|---|---|---|---|---|---|---|
@@ -31,21 +31,22 @@ Contract 0008, D7: §7 stays hand-written; this file is generated and the releas
 | `cloud.reboot` | admin | cloud-server | Disruptive | `cloud_reboot` | `NotVerifiable`: a reboot ends in the state it started from: nothing tells it apart afterwards. | mcp | — | `cloud.hard_reset` | M-28, U-23 |
 | `cloud.shutdown` | admin | cloud-server | Disruptive | `cloud_shutdown` | read back: the provider reports the server off. | — | — | — | M-27, U-23 |
 | `cloud.snapshot_create` | admin | cloud-server | Reversible | `cloud_create_snapshot` | `NotVerifiable`: the provider creates the snapshot asynchronously; it is listed only when that finishes. | — | — | — | M-30, U-23 |
-| `compose.deploy` | admin | host | RootEquivalent | `deploy_compose` | read back: every container of the compose project runs. | — | `app.deploy` | — | M-07, S-04, U-10, U-12 |
+| `compose.deploy` | admin | host | RootEquivalent | `deploy_compose` | read back: every container of the compose project runs. | — | `app.deploy`, `container.disable_restart`, `container.stop` | — | M-07, S-04, U-10, U-12 |
 | `config.agent` | admin | config | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-34 |
 | `config.mcp_permissions` | admin | config | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-34 |
 | `config.roles` | admin | config | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | `account.create`, `account.delete` | U-34 |
 | `config.save` | admin | config | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-34 |
 | `config.whitelist` | admin | config | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-34 |
 | `container.create` | admin | container | RootEquivalent | — | read back: the container the call returned runs. | — | — | `app.deploy` | — |
+| `container.disable_restart` | write | container | Disruptive | — | `NotVerifiable`: never decided under its own id: it runs only inside another capability, whose verification covers it. | — | — | `compose.deploy`, `container.env_set`, `gitdeploy.deploy` | — |
 | `container.env_file_save` | admin | container | RootEquivalent | — | `NotVerifiable`: compose recreates the container from the .env; the new variables are read by its process, not by Whiskers. | ui | — | — | U-06 |
-| `container.env_set` | admin | container | RootEquivalent | `set_container_env` | `NotVerifiable`: compose recreates the container from the .env; the new variables are read by its process, not by Whiskers. | mcp | — | — | M-06 |
+| `container.env_set` | admin | container | RootEquivalent | `set_container_env` | `NotVerifiable`: compose recreates the container from the .env; the new variables are read by its process, not by Whiskers. | mcp | `container.disable_restart`, `container.stop` | — | M-06 |
 | `container.exec` | admin | container | RootEquivalent | — | `NotVerifiable`: an arbitrary command inside the container: no semantic read-back. | ui | — | — | U-08 |
 | `container.remove` | admin | container | Destructive | — | read back: the container is gone. | — | — | — | U-02, U-05 |
 | `container.restart` | write | container | Disruptive | `restart_container` | read back: the container runs again. | webhook | — | `workload.restart` | M-03, S-01, S-04, U-01, U-05 |
 | `container.rollback` | write | container | Disruptive | — | read back: the container of the snapshot runs again. | — | — | — | S-02, U-04 |
 | `container.start` | write | container | Reversible | `start_container` | read back: the container runs, or a one-shot container exited 0. | ui | — | `workload.start` | M-01, U-01, U-05 |
-| `container.stop` | write | container | Disruptive | `stop_container` | read back: the container no longer runs. | — | — | `workload.stop` | M-02, U-01, U-05 |
+| `container.stop` | write | container | Disruptive | `stop_container` | read back: the container no longer runs. | — | — | `compose.deploy`, `container.env_set`, `gitdeploy.deploy`, `workload.stop` | M-02, U-01, U-05 |
 | `container.update` | write | container | Disruptive | `update_container` | read back: the recreated container runs. | background | — | — | M-04, S-02, S-04, U-03 |
 | `db.backup` | admin | container | Reversible | `backup_database` | read back: the dump file exists on the host and is not empty. | — | — | — | M-16, S-01, U-09 |
 | `db.backup_delete` | admin | container | Destructive | — | read back: no more than the kept number of dumps remain. | background | — | — | S-01 |
@@ -59,7 +60,7 @@ Contract 0008, D7: §7 stays hand-written; this file is generated and the releas
 | `firewall.rule_remove` | admin | host | Disruptive | `remove_firewall_rule` | `NotVerifiable`: ufw renumbers its rules after a delete, and the call names only the number: the removed rule cannot be identified afterwards. | — | — | — | M-10, U-15 |
 | `firewall.set_status` | admin | host | Disruptive | — | read back: ufw reports the requested status. | — | — | — | U-14 |
 | `gitdeploy.delete` | admin | git-deploy-app | Reversible | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `vault.secret_delete` | — | U-29 |
-| `gitdeploy.deploy` | admin | git-deploy-app | RootEquivalent | — | `NotVerifiable`: the repository decides what is built and started; the build output is recorded, not read back. | webhook | — | — | S-04, S-05, U-29 |
+| `gitdeploy.deploy` | admin | git-deploy-app | RootEquivalent | — | `NotVerifiable`: the repository decides what is built and started; the build output is recorded, not read back. | webhook | `container.disable_restart`, `container.stop` | — | S-04, S-05, U-29 |
 | `gitdeploy.save` | admin | git-deploy-app | RootEquivalent | `create_git_deploy_app` | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `vault.secret_delete`, `vault.secret_set` | `gitdeploy.set_token` | M-42, U-29 |
 | `gitdeploy.set_token` | admin | git-deploy-app | RootEquivalent | `set_git_deploy_token` | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `gitdeploy.save` | — | M-43 |
 | `guardrails.kill_switch_off` | admin | config | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-32 |

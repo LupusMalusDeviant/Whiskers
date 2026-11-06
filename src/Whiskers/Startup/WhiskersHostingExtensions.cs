@@ -311,6 +311,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();
         // Compose deployment plans (R1-07): read-only, on top of the Docker service and the host executor.
         builder.Services.AddSingleton<Whiskers.Services.Mutations.IComposePlanner, Whiskers.Services.Mutations.ComposePlanner>();
+        // Contract 0006: runs a planned compose deployment (write, pull, build, inspect the images, up, re-check).
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IComposeRunner, Whiskers.Services.Mutations.ComposeRunner>();
         // R1-44: per-host mTLS client credentials (key made in-process, signed by step-ca, kept under {MtlsDir}/hosts/).
         builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsClientCredentialStore, Whiskers.Services.Certificates.MtlsClientCredentialStore>();
         builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsCertificateService, Whiskers.Services.Certificates.MtlsCertificateService>();
