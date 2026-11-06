@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendments 1–8** (review rounds 1–8, at the end) are to be accepted by
+and the whiskers.site host. **Amendments 1–9** (review rounds 1–8 and implementation alignment, at the end) are to be accepted by
 the maintainer as one set.
 
 ## Purpose
@@ -549,3 +549,26 @@ This amendment takes precedence over Amendments 1–7. All amendments are to be 
 - **Rollout table.** Its caption now says it is superseded in detail by Amendments 1–8 (compose recreate instead of
   restart; state read from the live `.Args`).
 - **Current state** re-verified at `2a47d8d1`.
+
+## Amendment 9 — implementation alignment (6 November 2026)
+
+This amendment takes precedence over Amendments 1–8. All amendments are to be accepted together. It records where the
+R1-44 implementation needs more surface than the text names; the behaviour is unchanged.
+
+- **Store interface.** `IMtlsClientCredentialStore` additionally has:
+  - `CaPath`, `IsShared`, `IdentityOf`, `PendingIdentityOf`, `PendingFor`, `PreviousFor`;
+  - `IssuePendingAsync`, `ActivatePendingAsync`, `DiscardPendingAsync`, `DiscardPreviousAsync` (the pending slot of
+    phases 1–3 and the previous slot kept until retirement);
+  - `ReadJournal` / `WriteJournalAsync` (the per-host phase record);
+  - `KeyFiles()` (for the mode and ACL readiness).
+
+  `RemoveAsync` takes `hostId` instead of `serverId`: it runs after the server record is gone, so the gateway must not
+  bind it to a server.
+- **One-off client.** The confirmation over the new credential uses `HostShellOperations.ForOneOffClient`.
+  `MutationGatewayCoverageTests` pins its only caller to `MtlsClientProbe`.
+- **Live allow-list.** `IMtlsCertificateService.ReadLiveAllowListAsync` (read-only) reads `--allow-cn` from
+  `docker inspect ghostunnel`. Readiness and the retire check use it.
+- **Guard retry.** The guard waits 30 s before its single retry of the recreate and logs with
+  `logger -t whiskers-allow-guard`. The confirmation runs as `timeout -k 5 20 flock -w 30 …`.
+- **Onboarding without a clear negative check.** When the shared probe during onboarding gives neither a TLS alert nor
+  `sharedCredentialAbsent`, the onboarding record stays at phase 4 (not narrowed). A later migration closes it.
