@@ -105,6 +105,18 @@ public class PathMatrixParserTests
         Assert.Contains(problems, p => p.Contains("'**U-40**' looks like a §7 row ID"));
         Assert.Single(problems);
 
+        // Review round 7 n-2/n-3: other near misses — a suffix, lower case, an en dash, a letter O for a zero — are problems,
+        // and a fenced '## 8.' inside §7 does not end it.
+        const string nearMisses = "## 7. Paths\n\n| ID | Handler |\n|---|---|\n| U-01 | a |\n| U-40a | b |\n| u-41 | c |\n| U–42 | d |\n| U-4O | e |\n"
+            + "```\n## 8. Example\n```\n| U-02 | f |\n\n## 8. End\n";
+        const string nearMapping = "## Rows and capabilities\n\n| Row | Capabilities |\n|---|---|\n| U-01 | x.a |\n| U-02 | x.f |\n";
+        var nearProblems = new List<string>();
+        var nearRows = PathMatrixParser.Parse(nearMisses, nearMapping, nearProblems);
+        Assert.Equal(["U-01", "U-02"], nearRows.Select(r => r.Id));
+        foreach (var miss in new[] { "U-40a", "u-41", "U–42", "U-4O" })
+            Assert.Contains(nearProblems, p => p.Contains($"'{miss}' looks like a §7 row ID"));
+        Assert.Equal(4, nearProblems.Count);
+
         // Review round 6 NIT a: a class or the total counted twice in §7.6 is a problem.
         var countProblems = new List<string>();
         PathMatrixParser.Totals("**Rows today**\n\n| Class | Rows |\n|---|---|\n| UI (U) | 3 |\n| UI (U) | 4 |\n| **Total** | **7** |\n| Total | 7 |\n", countProblems);

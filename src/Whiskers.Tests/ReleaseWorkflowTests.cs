@@ -302,6 +302,18 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "permissions: {}\n\njobs:\n", "permissions: {}\n\nenv:\n  T: ${{ secrets.GITHUB_TOKEN }}\n\njobs:\n", "puts a credential into the environment of every job")]
     // Review round 6 m-1: the whole context, a brace inside the expression, any case, $GITHUB_ENV, the container's env.
     [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ toJSON(github) }}\n", "exposes the token beyond 'gh release list'")]
+    // Review round 7 m-1: the github context through a filter, an index or a function; an env that is no mapping; a direct
+    // $GITHUB_ENV write from an expression; an action handed a credential.
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ toJSON(github.*) }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ join(github.*, ',') }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github[inputs.ref] }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github.event[inputs.ref] }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "  build-test:\n    runs-on: ubuntu-latest\n", "  build-test:\n    runs-on: ubuntu-latest\n    env: ${{ fromJSON(inputs.ref) }}\n", "puts a credential into the environment of every step: its env is not a mapping")]
+    [InlineData("ci.yml", "permissions: {}\n\njobs:\n", "permissions: {}\n\nenv: ${{ fromJSON(inputs.ref) }}\n\njobs:\n", "puts a credential into the environment of every job: its env is not a mapping")]
+    [InlineData("ci.yml", "  build-test:\n    runs-on: ubuntu-latest\n", "  build-test:\n    runs-on: ubuntu-latest\n    container:\n      image: ubuntu:24.04\n      env: ${{ fromJSON(inputs.ref) }}\n", "into its container's environment: its env is not a mapping")]
+    [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        env: ${{ fromJSON(inputs.ref) }}\n        run: |\n", "holds a credential in its env: not a mapping")]
+    [InlineData("ci.yml", "          echo \"WHISKERS_PG_BIN_DIR=/usr/lib/postgresql/18/bin\" >> \"$GITHUB_ENV\"\n", "          echo \"T=${{ github.event.pull_request.title }}\" >> \"$GITHUB_ENV\"\n", "writes $GITHUB_ENV from an expression")]
+    [InlineData("ci.yml", "      - name: Setup .NET\n        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0\n        with:\n", "      - name: Setup .NET\n        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0\n        with:\n          source-url-token: ${{ secrets.NUGET }}\n", "passes a credential to an action before the base comparison")]
     [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ format('{0}', github . token) }}\n", "exposes the token beyond 'gh release list'")]
     [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ GITHUB.TOKEN }}\n", "exposes the token beyond 'gh release list'")]
     [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ Secrets.X }}\n", "exposes the token beyond 'gh release list'")]
@@ -1106,19 +1118,23 @@ internal static class WorkflowPolicy
             var otherCredential = (env as YamlMappingNode)?.Children
                 .Any(kv => Scalar(kv.Key) != "RELEASES_TOKEN" && Credential(Scalar(kv.Value))) == true;
             // Review round 5 NIT b: nor the job or the workflow, whose env every step of the job inherits.
-            if (ci.TryGetValue(job, out var baseJob) && EnvCredentials(Child(baseJob, "env")).Any())
-                violations.Add($"ci.yml job '{job}' puts a credential into the environment of every step: {string.Join(", ", EnvCredentials(Child(baseJob, "env")))}");
-            if (EnvCredentials(Child(ciRoot, "env")).Any())
-                violations.Add($"ci.yml puts a credential into the environment of every job: {string.Join(", ", EnvCredentials(Child(ciRoot, "env")))}");
+            ci.TryGetValue(job, out var baseJob);
+            if (baseJob is not null && EnvFinding(Child(baseJob, "env")) is { } jobEnv)
+                violations.Add($"ci.yml job '{job}' puts a credential into the environment of every step: its env is {jobEnv}");
+            if (EnvFinding(Child(ciRoot, "env")) is { } workflowEnv)
+                violations.Add($"ci.yml puts a credential into the environment of every job: its env is {workflowEnv}");
             // Review round 6 m-1: the job's container env, and an earlier step that hands a value on through $GITHUB_ENV.
-            if (baseJob is not null && EnvCredentials(Child(Child(baseJob, "container"), "env")).Any())
-                violations.Add($"ci.yml job '{job}' puts a credential into its container's environment: {string.Join(", ", EnvCredentials(Child(Child(baseJob, "container"), "env")))}");
+            if (baseJob is not null && EnvFinding(Child(Child(baseJob, "container"), "env")) is { } containerEnv)
+                violations.Add($"ci.yml job '{job}' puts a credential into its container's environment: its env is {containerEnv}");
             if (baseJob is not null)
                 foreach (var earlier in Steps(baseJob).TakeWhile(s => !ReferenceEquals(s, step)))
                 {
                     var name = Scalar(Child(earlier, "name")) ?? Scalar(Child(earlier, "uses")) ?? "?";
-                    if (EnvCredentials(Child(earlier, "env")).Any())
-                        violations.Add($"ci.yml job '{job}' step '{name}' before the base comparison holds a credential in its env");
+                    if (EnvFinding(Child(earlier, "env")) is { } stepEnv)
+                        violations.Add($"ci.yml job '{job}' step '{name}' before the base comparison holds a credential in its env: {stepEnv}");
+                    // Review round 7 m-1 c: an action handed a credential before the base comparison could pass it on.
+                    if (EnvFinding(Child(earlier, "with")) is { } with)
+                        violations.Add($"ci.yml job '{job}' step '{name}' passes a credential to an action before the base comparison: its with is {with}");
                     var earlierRun = Scalar(Child(earlier, "run")) ?? "";
                     var carriesExpression = earlierRun.Contains("${{", StringComparison.Ordinal)
                         || (Child(earlier, "env") as YamlMappingNode)?.Children.Any(kv => Scalar(kv.Value)?.Contains("${{", StringComparison.Ordinal) == true) == true;
@@ -1190,24 +1206,44 @@ internal static class WorkflowPolicy
     }
 
     /// <summary>
-    /// Whether a text carries the run's token or a secret (review rounds 5 and 6). Every whole <c>${{ … }}</c> expression is
+    /// Whether a text carries the run's token or a secret (review rounds 5 to 7). Every whole <c>${{ … }}</c> expression is
     /// read (non-greedy up to its own <c>}}</c>, so a <c>'{0}'</c> inside does not end it) without regard to case, as GitHub
-    /// evaluates them; it is a credential when it names <c>secrets</c> or <c>token</c> as a word anywhere, or the whole
-    /// <c>github</c> context as a value or a function argument (<c>github</c>, <c>toJSON(github)</c>) — that context holds
-    /// the token. A <c>github.*</c> property other than the token (<c>github.event.pull_request.base.sha</c>) is none.
-    /// Outside expressions, the bare words <c>github.token</c> and <c>secrets.</c> count too, in any case.
+    /// evaluates them. It is a credential when it names <c>secrets</c> or <c>token</c> as a word anywhere, or uses the
+    /// <c>github</c> context other than as a plain dotted path to one property that is not the token: <c>github</c> alone,
+    /// <c>toJSON(github)</c>, <c>github.*</c>, <c>github[…]</c>, <c>github.event[…]</c> and <c>join(github.*, ',')</c> all
+    /// count, because the context holds the token. <c>github.event.pull_request.base.sha</c> is allowed. Outside
+    /// expressions, the bare words <c>github.token</c> and <c>secrets.</c> count too, in any case.
     /// </summary>
     private static readonly Regex ExpressionPattern = new(@"\$\{\{(?<inner>.*?)\}\}", RegexOptions.CultureInvariant | RegexOptions.Singleline);
     private static readonly Regex CredentialWord = new(@"\b(secrets|token)\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-    private static readonly Regex WholeGithub = new(@"(^|[\s(,!])github\s*($|[\s),])", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex GithubWord = new(@"\bgithub\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    // A plain dotted path below github that is not the token, not followed by an index, a further '.' or a filter '*'.
+    private static readonly Regex PlainGithubPath = new(@"\Ggithub\.(?!token\b)[a-z_][\w-]*(\.[a-z_][\w-]*)*(?![\w.\[*-])",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static bool CredentialExpression(string inner)
+        => CredentialWord.IsMatch(inner)
+           || GithubWord.Matches(inner).Any(g => !PlainGithubPath.IsMatch(inner, g.Index));
 
     private static bool Credential(string? text) => text is not null
-        && (ExpressionPattern.Matches(text).Any(m => CredentialWord.IsMatch(m.Groups["inner"].Value) || WholeGithub.IsMatch(m.Groups["inner"].Value))
+        && (ExpressionPattern.Matches(text).Any(m => CredentialExpression(m.Groups["inner"].Value))
             || text.Contains("github.token", StringComparison.OrdinalIgnoreCase)
             || text.Contains("secrets.", StringComparison.OrdinalIgnoreCase));
 
-    private static IEnumerable<string> EnvCredentials(YamlNode? env)
-        => (env as YamlMappingNode)?.Children.Where(kv => Credential(Scalar(kv.Value))).Select(kv => Scalar(kv.Key) ?? "?") ?? [];
+    /// <summary>
+    /// What is wrong with an <c>env</c> (or <c>with</c>) node, or null: the keys holding a credential, or — for a node that
+    /// is not a mapping (a scalar, an expression such as <c>${{ fromJSON(…) }}</c>) — that it cannot be checked at all
+    /// (review round 7 m-1 a: such a node is a finding, never "no credential").
+    /// </summary>
+    private static string? EnvFinding(YamlNode? env) => env switch
+    {
+        null => null,
+        YamlMappingNode m when m.Children.Where(kv => Credential(Scalar(kv.Value))).Select(kv => Scalar(kv.Key) ?? "?").ToList() is { Count: > 0 } keys
+            => string.Join(", ", keys),
+        YamlMappingNode => null,
+        YamlScalarNode s when string.IsNullOrEmpty(s.Value) => null,
+        _ => "not a mapping, so it cannot be checked",
+    };
 
     // ---- YAML helpers ----
 

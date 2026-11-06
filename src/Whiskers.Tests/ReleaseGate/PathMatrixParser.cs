@@ -10,7 +10,11 @@ public static class PathMatrixParser
 {
     public const string PathCapabilitiesHeading = "## Rows and capabilities";
     private static readonly Regex RowId = new(@"^([MASTU])-(\d+)$", RegexOptions.CultureInvariant);
-    private static readonly Regex LooksLikeRowId = new(@"(?<![A-Za-z])[MASTU]-\d+", RegexOptions.CultureInvariant);
+    // A near miss of a row ID (review rounds 6 and 7): a class letter in any case, then any dash (ASCII or U+2010–U+2015)
+    // or any other non-word character, then a digit-like run ('U-40', 'u-40', 'U–40', 'U-4O'), anywhere in the first cell;
+    // or a first cell that starts with a class letter and a non-word character. Only an exact ID is a row.
+    private static readonly Regex LooksLikeRowId = new(@"((?<![A-Za-z])[MASTU][-‐-―][0-9O]|^[MASTU]\W)",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private static readonly Regex FirstBackticked = new(@"`([^`]+)`", RegexOptions.CultureInvariant);
 
     public static IReadOnlyList<PathRow> Parse(string contract, string? pathCapabilities)
@@ -20,8 +24,12 @@ public static class PathMatrixParser
     public static IReadOnlyList<PathRow> Parse(string contract, string? pathCapabilities, List<string> problems)
     {
         var lines = MarkdownTables.Lines(contract);
+        // A fenced '## 7.' or '## 8.' is an example, not the section's bounds (review round 7 n-1).
+        var fenced = MarkdownTables.Fenced(lines);
         var start = Array.FindIndex(lines, l => l.StartsWith("## 7.", StringComparison.Ordinal));
+        while (start >= 0 && fenced[start]) start = Array.FindIndex(lines, start + 1, l => l.StartsWith("## 7.", StringComparison.Ordinal));
         var end = Array.FindIndex(lines, Math.Max(start, 0), l => l.StartsWith("## 8.", StringComparison.Ordinal));
+        while (end >= 0 && fenced[end]) end = Array.FindIndex(lines, end + 1, l => l.StartsWith("## 8.", StringComparison.Ordinal));
         if (start < 0 || end < 0) { problems.Add("PRODUCT_CONTRACT.md has no §7 path matrix (## 7. … ## 8.)"); return []; }
 
         var mapping = new Dictionary<string, (int Line, string Cell)>(StringComparer.Ordinal);
@@ -39,7 +47,6 @@ public static class PathMatrixParser
         // Every '|' line outside a code fence, indented or not, with or without a space after the bar (review round 6 m-2):
         // a row the reader drops would be missing from R14/R15 and the inventory while the gate stays green. A first cell
         // that names a row ID but is not exactly one ('**U-40**', 'U-40a') is a problem, never a skipped line.
-        var fenced = MarkdownTables.Fenced(lines);
         var rows = new List<PathRow>();
         for (var i = start; i < end; i++)
         {

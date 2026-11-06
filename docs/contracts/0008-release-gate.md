@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
 review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
-does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 6) is pending acceptance. Both are at the end.
+does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 7) is pending acceptance. Both are at the end.
 
 ## Purpose
 
@@ -622,7 +622,7 @@ This amendment takes precedence over the text above. It was accepted on 6 Novemb
 - **`ReleaseGateBaseTests`** passes without comparing when `WHISKERS_GATE_BASE` is unset; the comparison runs in the CI
   step that sets it.
 
-## Amendment 2 — gate review rounds 1 to 6 (6 November 2026)
+## Amendment 2 — gate review rounds 1 to 7 (6 November 2026)
 
 This amendment takes precedence over the text above, Amendment 1 included. It is **pending acceptance** by the
 maintainer.
@@ -657,15 +657,26 @@ maintainer.
   of their reach: the checkout's persisted credentials hold the same read-only (`contents: read`) token.
 
   What counts as a credential: each whole `${{ … }}` expression is read up to its own closing `}}` and without regard to
-  case. It is a credential when it contains the word `secrets` or the word `token` anywhere, or the bare `github`
-  context as a value or a function argument (`${{ github }}`, `${{ toJSON(github) }}`). Outside expressions the
-  texts `github.token` and `secrets.` count too, in any case. A `github.*` property without the word `token`, such as
-  `github.event.pull_request.base.sha`, is no credential. The following is refused:
+  case. It is a credential when it contains the word `secrets` or the word `token` anywhere, or when it uses the `github`
+  context in any other way than a plain dotted path to a property that is not the token. A plain path is
+  `github.<name>` or `github.<name>.<name>…`, where a name starts with a letter or `_`, and it is not followed by an index
+  `[…]`, a filter `*` or a further `.`. So `${{ github }}`, `${{ toJSON(github) }}`, `${{ toJSON(github.*) }}`,
+  `${{ join(github.*, ',') }}`, `${{ github[…] }}` and `${{ github.event[…] }}` are credentials, while
+  `github.event.pull_request.base.sha` is not. Outside expressions, the texts `github.token` and `secrets.` count too,
+  in any case.
+
+  An `env` node that is not a mapping (a scalar, or an expression such as `${{ fromJSON(…) }}`) cannot be checked, so
+  it counts as holding a credential.
+
+  The following is refused:
   - in the base step, any environment value other than `RELEASES_TOKEN` that is a credential, and a credential in its
     script;
   - a credential in the `env` of the job that runs the base step, of that job's `container`, or of the workflow;
-  - in a step of that job before the base step, a credential in the step's `env`, or a write to `$GITHUB_ENV` in a step
-    whose script or `env` holds any `${{ … }}` expression, because later steps would inherit it.
+  - in a step of that job before the base step:
+    - a credential in the step's `env`;
+    - a credential in the `with` of a step that uses an action;
+    - a write to `$GITHUB_ENV` in a step whose script or `env` holds any `${{ … }}` expression, because later steps
+      would inherit it.
 - **Reading the base fails closed.** A file counts as absent from the base only when `git ls-tree` lists no such path at
   the base commit; any failure of `git ls-tree` or `git show` (a missing object after a shallow fetch, a corrupt object,
   a bad reference) is a finding, never an empty base. A current commit without a csproj is a finding too, and so is a
@@ -695,9 +706,12 @@ maintainer.
     validates the header of exactly the table that is read, so a fenced example table can neither be read nor stand in
     for the real header.
   - The §7 path matrix reader takes every `|` line between `## 7.` and `## 8.` outside a fence, indented or not and
-    with or without a space after the bar. A first cell that is exactly a row ID (`[MASTU]-n`) is a row. A first cell
-    that only contains one (`**U-40**`, `U-40a`) is a problem, never a skipped line. In §7.6, a class or the total
-    counted twice is a problem.
+    with or without a space after the bar. A fenced `## 7.` or `## 8.` does not bound the section.
+    - A first cell that is exactly a row ID (`[MASTU]-n`) is a row.
+    - A near miss is a problem, never a skipped line. A near miss is a first cell that holds a class letter in any case
+      followed by an ASCII dash or one of U+2010–U+2015 and then a digit or the letter O (`**U-40**`, `U-40a`, `u-40`,
+      `U–40`, `U-4O`), or a first cell that starts with a class letter and a non-word character.
+    - In §7.6, a class or the total counted twice is a problem.
   - R3 also reads `SECURITY_INVARIANTS.md` line by line: every line outside a fence that starts with `|` (after any
     indentation) and names an `INV-n` in its first cell, but is not a parsed row, is a finding ("an invariant row the
     gate cannot read"), so a table whose header the parser does not recognise cannot hide its rows. The base
