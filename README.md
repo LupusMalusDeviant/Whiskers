@@ -230,19 +230,19 @@ Do not set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` instead: it trusts every p
 **Tailscale Serve, Funnel and DockTail.** It depends on the mode.
 
 **HTTP mode.** tailscaled acts as a reverse proxy like any other. This covers `tailscale serve --http`/`--https`, Tailscale Services served over HTTP(S), and DockTail's default `docktail.service.protocol=http`. tailscaled replaces `X-Forwarded-For` with the caller's address; for Funnel traffic, that is the visitor's public address. List the address tailscaled connects from in `ForwardedHeaders__TrustedNetworks__0`:
-- **tailscaled on the same host as a native install, Serve target `localhost`:** loopback, which is already trusted. A target on another address of the host makes that address the peer; list it.
+- **tailscaled on the same host as a native install, Serve target `localhost`:** loopback, which is already trusted. Keep the target on `localhost`: a target on another address of the host makes that address the peer, and listing it trusts everything that connects to it, any TCP forward to it included.
 - **tailscaled on the host or with host networking, Whiskers in a container** (DockTail's default): the gateway of Whiskers' Docker network, for example `172.18.0.1/32`. Listing the gateway trusts everything that reaches Whiskers from it: host processes, published ports handled by docker-proxy (localhost, hairpin, rootless or userland-proxy setups), and any TCP forward. Do it only when the container publishes no ports and no TCP forward targets it.
 - **The safer layout:** a Tailscale sidecar with `network_mode: service:tailscale`. tailscaled then connects over loopback and nothing needs to be listed.
 
 **TCP mode.** This covers `--tcp`, `--tls-terminated-tcp` and `docktail.service.protocol=tcp`. tailscaled adds no forwarded headers; it passes whatever the client sends through unchanged, `Host` and `X-Forwarded-*` included. Whiskers sees tailscaled's address as the peer:
-- **If that address is not trusted:** every visitor appears to come from that one address. Forwarded headers a client sends are ignored, and the peer is named in production readiness for 24 hours.
-  - All visitors share one login rate limit, so a single client can lock everyone out of local sign-in.
+- **If that address is not trusted:** every visitor appears to come from that one address. Forwarded headers a client sends are ignored, and once a client sends them, the peer is named in production readiness until 24 hours after the last time.
+  - All visitors share one login rate limit (10 attempts a minute), so a single client can use it up and keep everyone else from signing in locally.
   - The audit shows only that address.
   - Behind `--tls-terminated-tcp`, Whiskers treats the connection as plain HTTP: the session cookie has no `Secure` flag, and a Google/OIDC callback is built with `http://`.
 - **If that address is trusted** (loopback for a forward to `localhost`, or a gateway you listed): the client picks its own address and scheme. That bypasses the per-client login rate limit and falsifies the audit.
 
 Do not put a TCP forward in front of Whiskers. If you must:
-- Point it at a non-loopback address: the host's LAN or tailnet IP, or the container's own address. Do not point it at `localhost` or `127.0.0.1`, because loopback is trusted by default.
+- Point it at a non-loopback address that is not in `ForwardedHeaders__TrustedNetworks`: the host's LAN or tailnet IP, or the container's own address. Do not point it at `localhost` or `127.0.0.1`, because loopback is trusted by default.
 - Make sure the address the forward comes from is not in `ForwardedHeaders__TrustedNetworks`.
 
 The sidecar layout above suits HTTP mode only: in a sidecar, a TCP forward to `localhost` arrives from a trusted peer.
