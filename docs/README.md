@@ -2,7 +2,7 @@
 
 | Document | What |
 |---|---|
-| [../README.md](../README.md) | Facts, install, first sign-in, MCP client, image verification, key settings, accepted limits |
+| [../README.md](../README.md) | Facts, install, first sign-in, MCP client, image verification, key settings, accepted limits, compose remaining risks and upgrade note, operations links |
 | [governance.md](governance.md) | Governance model: comparison with a plain Docker/K8s MCP server, the hero workflow, how the policy layer applies per caller |
 | [features.md](features.md) | Features by area, including the compose exposure checks (contract 0006) |
 | [installation.md](installation.md) | Every install path: installer, `docker run`, Compose, first sign-in, MCP clients, reverse proxy, Tailscale, profiles, Helm, from source |

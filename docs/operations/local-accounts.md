@@ -125,7 +125,7 @@ staged restore. The account's password is removed and its sessions end; set a ne
   of that container's log and may be shipped by a logging driver.
 - It works only for an **existing** local account and changes nothing else: it never creates an account and never
   grants a role. To re-create a lost Admin entirely, see the admin bootstrap (`WHISKERS_ADMIN_EMAIL`, first run only)
-  in the README.
+  in [configuration.md](../configuration.md).
 - The audit row (`auth.recovery_issued`, actor `cli (--recover-local-account)`) is written **before** anything changes;
   if it cannot be written, nothing changes (exit code 1).
 - Exit codes: `0` code issued, `2` usage, `3` no local account with that email, `1` nothing changed (audit or store

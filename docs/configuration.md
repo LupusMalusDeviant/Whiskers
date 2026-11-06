@@ -1,7 +1,15 @@
 # Configuration
 
-Whiskers is configured entirely through environment variables (`.env`). Every setting is optional. The full,
-commented list is [../.env.example](../.env.example).
+Whiskers is configured entirely through environment variables. Every setting is optional. The full, commented list
+is [../.env.example](../.env.example).
+
+- **Release `docker-compose.yml`:** the keys below go into a `.env` beside it, and the compose file maps them to the
+  container variables, for example `OIDC_ENABLED` → `Oidc__Enabled` and `PATH_BASE` → `PathBase`. Keys it does not map
+  include `ForwardedHeaders__*` and `WHISKERS_DB_*`; set those as `environment:` entries, or use the
+  `deploy/docker-compose.postgres.yml` overlay for the database.
+- **Installer or `docker run`:** the generated compose file passes only `TZ` and `VAULT_KEY_FILE`. Add the container
+  variables (`Oidc__Enabled`, `PathBase`, …) as `environment:` entries in `./whiskers/docker-compose.yml`, or as `-e`
+  flags.
 
 | Group | Keys | Notes |
 |---|---|---|

@@ -16,8 +16,11 @@ Whiskers/
 │   │   ├── wwwroot/            # static assets
 │   │   └── Program.cs          # composition root (DI, middleware, MCP, auth)
 │   └── Whiskers.Tests/         # xUnit test suite
-├── deploy/                     # installer, compose overlays, Helm chart, telemetry templates
+├── deploy/                     # installer, compose overlays, Helm chart
+│   └── telemetry/              # mesh/mTLS deploy templates (node_exporter, VictoriaMetrics, Tailscale ACL)
 ├── docs/                       # documentation (index: docs/README.md)
+│   ├── ARCHITECTURE.md         # architecture, security-critical areas & change control
+│   └── product/                # product positioning (see docs/product/POSITIONING.md)
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md

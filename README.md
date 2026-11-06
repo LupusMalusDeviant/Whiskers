@@ -19,8 +19,8 @@ of holding SSH keys or the Docker socket. Every call is authenticated, scope-che
 | Sign-in | Local accounts, Google, generic OIDC. `AUTH_DISABLED=true` makes every request an Admin (trusted LAN trials only). |
 | MCP keys | Read, Write or Admin scope, or an explicit tool list; checked on every call. Stored as SHA-256 hashes, shown once. |
 | Guardrails | Per tool Allow / Confirm / Block, evaluated in code at the tool boundary. `Confirm` runs only the exact call a human approved. |
-| Records | Agent History (every tool call) and a hash-chained Audit Log (checkpoints signed when `VAULT_KEY` is set). |
-| Host access | SSH only for onboarding. Afterwards: WireGuard mesh (Tailscale/NetBird), Docker API over mTLS behind a verb-whitelisting socket proxy, host commands via a one-shot `nsenter` container. No stored SSH key. |
+| Records | Agent History (every tool call) and a hash-chained Audit Log. Checkpoints are signed, and the trail is tamper-evident, only when `VAULT_KEY` is set. |
+| Host access | Onboarding uses SSH once. Onboarded hosts then run over a WireGuard mesh (Tailscale/NetBird), the Docker API over mTLS behind a verb-whitelisting socket proxy, and host commands via a one-shot `nsenter` container, with no standing SSH key. A server added as a plain SSH connection and never onboarded keeps using SSH (its key in `ssh-keys/`) until it is migrated. |
 | Targets | Docker hosts, k3s/Kubernetes clusters (kubeconfig), Hetzner and Hostinger cloud APIs. |
 | Storage | `/app/data` (`WHISKERS_DATA_DIR`). SQLite by default, PostgreSQL optional. Secrets vault AES-256-GCM with `VAULT_KEY`; SSH and mTLS client keys are protected by file permissions only. |
 | Images | `ghcr.io/lupusmalusdeviant/whiskers`, amd64 + arm64, Trivy-gated, SBOM + provenance, keyless cosign signature. |
@@ -37,13 +37,17 @@ curl -fsSLO "https://github.com/LupusMalusDeviant/Whiskers/releases/download/v${
 sha256sum --check --ignore-missing checksums.txt && bash install.sh
 ```
 
-The installer installs exactly that release, generates the vault key, verifies the image signature if cosign is
-installed, writes `./whiskers/` and waits until healthy. Flags: `install.sh --help`. The UI is at
-`http://127.0.0.1:5100`.
+The installer generates the vault key, verifies the image signature if cosign is installed, writes `./whiskers/` and
+waits until healthy. Flags: `install.sh --help`. The UI is at `http://127.0.0.1:5100`.
+
+Installers attached to releases up to 0.15.0 default to `latest`. Run those with
+`bash install.sh --image "ghcr.io/lupusmalusdeviant/whiskers:${VER}"`. From the next release on, the installer of a
+release installs exactly that release.
 
 Without the installer:
 
 ```bash
+VER=X.Y.Z
 docker run -d --name whiskers -p 127.0.0.1:5100:8080 \
   -v whiskers-data:/app/data -v /var/run/docker.sock:/var/run/docker.sock \
   "ghcr.io/lupusmalusdeviant/whiskers:${VER}"
@@ -91,7 +95,8 @@ resources: [docs/mcp.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main
 ## Verifying the image
 
 ```bash
-cosign verify ghcr.io/lupusmalusdeviant/whiskers:0.15.0 \
+VER=X.Y.Z
+cosign verify "ghcr.io/lupusmalusdeviant/whiskers:${VER}" \
   --certificate-identity-regexp '^https://github.com/LupusMalusDeviant/Whiskers/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -101,16 +106,21 @@ Images before v0.12.1 are not cosign-signed. Supply-chain details:
 
 ## Configuration
 
-Everything is optional; set it in a `.env` beside `docker-compose.yml`. The most used keys:
+Everything is optional. Where a setting goes depends on the install path:
 
-| Key | Effect |
-|---|---|
-| `VAULT_KEY_FILE` / `VAULT_KEY` | Encrypts stored secrets. Losing it makes them unreadable. |
-| `WHISKERS_DB_PROVIDER`, `WHISKERS_DB_CONNECTION_FILE` | `sqlite` (default) or `postgres`. |
-| `OIDC_ENABLED`, `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Sign-in through your identity provider. |
-| `HOST_BIND`, `HOST_PORT` | Published address; default `127.0.0.1:5100`. |
-| `PATH_BASE` | Subpath behind a reverse proxy. |
-| `ForwardedHeaders__TrustedNetworks__0` | Proxy whose `X-Forwarded-*` headers are believed; loopback only by default. |
+- **Release `docker-compose.yml`:** put the `.env` names below in a `.env` beside it; the compose file maps them to the
+  container variables.
+- **Installer or `docker run`:** the generated compose file passes only `TZ` and `VAULT_KEY_FILE`. Add the container
+  variables as `environment:` entries in `./whiskers/docker-compose.yml`, or as `-e` flags.
+
+| `.env` name (release compose) | Container variable | Effect |
+|---|---|---|
+| `VAULT_KEY_FILE` / `VAULT_KEY` | same | Encrypts stored secrets. Losing it makes them unreadable. The installer sets `VAULT_KEY_FILE`. |
+| — (use the `deploy/docker-compose.postgres.yml` overlay) | `WHISKERS_DB_PROVIDER`, `WHISKERS_DB_CONNECTION_FILE` | `sqlite` (default) or `postgres`. |
+| `OIDC_ENABLED`, `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | `Oidc__Enabled`, `Oidc__Authority`, `Oidc__ClientId`, `Oidc__ClientSecret` | Sign-in through your identity provider. |
+| `HOST_BIND`, `HOST_PORT` | — (port mapping; installer: `--bind`, `--port`) | Published address; default `127.0.0.1:5100`. |
+| `PATH_BASE` | `PathBase` | Subpath behind a reverse proxy. |
+| — (not mapped; add an `environment:` entry) | `ForwardedHeaders__TrustedNetworks__0` | Proxy whose `X-Forwarded-*` headers are believed; loopback only by default. |
 
 All keys: [docs/configuration.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/configuration.md) and [.env.example](https://github.com/LupusMalusDeviant/Whiskers/blob/main/.env.example).
 
@@ -148,7 +158,11 @@ or caught only after `up`:
 - **Out of scope**: the Deploy page's compose mode (`ComposeFileParser`) and `DeploymentRequest` / `deploy_app` are not
   decided on their exposures.
 
-Docker Compose v2.15 or newer is required on every managed host.
+**Upgrade note (contract 0006).** The new policy defaults change every policy's version hash, so open approvals and
+the policy snapshots of pinned runs expire at the upgrade. `docker compose pull --ignore-buildable` needs Docker
+Compose v2.15 or newer on every managed host. A label key, a port, a network or a privilege field from an `.env`
+variable that is not set now refuses the plan. Redeploys of projects with `build:` services rebuild with `--pull`, and
+Git deploys now pull images as well.
 
 ## Operating it
 
@@ -165,13 +179,13 @@ Requires the .NET SDK version in `global.json`.
 ```bash
 dotnet build Whiskers.slnx -c Release
 dotnet test Whiskers.slnx -c Release
-dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --filter Category=RequiresDocker   # PostgreSQL suites, needs Docker
-dotnet run --project src/Whiskers/Whiskers.csproj                                       # listens on :8080
+dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --filter Category=RequiresDocker   # PostgreSQL suites: need Docker, skipped locally without it, mandatory on CI
+dotnet run --project src/Whiskers/Whiskers.csproj                                       # http://localhost:5041 (launchSettings.json)
 ```
 
 After changing a package reference: `dotnet restore Whiskers.slnx --force-evaluate` and commit the lock files
-([deploy/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/deploy/README.md#pinned-build-inputs-r1-52)). Pull requests: [CONTRIBUTING.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/CONTRIBUTING.md);
-CI checks: [docs/operations/ci-and-release-checks.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/ci-and-release-checks.md).
+([deploy/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/deploy/README.md#pinned-build-inputs-r1-52)). Pull requests: [CONTRIBUTING.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/CONTRIBUTING.md).
+CI checks the build, the tests, the image, the PostgreSQL suites, dependencies, secrets and static analysis: [docs/operations/ci-and-release-checks.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/ci-and-release-checks.md).
 
 ## Documentation
 

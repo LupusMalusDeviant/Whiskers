@@ -30,6 +30,7 @@ Details: [deploy/README.md → Installer](../deploy/README.md#installer).
 No vault key — set `VAULT_KEY_FILE` before you store secrets:
 
 ```bash
+VER=X.Y.Z
 docker run -d --name whiskers -p 127.0.0.1:5100:8080 \
   -v whiskers-data:/app/data -v /var/run/docker.sock:/var/run/docker.sock \
   "ghcr.io/lupusmalusdeviant/whiskers:${VER}"
