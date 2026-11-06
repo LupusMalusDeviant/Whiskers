@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host.
+and the whiskers.site host. **Amendment 1** (review round 1, at the end) is pending acceptance.
 
 ## Purpose
 
@@ -199,3 +199,92 @@ to run while any `ServerConfig` still points to the shared paths.
 - **D5 Bulk rollout.** Recommended: one host per action, no "migrate all" in this package. Matches your wish to go host by
   host.
 - **D6 New hosts.** Recommended: onboarding uses its own identity right away (generation 1), with no shared phase.
+
+## Amendment 1 — review round 1 (6 November 2026, pending acceptance)
+
+This amendment is binding where it differs from the text above. Decisions D1–D6 are unchanged.
+
+### Identity (review B3)
+
+- `{slug}` is `Slug(server.Id)`, not the display name.
+  - Display names are lossy ("Web 1" and "web_1" both become `web-1`), not unique, and change on rename.
+- At first issue, the CN and the generation are stored in `{MtlsDir}/hosts/{id}/identity`.
+  - From then on they are only read from there, never derived again.
+- `IssueAsync` refuses when another server already maps to the same CN.
+- The CN matches the `MtlsIdentity` DNS-label pattern and has at most 63 characters.
+- `serverId` is checked against an allow-list pattern before it is used in a path.
+- `IsManaged` compares canonical full paths.
+
+### Store
+
+- `Ca` is the existing `{MtlsDir}/ca.crt`. There is no per-host copy and no new trust anchor.
+- The store holds `client.key`, `client.crt`, `identity` and `rollout.json`.
+- Key files are created with `UnixCreateMode` 0600 when they are opened, not changed with chmod afterwards.
+- `ValidateIssuedClient` accepts step's default EKU (serverAuth+clientAuth). It requires clientAuth and refuses any SAN.
+  - The CSR carries no SAN.
+
+### Host steps and confirmation (review B2)
+
+- **Applying an `--allow-cn` change.** ghostunnel is recreated detached:
+  `systemd-run … docker compose -f <file> up -d --force-recreate ghostunnel`. A restart would keep the old command line.
+- **Guard.** It uses its own guard script and marker, never `renew-guard.sh` / `.renew-ok`.
+  - Without the marker, it restores `docker-compose.yml.prev` and recreates ghostunnel.
+- **Confirmation in phases 2 and 4.** A one-off client built from the **new** credential connects, through the same
+  `BuildMtlsCredentials` / `ValidateMtlsServerCert` logic.
+  - `docker inspect ghostunnel` `.Args` must equal the intended list.
+- **Phase 4 negative check.** A handshake with the shared credential (with the previous generation, when rotating) must
+  be refused **before** the marker is written.
+- **Phase 5.** It is recorded only after both checks have passed.
+
+### Resume and concurrency (review M6)
+
+- **Where host state comes from.** It is read from the `docker inspect ghostunnel` args, not from the compose file.
+- **Guard in progress.** No step runs while a `whiskers-*-guard*` systemd unit is active on the host.
+- **One lock per host.** The rollout shares it with the server-certificate renewal (`RenewAsync`). A persisted phase
+  journal (`rollout.json`) says where the rollout stands after a restart.
+- **Preflight before any host change:**
+  - ghostunnel is managed by compose; the file is found through the label `com.docker.compose.project.config_files`;
+  - its args equal the approved list, except `--allow-cn`.
+
+  Otherwise the step is refused with an explanation. Only the `--allow-cn` items are edited, in place. Image pins and all
+  other flags stay as the host has them.
+
+### Retiring and restore (review M7)
+
+- **Retire is a UI action only** (Admin), with no MCP tool.
+- **What retire requires.** Every TCP+TLS server must have a phase-5 record with the negative check passed. The match is
+  on the client certificate's CN and thumbprint, not on path strings.
+- **Older self-backups.** They still contain the shared key, and the operator guide says so.
+- **Restore after a migration.** A readiness line names the case "shared client credential present while hosts are
+  narrowed" and points to break-glass re-onboarding over SSH.
+
+### Capabilities and renewal (review M8)
+
+- **Registration.** `mtls.client_migrate`, `mtls.client_renew` and `mtls.shared_client_retire` are registered in
+  `CapabilityCatalog`, `ControlPlaneResources.Capabilities` and `MutationCompositions` (raw host command allowance),
+  the same way as `certificate.renew_mtls`.
+  - MCP tools exist only for migrate and renew.
+- **Rotation.** `rotate: true` reuses phases 2–5 for g(n) → g(n+1).
+- **Plain renewal.** It keeps local `.prev` copies of the key and the certificate until the new connection is confirmed.
+
+### Tests (review M9 and minors)
+
+- **Validation is preserved.** After phase 3, after a renewal, after a rotation and for a newly onboarded host, the
+  credentials that are built validate through `ValidateMtlsServerCert` with `TcpCaCertPath`. A server certificate for the
+  wrong IP, or one from a foreign CA, is refused.
+- **Store.** Owner uid, key 0600 and directory 0700 (Unix).
+- **Enrollment.** `OnboardServerAsync` writes `PathsFor(id)` and the per-host `--allow-cn`.
+- **Identity.** Two servers whose names collide get different CNs.
+- **Docs.** A doc check confirms the blast-radius section in ARCHITECTURE and INV-58.
+- **Fixture.** `TestCa` moves to a shared test fixture.
+- **[braucht Nutzer/Hardware]** Live negative checks: A's credential at B's ghostunnel, and the shared credential after
+  phase 4.
+
+### INV-58
+
+✅ only "per host after migration". Readiness shows the status per host until every managed host is narrowed.
+
+### Definition
+
+"Operator-supplied paths" are paths that are neither the shared `{MtlsDir}/client.*` nor the managed
+`{MtlsDir}/hosts/{id}/*`. Migrating a server that is on the shared paths is the normal case.

@@ -1,6 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
+**Amendment 1** (review round 1, at the end) is pending acceptance.
 
 ## Purpose
 
@@ -167,3 +168,89 @@ operator choice.
 - **D5: readiness check for the own container** in this package, or split out.
 - **D6: `app.deploy`** (single container) is out of scope. It has no labels; its ports and `network_mode` could follow
   later through the same rule.
+
+## Amendment 1 — review round 1 (6 November 2026, pending acceptance)
+
+This amendment is binding where it differs from the text above. Decisions D1–D6 are unchanged, and D6 is made more
+precise below.
+
+### Agent path through the resolved target (review B1)
+
+- MCP `deploy_compose` makes no nested decision. Its plan is built while the gateway resolves the target
+  (`MutationTargets.HostAsync` / `WithPlanAsync`).
+- The exposures go there as a new field `MutationTarget.Exposures` (classes and details), and they are part of the
+  `ApprovalBinding`.
+- `ExposureChangeRule` reads **only** the resolved target, never caller arguments.
+- The nested `RunExposuresAsync` decision stays for the UI and automation paths.
+- When the tool plans again, `EnsureDecided` must find every exposure in the resolved target.
+- Tests:
+  - with `MaxAutonomousLevel = "admin"`, Funnel over MCP leads to Confirm;
+  - an approval is not reused after a change to `.env` alters the exposure.
+
+### Paths (review M1)
+
+- **In scope:** `container.env_set` (MCP `set_container_env`, the `.env` save on the container page, and
+  `MutationTargets` for `container.env_set`), and the App Store (`app.deploy` through `ComposeImpact.DeployAsync`).
+- **Out of scope and named as such:**
+  - the Deploy page's compose mode (`DeploymentService.DeployFromComposeAsync` / `ComposeFileParser`), which has no
+    `ComposePlan`;
+  - the `DeploymentRequest` paths (the Deploy form and MCP `deploy_app`).
+
+  The README names these gaps.
+
+### How exposures are detected (review M2)
+
+- **Source.** The union of the plan model and the server-side `docker compose config --format json`
+  (`ComposeConfigEffects`), the same way as for mounts. Compose resolves merging, `extends`, `label_file`, `!reset` and
+  `!override` itself. A service that only compose knows about is refused.
+- **Additional rows in the class `host`:**
+  - a service network that refers to an external network named `host`;
+  - `uts: host`, `cgroup: host`, `devices:`, `security_opt` with `seccomp:unconfined` or `apparmor:unconfined`.
+- **`network_mode: container:<x>`.** It is resolved through the inventory, and x's exposures are inherited. An x that
+  cannot be resolved is refused.
+- **Label keys.** They are matched case-insensitively. An added prefix that is not built in belongs to the class
+  `public`, failing closed.
+- **Remaining risk.** Traefik with `exposedByDefault` (`traefik.enable`, `traefik.http.services.*`) is named in the
+  README. D4 is unchanged.
+
+### Checked again after `up` (review M3)
+
+- The read-back verifier of `compose.deploy` / `app.deploy` (R1-37) inspects the containers that were created:
+  `Config.Labels` and `HostConfig.{NetworkMode, Privileged, CapAdd, PidMode, IpcMode, PortBindings}`. This catches labels
+  that come from the image.
+- A difference from what was decided means: the operation is reported as failed, there is an `exposure_change`
+  notification and an audit entry, and **the container is stopped** (fail closed).
+- Test: a label that comes from the image.
+
+### No values in the clear (review M4)
+
+- **`Detail` for a `RouteLabel`.** It holds the key, plus the value only when the value is literal. A value that comes
+  from a variable is marked `FromVariable` and goes into `Withheld`, like the mounts.
+- **The notification** carries only the service, the kind and the key.
+- Test: no `.env` value appears in the audit or in the notification.
+
+### Configuration (review M5)
+
+- `ExposureLabelPrefixes` and `ExposureConfirmClasses` become `OptionalPolicyFields` in `GuardrailStore`, so existing
+  preset files remain complete.
+- `GuardrailsView.ClonePolicy` copies both fields, and a test pins this.
+- `null` means the default.
+- The CHANGELOG says that the new defaults change every policy's `VersionHash`. Open approvals and the snapshots of
+  pinned runs therefore expire at the upgrade.
+
+### Minors
+
+- **Variables that cannot be resolved.** If a label key, or a value under a matching prefix, or a port, network or
+  privilege field cannot be resolved, the deployment is refused. An unresolved value under a key that does not match is
+  ignored.
+  - The CHANGELOG names this behaviour change, because compose also interpolates from the host's environment.
+- **Readiness.** If Whiskers' own container cannot be found or read, the line says "unknown", not OK. The line quotes
+  only the label key.
+- **Tests for the API key.** They run with `MaxAutonomousLevel = "admin"`. Under the standard policy, `compose.deploy`
+  already needs confirmation anyway.
+- **`exposure_change`.** It is classified in `NotificationEventTypes.SuppressibleEvents`. A failed send does not undo a
+  deployment that has already run.
+- **Line references (as of `25797a37`):**
+  - `MutationPolicy.cs:74-92`;
+  - `ComposeImpact.cs:65-71`;
+  - `ContainerTools.cs:450-495`.
