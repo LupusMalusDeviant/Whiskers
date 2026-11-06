@@ -125,6 +125,23 @@ traceable.
 | PC-D7 | Autonomy of AI triggers. | Read-only by default. Write requires an explicit per-trigger allowlist of capabilities and targets; anything else is Confirm, which for an unattended run means Deny. | Keep `MaxLevel=write` default. | INV-23, 27 |
 | PC-D8 | Policy engine and modules. | The policy engine and approvals are **core**, independent of the Agent module. Disabling the agent removes the agent, not the guardrails. | Keep them in the Agent module and document that MCP is unguarded without it. | INV-26 |
 
+### 6.1 Release decisions
+
+Every decision the release gate relies on (contract 0008, D5): an **exception** that lets a ⚠️ invariant ship
+(`RELEASE_GATE.md` *Accepted exceptions*, with a limitation in the product documentation that names the invariant), the
+**retirement** of an invariant ID (*Retired invariants*), and a **known violation** that lets exactly one patch release
+ship with a ❌/❓ (*Known violations*, from 1.0.1 on; never at X.Y.0). *Release* is that exact version for a known
+violation and — otherwise. *Status* is `Proposed` or `Accepted`; *Date* is the ISO date of acceptance; *Decided by*
+names the maintainer who accepted it. **An `Accepted` row is immutable**: it is never edited or deleted, and an ID is
+never reused; a changed decision is a new row with a new ID (R18, checked against the base on every pull request and
+against the previous release tag in every release run). A retirement that a PC-D decision above already settled is
+recorded here as a `retirement` that cites it.
+
+| ID | Kind | Invariant | Decision | Release | Status | Date | Decided by |
+|---|---|---|---|---|---|---|---|
+
+No release decision is recorded yet.
+
 ## 7. Path matrix (current state)
 
 One row per mutation path from [`audit/B-mutations.md`](audit/B-mutations.md), updated for WP1 and WP2 step 2.1. Each row shows
@@ -204,6 +221,8 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-45 | `create_git_deploy_webhook` (`webhook.save`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the webhook back | GW ✅ + details | github only; the approving person becomes the owner; the target resolves through the app (its server); a webhook for an app moved or renamed after the decision is refused (`conflict`); the secret appears once, in the answer only; a second webhook for the same app is not refused (`get_git_deploy_app` lists them) |
 | M-46 | `rotate_git_deploy_webhook_secret` (`webhook.rotate_secret`, contract 0001) | admin | `NotVerifiable` + reason (Whiskers' own record); the tool reads the webhook back | GW ✅ + details | git-deploy webhooks only; the new secret appears once, in the answer only |
 | M-47 | `assess_update_risk` (`image.assess_update`, pulls the candidate image) | **write** (R1-48; was read — a pull changes the host) | `NotVerifiable` + reason (an assessment changes no container) | GW ✅ + details; an assessment that could not be made is `Failed` | INV-20/38: the pull is a composed `image.pull` (`MutationCompositions`) |
+| M-48 | `migrate_mtls_client_credential` (`mtls.client_migrate`, R1-44, contract 0007; row added by R1-51) | admin | `NotVerifiable` + reason: every host step is confirmed inside the guarded rollout (the running ghostunnel's allow-list read back, the new credential admitted and, before narrowing, the shared one refused) | GW ✅ + details | INV-58 (holds per host only after the migration) |
+| M-49 | `renew_mtls_client_credential` (`mtls.client_renew`, R1-44, contract 0007; row added by R1-51) | admin | `NotVerifiable` + reason: the rollout confirms the new certificate through a rebuilt connection (a rotation reads the allow-list back) before it reports success | GW ✅ + details | INV-58 |
 
 The four writes M-42, M-43, M-45 and M-46 are not offered to the AI agent (`AgentToolRegistry.NonAgentTools`): credentials never
 reach a model. Every error of the five, the gateway's refusals and a pending approval included, is the coded envelope of
@@ -237,6 +256,7 @@ reach a model. Every error of the five, the gateway's refusals and a pending app
 | S-13 | First-run setup wizard: the first administrator (W1, R1-48) | the person holding the one-time setup token (host-level: it is read from the data directory or `WHISKERS_SETUP_TOKEN`) | the setup token | only while no Admin exists — `IWhitelistService.AddFirstAdminAsync` and `IRoleService.SetFirstAdminAsync` refuse once any Admin exists (the wizard holds `AccessControlWriteGate`, the one write boundary every role and whitelist writer shares, across the check and both writes, and the Admin is published only after it was saved: two submits at once create at most one, no other writer runs in between) | — (no person exists the gateway could decide for) | — | the address is added to the whitelist (its enforcement unchanged), then the Admin role; pinned to `SetupStateService` | `NotVerifiable` (Whiskers' own record; the role store is the setup state's truth) | ✅ `setup.first_admin` written **before** anything; without it nothing is written (fail closed) | designed exemption from the gateway (INV-38); afterwards whitelist and roles change only through it |
 | S-14 | Federated identity binding at sign-in (R1-27, contract 0003) | the person signing in through Google/OIDC whose verified address is an entry an Admin configured (role or whitelist) | the provider (issuer + subject); `email_verified=true` from a trusted provider (`GoogleAuth:TrustEmailVerified` default true, `Oidc:TrustEmailVerified` default false) for the standard `email` claim | only while an explicit Admin exists, only for an entry, only when the account has no binding for any issuer yet; everything else → a pending request, the sign-in refused | — (no person exists the gateway could decide for) | — | `IIdentityBindingStore.BindAtSignInAsync` under `AccessControlWriteGate` and the file lock shared with the host CLI, on the file as re-read there; under them it decides the admission again — an explicit Admin exists, the address is an entry the whitelist admits, the standard `email` claim is verified by a trusted provider, the subject is unbound and the account has no binding — then persists before it publishes; pinned to `FederatedAdmission` | `NotVerifiable` (Whiskers' own record) | ✅ `auth.identity_bound` (method `verified_email`) written **before** the binding; without it nothing is bound and the sign-in is refused | designed exemption from the gateway (INV-38), like S-13; confirming or removing bindings afterwards goes through it (U-36) |
 | S-15 | CLI binding confirmation `--confirm-identity-binding <email> [--issuer <issuer>]` (R1-27) | host operator (shell in the running container) | outside the app: host access | the newest pending request of that configured address only (several issuers pending → exit 4, nothing changed); never creates an entry or grants a role | — | — | binds the pending subject (replacing an older binding of the same account and issuer) in the file the running instance uses, under the exclusive lock both share and on the file as re-read there; the running instance follows it at once (no restart); never starts the web host | — (own record) | ✅ `auth.identity_bound` (actor `cli (--confirm-identity-binding)`) written **before** the change; without it nothing changes | INV-05 |
+| S-16 | Endpoint-check monitor (R1-57; row added by R1-51) | Automation on behalf of the check's owner (the Admin who saved it); **no owner → no run**, never a grace period; authority loss suspends the check | n/a | ✅ owner re-checked before every run | ✅ PC-D1 rules in the gateway (`endpointcheck.run`, Admin) | none (a recorded owner, no implied confirmation) | automation runner → gateway → the fixed probe commands of the check (resolve, curl, nc, openssl) on its server | `NotVerifiable` + reason (a probe changes nothing; its result is the check's answer) | ✅ gateway AL; the run is recorded with the check | — |
 
 ### 7.4 Interactive terminals
 
@@ -312,6 +332,8 @@ mTLS carries the server's diff.
 | U-34 | Settings: keys, tool levels, roles, whitelist, vault, registries, terminal, metric retention, quiet hours (`config.*`, `mcp.key_*`, `vault.secret_*`, `registry.*` since R1-11; metric retention `config.save` since R1-55, values from the environment read-only; quiet-hours rules `config.save` since R1-56, an unknown or non-IANA time zone refused before anything is written) | Admin | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ (versioned, redacted diff; no page row since R1-22) | INV-15, 16 |
 | U-35 | Local accounts (R1-49): own password change on *My account* (`account.password_change`, read level, own account only, current password required); add / reset / delete under *Settings → Local accounts* (`account.create`, `account.password_reset`, `account.delete`) | own account / Admin | `NotVerifiable` + reason (Whiskers' own account store, R1-37) | GW ✅ (the event names the account and, for an added one, the role — never a password or recovery code; the service re-checks the session and role itself) | INV-09, 61 |
 | U-36 | Sign-in identities (R1-27): confirm a pending request / remove a binding or pending request under *Settings → Sign-in identities* (`identity.binding_confirm`, `identity.binding_remove`) | Admin | `NotVerifiable` + reason (Whiskers' own record) | GW ✅ (target kind `identity`, the id as the only argument; refuses `last_admin` — the last way the last Admin can sign in, checked one removal at a time together with the local-account deletion — and `auth_disabled`) | INV-05, 61 |
+| U-37 | Per-host mTLS client credentials on *Servers* (R1-44, contract 0007; row added by R1-51): migrate a host to its own credential (`mtls.client_migrate`), retire the shared credential (`mtls.shared_client_retire`, refused while any considered host is not proven narrowed live) | Admin | `NotVerifiable` + reason (migration: every host step confirmed inside the rollout; retirement: Whiskers' own record) | GW ✅ (R1-44) | INV-58 |
+| U-38 | Endpoint checks (R1-57; row added by R1-51): save / delete a check, run it now (`endpointcheck.save`, `endpointcheck.delete`, `endpointcheck.run`; a run is fixed probe commands on the check's server) | Admin | `NotVerifiable` + reason (Whiskers' own record; a probe changes nothing) | GW ✅ | — |
 
 Reading the trail is not a mutation and not counted above, but it is governed (R1-23, INV-50): the Audit log and Agent
 History pages and the audit rows of the Self status timeline are Admin only; `GET /audit/export` is Admin only, records
@@ -337,24 +359,29 @@ All 90 paths were blocked by the shared gaps (INV-01, 22, 38, 39, 45, 48, 49; IN
 them structurally. The path-specific gaps then close in WP3–WP7.
 
 **Rows today (R1-51, counted from the tables above).** Later packages added rows: M-42…M-47 (contract 0001, R1-48),
-S-09…S-15 (R1-34, R1-48, R1-49, R1-27), U-35 and U-36 (R1-49, R1-27).
+S-09…S-15 (R1-34, R1-48, R1-49, R1-27), U-35 and U-36 (R1-49, R1-27). The release gate found five paths that had
+no row and R1-51 added them: M-48 and M-49 (R1-44), S-16 and U-38 (R1-57), U-37 (R1-44).
 
 | Class | Rows |
 |---|---|
-| MCP tools (M) | 47 |
+| MCP tools (M) | 49 |
 | Agent (A) | 4 |
-| Background / webhook / system (S) | 15 |
+| Background / webhook / system (S) | 16 |
 | Terminals (T) | 3 |
-| UI handler groups (U) | 36 |
-| **Total** | **105** |
+| UI handler groups (U) | 38 |
+| **Total** | **110** |
 
-The gap column per row is not recounted here, and the release gate (contract 0008, proposed) does not count gaps either: it
+The gap column per row is not recounted here, and the release gate (contract 0008) does not count gaps either: it
 counts the rows per class and fails when the table above disagrees (R15); the 90-row baseline stays as history.
 
 ## 8. How this document is maintained
 
-- A new mutating MCP tool, UI handler or background job gets a row in §7 in the same PR.
+- A new mutating MCP tool, UI handler or background job gets a row in §7 in the same PR, and a row that is not an M
+  row names its capabilities in [`PATH_CAPABILITIES.md`](PATH_CAPABILITIES.md).
 - When a WP closes a gap, the PR removes the invariant from the row's gap column and updates the invariant's
-  status in `SECURITY_INVARIANTS.md`.
-- When the gateway exists, §7 will be generated from the capability table (WP2) and checked in CI, so that the
-  document cannot drift from the code.
+  status in `SECURITY_INVARIANTS.md` (and its line in [`RELEASE_GATE.md`](RELEASE_GATE.md)).
+- §7 stays hand-written: its chain cells are judgments the capability table does not hold (contract 0008, D7). What is
+  generated is [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTORY.md), from the capability table, and the release gate
+  (`ReleaseGateTests`) joins the two in CI: every capability is named by a §7 row or composed by another (R13), every
+  tool and capability a row names exists (R14), and §7.6 matches the rows (R15). So the document cannot drift from the
+  code unnoticed.

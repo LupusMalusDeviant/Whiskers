@@ -1261,8 +1261,9 @@ public sealed class PerHostCredentialTests
 
         var invariants = DeploymentScripts.ReadRepoFile("docs", "v1", "SECURITY_INVARIANTS.md");
         var row = invariants.Split('\n').Single(l => l.StartsWith("| INV-58 |", StringComparison.Ordinal));
-        Assert.Contains("✅", row);
-        Assert.Contains("per host after migration", row);
+        // Contract 0008, D12: the invariant holds per host only after the migration, so the fleet-wide status is ⚠️.
+        Assert.Equal("⚠️", row.Split('|')[3].Trim());
+        Assert.Contains("Per host after migration (D12, contract 0008)", row);
         Assert.Contains("`PerHostCredentialTests`", row);
         Assert.DoesNotContain("planned", row);
     }

@@ -16,6 +16,7 @@ properties below is removed or weakened (each property has negative tests that m
 |---|---|---|
 | `build-test` → Test (in-process) | The whole in-process suite, including `EndpointAuthMatrixTests`, the boot matrix and the workflow policy tests | any test fails, fewer than the floor of tests passed (`check-test-results.sh`, the floor is in the step; raise it when the suite grows), or a test named in `.github/required-tests/in-process.txt` is missing or did not pass |
 | `build-test` → Test (Docker integration, mandatory) | PostgreSQL metrics (`PostgresSmokeTests`), local accounts on PostgreSQL (`PostgresIdentityTests`), PostgreSQL backup and restore on 17 and 14 — against real servers (Testcontainers) | no Docker daemon, a server that does not start (the tests throw on CI, `DockerRequirement`), any failed **or skipped** test, fewer than the floor, or a test named in `.github/required-tests/docker.txt` is missing or did not pass |
+| `build-test` → Release gate (compare with the base) | Pull requests and release runs only (R1-51, contract 0008, D16/R18): no invariant ID disappears without a retirement, the pinned highest ID never goes down, an accepted §6.1 release decision is never edited or deleted — against the pull request's base commit, or in a release run the previous release tag (`ReleaseGateBaseTests`) | a finding, an unreadable base, or the test skipped or missing from `gate-base.trx` |
 | `build-test` → DI boot gate | The app boots in Development (`ValidateOnBuild`) until `/healthz` answers | the app exits or never becomes healthy |
 | `artifact` | The image built from this commit (amd64): Trivy (CRITICAL fails, exceptions only in `.trivyignore`), the hardened compose profile, the upgrade from the previous published release and the way back | see [Artifact checks](#artifact-checks) |
 
@@ -25,12 +26,22 @@ must contain and pass (`<minimum> <name>`: a test, every case of a theory, or a 
 --require` fails on any entry that is missing, skipped or failed, whatever the floor says. `RequiredTestsManifestTests`
 keeps the manifests in step with the test assembly: every entry must name tests of its run, every container test must be
 required in the Docker run, and the endpoint matrix and the PostgreSQL Identity and metrics tests are named one by one.
-A new mandatory test goes into the manifest in the same change.
+A new mandatory test goes into the manifest in the same change. Each manifest ends in a block between
+`# BEGIN release-gate (generated)` and `# END release-gate`: the tests the ✅ invariants name, rendered by
+`ReleaseGateTests` (R1-51); do not edit it by hand — on a difference the test writes the fresh block to the manifest's
+`.actual` file. The `image-runtime` job is checked the same way (`image-runtime.trx`, `--no-skips`,
+`.github/required-tests/image-runtime.txt`).
+
+**Release gate (R1-51, contract 0008).** `ReleaseGateTests` runs inside the in-process tests and checks
+`docs/v1/SECURITY_INVARIANTS.md`, `RELEASE_GATE.md`, `PRODUCT_CONTRACT.md` (§6.1, §7), `PATH_CAPABILITIES.md` and the
+generated `CAPABILITY_INVENTORY.md` against the test assembly and these workflows. Its mode follows the version (below
+1.0.0: Development); only release.yml's `release-gate: release` input, turned into `WHISKERS_RELEASE_GATE` for the
+in-process step alone, makes a run a release run. The rules and the records are described in `docs/v1/RELEASE_GATE.md`.
 
 In a release, `ci.yml` runs on the tag commit (`workflow_call`) and the `artifact` job is skipped: the release checks the
 staged digest it publishes instead (`artifact-test`, below).
 
-### `security.yml` — every push and pull request against `main`, and weekly
+### `security.yml` — every push and pull request against `main`, weekly, and inside every release
 
 | Job | What it checks | Fails when |
 |---|---|---|
@@ -42,9 +53,10 @@ staged digest it publishes instead (`artifact-test`, below).
 
 ### `release.yml` — a `v*` tag
 
-`prepare` → `test` (the whole `ci.yml` on the tag commit) → `build` (amd64 and arm64, staged by digest) → `scan` (Trivy on
+`prepare` (the tag commit must be on `origin/main`) → `test` (the whole `ci.yml` on the tag commit, release gate in
+release mode) and `security` (the whole `security.yml` on the tag commit; `dependency-review` runs on pull requests only) → `build` (amd64 and arm64, staged by digest) → `scan` (Trivy on
 both digests) and **`artifact-test`** (the staged amd64 digest: hardened profile, N−1 upgrade and recovery) → `publish-image`
-(only after `test`, `scan` and `artifact-test`) → chart, GitHub release, moving tags. Nothing is tagged before the image
+(only after `test`, `security`, `scan` and `artifact-test`) → chart, GitHub release, moving tags. Nothing is tagged before the image
 that will be published passed the artifact checks. The arm64 image is scanned but not started (the runners are amd64).
 
 ### `chart-ci.yml`
