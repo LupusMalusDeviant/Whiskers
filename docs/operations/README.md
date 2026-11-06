@@ -17,4 +17,3 @@ Guides for running Whiskers in production. Start with the first four; the rest c
 | [per-host-mtls-migration.md](per-host-mtls-migration.md) | Per-host mTLS client credentials (R1-44): what changes where, the order of hosts, migrating one host (issue, widen, switch, narrow, record), why a preflight refuses a host, renewal and rotation, retiring the shared credential, removing a server, undo and verification |
 | [postgres-18-upgrade.md](postgres-18-upgrade.md) | Moving Whiskers' own database from PostgreSQL 17 to 18 with the overlay: why the volume and mount point change, the guard that stops an empty start, dump on 17 and restore on 18, going back, cleaning up |
 
-A short demo video will be linked here once its place is decided.

@@ -283,6 +283,9 @@ public class ProductionReadinessServiceTests : IDisposable
         Assert.Contains("alle mTLS-Client-Schlüssel", vaultCheck.Detail);
         Assert.Contains("eigene jedes Hosts", vaultCheck.Detail);
         Assert.Contains("Dateirechte", vaultCheck.Detail);
+        // Whiskers does not write the shared key and does not check the SSH keys' mode: no unconditional "0600".
+        Assert.DoesNotContain("0600", vaultCheck.Detail);
+        Assert.Contains("mTLS-Client-Schlüssel geschützt", vaultCheck.Detail);
         Assert.DoesNotContain("der mTLS-Client-Schlüssel im", vaultCheck.Detail);
         Assert.DoesNotContain("alle Secrets", vaultCheck.Detail);
     }

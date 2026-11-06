@@ -48,7 +48,7 @@ The chart runs one replica with the `Recreate` strategy, so the old pod stops be
 On its first start the new release:
 
 1. checks the vault key;
-2. takes a self-backup `pre-upgrade-<yyyyMMdd_HHmmss>` (if that fails, the start stops and nothing has changed);
+2. takes a self-backup `pre-upgrade-<yyyyMMdd_HHmmss>` (if that fails, the start stops and nothing has changed). `WHISKERS_UPGRADE_SKIP_BACKUP=true` skips this backup — only with a recovery point of your own; the log warns at every such start;
 3. migrates the database;
 4. records the release as the one that last started.
 
@@ -57,7 +57,7 @@ On its first start the new release:
 - `/healthz` answers `Healthy` (the process is up) and `/readyz` answers `Healthy` (database, server configuration
   and audit trail ready; `Degraded` names a problem that keeps Whiskers serving — see
   [troubleshooting.md](troubleshooting.md#healthz-and-readyz)).
-- Sign in, open *Settings → Production-ready?* and *Self status* (`/self-status`).
+- Sign in, open *Settings → Production-ready?* and the *Whiskers itself* page (`/self-status`).
 - The *Audit log* (Admin) shows new events after the start; a self-backup taken now succeeds.
 - Remove `docker-compose.yml.bak-<time>` once you are satisfied.
 

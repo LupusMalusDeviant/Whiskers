@@ -99,4 +99,4 @@ page keep working when the module is off.
 ## Related
 
 - Event sources: [`../HealthMonitor/`](../HealthMonitor/), [`../LogMonitor/`](../LogMonitor/), [`../ImageUpdate/`](../ImageUpdate/)
-- Config: `MATTERMOST_*` in [`../../../.env.example`](../../../../.env.example); Matrix configured in the UI
+- Config: `MATTERMOST_*` in [`../../../../.env.example`](../../../../.env.example); Matrix configured in the UI

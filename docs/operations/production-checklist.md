@@ -15,7 +15,9 @@ rest of the list is not mistaken for more than it is.
   manage its own host. If it only manages remote hosts, use `docker-compose.hardened.yml` (non-root, read-only root
   file system, socket proxy) — [container-hardening.md](../container-hardening.md). The readiness line
   "Hardened-Profil (non-root)" shows which one runs.
-- [ ] **Not on a public interface.** The installer binds to `127.0.0.1` (`HOST_BIND`); reach Whiskers through a
+- [ ] **Not on a public interface.** The installer binds to `127.0.0.1` by default (`--bind <addr>` or
+  `WHISKERS_BIND`, for a new install only; afterwards edit the `ports:` line of the compose file it wrote). The
+  repository's own `docker-compose.yml` takes `HOST_BIND` (also `127.0.0.1` by default). Reach Whiskers through a
   TLS-terminating reverse proxy or over the mesh. Management ports of managed hosts stay mesh-bound.
 - [ ] **HTTPS at the proxy, and the proxy trusted.** The readiness line "HTTPS am Reverse Proxy" is OK when the page
   came over HTTPS. Name the proxy in `ForwardedHeaders__TrustedNetworks__0` (narrowly, `/32` or `/128`); until then the
@@ -31,12 +33,15 @@ rest of the list is not mistaken for more than it is.
 - [ ] **Sign-in through your identity provider with MFA.** Local accounts have no second factor in 1.0; keep them as
   break-glass with long, unique passwords ([local-accounts.md](local-accounts.md)). OIDC: `OIDC_REQUIRE_HTTPS=true`
   (the readiness card warns otherwise); IdP requirements in [identity-bindings.md](identity-bindings.md).
-- [ ] **Few Admins, tight whitelist.** Review *Settings → Authentication*. Roles are global (see limits).
-- [ ] **MCP keys with the least level** they need, one key per client, unused keys deleted (*Settings → MCP*).
+- [ ] **Few Admins, tight whitelist.** Review *Settings → Authentication* (whitelist) and *Settings → User roles*.
+  Roles are global (see limits).
+- [ ] **MCP keys with the least level** they need, one key per client, unused keys deleted (*Settings → MCP
+  permissions*).
 - [ ] **Guardrails restrictive.** Keep the agent presets narrow; set `RequireSecondApprover` in the policy where one
   person must not approve their own interactive request; AI triggers stay read-only unless granted capabilities.
 - [ ] **Automation owners recorded.** AutoUpdate, AutoPatch and the in-app VPN bring-up run on the authority of the
-  Admin who took them over (*Settings → Automation owners*); without an owner they do not run.
+  Admin who took them over (*Settings → Automation owners*). Without an owner AutoPatch and the VPN bring-up never
+  run; AutoUpdate does not run either unless someone opted into its grace period — leave that off.
 
 ## Secrets
 
@@ -46,22 +51,28 @@ rest of the list is not mistaken for more than it is.
   Without it the vault and every encrypted backup are unreadable.
 - [ ] **No plaintext credentials left:** the readiness lines for cloud/DNS, notification/AI credentials, webhook
   secrets, rollback snapshots and session keys are OK.
-- [ ] **Environment-supplied credentials** (`AICHAT_API_KEY`, `AGENT_API_KEY`, `MATTERMOST_WEBHOOK_URL`, VPN keys …)
-  come from a secret store or Docker secrets (`…_FILE`), never from the image or a world-readable `.env`.
+- [ ] **Credentials in the environment kept to a minimum.** Settings such as `AICHAT_API_KEY`, `AGENT_API_KEY`,
+  `MATTERMOST_WEBHOOK_URL` or `HARBOR_PASSWORD` are plain environment variables: they have **no** `…_FILE` variant,
+  Whiskers does not put them into the vault, and they are visible in `docker inspect`. Prefer entering such
+  credentials in the UI (they are then stored in the vault); where the environment is needed, keep the `.env` mode
+  0600 and out of the image. File variants exist only for `VAULT_KEY_FILE`, `WHISKERS_DB_CONNECTION_FILE`,
+  `WHISKERS_ADMIN_PASSWORD_FILE` and the VPN enrollment keys (`TAILSCALE_AUTHKEY_FILE` / `NETBIRD_SETUP_KEY_FILE`,
+  read as `Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`); a `…_FILE` name invented for any other
+  setting is ignored.
 - [ ] **The data directory is protected** like a root credential: see the table below.
 
 ### What the data directory holds
 
 | Encrypted with `VAULT_KEY` (vault) | Encrypted with a key derived from `VAULT_KEY` | Not encrypted — file permissions only |
 |---|---|---|
-| cloud API keys, the DNS token, notification channels' credentials, the AI chat's and the agent's API keys, kubeconfigs, registry and Git credentials | inbound webhooks' signing secrets and rollback snapshots (in the database), the data-protection key ring (`keys/`) | SSH private keys (`ssh-keys/`), all mTLS client keys (`mtls/`: the shared one and one per host), the database (metrics, audit trail, accounts with hashed passwords), the JSON stores (roles, whitelist, servers, MCP key hashes, settings) |
+| cloud API keys, the DNS token, notification channels' credentials, the AI chat's and the agent's API keys, kubeconfigs, registry and Git credentials | inbound webhooks' signing secrets and rollback snapshots (in the database), the data-protection key ring (`keys/`) | SSH private keys (`ssh-keys/`), all mTLS client keys (`mtls/`: the shared one and one per host), the database (metrics, audit trail, accounts with hashed passwords), the JSON stores (roles, whitelist, servers, MCP key hashes, settings), the VPN state (`tailscale/`, `netbird/`), the setup token until setup is complete |
 
 Whoever can read the data directory, or run code in the Whiskers container, can act as Whiskers on every managed
 host. Self-backups hold the same data; with `VAULT_KEY` set they are encrypted.
 
 ## Backups
 
-- [ ] **A scheduled self-backup** (*Tasks*, type *SelfBackup*); the readiness line "Self-Backup eingeplant" is OK.
+- [ ] **A scheduled self-backup** (*Scheduled tasks*, type *SelfBackup*); the readiness line "Self-Backup eingeplant" is OK.
 - [ ] **Copies off the volume and off the host**, on a schedule of their own
   ([backup-and-recovery.md](backup-and-recovery.md#keep-a-copy-off-the-volume)).
 - [ ] **One restore tested** on a spare instance, including the off-volume recovery. A backup nobody restored is a
@@ -97,8 +108,10 @@ These are deliberate limits of Whiskers 1.0 (product contract §5). They are not
   Admin, an Admin-level key or a compromised Whiskers instance is root everywhere Whiskers manages. Whiskers decides
   *who* reaches that power and records it; it does not make it smaller.
 - **Host access is outside the contract.** Someone with a shell on the Whiskers host can change its database, stores
-  and binaries. With `VAULT_KEY` set, database-only edits of the audit trail are detectable (except the last minute
-  before the newest checkpoint).
+  and binaries. With `VAULT_KEY` set, database-only edits of the audit trail are detectable, except that the events
+  written **after** the newest signed checkpoint (at most about a minute's worth) can be cut off unnoticed. Without
+  `VAULT_KEY` nothing is signed, and someone who can write the database can rewrite the trail consistently; someone
+  who holds `VAULT_KEY`, the checkpoint file and the database can rewrite all three (ADR-0006).
 - **Single instance.** One process, one data directory, no replica and no failover. Availability and the recovery
   point come from your backups ([backup-and-recovery.md](backup-and-recovery.md#recovery-point-and-time)).
 - **Global roles.** Viewer, Operator and Admin, and key levels, apply to every managed server. There is no per-server or

@@ -984,7 +984,7 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 > READMEs (`../../../` one level short, the removed `ConfigExport/` and `DockerConnectionFactory.cs`, moved entity
 > files), the Backup README's opening, the `VaultService` comment, ADR-0002 (decision = what was implemented, the
 > deferral kept as history). Readiness: the vault line named one plaintext mTLS client key; since R1-44 every host
-> has its own, so it now names all of them and the SSH keys as protected by file mode only
+> has its own, so it now names all of them and the SSH keys as protected by file permissions only (no unconditional "0600"; the mTLS key modes are the separate line "mTLS-Client-Schlüssel geschützt")
 > (`ProductionReadinessServiceTests.The_vault_line_names_every_plaintext_key_kind_and_claims_no_more_than_file_protection`);
 > SECURITY.md and INV-52 say the same. The line `:54` the audit named had been corrected by R1-29. Contract rows:
 > U-15 and U-22 run through the gateway at the click (not "markup only"), S-05's policy and approval cells match the

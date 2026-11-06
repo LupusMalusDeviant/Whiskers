@@ -84,9 +84,11 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                                           + "nächsten Punkte), kubeconfigs sowie Registry- und Git-Zugangsdaten; mit einem daraus "
                                           + "abgeleiteten Schlüssel verschlüsselt sind die Secrets eingehender Webhooks, die Rollback-Snapshots "
                                           + "und die Sitzungsschlüssel. Noch unverschlüsselt gespeichert, nur durch die Dateirechte "
-                                          + "(0600) geschützt: die privaten SSH-Schlüssel (ssh-keys/) und alle mTLS-Client-Schlüssel "
-                                          + "– der gemeinsame und der eigene jedes Hosts – im Datenverzeichnis. Wer es lesen kann, "
-                                          + "kann als Whiskers handeln.",
+                                          + "geschützt: die privaten SSH-Schlüssel (ssh-keys/) und alle mTLS-Client-Schlüssel "
+                                          + "– der gemeinsame und der eigene jedes Hosts – im Datenverzeichnis. Ob die mTLS-Schlüssel "
+                                          + "nur für Whiskers lesbar sind, zeigt der Punkt „mTLS-Client-Schlüssel geschützt“; den Modus "
+                                          + "der SSH-Schlüssel prüft diese Liste nicht. Wer das Datenverzeichnis lesen kann, kann als "
+                                          + "Whiskers handeln.",
                 VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.",
                 _ => "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
             },

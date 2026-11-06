@@ -16,6 +16,6 @@ See [docs/ARCHITECTURE.md](../../../../docs/ARCHITECTURE.md) > *Onboarding a new
 
 ## Related
 
-- Architecture: [`../../../docs/ARCHITECTURE.md`](../../../../docs/ARCHITECTURE.md)
-- Deploy templates: [`../../../deploy/telemetry/`](../../../../deploy/telemetry/)
+- Architecture: [`../../../../docs/ARCHITECTURE.md`](../../../../docs/ARCHITECTURE.md)
+- Deploy templates: [`../../../../deploy/telemetry/`](../../../../deploy/telemetry/)
 - Server registry: [`../ServerConfig/`](../ServerConfig/)
