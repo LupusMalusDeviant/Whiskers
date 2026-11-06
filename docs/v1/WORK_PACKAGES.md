@@ -756,10 +756,18 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `PerHostCredentialTests` proves host A’s managed credential cannot authenticate to host B.
-- [ ] Enrollment, renewal, revocation and migration preserve hostname/chain validation.
-- [ ] Existing hosts migrate through an explicit recoverable rollout.
-- [ ] Private-key ownership/modes and blast-radius documentation are verified.
+- [x] `PerHostCredentialTests` proves host A’s managed credential cannot authenticate to host B.
+- [x] Enrollment, renewal, revocation and migration preserve hostname/chain validation.
+- [x] Existing hosts migrate through an explicit recoverable rollout.
+- [x] Private-key ownership/modes and blast-radius documentation are verified.
+- [ ] The rollout has run on the real fleet (Bifröst first, then the whiskers.site host, then host by host) and the
+      shared credential is retired.
+
+> Implemented per contract 0007 (amendments 1–8). Verified against simulated hosts and, on Linux, the host scripts run
+> under `sh`/`flock`/`timeout` with stubbed `systemctl`/`docker`. Not yet verified on a real ghostunnel: the TLS-alert
+> classification of a refused client (TLS 1.3 reports it on the first read), and that step-ca's leaf template adds no
+> CN-as-SAN (until then `ValidateIssuedClient` accepts at most one DNS SAN equal to the CN). Guide:
+> `docs/operations/per-host-mtls-migration.md`.
 
 **Out of scope:** Weakening current certificate validation or socket-proxy verbs.
 
