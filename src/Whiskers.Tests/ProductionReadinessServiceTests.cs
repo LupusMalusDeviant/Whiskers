@@ -84,6 +84,25 @@ public class ProductionReadinessServiceTests : IDisposable
         Assert.Contains("ForwardedHeaders__TrustedNetworks__0", line.Detail);
     }
 
+    [Fact]
+    public async Task Disabled_authentication_warns_against_funnel_and_tcp_forwards()
+    {
+        // 2026-11-06 (DockTail evaluation): behind a TCP forward every visitor arrives from tailscaled's private address
+        // and names its own Host, so the Auth:Disabled network check lets the internet in through Funnel.
+        var (vault, servers) = await Stores(null);
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:Disabled"] = "true" }).Build();
+
+        var line = (await new ProductionReadinessService(config, vault, _sp.GetRequiredService<IServiceScopeFactory>(),
+                servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true))
+            .Single(c => c.Title == "Authentifizierung aktiv");
+
+        Assert.False(line.Ok);
+        Assert.Contains("TCP-Weiterleitung", line.Detail);
+        Assert.Contains("Funnel", line.Detail);
+        Assert.Contains("Internet", line.Detail);
+    }
+
     [Theory]
     [InlineData(true, "false", true)]
     [InlineData(true, "true", false)]
