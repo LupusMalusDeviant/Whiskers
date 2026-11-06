@@ -36,6 +36,7 @@ public class ReleaseWorkflowTests
             ["publish-chart"] = ["packages"],
             ["github-release"] = ["contents"],
             ["move-tags"] = ["packages"],                 // move X.Y and latest after the GitHub release exists
+            ["security"] = ["security-events"],           // R1-51: calls security.yml, whose CodeQL job uploads its SARIF
         },
         ["security.yml"] = new()
         {
@@ -75,7 +76,7 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"", "        run: echo skipped")]
     [InlineData("ci.yml", "          bash .github/scripts/artifact-checks.sh upgrade \"$ARTIFACT\" \"$PREVIOUS\"", "          echo skipped")]
     [InlineData("ci.yml", "      - name: Trivy scan (gate, fail on CRITICAL)\n        uses: aquasecurity", "      - name: Trivy scan (gate, fail on CRITICAL)\n        if: false\n        uses: aquasecurity")]
-    [InlineData("release.yml", "    needs: [prepare, test, build, scan, artifact-test]", "    needs: [prepare, test, build, scan]")] // publish before the artifact test
+    [InlineData("release.yml", "    needs: [prepare, test, security, build, scan, artifact-test]", "    needs: [prepare, test, security, build, scan]")] // publish before the artifact test
     [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh prepare \"${IMAGE}@${AMD64_IMAGE}\" \"$ARTIFACT\"",
                 "        run: docker build -t \"$ARTIFACT\" .")]                                                          // tests a rebuild, not the staged digest
     [InlineData("release.yml", "          AMD64_IMAGE: ${{ needs.build.outputs.amd64_image }}\n        run: bash .github/scripts/artifact-checks.sh prepare",
@@ -225,13 +226,13 @@ public class ReleaseWorkflowTests
             "echo \"amd64_image=$(image_digest \"$AMD64_INDEX\" amd64)\" >> \"$GITHUB_OUTPUT\"")));
 
     [Theory]
-    [InlineData("    needs: [prepare, test, build, scan, artifact-test]", "    needs: [prepare, build, scan, artifact-test]")] // publish-image without tests
-    [InlineData("    needs: [prepare, test, build, scan, artifact-test]", "    needs: [prepare, test, build, artifact-test]")] // publish-image without scan
+    [InlineData("    needs: [prepare, test, security, build, scan, artifact-test]", "    needs: [prepare, security, build, scan, artifact-test]")] // publish-image without tests
+    [InlineData("    needs: [prepare, test, security, build, scan, artifact-test]", "    needs: [prepare, test, security, build, artifact-test]")] // publish-image without scan
     [InlineData("    needs: [prepare, test, scan, publish-image]", "    needs: [prepare, test, publish-image]")]
     [InlineData("    needs: [prepare, test, build, scan, publish-image, publish-chart]", "    needs: [prepare, build, scan, publish-image, publish-chart]")]
     [InlineData("PUBLISHED=\"$(gh release list", "PUBLISHED=\"$(git tag -l 'v*'; true) #")] // latest from git tags, not published releases
     [InlineData("    needs: [prepare, test]\n    runs-on", "    needs: [prepare]\n    runs-on")]       // build before tests
-    [InlineData("      ref: ${{ needs.prepare.outputs.sha }}\n\n  # Build each", "      ref: ${{ github.sha }}\n\n  # Build each")] // tests on another commit
+    [InlineData("      ref: ${{ needs.prepare.outputs.sha }}\n      # R1-51 (contract 0008): only this", "      ref: ${{ github.sha }}\n      # R1-51 (contract 0008): only this")] // tests on another commit
     [InlineData("      - name: Checkout the tag commit\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ needs.prepare.outputs.sha }}\n\n      - name: Set up QEMU",
                 "      - name: Checkout the tag commit\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n\n      - name: Set up QEMU")] // build checks out the dispatched ref
     [InlineData("          ref: refs/tags/${{ steps.tag.outputs.tag }}", "          ref: ${{ github.ref }}")]
@@ -255,6 +256,53 @@ public class ReleaseWorkflowTests
     [InlineData("          ref: ${{ inputs.ref }}", "          ref: main")]
     public void A_ci_workflow_that_cannot_gate_the_release_is_caught(string from, string to)
         => Assert.NotEmpty(WorkflowPolicy.ReleaseGateViolations(Workflow("release.yml"), Mutate(Workflow("ci.yml"), from, to)));
+
+    // ---- R1-51: the release gate's wiring (contract 0008) ---------------------------------------------------------
+
+    [Fact]
+    public void The_release_gate_is_wired_as_contract_0008_specifies()
+        => Assert.Empty(WorkflowPolicy.ReleaseGateWiringViolations(Workflow("release.yml"), Workflow("ci.yml"), Workflow("security.yml")));
+
+    [Theory]
+    // The mode: only release.yml's test job makes a release run, and only through the input.
+    [InlineData("release.yml", "      release-gate: release\n", "")]
+    [InlineData("release.yml", "      release-gate: release\n", "      release-gate: dry-run\n")]
+    [InlineData("release.yml", "    uses: ./.github/workflows/security.yml\n    with:\n", "    uses: ./.github/workflows/security.yml\n    with:\n      release-gate: release\n")]
+    [InlineData("ci.yml", "      release-gate:\n        description:", "      gate-mode:\n        description:")]
+    [InlineData("ci.yml", "          WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}", "          WHISKERS_RELEASE_GATE: release")]
+    [InlineData("ci.yml", "        env:\n          WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}\n", "")]
+    [InlineData("ci.yml", "permissions: {}\n", "permissions: {}\n\nenv:\n  WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}\n")]
+    [InlineData("ci.yml", "          set -euo pipefail\n          if [ \"$RELEASE_GATE\" = \"release\" ]; then",
+                "          set -euo pipefail\n          export WHISKERS_RELEASE_GATE=release\n          if [ \"$RELEASE_GATE\" = \"release\" ]; then")]
+    // The base comparison: every pull request and every release run, the right base, fail closed.
+    [InlineData("ci.yml", "        if: github.event_name == 'pull_request' || inputs.release-gate == 'release'\n", "        if: github.event_name == 'pull_request'\n")]
+    [InlineData("ci.yml", "        if: github.event_name == 'pull_request' || inputs.release-gate == 'release'\n", "        if: inputs.release-gate == 'release'\n")]
+    [InlineData("ci.yml", "      - name: Release gate (compare with the base)\n", "      - name: Release gate (compare with the base)\n        continue-on-error: true\n")]
+    [InlineData("ci.yml", "            export WHISKERS_GATE_BASE=previous-tag\n", "            export WHISKERS_GATE_BASE=\"$BASE_SHA\"\n")]
+    [InlineData("ci.yml", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n", "            git fetch --depth=1 origin \"$BASE_SHA\" '+refs/tags/v*:refs/tags/v*'\n")]
+    [InlineData("ci.yml", "          BASE_SHA: ${{ github.event.pull_request.base.sha }}", "          BASE_SHA: ${{ github.event.pull_request.head.sha }}")]
+    [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/gate-base.trx 1 --no-skips\n", "")]
+    [InlineData("ci.yml", "TestResults/gate-base.trx 1 --no-skips", "TestResults/gate-base.trx 1")]
+    // The image-runtime run: from its TRX file, with its manifest.
+    [InlineData("ci.yml", " --no-skips --require .github/required-tests/image-runtime.txt", " --no-skips")]
+    [InlineData("ci.yml", "TestResults/image-runtime.trx 7 --no-skips", "TestResults/image-runtime.trx 7")]
+    [InlineData("ci.yml", "            --logger \"trx;LogFileName=image-runtime.trx\" --results-directory TestResults\n", "            --results-directory TestResults\n")]
+    // security.yml in the release, on the tag commit, before anything is published.
+    [InlineData("release.yml", "    needs: [prepare, test, security, build, scan, artifact-test]", "    needs: [prepare, test, build, scan, artifact-test]")]
+    [InlineData("release.yml", "  security:\n    needs: prepare\n", "  security:\n    needs: prepare\n    if: github.event_name == 'push'\n")]
+    [InlineData("release.yml", "    uses: ./.github/workflows/security.yml\n    with:\n      ref: ${{ needs.prepare.outputs.sha }}", "    uses: ./.github/workflows/security.yml\n    with:\n      ref: main")]
+    [InlineData("security.yml", "  workflow_call:\n", "  workflow_run:\n")]
+    [InlineData("security.yml", "        with:\n          ref: ${{ inputs.ref }}\n          fetch-depth: 0", "        with:\n          fetch-depth: 0")]
+    // The tag commit is on main.
+    [InlineData("release.yml", "          if ! git merge-base --is-ancestor \"$SHA\" refs/remotes/origin/main; then\n", "          if false; then\n")]
+    [InlineData("release.yml", "          ref: refs/tags/${{ steps.tag.outputs.tag }}\n          fetch-depth: 0", "          ref: refs/tags/${{ steps.tag.outputs.tag }}")]
+    public void A_broken_release_gate_wiring_is_caught(string file, string from, string to)
+    {
+        string Text(string name) => name == file ? Mutate(Workflow(name), from, to) : Workflow(name);
+        var violations = WorkflowPolicy.ReleaseGateWiringViolations(Text("release.yml"), Text("ci.yml"), Text("security.yml"))
+            .Concat(WorkflowPolicy.IntegrationGateViolations(Text("release.yml"), Text("ci.yml"), Text("security.yml")));
+        Assert.NotEmpty(violations);
+    }
 
     [Theory]
     [InlineData("          image-ref: ${{ env.IMAGE }}@${{ needs.build.outputs.arm64_image }}", "          image-ref: ${{ env.IMAGE }}@${{ needs.build.outputs.amd64_image }}")] // arm64 unscanned
@@ -543,6 +591,11 @@ internal static class WorkflowPolicy
         return violations;
     }
 
+    /// <summary>A job that writes somewhere the release ships to. Uploading code-scanning results (security-events) is a
+    /// check, not a publication: the release's own security job (R1-51) holds it for CodeQL.</summary>
+    private static bool IsPublisher(YamlMappingNode job)
+        => Child(job, "permissions") is { } p && Writes(p).Any(scope => scope != "security-events");
+
     private static IEnumerable<string> Writes(YamlNode permissions) => permissions switch
     {
         YamlScalarNode s when s.Value is "read-all" or "" or null => [],
@@ -610,7 +663,7 @@ internal static class WorkflowPolicy
         var scanners = JobsUsing(jobs, "aquasecurity/trivy-action@");
         if (builders.Count == 0) violations.Add("no job builds the image");
         if (scanners.Count == 0) violations.Add("no job scans the image");
-        var publishers = jobs.Where(j => Child(j.Value, "permissions") is { } p && Writes(p).Any() && !builders.Contains(j.Key))
+        var publishers = jobs.Where(j => IsPublisher(j.Value) && !builders.Contains(j.Key))
             .Select(j => j.Key).ToList();
         if (publishers.Count == 0) violations.Add("no publishing job found");
 
@@ -866,7 +919,7 @@ internal static class WorkflowPolicy
             if (JobRuns(job).Contains("docker build", StringComparison.Ordinal) || JobsUsing(new() { [id] = job }, "docker/build-push-action@").Count > 0)
                 violations.Add($"release.yml job '{id}' builds an image instead of checking the staged one");
             var builders = JobsUsing(release, "docker/build-push-action@");
-            foreach (var publisher in release.Where(j => Child(j.Value, "permissions") is { } p && Writes(p).Any() && !builders.Contains(j.Key)))
+            foreach (var publisher in release.Where(j => IsPublisher(j.Value) && !builders.Contains(j.Key)))
                 if (!Ancestors(release, publisher.Key).Contains(id))
                     violations.Add($"release.yml publish job '{publisher.Key}' does not wait for the artifact checks ('{id}')");
         }
@@ -928,6 +981,130 @@ internal static class WorkflowPolicy
             if (!TrivyIgnoreEntry.IsMatch(line)) violations.Add($"'{line}' has no expiry ('<id> exp:YYYY-MM-DD')");
             if (i == 0 || !ReasonLine.IsMatch(lines[i - 1])) violations.Add($"'{line}' is not preceded by a '# reason: ...' line");
         }
+        return violations;
+    }
+
+    // ---- R1-51: the release gate's wiring (contract 0008) ----
+
+    private const string SecurityWorkflow = "./.github/workflows/security.yml";
+    private const string ModeVariable = "WHISKERS_RELEASE_GATE";
+
+    /// <summary>
+    /// Contract 0008: only release.yml makes a run a release run (<c>release-gate: release</c>), ci.yml turns that input
+    /// into the mode variable for the in-process step and nowhere else, the records are compared with a base on a pull
+    /// request and in a release run, the image-runtime run is checked from its TRX file with its manifest, the release
+    /// runs security.yml on the tag commit before it publishes, and the tag commit must be on main.
+    /// </summary>
+    public static IReadOnlyList<string> ReleaseGateWiringViolations(string releaseYaml, string ciYaml, string securityYaml)
+    {
+        var violations = new List<string>();
+        var releaseRoot = Parse(releaseYaml);
+        var ciRoot = Parse(ciYaml);
+        var securityRoot = Parse(securityYaml);
+        var release = Jobs(releaseRoot).ToDictionary(j => j.Id, j => j.Job);
+        var ci = Jobs(ciRoot).ToDictionary(j => j.Id, j => j.Job);
+
+        // The mode input: set by the release's test job alone, and to exactly 'release'.
+        var callers = release.Where(j => Scalar(Child(j.Value, "uses")) == CiWorkflow).ToList();
+        if (callers.Count != 1 || Scalar(Child(Child(callers[0].Value, "with"), "release-gate")) != "release")
+            violations.Add("release.yml: the job that calls ci.yml does not pass 'release-gate: release'");
+        foreach (var (id, job) in release.Where(j => Scalar(Child(j.Value, "uses")) != CiWorkflow))
+            if (Child(Child(job, "with"), "release-gate") is not null)
+                violations.Add($"release.yml job '{id}' passes 'release-gate' but does not call ci.yml");
+        if (Child(Child(Child(Child(ciRoot, "on"), "workflow_call"), "inputs"), "release-gate") is not YamlMappingNode input
+            || Scalar(Child(input, "default")) is not (null or ""))
+            violations.Add("ci.yml has no 'release-gate' workflow_call input with an empty default");
+
+        // ci.yml: the variable comes only from that input, only in the in-process step.
+        if (Child(Child(ciRoot, "env"), ModeVariable) is not null)
+            violations.Add($"ci.yml sets {ModeVariable} for the whole workflow");
+        foreach (var (id, job) in ci)
+            if (Child(Child(job, "env"), ModeVariable) is not null)
+                violations.Add($"ci.yml job '{id}' sets {ModeVariable} for the whole job");
+        foreach (var (id, job) in release)
+            if (Child(Child(job, "env"), ModeVariable) is not null || Steps(job).Any(s => Child(Child(s, "env"), ModeVariable) is not null))
+                violations.Add($"release.yml job '{id}' sets {ModeVariable}: the mode reaches the gate only through ci.yml's input");
+        if (Child(Child(releaseRoot, "env"), ModeVariable) is not null)
+            violations.Add($"release.yml sets {ModeVariable} for the whole workflow");
+        var modeSteps = ci.SelectMany(j => Steps(j.Value).Select(s => (Job: j.Key, Step: s)))
+            .Where(x => Child(Child(x.Step, "env"), ModeVariable) is not null).ToList();
+        var inProcess = modeSteps.Where(x => Scalar(Child(x.Step, "run"))?.Contains("--filter \"Category!=RequiresDocker\"", StringComparison.Ordinal) == true).ToList();
+        if (inProcess.Count != 1 || Scalar(Child(Child(inProcess[0].Step, "env"), ModeVariable)) != "${{ inputs.release-gate }}")
+            violations.Add($"ci.yml: the in-process step does not take {ModeVariable} from the 'release-gate' input");
+        foreach (var (job, step) in modeSteps.Except(inProcess))
+            violations.Add($"ci.yml job '{job}' step '{Scalar(Child(step, "name")) ?? "?"}' sets {ModeVariable}: only the in-process step may");
+        var allRuns = string.Join("\n", ci.Values.Concat(release.Values).SelectMany(Steps).Select(s => Scalar(Child(s, "run"))).OfType<string>());
+        if (Regex.IsMatch(allRuns, $@"\b{ModeVariable}="))
+            violations.Add($"a run script sets {ModeVariable} itself");
+
+        // The base comparison (D16, R18): on a pull request against its base commit, in a release run against the
+        // previous release tag; the tags are fetched only in the release run; checked from its TRX file, no skip.
+        var baseSteps = ci.SelectMany(j => Steps(j.Value).Select(s => (Job: j.Key, Step: s)))
+            .Where(x => Scalar(Child(x.Step, "run"))?.Contains("ReleaseGateBaseTests", StringComparison.Ordinal) == true).ToList();
+        if (baseSteps.Count != 1) violations.Add($"ci.yml: expected one step that runs ReleaseGateBaseTests, found {baseSteps.Count}");
+        foreach (var (job, step) in baseSteps)
+        {
+            var condition = Scalar(Child(step, "if")) ?? "";
+            if (!condition.Contains("github.event_name == 'pull_request'", StringComparison.Ordinal)
+                || !condition.Contains("inputs.release-gate == 'release'", StringComparison.Ordinal)
+                || condition.Contains("&&", StringComparison.Ordinal))
+                violations.Add($"ci.yml job '{job}': the base comparison does not run on every pull request and every release run");
+            var env = Child(step, "env");
+            if (Scalar(Child(env, "BASE_SHA")) != "${{ github.event.pull_request.base.sha }}"
+                || Scalar(Child(env, "RELEASE_GATE")) != "${{ inputs.release-gate }}")
+                violations.Add($"ci.yml job '{job}': the base comparison does not take the pull request's base and the mode from the event");
+            var run = Scalar(Child(step, "run")) ?? "";
+            var branches = Regex.Match(run, @"if \[ ""\$RELEASE_GATE"" = ""release"" \]; then\n(?<tag>(?:(?!\s*else\n)[^\n]*\n)*?)\s*else\n(?<pr>(?:(?!\s*fi\n)[^\n]*\n)*?)\s*fi\n");
+            if (!branches.Success
+                || !branches.Groups["tag"].Value.Contains("refs/tags/v*", StringComparison.Ordinal)
+                || !branches.Groups["tag"].Value.Contains("WHISKERS_GATE_BASE=previous-tag", StringComparison.Ordinal)
+                || !branches.Groups["pr"].Value.Contains("origin \"$BASE_SHA\"", StringComparison.Ordinal)
+                || !branches.Groups["pr"].Value.Contains("WHISKERS_GATE_BASE=\"$BASE_SHA\"", StringComparison.Ordinal)
+                || branches.Groups["pr"].Value.Contains("refs/tags", StringComparison.Ordinal))
+                violations.Add($"ci.yml job '{job}': the base comparison does not fetch the base SHA on a pull request and the tags only in a release run");
+            if (!Regex.IsMatch(run, @"check-test-results\.sh \S+ [1-9]\d* --no-skips\n"))
+                violations.Add($"ci.yml job '{job}': the base comparison is not checked from its TRX file without skips");
+            if (!ci.TryGetValue(job, out var j) || !Steps(j).Any(s => Scalar(Child(s, "run"))?.Contains("--filter \"Category!=RequiresDocker\"", StringComparison.Ordinal) == true))
+                violations.Add($"ci.yml job '{job}': the base comparison does not run in the job that builds and tests");
+        }
+
+        // The image-runtime run (D14): from its TRX file, a floor, no skip, its manifest.
+        var imageRuns = ci.Values.SelectMany(Steps).Select(s => Scalar(Child(s, "run"))).OfType<string>()
+            .Where(r => r.Contains("--filter \"Category=ImageRuntime\"", StringComparison.Ordinal)).ToList();
+        if (imageRuns.Count != 1 || !imageRuns[0].Contains("--logger \"trx;LogFileName=image-runtime.trx\"", StringComparison.Ordinal)
+            || !Regex.IsMatch(imageRuns[0], @"check-test-results\.sh TestResults/image-runtime\.trx [1-9]\d* --no-skips --require \.github/required-tests/image-runtime\.txt\n"))
+            violations.Add("ci.yml does not check the image-runtime tests from their TRX file against a floor, without skips and with image-runtime.txt");
+
+        // security.yml in the release (D8): called on the tag commit, unconditionally, and every publication waits for it.
+        if (Child(Child(securityRoot, "on"), "workflow_call") is null) violations.Add("security.yml cannot be called by the release (no workflow_call)");
+        foreach (var (id, job) in Jobs(securityRoot))
+            foreach (var checkout in Steps(job).Where(s => Scalar(Child(s, "uses"))?.StartsWith("actions/checkout@") == true))
+                if (Scalar(Child(Child(checkout, "with"), "ref")) != "${{ inputs.ref }}")
+                    violations.Add($"security.yml job '{id}' ignores the ref the release passes in");
+        var securityCallers = release.Where(j => Scalar(Child(j.Value, "uses")) == SecurityWorkflow).ToList();
+        if (securityCallers.Count != 1) violations.Add($"release.yml: expected one job that calls security.yml, found {securityCallers.Count}");
+        foreach (var (id, job) in securityCallers)
+        {
+            if (Scalar(Child(Child(job, "with"), "ref"))?.Contains(PrepareSha) != true)
+                violations.Add($"release.yml job '{id}' does not check the tag commit ({PrepareSha})");
+            if (Child(job, "if") is not null) violations.Add($"release.yml job '{id}' runs only under a condition");
+            var builders = JobsUsing(release, "docker/build-push-action@");
+            foreach (var publisher in release.Where(p => IsPublisher(p.Value) && !builders.Contains(p.Key)).Select(p => p.Key))
+                if (!Ancestors(release, publisher).Contains(id))
+                    violations.Add($"release.yml publish job '{publisher}' does not wait for the security checks ('{id}')");
+        }
+
+        // The tag commit is on main (D16): otherwise the pull request's base comparison never saw it.
+        if (release.TryGetValue("prepare", out var prepare))
+        {
+            var prepareRuns = string.Join("\n", Steps(prepare).Select(s => Scalar(Child(s, "run"))).OfType<string>());
+            if (!Regex.IsMatch(prepareRuns, @"if ! git merge-base --is-ancestor ""\$SHA"" refs/remotes/origin/main; then\n[^\n]*exit 1\n"))
+                violations.Add("the prepare job does not refuse a tag commit that is not on origin/main");
+            var tagCheckout = Steps(prepare).FirstOrDefault(s => Scalar(Child(s, "uses"))?.StartsWith("actions/checkout@") == true);
+            if (Scalar(Child(Child(tagCheckout, "with"), "fetch-depth")) != "0")
+                violations.Add("the prepare job's checkout does not fetch origin/main (fetch-depth: 0)");
+        }
+        else violations.Add("the release has no 'prepare' job");
         return violations;
     }
 

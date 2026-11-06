@@ -11,6 +11,11 @@
 # parts also name their mandatory tests (.github/required-tests/): each must be in the run and pass, whatever the floor. The
 # `artifact` job builds the image and checks the deliverable itself (Trivy, hardened profile, N-1 upgrade and recovery);
 # in a release the same checks run against the staged digest instead (release.yml `artifact-test`). Every job is bounded.
+#
+# R1-51 (contract 0008): the release gate (ReleaseGateTests) runs inside the in-process tests. Its mode follows the
+# version; only release.yml makes a run a release run, through the input `release-gate: release`, which this file turns
+# into WHISKERS_RELEASE_GATE for the in-process step and nowhere else. On a pull request and in a release run the records
+# are also compared with a base (the pull request's base commit, or the previous release tag).
 name: ci
 
 on:
@@ -22,6 +27,11 @@ on:
     inputs:
       ref:
         description: "Commit to build and test (the release workflow passes the tag commit). Empty = the event's ref."
+        required: false
+        type: string
+        default: ""
+      release-gate:
+        description: "'release' in a release run (release.yml); empty otherwise. Can only make the release gate stricter."
         required: false
         type: string
         default: ""
@@ -72,6 +82,8 @@ jobs:
       # The floor guards against a silently-empty or shrunken run: with the test project missing from Whiskers.slnx,
       # `dotnet test --no-build` once exited 0 without executing any test. Raise it when the suite grows.
       - name: Test (in-process)
+        env:
+          WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}
         run: |
           set -euo pipefail
           dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
@@ -89,6 +101,28 @@ jobs:
             --filter "Category=RequiresDocker" --logger "console;verbosity=minimal" \
             --logger "trx;LogFileName=docker.trx" --results-directory TestResults
           bash .github/scripts/check-test-results.sh TestResults/docker.trx 70 --no-skips --require .github/required-tests/docker.txt
+
+      # R1-51 (contract 0008, D16 and R18): no invariant ID disappears without a retirement, the pinned highest ID never goes
+      # down, and an accepted release decision is never edited — compared with the pull request's base commit, or in a
+      # release run with the previous release tag (the highest vX.Y.Z below the version; tags fetched only then).
+      - name: Release gate (compare with the base)
+        if: github.event_name == 'pull_request' || inputs.release-gate == 'release'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          RELEASE_GATE: ${{ inputs.release-gate }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE_GATE" = "release" ]; then
+            git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
+            export WHISKERS_GATE_BASE=previous-tag
+          else
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            export WHISKERS_GATE_BASE="$BASE_SHA"
+          fi
+          dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
+            --filter "FullyQualifiedName~Whiskers.Tests.ReleaseGate.ReleaseGateBaseTests" --logger "console;verbosity=minimal" \
+            --logger "trx;LogFileName=gate-base.trx" --results-directory TestResults
+          bash .github/scripts/check-test-results.sh TestResults/gate-base.trx 1 --no-skips
 
       # DI boot gate (project rule): build+tests miss DI-graph regressions — boot the app in
       # Development (ValidateOnBuild/ValidateScopes) against a fresh data dir until /healthz answers.
@@ -216,6 +250,8 @@ jobs:
         run: |
           set -euo pipefail
           dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
-            --filter "Category=ImageRuntime" --logger "console;verbosity=normal" | tee image-runtime.log
-          grep -Eq "Passed:\s*[1-9]" image-runtime.log
-          if grep -Eq "Skipped:\s*[1-9]" image-runtime.log; then echo "::error::image runtime tests were skipped"; exit 1; fi
+            --filter "Category=ImageRuntime" --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=image-runtime.trx" --results-directory TestResults
+          # R1-51 (contract 0008, D14): checked from the TRX file like the other suites — a floor, no skip, and the
+          # required tests of image-runtime.txt (the image tests invariants may name are rendered into its block).
+          bash .github/scripts/check-test-results.sh TestResults/image-runtime.trx 7 --no-skips --require .github/required-tests/image-runtime.txt
