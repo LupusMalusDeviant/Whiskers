@@ -497,12 +497,34 @@ public class ReleaseGateTests
     [Fact]
     public void A_pushed_tag_cannot_choose_or_fake_the_base()
     {
-        // Review M3: only published releases count; a bare tag pushed below the version is ignored.
-        string[] tags = ["v0.15.0", "v1.0.0", "v1.1.0", "v1.1.99"];
+        // Review round 1 M3, round 2 m-B/m-D: the base is a published release in the release commit's history.
+        var v120 = new GateVersion(1, 2, 0);
+        string[] tags = ["v0.15.0", "v1.0.0", "v1.1.0", "v1.1.99", "latest"];
         string[] published = ["v0.15.0", "v1.0.0", "v1.1.0", "v1.2.0-rc1"];
-        Assert.Equal("v1.1.0", BaseComparison.PreviousRelease(tags, published, new GateVersion(1, 2, 0)));
-        Assert.Null(BaseComparison.PreviousRelease(tags, [], new GateVersion(1, 2, 0)));
-        Assert.Null(BaseComparison.PreviousRelease(["v1.1.99"], ["v1.1.99-not"], new GateVersion(1, 2, 0)));
+        static GateVersion? Own(string t) => t == "v1.1.99" ? new GateVersion(0, 9, 0) : GateVersion.TryParse(t[1..]); // v1.1.99: a forged tag
+        static bool All(string _) => true;
+
+        var ok = BaseComparison.ChooseBase(tags, published, All, Own, v120);
+        Assert.Equal(("v1.1.0", 0), (ok.Tag, ok.Problems.Count)); // the unpublished v1.1.99 carries another version: no release commit
+
+        // Not an ancestor of the release commit.
+        var stray = BaseComparison.ChooseBase(tags, published, t => t != "v1.1.0", Own, v120);
+        Assert.Contains(stray.Problems, p => p.Contains("v1.1.0 is not an ancestor"));
+        // The release list is missing, or empty.
+        var missing = BaseComparison.ChooseBase(tags, null, All, Own, v120);
+        Assert.Null(missing.Tag);
+        Assert.Contains(missing.Problems, p => p.Contains("no list of published releases"));
+        var empty = BaseComparison.ChooseBase(tags, [], All, Own, v120);
+        Assert.Null(empty.Tag);
+        Assert.Contains(empty.Problems, p => p.Contains("no published release below 1.2.0"));
+
+        // A release deleted or demoted to a pre-release: the base would fall back past a real release commit.
+        var fallback = BaseComparison.ChooseBase(tags, ["v0.15.0", "v1.0.0"], All, Own, v120);
+        Assert.Equal("v1.0.0", fallback.Tag);
+        Assert.Contains(fallback.Problems, p => p.StartsWith("v1.1.0 is a release commit", StringComparison.Ordinal));
+        // ...but not a tag outside the history, or one whose commit carries another version (a failed or forged tag).
+        Assert.Empty(BaseComparison.ChooseBase(tags, ["v0.15.0", "v1.0.0"], t => t != "v1.1.0", Own, v120).Problems.Where(p => p.StartsWith("v1.1.0", StringComparison.Ordinal)));
+        Assert.Empty(BaseComparison.ChooseBase(tags, ["v0.15.0", "v1.0.0"], All, t => t == "v1.1.0" ? null : Own(t), v120).Problems);
 
         // A tag whose commit does not carry the tag's version is no release commit: refused, never a bootstrap base.
         const string old = "<Project><PropertyGroup><Version>0.9.0</Version></PropertyGroup></Project>";
@@ -522,6 +544,8 @@ public class ReleaseGateTests
         Assert.Contains(BaseComparison.Compare(At("0.99.0"), At("1.0.3"), "the base"), f => f.Rule == "D2" && f.Message.Contains("never goes down"));
         Assert.DoesNotContain(BaseComparison.Compare(At("1.0.3"), At("1.0.3"), "the base"), f => f.Rule == "D2");
         Assert.DoesNotContain(BaseComparison.Compare(At("1.1.0"), At("1.0.3"), "the base"), f => f.Rule == "D2");
+        // No current csproj: the comparison fails on its own instead of skipping the check (review round 2 NIT).
+        Assert.Contains(BaseComparison.Compare(At("1.0.3") with { Csproj = null }, At("1.0.3"), "the base"), f => f.Rule == "D2" && f.Message.Contains("no src/Whiskers/Whiskers.csproj"));
     }
 
     [Fact]

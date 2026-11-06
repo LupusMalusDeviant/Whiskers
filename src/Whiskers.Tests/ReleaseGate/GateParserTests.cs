@@ -127,9 +127,27 @@ public class ReleaseGateDocumentTests
         var text = GateFiles.Require(GateFiles.ReleaseGateDoc);
         var line = ReleaseGateTests.LineStartingWith(text, "| release.yml | scan |");
         var split = text.Replace(line + "\n", "\n" + line + "\n");
-        Assert.Contains(ReleaseGateDocument.Parse(split).Problems, p => p.Contains("blank line"));
-        // A new table after a blank line (header and separator) is not a dropped row.
+        Assert.Contains(ReleaseGateDocument.Parse(split).Problems, p => p.Contains("after the end of the table"));
+        // Two blank lines, and a blank line then text then the row (review round 2, m-C).
+        var twoBlanks = text.Replace(line + "\n", "\n\n" + line + "\n");
+        Assert.Contains(ReleaseGateDocument.Parse(twoBlanks).Problems, p => p.Contains("after the end of the table"));
+        var textBetween = text.Replace(line + "\n", "\nSome prose.\n" + line + "\n");
+        Assert.Contains(ReleaseGateDocument.Parse(textBetween).Problems, p => p.Contains("after the end of the table"));
+        // A blank line, a data row, then a separator line is no new table of that header either.
+        var fakeHeader = text.Replace(line + "\n", "\n" + line + "\n|---|---|---|---|\n");
+        Assert.Contains(ReleaseGateDocument.Parse(fakeHeader).Problems, p => p.Contains("after the end of the table"));
         Assert.Empty(ReleaseGateDocument.Parse(text).Problems);
+    }
+
+    [Fact]
+    public void A_repeated_table_with_the_same_header_is_read_where_repeats_are_allowed()
+    {
+        const string header = "| ID | Invariant | Status | Evidence / gap | Test | WP |\n|---|---|---|---|---|---|\n";
+        const string row1 = "| INV-01 | a | ✅ | e | `ATests` | WP1 |\n";
+        const string row2 = "| INV-02 | b | ✅ | e | `BTests` | WP1 |\n";
+        Assert.Equal(2, InvariantTableParser.Parse(header + row1 + "\nprose\n\n" + header + row2).Count);
+        Assert.Throws<FormatException>(() => InvariantTableParser.Parse(header + row1 + "\nprose\n" + row2));
+        Assert.Throws<FormatException>(() => MarkdownTables.After("## H\n\n" + header + row1 + "\n" + header + row2, "## H"));
     }
 
     [Fact]

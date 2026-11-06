@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
 review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
-does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review round 1) is pending acceptance. Both are at the end.
+does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 and 2) is pending acceptance. Both are at the end.
 
 ## Purpose
 
@@ -622,7 +622,7 @@ This amendment takes precedence over the text above. It was accepted on 6 Novemb
 - **`ReleaseGateBaseTests`** passes without comparing when `WHISKERS_GATE_BASE` is unset; the comparison runs in the CI
   step that sets it.
 
-## Amendment 2 — gate review round 1 (6 November 2026)
+## Amendment 2 — gate review rounds 1 and 2 (6 November 2026)
 
 This amendment takes precedence over the text above, Amendment 1 included. It is **pending acceptance** by the
 maintainer.
@@ -641,15 +641,22 @@ maintainer.
   applies to the pull request base and to the previous release.
 - **The previous release is a published release in the release commit's history (R18, D16).** In a release run the
   base is the highest tag strictly below `<Version>` that is a published GitHub release, not a draft and not a
-  pre-release. Only release.yml's last jobs publish one, after every gate. The base step fails when any of these holds:
-  - no such release exists;
-  - the release's commit is not an ancestor of the release commit;
-  - the release commit's csproj does not carry the tag's version.
+  pre-release. The base step fails when any of these holds:
+  - the list of published releases is missing, or no such release exists;
+  - the base release's commit is not an ancestor of the release commit;
+  - the base release's commit does not carry the tag's version in its csproj;
+  - a `vX.Y.Z` tag between the base and `<Version>` is an ancestor of the release commit, carries its own version in
+    its csproj and has no published release (the base would otherwise fall back past it, for example after a release
+    was deleted or demoted). A failed release's tag must therefore be finished or deleted before the next release.
 
-  So a pushed `vX.Y.Z` tag without a published release cannot choose the base. A tag on a commit of another version is
-  refused instead of being read as a 0.x bootstrap base. The CI step does three things only in a release run: it
-  fetches the whole history and the tags (`--unshallow`), and it lists the published releases (`gh release list`,
-  using the run's own token).
+  The guarantee is the ancestry check together with the version match. The published list only screens out tags whose
+  release run failed: anyone who can push a tag can also publish a release by hand. A tag on a commit of another
+  version is refused instead of being read as a 0.x bootstrap base. Only in a release run, the CI step fetches the whole
+  history and the tags (`--unshallow`) and lists the published releases (`gh release list`). The run's own token is
+  passed to `gh` alone and unset before the tests run, so a pull request's test code never sees it.
+- **Reading the base fails closed.** A file counts as absent from the base only when `git ls-tree` lists no such path at
+  the base commit; any failure of `git ls-tree` or `git show` (a missing object after a shallow fetch, a corrupt object,
+  a bad reference) is a finding, never an empty base. A current commit without a csproj is a finding too.
 - **A comparing step that lost its base fails.** The CI step exports `WHISKERS_GATE_BASE_REQUIRED=true`. With it set
   and `WHISKERS_GATE_BASE` empty, `ReleaseGateBaseTests` fails instead of passing without a comparison.
 - **R10 covers step conditions.**
@@ -662,7 +669,9 @@ maintainer.
   - `ReleaseGateTests.The_repository_passes_the_gate_in_its_mode`;
   - the classes `ReleaseGateTests`, `InvariantTableParserTests`, `PathMatrixParserTests` and `ReleaseGateDocumentTests`;
   - `ReleaseGateBaseTests.The_records_keep_every_id_and_decision_of_the_base`.
-- **Table hygiene.** A table row that follows a blank line is a parse problem rather than a dropped row, unless it
-  starts a new table (a header plus its separator). A §11 count row given twice is an R3 finding.
+- **Table hygiene.** A table ends at its first line that does not start with `|`. Every `|` line after that, up to the
+  next heading, is a parse problem rather than a dropped row. The one exception is a further table with the same header
+  (header row plus separator) where the reader takes every such table (the invariant tables); under a heading that
+  holds one table, a second one is a problem too. A §11 count row given twice is an R3 finding.
 - **Patch releases come from `main`.** The tag-on-main check (D16) refuses a tag cut on a `release/*` branch. Land the
   fix on `main` and tag it there.

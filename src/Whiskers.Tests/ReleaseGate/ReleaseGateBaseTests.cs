@@ -5,7 +5,8 @@ namespace Whiskers.Tests.ReleaseGate;
 /// <summary>
 /// Contract 0008, D16 (a) and R18, against the real base. CI's step "Release gate (compare with the base)" sets
 /// <c>WHISKERS_GATE_BASE</c>: the pull request's base commit, or <c>previous-tag</c> in a release run (the highest
-/// vX.Y.Z tag strictly below the version, tags fetched by that step). Without the variable there is no base to compare
+/// published release strictly below the version that is in the release commit's history, see BaseComparison.ChooseBase).
+/// Without the variable there is no base to compare
 /// with, and the test has nothing to do — the ordinary runs are not where this check lives.
 /// </summary>
 public class ReleaseGateBaseTests
@@ -32,15 +33,11 @@ public class ReleaseGateBaseTests
             var (exit, tags) = Git("tag", "--list", "v*");
             Assert.True(exit == 0, $"git tag failed: {tags}");
             var releasesFile = Environment.GetEnvironmentVariable(ReleasesVariable);
-            Assert.True(!string.IsNullOrEmpty(releasesFile) && File.Exists(releasesFile),
-                $"{ReleasesVariable} names no file of published releases: without it a pushed tag could choose the base");
-            var previous = BaseComparison.PreviousRelease(Lines(tags), Lines(File.ReadAllText(releasesFile!)), GateFiles.Version());
-            Assert.True(previous is not null, $"no published release below {GateFiles.Version()} was found: a missing base is a finding, never a pass (were the tags fetched?)");
-            reference = tag = previous!;
-            label = $"the previous release {previous}";
-            // A published release that is not in the release commit's history is not its predecessor (review M3).
-            var (ancestor, why) = Git("merge-base", "--is-ancestor", previous + "^{commit}", "HEAD");
-            Assert.True(ancestor == 0, $"{label} is not an ancestor of the release commit ({why.Trim()}): not a base (was the history fetched?)");
+            var published = !string.IsNullOrEmpty(releasesFile) && File.Exists(releasesFile) ? Lines(File.ReadAllText(releasesFile)) : null;
+            var choice = BaseComparison.ChooseBase(Lines(tags), published, IsAncestorOfHead, VersionAt, GateFiles.Version());
+            Assert.True(choice.Problems.Count == 0 && choice.Tag is not null, "The previous release:\n" + string.Join("\n", choice.Problems));
+            reference = tag = choice.Tag!;
+            label = $"the previous release {tag}";
         }
         var (verify, output) = Git("rev-parse", "--verify", "--quiet", reference + "^{commit}");
         Assert.True(verify == 0, $"{label} cannot be read ({output.Trim()}): a missing base is a finding, never a pass");
@@ -59,10 +56,33 @@ public class ReleaseGateBaseTests
 
     private static string[] Lines(string text) => text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+    /// <summary>A git failure that is not a definite answer: the ancestry is unknown, so it fails instead of choosing.</summary>
+    private static bool IsAncestorOfHead(string tag)
+    {
+        var (exit, output) = Git("merge-base", "--is-ancestor", tag + "^{commit}", "HEAD");
+        if (exit is 0 or 1) return exit == 0;
+        throw new InvalidOperationException($"git merge-base failed for {tag} ({output.Trim()}): the ancestry is unknown");
+    }
+
+    private static GateVersion? VersionAt(string tag)
+    {
+        try { return Show(tag, GateFiles.Csproj) is { } csproj ? ReleaseGate.ReadVersion(csproj) : null; }
+        catch (FormatException) { return null; }
+    }
+
+    /// <summary>
+    /// A file at a commit, or null when the commit's tree has no such path (review round 2 m-A). "Absent" is decided by
+    /// <c>git ls-tree</c>, which answers with an empty list; any failure of either command (a missing object after a
+    /// shallow fetch, a corrupt object, a bad reference) fails the test instead of reading as an empty base.
+    /// </summary>
     private static string? Show(string reference, string path)
     {
+        var (listed, entries) = Git("ls-tree", "--name-only", reference, "--", path);
+        Assert.True(listed == 0, $"git ls-tree {reference} -- {path} failed ({entries.Trim()}): what the gate cannot read is a finding");
+        if (entries.Trim().Length == 0) return null;
         var (exit, text) = Git("show", $"{reference}:{path}");
-        return exit == 0 ? text.Replace("\r\n", "\n") : null;
+        Assert.True(exit == 0, $"git show {reference}:{path} failed ({text.Trim()}) although the path exists: what the gate cannot read is a finding");
+        return text.Replace("\r\n", "\n");
     }
 
     private static (int Exit, string Output) Git(params string[] args)

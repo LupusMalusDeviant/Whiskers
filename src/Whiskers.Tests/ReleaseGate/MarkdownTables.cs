@@ -26,7 +26,7 @@ public static class MarkdownTables
             start++;
         }
         if (start >= lines.Length) throw new FormatException($"no table follows the heading '{heading}'");
-        return Read(lines, start, heading);
+        return Read(lines, start, heading, repeatAllowed: false);
     }
 
     /// <summary>Every table in <paramref name="markdown"/> whose header cells equal <paramref name="header"/>.</summary>
@@ -39,12 +39,15 @@ public static class MarkdownTables
             if (!lines[i].TrimStart().StartsWith('|')) continue;
             if (i > 0 && lines[i - 1].TrimStart().StartsWith('|')) continue; // not the first row of a table
             if (!Split(lines[i]).SequenceEqual(header)) continue;
-            rows.AddRange(Read(lines, i, string.Join(" | ", header)));
+            rows.AddRange(Read(lines, i, string.Join(" | ", header), repeatAllowed: true));
         }
         return rows;
     }
 
-    private static List<(int Line, string[] Cells)> Read(string[] lines, int headerIndex, string what)
+    /// <param name="repeatAllowed">Whether a second table with the same header may follow under the same heading (it is
+    /// then read by its own call, as <see cref="WithHeader"/> does); for <see cref="After"/> it would be dropped, so it is
+    /// a problem there.</param>
+    private static List<(int Line, string[] Cells)> Read(string[] lines, int headerIndex, string what, bool repeatAllowed)
     {
         var header = Split(lines[headerIndex]);
         var rows = new List<(int, string[])>();
@@ -56,19 +59,25 @@ public static class MarkdownTables
                 throw new FormatException($"line {i + 1}: the row under '{what}' has {cells.Length} cells, the table has {header.Length}");
             rows.Add((i + 1, cells));
         }
-        // A blank line ends a Markdown table: rows after it would be dropped silently (review NIT). A '|' line right after
-        // the blank is a finding unless it starts a new table (a header followed by its separator).
-        var end = headerIndex + 1;
-        while (end < lines.Length && lines[end].TrimStart().StartsWith('|')) end++;
-        if (end + 1 < lines.Length && lines[end].Trim().Length == 0 && lines[end + 1].TrimStart().StartsWith('|'))
+        // A table ends at its first non-'|' line: rows after that would be dropped silently (review round 1 NIT, round 2
+        // m-C). Every '|' line from there up to the next heading is a problem, unless it belongs to another table with the
+        // same header (header row, then its separator) where such a repeat is read on its own.
+        var i2 = headerIndex + 1;
+        while (i2 < lines.Length && lines[i2].TrimStart().StartsWith('|')) i2++;
+        var tableEnd = i2;
+        for (; i2 < lines.Length && !lines[i2].TrimStart().StartsWith('#'); i2++)
         {
-            var next = end + 2 < lines.Length ? Split(lines[end + 2]) : [];
-            var startsTable = next.Length > 0 && next.All(c => c.Length > 0 && c.Trim(':', '-').Length == 0);
-            if (!startsTable)
-                throw new FormatException($"line {end + 2}: a table row after a blank line under '{what}' — the table ended at line {end}, so the row would be dropped");
+            if (!lines[i2].TrimStart().StartsWith('|')) continue;
+            var repeat = repeatAllowed && Split(lines[i2]).SequenceEqual(header)
+                && i2 + 1 < lines.Length && IsSeparator(Split(lines[i2 + 1]));
+            if (!repeat)
+                throw new FormatException($"line {i2 + 1}: a table row after the end of the table under '{what}' (it ended at line {tableEnd}) would be dropped");
+            while (i2 + 1 < lines.Length && lines[i2 + 1].TrimStart().StartsWith('|')) i2++; // skip that table
         }
         return rows;
     }
+
+    private static bool IsSeparator(string[] cells) => cells.All(c => c.Length > 0 && c.Trim(':', '-').Length == 0);
 
     /// <summary>The cells of one table line, trimmed, with <c>\|</c> turned back into <c>|</c>.</summary>
     public static string[] Split(string line)

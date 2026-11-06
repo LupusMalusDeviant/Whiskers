@@ -287,7 +287,10 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "git fetch --no-tags --unshallow origin", "git fetch --no-tags --depth=1 origin")]                      // no history: ancestry unknowable
     [InlineData("ci.yml", " --exclude-drafts --exclude-pre-releases", "")]                                                          // a draft as the base
     [InlineData("ci.yml", "            export WHISKERS_GATE_RELEASES=\"$RUNNER_TEMP/releases.txt\"\n", "")]                          // any pushed tag is the base
-    [InlineData("ci.yml", "          RELEASE_GATE: ${{ inputs.release-gate }}\n          GH_TOKEN: ${{ github.token }}\n", "          RELEASE_GATE: ${{ inputs.release-gate }}\n")]
+    [InlineData("ci.yml", "          RELEASE_GATE: ${{ inputs.release-gate }}\n          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASE_GATE: ${{ inputs.release-gate }}\n")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          GH_TOKEN: ${{ github.token }}\n")] // the tests see the token
+    [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "")]                                                                     // the tests see the token
+    [InlineData("ci.yml", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n            export GH_TOKEN=\"$RELEASES_TOKEN\"\n")] // and in a pull request
     // The image-runtime run: from its TRX file, with its manifest.
     [InlineData("ci.yml", " --no-skips --require .github/required-tests/image-runtime.txt", " --no-skips")]
     [InlineData("ci.yml", "TestResults/image-runtime.trx 7 --no-skips", "TestResults/image-runtime.trx 7")]
@@ -1071,10 +1074,14 @@ internal static class WorkflowPolicy
             // fetches the whole history and lists the published releases (no drafts, no pre-releases) for the test.
             var tagBranch = branches.Success ? branches.Groups["tag"].Value : "";
             if (!tagBranch.Contains("--unshallow", StringComparison.Ordinal)
-                || !Regex.IsMatch(tagBranch, @"gh release list --repo ""\$GITHUB_REPOSITORY"" --limit \d+ --exclude-drafts --exclude-pre-releases --json tagName --jq '\.\[\]\.tagName' > ""\$RUNNER_TEMP/releases\.txt""\n")
+                || !Regex.IsMatch(tagBranch, @"GH_TOKEN=""\$RELEASES_TOKEN"" gh release list --repo ""\$GITHUB_REPOSITORY"" --limit \d+ --exclude-drafts --exclude-pre-releases --json tagName --jq '\.\[\]\.tagName' > ""\$RUNNER_TEMP/releases\.txt""\n")
                 || !tagBranch.Contains("export WHISKERS_GATE_RELEASES=\"$RUNNER_TEMP/releases.txt\"", StringComparison.Ordinal)
-                || Scalar(Child(env, "GH_TOKEN")) != "${{ github.token }}")
+                || Scalar(Child(env, "RELEASES_TOKEN")) != "${{ github.token }}")
                 violations.Add($"ci.yml job '{job}': the release run's base comparison does not fetch the history and the published releases");
+            // Review round 2 NIT: the token reaches gh only; the tests (a pull request's own code) never see it.
+            if (Child(env, "GH_TOKEN") is not null || Child(env, "GITHUB_TOKEN") is not null
+                || Regex.Matches(run, @"\$RELEASES_TOKEN").Count != 1 || !Regex.IsMatch(run, @"\nfi\nunset RELEASES_TOKEN\n"))
+                violations.Add($"ci.yml job '{job}': the base comparison exposes the token beyond 'gh release list' (unset it before the tests)");
             // Review m3: the step marks itself, so a base lost on the way fails instead of passing without a comparison.
             if (!Regex.IsMatch(run, @"\nexport WHISKERS_GATE_BASE_REQUIRED=true\ndotnet test "))
                 violations.Add($"ci.yml job '{job}': the base comparison does not require a base (WHISKERS_GATE_BASE_REQUIRED=true)");

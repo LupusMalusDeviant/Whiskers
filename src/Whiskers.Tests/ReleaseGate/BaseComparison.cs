@@ -22,15 +22,43 @@ public static class BaseComparison
     private static IEnumerable<string> RowIds(string invariants)
         => RowId.Matches(invariants.Replace("\r\n", "\n")).Select(m => m.Groups[1].Value).Distinct(StringComparer.Ordinal);
 
+    /// <summary>The base a release run chose, and why it cannot be used (empty when it can).</summary>
+    public sealed record BaseChoice(string? Tag, IReadOnlyList<string> Problems);
+
     /// <summary>
-    /// The previous release a release run compares with (review M3): the highest tag strictly below
-    /// <paramref name="version"/> that is a published GitHub release (not a draft, not a pre-release). Only release.yml's
-    /// last jobs publish one, after every gate, so pushing a bare vX.Y.Z tag cannot choose the base.
+    /// The previous release a release run compares with (Amendment 2; review round 1 M3, round 2 m-B and m-D). The
+    /// guarantee is the ancestry check (<paramref name="isAncestor"/>: the tag's commit is in the release commit's history)
+    /// together with the version match <see cref="Compare"/> makes (the tag's commit carries the tag's version). The list
+    /// of published GitHub releases (no drafts, no pre-releases) only screens out tags whose release run failed; anyone who
+    /// can push a tag can also publish a release by hand. A tag between the chosen base and the version that is in the
+    /// history and carries its own version but has no published release is a finding: the base would otherwise fall back
+    /// past it (a deleted or demoted release), and a release forged below it could not pick an older base unseen.
     /// </summary>
-    public static string? PreviousRelease(IEnumerable<string> tags, IEnumerable<string> published, GateVersion version)
+    /// <param name="published">The published releases, or null when the list is missing (a finding).</param>
+    /// <param name="versionAt">The version in the csproj of a tag's commit, or null when it cannot be read.</param>
+    public static BaseChoice ChooseBase(IEnumerable<string> tags, IEnumerable<string>? published, Func<string, bool> isAncestor,
+        Func<string, GateVersion?> versionAt, GateVersion version)
     {
+        if (published is null)
+            return new(null, ["there is no list of published releases: without it a tag whose release failed could be the base"]);
         var releases = published.Select(p => p.Trim()).ToHashSet(StringComparer.Ordinal);
-        return PreviousTag(tags.Where(releases.Contains), version);
+        var all = tags.Select(t => t.Trim()).Where(t => Tag.IsMatch(t)).ToList();
+        var chosen = PreviousTag(all.Where(releases.Contains), version);
+        if (chosen is null)
+            return new(null, [$"no published release below {version} was found: a missing base is a finding, never a pass (were the tags fetched?)"]);
+
+        var problems = new List<string>();
+        if (!isAncestor(chosen))
+            problems.Add($"the previous release {chosen} is not an ancestor of the release commit: not a base (was the history fetched?)");
+        var chosenVersion = GateVersion.TryParse(chosen[1..])!;
+        foreach (var t in all.Where(t => !releases.Contains(t)).OrderBy(t => t, StringComparer.Ordinal))
+        {
+            var v = GateVersion.TryParse(t[1..])!;
+            if (v > chosenVersion && v < version && isAncestor(t) && versionAt(t) == v)
+                problems.Add($"{t} is a release commit in the release commit's history (its csproj says {v}) without a published "
+                             + $"release: the base would fall back past it to {chosen}; publish that release or delete the tag");
+        }
+        return new(chosen, problems);
     }
 
     /// <summary>The highest vX.Y.Z tag strictly below <paramref name="version"/>, compared on the three numbers.</summary>
@@ -66,7 +94,8 @@ public static class BaseComparison
         // The version never goes down against the base (D2): a lower version would drop the gate's mode.
         try
         {
-            if (current.Csproj is not null && ReleaseGate.ReadVersion(current.Csproj) is { } now && now < baseVersion)
+            if (current.Csproj is null) Add("D2", "Whiskers.csproj", "the current commit has no src/Whiskers/Whiskers.csproj: its version cannot be compared with the base");
+            else if (ReleaseGate.ReadVersion(current.Csproj) is { } now && now < baseVersion)
                 Add("D2", "Whiskers.csproj", $"the version {now} is below {baseVersion} of {label}: the version (and with it the gate's mode) never goes down");
         }
         catch (FormatException ex) { Add("D2", "Whiskers.csproj", $"the current version cannot be read: {ex.Message}"); }

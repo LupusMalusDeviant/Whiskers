@@ -61,9 +61,12 @@ that will be published passed the artifact checks. The arm64 image is scanned bu
 
 - **Releases come from `main`, patch releases included.** `prepare` refuses a tag whose commit is not reachable from
   `origin/main` (R1-51, D16), so a patch tag cut on a `release/*` branch is refused: land the fix on `main` and tag there.
-- **The base of a release run** is the previous *published* GitHub release (not a draft, not a pre-release) below the
-  version; it must be an ancestor of the release commit and carry its tag's version in its csproj. A bare `vX.Y.Z` tag
-  without a published release is ignored, a mismatch fails the run.
+- **The base of a release run** is the highest *published* GitHub release (not a draft, not a pre-release) below the
+  version. What makes it trustworthy is that its commit must be an ancestor of the release commit and its csproj must
+  carry the tag's version; the published list only screens out tags whose release run failed (anyone who can push a
+  tag can also publish a release by hand). A tag between that base and the version that is in the history and carries
+  its own version but has no published release fails the run, so the base cannot silently fall back past a deleted
+  or demoted release. **After a failed release**, either finish it (re-run) or delete its tag before the next release.
 - **CodeQL runs but does not block the release on alerts.** In the release, `security` runs CodeQL on the tag commit;
   the job fails only when the analysis cannot run. Open alerts block merges through the repository's code-scanning rule
   (below), not the release run itself.
