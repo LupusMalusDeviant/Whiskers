@@ -121,6 +121,18 @@ public class ReleaseGateDocumentTests
     }
 
     [Fact]
+    public void A_row_after_a_blank_line_is_a_problem_not_dropped()
+    {
+        // Review NIT: a blank line ends the table; the release.yml suite rows below it must not vanish silently.
+        var text = GateFiles.Require(GateFiles.ReleaseGateDoc);
+        var line = ReleaseGateTests.LineStartingWith(text, "| release.yml | scan |");
+        var split = text.Replace(line + "\n", "\n" + line + "\n");
+        Assert.Contains(ReleaseGateDocument.Parse(split).Problems, p => p.Contains("blank line"));
+        // A new table after a blank line (header and separator) is not a dropped row.
+        Assert.Empty(ReleaseGateDocument.Parse(text).Problems);
+    }
+
+    [Fact]
     public void The_decision_table_needs_its_heading_and_columns()
     {
         var contract = GateFiles.Require(GateFiles.Contract);

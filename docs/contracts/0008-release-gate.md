@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
 review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
-does not depend on it and is done on the same branch. **Amendment 1** (implementation, at the end) is pending acceptance.
+does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review round 1) is pending acceptance. Both are at the end.
 
 ## Purpose
 
@@ -607,7 +607,7 @@ repository except a `.actual` file on a snapshot difference.
 
 ## Amendment 1 — implementation (6 November 2026)
 
-This amendment takes precedence over the text above and is to be accepted by the maintainer.
+This amendment takes precedence over the text above. It was accepted on 6 November 2026.
 
 - **Bootstrap for 0.x bases (R18).** A base tag below 1.0.0 that lacks `docs/v1/SECURITY_INVARIANTS.md` or
   `docs/v1/PRODUCT_CONTRACT.md` counts as an empty base, like a 0.x base without the tables. A missing file stays a
@@ -621,3 +621,48 @@ This amendment takes precedence over the text above and is to be accepted by the
   counts 110 rows.
 - **`ReleaseGateBaseTests`** passes without comparing when `WHISKERS_GATE_BASE` is unset; the comparison runs in the CI
   step that sets it.
+
+## Amendment 2 — gate review round 1 (6 November 2026)
+
+This amendment takes precedence over the text above, Amendment 1 included. It is **pending acceptance** by the
+maintainer.
+
+- **Bootstrap order and missing files (refines Amendment 1).** The base's csproj is read first and decides the
+  bootstrap. A base without a csproj, or with an unreadable version, is always a finding. A base below 1.0.0 that lacks
+  `SECURITY_INVARIANTS.md`, `PRODUCT_CONTRACT.md` or `RELEASE_GATE.md` counts as empty for that file. Correction to
+  Amendment 1's example: neither v0.14.1 nor v0.15.0 has `docs/v1/`; v0.15.0 is the latest published release, so it is
+  the base of the next 0.x release after 0.15.0.
+- **Strict base tables (refines Amendment 1's "line by line").** Only the invariant IDs of the base's
+  `SECURITY_INVARIANTS.md` are read line by line, because main's INV-24 row had an unescaped `|`. The base's
+  `RELEASE_GATE.md` (pin and retired IDs) and its §6.1 table are read with the strict parsers. A problem in them is a
+  finding, because a malformed table would hide retired IDs or accepted decisions. Only a file or table that is absent
+  from a base below 1.0.0 counts as empty.
+- **The version never goes down against the base (D2).** A current `<Version>` below the base's is a finding. This
+  applies to the pull request base and to the previous release.
+- **The previous release is a published release in the release commit's history (R18, D16).** In a release run the
+  base is the highest tag strictly below `<Version>` that is a published GitHub release, not a draft and not a
+  pre-release. Only release.yml's last jobs publish one, after every gate. The base step fails when any of these holds:
+  - no such release exists;
+  - the release's commit is not an ancestor of the release commit;
+  - the release commit's csproj does not carry the tag's version.
+
+  So a pushed `vX.Y.Z` tag without a published release cannot choose the base. A tag on a commit of another version is
+  refused instead of being read as a 0.x bootstrap base. The CI step does three things only in a release run: it
+  fetches the whole history and the tags (`--unshallow`), and it lists the published releases (`gh release list`,
+  using the run's own token).
+- **A comparing step that lost its base fails.** The CI step exports `WHISKERS_GATE_BASE_REQUIRED=true`. With it set
+  and `WHISKERS_GATE_BASE` empty, `ReleaseGateBaseTests` fails instead of passing without a comparison.
+- **R10 covers step conditions.**
+  - A mandatory step with an `if:` is a finding.
+  - The one exception is the base-comparison step with exactly `github.event_name == 'pull_request' ||
+    inputs.release-gate == 'release'`.
+  - For a mandatory-suite row that names only a job, any step `if:` in that job is a finding.
+- **The gate is a required test.** These entries are in `.github/required-tests/in-process.txt`, each class with its
+  discovered case count, and `RequiredTestsManifestTests` pins them:
+  - `ReleaseGateTests.The_repository_passes_the_gate_in_its_mode`;
+  - the classes `ReleaseGateTests`, `InvariantTableParserTests`, `PathMatrixParserTests` and `ReleaseGateDocumentTests`;
+  - `ReleaseGateBaseTests.The_records_keep_every_id_and_decision_of_the_base`.
+- **Table hygiene.** A table row that follows a blank line is a parse problem rather than a dropped row, unless it
+  starts a new table (a header plus its separator). A §11 count row given twice is an R3 finding.
+- **Patch releases come from `main`.** The tag-on-main check (D16) refuses a tag cut on a `release/*` branch. Land the
+  fix on `main` and tag it there.

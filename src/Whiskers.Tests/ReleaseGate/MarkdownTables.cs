@@ -56,6 +56,17 @@ public static class MarkdownTables
                 throw new FormatException($"line {i + 1}: the row under '{what}' has {cells.Length} cells, the table has {header.Length}");
             rows.Add((i + 1, cells));
         }
+        // A blank line ends a Markdown table: rows after it would be dropped silently (review NIT). A '|' line right after
+        // the blank is a finding unless it starts a new table (a header followed by its separator).
+        var end = headerIndex + 1;
+        while (end < lines.Length && lines[end].TrimStart().StartsWith('|')) end++;
+        if (end + 1 < lines.Length && lines[end].Trim().Length == 0 && lines[end + 1].TrimStart().StartsWith('|'))
+        {
+            var next = end + 2 < lines.Length ? Split(lines[end + 2]) : [];
+            var startsTable = next.Length > 0 && next.All(c => c.Length > 0 && c.Trim(':', '-').Length == 0);
+            if (!startsTable)
+                throw new FormatException($"line {end + 2}: a table row after a blank line under '{what}' — the table ended at line {end}, so the row would be dropped");
+        }
         return rows;
     }
 

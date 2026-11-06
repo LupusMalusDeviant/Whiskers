@@ -70,6 +70,22 @@ public class RequiredTestsManifestTests
     }
 
     [Fact]
+    public void The_release_gate_and_its_parsers_are_required_in_the_in_process_run()
+    {
+        // Contract 0008: "It is named in .github/required-tests/in-process.txt so it cannot vanish" (review M2).
+        var entries = Entries(InProcess);
+        Assert.Contains(entries, e => e.Name == typeof(ReleaseGateTests).FullName + "." + nameof(ReleaseGateTests.The_repository_passes_the_gate_in_its_mode));
+        Assert.Contains(entries, e => e.Name == typeof(ReleaseGateBaseTests).FullName + "." + nameof(ReleaseGateBaseTests.The_records_keep_every_id_and_decision_of_the_base));
+        foreach (var type in new[] { typeof(ReleaseGateTests), typeof(InvariantTableParserTests), typeof(PathMatrixParserTests), typeof(ReleaseGateDocumentTests) })
+        {
+            var entry = entries.SingleOrDefault(e => e.Name == type.FullName);
+            Assert.True(entry.Name is not null, $"{type.FullName} is not a class entry of {InProcess}");
+            var cases = TestMethods(type).Sum(m => TestCatalog.Instance.CaseCount(type, m));
+            Assert.True(entry.Minimum == cases, $"{type.FullName}: the minimum is {entry.Minimum}, xUnit discovers {cases} cases");
+        }
+    }
+
+    [Fact]
     public void The_endpoint_matrix_and_the_postgres_identity_and_metrics_suites_are_required_test_by_test()
     {
         void AllRequired(string manifest, Type type)

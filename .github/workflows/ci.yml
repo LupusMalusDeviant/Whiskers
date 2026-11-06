@@ -104,21 +104,26 @@ jobs:
 
       # R1-51 (contract 0008, D16 and R18): no invariant ID disappears without a retirement, the pinned highest ID never goes
       # down, and an accepted release decision is never edited — compared with the pull request's base commit, or in a
-      # release run with the previous release tag (the highest vX.Y.Z below the version; tags fetched only then).
+      # release run with the previous release (the highest published GitHub release below the version, which must be an
+      # ancestor of the release commit and carry its tag's version; tags, history and the release list fetched only then).
       - name: Release gate (compare with the base)
         if: github.event_name == 'pull_request' || inputs.release-gate == 'release'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           RELEASE_GATE: ${{ inputs.release-gate }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ "$RELEASE_GATE" = "release" ]; then
-            git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
+            git fetch --no-tags --unshallow origin '+refs/tags/v*:refs/tags/v*'
+            gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName' > "$RUNNER_TEMP/releases.txt"
+            export WHISKERS_GATE_RELEASES="$RUNNER_TEMP/releases.txt"
             export WHISKERS_GATE_BASE=previous-tag
           else
             git fetch --no-tags --depth=1 origin "$BASE_SHA"
             export WHISKERS_GATE_BASE="$BASE_SHA"
           fi
+          export WHISKERS_GATE_BASE_REQUIRED=true
           dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
             --filter "FullyQualifiedName~Whiskers.Tests.ReleaseGate.ReleaseGateBaseTests" --logger "console;verbosity=minimal" \
             --logger "trx;LogFileName=gate-base.trx" --results-directory TestResults

@@ -35,7 +35,7 @@ public class ReleaseGateTests
 
         // A difference in a generated file: write the fresh render beside it, never over it (as for the MCP catalog).
         if (findings.Any(f => f.Rule == "R8"))
-            foreach (var (manifest, block) in ReleaseGate.RenderManifestBlocks(inputs))
+            foreach (var (manifest, block) in ReleaseGate.RenderManifestBlocks(inputs, version))
                 File.WriteAllText(GateFiles.Full($".github/required-tests/{manifest}") + ".actual",
                     ReleaseGate.WithBlock(inputs.Manifests.GetValueOrDefault(manifest) ?? "", block));
         if (findings.Any(f => f.Rule == "R12"))
@@ -344,6 +344,12 @@ public class ReleaseGateTests
     [InlineData("release.yml", "    needs: [prepare, test, security, build, scan, artifact-test]", "    needs: [prepare, test, security, build, artifact-test]")]  // scan dropped
     [InlineData("release.yml", "    needs: [prepare, test, security, build, scan, artifact-test]", "    needs: [prepare, test, build, scan, artifact-test]")]      // security dropped
     [InlineData("release.yml", "  security:\n    needs: prepare\n", "  security:\n    needs: prepare\n    if: false\n")]                                       // skipped
+    // A step-level condition skips a mandatory step in the release run while the job still succeeds (review M4).
+    [InlineData("ci.yml", "      - name: Test (in-process)\n", "      - name: Test (in-process)\n        if: inputs.release-gate != 'release'\n")]
+    [InlineData("ci.yml", "      - name: Test (Docker integration, mandatory)\n", "      - name: Test (Docker integration, mandatory)\n        if: github.event_name != 'push'\n")]
+    [InlineData("ci.yml", "      - name: Image runtime tests\n", "      - name: Image runtime tests\n        if: github.event_name == 'pull_request'\n")]
+    [InlineData("ci.yml", "        if: github.event_name == 'pull_request' || inputs.release-gate == 'release'\n", "        if: github.event_name == 'pull_request'\n")] // base step: only the exact condition
+    [InlineData("release.yml", "      - name: Trivy scan arm64 (gate, fail on CRITICAL)\n", "      - name: Trivy scan arm64 (gate, fail on CRITICAL)\n        if: false\n")]                                         // a step of a job row
     public void A_mandatory_suite_that_cannot_block_the_release_fails(string file, string from, string to)
     {
         var workflows = new Dictionary<string, string>(Real.Workflows) { [file] = Mutate(Real.Workflows[file], from, to) };
@@ -471,14 +477,68 @@ public class ReleaseGateTests
         Assert.Empty(BaseComparison.Compare(Snapshot(Real), predates, "the base"));
         var noPinYet = new GateSnapshot(csproj, Real.Invariants, "# Release gate\n", Real.Contract);
         Assert.Empty(BaseComparison.Compare(Snapshot(Real), noPinYet, "the base"));
-        // A missing base file is a finding; so is a base at 1.0.0 or above without the tables.
-        Assert.Contains(BaseComparison.Compare(Snapshot(Real), predates with { Invariants = null }, "the base"), f => f.Rule == "D16" && f.Message.Contains("SECURITY_INVARIANTS.md"));
-        Assert.Contains(BaseComparison.Compare(Snapshot(Real), predates with { Contract = null }, "the base"), f => f.Rule == "D16");
-        Assert.Contains(BaseComparison.Compare(Snapshot(Real), null, "the base"), f => f.Rule == "D16");
+        // Amendment 1: a 0.x base without the files (v0.14.1, v0.15.0 have no docs/v1/) is an empty base.
+        var bare = new GateSnapshot(csproj, null, null, null);
+        Assert.Empty(BaseComparison.Compare(Snapshot(Real), bare, "the previous release v0.15.0", "v0.15.0"));
+        Assert.Empty(BaseComparison.Compare(Snapshot(Real), predates with { Invariants = null }, "the base"));
+        Assert.Empty(BaseComparison.Compare(Snapshot(Real), predates with { Contract = null }, "the base"));
+        // From 1.0.0 on a missing file or table is a finding; so is a base without a csproj, or no base at all.
         const string one = "<Project><PropertyGroup><Version>1.0.0</Version></PropertyGroup></Project>";
-        var findings = BaseComparison.Compare(Snapshot(Real), predates with { Csproj = one }, "the previous release tag v1.0.0");
+        GateSnapshot Current(GateInputs i) => Snapshot(i, "<Project><PropertyGroup><Version>1.0.1</Version></PropertyGroup></Project>");
+        Assert.Contains(BaseComparison.Compare(Current(Real), bare with { Csproj = one }, "the base"), f => f.Rule == "D16" && f.Message.Contains("SECURITY_INVARIANTS.md"));
+        Assert.Contains(BaseComparison.Compare(Current(Real), predates with { Csproj = one, Contract = null }, "the base"), f => f.Rule == "D16" && f.Message.Contains("PRODUCT_CONTRACT.md"));
+        Assert.Contains(BaseComparison.Compare(Snapshot(Real), bare with { Csproj = null }, "the base"), f => f.Rule == "D16" && f.Message.Contains("csproj"));
+        Assert.Contains(BaseComparison.Compare(Snapshot(Real), null, "the base"), f => f.Rule == "D16");
+        var findings = BaseComparison.Compare(Current(Real), predates with { Csproj = one }, "the previous release v1.0.0", "v1.0.0");
         Assert.Contains(findings, f => f.Rule == "D16" && f.Message.Contains("no RELEASE_GATE.md"));
         Assert.Contains(findings, f => f.Rule == "R18" && f.Message.Contains("6.1"));
+    }
+
+    [Fact]
+    public void A_pushed_tag_cannot_choose_or_fake_the_base()
+    {
+        // Review M3: only published releases count; a bare tag pushed below the version is ignored.
+        string[] tags = ["v0.15.0", "v1.0.0", "v1.1.0", "v1.1.99"];
+        string[] published = ["v0.15.0", "v1.0.0", "v1.1.0", "v1.2.0-rc1"];
+        Assert.Equal("v1.1.0", BaseComparison.PreviousRelease(tags, published, new GateVersion(1, 2, 0)));
+        Assert.Null(BaseComparison.PreviousRelease(tags, [], new GateVersion(1, 2, 0)));
+        Assert.Null(BaseComparison.PreviousRelease(["v1.1.99"], ["v1.1.99-not"], new GateVersion(1, 2, 0)));
+
+        // A tag whose commit does not carry the tag's version is no release commit: refused, never a bootstrap base.
+        const string old = "<Project><PropertyGroup><Version>0.9.0</Version></PropertyGroup></Project>";
+        const string current = "<Project><PropertyGroup><Version>1.2.0</Version></PropertyGroup></Project>";
+        var now = new GateSnapshot(current, Real.Invariants, Real.ReleaseGate, Real.Contract);
+        var fake = BaseComparison.Compare(now, new GateSnapshot(old, null, null, null), "the previous release v1.1.99", "v1.1.99");
+        Assert.Contains(fake, f => f.Rule == "D16" && f.Message.Contains("not a release commit"));
+        Assert.Empty(BaseComparison.Compare(now, new GateSnapshot(old, null, null, null), "the base"));
+    }
+
+    [Fact]
+    public void The_version_never_goes_down_against_the_base()
+    {
+        // Review m1: lowering <Version> would drop the gate's mode (D2).
+        static string Project(string v) => $"<Project><PropertyGroup><Version>{v}</Version></PropertyGroup></Project>";
+        GateSnapshot At(string v) => new(Project(v), Real.Invariants, Real.ReleaseGate, Real.Contract);
+        Assert.Contains(BaseComparison.Compare(At("0.99.0"), At("1.0.3"), "the base"), f => f.Rule == "D2" && f.Message.Contains("never goes down"));
+        Assert.DoesNotContain(BaseComparison.Compare(At("1.0.3"), At("1.0.3"), "the base"), f => f.Rule == "D2");
+        Assert.DoesNotContain(BaseComparison.Compare(At("1.1.0"), At("1.0.3"), "the base"), f => f.Rule == "D2");
+    }
+
+    [Fact]
+    public void A_malformed_table_in_the_base_is_a_finding_not_an_empty_base()
+    {
+        // Review m2: a base table that is present is read strictly; only an absent one in a 0.x base counts as empty.
+        static string Project(string v) => $"<Project><PropertyGroup><Version>{v}</Version></PropertyGroup></Project>";
+        var withRetired = Mutate(Real.ReleaseGate, "| Invariant | Decision | Date |\n|---|---|---|\n", "| Invariant | Decision | Date |\n|---|---|---|\n| INV-99 | RG-1 |\n");
+        foreach (var v in new[] { "0.15.0", "1.0.0" })
+        {
+            var current = new GateSnapshot(Project(v), Real.Invariants, Real.ReleaseGate, Real.Contract);
+            var brokenGate = current with { ReleaseGate = withRetired };
+            Assert.Contains(BaseComparison.Compare(current, brokenGate, "the base"), f => f.Rule == "D16" && f.Message.Contains("RELEASE_GATE.md"));
+            var brokenDecisions = current with { Contract = Real.Contract.Replace("| ID | Kind | Invariant | Decision | Release | Status | Date | Decided by |",
+                "| ID | Kind | Invariant | Decision | Status | Date | Decided by | Notes |") };
+            Assert.Contains(BaseComparison.Compare(current, brokenDecisions, "the base"), f => f.Rule == "R18");
+        }
     }
 
     // ---- R12–R15 -----------------------------------------------------------------------------------------------

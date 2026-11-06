@@ -283,6 +283,11 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "          BASE_SHA: ${{ github.event.pull_request.base.sha }}", "          BASE_SHA: ${{ github.event.pull_request.head.sha }}")]
     [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/gate-base.trx 1 --no-skips\n", "")]
     [InlineData("ci.yml", "TestResults/gate-base.trx 1 --no-skips", "TestResults/gate-base.trx 1")]
+    [InlineData("ci.yml", "          export WHISKERS_GATE_BASE_REQUIRED=true\n", "")]                                                  // a lost base passes
+    [InlineData("ci.yml", "git fetch --no-tags --unshallow origin", "git fetch --no-tags --depth=1 origin")]                      // no history: ancestry unknowable
+    [InlineData("ci.yml", " --exclude-drafts --exclude-pre-releases", "")]                                                          // a draft as the base
+    [InlineData("ci.yml", "            export WHISKERS_GATE_RELEASES=\"$RUNNER_TEMP/releases.txt\"\n", "")]                          // any pushed tag is the base
+    [InlineData("ci.yml", "          RELEASE_GATE: ${{ inputs.release-gate }}\n          GH_TOKEN: ${{ github.token }}\n", "          RELEASE_GATE: ${{ inputs.release-gate }}\n")]
     // The image-runtime run: from its TRX file, with its manifest.
     [InlineData("ci.yml", " --no-skips --require .github/required-tests/image-runtime.txt", " --no-skips")]
     [InlineData("ci.yml", "TestResults/image-runtime.trx 7 --no-skips", "TestResults/image-runtime.trx 7")]
@@ -1062,6 +1067,17 @@ internal static class WorkflowPolicy
                 || !branches.Groups["pr"].Value.Contains("WHISKERS_GATE_BASE=\"$BASE_SHA\"", StringComparison.Ordinal)
                 || branches.Groups["pr"].Value.Contains("refs/tags", StringComparison.Ordinal))
                 violations.Add($"ci.yml job '{job}': the base comparison does not fetch the base SHA on a pull request and the tags only in a release run");
+            // Review M3: in a release run the base is a published release in the release commit's history, so the step
+            // fetches the whole history and lists the published releases (no drafts, no pre-releases) for the test.
+            var tagBranch = branches.Success ? branches.Groups["tag"].Value : "";
+            if (!tagBranch.Contains("--unshallow", StringComparison.Ordinal)
+                || !Regex.IsMatch(tagBranch, @"gh release list --repo ""\$GITHUB_REPOSITORY"" --limit \d+ --exclude-drafts --exclude-pre-releases --json tagName --jq '\.\[\]\.tagName' > ""\$RUNNER_TEMP/releases\.txt""\n")
+                || !tagBranch.Contains("export WHISKERS_GATE_RELEASES=\"$RUNNER_TEMP/releases.txt\"", StringComparison.Ordinal)
+                || Scalar(Child(env, "GH_TOKEN")) != "${{ github.token }}")
+                violations.Add($"ci.yml job '{job}': the release run's base comparison does not fetch the history and the published releases");
+            // Review m3: the step marks itself, so a base lost on the way fails instead of passing without a comparison.
+            if (!Regex.IsMatch(run, @"\nexport WHISKERS_GATE_BASE_REQUIRED=true\ndotnet test "))
+                violations.Add($"ci.yml job '{job}': the base comparison does not require a base (WHISKERS_GATE_BASE_REQUIRED=true)");
             if (!Regex.IsMatch(run, @"check-test-results\.sh \S+ [1-9]\d* --no-skips\n"))
                 violations.Add($"ci.yml job '{job}': the base comparison is not checked from its TRX file without skips");
             if (!ci.TryGetValue(job, out var j) || !Steps(j).Any(s => Scalar(Child(s, "run"))?.Contains("--filter \"Category!=RequiresDocker\"", StringComparison.Ordinal) == true))

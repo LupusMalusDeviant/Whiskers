@@ -61,9 +61,11 @@ public static class ReleaseGate
     }
 
     /// <summary>The generated manifest blocks (R8): manifest file name → block text, markers included.</summary>
-    public static IReadOnlyDictionary<string, string> RenderManifestBlocks(GateInputs inputs)
+    /// <remarks>Rendered at the version the gate evaluates (review NIT): an exception expired at that version is out of
+    /// the block here exactly as it is in <see cref="Evaluate"/>, so the .actual file can match.</remarks>
+    public static IReadOnlyDictionary<string, string> RenderManifestBlocks(GateInputs inputs, GateVersion? version = null)
     {
-        var e = new Evaluation(inputs, GateMode.Development, new GateVersion(0, 0, 0));
+        var e = new Evaluation(inputs, GateMode.Development, version ?? new GateVersion(0, 0, 0));
         e.Prepare();
         return e.RenderBlocks();
     }
@@ -241,8 +243,9 @@ public static class ReleaseGate
                         : InvariantTableParser.ParseStatus(cells[0]) is { } s ? InvariantTableParser.Symbol(s) : null;
                     var n = Regex.Match(cells[1], @"^\**(\d+)");
                     if (key is null || !n.Success) { Add("R3", "SECURITY_INVARIANTS.md §11", $"line {line}: '{string.Join(" | ", cells)}' is not a count row"); continue; }
-                    if (int.Parse(n.Groups[1].Value) != expected[key])
-                        Add("R3", "SECURITY_INVARIANTS.md §11", $"line {line}: {key} is {n.Groups[1].Value}, the table has {expected[key]}");
+                    if (!expected.TryGetValue(key, out var count)) { Add("R3", "SECURITY_INVARIANTS.md §11", $"line {line}: {key} is counted twice"); continue; }
+                    if (int.Parse(n.Groups[1].Value) != count)
+                        Add("R3", "SECURITY_INVARIANTS.md §11", $"line {line}: {key} is {n.Groups[1].Value}, the table has {count}");
                     expected.Remove(key);
                 }
                 foreach (var missing in expected.Keys) Add("R3", "SECURITY_INVARIANTS.md §11", $"has no count for {missing}");
@@ -467,6 +470,13 @@ public static class ReleaseGate
                 @"check-test-results\.sh \S+ [1-9]\d* --no-skips", "a TRX check of the base comparison (D16)"),
         ];
 
+        /// <summary>The only conditions a mandatory step may carry: the base comparison runs on every pull request and every
+        /// release run (D16), and nowhere else is there a base to compare with. Any other step condition is an R10 finding.</summary>
+        private static readonly Dictionary<(string Workflow, string Job, string? Step), string> AllowedStepConditions = new()
+        {
+            [("ci.yml", "build-test", "Release gate (compare with the base)")] = "github.event_name == 'pull_request' || inputs.release-gate == 'release'",
+        };
+
         private void Suites()
         {
             foreach (var (wf, job, step, pattern, what) in RequiredSuites)
@@ -501,6 +511,15 @@ public static class ReleaseGate
                     var steps = Workflow.Steps(job).Where(x => Workflow.Scalar(x, "name") == s.Step).ToList();
                     if (steps.Count != 1) Add("R10", subject, $"RELEASE_GATE.md:{s.Line}: the job has {steps.Count} steps of that name");
                     if (steps.Any(x => Workflow.Truthy(Workflow.Scalar(x, "continue-on-error")))) Add("R10", subject, "the step may fail without failing the job (continue-on-error)");
+                    foreach (var stepCondition in steps.Select(x => Workflow.Scalar(x, "if")).OfType<string>())
+                        if (!AllowedStepConditions.TryGetValue((s.Workflow, s.Job, s.Step), out var allowed) || stepCondition.Trim() != allowed)
+                            Add("R10", subject, $"the step is conditional ('if: {stepCondition}') and may be skipped in a release run");
+                }
+                else
+                {
+                    foreach (var x in Workflow.Steps(job))
+                        if (Workflow.Scalar(x, "if") is { } stepIf)
+                            Add("R10", subject, $"step '{Workflow.Scalar(x, "name") ?? Workflow.Scalar(x, "uses") ?? "?"}' is conditional ('if: {stepIf}') and may be skipped in a release run");
                 }
                 switch (s.Workflow)
                 {
