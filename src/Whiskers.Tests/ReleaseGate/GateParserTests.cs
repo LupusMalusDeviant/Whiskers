@@ -119,21 +119,25 @@ public class PathMatrixParserTests
 
         // Review round 8 n-2: no dash or spaces, a minus sign, a class letter after other letters are near misses too;
         // words with a class letter and a lower-case 'o' ('MCP tools', 'Total') are not.
-        const string wider = "## 7. Paths\n\n| ID | Handler |\n|---|---|\n| U-01 | a |\n| U40 | b |\n| **U 41** | c |\n| U−42 | d |\n"
+        const string wider = "## 7. Paths\n\n| ID | Handler |\n|---|---|\n| U-01 | a |\n| U40 | b |\n| **U 41** | c |\n| U\u221242 | d |\n"
             + "| MU-43 | e |\n| XU-44 | f |\n| MCP tools (M) | g |\n| **Total** | h |\n"
             // Review round 9 n-1/n-2: a letter O or o, or I, for a digit.
             + "| **U-O** | i |\n| **U-O4** | j |\n| **U-o1** | k |\n| **U-OI** | l |\n"
             // Review round 9 n-4: lookalikes — a Cyrillic class letter, zero-width and soft hyphens, small and fullwidth
             // hyphen-minus, fullwidth letters and digits (a fullwidth-digit ID is no row either).
-            + "| Т-45 | m |\n| U​-46 | n |\n| U­47 | o |\n| U﹣48 | p |\n| U－49 | q |\n"
-            + "| Ｕ-５０ | r |\n| U-５１ | s |\n\n## 8. End\n";
+            + "| \u0422-45 | m |\n| U\u200B-46 | n |\n| U\u00AD47 | o |\n| U\uFE6348 | p |\n| U\uFF0D49 | q |\n"
+            + "| \uFF35-\uFF15\uFF10 | r |\n| U-\uFF15\uFF11 | s |\n"
+            // Review round 10: without a digit, after '**' so that rule (d) cannot catch them, the Dash and Invisible
+            // characters and the Cyrillic O are what makes these near misses.
+            + "| **U\uFF0DOI** | t |\n| **U\u200B-O** | u |\n| **U\u00AD-lO** | v |\n| **U-\u041El** | w |\n\n## 8. End\n";
         const string widerMapping = "## Rows and capabilities\n\n| Row | Capabilities |\n|---|---|\n| U-01 | x.a |\n";
         var widerProblems = new List<string>();
         Assert.Equal(["U-01"], PathMatrixParser.Parse(wider, widerMapping, widerProblems).Select(r => r.Id));
         string[] misses =
         [
-            "U40", "**U 41**", "U−42", "MU-43", "XU-44", "**U-O**", "**U-O4**", "**U-o1**", "**U-OI**",
-            "Т-45", "U​-46", "U­47", "U﹣48", "U－49", "Ｕ-５０", "U-５１",
+            "U40", "**U 41**", "U\u221242", "MU-43", "XU-44", "**U-O**", "**U-O4**", "**U-o1**", "**U-OI**",
+            "\u0422-45", "U\u200B-46", "U\u00AD47", "U\uFE6348", "U\uFF0D49", "\uFF35-\uFF15\uFF10", "U-\uFF15\uFF11",
+            "**U\uFF0DOI**", "**U\u200B-O**", "**U\u00AD-lO**", "**U-\u041El**",
         ];
         foreach (var miss in misses)
             Assert.Contains(widerProblems, p => p.Contains($"'{miss}' looks like a §7 row ID"));

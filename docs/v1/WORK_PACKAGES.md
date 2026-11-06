@@ -996,8 +996,8 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 > specified. `src/Whiskers.Tests/ReleaseGate/`: `ReleaseGateTests` with its parsers (invariant table, §7 path matrix,
 > `RELEASE_GATE.md`, §6.1 release decisions), the xUnit-discovery test catalog, the R1–R18 checks in Development, Line and
 > Release mode, the generated manifest blocks and `CAPABILITY_INVENTORY.md`, and `ReleaseGateBaseTests` (D16/R18 against
-> the pull request's base or the previous release tag). New records: `docs/v1/RELEASE_GATE.md` (pin `INV-61`, the twelve
-> open invariants, platform skips, mandatory suites), `PATH_CAPABILITIES.md`, the generated `CAPABILITY_INVENTORY.md`,
+> the pull request's base or the previous release tag). New records: `docs/v1/RELEASE_GATE.md` (pin `INV-62`, the thirteen
+> open invariants (INV-62 from contract 0006 merged), platform skips, mandatory suites), `PATH_CAPABILITIES.md`, the generated `CAPABILITY_INVENTORY.md`,
 > `PRODUCT_CONTRACT.md` §6.1 (empty) and five §7 rows that had none (M-48, M-49, S-16, U-37, U-38). D12: INV-58 ⚠️; D10:
 > the INV-21 marker names `ReadOnlyKillSwitchWireTests`. CI: `release-gate: release` from release.yml only, the base
 > comparison step on pull requests and release runs, release.yml calls security.yml and refuses a tag commit not on

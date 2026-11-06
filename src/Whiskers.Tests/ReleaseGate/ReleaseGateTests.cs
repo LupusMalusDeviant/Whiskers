@@ -475,11 +475,11 @@ public class ReleaseGateTests
         // An invariant ID that disappears, and a pin that goes down.
         var deleted = Snapshot(Real with
         {
-            Invariants = RemoveLine(Real.Invariants, "| INV-61 |"),
+            Invariants = RemoveLine(Real.Invariants, "| INV-62 |"),
             ReleaseGate = Mutate(Real.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61"),
         });
         var lost = BaseComparison.Compare(deleted, Snapshot(Real), "the base");
-        Assert.Contains(lost, f => f.Rule == "D16" && f.Subject == "INV-61");
+        Assert.Contains(lost, f => f.Rule == "D16" && f.Subject == "INV-62");
         Assert.Contains(lost, f => f.Rule == "D16" && f.Message.Contains("went down"));
 
         // The previous release tag: the highest vX.Y.Z strictly below the version, by the three numbers.

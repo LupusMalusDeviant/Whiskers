@@ -11,24 +11,27 @@ public static class PathMatrixParser
     public const string PathCapabilitiesHeading = "## Rows and capabilities";
     // A row ID is an ASCII class letter, an ASCII '-' and ASCII digits only ('\d' alone would also take e.g. fullwidth digits).
     private static readonly Regex RowId = new(@"^([MASTU])-([0-9]+)$", RegexOptions.CultureInvariant);
-    // A near miss of a row ID (review rounds 6 to 9): a first cell that is not exactly a row ID matches when
-    //   (a) it contains any numeric character (Unicode category N: ASCII, fullwidth, Arabic-Indic, superscript digits …),
-    //       e.g. 'U40', '**U 41**', 'U−42', 'MU-43', 'Ｕ-40', 'U­40', 'U​-40', 'U－40', 'U-o1'; or
+    // A near miss of a row ID (review rounds 6 to 10): a first cell that is not exactly a row ID matches when
+    //   (a) it contains any numeric character (Unicode category N: ASCII, fullwidth, Arabic-Indic, superscript digits),
+    //       e.g. 'U40', '**U 41**', 'U' U+2212 '42', 'MU-43', a fullwidth 'U-40', 'U' U+00AD '40', 'U' U+200B '-40',
+    //       'U' U+FF0D '40', 'U-o1'; or
     //   (b) anywhere in it, a class letter M, A, S, T or U in any case (also after other letters) is followed by any run,
-    //       possibly empty, of whitespace, separators and dashes (see Separator) and then a capital O that no letter
+    //       possibly empty, of whitespace, Dash and Invisible characters (below) and then a capital O that no letter
     //       follows ('U-O', 'UO'); or
-    //   (c) anywhere in it, a class letter is followed by at least one dash (with any whitespace or separators around it)
-    //       and then a digit-like letter: O, o, I, l, or the Cyrillic О, о ('**U-OI**', 'U-lO', 'U-oo'); or
+    //   (c) anywhere in it, a class letter is followed by at least one Dash character (with any whitespace or Invisible
+    //       characters around it) and then a digit-like letter: O, o, I, l, or the Cyrillic U+041E, U+043E ('**U-OI**',
+    //       'U-lO', 'U-oo'); or
     //   (d) it starts with a class letter and a character that is neither a letter, a digit nor '_' ('U:x').
     // Words with a class letter and a lower-case 'o' but no dash and no digit ('MCP tools', 'Total') do not match.
-    // Dashes: ASCII '-', U+00AD soft hyphen, U+2010 to U+2015, U+2212 minus, U+FE58, U+FE63 and U+FF0D. Other separators:
-    // U+200B to U+200D and U+2060 (zero-width characters).
-    private const string Dash = @"\-­‐-―−﹘﹣－";
-    private const string Invisible = @"​-‍⁠";
+    // Dash: ASCII '-', U+00AD soft hyphen, U+2010 to U+2015, U+2212 minus, U+FE58, U+FE63 and U+FF0D.
+    // Invisible: U+200B to U+200D and U+2060 (zero-width characters).
+    private const string Dash = "\\-\u00AD\u2010-\u2015\u2212\uFE58\uFE63\uFF0D";
+    private const string Invisible = "\u200B-\u200D\u2060";
+    private const string DigitLikeLetter = "OoIl\u041E\u043E";
     private static readonly Regex LooksLikeRowId = new(
         @"\p{N}"
         + $@"|[MASTU][\s{Dash}{Invisible}]*(?-i:O)(?![\p{{L}}])"
-        + $@"|[MASTU][\s{Invisible}]*[{Dash}]+[\s{Invisible}]*(?-i:[OoIlОо])"
+        + $@"|[MASTU][\s{Invisible}]*[{Dash}]+[\s{Invisible}]*(?-i:[{DigitLikeLetter}])"
         + @"|^[MASTU]\W",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private static readonly Regex FirstBackticked = new(@"`([^`]+)`", RegexOptions.CultureInvariant);

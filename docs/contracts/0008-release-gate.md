@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
 review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
-does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 9) is pending acceptance. Both are at the end.
+does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 10) was accepted on 6 November 2026. Both are at the end.
 
 ## Purpose
 
@@ -622,10 +622,10 @@ This amendment takes precedence over the text above. It was accepted on 6 Novemb
 - **`ReleaseGateBaseTests`** passes without comparing when `WHISKERS_GATE_BASE` is unset; the comparison runs in the CI
   step that sets it.
 
-## Amendment 2 — gate review rounds 1 to 9 (6 November 2026)
+## Amendment 2 — gate review rounds 1 to 10 (6 November 2026)
 
-This amendment takes precedence over the text above, Amendment 1 included. It is **pending acceptance** by the
-maintainer.
+This amendment takes precedence over the text above, Amendment 1 included. It was accepted on 6 November
+2026.
 
 - **Bootstrap order and missing files (refines Amendment 1).** The base's csproj is read first and decides the
   bootstrap. A base without a csproj, or with an unreadable version, is always a finding. A base below 1.0.0 that lacks
