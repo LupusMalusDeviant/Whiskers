@@ -22,7 +22,7 @@ namespace Whiskers.Tests;
 /// denial, the kill switch, a revoked owner and an unwritable audit each stop the action before anything runs; a
 /// revoked owner also switches the webhook off and tells an admin. No secret reaches the gateway's arguments.
 /// </summary>
-public sealed class WebhookMutationTests : IDisposable
+public sealed partial class WebhookMutationTests : IDisposable
 {
     private const string Admin = "admin@example.com";
     private static readonly string AdminId = PrincipalIds.User(Admin);
@@ -908,7 +908,7 @@ public sealed class WebhookMutationTests : IDisposable
         // The Docker service of the webhook (lookup and planning) starts failing whenever a test says so.
         var docker = ThrowingDocker.Wrap(_docker, () => _dockerThrows, () => _dockerTimesOut);
         return new(_sp.GetRequiredService<IServiceScopeFactory>(), docker, _host, new ComposePlanner(docker, _host),
-            NullLogger<WebhookService>.Instance, locks: _locks, vault: TestVault.Usable);
+            NullLogger<WebhookService>.Instance, locks: _locks, vault: TestVault.Usable, composeRunner: _composeRunner);
     }
 
     /// <summary>A Docker service whose container listing fails, as for a server that is no longer registered.</summary>
@@ -1010,7 +1010,7 @@ public sealed class WebhookMutationTests : IDisposable
 
     // Built per call so the kill switch and protected names set by a test apply.
     private IAutomationMutationRunner Automation() => new LateRunner(() => new AutomationMutationRunner(Gateway(),
-        new CapabilityCatalog(), new AutomationOwnerResolver(_roles, _whitelist, new Keys(), new Accounts()),
+        new CapabilityCatalog(), new AutomationOwnerResolver(_roles, _whitelist, _keys, new Accounts()),
         new StaticOptionsMonitor<AutomationOptions>(new AutomationOptions { RequireOwner = _requireOwner })));
 
     private UiMutationRunner UiRunner(AppRole role, string email = Admin) =>

@@ -614,9 +614,21 @@ public sealed partial class ProtectedResourceResolutionTests
         /// <summary>Called after each image inspection (contract 0006: another run moving a tag in between).</summary>
         public Action? ImageInspected { get; set; }
 
+        /// <summary>What <see cref="ComposeExposures.CgroupnsDefaultCommand"/> prints (review M1): cgroup v2 without a
+        /// daemon.json by default; null fails it.</summary>
+        public string? CgroupnsOutput { get; set; } = "2\n---\n";
+
+        /// <summary>How often the daemon's default cgroup namespace mode was read.</summary>
+        public int CgroupnsReads { get; private set; }
+
         public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
             CancellationToken ct = default, int? maxOutputChars = null)
         {
+            if (command == ComposeExposures.CgroupnsDefaultCommand)
+            {
+                CgroupnsReads++;
+                return CgroupnsOutput is null ? Done("", 1) : Done(CgroupnsOutput);
+            }
             if (command.EndsWith(" config --format json", StringComparison.Ordinal))
             {
                 ConfigCommands.Add(command);

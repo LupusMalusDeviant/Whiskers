@@ -17,7 +17,7 @@ namespace Whiskers.Tests;
 /// build, inspect the images, up) and the re-check of what a run created — stopping under the agent rule set, reporting
 /// for persons — with no <c>.env</c> value in any sink.
 /// </summary>
-public sealed class ComposeImpactExposureTests
+public sealed partial class ComposeImpactExposureTests
 {
     private const string Admin = "admin@example.com";
     private const string Dir = "/opt/deployments/shop";
@@ -681,7 +681,9 @@ public sealed class ComposeImpactExposureTests
             capability: "container.env_set");
 
         Assert.Equal(MutationStatus.PendingApproval, outcome.Status);
-        Assert.DoesNotContain("docktail", outcome.Reason);   // withheld: the kind and the class only
+        // Only the value came from the .env: the reason names the key (review m1), never the value.
+        Assert.Contains("docktail.funnel.enable", outcome.Reason);
+        Assert.DoesNotContain("=true", outcome.Reason);
         Assert.Null(seen);
     }
 
