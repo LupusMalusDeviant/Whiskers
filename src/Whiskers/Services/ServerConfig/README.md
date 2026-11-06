@@ -16,7 +16,7 @@ A server config carries its connection type (`Local`, `SSH`, or `TCP`), transpor
 
 ## Related
 
-- Connection transport selection: [`../Docker/DockerConnectionFactory.cs`](../Docker/DockerConnectionFactory.cs)
+- Connection transport selection: [`../Docker/DockerConnectionManager.cs`](../Docker/DockerConnectionManager.cs)
 - Server models: [`../../Models/`](../../Models/)
 - New servers are provisioned (mesh + mTLS) by [`../Onboarding/`](../Onboarding/).
 - Audit (R1-22): add/update/take record the server's versioned diff ([`../Mutations/ConfigChange.cs`](../Mutations/ConfigChange.cs)), compared with the stored state, not

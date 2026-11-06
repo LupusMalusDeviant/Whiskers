@@ -5,6 +5,9 @@
 # time-limited and every action pinned to a full commit SHA (Dependabot keeps them current). Controls that live in the
 # repository settings (branch protection and required checks, Dependabot alerts, GitHub secret scanning and push
 # protection, code-scanning merge protection) are documented in docs/operations/ci-and-release-checks.md.
+#
+# R1-51 (contract 0008, D8): release.yml calls this file (`workflow_call`) with the tag commit as `ref`, and its
+# publish-image job needs it, so a release runs these checks on the commit it ships.
 name: security
 
 on:
@@ -15,6 +18,13 @@ on:
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to check (the release workflow passes the tag commit). Empty = the event's ref."
+        required: false
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -36,6 +46,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -88,6 +100,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - name: Dependency review (gate)
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
@@ -103,6 +117,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
 
       - name: gitleaks (history and tree, gate)
@@ -125,6 +140,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -149,6 +166,8 @@ jobs:
       security-events: write   # upload the SARIF to code scanning
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2

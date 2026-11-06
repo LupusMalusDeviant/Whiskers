@@ -2,7 +2,8 @@
 #
 #   prepare        validate the tag (X.Y.Z), check out the tag commit, match csproj + chart versions,
 #                  refuse early if the version is already published
-#   test           the full CI suite (ci.yml via workflow_call) on the tag commit
+#   test           the full CI suite (ci.yml via workflow_call) on the tag commit, with the release gate in release mode
+#   security       the security checks (security.yml via workflow_call) on the tag commit (R1-51, D8)
 #   build          build amd64 and arm64 ONCE each and stage them in GHCR untagged, by digest
 #   scan           Trivy gate on both staged digests (any CRITICAL fails; exceptions only via .trivyignore)
 #   artifact-test  R1-47 gate on the staged amd64 digest: hardened compose profile, N-1 upgrade and recovery
@@ -96,6 +97,11 @@ jobs:
           if [ "$(git rev-parse HEAD)" != "$SHA" ] || [ "$GITHUB_SHA" != "$SHA" ]; then
             echo "::error::checked-out commit, run commit (${GITHUB_SHA}) and tag commit (${SHA}) differ"; exit 1
           fi
+          # R1-51 (contract 0008, D16): a release is cut from main. A tag on a side branch would skip the pull request's
+          # base comparison (R18), so it is refused before anything is built.
+          if ! git merge-base --is-ancestor "$SHA" refs/remotes/origin/main; then
+            echo "::error::the tag commit ${SHA} is not reachable from origin/main; release only commits that are on main"; exit 1
+          fi
           VER="${TAG#v}"
           CSPROJ_VER="$(sed -n 's#.*<Version>\([^<]*\)</Version>.*#\1#p' src/Whiskers/Whiskers.csproj | head -n1)"
           CHART_VER="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' deploy/helm/whiskers/Chart.yaml)"
@@ -143,6 +149,20 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      # R1-51 (contract 0008): only this makes the run a release run for the release gate (Release mode from 1.0.0 on).
+      release-gate: release
+
+  # R1-51 (contract 0008, D8): the security checks (vulnerable packages, secrets, analyzers, CodeQL) on the tag commit,
+  # in this run — a release does not rely on the last weekly run having been green.
+  security:
+    needs: prepare
+    permissions:
+      contents: read
+      actions: read
+      security-events: write   # CodeQL uploads its SARIF to code scanning
+    uses: ./.github/workflows/security.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
 
@@ -329,7 +349,7 @@ jobs:
   # Tag exactly the scanned digests. `X.Y.Z` is immutable (refused if it exists); the moving tags `X.Y` and `latest`
   # are moved by the last job, move-tags.
   publish-image:
-    needs: [prepare, test, build, scan, artifact-test]
+    needs: [prepare, test, security, build, scan, artifact-test]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

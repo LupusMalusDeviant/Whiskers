@@ -269,6 +269,27 @@ public class ProductionReadinessServiceTests : IDisposable
         Assert.Contains("passt nicht", vaultCheck.Detail);
     }
 
+    [Fact]
+    public async Task The_vault_line_names_every_plaintext_key_kind_and_claims_no_more_than_file_protection()
+    {
+        // R1-51 (INV-56): since R1-44 there is one mTLS client key per host besides the shared one, all of them in
+        // plaintext like the SSH keys; the line must not read as if one key were left or as if the vault held them.
+        var (vault, servers) = await Stores("readiness-test-passphrase");
+
+        var vaultCheck = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == VaultTitle);
+
+        Assert.True(vaultCheck.Ok);
+        Assert.Contains("ssh-keys/", vaultCheck.Detail);
+        Assert.Contains("alle mTLS-Client-Schlüssel", vaultCheck.Detail);
+        Assert.Contains("eigene jedes Hosts", vaultCheck.Detail);
+        Assert.Contains("Dateirechte", vaultCheck.Detail);
+        // Whiskers does not write the shared key and does not check the SSH keys' mode: no unconditional "0600".
+        Assert.DoesNotContain("0600", vaultCheck.Detail);
+        Assert.Contains("mTLS-Client-Schlüssel geschützt", vaultCheck.Detail);
+        Assert.DoesNotContain("der mTLS-Client-Schlüssel im", vaultCheck.Detail);
+        Assert.DoesNotContain("alle Secrets", vaultCheck.Detail);
+    }
+
     // ---------------------------------------------------------------- contract 0006: the own container's exposure
 
     private async Task<ReadinessCheck?> SelfExposureLine(bool authDisabled, bool withDocker,

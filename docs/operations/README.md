@@ -1,9 +1,13 @@
 # Operations
 
-Guides for running Whiskers in production.
+Guides for running Whiskers in production. Start with the first four; the rest cover one feature each.
 
 | Guide | Covers |
 |---|---|
+| [production-checklist.md](production-checklist.md) | Before production: pinned and verified release, profile, bind and reverse proxy, sign-in with MFA, access and guardrails, `VAULT_KEY` and what the data directory holds (encrypted and not), backups and a tested restore, monitoring, managed hosts — and the accepted limits of 1.0 (root-equivalent administration, single instance, global roles, no terminal transcript, out-of-band changes) |
+| [upgrade-and-rollback.md](upgrade-and-rollback.md) | Version policy (pinned releases, forward-only migrations), what to check before an upgrade, the upgrade with the installer, your own compose file or Helm, what to check after it, and which rollback fits which situation |
+| [backup-and-recovery.md](backup-and-recovery.md) | Self-backup and restore on SQLite and PostgreSQL, the off-volume recovery onto a new host, recovery point and time, the mechanics of the pre-upgrade backup, a failed migration and a downgrade |
+| [troubleshooting.md](troubleshooting.md) | `/healthz` and `/readyz`, a start that stops (vault key, pre-upgrade backup, migration, damaged store, staged restore), sign-in problems, unreachable hosts (SSH tunnels, host keys, ghostunnel, circuits), refused actions, backup failures, what to collect for a report |
 | [observability.md](observability.md) | Where the logs are, structured (JSON) logs, following one request to its operation and audit row, the loop-stall, operation-incomplete and audit-failure signals with example alert rules |
 | [local-accounts.md](local-accounts.md) | Local accounts: the MFA posture (none for local accounts in 1.0 — use OIDC with MFA in production), password policy and lockout, own password change, Admin add/reset/delete, one-time recovery codes, host recovery with `--recover-local-account`, the last-Admin rule |
 | [identity-bindings.md](identity-bindings.md) | Google/OIDC sign-in identities (R1-27): binding by issuer and subject, the IdP requirements (`email` scope, users cannot change their own address, honest `email_verified`, `Oidc:TrustEmailVerified`), pending requests, confirming in Settings or with `--confirm-identity-binding`, recycled addresses, what an upgrade or an issuer change does |
@@ -11,5 +15,5 @@ Guides for running Whiskers in production.
 | [endpoint-checks.md](endpoint-checks.md) | Endpoint checks run from the managed host (R1-57): the tools each host needs (`getent`, `curl`, `openssl`, OpenBSD `nc`) and how to install them, which addresses a check may contact, internal-target exceptions, the bounds of a run, the audit of every run and the `endpoint_check_failed` alert |
 | [disk-health.md](disk-health.md) | Optional disk-health readings (R1-58): installing smartmontools, the shell script and systemd timer that write `smartmon.prom` every 15 minutes, the 2-hour freshness limit, what Healthy / Degraded / Unknown / Not supported mean, the three alerts; md RAID and ZFS need nothing extra |
 | [per-host-mtls-migration.md](per-host-mtls-migration.md) | Per-host mTLS client credentials (R1-44): what changes where, the order of hosts, migrating one host (issue, widen, switch, narrow, record), why a preflight refuses a host, renewal and rotation, retiring the shared credential, removing a server, undo and verification |
-| [backup-and-recovery.md](backup-and-recovery.md) | Self-backup and restore on SQLite and PostgreSQL, the off-volume recovery onto a new host, recovery point and time |
 | [postgres-18-upgrade.md](postgres-18-upgrade.md) | Moving Whiskers' own database from PostgreSQL 17 to 18 with the overlay: why the volume and mount point change, the guard that stops an empty start, dump on 17 and restore on 18, going back, cleaning up |
+

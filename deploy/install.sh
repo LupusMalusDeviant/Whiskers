@@ -531,4 +531,6 @@ ${B}Later${N}
   • Upgrade:  bash install.sh --version <X.Y.Z>   (or the install.sh of the newer release; downgrades are refused)
   • Logs:     ( cd $DIR && ${DC[*]} logs -f )
   • Hardened/K8s:  see the README, docker-compose.hardened.yml and the Helm chart
+  • Before production use:  https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md
+  • When something is wrong: https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/troubleshooting.md
 EOF

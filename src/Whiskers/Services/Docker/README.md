@@ -2,7 +2,7 @@
 
 Everything that talks to the Docker Engine. This folder owns the **connection layer** (how Whiskers reaches each host's Docker daemon, local socket, SSH tunnel, or TCP/mTLS) and the **operations layer** (containers, images, networks, stats).
 
-Connections are established per configured server and cached; for SSH-tunnelled hosts the manager self-heals dead tunnels. For TCP/mTLS hosts there is no SSH at all (see [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)).
+Connections are established per configured server and cached; for SSH-tunnelled hosts the manager self-heals dead tunnels. For TCP/mTLS hosts there is no SSH at all (see [docs/ARCHITECTURE.md](../../../../docs/ARCHITECTURE.md)).
 
 ## Files
 

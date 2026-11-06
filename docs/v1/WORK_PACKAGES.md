@@ -969,11 +969,41 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 
 **Acceptance criteria:**
 
-- [ ] `ReleaseGateTests` fails on non-✅ invariants, missing named tests, unsuccessful mandatory suites or undocumented exceptions.
-- [ ] Generate/check the capability/path inventory so the 90-row historical matrix cannot silently drift.
-- [ ] Publish upgrade/rollback, backup/restore, troubleshooting and production-checklist guides.
-- [ ] State accepted limits: single instance, global roles, root-equivalent administration, no terminal transcript and out-of-band changes.
-- [ ] Correct folder README links, ADR-0002 wording and readiness/UI claims.
+- [x] `ReleaseGateTests` fails on non-✅ invariants, missing named tests, unsuccessful mandatory suites or undocumented exceptions.
+- [x] Generate/check the capability/path inventory so the 90-row historical matrix cannot silently drift.
+- [x] Publish upgrade/rollback, backup/restore, troubleshooting and production-checklist guides.
+- [x] State accepted limits: single instance, global roles, root-equivalent administration, no terminal transcript and out-of-band changes.
+- [x] Correct folder README links, ADR-0002 wording and readiness/UI claims.
+
+> **Status (R1-51 branch, documentation part):** the release gate itself waits for contract 0008
+> (`docs/contracts/0008-release-gate.md`, proposed). Done: `docs/operations/production-checklist.md` (with "What the
+> data directory holds" and the accepted limits), `upgrade-and-rollback.md`, `troubleshooting.md` beside the existing
+> `backup-and-recovery.md`; the operations index, the README ("Accepted limits (1.0)", "Operating it"), SECURITY.md and
+> the installer's closing output link them. The limits are stated in the README, SECURITY.md, the checklist and
+> PRODUCT_CONTRACT §5 (item 3 now states PC-D2: no transcript). Corrections: seventeen broken relative links in eleven folder
+> READMEs (`../../../` one level short, the removed `ConfigExport/` and `DockerConnectionFactory.cs`, moved entity
+> files), the Backup README's opening, the `VaultService` comment, ADR-0002 (decision = what was implemented, the
+> deferral kept as history). Readiness: the vault line named one plaintext mTLS client key; since R1-44 every host
+> has its own, so it now names all of them and the SSH keys as protected by file permissions only (no unconditional "0600"; the mTLS key modes are the separate line "mTLS-Client-Schlüssel geschützt")
+> (`ProductionReadinessServiceTests.The_vault_line_names_every_plaintext_key_kind_and_claims_no_more_than_file_protection`);
+> SECURITY.md and INV-52 say the same. The line `:54` the audit named had been corrected by R1-29. Contract rows:
+> U-15 and U-22 run through the gateway at the click (not "markup only"), S-05's policy and approval cells match the
+> gateway path, §7.6 counts today's 105 rows (110 since the gate part, below) beside the 90-row baseline; Kubernetes actions were already shown as
+> migrated (U-01). INV-17 stays ⚠️ (no handler-level test for these pages), INV-56 stays ⚠️ (the readiness lines
+> are German only; no test compares README/SECURITY.md claims with the code).
+>
+> **Status (R1-51 branch, gate part):** contract 0008 accepted on 6 November 2026 (D1–D16 as recommended) and built as
+> specified. `src/Whiskers.Tests/ReleaseGate/`: `ReleaseGateTests` with its parsers (invariant table, §7 path matrix,
+> `RELEASE_GATE.md`, §6.1 release decisions), the xUnit-discovery test catalog, the R1–R18 checks in Development, Line and
+> Release mode, the generated manifest blocks and `CAPABILITY_INVENTORY.md`, and `ReleaseGateBaseTests` (D16/R18 against
+> the pull request's base or the previous release tag). New records: `docs/v1/RELEASE_GATE.md` (pin `INV-62`, the thirteen
+> open invariants (INV-62 from contract 0006 merged), platform skips, mandatory suites), `PATH_CAPABILITIES.md`, the generated `CAPABILITY_INVENTORY.md`,
+> `PRODUCT_CONTRACT.md` §6.1 (empty) and five §7 rows that had none (M-48, M-49, S-16, U-37, U-38). D12: INV-58 ⚠️; D10:
+> the INV-21 marker names `ReadOnlyKillSwitchWireTests`. CI: `release-gate: release` from release.yml only, the base
+> comparison step on pull requests and release runs, release.yml calls security.yml and refuses a tag commit not on
+> `origin/main`, the image-runtime run is checked from its TRX file with `.github/required-tests/image-runtime.txt`; the
+> wiring is pinned by `ReleaseWorkflowTests` (with negative mutations). The version is 0.x, so the gate runs in
+> Development mode and passes today.
 
 **Out of scope:** Treating documentation as proof that an implementation invariant holds.
 
