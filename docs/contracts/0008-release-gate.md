@@ -1,6 +1,6 @@
 # Contract 0008 — Mechanical release gate (R1-51)
 
-Status: **Proposed** · 6 November 2026, revised after review rounds 1 and 2. Waits for the maintainer's decisions
+Status: **Proposed** · 6 November 2026, revised after review rounds 1 to 4. Waits for the maintainer's decisions
 D1–D16 at the end. Nothing of the gate is implemented before this contract is accepted; the documentation
 part of R1-51 (operator guides, accepted limits, corrections) does not depend on it and is done on the same branch.
 
@@ -368,14 +368,18 @@ The test reads the real files, determines version and mode (above), runs `Releas
     equals the row's *Release*;
   - have *Release* equal to the current `<Version>`, and that version must be a **patch release** (patch number ≥ 1):
     a record at `X.Y.0` — 1.0.0 itself, or any minor or major release — fails, so no X.Y.0 ships with a ❌/❓;
-  - have *Review by* equal to the next patch after *Release*;
+  - have *Review by* equal to the next patch after *Release*. The field adds no constraint of its own (R17 already
+    fixes *Release* = `<Version>`); it is kept so a reader of the table sees when the record lapses, and the gate
+    only checks that it matches;
   - carry an *Advisory* in `GHSA-xxxx-xxxx-xxxx` form (format check only; that the release notes link it is left to
     review, or to `release.yml` if it is later taught to check);
   - link a limitation section in the product documents that names the invariant ID, exactly as R11 requires for an
     exception, so the accepted release rule (`SECURITY_INVARIANTS.md:14–16`: every deliberate gap is documented) and
     the gate agree;
-  - with D15 (d) only, checked in release runs: name an invariant that was ✅ or ⚠️ in the previous release tag
-    (`git show <previous tag>:docs/v1/SECURITY_INVARIANTS.md`, from the `prepare` job's full-history checkout).
+  - with D15 (d) only: name an invariant that was ✅ or ⚠️ in the previous release tag (as defined in R18: the
+    highest `vX.Y.Z` tag strictly below `<Version>`). The check runs in `ReleaseGateTests` in `build-test`, in release
+    runs only, reading `git show <previous tag>:docs/v1/SECURITY_INVARIANTS.md` after the tag fetch of R18; a
+    previous tag that is missing or unreadable is a finding, never "first occurrence";
 
   In every mode a row whose *Release* is not the current `<Version>` fails. Consequences: the record must be written
   in the pull request that bumps `<Version>` to the patch it covers (a record written while `main` is still at the
@@ -383,10 +387,17 @@ The test reads the real files, determines version and mode (above), runs `Releas
   fails, because *Release* must equal both `<Version>` and the decision's *Release*, and the decision itself cannot
   be edited (R18). A second release with the same violation needs a new decision with a new ID. Without D15 (b), (c)
   or (d) the table must be absent or empty.
-- **R18 — Accepted decisions are immutable (with D16 (a)).** The base-diff step of D16 also compares §6.1 with the
-  pull request's base commit: an `Accepted` row that changes in any cell or disappears fails, an ID that reappears
-  with different content fails, and a new row must use an ID above every ID in the base. Within one commit the gate
-  can only check that IDs are unique; without D16 (a) immutability rests on review.
+- **R18 — Accepted decisions are immutable (with D16 (a)).** The base-diff step of D16 also compares §6.1 with a
+  base: an `Accepted` row that changes in any cell or disappears fails, an ID that reappears with different content
+  fails, and a new row must use an ID above every ID in the base. The base is the pull request's base commit on pull
+  requests, and the **previous release tag** in release runs. *Previous release tag* means the highest `vX.Y.Z` tag
+  strictly below `<Version>` (compared on the three numbers, not by date, and regardless of whether a GitHub release
+  was published for it). In release runs `build-test` fetches the tags (`git fetch --tags`, only when `release-gate`
+  is `release`); for 1.0.0 that is the highest 0.x tag. A previous tag that is missing (no such tag found, for example
+  because the fetch failed) or whose files cannot be read is a finding, never a pass.
+  Together with the `origin/main` reachability check in `prepare` (D16), a tag cannot carry an edited decision past
+  the gate. Within one commit the gate can only check that IDs are unique; without D16 (a) immutability rests on
+  review.
 
 ### Capability/path inventory and drift
 
@@ -438,12 +449,12 @@ generated, and the two are joined by tests.
 | `ReleaseGateTests.A_mandatory_suite_that_cannot_block_the_release_fails` | R10: job removed, `continue-on-error` added, dropped from `needs`, `--no-skips` removed |
 | `ReleaseGateTests.An_exception_needs_an_accepted_dated_decision_and_a_limitation` | R11: `Proposed` decision, missing date or decider, decision of another kind or for another invariant, dead link, section that does not name the invariant, exception for ❌ or ✅, review version not newer (in Development mode too) |
 | `ReleaseGateTests.A_known_violation_covers_exactly_one_release` | R17 (D15 (b), (c) or (d)): an accepted record at 1.0.1 with *Release* 1.0.1 lets Release pass; *Release* other than `<Version>` fails; *Release* differing from the decision's *Release* fails; *Review by* other than the next patch fails; a renewal at 1.0.2 that changes only *Review by* fails; a record at 1.1.0 (X.Y.0) fails; a record without a limitation section naming the invariant fails; an advisory not in `GHSA-` form fails; a record for a ⚠️ or ✅ fails; with D15 (d), an invariant already ❌ in the previous tag fails; without D15 (b), (c) or (d) any row fails |
-| `ReleaseGateTests.An_accepted_decision_cannot_change` | R18 (D16 (a)), against an in-memory base: an `Accepted` §6.1 row edited in one cell fails; a deleted one fails; a reused ID fails; a new ID at or below the base's highest fails; a new row passes |
+| `ReleaseGateTests.An_accepted_decision_cannot_change` | R18 (D16 (a)), against an in-memory base: an `Accepted` §6.1 row edited in one cell fails; a deleted one fails; a reused ID fails; a new ID at or below the base's highest fails; a new row passes; the same checks against a previous-tag base in a release run; the previous tag is the highest `vX.Y.Z` strictly below `<Version>` (1.0.2 → v1.0.1 even if v1.1.0 exists; 1.0.0 → highest 0.x); no previous tag or an unreadable file is a finding |
 | `ReleaseGateTests.The_capability_inventory_matches_the_code` | R12 (snapshot, `.actual`) |
 | `ReleaseGateTests.Matrix_and_catalog_name_each_other` | R13/R14: a new capability without a row, a row naming an unknown capability or tool |
 | `ReleaseGateTests.The_totals_match_the_rows` | R15 |
 | `InvariantTableParserTests`, `PathMatrixParserTests`, `ReleaseGateDocumentTests` | parsing of the real files and of edge cases (prose in the test column, escaped `\|`, planned entries with and without a name, a missing table heading) |
-| `ReleaseWorkflowTests` (extended) | `release.yml` passes `release-gate: release` and `ci.yml` sets the variable only from that input; with D8, `publish-image` needs the called `security.yml`; with D14, the image-runtime step writes TRX and checks its manifest; with D16, the base-diff step exists on pull requests and its checkout has `fetch-depth: 0` (or fetches the base SHA) |
+| `ReleaseWorkflowTests` (extended) | `release.yml` passes `release-gate: release` and `ci.yml` sets the variable only from that input; with D8, `publish-image` needs the called `security.yml`; with D14, the image-runtime step writes TRX and checks its manifest; with D16, the base-diff step exists on pull requests and its checkout has `fetch-depth: 0` (or fetches the base SHA); with D16 (a), `prepare` refuses a tag commit not reachable from `origin/main` and the release run repeats the comparison against the previous release tag; with D16 (a) or D15 (d), `build-test` fetches tags only when `release-gate` is `release`, and the gate's previous-tag lookup (highest `vX.Y.Z` strictly below `<Version>`) turns a missing or unreadable tag into a finding |
 | `RequiredTestsManifestTests` (extended) | still green with the generated blocks; uses the shared `TestCatalog` |
 
 Negative tests mutate the text of the real files in memory, as `ReleaseWorkflowTests` does; nothing is written to the
@@ -524,8 +535,9 @@ repository except a `.actual` file on a snapshot difference.
     shared state); making it a standing product limitation would turn the release rule into a formality. Whether a
     release may still go out while a ❌/❓ is open, for one patch release under an advisory, is a separate and much
     narrower question: D15. R17 enforces that narrowness: a known-violation record is tied to one exact patch version
-    (never X.Y.0, so 1.0.0 cannot ship with today's INV-18 ❌), needs a documented limitation and cannot be renewed
-    without a new decision.
+    (never X.Y.0, so 1.0.0 cannot ship with today's INV-18 ❌) and needs a documented limitation. With D16 (a) it
+    also cannot be renewed without a new decision (R18, on pull requests and in release runs); without D16 (a) that
+    rests on review.
 12. **D12 — INV-58's qualified ✅ ("✅ per host after migration").**
     (a) Set it to ⚠️, move "per host after migration" into the evidence column, and — if 1.0 is to ship with the
     shared credential still supported — accept an `RG-n` exception whose limitation says that a host still on the
@@ -580,3 +592,9 @@ repository except a `.actual` file on a snapshot difference.
     the pin and on review (with CODEOWNERS on `docs/v1/` recommended). *Recommended: (a).* It turns the remaining
     three-file edit and any silent edit of an accepted decision into a CI failure. The step runs on pull requests in
     `ci.yml`, whose checkout then needs `fetch-depth: 0` or an explicit fetch of the base SHA.
+    A release tag can be pushed on a commit that never went through a pull request, so with (a) the comparison also
+    runs in **release runs**, against the *previous release tag* (the highest `vX.Y.Z` tag strictly below
+    `<Version>`, see R18) instead of the pull request's base: §6.1 immutability, IDs that disappear and a pin that goes
+    down are checked there too. In addition, `prepare` in `release.yml` requires the tag commit to be reachable from
+    `origin/main` (`git merge-base --is-ancestor <tag commit> origin/main`); a tag on a side branch fails before
+    anything is built. Both are `ReleaseWorkflowTests` cases.
