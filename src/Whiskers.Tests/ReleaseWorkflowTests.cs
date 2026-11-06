@@ -320,6 +320,9 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        env:\n          T: ${{ github.event.pull_request.title }}\n        run: |\n          echo \"T=$T\" >> \"$GITHUB_ENV\"\n", "writes $GITHUB_ENV from an expression")]
     [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        env:\n          T: ${{ github.token }}\n        run: |\n", "holds a credential in its env")]
     [InlineData("ci.yml", "  build-test:\n    runs-on: ubuntu-latest\n", "  build-test:\n    runs-on: ubuntu-latest\n    container:\n      image: ubuntu:24.04\n      env:\n        T: ${{ github.token }}\n", "into its container's environment")]
+    [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        run: |\n          echo \"${{ secrets.DEPLOY_KEY }}\" > \"$RUNNER_TEMP/k\"\n", "holds a credential in its script before the base comparison")]
+    [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        run: |\n          gh auth login --with-token <<< \"${{ github.token }}\"\n", "holds a credential in its script before the base comparison")]
+    [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        env:\n          T:\n            - x\n        run: |\n", "holds a credential in its env: T")]
     // The N-1 checks list the published releases with gh: both need GH_TOKEN (review round 3, M-1).
     [InlineData("ci.yml", "      - name: N-1 upgrade and recovery\n        env:\n          GH_TOKEN: ${{ github.token }}\n", "      - name: N-1 upgrade and recovery\n        env:\n          RELEASES_TOKEN: ${{ github.token }}\n", "runs 'artifact-checks.sh previous-release' without GH_TOKEN")]
     [InlineData("release.yml", "          VER: ${{ needs.prepare.outputs.ver }}\n          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "          VER: ${{ needs.prepare.outputs.ver }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "runs 'artifact-checks.sh previous-release' without GH_TOKEN")]
@@ -1136,6 +1139,9 @@ internal static class WorkflowPolicy
                     if (EnvFinding(Child(earlier, "with")) is { } with)
                         violations.Add($"ci.yml job '{job}' step '{name}' passes a credential to an action before the base comparison: its with is {with}");
                     var earlierRun = Scalar(Child(earlier, "run")) ?? "";
+                    // Review round 8 m-1: nor in its script, which could leave it in a file for the base comparison.
+                    if (Credential(earlierRun))
+                        violations.Add($"ci.yml job '{job}' step '{name}' holds a credential in its script before the base comparison");
                     var carriesExpression = earlierRun.Contains("${{", StringComparison.Ordinal)
                         || (Child(earlier, "env") as YamlMappingNode)?.Children.Any(kv => Scalar(kv.Value)?.Contains("${{", StringComparison.Ordinal) == true) == true;
                     if (earlierRun.Contains("GITHUB_ENV", StringComparison.Ordinal) && carriesExpression)
@@ -1233,12 +1239,14 @@ internal static class WorkflowPolicy
     /// <summary>
     /// What is wrong with an <c>env</c> (or <c>with</c>) node, or null: the keys holding a credential, or — for a node that
     /// is not a mapping (a scalar, an expression such as <c>${{ fromJSON(…) }}</c>) — that it cannot be checked at all
-    /// (review round 7 m-1 a: such a node is a finding, never "no credential").
+    /// (review round 7 m-1 a: such a node is a finding, never "no credential"). An absent or empty node holds none. Inside a
+    /// mapping, a value that is not a scalar (a sequence or a mapping) counts as a credential too (review round 8 n-1).
     /// </summary>
     private static string? EnvFinding(YamlNode? env) => env switch
     {
         null => null,
-        YamlMappingNode m when m.Children.Where(kv => Credential(Scalar(kv.Value))).Select(kv => Scalar(kv.Key) ?? "?").ToList() is { Count: > 0 } keys
+        YamlMappingNode m when m.Children.Where(kv => kv.Value is not YamlScalarNode || Credential(Scalar(kv.Value)))
+                .Select(kv => Scalar(kv.Key) ?? "?").ToList() is { Count: > 0 } keys
             => string.Join(", ", keys),
         YamlMappingNode => null,
         YamlScalarNode s when string.IsNullOrEmpty(s.Value) => null,

@@ -10,10 +10,14 @@ public static class PathMatrixParser
 {
     public const string PathCapabilitiesHeading = "## Rows and capabilities";
     private static readonly Regex RowId = new(@"^([MASTU])-(\d+)$", RegexOptions.CultureInvariant);
-    // A near miss of a row ID (review rounds 6 and 7): a class letter in any case, then any dash (ASCII or U+2010–U+2015)
-    // or any other non-word character, then a digit-like run ('U-40', 'u-40', 'U–40', 'U-4O'), anywhere in the first cell;
-    // or a first cell that starts with a class letter and a non-word character. Only an exact ID is a row.
-    private static readonly Regex LooksLikeRowId = new(@"((?<![A-Za-z])[MASTU][-‐-―][0-9O]|^[MASTU]\W)",
+    // A near miss of a row ID (review rounds 6 to 8). The first cell matches when, anywhere in it, either
+    //   (a) a class letter M, A, S, T or U in any case, even right after other letters ('MU-40', 'XU-40'), is followed by
+    //       any run of whitespace and dashes — ASCII '-', U+2010 to U+2015, U+2212 — possibly empty, and then a digit
+    //       ('U-40', 'u-41', 'U–42', 'U−40', 'U40', 'U 40', '**U-40**'); or
+    //   (b) the same, followed by a capital letter O that no letter follows ('U-O', 'U-O4'); or
+    //   (c) the cell starts with a class letter and a character that is neither a letter, a digit nor '_' ('U:40', 'U.4').
+    // A lower-case 'o' is not a digit-like O, so words such as 'tools' or 'Total' do not match. Only an exact ID is a row.
+    private static readonly Regex LooksLikeRowId = new(@"[MASTU][\s\-‐-―−]*(?:\d|(?-i:O)(?![A-Za-z]))|^[MASTU]\W",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private static readonly Regex FirstBackticked = new(@"`([^`]+)`", RegexOptions.CultureInvariant);
 

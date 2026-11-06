@@ -117,6 +117,25 @@ public class PathMatrixParserTests
             Assert.Contains(nearProblems, p => p.Contains($"'{miss}' looks like a §7 row ID"));
         Assert.Equal(4, nearProblems.Count);
 
+        // Review round 8 n-2: no dash or spaces, a minus sign, a class letter after other letters are near misses too;
+        // words with a class letter and a lower-case 'o' ('MCP tools', 'Total') are not.
+        const string wider = "## 7. Paths\n\n| ID | Handler |\n|---|---|\n| U-01 | a |\n| U40 | b |\n| **U 41** | c |\n| U−42 | d |\n"
+            + "| MU-43 | e |\n| XU-44 | f |\n| MCP tools (M) | g |\n| **Total** | h |\n\n## 8. End\n";
+        const string widerMapping = "## Rows and capabilities\n\n| Row | Capabilities |\n|---|---|\n| U-01 | x.a |\n";
+        var widerProblems = new List<string>();
+        Assert.Equal(["U-01"], PathMatrixParser.Parse(wider, widerMapping, widerProblems).Select(r => r.Id));
+        foreach (var miss in new[] { "U40", "**U 41**", "U−42", "MU-43", "XU-44" })
+            Assert.Contains(widerProblems, p => p.Contains($"'{miss}' looks like a §7 row ID"));
+        Assert.Equal(5, widerProblems.Count);
+
+        // Review round 8 n-3: a fenced '## 7. Example' before the real §7 does not start it, so a row-like line between
+        // the two is neither a row nor a problem.
+        const string fencedStart = "## 6. Before\n\n```\n## 7. Example\n```\n| U-09 | x |\n\n## 7. Paths\n\n| ID | Handler |\n|---|---|\n"
+            + "| U-01 | a |\n\n## 8. End\n";
+        var fencedProblems = new List<string>();
+        Assert.Equal(["U-01"], PathMatrixParser.Parse(fencedStart, widerMapping, fencedProblems).Select(r => r.Id));
+        Assert.Empty(fencedProblems);
+
         // Review round 6 NIT a: a class or the total counted twice in §7.6 is a problem.
         var countProblems = new List<string>();
         PathMatrixParser.Totals("**Rows today**\n\n| Class | Rows |\n|---|---|\n| UI (U) | 3 |\n| UI (U) | 4 |\n| **Total** | **7** |\n| Total | 7 |\n", countProblems);
