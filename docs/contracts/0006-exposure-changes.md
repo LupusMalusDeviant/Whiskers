@@ -716,7 +716,7 @@ This amendment takes precedence over Amendments 1–8. All amendments are to be 
 
 ### Wording (review NITs)
 
-- The base text's `MutationPolicy.cs:74-92` reads `MutationPolicy.cs:74-92`.
+- The base text cited `MutationPolicy.cs:79-85`; it now reads `MutationPolicy.cs:74-92` (line 35).
 - **Timeouts.** Amendment 8's timeout sentence is replaced by: each path keeps its current per-command timeouts
   (2 minutes for `env_set` / `env_file_save`; 600 s build and 300 s `up` for git deploy; the existing budget for UI, MCP
   and webhook deploys). The script split around step 4 gives each command the same budget it had.
