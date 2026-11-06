@@ -265,64 +265,74 @@ public class ReleaseWorkflowTests
 
     [Theory]
     // The mode: only release.yml's test job makes a release run, and only through the input.
-    [InlineData("release.yml", "      release-gate: release\n", "")]
-    [InlineData("release.yml", "      release-gate: release\n", "      release-gate: dry-run\n")]
-    [InlineData("release.yml", "    uses: ./.github/workflows/security.yml\n    with:\n", "    uses: ./.github/workflows/security.yml\n    with:\n      release-gate: release\n")]
-    [InlineData("ci.yml", "      release-gate:\n        description:", "      gate-mode:\n        description:")]
-    [InlineData("ci.yml", "          WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}", "          WHISKERS_RELEASE_GATE: release")]
-    [InlineData("ci.yml", "        env:\n          WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}\n", "")]
-    [InlineData("ci.yml", "permissions: {}\n", "permissions: {}\n\nenv:\n  WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}\n")]
+    [InlineData("release.yml", "      release-gate: release\n", "", "does not pass 'release-gate: release'")]
+    [InlineData("release.yml", "      release-gate: release\n", "      release-gate: dry-run\n", "does not pass 'release-gate: release'")]
+    [InlineData("release.yml", "    uses: ./.github/workflows/security.yml\n    with:\n", "    uses: ./.github/workflows/security.yml\n    with:\n      release-gate: release\n", "passes 'release-gate' but does not call ci.yml")]
+    [InlineData("ci.yml", "      release-gate:\n        description:", "      gate-mode:\n        description:", "no 'release-gate' workflow_call input")]
+    [InlineData("ci.yml", "          WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}", "          WHISKERS_RELEASE_GATE: release", "in-process step does not take WHISKERS_RELEASE_GATE")]
+    [InlineData("ci.yml", "        env:\n          WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}\n", "", "in-process step does not take WHISKERS_RELEASE_GATE")]
+    [InlineData("ci.yml", "permissions: {}\n", "permissions: {}\n\nenv:\n  WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}\n", "sets WHISKERS_RELEASE_GATE for the whole workflow")]
     [InlineData("ci.yml", "          set -euo pipefail\n          if [ \"$RELEASE_GATE\" = \"release\" ]; then",
-                "          set -euo pipefail\n          export WHISKERS_RELEASE_GATE=release\n          if [ \"$RELEASE_GATE\" = \"release\" ]; then")]
+                "          set -euo pipefail\n          export WHISKERS_RELEASE_GATE=release\n          if [ \"$RELEASE_GATE\" = \"release\" ]; then", "a run script sets WHISKERS_RELEASE_GATE itself")]
     // The base comparison: every pull request and every release run, the right base, fail closed.
-    [InlineData("ci.yml", "        if: github.event_name == 'pull_request' || inputs.release-gate == 'release'\n", "        if: github.event_name == 'pull_request'\n")]
-    [InlineData("ci.yml", "        if: github.event_name == 'pull_request' || inputs.release-gate == 'release'\n", "        if: inputs.release-gate == 'release'\n")]
-    [InlineData("ci.yml", "      - name: Release gate (compare with the base)\n", "      - name: Release gate (compare with the base)\n        continue-on-error: true\n")]
-    [InlineData("ci.yml", "            export WHISKERS_GATE_BASE=previous-tag\n", "            export WHISKERS_GATE_BASE=\"$BASE_SHA\"\n")]
-    [InlineData("ci.yml", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n", "            git fetch --depth=1 origin \"$BASE_SHA\" '+refs/tags/v*:refs/tags/v*'\n")]
-    [InlineData("ci.yml", "          BASE_SHA: ${{ github.event.pull_request.base.sha }}", "          BASE_SHA: ${{ github.event.pull_request.head.sha }}")]
-    [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/gate-base.trx 1 --no-skips\n", "")]
-    [InlineData("ci.yml", "TestResults/gate-base.trx 1 --no-skips", "TestResults/gate-base.trx 1")]
-    [InlineData("ci.yml", "          export WHISKERS_GATE_BASE_REQUIRED=true\n", "")]                                                  // a lost base passes
-    [InlineData("ci.yml", "git fetch --no-tags --unshallow origin", "git fetch --no-tags --depth=1 origin")]                      // no history: ancestry unknowable
-    [InlineData("ci.yml", " --exclude-drafts --exclude-pre-releases", "")]                                                          // a draft as the base
-    [InlineData("ci.yml", "            export WHISKERS_GATE_RELEASES=\"$RUNNER_TEMP/releases.txt\"\n", "")]                          // any pushed tag is the base
-    [InlineData("ci.yml", "          RELEASE_GATE: ${{ inputs.release-gate }}\n          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASE_GATE: ${{ inputs.release-gate }}\n")]
-    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          GH_TOKEN: ${{ github.token }}\n")] // the tests see the token
-    [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "")]                                                                     // the tests see the token
-    [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "          unset RELEASES_TOKEN\n          echo \"${{ github.token }}\" >/dev/null\n")]          // the token inline in the script
-    [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "          unset RELEASES_TOKEN\n          echo \"${{ secrets.GITHUB_TOKEN }}\" >/dev/null\n")]  // a secret inline in the script
-    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github.token }}\n")] // the token under another name
-    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ secrets.GITHUB_TOKEN }}\n")] // a secret under another name
+    [InlineData("ci.yml", "        if: github.event_name == 'pull_request' || inputs.release-gate == 'release'\n", "        if: github.event_name == 'pull_request'\n", "does not run on every pull request and every release run")]
+    [InlineData("ci.yml", "        if: github.event_name == 'pull_request' || inputs.release-gate == 'release'\n", "        if: inputs.release-gate == 'release'\n", "does not run on every pull request and every release run")]
+    [InlineData("ci.yml", "      - name: Release gate (compare with the base)\n", "      - name: Release gate (compare with the base)\n        continue-on-error: true\n", "continue-on-error")]
+    [InlineData("ci.yml", "            export WHISKERS_GATE_BASE=previous-tag\n", "            export WHISKERS_GATE_BASE=\"$BASE_SHA\"\n", "does not fetch the base SHA on a pull request")]
+    [InlineData("ci.yml", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n", "            git fetch --depth=1 origin \"$BASE_SHA\" '+refs/tags/v*:refs/tags/v*'\n", "does not fetch the base SHA on a pull request")]
+    [InlineData("ci.yml", "          BASE_SHA: ${{ github.event.pull_request.base.sha }}", "          BASE_SHA: ${{ github.event.pull_request.head.sha }}", "does not take the pull request's base")]
+    [InlineData("ci.yml", "          bash .github/scripts/check-test-results.sh TestResults/gate-base.trx 1 --no-skips\n", "", "not checked from its TRX file without skips")]
+    [InlineData("ci.yml", "TestResults/gate-base.trx 1 --no-skips", "TestResults/gate-base.trx 1", "not checked from its TRX file without skips")]
+    [InlineData("ci.yml", "          export WHISKERS_GATE_BASE_REQUIRED=true\n", "", "does not require a base")]                                                  // a lost base passes
+    [InlineData("ci.yml", "git fetch --no-tags --unshallow origin", "git fetch --no-tags --depth=1 origin", "does not fetch the history and the published releases")]                      // no history: ancestry unknowable
+    [InlineData("ci.yml", " --exclude-drafts --exclude-pre-releases", "", "does not fetch the history and the published releases")]                                                          // a draft as the base
+    [InlineData("ci.yml", "            export WHISKERS_GATE_RELEASES=\"$RUNNER_TEMP/releases.txt\"\n", "", "does not fetch the history and the published releases")]                          // any pushed tag is the base
+    [InlineData("ci.yml", "          RELEASE_GATE: ${{ inputs.release-gate }}\n          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASE_GATE: ${{ inputs.release-gate }}\n", "does not fetch the history and the published releases")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          GH_TOKEN: ${{ github.token }}\n", "exposes the token beyond 'gh release list'")] // the tests see the token
+    [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "", "exposes the token beyond 'gh release list'")]                                                                     // the tests see the token
+    [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "          unset RELEASES_TOKEN\n          echo \"${{ github.token }}\" >/dev/null\n", "exposes the token beyond 'gh release list'")]          // the token inline in the script
+    [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "          unset RELEASES_TOKEN\n          echo \"${{ secrets.GITHUB_TOKEN }}\" >/dev/null\n", "exposes the token beyond 'gh release list'")]  // a secret inline in the script
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github.token }}\n", "exposes the token beyond 'gh release list'")] // the token under another name
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ secrets.GITHUB_TOKEN }}\n", "exposes the token beyond 'gh release list'")] // a secret under another name
     // Review round 5 NIT b: other spellings, and the job's or the workflow's env.
-    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github['token'] }}\n")]
-    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github . token }}\n")]
-    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ secrets['GITHUB_TOKEN'] }}\n")]
-    [InlineData("ci.yml", "  build-test:\n    runs-on: ubuntu-latest\n", "  build-test:\n    runs-on: ubuntu-latest\n    env:\n      T: ${{ github.token }}\n")]
-    [InlineData("ci.yml", "permissions: {}\n\njobs:\n", "permissions: {}\n\nenv:\n  T: ${{ secrets.GITHUB_TOKEN }}\n\njobs:\n")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github['token'] }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github . token }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ secrets['GITHUB_TOKEN'] }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "  build-test:\n    runs-on: ubuntu-latest\n", "  build-test:\n    runs-on: ubuntu-latest\n    env:\n      T: ${{ github.token }}\n", "puts a credential into the environment of every step")]
+    [InlineData("ci.yml", "permissions: {}\n\njobs:\n", "permissions: {}\n\nenv:\n  T: ${{ secrets.GITHUB_TOKEN }}\n\njobs:\n", "puts a credential into the environment of every job")]
+    // Review round 6 m-1: the whole context, a brace inside the expression, any case, $GITHUB_ENV, the container's env.
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ toJSON(github) }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ format('{0}', github . token) }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ GITHUB.TOKEN }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ Secrets.X }}\n", "exposes the token beyond 'gh release list'")]
+    [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        env:\n          T: ${{ github.event.pull_request.title }}\n        run: |\n          echo \"T=$T\" >> \"$GITHUB_ENV\"\n", "writes $GITHUB_ENV from an expression")]
+    [InlineData("ci.yml", "      - name: PostgreSQL client tools\n        run: |\n", "      - name: PostgreSQL client tools\n        env:\n          T: ${{ github.token }}\n        run: |\n", "holds a credential in its env")]
+    [InlineData("ci.yml", "  build-test:\n    runs-on: ubuntu-latest\n", "  build-test:\n    runs-on: ubuntu-latest\n    container:\n      image: ubuntu:24.04\n      env:\n        T: ${{ github.token }}\n", "into its container's environment")]
     // The N-1 checks list the published releases with gh: both need GH_TOKEN (review round 3, M-1).
-    [InlineData("ci.yml", "      - name: N-1 upgrade and recovery\n        env:\n          GH_TOKEN: ${{ github.token }}\n", "      - name: N-1 upgrade and recovery\n        env:\n          RELEASES_TOKEN: ${{ github.token }}\n")]
-    [InlineData("release.yml", "          VER: ${{ needs.prepare.outputs.ver }}\n          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "          VER: ${{ needs.prepare.outputs.ver }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=")]
-    [InlineData("ci.yml", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n            export GH_TOKEN=\"$RELEASES_TOKEN\"\n")] // and in a pull request
+    [InlineData("ci.yml", "      - name: N-1 upgrade and recovery\n        env:\n          GH_TOKEN: ${{ github.token }}\n", "      - name: N-1 upgrade and recovery\n        env:\n          RELEASES_TOKEN: ${{ github.token }}\n", "runs 'artifact-checks.sh previous-release' without GH_TOKEN")]
+    [InlineData("release.yml", "          VER: ${{ needs.prepare.outputs.ver }}\n          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "          VER: ${{ needs.prepare.outputs.ver }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "runs 'artifact-checks.sh previous-release' without GH_TOKEN")]
+    [InlineData("ci.yml", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n", "            git fetch --no-tags --depth=1 origin \"$BASE_SHA\"\n            export GH_TOKEN=\"$RELEASES_TOKEN\"\n", "exposes the token beyond 'gh release list'")] // and in a pull request
     // The image-runtime run: from its TRX file, with its manifest.
-    [InlineData("ci.yml", " --no-skips --require .github/required-tests/image-runtime.txt", " --no-skips")]
-    [InlineData("ci.yml", "TestResults/image-runtime.trx 7 --no-skips", "TestResults/image-runtime.trx 7")]
-    [InlineData("ci.yml", "            --logger \"trx;LogFileName=image-runtime.trx\" --results-directory TestResults\n", "            --results-directory TestResults\n")]
+    [InlineData("ci.yml", " --no-skips --require .github/required-tests/image-runtime.txt", " --no-skips", "image-runtime tests from their TRX file")]
+    [InlineData("ci.yml", "TestResults/image-runtime.trx 7 --no-skips", "TestResults/image-runtime.trx 7", "image-runtime tests from their TRX file")]
+    [InlineData("ci.yml", "            --logger \"trx;LogFileName=image-runtime.trx\" --results-directory TestResults\n", "            --results-directory TestResults\n", "image-runtime tests from their TRX file")]
     // security.yml in the release, on the tag commit, before anything is published.
-    [InlineData("release.yml", "    needs: [prepare, test, security, build, scan, artifact-test]", "    needs: [prepare, test, build, scan, artifact-test]")]
-    [InlineData("release.yml", "  security:\n    needs: prepare\n", "  security:\n    needs: prepare\n    if: github.event_name == 'push'\n")]
-    [InlineData("release.yml", "    uses: ./.github/workflows/security.yml\n    with:\n      ref: ${{ needs.prepare.outputs.sha }}", "    uses: ./.github/workflows/security.yml\n    with:\n      ref: main")]
-    [InlineData("security.yml", "  workflow_call:\n", "  workflow_run:\n")]
-    [InlineData("security.yml", "        with:\n          ref: ${{ inputs.ref }}\n          fetch-depth: 0", "        with:\n          fetch-depth: 0")]
+    [InlineData("release.yml", "    needs: [prepare, test, security, build, scan, artifact-test]", "    needs: [prepare, test, build, scan, artifact-test]", "does not wait for the security checks")]
+    [InlineData("release.yml", "  security:\n    needs: prepare\n", "  security:\n    needs: prepare\n    if: github.event_name == 'push'\n", "runs only under a condition")]
+    [InlineData("release.yml", "    uses: ./.github/workflows/security.yml\n    with:\n      ref: ${{ needs.prepare.outputs.sha }}", "    uses: ./.github/workflows/security.yml\n    with:\n      ref: main", "does not check the tag commit")]
+    [InlineData("security.yml", "  workflow_call:\n", "  workflow_run:\n", "security.yml cannot be called by the release")]
+    [InlineData("security.yml", "        with:\n          ref: ${{ inputs.ref }}\n          fetch-depth: 0", "        with:\n          fetch-depth: 0", "ignores the ref the release passes in")]
     // The tag commit is on main.
-    [InlineData("release.yml", "          if ! git merge-base --is-ancestor \"$SHA\" refs/remotes/origin/main; then\n", "          if false; then\n")]
-    [InlineData("release.yml", "          ref: refs/tags/${{ steps.tag.outputs.tag }}\n          fetch-depth: 0", "          ref: refs/tags/${{ steps.tag.outputs.tag }}")]
-    public void A_broken_release_gate_wiring_is_caught(string file, string from, string to)
+    [InlineData("release.yml", "          if ! git merge-base --is-ancestor \"$SHA\" refs/remotes/origin/main; then\n", "          if false; then\n", "does not refuse a tag commit that is not on origin/main")]
+    [InlineData("release.yml", "          ref: refs/tags/${{ steps.tag.outputs.tag }}\n          fetch-depth: 0", "          ref: refs/tags/${{ steps.tag.outputs.tag }}", "does not fetch origin/main (fetch-depth: 0)")]
+    public void A_broken_release_gate_wiring_is_caught(string file, string from, string to, string expected)
     {
         string Text(string name) => name == file ? Mutate(Workflow(name), from, to) : Workflow(name);
         var violations = WorkflowPolicy.ReleaseGateWiringViolations(Text("release.yml"), Text("ci.yml"), Text("security.yml"))
-            .Concat(WorkflowPolicy.IntegrationGateViolations(Text("release.yml"), Text("ci.yml"), Text("security.yml")));
-        Assert.NotEmpty(violations);
+            .Concat(WorkflowPolicy.IntegrationGateViolations(Text("release.yml"), Text("ci.yml"), Text("security.yml"))).ToList();
+        // The check meant for this mutation fires, not just any (review round 6 NIT c).
+        Assert.True(violations.Any(v => v.Contains(expected, StringComparison.Ordinal)),
+            $"expected a violation containing '{expected}', got:\n" + string.Join("\n", violations));
     }
 
     [Theory]
@@ -1100,6 +1110,21 @@ internal static class WorkflowPolicy
                 violations.Add($"ci.yml job '{job}' puts a credential into the environment of every step: {string.Join(", ", EnvCredentials(Child(baseJob, "env")))}");
             if (EnvCredentials(Child(ciRoot, "env")).Any())
                 violations.Add($"ci.yml puts a credential into the environment of every job: {string.Join(", ", EnvCredentials(Child(ciRoot, "env")))}");
+            // Review round 6 m-1: the job's container env, and an earlier step that hands a value on through $GITHUB_ENV.
+            if (baseJob is not null && EnvCredentials(Child(Child(baseJob, "container"), "env")).Any())
+                violations.Add($"ci.yml job '{job}' puts a credential into its container's environment: {string.Join(", ", EnvCredentials(Child(Child(baseJob, "container"), "env")))}");
+            if (baseJob is not null)
+                foreach (var earlier in Steps(baseJob).TakeWhile(s => !ReferenceEquals(s, step)))
+                {
+                    var name = Scalar(Child(earlier, "name")) ?? Scalar(Child(earlier, "uses")) ?? "?";
+                    if (EnvCredentials(Child(earlier, "env")).Any())
+                        violations.Add($"ci.yml job '{job}' step '{name}' before the base comparison holds a credential in its env");
+                    var earlierRun = Scalar(Child(earlier, "run")) ?? "";
+                    var carriesExpression = earlierRun.Contains("${{", StringComparison.Ordinal)
+                        || (Child(earlier, "env") as YamlMappingNode)?.Children.Any(kv => Scalar(kv.Value)?.Contains("${{", StringComparison.Ordinal) == true) == true;
+                    if (earlierRun.Contains("GITHUB_ENV", StringComparison.Ordinal) && carriesExpression)
+                        violations.Add($"ci.yml job '{job}' step '{name}' writes $GITHUB_ENV from an expression before the base comparison: later steps would inherit it");
+                }
             if (Child(env, "GH_TOKEN") is not null || Child(env, "GITHUB_TOKEN") is not null || otherCredential || Credential(run)
                 || Regex.Matches(run, @"\$RELEASES_TOKEN").Count != 1 || !Regex.IsMatch(run, @"\nfi\nunset RELEASES_TOKEN\n"))
                 violations.Add($"ci.yml job '{job}': the base comparison exposes the token beyond 'gh release list' (unset it before the tests)");
@@ -1165,16 +1190,21 @@ internal static class WorkflowPolicy
     }
 
     /// <summary>
-    /// An expression that yields the run's token or a secret (review round 5 NIT b): <c>github.token</c> in any spelling
-    /// (<c>github . token</c>, <c>github['token']</c>) or anything under <c>secrets</c>, inside <c>${{ }}</c>; plus the bare
-    /// words in run text. Other <c>github.*</c> context values (an event's SHA) are no credential.
+    /// Whether a text carries the run's token or a secret (review rounds 5 and 6). Every whole <c>${{ … }}</c> expression is
+    /// read (non-greedy up to its own <c>}}</c>, so a <c>'{0}'</c> inside does not end it) without regard to case, as GitHub
+    /// evaluates them; it is a credential when it names <c>secrets</c> or <c>token</c> as a word anywhere, or the whole
+    /// <c>github</c> context as a value or a function argument (<c>github</c>, <c>toJSON(github)</c>) — that context holds
+    /// the token. A <c>github.*</c> property other than the token (<c>github.event.pull_request.base.sha</c>) is none.
+    /// Outside expressions, the bare words <c>github.token</c> and <c>secrets.</c> count too, in any case.
     /// </summary>
-    private static readonly Regex CredentialExpression = new(
-        @"\$\{\{[^}]*(\bgithub\s*(\.\s*token\b|\[\s*['""]token['""]\s*\])|\bsecrets\b)", RegexOptions.CultureInvariant);
+    private static readonly Regex ExpressionPattern = new(@"\$\{\{(?<inner>.*?)\}\}", RegexOptions.CultureInvariant | RegexOptions.Singleline);
+    private static readonly Regex CredentialWord = new(@"\b(secrets|token)\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex WholeGithub = new(@"(^|[\s(,!])github\s*($|[\s),])", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static bool Credential(string? text) => text is not null
-        && (CredentialExpression.IsMatch(text) || text.Contains("github.token", StringComparison.Ordinal)
-            || text.Contains("secrets.", StringComparison.Ordinal));
+        && (ExpressionPattern.Matches(text).Any(m => CredentialWord.IsMatch(m.Groups["inner"].Value) || WholeGithub.IsMatch(m.Groups["inner"].Value))
+            || text.Contains("github.token", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("secrets.", StringComparison.OrdinalIgnoreCase));
 
     private static IEnumerable<string> EnvCredentials(YamlNode? env)
         => (env as YamlMappingNode)?.Children.Where(kv => Credential(Scalar(kv.Value))).Select(kv => Scalar(kv.Key) ?? "?") ?? [];

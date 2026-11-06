@@ -10,6 +10,7 @@ public static class PathMatrixParser
 {
     public const string PathCapabilitiesHeading = "## Rows and capabilities";
     private static readonly Regex RowId = new(@"^([MASTU])-(\d+)$", RegexOptions.CultureInvariant);
+    private static readonly Regex LooksLikeRowId = new(@"(?<![A-Za-z])[MASTU]-\d+", RegexOptions.CultureInvariant);
     private static readonly Regex FirstBackticked = new(@"`([^`]+)`", RegexOptions.CultureInvariant);
 
     public static IReadOnlyList<PathRow> Parse(string contract, string? pathCapabilities)
@@ -35,13 +36,22 @@ public static class PathMatrixParser
             catch (FormatException e) { problems.Add($"PATH_CAPABILITIES.md: {e.Message}"); }
         }
 
+        // Every '|' line outside a code fence, indented or not, with or without a space after the bar (review round 6 m-2):
+        // a row the reader drops would be missing from R14/R15 and the inventory while the gate stays green. A first cell
+        // that names a row ID but is not exactly one ('**U-40**', 'U-40a') is a problem, never a skipped line.
+        var fenced = MarkdownTables.Fenced(lines);
         var rows = new List<PathRow>();
         for (var i = start; i < end; i++)
         {
-            if (!lines[i].StartsWith("| ", StringComparison.Ordinal)) continue;
+            if (fenced[i] || !lines[i].TrimStart().StartsWith('|')) continue;
             var cells = MarkdownTables.Split(lines[i]);
             var id = RowId.Match(cells[0]);
-            if (!id.Success) continue;
+            if (!id.Success)
+            {
+                if (LooksLikeRowId.IsMatch(cells[0]))
+                    problems.Add($"PRODUCT_CONTRACT.md:{i + 1}: '{cells[0]}' looks like a §7 row ID but is not one (write it as e.g. 'U-40')");
+                continue;
+            }
             var cls = id.Groups[1].Value;
             if (cls == "M")
             {
@@ -104,8 +114,10 @@ public static class PathMatrixParser
             var count = Regex.Match(cells[1], @"^\**(\d+)\**$");
             if (!count.Success) continue;
             var cls = Regex.Match(cells[0], @"\(([MASTU])\)");
-            if (cls.Success) result[cls.Groups[1].Value] = int.Parse(count.Groups[1].Value);
-            else if (cells[0].Contains("Total", StringComparison.Ordinal)) result["Total"] = int.Parse(count.Groups[1].Value);
+            var key = cls.Success ? cls.Groups[1].Value : cells[0].Contains("Total", StringComparison.Ordinal) ? "Total" : null;
+            // A class or the total counted twice is a problem, as for §11 (review round 6 NIT a), never the last one wins.
+            if (key is not null && !result.TryAdd(key, int.Parse(count.Groups[1].Value)))
+                problems.Add($"PRODUCT_CONTRACT.md §7.6: '{key}' is counted twice");
         }
         return result;
     }

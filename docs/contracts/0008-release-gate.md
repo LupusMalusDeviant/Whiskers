@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with D1–D16 as recommended (drafted and revised after
 review rounds 1 to 4 the same day). The documentation part of R1-51 (operator guides, accepted limits, corrections)
-does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 5) is pending acceptance. Both are at the end.
+does not depend on it and is done on the same branch. **Amendment 1** (implementation) was accepted on 6 November 2026; **Amendment 2** (gate review rounds 1 to 6) is pending acceptance. Both are at the end.
 
 ## Purpose
 
@@ -622,7 +622,7 @@ This amendment takes precedence over the text above. It was accepted on 6 Novemb
 - **`ReleaseGateBaseTests`** passes without comparing when `WHISKERS_GATE_BASE` is unset; the comparison runs in the CI
   step that sets it.
 
-## Amendment 2 — gate review rounds 1 to 5 (6 November 2026)
+## Amendment 2 — gate review rounds 1 to 6 (6 November 2026)
 
 This amendment takes precedence over the text above, Amendment 1 included. It is **pending acceptance** by the
 maintainer.
@@ -654,11 +654,18 @@ maintainer.
   version is refused instead of being read as a 0.x bootstrap base. Only in a release run, the CI step fetches the whole
   history and the tags (`--unshallow`) and lists the published releases (`gh release list`). The run's own token is
   passed to `gh` alone and unset before the tests run, so it is not in the tests' environment. This does not put it out
-  of their reach: the checkout's persisted credentials hold the same read-only (`contents: read`) token. In that step no
-  other environment value and no line of the script names the token or a secret: an expression `${{ … }}` with
-  `github.token` in any spelling (`github . token`, `github['token']`) or with `secrets`, or the bare words
-  `github.token` / `secrets.`. Other `github.*` values (the base SHA) are no credential. Neither the job nor the
-  workflow sets such a value in its `env`, which every step would inherit.
+  of their reach: the checkout's persisted credentials hold the same read-only (`contents: read`) token.
+
+  What counts as a credential: each whole `${{ … }}` expression is read up to its own closing `}}` and without regard to
+  case. It is a credential when it contains the word `secrets` or the word `token` anywhere, or the bare `github`
+  context as a value or a function argument (`${{ github }}`, `${{ toJSON(github) }}`). Outside expressions the
+  texts `github.token` and `secrets.` count too, in any case. A `github.*` property without the word `token`, such as
+  `github.event.pull_request.base.sha`, is no credential. The following is refused:
+  - in the base step, any environment value other than `RELEASES_TOKEN` that is a credential, and a credential in its
+    script;
+  - a credential in the `env` of the job that runs the base step, of that job's `container`, or of the workflow;
+  - in a step of that job before the base step, a credential in the step's `env`, or a write to `$GITHUB_ENV` in a step
+    whose script or `env` holds any `${{ … }}` expression, because later steps would inherit it.
 - **Reading the base fails closed.** A file counts as absent from the base only when `git ls-tree` lists no such path at
   the base commit; any failure of `git ls-tree` or `git show` (a missing object after a shallow fetch, a corrupt object,
   a bad reference) is a finding, never an empty base. A current commit without a csproj is a finding too, and so is a
@@ -684,8 +691,13 @@ maintainer.
     spaces (a backtick opener's info string may not contain a backtick), and closes only with the same character, at
     least as many, at most three spaces of indentation and nothing else on the line. Fenced lines are skipped by every
     table reader the gate uses: the first table under a heading, every table with a given header (the invariant
-    tables), and the §7.6 row counts. Each header check validates the header of exactly the table that is read, so a
-    fenced example table can neither be read nor stand in for the real header.
+    tables), the §7 path matrix, the §7.6 row counts, and the base comparison's invariant IDs. Each header check
+    validates the header of exactly the table that is read, so a fenced example table can neither be read nor stand in
+    for the real header.
+  - The §7 path matrix reader takes every `|` line between `## 7.` and `## 8.` outside a fence, indented or not and
+    with or without a space after the bar. A first cell that is exactly a row ID (`[MASTU]-n`) is a row. A first cell
+    that only contains one (`**U-40**`, `U-40a`) is a problem, never a skipped line. In §7.6, a class or the total
+    counted twice is a problem.
   - R3 also reads `SECURITY_INVARIANTS.md` line by line: every line outside a fence that starts with `|` (after any
     indentation) and names an `INV-n` in its first cell, but is not a parsed row, is a finding ("an invariant row the
     gate cannot read"), so a table whose header the parser does not recognise cannot hide its rows. The base

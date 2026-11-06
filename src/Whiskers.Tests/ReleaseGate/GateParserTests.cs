@@ -90,6 +90,30 @@ public class PathMatrixParserTests
         PathMatrixParser.Parse(contract, null, problems);
         Assert.Contains(problems, p => p.Contains("PATH_CAPABILITIES.md is missing"));
     }
+
+    [Fact]
+    public void Indented_and_tight_rows_are_read_fenced_ones_are_not_and_a_near_miss_is_a_problem()
+    {
+        // Review round 6 m-2: the §7 reader takes every '|' line outside a fence.
+        const string contract = "## 7. Paths\n\n| ID | Handler |\n|---|---|\n| U-01 | a |\n  | U-02 | b |\n|A-12| c |\n"
+            + "```\n| U-90 | example |\n```\n| **U-40** | bold |\n\n## 8. End\n";
+        const string mapping = "## Rows and capabilities\n\n| Row | Capabilities |\n|---|---|\n| U-01 | x.a |\n| U-02 | x.b |\n| A-12 | x.c |\n";
+        var problems = new List<string>();
+        var rows = PathMatrixParser.Parse(contract, mapping, problems);
+        Assert.Equal(["U-01", "U-02", "A-12"], rows.Select(r => r.Id));
+        Assert.DoesNotContain(rows, r => r.Id == "U-90");
+        Assert.Contains(problems, p => p.Contains("'**U-40**' looks like a §7 row ID"));
+        Assert.Single(problems);
+
+        // Review round 6 NIT a: a class or the total counted twice in §7.6 is a problem.
+        var countProblems = new List<string>();
+        PathMatrixParser.Totals("**Rows today**\n\n| Class | Rows |\n|---|---|\n| UI (U) | 3 |\n| UI (U) | 4 |\n| **Total** | **7** |\n| Total | 7 |\n", countProblems);
+        Assert.Contains(countProblems, p => p.Contains("'U' is counted twice"));
+        Assert.Contains(countProblems, p => p.Contains("'Total' is counted twice"));
+
+        // Review round 6 NIT b: the base comparison reads no ID from a fenced example.
+        Assert.Equal(["INV-01", "INV-02"], BaseComparison.RowIds("| INV-01 | a |\n```\n| INV-99 | example |\n```\n  | INV-02 | b |\n"));
+    }
 }
 
 public class ReleaseGateDocumentTests

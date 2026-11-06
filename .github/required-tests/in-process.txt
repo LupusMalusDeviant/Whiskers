@@ -21,14 +21,14 @@
 7 Whiskers.Tests.RequiredTestsManifestTests
 
 # The workflows' gates themselves: pinned actions, permissions, release order, the checks above.
-187 Whiskers.Tests.ReleaseWorkflowTests
+194 Whiskers.Tests.ReleaseWorkflowTests
 
 # The release gate itself (R1-51, contract 0008): it runs only in this run, so it is named here and cannot vanish behind
 # the floor — a lost [Fact], a class made internal or filtered out would otherwise pass every rule unchecked.
 1 Whiskers.Tests.ReleaseGate.ReleaseGateTests.The_repository_passes_the_gate_in_its_mode
 41 Whiskers.Tests.ReleaseGate.ReleaseGateTests
 12 Whiskers.Tests.ReleaseGate.InvariantTableParserTests
-2 Whiskers.Tests.ReleaseGate.PathMatrixParserTests
+3 Whiskers.Tests.ReleaseGate.PathMatrixParserTests
 7 Whiskers.Tests.ReleaseGate.ReleaseGateDocumentTests
 1 Whiskers.Tests.ReleaseGate.ReleaseGateBaseTests.The_records_keep_every_id_and_decision_of_the_base
 
