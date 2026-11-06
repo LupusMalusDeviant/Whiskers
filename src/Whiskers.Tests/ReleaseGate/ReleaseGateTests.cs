@@ -161,6 +161,18 @@ public class ReleaseGateTests
         var qualified = Real with { Invariants = SetCell(Real.Invariants, "| INV-58 |", 2, "✅ per host after migration") };
         Assert.Contains(Evaluate(qualified, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-58");
 
+        // A table under a new heading whose header the parser does not recognise: its ❌ row is invisible to the table,
+        // the pin and §11 are left alone — the row line itself is the finding (review round 4 m-1).
+        var hidden = Real with
+        {
+            Invariants = Mutate(Real.Invariants, "## 11.", "## 12. Something\n\n| ID | Invariant | Status | Evidence/gap | Test | WP |\n|---|---|---|---|---|---|\n"
+                + "| INV-62 | hidden | ❌ | none | — | WP1 |\n\n## 11."),
+        };
+        Assert.Contains(Evaluate(hidden, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-62" && f.Message.Contains("cannot read"));
+        // ...but a row in a fenced example is no row.
+        var example = Real with { Invariants = Mutate(Real.Invariants, "## 11.", "```\n| INV-62 | example |\n```\n\n## 11.") };
+        Assert.DoesNotContain(Evaluate(example, GateMode.Development, Dev), f => f.Subject == "INV-62");
+
         var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 49 |", "| ✅ | 50 |") };
         Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 50, the table has 49"));
 

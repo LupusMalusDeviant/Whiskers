@@ -18,10 +18,13 @@ public static class MarkdownTables
         if (at < 0) throw new FormatException($"the heading '{heading}' is missing");
         if (Array.FindIndex(lines, at + 1, l => l.Trim() == heading) >= 0)
             throw new FormatException($"the heading '{heading}' appears twice");
+        // The first '|' line after the heading outside code fences: a fenced example table is not the table (review round 4
+        // NIT 3), and a fenced shell comment is no heading.
+        var fenced = Fenced(lines);
         var start = at + 1;
-        while (start < lines.Length && !lines[start].TrimStart().StartsWith('|'))
+        while (start < lines.Length && (fenced[start] || !lines[start].TrimStart().StartsWith('|')))
         {
-            if (lines[start].TrimStart().StartsWith('#'))
+            if (!fenced[start] && IsHeading(lines[start].TrimStart()))
                 throw new FormatException($"no table follows the heading '{heading}'");
             start++;
         }
@@ -31,8 +34,8 @@ public static class MarkdownTables
 
     /// <summary>Every table in <paramref name="markdown"/> whose header cells equal <paramref name="header"/>.</summary>
     /// <remarks>A table under its own heading with a different (or no) header row is not seen at all — rows written there
-    /// are not read. For the invariant tables the pinned highest ID (R3) catches a row lost that way; a new caller needs
-    /// its own guard (review round 3 NIT).</remarks>
+    /// are not read. For the invariant tables R3 guards this: every line that looks like an invariant row
+    /// (<c>| INV-nn |</c>) but is not a parsed row is a finding (review round 4 m-1). A new caller needs its own guard.</remarks>
     public static IReadOnlyList<(int Line, string[] Cells)> WithHeader(string markdown, params string[] header)
     {
         var lines = Lines(markdown);
@@ -70,12 +73,11 @@ public static class MarkdownTables
         var tableEnd = i2;
         // Up to the next heading ('#' to '######' and a space), outside code fences: a shell comment in a fenced block is
         // no heading, and a '|' line in a fence is no table row (review round 3 NIT).
-        var inFence = false;
+        var fenced = Fenced(lines);
         for (; i2 < lines.Length; i2++)
         {
             var trimmed = lines[i2].TrimStart();
-            if (trimmed.StartsWith("```", StringComparison.Ordinal) || trimmed.StartsWith("~~~", StringComparison.Ordinal)) { inFence = !inFence; continue; }
-            if (inFence) continue;
+            if (fenced[i2]) continue;
             if (IsHeading(trimmed)) break;
             if (!trimmed.StartsWith('|')) continue;
             var repeat = repeatAllowed && Split(lines[i2]).SequenceEqual(header)
@@ -85,6 +87,31 @@ public static class MarkdownTables
             while (i2 + 1 < lines.Length && lines[i2 + 1].TrimStart().StartsWith('|')) i2++; // skip that table
         }
         return rows;
+    }
+
+    /// <summary>
+    /// Which lines are code-fence markers or inside a fence (CommonMark): a fence opens with three or more backticks or
+    /// tildes and closes only with the same character, at least as many of them, and nothing else on the line (review
+    /// round 4 NIT 1: a '~~~' line inside a '```' block does not close it). An unclosed fence runs to the end.
+    /// </summary>
+    public static bool[] Fenced(string[] lines)
+    {
+        var fenced = new bool[lines.Length];
+        char? marker = null;
+        var length = 0;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var trimmed = lines[i].TrimStart();
+            var run = trimmed.Length > 0 && trimmed[0] is '`' or '~' ? trimmed.TakeWhile(c => c == trimmed[0]).Count() : 0;
+            if (marker is null)
+            {
+                if (run >= 3) { marker = trimmed[0]; length = run; fenced[i] = true; }
+                continue;
+            }
+            fenced[i] = true;
+            if (run >= length && trimmed[0] == marker && trimmed[run..].Trim().Length == 0) marker = null;
+        }
+        return fenced;
     }
 
     private static bool IsHeading(string trimmed) => System.Text.RegularExpressions.Regex.IsMatch(trimmed, "^#{1,6} ");

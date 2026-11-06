@@ -290,7 +290,10 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "          RELEASE_GATE: ${{ inputs.release-gate }}\n          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASE_GATE: ${{ inputs.release-gate }}\n")]
     [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          GH_TOKEN: ${{ github.token }}\n")] // the tests see the token
     [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "")]                                                                     // the tests see the token
-    [InlineData("ci.yml", "            GH_TOKEN=\"$RELEASES_TOKEN\" gh release list", "            GH_TOKEN=\"${{ github.token }}\" gh release list")] // the token inline in the script
+    [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "          unset RELEASES_TOKEN\n          echo \"${{ github.token }}\" >/dev/null\n")]          // the token inline in the script
+    [InlineData("ci.yml", "          unset RELEASES_TOKEN\n", "          unset RELEASES_TOKEN\n          echo \"${{ secrets.GITHUB_TOKEN }}\" >/dev/null\n")]  // a secret inline in the script
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ github.token }}\n")] // the token under another name
+    [InlineData("ci.yml", "          RELEASES_TOKEN: ${{ github.token }}\n", "          RELEASES_TOKEN: ${{ github.token }}\n          OTHER: ${{ secrets.GITHUB_TOKEN }}\n")] // a secret under another name
     // The N-1 checks list the published releases with gh: both need GH_TOKEN (review round 3, M-1).
     [InlineData("ci.yml", "      - name: N-1 upgrade and recovery\n        env:\n          GH_TOKEN: ${{ github.token }}\n", "      - name: N-1 upgrade and recovery\n        env:\n          RELEASES_TOKEN: ${{ github.token }}\n")]
     [InlineData("release.yml", "          VER: ${{ needs.prepare.outputs.ver }}\n          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=", "          VER: ${{ needs.prepare.outputs.ver }}\n        run: |\n          set -euo pipefail\n          PREVIOUS=")]
@@ -1082,8 +1085,13 @@ internal static class WorkflowPolicy
                 || !tagBranch.Contains("export WHISKERS_GATE_RELEASES=\"$RUNNER_TEMP/releases.txt\"", StringComparison.Ordinal)
                 || Scalar(Child(env, "RELEASES_TOKEN")) != "${{ github.token }}")
                 violations.Add($"ci.yml job '{job}': the release run's base comparison does not fetch the history and the published releases");
-            // Review round 2 NIT: the token reaches gh only; the tests (a pull request's own code) never see it.
-            if (Child(env, "GH_TOKEN") is not null || Child(env, "GITHUB_TOKEN") is not null || run.Contains("github.token", StringComparison.Ordinal)
+            // Review rounds 2-4: the token reaches gh only and is not in the tests' environment. Only RELEASES_TOKEN may carry
+            // a token (no other env value, no run text names github.token or a secret).
+            static bool Credential(string? text) => text is not null
+                && (text.Contains("github.token", StringComparison.Ordinal) || text.Contains("secrets.", StringComparison.Ordinal));
+            var otherCredential = (env as YamlMappingNode)?.Children
+                .Any(kv => Scalar(kv.Key) != "RELEASES_TOKEN" && Credential(Scalar(kv.Value))) == true;
+            if (Child(env, "GH_TOKEN") is not null || Child(env, "GITHUB_TOKEN") is not null || otherCredential || Credential(run)
                 || Regex.Matches(run, @"\$RELEASES_TOKEN").Count != 1 || !Regex.IsMatch(run, @"\nfi\nunset RELEASES_TOKEN\n"))
                 violations.Add($"ci.yml job '{job}': the base comparison exposes the token beyond 'gh release list' (unset it before the tests)");
             // Review m3: the step marks itself, so a base lost on the way fails instead of passing without a comparison.

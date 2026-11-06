@@ -158,6 +158,14 @@ public class ReleaseGateDocumentTests
         Assert.Throws<FormatException>(() => MarkdownTables.After(table + "```bash\n# a comment\n```\n| 3 | 4 |\n", "## H"));
         Assert.Throws<FormatException>(() => MarkdownTables.After(table + "#hashtag, not a heading\n| 3 | 4 |\n", "## H"));
         Assert.Single(MarkdownTables.After(table + "```\n| a | pipe | in code |\n```\n\n## Next\n\n| 3 | 4 |\n", "## H"));
+        // Review round 4 NIT 1: a fence closes only with its own character and at least its length.
+        Assert.Throws<FormatException>(() => MarkdownTables.After(table + "```\n~~~\n# comment\n```\n| 3 | 4 |\n", "## H"));
+        Assert.Throws<FormatException>(() => MarkdownTables.After(table + "````\n```\n# comment\n````\n| 3 | 4 |\n", "## H"));
+        Assert.Equal([false, true, true, true, true, false], MarkdownTables.Fenced(["a", "````md", "```", "~~~", "`````", "b"]));
+        // Review round 4 NIT 3: a fenced example table between the heading and the real table is not the table.
+        var rows = MarkdownTables.After("## H\n\n```\n| X | Y |\n|---|---|\n| no | no |\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n", "## H");
+        Assert.Equal(["1", "2"], Assert.Single(rows).Cells);
+        Assert.Throws<FormatException>(() => MarkdownTables.After("## H\n\n```\n# not a heading\n| X |\n```\n\n## Next\n", "## H"));
     }
 
     [Fact]
