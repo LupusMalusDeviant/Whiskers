@@ -137,7 +137,7 @@ log records the same ids; the audit log keeps display names in `Actor` and the i
 | `AutomationOwnerStore.cs` | `IAutomationOwnerStore` + `AutomationOwnerStore`: owners of AutoPatch / AutoUpdate / the VPN bring-up (`vpnbootstrap`, R1-43) in `automation-owners.json`, written atomically; an unreadable file blocks every feature until each is taken over. |
 | `ComposePlan.cs` | R1-07: `ComposeDeployment` (what is asked: server, files or directory, project directory, explicit project, new `.env`, `--remove-orphans`), `ComposePlan` (the effective project, files, services and `Impact` — every existing container recreated, removed as orphan or colliding by name; `WriteScript` / `PullCommand` / `BuildCommand` / `UpCommand` (`up -d --pull never --no-build`) / `RestoreScript` with explicit `-p`, `--project-directory`, `-f`, `--env-file`; `EnsureDecided`, which also checks the exposures and shared containers, contract 0006), `ComposeModel` (pure: project name precedence and normalisation, `.env` parsing, interpolation, file merging, impact) and `ComposePlanGate`. Anything that cannot be worked out throws `ComposePlanException` (fail closed). |
 | `ComposePlanner.cs` | `IComposePlanner` + `ComposePlanner` (singleton): reads what the deployment does not bring along from the host (a directory's default compose file + override, the existing `.env`, a container's `config_files` / working directory for a `.env` change) and lists the server's containers. Read-only. |
-| `ComposeImpact.cs` | UI side of a plan: `DeployAsync` (plan, decide the capability, then the mounts and the exposures nested, then each planned container nested, plan again and run it through `IComposeRunner`), `GateFor` (a `ComposePlanGate` for plans made inside an operation, e.g. Git deploy; the automation gate decides mounts and exposures nested too), `RunExposuresAsync` / `ExposureArguments` / `NeedsExposureDecision` (contract 0006) and `RunForEachAsync`. |
+| `ComposeImpact.cs` | UI side of a plan: `SaveEnvAsync` (the container page's `.env` save: mounts, exposures, each affected container, re-plan and run), `DeployAsync` (plan, decide the capability, then the mounts and the exposures nested, then each planned container nested, plan again and run it through `IComposeRunner`), `GateFor` (a `ComposePlanGate` for plans made inside an operation, e.g. Git deploy; the automation gate decides mounts and exposures nested too), `RunExposuresAsync` / `ExposureArguments` / `NeedsExposureDecision` (contract 0006) and `RunForEachAsync`. |
 | `ComposeExposure.cs` | Contract 0006: `ComposeExposure` (service, kind, key, value, what may be shown, withheld flags), `ExposureClasses` (`public` / `host` / `published` under a policy's label prefixes) and `ComposeExposures` (identities and comparison keys, normalisation — `CAP_`, loopback, ephemeral ports, devices, security options —, the allow-list of label values that may be shown, compose's JSON, `docker inspect` of containers and images). |
 | `ComposeModelExposures.cs` | Contract 0006: `ComposeModel.ExposuresOf` — the exposures the compose files write, per service, interpolated from the `.env` (merge keys and same-file `extends` followed), and the `service:` / `container:` namespaces they share. |
 | `ComposeRunner.cs` | Contract 0006: `IComposeRunner` + `ComposeRunner` (singleton) — one run order for every path (write, pull, build, inspect the images, `up --pull never --no-build`, re-check), the tag and file restore of a refused run, the notifications, and `ComposeExposureStopper` (`container.disable_restart` + `container.stop` of a container the run created). |
@@ -379,10 +379,22 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   or privilege field refuses the plan; so do a relative `label_file` and `COMPOSE_PROFILES` from an unset variable.
   A part from a variable — and a literal label value that is not `true`/`false`, a port number or a Traefik rule of
   `Host`/`HostSNI`/`HostRegexp`/`Method` only — is withheld: compared and bound, never written. `ComposeImpact`
-  decides them under `compose.deploy` (`exposure`, `exposureWithheld`, `exposureClasses`, `related`,
-  `relatedWithheld`) after the mounts (`RunExposuresAsync`, and nested in the automation gate); the resolver puts them
-  on the target (`MutationTarget.Exposures`, hashed by the approval binding), `MutationScope.CoversExposure` and
-  `EnsureDecided` check a re-plan.
+  decides them under `compose.deploy` (`exposure`, `exposureShown`, `exposureWithheld`, `exposureValueWithheld`,
+  `exposureClasses`, `related`, `relatedWithheld`) after the mounts (`RunExposuresAsync`, and nested in the
+  automation gate); the resolver puts them on the target (`MutationTarget.Exposures`, hashed by the approval binding),
+  `MutationScope.CoversExposure` and `EnsureDecided` check a re-plan. `exposureShown` (audited) keeps what may be
+  shown of every entry — its key, never a value; the kind only for a key from a variable. An entry whose key came from
+  a variable travels in `exposureWithheld`, one whose value only is withheld in `exposureValueWithheld` (both payloads;
+  `MutationTarget.ExposureKeysShown` lets `ExposureChangeRule` name the key of the latter). These arguments are
+  Whiskers' own: the resolver refuses a `compose.deploy` that brings one on any surface but the UI and automation
+  (review B1), and the scope reads exposures and shared containers from the resolved target only (`CoversExposure`,
+  `CoversRelated`) — never from a caller's arguments. The page's `.env` save runs as `ComposeImpact.SaveEnvAsync`.
+- **Two rule sets in one run, and image labels the compose file overrides** (contract 0006, both fail closed): a
+  webhook owned by an API key that fires the Git deploy of an app a person owns is decided twice — the webhook under
+  the agent rule set, the deployment under the person's — so the stricter one stops it first. An image label the
+  compose file sets to another value (for instance `docktail.funnel.enable: "false"`) still counts as the image's
+  exposure: it needs a confirmation (agent) or is noted (person) like any undecided image label, even though the
+  container will not carry it.
 - **Compose runs** (contract 0006): every path runs a plan through `IComposeRunner` (`ComposeRunner`): write the
   files (what they replace is kept in `/tmp/whiskers-compose-<guid>`, 0700) → pull (`--ignore-buildable`; on the
   `.env` paths only missing images) → build (`--pull`; on the `.env` paths only missing images, without `--pull`) →
@@ -391,11 +403,18 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   The re-check inspects the containers the run created (project and service labels, an id not in the plan's
   `Impact`; `MutationScope.AddCreatedByRun`) and compares their exposures on (service, kind, key, value); a
   namespace shared at run time must be decided or created by the run; a container that cannot be inspected counts as
-  `public`. Under the agent rule set (`MutationScope.AgentRuleSet`) a violation of a confirm class is stopped
+  `public`. A `CgroupnsMode: host` whose service does not set `cgroup` is the daemon's default, not the deployment's
+  (review M1): the runner reads the default once per server (`default-cgroupns-mode` of `/etc/docker/daemon.json`,
+  otherwise `host` for cgroup v1 and `private` for v2 from `docker info`; a successful read is kept for the runner's
+  lifetime) and skips the entry when the default is `host`; a default that cannot be read counts it as a violation
+  and says so. A `--default-cgroupns-mode` on dockerd's command line is not read (it only errs towards a violation).
+  The re-check also runs when `up` failed or threw (the exception goes on afterwards), and a violation names a key
+  only when it cannot be an `.env` value (the plan read it literally or the inspected image carries it). Under the agent rule set (`MutationScope.AgentRuleSet`) a violation of a confirm class is stopped
   (`ComposeExposureStopper`: `container.disable_restart`, then `container.stop`, retried once — the scope guard
   lets only these two reach a container in the run's stop set, which `Covers` never reads); a run whose containers
   cannot be listed falls back to the plan's `stop`. Every violation notifies `exposure_violation` (unsuppressible);
-  a person's run with a `public` or `host` exposure notifies `exposure_change` (suppressible, key only). A refusal
+  a person's successful run with a `public` or `host` exposure notifies `exposure_change` (suppressible, key only; not
+  after a failed `up`). A refusal
   before `up` puts the files and the image tags back (compare-and-swap: a tag another run moved is left alone; 30 s
   per command, no cancellation).
 - **Free-text arguments** (`query`, `command`, `content`, `env`, …) are kept out of the audit row
