@@ -498,13 +498,16 @@ public static class ComposeExposures
 
     /// <summary>Reads <see cref="CgroupnsDefaultCommand"/>: the daemon.json's <c>default-cgroupns-mode</c>
     /// (<c>host</c> / <c>private</c>) when set, otherwise <c>host</c> for cgroup v1 and <c>private</c> for v2; <c>null</c>
-    /// for anything it cannot read (fail closed: the caller then counts a host cgroup namespace).</summary>
-    public static string? ParseCgroupnsDefault(string output)
+    /// for anything it cannot read (fail closed: the caller then counts a host cgroup namespace). On cgroup v1 a
+    /// <paramref name="privileged"/> container's default is <c>host</c> whatever daemon.json says: Docker forces it
+    /// (review N1).</summary>
+    public static string? ParseCgroupnsDefault(string output, bool privileged = false)
     {
         var lines = output.Replace("\r\n", "\n").Split('\n');
         var separator = Array.FindIndex(lines, l => l.Trim() == "---");
         if (separator < 0) return null;
         var version = string.Join('\n', lines[..separator]).Trim();
+        if (privileged && version == "1") return "host";
         var config = string.Join('\n', lines[(separator + 1)..]).Trim();
         if (config.Length > 0)
         {

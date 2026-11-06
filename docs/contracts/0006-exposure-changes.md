@@ -791,8 +791,8 @@ be accepted by the maintainer.
 - **Scope.** The decided exposures of a scope come only from `request.Target.Exposures`; shared namespace targets only
   from `Target.Id`, `Target.Name` and `Target.Related` (walking the parent chain). Raw arguments never count as decided.
 - **Refusal.** `compose.deploy` refuses the arguments `exposure`, `exposureShown`, `exposureWithheld`,
-  `exposureValueWithheld`, `exposureClasses`, `related` and `relatedWithheld` on every surface except Ui and Automation
-  (the surfaces whose nested decisions write them).
+  `exposureValueWithheld`, `exposureClasses`, `related`, `relatedWithheld` and `mounts` on every surface except Ui and
+  Automation (the surfaces whose nested decisions write them).
 
 ### The daemon's default cgroup namespace (review M1)
 
@@ -805,6 +805,7 @@ Amendment 2's field list is narrowed for `CgroupnsMode`:
 - Default `host`: the entry is not an exposure. Default `private`: a violation as before. Unreadable: a violation, with
   the note that the daemon default could not be read (fail closed).
 - A service that sets `cgroup` is compared as before; the default is never consulted.
+- On cgroup v1, a privileged service's default is `host` whatever `daemon.json` says (Docker forces it).
 - A dockerd command-line `--default-cgroupns-mode` is not detected; it can only cause a false violation, never a miss.
 
 ### Shown keys and withheld values (review m1, m3)

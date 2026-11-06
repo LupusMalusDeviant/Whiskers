@@ -386,8 +386,8 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   shown of every entry — its key, never a value; the kind only for a key from a variable. An entry whose key came from
   a variable travels in `exposureWithheld`, one whose value only is withheld in `exposureValueWithheld` (both payloads;
   `MutationTarget.ExposureKeysShown` lets `ExposureChangeRule` name the key of the latter). These arguments are
-  Whiskers' own: the resolver refuses a `compose.deploy` that brings one on any surface but the UI and automation
-  (review B1), and the scope reads exposures and shared containers from the resolved target only (`CoversExposure`,
+  Whiskers' own: the resolver refuses a `compose.deploy` that brings one — or `mounts` — on any surface but the UI
+  and automation (review B1, N3), and the scope reads exposures and shared containers from the resolved target only (`CoversExposure`,
   `CoversRelated`) — never from a caller's arguments. The page's `.env` save runs as `ComposeImpact.SaveEnvAsync`.
 - **Two rule sets in one run, and image labels the compose file overrides** (contract 0006, both fail closed): a
   webhook owned by an API key that fires the Git deploy of an app a person owns is decided twice — the webhook under
@@ -407,7 +407,8 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   (review M1): the runner reads the default once per server (`default-cgroupns-mode` of `/etc/docker/daemon.json`,
   otherwise `host` for cgroup v1 and `private` for v2 from `docker info`; a successful read is kept for the runner's
   lifetime) and skips the entry when the default is `host`; a default that cannot be read counts it as a violation
-  and says so. A `--default-cgroupns-mode` on dockerd's command line is not read (it only errs towards a violation).
+  and says so. On cgroup v1 a privileged container's default is `host` whatever daemon.json says (Docker forces
+  it). A `--default-cgroupns-mode` on dockerd's command line is not read (it only errs towards a violation).
   The re-check also runs when `up` failed or threw (the exception goes on afterwards), and a violation names a key
   only when it cannot be an `.env` value (the plan read it literally or the inspected image carries it). Under the agent rule set (`MutationScope.AgentRuleSet`) a violation of a confirm class is stopped
   (`ComposeExposureStopper`: `container.disable_restart`, then `container.stop`, retried once — the scope guard

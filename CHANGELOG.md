@@ -32,8 +32,8 @@ All notable changes to Whiskers are documented here. The format follows
   - Under the agent rule set a container a run created with an exposure nobody decided is stopped and its restart
     policy set to `no`. A host cgroup namespace the compose file did not ask for counts only when it is not the
     daemon's default (read from `daemon.json` / `docker info`; unreadable → it counts).
-  - A `deploy_compose` call (MCP or agent) that brings the nested decision's own arguments (`exposure…`, `related…`)
-    is refused.
+  - A `compose.deploy` call that brings the nested decisions' own arguments (`exposure…`, `related…`, `mounts`) is
+    refused on every surface except UI and automation.
 
 - **Every managed host gets its own mTLS client identity (R1-44, INV-58): action needed after the upgrade.**
   - **Before:** one client certificate (`serverwatch-client`) opened every host. Its key, if stolen, opened the whole

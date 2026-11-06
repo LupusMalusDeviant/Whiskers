@@ -100,6 +100,7 @@ public sealed partial class ComposeImpactExposureTests
     [InlineData("exposureClasses")]
     [InlineData("related")]
     [InlineData("relatedWithheld")]
+    [InlineData("mounts")]
     public async Task Deploy_compose_that_brings_a_nested_decision_argument_is_refused_before_anything_runs(string name)
     {
         _host.ComposeConfig = PlainConfig;
@@ -107,10 +108,10 @@ public sealed partial class ComposeImpactExposureTests
         var arguments = new Dictionary<string, string>
         {
             ["serverId"] = "local", ["projectName"] = "shop", ["composeContent"] = PlainYaml,
-            [name] = name.StartsWith("related", StringComparison.Ordinal) ? "whiskers" : FunnelIdentity,
+            [name] = name.StartsWith("related", StringComparison.Ordinal) ? "whiskers" : name == "mounts" ? "/var/run/docker.sock" : FunnelIdentity,
         };
 
-        foreach (var surface in new[] { MutationSurface.Mcp, MutationSurface.Agent })
+        foreach (var surface in new[] { MutationSurface.Mcp, MutationSurface.Agent, MutationSurface.Webhook, MutationSurface.Terminal })
         {
             var (outcome, ran) = await ToolAsync("compose.deploy", arguments, () => DeployComposeTool(PlainYaml), surface);
 
@@ -274,6 +275,44 @@ public sealed partial class ComposeImpactExposureTests
     [InlineData("", null)]
     public void The_default_cgroup_namespace_mode_is_parsed_fail_closed(string output, string? expected) =>
         Assert.Equal(expected, ComposeExposures.ParseCgroupnsDefault(output));
+
+    [Theory]
+    [InlineData("1\n---\n{\"default-cgroupns-mode\":\"private\"}", "host")]
+    [InlineData("1\n---\n", "host")]
+    [InlineData("2\n---\n", "private")]
+    [InlineData("2\n---\n{\"default-cgroupns-mode\":\"private\"}", "private")]
+    [InlineData("3\n---\n", null)]
+    public void On_cgroup_v1_a_privileged_containers_default_is_host_whatever_daemon_json_says(string output, string? expected) =>
+        Assert.Equal(expected, ComposeExposures.ParseCgroupnsDefault(output, privileged: true));
+
+    [Fact]
+    public async Task A_privileged_service_on_cgroup_v1_with_a_private_daemon_default_passes_the_re_check()
+    {
+        _host.CgroupnsOutput = "1\n---\n{\"default-cgroupns-mode\":\"private\"}\n";
+        var plan = await PlanAsync("name: shop\nservices:\n  web:\n    image: nginx\n    privileged: true\n",
+            """{"services":{"web":{"image":"nginx","privileged":true}}}""");
+        _upCreates.Add(("new-web", "web", """{"NetworkMode":"shop_default","Privileged":true,"CgroupnsMode":"host"}""", ""));
+        using var _ = Decide(plan, agent: true);
+
+        var result = await RunAsync(plan);
+
+        Assert.True(result.Success, string.Join("; ", result.Violations));
+        Assert.Empty(_docker.Actions);
+    }
+
+    [Fact]
+    public async Task An_unprivileged_service_on_cgroup_v1_with_a_private_daemon_default_is_still_stopped()
+    {
+        _host.CgroupnsOutput = "1\n---\n{\"default-cgroupns-mode\":\"private\"}\n";
+        var plan = await PlanAsync(PlainYaml, PlainConfig);
+        _upCreates.Add(("new-web", "web", CgroupHost, ""));
+        using var _ = Decide(plan, agent: true);
+
+        var result = await RunAsync(plan);
+
+        Assert.Contains(result.Violations, v => v.Contains("host namespace cgroup", StringComparison.Ordinal));
+        Assert.Contains(_docker.Actions, a => a is { Op: "stop", ContainerId: "new-web" });
+    }
 
     // ---------------------------------------------------------------- m1: a value-only withheld entry
 

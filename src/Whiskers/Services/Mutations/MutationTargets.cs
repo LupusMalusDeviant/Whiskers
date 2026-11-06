@@ -257,9 +257,10 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (resolution.Target is not { } resolvedHost || capability.Id != "compose.deploy") return resolution;
         // Contract 0006 (review B1): the nested decision's lists are Whiskers' own — a page or an automation gate fills
         // them from the plan it made. A caller on any other surface (MCP, the agent) could mark an exposure or a shared
-        // container as decided with them, so such a call is refused.
+        // container as decided with them, so such a call is refused — and so is `mounts` (review N3), which would
+        // otherwise reach the target's Related set.
         if (request.Surface is not (MutationSurface.Ui or MutationSurface.Automation)
-            && request.Arguments.Keys.FirstOrDefault(k => NestedDecisionArguments.Contains(k, StringComparer.OrdinalIgnoreCase)) is { } injected)
+            && request.Arguments.Keys.FirstOrDefault(k => RefusedFromCallers.Contains(k, StringComparer.OrdinalIgnoreCase)) is { } injected)
             return Refuse($"The argument '{injected}' is set by Whiskers itself for a planned deployment; a call may not bring it.");
         // Contract 0006 (Amendment 7): the containers a planned deployment shares a namespace with, from the nested
         // decision — whatever else the call carries. A withheld one came from an .env value: decided, never recorded.
@@ -306,6 +307,10 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
     /// automation surfaces (<see cref="ComposeImpact.ExposureArguments"/>).</summary>
     internal static readonly IReadOnlyList<string> NestedDecisionArguments =
         ["exposure", "exposureShown", "exposureWithheld", "exposureValueWithheld", "exposureClasses", "related", "relatedWithheld"];
+
+    /// <summary>What a <c>compose.deploy</c> from any surface but the UI and automation may not bring: the nested exposure
+    /// decision's arguments and the nested mounts decision's <c>mounts</c> (review B1, N3).</summary>
+    internal static readonly IReadOnlyList<string> RefusedFromCallers = [.. NestedDecisionArguments, "mounts"];
 
     private static string[] Lines(MutationRequest request, string argument) =>
         MutationTargets.String(request.Arguments, argument)?.Split('\n', StringSplitOptions.RemoveEmptyEntries) ?? [];
