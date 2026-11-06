@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
 touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendment 1** (review round 1, at the end) is pending acceptance.
+and the whiskers.site host. **Amendments 1 and 2** (review rounds 1 and 2, at the end) are pending acceptance.
 
 ## Purpose
 
@@ -288,3 +288,81 @@ This amendment is binding where it differs from the text above. Decisions D1–D
 
 "Operator-supplied paths" are paths that are neither the shared `{MtlsDir}/client.*` nor the managed
 `{MtlsDir}/hosts/{id}/*`. Migrating a server that is on the shared paths is the normal case.
+
+## Amendment 2 — review round 2 (6 November 2026, pending acceptance together with Amendment 1)
+
+### Recreating ghostunnel (review BL-1)
+
+Every recreate, the guard's included, has exactly this form:
+
+```
+docker compose -p <com.docker.compose.project> --project-directory <com.docker.compose.project.working_dir> \
+  -f <the single config file> up -d --no-deps --force-recreate ghostunnel
+```
+
+The preflight refuses the step unless all of these hold:
+
+- there is exactly one config file;
+- that file's `ghostunnel` and `socket-proxy` services equal the running containers (`docker inspect`): image digest,
+  environment, ports, volumes, and the command apart from `--allow-cn`;
+- the running `--allow-cn` set contains nothing but the shared CN and this host's own CN(s). A foreign CN is refused.
+
+Only the `--allow-cn` items under `command:` are edited, and a `.prev` copy is kept.
+
+### Generations side by side (review MA-4)
+
+- **No live overwrite.** Neither a rotation nor a renewal overwrites the credential in use.
+- **Pending slot.** The new generation, or the renewed certificate, is written to a slot of its own
+  (`hosts/{id}/g{n}/client.*`). `identity` records the active and the pending generation.
+- **Phase 3** switches `ServerConfig` atomically and rebuilds the cached Docker client.
+- **Deleting the old files.** The previous files are deleted only after the phase-4 negative check (for a rotation), or
+  after the confirmed connection (for a renewal).
+
+### Retiring (review MA-5)
+
+- **Onboarding (D6)** writes, after its verify step, a record equivalent to phase 5, including the negative check with the
+  shared credential.
+- **Which servers retire looks at.** Only servers whose configured client certificate matches the shared CN or
+  thumbprint, plus servers with a managed identity. Other servers are listed, but do not block retiring.
+
+### Confirmation (review MI-8)
+
+- **Channel.** The marker is written over the one-off connection with the new credential.
+- **What counts as refused.** In the negative check, "refused" means a TLS alert from ghostunnel (with TLS 1.3 on the
+  first read), right after a successful positive check.
+- **No answer.** A timeout or reset counts as "not checked": the step fails and no marker is written.
+
+### CN rule (review MI-10)
+
+`whiskers-client-{slug}-g{n}`. If that would exceed 63 characters or collide, `{slug}` is the truncated `Slug(id)` plus
+`-` plus the first six hex characters of SHA-256(serverId).
+
+### Registration (review MI-11)
+
+In addition to Amendment 1, the following are registered:
+
+- `VerificationContracts` entries for the three capabilities;
+- `McpPermission` levels and categories for the two tools;
+- the compositions `mtls.client_migrate` / `mtls.client_renew` → `server.save`;
+- client issuance inside `server.onboard`;
+- `RemoveAsync` when a server is removed.
+
+### Tests (review MI-12)
+
+These tests are added:
+
+- the one-off confirmation client refuses a server certificate with the wrong IP or from a foreign CA;
+- a failed negative check writes no marker and takes the guard path;
+- the preflight refuses when the file and the running container differ;
+- a step is refused while a guard unit is active;
+- the lock is shared with `RenewAsync`;
+- a resume after the marker but before the phase-5 record runs both checks again;
+- the Windows ACL readiness, if it is implemented.
+
+### NITs
+
+- **Key files.** Leftover `*.new` files are deleted before a key file is created (`UnixCreateMode` applies only at
+  creation).
+- **Operator guide.** Before a server that was never migrated is removed, its ghostunnel is narrowed or removed.
+- **[braucht Hardware]** Check that step's leaf template adds no SAN to a client certificate. Until that is verified,
+  `ValidateIssuedClient` accepts at most one DNS SAN equal to the CN, and refuses any other SAN.

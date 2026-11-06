@@ -1,7 +1,7 @@
 # Contract 0006 — Exposure changes in compose deployments
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended.
-**Amendment 1** (review round 1, at the end) is pending acceptance.
+**Amendments 1 and 2** (review rounds 1 and 2, at the end) are pending acceptance.
 
 ## Purpose
 
@@ -254,3 +254,64 @@ precise below.
   - `MutationPolicy.cs:74-92`;
   - `ComposeImpact.cs:65-71`;
   - `ContainerTools.cs:450-495`.
+
+## Amendment 2 — review round 2 (6 November 2026, pending acceptance together with Amendment 1)
+
+### Re-check after `up` (review MA-1, MI-2, MI-4 — replaces "Checked again after `up`" in Amendment 1)
+
+- **Where it runs.** Inside the scope of the operation, directly after `up`, on every path that runs a `ComposePlan`:
+  - `ComposeImpact.DeployAsync`;
+  - webhook `DeployCompose`;
+  - `GitDeployService` (`gitdeploy.deploy`);
+  - `set_container_env` (`container.env_set`);
+  - the `.env` save on the container page (`container.env_file_save`).
+
+  It also runs when `up` failed.
+- **Project name.** The check uses the plan's real project name, which is held in memory only.
+- **Fail closed.** A run that cannot be checked counts as different.
+- **Compared fields.** Exactly the detection rows: `Config.Labels`, and `HostConfig` `NetworkMode`, `Privileged`, `CapAdd`,
+  `PidMode`, `IpcMode`, `UTSMode`, `UsernsMode`, `CgroupnsMode`, `Devices`, `SecurityOpt` and `PortBindings`.
+- **Comparison rule.** Runtime ⊆ decided, after normalising: the `CAP_` prefix, `container:<id>` versus `service:x`,
+  and ephemeral host ports. A runtime set that is smaller than decided is fine.
+- **Image labels before `up`.** For services with `image:`, the image is pulled first and its labels are checked with
+  `docker image inspect`. `DeployScript` is split for this. Services with `build:` keep a window between start and
+  re-check; the README names it.
+
+### Stopping only for the agent rule set (review MA-3, MI-5)
+
+- **When the container is stopped.** Only when the decision came from the agent rule set (`CreateDefault`) and the
+  undecided exposure is in a class of `ExposureConfirmClasses`.
+  - It is stopped with `docker update --restart=no` and then `docker stop`.
+  - Compositions `compose.deploy`, `app.deploy`, `gitdeploy.deploy`, `container.env_set` and `container.env_file_save` →
+    `container.stop` are registered for this.
+- **Otherwise** (persons and human-owned automations, PC-D1): the operation is reported as failed, audited and notified,
+  and the container keeps running.
+- **Notification type.** The stop is reported as `exposure_violation`, which is not suppressible. `exposure_change` stays
+  suppressible.
+
+### Input to the rule (review MA-2)
+
+- **Where `MutationTarget.Exposures` comes from.** `HostAsync` fills it from the `composeContent` plan. Without
+  `composeContent`, it comes from the nested decision's `exposure` argument, as with `mounts`.
+- **How the rule gets the exposures.** `WithResolvedTarget` passes them as `__resolvedExposure{i}` keys. Withheld ones are
+  passed under a withheld prefix. Keys starting with `__` sent by a caller are stripped, as before.
+- **What the target holds.** Kind, service and label key. The rule classifies them with `context.Policy`, so a pinned
+  preset uses its own prefixes. `exposureClasses` is informational only.
+
+### Smaller points (review MI-1, MI-3, MI-6, MI-7)
+
+- **Capabilities.** Wherever this contract says `container.env_set`, `container.env_file_save` is meant as well.
+- **Variable keys.** A label key that comes from a variable is shown as `label (withheld)`. The reason then falls back to
+  kind and class. An entry that only compose reports, and that is marked `FromVariable`, is treated the same way.
+- **Remaining risks** named in the README:
+  - Traefik `exposedByDefault`;
+  - Serve or Funnel through a Tailscale sidecar's serve configuration;
+  - `cloudflared` tunnels.
+- **Additional tests:**
+  - every new detection row: external network `host`, uts, cgroup, devices, security_opt;
+  - `container:x` inherits x's exposures, and an x that cannot be resolved is refused;
+  - case-insensitive keys, and an operator-added prefix is `public`;
+  - a service that only compose knows about is refused;
+  - `env_set` and `env_file_save` produce the decision;
+  - the re-check runs on every path, git deploy included;
+  - the readiness line says "unknown" when the own container cannot be read.
