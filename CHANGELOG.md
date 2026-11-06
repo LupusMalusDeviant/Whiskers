@@ -6,6 +6,24 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Every managed host gets its own mTLS client identity (R1-44, INV-58): action needed after the upgrade.**
+  - **Before:** one client certificate (`serverwatch-client`) opened every host. Its key, if stolen, opened the whole
+    fleet.
+  - **New hosts:** onboarding issues the host its own identity `whiskers-client-{slug}-g1`. The key is made in Whiskers'
+    process and stored in `{MtlsDir}/hosts/{id}/`. The host's ghostunnel admits only that name.
+  - **Existing hosts** keep working on the shared credential until you migrate them, one at a time, from the server page
+    (key icon) or with the Admin MCP tool `migrate_mtls_client_credential`.
+    - Each host step changes only the `--allow-cn` items of ghostunnel's compose file.
+    - Each step is guarded: the host restores the previous file by itself unless the step is confirmed through the new
+      credential.
+    - A host counts as migrated only once the shared credential was refused there with a TLS alert.
+  - **Renewal and rotation:** `renew_mtls_client_credential` renews a migrated host's credential, or rotates it to the
+    next generation with `rotate=true`.
+  - **Retiring:** once every host is migrated, the shared key can be retired from the server page (UI only).
+  - **Readiness checklist:** it lists every host still on the shared credential, every unfinished migration, every host
+    whose ghostunnel is not running or cannot be read, and every migrated host whose running allow list differs.
+  - **Order:** Bifröst first, then the whiskers.site host, then host by host. Guide:
+    `docs/operations/per-host-mtls-migration.md`.
 - **Tailscale Serve, Funnel and DockTail in front of Whiskers: documented.**
   - In TCP mode tailscaled adds no forwarded headers. This covers `tailscale serve --tcp`/`--tls-terminated-tcp` and
     DockTail with `protocol=tcp`.

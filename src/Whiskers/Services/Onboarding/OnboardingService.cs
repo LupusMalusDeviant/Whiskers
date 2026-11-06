@@ -35,12 +35,12 @@ public class OnboardingService : IOnboardingService
     private readonly IDockerService _docker;
     private readonly ILogger<OnboardingService> _logger;
     private readonly IMtlsCertificateService _certificates;
+    private readonly IMtlsClientCredentialStore _clientCredentials;
 
-    // Deployment-specific paths (match this Whiskers install). The shared client cert + CA that
-    // every managed host's ghostunnel is verified against live here (created during the first
-    // migration); only the per-host SERVER cert is issued anew.
+    // Deployment-specific paths (match this Whiskers install). Since R1-44 each host gets its own client
+    // credential from IMtlsClientCredentialStore ({MtlsDir}/hosts/{id}/); the CA bundle stays {MtlsDir}/ca.crt.
+    // The per-host SERVER cert is issued on the host itself.
     private const string DockerProxyPort = "2376";
-    private readonly string _mtlsCertDir; // /app/data/mtls by default: client.crt/key + ca.crt (shared)
     private const string VmComposeDirOnHost = "/opt/telemetry-vm";   // holds scrape.yml + compose
     private const string ScrapeFileOnHost = "/opt/telemetry-vm/scrape.yml";
 
@@ -49,15 +49,15 @@ public class OnboardingService : IOnboardingService
         IServerConfigService serverConfig,
         IDockerService docker,
         IMtlsCertificateService certificates,
-        ILogger<OnboardingService> logger,
-        DataPathOptions? dataPaths = null)
+        IMtlsClientCredentialStore clientCredentials,
+        ILogger<OnboardingService> logger)
     {
         _exec = exec;
         _certificates = certificates;
+        _clientCredentials = clientCredentials;
         _serverConfig = serverConfig;
         _docker = docker;
         _logger = logger;
-        _mtlsCertDir = (dataPaths ?? DataPathOptions.Default).MtlsDir;
     }
 
     public async Task<OnboardingResult> OnboardServerAsync(string serverId, IProgress<string> progress, CancellationToken ct = default)
@@ -73,6 +73,7 @@ public class OnboardingService : IOnboardingService
         }
 
         var slug = OnboardingCommands.Slug(server.Name);
+        SemaphoreSlim? hostLock = null;
         try
         {
             // 0) Bootstrap reachability ------------------------------------------------------------
@@ -169,14 +170,47 @@ public class OnboardingService : IOnboardingService
             // the CSR travels to step-ca (on local) and the signed certificate travels back. It used to be the
             // other way round — key made on Badwolf, shipped base64 through the command channel.
             step = OnboardingStep.Certificate;
+            // R1-44 (contract 0007, amendment 10; review r3 MAJOR 1): steps 5–9 — from the server certificate to the
+            // journal — hold the store's per-host lock, the one every certificate step and server removal take. A
+            // running migration, renewal, rotation or removal makes onboarding refuse instead of interleaving slots.
+            var gate = _clientCredentials.HostLock(serverId);
+            if (!await gate.WaitAsync(0, ct))
+                return Fail(progress, completed, step,
+                    $"Für {server.Name} läuft gerade ein Zertifikatsschritt (Migration, Erneuerung, Rotation oder Entfernen); " +
+                    "Onboarding erneut starten, sobald er fertig ist.");
+            hostLock = gate;
+            // Steps 0–4 can take minutes (Tailscale login): continue with the record as it is now, under the lock, so a
+            // change finished meanwhile (a rotation, an edit) is not overwritten at the switchover (review r4 MINOR 2).
+            if (_serverConfig.GetServer(serverId)?.Clone() is not { } current)
+                return Fail(progress, completed, step, $"{server.Name} wurde inzwischen entfernt.");
+            server = current;
             progress.Report("⑥ Server-Zertifikat ausstellen (Schlüssel auf dem Host, step-ca signiert)…");
             await _certificates.IssueForNewHostAsync(serverId, MtlsIdentity.ForNewHost(slug, tsIp), ct);
+            // R1-44 (D6): the host gets its own client identity right away (generation 1); its proxy never admits the
+            // fleet's shared one. The key is made in Whiskers' process and stays in its data directory. A re-run after the
+            // switchover reuses the credential the server record names (the record is authoritative); otherwise the
+            // credential goes into a new slot.
+            var clientIdentity = _clientCredentials.IdentityOf(serverId);
+            MtlsClientCredentialPaths clientPaths;
+            if (clientIdentity is not null && _clientCredentials.IsManaged(server)
+                && File.Exists(server.TcpClientCertPath) && File.Exists(server.TcpClientKeyPath))
+            {
+                clientPaths = new MtlsClientCredentialPaths(server.TcpClientCertPath!, server.TcpClientKeyPath!,
+                    _clientCredentials.CaPath, clientIdentity.Generation);
+            }
+            else
+            {
+                clientPaths = await _clientCredentials.IssueAsync(server, clientIdentity?.Generation ?? 1, ct);
+                clientIdentity = _clientCredentials.IdentityOf(serverId)
+                                 ?? throw new InvalidOperationException("The issued client identity could not be read back.");
+            }
             completed.Add(step);
 
             // 6) Deploy socket-proxy + ghostunnel (mTLS) on the new host -------------------------
             step = OnboardingStep.MtlsProxy;
             progress.Report("⑦ socket-proxy + ghostunnel (mTLS) deployen…");
-            await WriteFile(serverId, "/opt/dockerproxy/docker-compose.yml", OnboardingCommands.DockerProxyCompose(tsIp), ct);
+            await WriteFile(serverId, "/opt/dockerproxy/docker-compose.yml",
+                OnboardingCommands.DockerProxyCompose(tsIp, clientIdentity.CommonName), ct);
             await Sh(serverId, "cd /opt/dockerproxy && sudo docker compose up -d", TimeSpan.FromMinutes(2), ct);
             completed.Add(step);
 
@@ -195,9 +229,9 @@ public class OnboardingService : IOnboardingService
             server.TcpHost = tsIp;
             server.TcpPort = int.Parse(DockerProxyPort);
             server.TcpUseTls = true;
-            server.TcpClientCertPath = $"{_mtlsCertDir}/client.crt";
-            server.TcpClientKeyPath = $"{_mtlsCertDir}/client.key";
-            server.TcpCaCertPath = $"{_mtlsCertDir}/ca.crt";
+            server.TcpClientCertPath = clientPaths.Cert;
+            server.TcpClientKeyPath = clientPaths.Key;
+            server.TcpCaCertPath = clientPaths.Ca;   // the fleet CA bundle {MtlsDir}/ca.crt — no new trust anchor
             server.MetricsSource = MetricsSourceKind.Prometheus;
             server.MetricsEndpoint = vmEndpoint;
             await _serverConfig.UpdateServerAsync(server);
@@ -213,6 +247,11 @@ public class OnboardingService : IOnboardingService
                 progress.Report($"⚠️ Onboarding fertig, aber mTLS-Verbindung noch nicht erreichbar: {info.Error}");
                 return Fail(progress, completed, step, info.Error ?? "mTLS-Verbindung nicht erreichbar.");
             }
+            // The issued slot was pending; the record names it and the connection through it works: now it is active.
+            if (_clientCredentials.PendingFor(serverId) is { } pendingSlot
+                && MtlsClientCredentialStore.SamePath(server.TcpClientCertPath, pendingSlot.Cert))
+                await _clientCredentials.ActivatePendingAsync(serverId, CancellationToken.None);
+            await RecordClientIdentityAsync(server, clientIdentity, progress, ct);
             completed.Add(step);
 
             // Onboarding succeeded over mTLS → drop the one-time bootstrap credentials so nothing
@@ -233,6 +272,41 @@ public class OnboardingService : IOnboardingService
             _logger.LogError(ex, "Onboarding failed for {ServerId} at step {Step}", serverId, step);
             return Fail(progress, completed, step, ex.Message);
         }
+        finally
+        {
+            hostLock?.Release();
+        }
+    }
+
+    /// <summary>Seam for tests: a probe of one client credential against the new host (one-off connection).</summary>
+    internal Func<Models.ServerConfig, CancellationToken, Task<MtlsProbeOutcome>> ProbeCredential { get; set; } =
+        (server, ct) => MtlsClientProbe.ProbeAsync(server, TimeSpan.FromSeconds(10), ct);
+
+    /// <summary>
+    /// R1-44 (D6, amendments 2 and 3): the phase-5-equivalent record of a new host. Its proxy was written with only the
+    /// host's own name; the record says so only once the shared credential was refused there with a TLS alert — or when
+    /// there is no shared credential to try (fresh install, retired). Otherwise it stays at phase 4 and the page says why.
+    /// </summary>
+    private async Task RecordClientIdentityAsync(Models.ServerConfig server, MtlsClientIdentity identity, IProgress<string> progress, CancellationToken ct)
+    {
+        var shared = _clientCredentials.SharedPaths;
+        var sharedExists = File.Exists(shared.Cert) && File.Exists(shared.Key);
+        var refused = false;
+        if (sharedExists)
+        {
+            var probe = server.Clone();
+            probe.TcpClientCertPath = shared.Cert;
+            probe.TcpClientKeyPath = shared.Key;
+            probe.TcpCaCertPath = _clientCredentials.CaPath;
+            refused = await ProbeCredential(probe, ct) == MtlsProbeOutcome.Refused;
+            if (!refused)
+                progress.Report("⚠️ Ob der Host die gemeinsame Client-Identität ablehnt, ließ sich nicht prüfen. Die Migration " +
+                                "(„Migrieren“) wiederholt die Prüfung.");
+        }
+        await _clientCredentials.WriteJournalAsync(server.Id, new MtlsRolloutJournal(MtlsRolloutJournal.Onboard,
+            identity.CommonName, identity.Generation, sharedExists && !refused ? 4 : 5,
+            sharedExists ? MtlsCertificateService.CommonNameOf(shared.Cert) : null, refused, DateTime.UtcNow,
+            SharedCredentialAbsent: !sharedExists), ct);
     }
 
     /// <summary>Reports the per-step hint + technical detail and builds the failure result.</summary>

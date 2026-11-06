@@ -334,7 +334,12 @@ public sealed class AuditCompletenessTests : IDisposable
         Assert.DoesNotContain("hunter2", row.Details);
     }
 
-    private static readonly HashSet<string> HardProtected = new(StringComparer.Ordinal) { "renew_mtls_certificate" };
+    private static readonly HashSet<string> HardProtected = new(StringComparer.Ordinal)
+    {
+        "renew_mtls_certificate",
+        // R1-44: the per-host client credential tools touch the protected mTLS layer like the server certificate's.
+        "migrate_mtls_client_credential", "renew_mtls_client_credential",
+    };
 
     /// <summary>Every mutating MCP tool — every tool above Read (R1-20).</summary>
     public static TheoryData<string> MutatingMcpTools()

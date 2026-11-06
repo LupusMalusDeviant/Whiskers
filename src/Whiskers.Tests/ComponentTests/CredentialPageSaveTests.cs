@@ -59,6 +59,8 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
         Services.AddSingleton(NullProxy<IKubernetesClientCache>.Create());
         Services.AddSingleton(NullProxy<Whiskers.Services.Observability.ILoopSuspensionService>.Create());
         Services.AddSingleton(NullProxy<Whiskers.Services.Docker.Budget.IServerCircuitBreaker>.Create());
+        Services.AddSingleton(EmptyClientCredentialStore());
+        Services.AddSingleton(NullProxy<Whiskers.Services.Certificates.IMtlsCertificateService>.Create());
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 

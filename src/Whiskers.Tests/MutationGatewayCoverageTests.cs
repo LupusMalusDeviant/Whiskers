@@ -334,6 +334,7 @@ public class MutationGatewayCoverageTests
     [
         ("Whiskers.Services.Certificates.MtlsCertificateService", "ConfirmAsync", "certificate renewal: confirms the installed certificate"),
         ("Whiskers.Services.Certificates.MtlsCertificateService", "RunAsync", "certificate renewal / issue: installs the certificate"),
+        ("Whiskers.Services.Certificates.MtlsClientCredentialStore", "SignAsync", "R1-44: step-ca on local signs a per-host client CSR (certificate.issue_mtls)"),
         ("Whiskers.Services.Database.DatabaseService", "ExecInContainer", "db.query / db.backup and the database listings"),
         ("Whiskers.Services.GitDeploy.GitDeployService", "Sh", "gitdeploy.deploy / gitdeploy.delete: checkout, build, up"),
         ("Whiskers.Services.Onboarding.OnboardingService", "ResolveVmEndpoint", "server.onboard: reads the host's address"),
@@ -388,6 +389,16 @@ public class MutationGatewayCoverageTests
             .Distinct()
             .Order();
         Assert.Equal([hostShell], constructors);
+
+        // R1-44: the one-off helper over a client built from a not-yet-active credential has exactly one caller, the
+        // allow-list confirmation that must travel through the NEW client credential (contract 0007, MI-8).
+        var oneOff = MutationCallScanner
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Docker.Operations.HostShellOperations)
+                               && m.Name == nameof(Whiskers.Services.Docker.Operations.HostShellOperations.ForOneOffClient))
+            .Select(c => c.Owner.FullName!)
+            .Distinct()
+            .Order();
+        Assert.Equal([typeof(Whiskers.Services.Certificates.MtlsClientProbe).FullName!], oneOff);
 
         // The interface pinned above has exactly one implementation in the app: another one would be a second way to
         // drive Docker that the caller pin does not see.
@@ -502,6 +513,7 @@ public class MutationGatewayCoverageTests
         ("IPolicyDecisionStore.RecordAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
         ("IUiMutationRunner.RunAsync", "the gateway entry for the UI"),
         // Designed exemptions with pinned callers (start-up, before the gateway can decide; the first admin).
+        ("IMtlsClientCredentialStore.WriteJournalAsync", "R1-44: the rollout journal, Whiskers' own record of the phase a host reached (written inside mtls.client_migrate / mtls.client_renew / server.onboard decisions)"),
         ("IAgentSettingsStore.AdoptApiKeyRefAsync", "start-up credential migration (R1-30), pinned by CredentialAdoptionCallersTests"),
         ("IAppSettingsStore.AdoptDnsTokenRefAsync", "start-up credential migration (R1-29), pinned by CredentialAdoptionCallersTests"),
         ("IAppSettingsStore.AdoptSettingRefAsync", "start-up credential migration (R1-30), pinned by CredentialAdoptionCallersTests"),

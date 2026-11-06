@@ -52,6 +52,8 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
         Services.AddSingleton(Null<IKubernetesClientCache>());
         Services.AddSingleton(Null<Whiskers.Services.Observability.ILoopSuspensionService>());
         Services.AddSingleton(Null<Whiskers.Services.Docker.Budget.IServerCircuitBreaker>());
+        Services.AddSingleton(EmptyClientCredentialStore());
+        Services.AddSingleton(Null<Whiskers.Services.Certificates.IMtlsCertificateService>());
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 
@@ -239,6 +241,12 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
 
     /// <summary>A do-nothing implementation of <typeparamref name="T"/>: default values and completed tasks.</summary>
     private static T Null<T>() where T : class => NullProxy<T>.Create();
+
+    /// <summary>R1-44: the page shows each host's client credential; a store over an empty data directory has none.</summary>
+    internal static Whiskers.Services.Certificates.IMtlsClientCredentialStore EmptyClientCredentialStore() =>
+        new Whiskers.Services.Certificates.MtlsClientCredentialStore(Null<Whiskers.Services.Server.IHostCommandExecutor>(),
+            NullLogger<Whiskers.Services.Certificates.MtlsClientCredentialStore>.Instance,
+            new DataPathOptions(Path.Combine(Path.GetTempPath(), "whiskers-empty-" + Guid.NewGuid().ToString("N"))));
 
     public class NullProxy<T> : DispatchProxy where T : class
     {

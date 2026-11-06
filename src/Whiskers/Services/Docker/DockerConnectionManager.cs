@@ -360,7 +360,7 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// the system trust store). PEM client cert+key are round-tripped through PKCS#12 so the private
     /// key is usable for TLS client auth across platforms.
     /// </summary>
-    private static CertificateCredentials BuildMtlsCredentials(Models.ServerConfig server)
+    internal static CertificateCredentials BuildMtlsCredentials(Models.ServerConfig server)
     {
         using var ephemeral = X509Certificate2.CreateFromPemFile(server.TcpClientCertPath!, server.TcpClientKeyPath);
         var clientCert = X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pkcs12), null);

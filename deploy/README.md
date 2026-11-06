@@ -129,6 +129,9 @@ in `docker-compose.hardened.yml` and `deploy/telemetry/host/docker-compose.yml` 
 otherwise), so a Dependabot bump there is completed in the template in the same PR. **ghostunnel** has no compose file
 Dependabot scans: check its releases by hand with every dependency refresh and move `ghostunnel/ghostunnel:vX.Y.Z@sha256:…`
 in the template (protected mTLS layer — the maintainer approves the change; the flags are pinned by a test).
+Since R1-44 the one per-host value in that template is `--allow-cn=whiskers-client-{slug}-g{n}`: each host's ghostunnel
+admits only its own client identity, not the former shared `serverwatch-client`. Existing hosts are moved over by the
+guarded migration in `docs/operations/per-host-mtls-migration.md`, which edits only the `--allow-cn` items.
 
 **Not pinned — mutable inputs of the image build:** the runtime stage runs `apt-get install` against the live Ubuntu, Tailscale (`pkgs.tailscale.com`) and PostgreSQL (`apt.postgresql.org`) repositories without version numbers (`openssh-client`, `sshpass`, `iptables`, `curl`, `ca-certificates`, `tailscale`, `postgresql-client-18`). The same commit and base digests can therefore install newer package versions on a later build. What a release actually shipped is recorded in its SBOMs (one per architecture, attached to the GitHub release).
 

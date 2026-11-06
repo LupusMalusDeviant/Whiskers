@@ -89,6 +89,18 @@ internal sealed class HostShellOperations
         _time = time ?? TimeProvider.System;
     }
 
+    /// <summary>
+    /// R1-44 (contract 0007, amendment 2 MI-8): the same one-shot helper over a throw-away client the caller built from a
+    /// credential that is not (yet) the server record's — the allow-list confirmation must travel through the NEW client
+    /// credential. No leftover sweep runs for this client (the regular executor's runs sweep on their own). Pinned to its
+    /// one caller by <c>MutationGatewayCoverageTests</c>.
+    /// </summary>
+    internal static HostShellOperations ForOneOffClient(global::Docker.DotNet.DockerClient client, MemoryCache statsCache, string serverId)
+    {
+        statsCache.Set($"hostshellsweep:{serverId}", true);
+        return new HostShellOperations(_ => Task.FromResult<IHostShellDocker>(new DockerClientHostShell(client)), statsCache);
+    }
+
     // The direct client use DockerBudgetCoverageTests counts: the helper has its own deadline, outside the load budget.
     private async Task<global::Docker.DotNet.DockerClient> GetClient(string? serverId)
         => await _connectionManager!.GetClientAsync(serverId);

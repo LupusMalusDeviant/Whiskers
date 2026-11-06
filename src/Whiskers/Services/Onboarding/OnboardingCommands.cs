@@ -72,7 +72,15 @@ $@"services:
       - '/:/host:ro,rslave'
 ";
 
-    public static string DockerProxyCompose(string tsIp) =>
+    /// <summary>The mTLS proxy of a managed host: docker-socket-proxy behind ghostunnel. Since R1-44 ghostunnel admits
+    /// exactly one client name, the host's own (<paramref name="allowedClientCn"/>, allow-listed); every other flag is the
+    /// approved one (<see cref="Whiskers.Services.Certificates.MtlsAllowListCommands.ApprovedArgsWithoutAllowCn"/>).</summary>
+    public static string DockerProxyCompose(string tsIp, string allowedClientCn) =>
+        Whiskers.Services.Certificates.MtlsClientIdentity.IsValidCommonName(allowedClientCn)
+            ? DockerProxyComposeFor(tsIp, allowedClientCn)
+            : throw new ArgumentException($"'{allowedClientCn}' is not an allowed client name.", nameof(allowedClientCn));
+
+    private static string DockerProxyComposeFor(string tsIp, string allowedClientCn) =>
 $@"services:
   socket-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
@@ -107,7 +115,7 @@ $@"services:
       - --cert=/certs/server.crt
       - --key=/certs/server.key
       - --cacert=/certs/ca.crt
-      - --allow-cn=serverwatch-client
+      - --allow-cn={allowedClientCn}
     volumes:
       - /opt/dockerproxy/certs:/certs:ro
     ports:

@@ -18,17 +18,44 @@ public static class ServerRemoval
     /// <summary>Removes <paramref name="server"/>; returns false when its kubeconfig or cloud API key could not be removed
     /// from the vault afterwards — including when the vault is disabled or locked and the server named such a secret
     /// (the secret then stays in vault.json, unused).</summary>
-    public static async Task<bool> RemoveAsync(IServerConfigService servers, IVaultService vault, Models.ServerConfig server)
+    public static async Task<bool> RemoveAsync(IServerConfigService servers, IVaultService vault, Models.ServerConfig server,
+        Whiskers.Services.Certificates.IMtlsClientCredentialStore? clientCredentials = null)
     {
         ArgumentNullException.ThrowIfNull(servers);
         ArgumentNullException.ThrowIfNull(vault);
         ArgumentNullException.ThrowIfNull(server);
 
+        // R1-44 (review r1 MINOR 8): never while a certificate step holds the host — a running migration would lose
+        // its slot or journal. Refused before anything is removed.
+        var gate = clientCredentials?.HostLock(server.Id);
+        if (gate is not null && !await gate.WaitAsync(0))
+            throw new InvalidOperationException($"A certificate operation for {server.Name} is running; remove the server once it has finished.");
+        try
+        {
+            return await RemoveLockedAsync(servers, vault, server, clientCredentials);
+        }
+        finally
+        {
+            gate?.Release();
+        }
+    }
+
+    private static async Task<bool> RemoveLockedAsync(IServerConfigService servers, IVaultService vault, Models.ServerConfig server,
+        Whiskers.Services.Certificates.IMtlsClientCredentialStore? clientCredentials)
+    {
         // The record as stored when it was removed: a page showing an older copy may name a kubeconfig that a
         // rotation has replaced meanwhile.
         var removed = await servers.TakeServerAsync(server.Id) ?? server;
-        if (!vault.IsEnabled) return removed.ConnectionType != ConnectionType.Kubernetes && removed.CloudKeyRef is null;
-        var ok = true;
+        // R1-44: its own mTLS client key goes with it (nothing else uses it).
+        var keyRemoved = true;
+        if (clientCredentials is not null && Whiskers.Services.Certificates.MtlsClientCredentialStore.IsValidServerId(removed.Id))
+        {
+            try { await clientCredentials.RemoveAsync(removed.Id, CancellationToken.None); }
+            catch (IOException) { keyRemoved = false; }
+            catch (UnauthorizedAccessException) { keyRemoved = false; }
+        }
+        if (!vault.IsEnabled) return keyRemoved && removed.ConnectionType != ConnectionType.Kubernetes && removed.CloudKeyRef is null;
+        var ok = keyRemoved;
         // Its kubeconfig and its cloud API key (R1-29) live in the vault: remove them with it, unless another server
         // still names the same key.
         if (removed.ConnectionType == ConnectionType.Kubernetes)

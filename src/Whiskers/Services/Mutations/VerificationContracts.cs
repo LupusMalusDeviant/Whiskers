@@ -96,6 +96,12 @@ public static class VerificationContracts
             ["certificate.renew_mtls"] = VerificationContract.None(
                 "the renewal itself confirms the presented certificate's thumbprint before it reports success."),
             ["certificate.issue_mtls"] = VerificationContract.None(NestedOnly),
+            ["mtls.client_migrate"] = VerificationContract.None(
+                "every host step is confirmed inside the rollout: the running ghostunnel's allow-list is read back, the new " +
+                "credential is admitted and, before narrowing, the previous one refused."),
+            ["mtls.client_renew"] = VerificationContract.None(
+                "the rollout confirms the new certificate through a rebuilt connection (and a rotation reads the allow-list back) before it reports success."),
+            ["mtls.shared_client_retire"] = VerificationContract.None(OwnRecord),
 
             // Databases
             ["db.query"] = VerificationContract.None("an arbitrary SQL statement: no semantic read-back."),

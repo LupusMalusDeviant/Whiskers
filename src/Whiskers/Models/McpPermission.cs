@@ -113,6 +113,9 @@ public static class McpPermissionLevels
         ["deploy_app"] = Admin,
         ["deploy_compose"] = Admin,
         ["renew_mtls_certificate"] = Admin,  // swaps the key of a proxy every command to that host passes through
+        // R1-44: change which client a host's proxy admits (per-host client credentials).
+        ["migrate_mtls_client_credential"] = Admin,
+        ["renew_mtls_client_credential"] = Admin,
         ["add_firewall_rule"] = Admin,
         ["remove_firewall_rule"] = Admin,
         ["update_nginx_config"] = Admin,
@@ -244,6 +247,8 @@ public static class McpPermissionLevels
         ["deploy_app"] = "Deployment",
         ["deploy_compose"] = "Deployment",
         ["renew_mtls_certificate"] = "Server",
+        ["migrate_mtls_client_credential"] = "Server",
+        ["renew_mtls_client_credential"] = "Server",
         ["get_update_status"] = "Monitoring",
         ["get_auto_patch_status"] = "Monitoring",
         ["preview_auto_patch"] = "Container",
