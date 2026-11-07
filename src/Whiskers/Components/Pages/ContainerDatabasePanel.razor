@@ -527,23 +527,14 @@ else
 
     private static string Quote(string s) => Whiskers.Utils.ShellUtils.Quote(s);
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["ContainerDetail_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
     private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
         // The role comes from the capability catalog, the one level table (INV-13), never from the page.
         var required = CapabilityCatalog.RoleOf(capabilityId);
-        if (Require(required)) return true;
+        if (_role >= required) return true;
+        Snackbar.Add(L["ContainerDetail_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -719,26 +710,18 @@ else
     // the Docker API exec endpoint: the mTLS socket-proxy blocks container exec (EXEC=0), but the host's
     // own docker.sock has full access, so this works uniformly on Local, SSH and TCP+mTLS servers.
     // A changing command runs through the gateway under <paramref name="capability"/> (container target); a
-    // read-only one passes null. What it does — the command, or the SQL it feeds the database — goes along as
+    // read goes through ReadInContainerViaHost instead. What it does — the command, or the SQL it feeds the database — goes along as
     // <paramref name="command"/> / <paramref name="query"/> (with the <paramref name="database"/> it runs in) so the
     // gateway can check it for protected resources (R1-16); the shell line itself, which carries the database password, stays in the delegate, and the audit
     // keeps only the length of both.
     // <paramref name="failedWhen"/> recognises a failure the command reports in its output with exit code 0 (a
     // missing framework, an unsupported file): the gateway then records it Failed, not Executed (R1-21).
-    private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerViaHost(string? capability,
+    private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerViaHost(string capability,
         string[] cmd, TimeSpan timeout, string? command = null, string? query = null, string? database = null,
         Func<string, string?>? failedWhen = null)
     {
-        // R1-42 (INV-41): the container reference comes from the route; it is checked and follows `--`.
-        var dockerCmd = "docker exec -- " +
-                        Whiskers.Utils.ShellUtils.Quote(Whiskers.Utils.CommandOperands.RequireContainerRef(ContainerId)) + " " +
-                        string.Join(' ', cmd.Select(Whiskers.Utils.ShellUtils.Quote));
+        var dockerCmd = DockerExecCommand(cmd);
         var sid = _resolvedServerId ?? "local";
-        if (capability is null)
-        {
-            var read = await HostCommandExecutor.ExecuteAsync(sid, dockerCmd, timeout);
-            return (read.Output, read.Error, read.ExitCode);
-        }
         var r = await Mutations.RunAsync(capability,
             new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database, command, query },
             async _ =>
@@ -749,6 +732,29 @@ else
                 return result;
             });
         return (r.Output, r.Error, r.ExitCode);
+    }
+
+    /// <summary>A read inside the container (no capability, no gateway): only the status check uses it.</summary>
+    private async Task<(string StdOut, string StdErr, int ExitCode)> ReadInContainerViaHost(string[] cmd, TimeSpan timeout)
+    {
+        var read = await HostCommandExecutor.ExecuteAsync(_resolvedServerId ?? "local", DockerExecCommand(cmd), timeout);
+        return (read.Output, read.Error, read.ExitCode);
+    }
+
+    // R1-42 (INV-41): the container reference comes from the route; it is checked and follows `--`.
+    private string DockerExecCommand(string[] cmd) =>
+        "docker exec -- " +
+        Whiskers.Utils.ShellUtils.Quote(Whiskers.Utils.CommandOperands.RequireContainerRef(ContainerId)) + " " +
+        string.Join(' ', cmd.Select(Whiskers.Utils.ShellUtils.Quote));
+
+    /// <summary>The role check in front of the migration status read; its role is fixed by the read
+    /// (<see cref="Whiskers.Components.PageReads"/>), not by a capability.</summary>
+    private bool MayCheckMigrationStatus()
+    {
+        var required = Whiskers.Components.PageReads.MigrationStatus;
+        if (_role >= required) return true;
+        Snackbar.Add(L["ContainerDetail_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
+        return false;
     }
 
     private async Task RunMigration()
@@ -810,12 +816,12 @@ else
 
     private async Task CheckMigrationStatus()
     {
-        if (!Require(AppRole.Operator)) return;
+        if (!MayCheckMigrationStatus()) return;
         if (_container == null) return;
         State.DbMigrating = true; State.MigrationOutput = null;
         try
         {
-            var result = await ExecInContainerViaHost(null, new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(1));
+            var result = await ReadInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(1));
             State.MigrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
             State.MigrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }

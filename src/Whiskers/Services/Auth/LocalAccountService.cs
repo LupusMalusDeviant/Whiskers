@@ -67,7 +67,7 @@ public sealed class LocalAccountService : ILocalAccountService
 
     public async Task<IReadOnlyList<LocalAccountInfo>> ListAsync(CancellationToken ct = default)
     {
-        if ((await AdminAsync()).Error is not null) return [];
+        if ((await AdminAsync(AppRole.Admin)).Error is not null) return [];   // listing accounts is a read, Admin only
         var users = await _db.Users.AsNoTracking().OrderBy(u => u.Email).ToListAsync(ct);
         var codes = await _db.UserTokens.AsNoTracking()
             .Where(t => t.LoginProvider == RecoveryCodes.TokenProvider && t.Name == RecoveryCodes.TokenName)
@@ -139,7 +139,7 @@ public sealed class LocalAccountService : ILocalAccountService
             // Inside the try: the context of a circuit closed while it waited is disposed, and Clear() throws — the
             // gate is released all the same.
             _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
-            if ((await AccountAdminAsync()).Error is { } refused) return LocalAccountResult.Refused(refused);
+            if ((await AccountAdminAsync("account.create")).Error is { } refused) return LocalAccountResult.Refused(refused);
             if (await _users.FindByEmailAsync(email) is not null) return LocalAccountResult.Refused(LocalAccountErrors.AlreadyExists);
             // An email that already holds a different explicit role (a Google/OIDC user) is not silently changed:
             // its role is managed in the role list.
@@ -199,7 +199,7 @@ public sealed class LocalAccountService : ILocalAccountService
             // Inside the try: the context of a circuit closed while it waited is disposed, and Clear() throws — the
             // gate is released all the same.
             _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
-            var (actor, refused) = await AccountAdminAsync();
+            var (actor, refused) = await AccountAdminAsync("account.password_reset");
             if (refused is not null) return LocalAccountResult.Refused(refused);
             if (SameEmail(actor, email)) return LocalAccountResult.Refused(LocalAccountErrors.OwnAccount);
             var user = await _users.FindByEmailAsync(email);
@@ -223,7 +223,7 @@ public sealed class LocalAccountService : ILocalAccountService
             // gate is released all the same.
             _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
             // Re-checked under the lock: an Admin whose own account went a moment ago decides nothing.
-            var (actor, refused) = await AccountAdminAsync();
+            var (actor, refused) = await AccountAdminAsync("account.delete");
             if (refused is not null) return LocalAccountResult.Refused(refused);
             if (SameEmail(actor, email)) return LocalAccountResult.Refused(LocalAccountErrors.OwnAccount);
             var user = await _users.FindByEmailAsync(email);
@@ -435,16 +435,17 @@ public sealed class LocalAccountService : ILocalAccountService
 
     // ------------------------------------------------------------------------------------------------ helpers
 
-    /// <summary>The caller as an Admin who may change accounts: refused while authentication is disabled.</summary>
-    private async Task<(string? Email, string? Error)> AccountAdminAsync() =>
-        _authDisabled ? (null, LocalAccountErrors.AuthDisabled) : await AdminAsync();
+    /// <summary>The caller as someone who may run <paramref name="capabilityId"/> on accounts, with the role from the
+    /// capability catalog (INV-13; Admin for every account capability): refused while authentication is disabled.</summary>
+    private async Task<(string? Email, string? Error)> AccountAdminAsync(string capabilityId) =>
+        _authDisabled ? (null, LocalAccountErrors.AuthDisabled) : await AdminAsync(CapabilityCatalog.RoleOf(capabilityId));
 
-    /// <summary>The caller as an Admin, with the session checked now.</summary>
-    private async Task<(string? Email, string? Error)> AdminAsync()
+    /// <summary>The caller holding <paramref name="required"/>, with the session checked now.</summary>
+    private async Task<(string? Email, string? Error)> AdminAsync(AppRole required)
     {
         var session = await _user.CheckSessionAsync();
         if (!session.Valid) return (null, LocalAccountErrors.SessionInvalid);
-        if (session.Role < AppRole.Admin) return (null, LocalAccountErrors.NotAuthorized);
+        if (session.Role < required) return (null, LocalAccountErrors.NotAuthorized);
         return (await _user.GetEmailAsync(), null);
     }
 

@@ -284,16 +284,18 @@ public sealed class UiAuditCompletenessTests : IDisposable
             // Skips loading the admin-only settings into the circuit; changes nothing.
             ["Pages/Settings.razor"] = ["OnInitializedAsync"],
         }.GetValueOrDefault(page, []);
-        // Every plain Require( call — whatever its argument and wherever it sits in the handler — must be in a read.
+        // Every plain Require( call or read check (May…(), with a PageReads role) — whatever its argument and wherever
+        // it sits in the handler — must be in a read.
         var handlers = System.Text.RegularExpressions.Regex.Matches(source, @"(?:private|protected|public)[^\n(]*?\s(\w+)\(");
         // An inline role comparison that returns (`if (_role < AppRole.X)`) is a refusal too.
         foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(source,
-                     @"(?<![\w.])Require\(|if \(_role < "))
+                     @"(?<![\w.])Require\(|(?<![\w.])May[A-Z]\w*\(\)|if \(_role < "))
         {
             // `@if (_role < …)` in the markup only decides what is rendered.
             if (call.Index > 0 && source[call.Index - 1] == '@') continue;
             var handler = handlers.Where(h => h.Index < call.Index).LastOrDefault()?.Groups[1].Value;
-            if (handler is "Require" or "RequireAsync" or "RequireRoleAsync") continue;   // the helpers themselves
+            if (handler is "Require" or "RequireAsync" or "RequireRoleAsync" || (handler is not null && System.Text.RegularExpressions.Regex.IsMatch(handler, "^May[A-Z]")))
+                continue;   // the helpers themselves
             Assert.True(handler is not null && reads.Contains(handler),
                 $"{page}: a plain Require( in '{handler}' records no refusal — use RequireAsync.");
         }

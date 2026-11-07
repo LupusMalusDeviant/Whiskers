@@ -57,8 +57,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCleanup", "host.prune"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ApplyRetention", "db.backup_delete"),
         ("Whiskers.Services.Mutations.ComposeImpact", "SaveEnvAsync", "container.env_file_save"),
-        // Two separate calls in one helper: with a capability (migrate, rollback, SQL import) it runs the primitive inside
-        // that decision; without one (migrate:status) it reads through the plain executor — so it is in both lists.
+        // The write helper: migrate, rollback and SQL import run the primitive inside their capability decision.
         ("Whiskers.Components.Pages.ContainerDatabasePanel", "ExecInContainerViaHost", "container.exec, db.query"),
         ("Whiskers.Services.Mutations.ComposeImpact", "DeployAsync", "app.deploy, compose.deploy"),
         ("Whiskers.Services.Webhooks.WebhookService", "DeployCompose", "compose.deploy"),
@@ -276,7 +275,7 @@ public class MutationGatewayCoverageTests
     /// <summary>Plain-executor calls that read (the command changes nothing on the host).</summary>
     public static readonly (string Owner, string Handler, string Why)[] PlainExecutorReads =
     [
-        ("Whiskers.Components.Pages.ContainerDatabasePanel", "ExecInContainerViaHost", "artisan migrate:status (capability null); the write branch uses the primitive"),
+        ("Whiskers.Components.Pages.ContainerDatabasePanel", "ReadInContainerViaHost", "artisan migrate:status; the writes go through ExecInContainerViaHost and the primitive"),
         ("Whiskers.Components.Pages.ContainerDetail", "LoadEnvVars", "finds the compose directory and reads its .env"),
         ("Whiskers.Mcp.Tools.MonitoringTools", "GetServerLogs", "journalctl / log tail"),
         ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumesAsync", "docker volume ls"),

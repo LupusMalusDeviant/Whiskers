@@ -348,16 +348,6 @@ else
         maxBackups, command,
     };
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["ScheduledTasksView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation, with the role from the capability catalog (INV-13).</summary>
     private Task<bool> RequireAsync(string capabilityId, object arguments) =>
         RequireRoleAsync(CapabilityCatalog.RoleOf(capabilityId), capabilityId, arguments);
@@ -367,7 +357,8 @@ else
     /// Called directly only by "Run now", whose role is the task's own requirement (<see cref="RunNowRole"/>).</summary>
     private async Task<bool> RequireRoleAsync(AppRole required, string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        if (_role >= required) return true;
+        Snackbar.Add(L["ScheduledTasksView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }

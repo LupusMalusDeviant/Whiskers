@@ -34,7 +34,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
 
     /// <summary>The one place the fixed rule turns a role into the level it holds (INV-13): Admin ↔ admin,
     /// Operator ↔ write, Viewer (and anything else) ↔ read. Every surface that maps a signed-in person's role to a
-    /// level calls this; <c>CapabilityTableConsistencyTests</c> forbids a second spelling.</summary>
+    /// level calls this; <c>PageRoleScanTests.The_role_level_rule_is_spelled_only_in_the_catalog</c> forbids a second
+    /// spelling.</summary>
     public static string LevelFor(AppRole role) => role switch
     {
         AppRole.Admin => McpPermissionLevels.Admin,

@@ -138,23 +138,14 @@ else
         await LoadBackups();
     }
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["SelfBackupPanel_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
     private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
         // The role comes from the capability catalog, the one level table (INV-13), never from the page.
         var required = CapabilityCatalog.RoleOf(capabilityId);
-        if (Require(required)) return true;
+        if (_role >= required) return true;
+        Snackbar.Add(L["SelfBackupPanel_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }

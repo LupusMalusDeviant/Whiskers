@@ -81,17 +81,10 @@ public class CapabilityTableConsistencyTests
     {
         var level = Catalog.Find(id)!.RequiredLevel;
         var role = CapabilityCatalog.RoleFor(level);
-        Assert.True(McpPermissionLevels.HasAccess(Level(role), level));
+        Assert.True(McpPermissionLevels.HasAccess(CapabilityCatalog.LevelFor(role), level));
         if (role > AppRole.Viewer)
-            Assert.False(McpPermissionLevels.HasAccess(Level(role - 1), level));
+            Assert.False(McpPermissionLevels.HasAccess(CapabilityCatalog.LevelFor(role - 1), level));
     }
-
-    private static string Level(AppRole role) => role switch
-    {
-        AppRole.Admin => McpPermissionLevels.Admin,
-        AppRole.Operator => McpPermissionLevels.Write,
-        _ => McpPermissionLevels.Read,
-    };
 
     /// <summary>Every capability a page runs through the gateway is in the catalog (UI-only ones included), and the
     /// Scheduled tasks page takes the delete level from the catalog instead of a hard-coded role.</summary>
