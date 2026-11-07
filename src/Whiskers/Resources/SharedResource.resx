@@ -4716,7 +4716,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>CVE scan finished.</value>
   </data>
   <data name="Cves_Snackbar_ScanNotStarted" xml:space="preserve">
-    <value>No CVE scan was started: one is already running, or CVE scanning is turned off.</value>
+    <value>No CVE scan was started: one is already running, or the CVE module is off.</value>
   </data>
   <data name="Cves_Snackbar_ScanFailed" xml:space="preserve">
     <value>CVE scan failed: {0}</value>

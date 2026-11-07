@@ -637,6 +637,19 @@ public class MutationGatewayCoverageTests
     }
 
     [Fact]
+    public void Only_the_trigger_dispatcher_detaches_a_scope()
+    {
+        // MutationScope.Detach drops the whole open scope — its authority and the restrictions nested calls inherit
+        // from it (pinned preset, trigger id). That is safe only for work that brings its own principal and pin: an AI
+        // trigger run. Anything else that starts work outside a decision suppresses the flow (test below).
+        var callers = MutationCallScanner.Callers(App, m => m.DeclaringType == typeof(MutationScope)
+                                                             && m.Name == nameof(MutationScope.Detach))
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().Order(StringComparer.Ordinal).ToList();
+
+        Assert.Equal(["Whiskers.Services.Agent.Triggers.AiTriggerDispatcher.OnEventAsync"], callers);
+    }
+
+    [Fact]
     public void Work_started_in_the_background_from_a_decision_does_not_inherit_its_scope()
     {
         // m3 (R1-48 review): a scope closed under work it started is refused from then on — also a nested decision begun

@@ -57,10 +57,10 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
         var dialog = await OpenDialog();
         _user.Role = role;            // and the role changed before the click
 
-        Submit(dialog, "8080");
+        await Submit(dialog, "8080");
 
         dialog.WaitForAssertion(() => Assert.Equal(["denied:Denied"], Events()), TimeSpan.FromSeconds(10));
-        Assert.Empty(_firewall.Calls);
+        Assert.Empty(Calls());
     }
 
     [Fact]
@@ -68,9 +68,9 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
     {
         var dialog = await OpenDialog();
 
-        Submit(dialog, "8080");
+        await Submit(dialog, "8080");
 
-        dialog.WaitForAssertion(() => Assert.Equal(["add:srv-1:8080:tcp:allow:"], _firewall.Calls), TimeSpan.FromSeconds(10));
+        dialog.WaitForAssertion(() => Assert.Equal(["add:srv-1:8080:tcp:allow:"], Calls()), TimeSpan.FromSeconds(10));
         Assert.Equal(["begin:firewall.rule_add:", "complete:Executed"], Events());
     }
 
@@ -86,7 +86,7 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
         await page.InvokeAsync(() => (Task)method.Invoke(page.Instance, [1])!);
 
         Assert.Equal(["denied:Denied"], Events());
-        Assert.Empty(_firewall.Calls);
+        Assert.Empty(Calls());
     }
 
     private async Task<IRenderedComponent<MudDialogProvider>> OpenDialog()
@@ -96,15 +96,33 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
         var dialogs = Services.GetRequiredService<IDialogService>();
         var parameters = new DialogParameters<AddFirewallRuleDialog> { { x => x.ServerId, "srv-1" } };
         await provider.InvokeAsync(() => dialogs.ShowAsync<AddFirewallRuleDialog>("add", parameters));
-        provider.WaitForAssertion(() => Assert.NotEmpty(provider.FindAll("input")), TimeSpan.FromSeconds(10));
+        // Wait for the submit button itself: the selects and the popover provider still re-render after the first input.
+        provider.WaitForAssertion(() => Assert.NotNull(SubmitButton(provider)), TimeSpan.FromSeconds(10));
         return provider;
     }
 
-    private static void Submit(IRenderedComponent<MudDialogProvider> dialog, string port)
+    private static AngleSharp.Dom.IElement? SubmitButton(IRenderedComponent<MudDialogProvider> dialog) =>
+        dialog.FindAll("button").LastOrDefault(b => b.TextContent.Contains("AddFirewallRuleDialog_Button_Submit"));
+
+    /// <summary>Types the port and clicks submit. Each element is found again right before its event, and both events
+    /// are awaited: a re-render between finding and firing leaves a stale event-handler id, which bUnit rejects at once
+    /// (seen once on a loaded full-suite run); such an attempt is retried, it never reached the dialog.</summary>
+    private static async Task Submit(IRenderedComponent<MudDialogProvider> dialog, string port)
     {
-        dialog.FindAll("input").First().Change(port);
-        dialog.FindAll("button").Last(b => b.TextContent.Contains("AddFirewallRuleDialog_Button_Submit")).Click();
+        await Retrying(() => dialog.FindAll("input").First().ChangeAsync(new ChangeEventArgs { Value = port }));
+        await Retrying(() => SubmitButton(dialog)!.ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs()));
     }
+
+    private static async Task Retrying(Func<Task> fire)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try { await fire(); return; }
+            catch (Bunit.Rendering.UnknownEventHandlerIdException) when (attempt < 5) { await Task.Delay(50); }
+        }
+    }
+
+    private List<string> Calls() { lock (_firewall.Calls) return _firewall.Calls.ToList(); }
 
     private List<string> Events() { lock (_audit.Events) return _audit.Events.ToList(); }
 

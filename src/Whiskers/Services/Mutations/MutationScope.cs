@@ -448,8 +448,12 @@ public sealed class MutationScope : IDisposable
     /// Takes the open scope off the current async flow until the returned handle is disposed, and changes nothing else
     /// on the flow (budget lane, correlation id). For unattended work started from inside a decision that is not part
     /// of that decision — an AI trigger run fired by an event a person's operation raised: what it starts there sees
-    /// no scope, so its own gateway calls do not become children of the person's operation. It only removes authority,
-    /// it grants none. Dispose in the same synchronous frame that called it.
+    /// no scope, so its own gateway calls do not become children of the person's operation. It removes the whole scope:
+    /// the authority it decided and also the restrictions nested calls inherit from it (pinned preset, trigger id,
+    /// <see cref="Covers"/>). That is safe only for work that brings its own principal and pin, as a trigger run does;
+    /// <c>AiTriggerDispatcher.OnEventAsync</c> is therefore its only caller, pinned by
+    /// <c>MutationGatewayCoverageTests.Only_the_trigger_dispatcher_detaches_a_scope</c>. Dispose in the same synchronous
+    /// frame that called it.
     /// </summary>
     internal static IDisposable Detach() => new Detached();
 

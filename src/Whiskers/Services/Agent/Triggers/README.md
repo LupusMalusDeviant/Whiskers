@@ -55,7 +55,9 @@ the **background lane** (`ServerBudget`): it does not take the interactive slots
 dropped, and a server paused with `checks.pause` (U-22) refuses its Docker calls (`ServerSuspendedException`). A run fired
 from an interactive flow (a person's action whose notification matches) stays interactive, as before. The one thing it
 does **not** take along is the open gateway decision (`MutationScope.Detach`): an event raised inside a person's operation
-(a manual CVE scan, `cve.scan`, U-40) does not make the run's own decisions children of that operation.
+(a manual CVE scan, `cve.scan`, U-40) does not make the run's own decisions children of that operation. Other ambient state flows as it did before this change: in particular the set of resource locks the flow holds
+(`ResourceLocks`), so a run fired from inside a held lock would be treated as holding it too. No trigger event is raised
+under a lock today (none of `AiTriggerEvents.All` comes from a lock-holding flow); a new one that is must detach that as well.
 
 Safety: recursion guard (ignores its own `agent_action` events), per-container cooldown, and a
 concurrency cap. Runs only when the agent is enabled.

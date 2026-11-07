@@ -93,6 +93,29 @@ public class CveModuleTests
         Assert.False(started);
     }
 
+    [Fact]
+    public async Task A_manual_cycle_that_finds_the_scan_gate_taken_does_nothing_and_never_says_started()
+    {
+        // The real monitor, with its scan gate already held (as by the loop's own cycle): the manual cycle returns false,
+        // never calls "started" and leaves the gate to its holder.
+        static T Null<T>() where T : class => ComponentTests.ServersKubeconfigSaveTests.NullProxy<T>.Create();
+        var monitor = new CveMonitorService(Null<ICveFindingsStore>(),
+            new StaticOptionsMonitor<Whiskers.Configuration.CveMonitorSettings>(new Whiskers.Configuration.CveMonitorSettings()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CveMonitorService>.Instance,
+            Null<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>(), Null<Whiskers.Services.ServerConfig.IServerConfigService>(),
+            Null<Whiskers.Services.Docker.IDockerService>(), Null<IOsCveScanner>(), Null<ITrivyScanner>(),
+            Null<Whiskers.Services.Notifications.INotificationService>(), Null<ICveAgeStore>(),
+            Null<Microsoft.AspNetCore.SignalR.IHubContext<Whiskers.Hubs.ContainerHub>>(), Null<Whiskers.Services.Metrics.IMetricsSource>());
+        var gate = typeof(CveMonitorService).GetField("_scanning",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        gate.SetValue(monitor, 1);
+        var started = false;
+
+        Assert.False(await monitor.RunOneCycleAsync(started: () => started = true));
+        Assert.False(started);
+        Assert.Equal(1, gate.GetValue(monitor));   // still held by its holder, not released by the refused call
+    }
+
     // --- Enable/disable gate -----------------------------------------------------------------------------
 
     [Fact]

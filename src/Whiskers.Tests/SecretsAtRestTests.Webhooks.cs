@@ -166,7 +166,12 @@ public partial class SecretsAtRestTests
         // Read while the connection pool is still alive: closing it would fold the log back on its own.
         foreach (var file in Directory.EnumerateFiles(_root, "metrics.db*"))
         {
-            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            // SQLite may remove the -wal/-shm file between the listing and the open (a checkpoint on another
+            // connection): a file that no longer exists holds no secret, so it is skipped, not a failure.
+            FileStream stream;
+            try { stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete); }
+            catch (FileNotFoundException) { continue; }
+            using var _ = stream;
             using var copy = new MemoryStream();
             stream.CopyTo(copy);
             Assert.False(System.Text.Encoding.UTF8.GetString(copy.ToArray()).Contains(secret, StringComparison.Ordinal),
