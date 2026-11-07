@@ -314,6 +314,11 @@ public class PageRoleScanTests
     [InlineData("var ok = MayRemove; TryStart(out ok); if (!ok) return;", false)]
     [InlineData("var ok = MayRemove; Refresh(ref ok); if (!ok) return;", false)]
     [InlineData("bool ok; if (x) { } else ok = MayRemove; if (!ok) return;", false)]
+    [InlineData("var ok = MayRemove; ok ^= MayStart; if (!ok) return;", false)]
+    [InlineData("var ok = MayRemove; TryStart(out bool ok); if (!ok) return;", false)]
+    [InlineData("var ok = MayRemove; TryStart(out var ok); if (!ok) return;", false)]
+    [InlineData("return ok = MayRemove;", false)]
+    [InlineData("Instance ok = MayRemove; if (!ok) return;", true)]
     public void A_local_is_followed_only_through_its_one_write(string body, bool followed) =>
         Assert.Equal(followed, WithLocals(body, ["ok"]).Contains("MayRemove"));
 
@@ -1094,9 +1099,11 @@ public class PageRoleScanTests
 
     /// <summary><paramref name="names"/> plus, one step, the names in the initializer of each of them that is a local
     /// written exactly once in <paramref name="skeleton"/> — by its declaration as <c>var</c>, <c>bool</c> or a simple
-    /// (optionally nullable) type name (<c>var ok = MayX; if (!ok) …</c>). Every write counts: a plain or compound
+    /// (optionally nullable) type name (<c>var ok = MayX; if (!ok) …</c>). These writes count: a plain or compound
     /// assignment (<c>&amp;=</c>, <c>|=</c>, <c>^=</c>, <c>??=</c>) and an <c>out</c> / <c>ref</c> argument, so a local
-    /// written more than once is not followed at all. A local that is not followed (more than one write, a generic or
+    /// written more than once that way is not followed at all. Not counted: deconstruction targets (<c>(ok, _) = …</c>),
+    /// a parenthesized target, and pattern, <c>foreach</c> or <c>catch</c> variables of the same name in another scope;
+    /// through those the local is still followed. A local that is not followed (more than one write, a generic or
     /// tuple declaration, no declaration) loses its check: the handler is then held to its remaining checks or not
     /// compared.</summary>
     private static HashSet<string> WithLocals(string skeleton, HashSet<string> names)
