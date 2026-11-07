@@ -130,18 +130,13 @@ public class CapabilityTableConsistencyTests
     public void An_unknown_capability_needs_admin_on_a_page(string? id) =>
         Assert.Equal(AppRole.Admin, CapabilityCatalog.RoleOf(id!));
 
-    /// <summary>The one handler that still states its own role for a capability, held here by name until its role is
-    /// decided: the webhook test fires the webhook's real action and requires Operator, while the catalog requires
-    /// Admin for <c>compose.deploy</c>, <c>gitdeploy.deploy</c> and <c>webhook.save</c> (the gateway decides those at
-    /// Admin in any case). A new entry here is a level decision, not a test fix.</summary>
-    private static readonly string[] UndecidedPageRoles = ["WebhooksView.razor:TestWebhook"];
-
     /// <summary>
     /// No page or panel states its own role in front of a capability (INV-13): a role check in a handler that runs,
     /// refuses or guards a mutation (<c>Mutations.*</c>, <c>RefuseAsync</c>, <c>RequireAsync</c>) names no
     /// <c>AppRole.*</c> and no <c>_isAdmin</c> — it asks the catalog (<c>RoleOf(capabilityId)</c>), also where the
-    /// capability id is computed (Dashboard rows, cloud actions). A literal role is left only in front of a read
-    /// (a plain <c>Require</c> in a handler that changes nothing) and in markup, which only decides what is shown.
+    /// capability id is computed (Dashboard rows, cloud actions, the webhook test). A literal role is left only in
+    /// front of a read (a plain <c>Require</c> in a handler that changes nothing) and in markup, which only decides
+    /// what is shown.
     /// </summary>
     [Fact]
     public void No_page_states_its_own_role_in_front_of_a_capability()
@@ -152,9 +147,7 @@ public class CapabilityTableConsistencyTests
             .ToList();
         var found = files.SelectMany(f => PageRoleLiterals(Path.GetFileName(f), File.ReadAllText(f))).Distinct().ToList();
 
-        Assert.Empty(found.Except(UndecidedPageRoles));
-        // A stale exception is caught as well: once its role is decided, the entry goes.
-        Assert.Equal(UndecidedPageRoles.Order(), found.Intersect(UndecidedPageRoles).Order());
+        Assert.Empty(found);
 
         // The scan sees the handlers it is about: dozens run a capability, and they ask the catalog.
         var guarded = files.Sum(f => Methods(File.ReadAllText(f)).Count(m => RunsCapability.IsMatch(m.Body)));
@@ -164,9 +157,8 @@ public class CapabilityTableConsistencyTests
     }
 
     /// <summary>Every page's role-check helper takes a capability id and no role, and asks the catalog for the role.
-    /// Only the two pages whose handler needs a role the catalog cannot state statically keep a role-taking core
-    /// (<c>RequireRoleAsync</c>): Scheduled tasks for "Run now" (the task's own requirement, from
-    /// <c>SchedulerRequirementResolver</c>) and Webhooks for the undecided test above.</summary>
+    /// Only Scheduled tasks keeps a role-taking core (<c>RequireRoleAsync</c>), for "Run now": its role is the task's
+    /// own requirement, from <c>SchedulerRequirementResolver</c>, which the catalog cannot state statically.</summary>
     [Fact]
     public void Every_page_role_check_helper_asks_the_catalog()
     {
@@ -182,7 +174,7 @@ public class CapabilityTableConsistencyTests
                 helpers++;
                 if (m.Groups[1].Value == "RequireRoleAsync")
                 {
-                    Assert.Contains(name, new[] { "ScheduledTasksView.razor", "WebhooksView.razor" });
+                    Assert.Equal("ScheduledTasksView.razor", name);
                     continue;
                 }
                 Assert.Equal("string capabilityId, object arguments", m.Groups[2].Value);

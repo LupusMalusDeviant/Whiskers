@@ -232,14 +232,12 @@ else
         return true;
     }
 
-    /// <summary>The role check in front of a mutation, with the role from the capability catalog (INV-13).</summary>
-    private Task<bool> RequireAsync(string capabilityId, object arguments) =>
-        RequireRoleAsync(CapabilityCatalog.RoleOf(capabilityId), capabilityId, arguments);
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
-    private async Task<bool> RequireRoleAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
         if (Require(required)) return true;
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
@@ -361,12 +359,10 @@ else
 
     private async Task TestWebhook(Whiskers.Models.WebhookEntity wh)
     {
-        // Triggering runs restart/rebuild/deploy on the host — gate it behind Operator so a Viewer
-        // cannot fire host actions from the UI. A refusal is decided on the action the test would run (R1-22).
-        // INV-13 open decision: Operator is lower than the catalog role of compose.deploy, gitdeploy.deploy and
-        // webhook.save (Admin); the gateway still decides those at Admin. Held as the one named exception in
-        // CapabilityTableConsistencyTests until the role here is decided.
-        if (!await RequireRoleAsync(AppRole.Operator, TestCapabilityOf(wh),
+        // Triggering runs restart/rebuild/deploy on the host. The role is the catalog's for the action the test
+        // would run (INV-13): Operator for restart / rebuild, Admin for compose deploy, Git deploy and anything else;
+        // a refusal is decided on that action (R1-22).
+        if (!await RequireAsync(TestCapabilityOf(wh),
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId })) return;
         Snackbar.Add(L["WebhooksView_Snackbar_Testing", wh.Name].Value, Severity.Info);
         bool success;

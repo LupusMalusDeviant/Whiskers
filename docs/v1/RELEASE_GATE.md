@@ -37,7 +37,6 @@ Highest invariant ID: INV-62
 | Invariant | Status | Package | Why it is open | Reference |
 |---|---|---|---|---|
 | INV-01 | ⚠️ | R1-03 | webhook and system principals come with their packages; humans are keyed by the account handle, not the credential | — |
-| INV-13 | ⚠️ | R1-05 | pages take their role from the capability table, except the webhook test, which requires Operator where the table requires Admin (deploy, Git deploy, other actions); awaits a decision | — |
 | INV-17 | ⚠️ | WP10 | no handler-level test pins the Servers pause/resume page (U-22) and the firewall dialog (U-15) | — |
 | INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |
 | INV-19 | ⚠️ | WP2 | root-equivalent capabilities are Admin, not yet proven for every surface | — |
