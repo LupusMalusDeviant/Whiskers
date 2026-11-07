@@ -8,11 +8,14 @@ All notable changes to Whiskers are documented here. The format follows
 
 - **Pages take their role from the capability catalog (INV-13, R1-05).** Every role check in front of a capability
   asks `CapabilityCatalog.RoleOf` instead of naming a role; no page helper takes a role any more, the three reads a
-  page guards itself take a named role from `PageReads` (the migration-status read runs one fixed command), the account service re-checks create, reset and delete with
-  the catalog role, and a deny-by-default source scan forbids any other role there; the role → level rule has one spelling, `CapabilityCatalog.LevelFor`, which every surface calls, and a
-  required level that is not read, write or admin maps to Admin. No level changed. **Behaviour change:** testing a compose-deploy, Git-deploy or other non-container webhook from the
-  Webhooks page now needs Admin on the page as well (the gateway already required it); an Operator is refused there
-  with one Denied audit event, and restart / rebuild webhooks stay testable by an Operator.
+  page guards itself take a named role from `PageReads` (the migration-status read runs one fixed command), the
+  account service re-checks create, reset and delete with the catalog role, and a deny-by-default source scan forbids
+  any other role there. A test runs every capability for every role through the gateway. The role → level rule has
+  one spelling, `CapabilityCatalog.LevelFor`, which every surface calls, and a required level that is not read, write
+  or admin maps to Admin. No level changed. **Behaviour change:** testing a compose-deploy, Git-deploy or other
+  non-container webhook from the Webhooks page now needs Admin on the page as well (the gateway already required it);
+  an Operator is refused there with one Denied audit event, and restart / rebuild webhooks stay testable by an
+  Operator.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,

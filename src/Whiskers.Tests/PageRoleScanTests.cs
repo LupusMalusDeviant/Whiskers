@@ -11,7 +11,7 @@ namespace Whiskers.Tests;
 /// at its catalog level for the signed-in user on every surface. This scan keeps pages from stating a role of their own
 /// in front of a capability, in the forms the codebase uses or that are plausibly written by accident (also by copying
 /// an existing pattern); each form has a self-test below. Deliberately obfuscated code (reflection, a role built from
-/// arithmetic, a helper in another file) is out of scope.
+/// arithmetic, a runner reached through an unlisted type) is out of scope.
 /// <para>Structurally, no component member takes a role except Scheduled tasks' <c>RequireRoleAsync</c> (two pinned
 /// call sites) and two display helpers; role checks in front of a capability are <c>RequireAsync(capabilityId, …)</c>
 /// helpers that ask <see cref="CapabilityCatalog.RoleOf"/>, and the reads a page guards itself take their role from
@@ -19,25 +19,33 @@ namespace Whiskers.Tests;
 /// <list type="bullet">
 /// <item>each role literal, <c>HasRoleAsync(</c> and role comparison takes its role from the catalog (or the
 /// <c>required</c> a helper got from it, or <c>PageReads</c>), or is a listed line — keyed by file, member and line,
-/// occurring exactly once, in a member that runs no capability;</item>
-/// <item>"runs a capability" is any use of the runner <c>Mutations</c> (a call, passing it on, copying it), or a
-/// <c>Require…Async</c> / <c>RefuseAsync</c> call, and is transitive through members of the same file;</item>
-/// <item>gate fields (a field assigned from a role check, e.g. <c>_isAdmin</c>) are denied by default: outside their
-/// assignment and declaration they appear only on listed lines in members that run no capability, or — for a gate
-/// decided for a catalog id — as <c>if (!gate)</c> in a handler whose literal capability ids need no more;</item>
+/// occurring exactly once;</item>
+/// <item>the member graph has an edge for every call and every read of a property (expression-bodied or with
+/// accessors) within the file; "runs a capability" is a use of <c>Mutations</c> or a <c>Require…Async</c> /
+/// <c>RefuseAsync</c> call, closed over that graph;</item>
+/// <item>the runner is used only as <c>Mutations.&lt;member&gt;</c> or handed to a known helper of another file
+/// (<see cref="CrossFileHelpers"/>, whose ids count as run where it is called) — never copied or passed elsewhere;</item>
+/// <item>a member that runs a capability neither holds a listed line nor reaches, over the graph, a member holding one
+/// (except over the pinned <see cref="ReachListed"/> lines; data defaults in <see cref="ListedData"/> are not
+/// followed), a read role or a role-taking display helper;</item>
+/// <item>gate fields (a field or auto-property assigned from a role check, directly or through a local) are denied by
+/// default over the whole code region: outside their assignment and declaration they appear only on listed lines in
+/// members that run no capability, or — for a gate decided for a catalog id — as <c>if (!gate)</c> in a handler;</item>
 /// <item>a handler's literal catalog check (<c>RequireAsync("id")</c>, <c>RoleOf("id")</c> in a comparison or
-/// <c>HasRoleAsync</c>, a gate) is at least the strictest literal capability id it runs, also through same-file
-/// helpers;</item>
-/// <item>a capability id computed at run time is run only next to <c>RequireAsync(x, …)</c> / <c>RoleOf(x)</c> of that
-/// very expression, through a hand-off parameter every caller fills with a literal id, or on a listed line;</item>
-/// <item>read roles and role-taking display helpers are never reached from a member that runs a capability;</item>
+/// <c>HasRoleAsync</c>, such a gate) is at least the strictest literal capability id it runs, through same-file
+/// helpers and known helpers of other files;</item>
+/// <item>the capability argument of every runner call (<c>RunAsync</c> and each <c>IUiMutationRunner</c> extension
+/// with a <c>capabilityId</c>) is a literal id, follows <c>RequireAsync(x, …)</c> / <c>RoleOf(x)</c> of that very
+/// expression earlier in the same member, comes through a hand-off parameter every caller (markup included) fills
+/// with a literal id, or is listed in <see cref="ComputedRuns"/>;</item>
 /// <item>no role alias in the product, no <c>RoleFor</c>, <c>default(AppRole)</c> or enumeration of roles in a
 /// component outside "Run now", and the role ↔ level rule has one spelling in the whole product.</item>
 /// </list>
 /// Not checked here: whether a computed check (<c>RequireAsync(capability, …)</c> with an id chosen at run time) matches
-/// the literal ids the handler then runs (Dashboard rows, cloud actions) — the gateway holds those. Methods are found
-/// by their modifiers (or, in a .razor code block, at the top level without them); code the member parser does not see
-/// still falls under the line rules and the gate rule, which run over the whole code region.
+/// the literal ids the handler then runs (Dashboard rows, cloud actions), and whether an earlier check sits on the
+/// same branch as the run — the gateway holds those. Methods are found by their modifiers (or, in a .razor code
+/// block, at the top level without them); code the member parser does not see still falls under the line rules and
+/// the gate rule, which run over the whole code region.
 /// </summary>
 public class PageRoleScanTests
 {
@@ -87,12 +95,6 @@ public class PageRoleScanTests
         ("Servers.razor", "OnInitializedAsync", "if (add is \"onboard\" or \"classic\" && _role >= AppRole.Admin)"),
         ("EndpointChecks.razor", "DisplayTarget", "if (role < AppRole.Admin && target.IndexOf('?') is >= 0 and var query)"),
         ("EndpointChecks.razor", "DisplayDetail", "role >= AppRole.Admin ? detail ?? \"\" : EndpointCheckRunner.MaskInternalAddresses(detail);"),
-        // Data, not checks: form defaults, a parameter's fail-closed default, the RoleGuard default.
-        ("Settings.razor", "(field)", "private Whiskers.Models.AppRole _defaultRole = Whiskers.Models.AppRole.Viewer;"),
-        ("Settings.razor", "(field)", "private Whiskers.Models.AppRole _newRoleRole = Whiskers.Models.AppRole.Operator;"),
-        ("LocalAccountsPanel.razor", "(field)", "private AppRole _newRole = AppRole.Viewer;"),
-        ("ContainerDatabasePanel.razor", "(field)", "[Parameter] public AppRole Role { get; set; } = AppRole.Viewer;"),
-        ("RoleGuard.razor", "(field)", "[Parameter] public Whiskers.Models.AppRole RequiredRole { get; set; } = Whiskers.Models.AppRole.Operator;"),
         // The reads a page guards itself, one named role each (not capabilities).
         ("PageReads.cs", "MigrationStatus", "public static AppRole MigrationStatus => AppRole.Operator;"),
         ("PageReads.cs", "NginxConfigTest", "public static AppRole NginxConfigTest => AppRole.Admin;"),
@@ -102,6 +104,57 @@ public class PageRoleScanTests
         ("ScheduledTasksView.razor", "RunNowRole", ": AppRole.Admin;"),
         ("ScheduledTasksView.razor", "RunNowRole", "return AppRole.Admin;"),
     ];
+
+    /// <summary>Listed lines that are data, not checks — form defaults, a parameter's fail-closed default, the RoleGuard
+    /// default. Pinned like <see cref="Listed"/>, but reading their member is reading data (the panel's own checks compare
+    /// against its <c>Role</c>), so they are not followed through the member graph.</summary>
+    private static readonly (string File, string Member, string Line)[] ListedData =
+    [
+        ("Settings.razor", "(field)", "private Whiskers.Models.AppRole _defaultRole = Whiskers.Models.AppRole.Viewer;"),
+        ("Settings.razor", "(field)", "private Whiskers.Models.AppRole _newRoleRole = Whiskers.Models.AppRole.Operator;"),
+        ("LocalAccountsPanel.razor", "(field)", "private AppRole _newRole = AppRole.Viewer;"),
+        ("ContainerDatabasePanel.razor", "Role", "[Parameter] public AppRole Role { get; set; } = AppRole.Viewer;"),
+        ("RoleGuard.razor", "RequiredRole", "[Parameter] public Whiskers.Models.AppRole RequiredRole { get; set; } = Whiskers.Models.AppRole.Operator;"),
+    ];
+
+    /// <summary>The lines over which a member that runs a capability may reach a member holding a listed line.</summary>
+    private static readonly (string File, string Member, string Line)[] ReachListed =
+    [
+        // The container page loads the .env and database tabs when they are opened; the tab index (a listed display
+        // line) only decides that load. Its capabilities (the terminal) are checked by RequireAsync.
+        ("ContainerDetail.razor", "OnAfterRenderAsync", "if (_activeTab == EnvTabIndex && !_envLoaded)"),
+        ("ContainerDetail.razor", "OnAfterRenderAsync", "if (_activeTab == DbTabIndex && _container?.IsDatabase == true && _dbPanel is not null)"),
+        // "Run now" asks for the task's own requirement.
+        ("ScheduledTasksView.razor", "RunNow", "if (!await RequireRoleAsync(RunNowRole(task), \"scheduler.run\","),
+    ];
+
+    /// <summary>Helpers in another file that run capabilities with ids fixed inside them (beyond an id they are handed):
+    /// called from a page, those ids count as run there. <see cref="The_cross_file_helper_ids_are_the_ids_the_helpers_run"/>
+    /// reads them back from the helpers.</summary>
+    private static readonly (string Call, string File, string Method, string[] Ids)[] CrossFileHelpers =
+    [
+        (@"VaultBackedSettingsSave\s*\.\s*SaveAppSettingsAsync", "Services/Vault/VaultBackedSettingsSave.cs", "SaveAppSettingsAsync", ["config.save", "vault.secret_delete", "vault.secret_set"]),
+        (@"VaultBackedSettingsSave\s*\.\s*SaveAgentAsync", "Services/Vault/VaultBackedSettingsSave.cs", "SaveAgentAsync", ["config.agent", "vault.secret_delete", "vault.secret_set"]),
+        (@"Mutations\s*\.\s*SaveEnvAsync", "Services/Mutations/ComposeImpact.cs", "SaveEnvAsync", ["compose.deploy", "container.env_file_save"]),
+        (@"Mutations\s*\.\s*DeployAsync", "Services/Mutations/ComposeImpact.cs", "DeployAsync", ["compose.deploy"]),
+        (@"Mutations\s*\.\s*RunForEachAsync", "Services/Mutations/ComposeImpact.cs", "RunForEachAsync", []),
+        (@"Mutations\s*\.\s*GateFor", "Services/Mutations/ComposeImpact.cs", "GateFor", ["compose.deploy"]),
+    ];
+
+    /// <summary>Which argument of a runner call is the capability id: the interface's RunAsync, and every
+    /// <c>IUiMutationRunner</c> extension with a <c>string capabilityId</c> parameter, read from its source.</summary>
+    private static readonly Lazy<Dictionary<string, int>> RunnerIdPositions = new(() =>
+    {
+        var positions = new Dictionary<string, int> { ["RunAsync"] = 0 };
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(SourceRoot(), "src", "Whiskers", "Services"), "*.cs", SearchOption.AllDirectories))
+            foreach (Match m in Regex.Matches(StripComments(File.ReadAllText(file)),
+                         @"public\s+static\s+[^\n(]*?\s(?<name>\w+)\s*(?:<[^<>()]*>)?\(\s*this\s+IUiMutationRunner\s+\w+\s*(?:,(?<params>[^)]*))?\)"))
+            {
+                var at = Arguments(m.Groups["params"].Value).FindIndex(p => Regex.IsMatch(p, @"\bstring\s+capabilityId\b"));
+                if (at >= 0) positions[m.Groups["name"].Value] = at;
+            }
+        return positions;
+    });
 
     /// <summary>The role every page holds before it is loaded: Viewer, fail closed.</summary>
     private const string RoleDefault = "private AppRole _role = AppRole.Viewer;";
@@ -139,7 +192,7 @@ public class PageRoleScanTests
     {
         var files = ComponentFiles();
         var stats = new Stats();
-        var findings = files.SelectMany(f => Findings(Path.GetFileName(f), File.ReadAllText(f), Listed, stats)).ToList();
+        var findings = files.SelectMany(f => Findings(Path.GetFileName(f), File.ReadAllText(f), [.. Listed, .. ListedData], stats)).ToList();
         Assert.True(findings.Count == 0, "INV-13:\n" + string.Join("\n", findings));
 
         // The scan sees what it is about.
@@ -155,7 +208,7 @@ public class PageRoleScanTests
     public void Every_listed_line_exists_exactly_once_where_it_is_listed()
     {
         var lines = ComponentFiles().SelectMany(f => MemberLines(Path.GetFileName(f), File.ReadAllText(f))).ToList();
-        foreach (var entry in Listed.Concat(RequireRoleCalls))
+        foreach (var entry in Listed.Concat(ListedData).Concat(RequireRoleCalls).Concat(ReachListed))
             Assert.True(lines.Count(l => l == entry) == 1, $"{entry.File}:{entry.Member}: '{entry.Line}' is not there exactly once");
     }
 
@@ -208,6 +261,51 @@ public class PageRoleScanTests
         Assert.Single(Regex.Matches(code, @"(?<![\w.])AdminAsync\(AppRole\.Admin\)"));
         Assert.Single(Regex.Matches(code, @"session\.Role\s*[<>]"));
         Assert.Contains("if (session.Role < required) return (null, LocalAccountErrors.NotAuthorized);", code);
+    }
+
+    /// <summary>The ids the scan counts for a helper in another file are the literal ids that helper runs (its own body
+    /// and the members of its file it reaches, constants resolved), so the seed cannot drift from the code.</summary>
+    [Fact]
+    public void The_cross_file_helper_ids_are_the_ids_the_helpers_run()
+    {
+        foreach (var helper in CrossFileHelpers)
+        {
+            var path = Path.Combine(SourceRoot(), "src", "Whiskers", helper.File);
+            var region = CodeRegions(Path.GetFileName(path), File.ReadAllText(path))[0];
+            var members = Members(region, razor: false);
+            var constants = Regex.Matches(region.Code, @"\bconst\s+string\s+(\w+)\s*=\s*""([^""]*)""")
+                .ToDictionary(m => m.Groups[1].Value, m => m.Groups[2].Value);
+            // The UI overload where the helper has one per runner type.
+            var start = members.Where(m => m.Name == helper.Method)
+                .OrderByDescending(m => m.Parameters.Contains("IUiMutationRunner", StringComparison.Ordinal)).First();
+            var seen = new HashSet<Member>();
+            var queue = new Queue<Member>([start]);
+            var ids = new SortedSet<string>(StringComparer.Ordinal);
+            while (queue.TryDequeue(out var m))
+            {
+                if (!seen.Add(m)) continue;
+                foreach (Match id in CatalogIdLiteral.Matches(m.Body))
+                    if (Catalog.Find(id.Groups[1].Value) is not null) ids.Add(id.Groups[1].Value);
+                foreach (var (name, value) in constants)
+                    if (Catalog.Find(value) is not null && Regex.IsMatch(m.Body, $@"(?<![\w.]){Regex.Escape(name)}\b")) ids.Add(value);
+                foreach (var callee in members.Where(c => !c.Property && Regex.IsMatch(m.Body, $@"(?<![\w]){Regex.Escape(c.Name)}\s*(?:<[^<>()]*>)?\s*\(")
+                                                          && !c.Parameters.Contains("IAutomationMutationRunner", StringComparison.Ordinal)))
+                    queue.Enqueue(callee);
+            }
+            Assert.True(ids.SequenceEqual(helper.Ids.Order(StringComparer.Ordinal)),
+                $"{helper.Method}: runs {string.Join(", ", ids)}, the scan counts {string.Join(", ", helper.Ids)}");
+        }
+    }
+
+    /// <summary>The scan knows where the capability id sits in every runner call it holds to the computed-id rule.</summary>
+    [Fact]
+    public void The_runner_calls_name_their_capability_argument()
+    {
+        var positions = RunnerIdPositions.Value;
+        Assert.Equal(0, positions["RunAsync"]);
+        Assert.Equal(0, positions["RunForEachAsync"]);
+        Assert.Equal(3, positions["DeployAsync"]);
+        Assert.Equal(0, positions["GateFor"]);
     }
 
     /// <summary>No role alias anywhere in the product: a <c>using static</c> of <c>AppRole</c> (also global), a role
@@ -279,11 +377,21 @@ public class PageRoleScanTests
     [InlineData("a read-check helper in front of a capability", "    private bool MayRead()\n    {\n        var required = Whiskers.Components.PageReads.MigrationStatus;\n        return _role >= required;\n    }\n    private async Task Go()\n    {\n        if (!MayRead()) return;\n        await Exec(\"db.query\");\n    }\n    private async Task Exec(string capability)\n    {\n        await Mutations.RunAsync(capability, new { }, _ => Task.CompletedTask);\n    }\n")]
     [InlineData("a read check two calls deep", "    private bool Ok() => _role >= Whiskers.Components.PageReads.NginxConfigTest;\n    private bool Ok2() => Ok();\n    private async Task Go()\n    {\n        if (!Ok2()) return;\n        await Mutations.RunAsync(\"nginx.reload\", new { }, _ => Task.CompletedTask);\n    }\n")]
     [InlineData("a read role in front of a capability", "    private async Task Go()\n    {\n        if (_role < Whiskers.Components.PageReads.NginxConfigTest) return;\n        await Mutations.RunAsync(\"nginx.reload\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a read-check property in front of a capability", "    private bool MayTestConfig => _role >= Whiskers.Components.PageReads.NginxConfigTest;\n    private async Task Reload()\n    {\n        if (!MayTestConfig) return;\n        await Mutations.RunAsync(\"nginx.reload\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a read-check accessor property in front of a capability", "    private bool MayTest\n    {\n        get { return _role >= Whiskers.Components.PageReads.NginxConfigTest; }\n    }\n    private async Task Reload()\n    {\n        if (!MayTest) return;\n        await Mutations.RunAsync(\"nginx.reload\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a listed tab-index property read where a capability runs", "    private int EnvTabIndex => _role >= AppRole.Operator ? 5 : -1;\n    private async Task Save()\n    {\n        if (_tab != EnvTabIndex) return;\n        await Mutations.RunAsync(\"container.env_file_save\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("an auto-property gate for another capability", "    private bool MayRemove { get; set; }\n    protected override async Task OnInitializedAsync()\n    {\n        MayRemove = await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf(\"container.start\"));\n    }\n    private async Task Remove()\n    {\n        if (!MayRemove) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a gate filled through a local", "    private bool _may;\n    protected override async Task OnInitializedAsync()\n    {\n        var ok = await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf(\"container.start\"));\n        _may = ok;\n    }\n    private async Task Remove()\n    {\n        if (!_may) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a computed id through a runner extension", "    private async Task Go()\n    {\n        var action = Pick();\n        if (!await RequireAsync(\"container.start\", new { })) return;\n        await Mutations.RunForEachAsync(action, Containers, Sid, Fire);\n    }\n")]
+    [InlineData("the check after the run", "    private async Task Go()\n    {\n        var id = Pick();\n        await Mutations.RunAsync(id, new { }, _ => Task.CompletedTask);\n        if (!await RequireAsync(id, new { })) return;\n    }\n")]
+    [InlineData("the runner handed to an unknown helper", "    private async Task Save()\n    {\n        await Other.SaveAsync(Mutations, new { });\n    }\n")]
+    [InlineData("weaker check than a helper in another file runs", "    private async Task Save()\n    {\n        if (!await RequireAsync(\"container.start\", new { })) return;\n        await Whiskers.Services.Vault.VaultBackedSettingsSave.SaveAgentAsync(Mutations, Vault);\n    }\n")]
     public void The_scan_catches_a_way_around_the_catalog(string what, string code)
     {
         (string, string, string)[] listed =
         [
             ("P.razor", "Go", "if (_role < AppRole.Admin) return;"),
+            ("P.razor", "EnvTabIndex", "private int EnvTabIndex => _role >= AppRole.Operator ? 5 : -1;"),
             ("P.razor", "OnInitializedAsync", "_isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);"),
         ];
         Assert.True(Findings("P.razor", Page(code), listed, new Stats()).Count > 0, $"not caught: {what}");
@@ -304,6 +412,7 @@ public class PageRoleScanTests
             ("P.razor", "OnInitializedAsync", "_isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);"),
             ("P.razor", "OnInitializedAsync", "if (_isAdmin) await Load();"),
             ("P.razor", "Peek", "var shown = _isAdmin ? Load() : null;"),
+            ("P.razor", "EnvTabIndex", "private int EnvTabIndex => _role >= AppRole.Operator ? 5 : -1;"),
         ];
         const string code =
             "    private AppRole _role = AppRole.Viewer;\n" +
@@ -330,13 +439,23 @@ public class PageRoleScanTests
             "    private async Task TestConfig()\n    {\n        if (!MayTestConfig()) return;\n        var text = \"{ unbalanced\";\n    }\n" +
             "    private object? Peek()\n    {\n        var shown = _isAdmin ? Load() : null;\n        return shown;\n    }\n" +
             "    private Task Load() => Task.CompletedTask;\n" +
-            "    private string Note => \"it's // not a comment\";\n";
+            "    private string Note => \"it's // not a comment\";\n" +
+            "    private int EnvTabIndex => _role >= AppRole.Operator ? 5 : -1;\n" +
+            "    private async Task OpenTab()\n    {\n        if (_tab == EnvTabIndex) await Load();\n    }\n" +
+            "    private bool MayRestart { get; set; }\n" +
+            "    private async Task Deploy()\n    {\n        if (!await RequireAsync(\"compose.deploy\", new { })) return;\n" +
+            "        await Mutations.DeployAsync(Executor, Planner, Runner, \"compose.deploy\", new { }, Plan);\n    }\n" +
+            "    private async Task SaveAgentSettings()\n    {\n        if (!_may) return;\n" +
+            "        await Whiskers.Services.Vault.VaultBackedSettingsSave.SaveAgentAsync(Mutations, Vault);\n    }\n" +
+            "    private async Task Restart()\n    {\n        if (!MayRestart) return;\n" +
+            "        await Mutations.RunAsync(\"container.restart\", new { }, _ => Task.CompletedTask);\n    }\n" +
+            "    private async Task Decide()\n    {\n        var ok = await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf(\"container.restart\"));\n        MayRestart = ok;\n    }\n";
         var page = "@if (_role >= AppRole.Admin && _isAdmin) { <b>don't care: shown only</b> }\n" +
                    "<button @onclick=\"@(() => Exec(\"container.exec\"))\">x</button>\n" + Page(code);
         var stats = new Stats();
         var findings = Findings("P.razor", page, listed, stats);
         Assert.True(findings.Count == 0, string.Join("\n", findings));
-        Assert.True(stats.Compared >= 4, $"only {stats.Compared} handlers compared");
+        Assert.True(stats.Compared >= 7, $"only {stats.Compared} handlers compared");
     }
 
     /// <summary>The fixed rule has one spelling in the product (<see cref="CapabilityCatalog.LevelFor"/> and its
@@ -412,10 +531,17 @@ public class PageRoleScanTests
         @"\busing\s+static\s+[\w.]*\bAppRole\b|\bconst\s+(?:Whiskers\.Models\.)?AppRole\b|\bstatic\s+readonly\s+(?:Whiskers\.Models\.)?AppRole\b" +
         @"|\(\s*(?:Whiskers\.Models\.)?AppRole\s*\)\s*[\w(-]|\bAppRole\s+RoleOf\s*\(|\bEnum\.(?:Parse|TryParse)\s*<\s*(?:Whiskers\.Models\.)?AppRole\b");
     private static readonly Regex CatalogIdLiteral = new(@"""([a-z_]+\.[a-z_.]+)""");
-    /// <summary>A field assignment at the start of a statement whose value comes from a role check: a gate field.</summary>
-    private static readonly Regex GateAssignment = new(
-        @"(?<=(?:^|[;{})])[ \t\r\n]*)(?<name>\w+)\s*=(?![=>])(?<rhs>[^;]*?(?:HasRoleAsync|GetRoleAsync|RoleOf\(|\.Role\b|\b_?role\b)[^;]*);",
-        RegexOptions.Multiline);
+    /// <summary>What makes a value a role decision.</summary>
+    private const string RoleCheckPattern = @"HasRoleAsync|GetRoleAsync|RoleOf\(|\.Role\b|\b_?role\b";
+    private static readonly Regex RoleCheck = new(RoleCheckPattern);
+    /// <summary>An assignment at the start of a statement (a field assigned from a role check, or from a local holding
+    /// one, is a gate field).</summary>
+    private static readonly Regex Assignment = new(@"(?<=(?:^|[;{})])[ \t\r\n]*)(?<name>\w+)\s*=(?![=>])(?<rhs>[^;]*);", RegexOptions.Multiline);
+    /// <summary>A local declared from a role check.</summary>
+    private static readonly Regex RoleLocal = new(
+        @"(?<![\w.])(?:var|bool|AppRole|Whiskers\.Models\.AppRole)\s+(?<name>\w+)\s*=(?![=>])(?<rhs>[^;]*?(?:" + RoleCheckPattern + @")[^;]*);");
+    /// <summary>The body of an auto-property.</summary>
+    private static readonly Regex AutoProperty = new(@"^\s*get\s*;\s*(?:(?:private|protected|internal)\s+)?(?:set|init)\s*;\s*\}?\s*$");
     /// <summary>A field declaration (one or more names) at the top level of a code region.</summary>
     private static readonly Regex FieldDeclaration = new(
         @"(?m)^[ \t]*(?:\[[^\]\n]*\][ \t]*)*(?:(?:private|protected|public|internal|static|readonly|volatile)\s+)*(?!(?:return|await|throw|yield|else|new|case|goto|var)\b)[\w.<>\[\]?]+\s+(?<names>\w+(?:\s*,\s*\w+)*)\s*(?:=\s*(?:true|false|default|null|0)\s*)?;[ \t]*$");
@@ -426,7 +552,7 @@ public class PageRoleScanTests
         @"|(?:HasRoleAsync\(\s*|(?:<=|>=|<|(?<![=-])>)\s*\(?\s*)CapabilityCatalog\.RoleOf\(\s*""(?<id>[^""]+)""\s*\)" +
         @"|CapabilityCatalog\.RoleOf\(\s*""(?<id>[^""]+)""\s*\)\s*(?:<=|>=|<(?![<=])|>(?![>=]))");
 
-    private sealed record Member(string Name, string Parameters, int Start, int BodyStart, int End, string Body, bool Expression);
+    private sealed record Member(string Name, string Parameters, int Start, int BodyStart, int End, string Body, bool Expression, bool Property);
     private sealed record Region(string Code, string Skeleton);
     private sealed record Gate(string? Id, HashSet<int> Assignments);
 
@@ -459,16 +585,21 @@ public class PageRoleScanTests
             }
 
             // "Runs a capability", transitively within the file; and the literal capability ids each member runs.
+            // The member graph: a call, or a read of a property (expression-bodied or with accessors).
             var names = members.Select(m => m.Name).Distinct().ToList();
-            var calls = members.ToDictionary(m => m, m => names.Where(n => n != m.Name && Regex.IsMatch(m.Body, $@"(?<![\w.]){Regex.Escape(n)}\s*(?:<[^<>()]*>)?\s*\(")).ToList());
-            HashSet<string> Close(IEnumerable<string> seed)
+            var properties = members.Where(m => m.Property).Select(m => m.Name).ToHashSet();
+            Regex Reference(string n) => properties.Contains(n)
+                ? new Regex($@"(?<![\w.]){Regex.Escape(n)}\b")
+                : new Regex($@"(?<![\w.]){Regex.Escape(n)}\s*(?:<[^<>()]*>)?\s*\(");
+            var calls = members.ToDictionary(m => m, m => names.Where(n => n != m.Name && Reference(n).IsMatch(m.Body)).ToList());
+            HashSet<string> Close(IEnumerable<string> seed, Func<Member, string, bool>? edge = null)
             {
                 var set = seed.ToHashSet();
                 for (var changed = true; changed;)
                 {
                     changed = false;
                     foreach (var m in members)
-                        if (!set.Contains(m.Name) && calls[m].Any(set.Contains)) { set.Add(m.Name); changed = true; }
+                        if (!set.Contains(m.Name) && calls[m].Any(n => set.Contains(n) && (edge?.Invoke(m, n) ?? true))) { set.Add(m.Name); changed = true; }
                 }
                 return set;
             }
@@ -484,6 +615,8 @@ public class PageRoleScanTests
                     var body = CatalogRole.Replace(Regex.Replace(m.Body, @"\b(?:Require\w*Async|RefuseAsync)\(\s*""[^""]*""", "("), "");
                     foreach (Match id in CatalogIdLiteral.Matches(body))
                         if (Catalog.Find(id.Groups[1].Value) is not null) ids.Add(id.Groups[1].Value);
+                    foreach (var helper in CrossFileHelpers.Where(h => Regex.IsMatch(m.Body, $@"(?<![\w]){h.Call}\s*(?:<[^<>()]*>)?\s*\(")))
+                        ids.UnionWith(helper.Ids);
                     foreach (var callee in calls[m].Where(runs.Contains)) ids.UnionWith(RanIds(callee, seen));
                 }
                 return ranIds[name] = ids;
@@ -491,15 +624,30 @@ public class PageRoleScanTests
             stats.Handlers += members.Count(m => runs.Contains(m.Name));
 
             // Gate fields: fields assigned from a role check (the id it was decided for, null for a listed role).
+            // Fields and auto-properties; a local set from a role check passes its decision on to the field it fills.
             var fields = FieldDeclaration.Matches(region.Code).Where(f => Owner(f.Index) is null)
-                .SelectMany(f => f.Groups["names"].Value.Split(',').Select(n => n.Trim())).ToHashSet();
+                .SelectMany(f => f.Groups["names"].Value.Split(',').Select(n => n.Trim()))
+                .Concat(members.Where(m => m.Property && AutoProperty.IsMatch(m.Body)).Select(m => m.Name))
+                .ToHashSet();
+            static string? DecidedFor(string rhs) =>
+                CatalogRole.Match(rhs) is { Success: true } c && c.Groups["arg"].Value.StartsWith('"') && !RoleLiteral.IsMatch(rhs)
+                    ? c.Groups["arg"].Value.Trim('"') : null;
+            var roleLocals = members.ToDictionary(m => m, m => RoleLocal.Matches(m.Body)
+                .Where(l => l.Groups["name"].Value != "required")
+                .GroupBy(l => l.Groups["name"].Value)
+                .ToDictionary(g => g.Key, g => g.Select(l => DecidedFor(l.Groups["rhs"].Value)).Distinct().Count() == 1
+                    ? DecidedFor(g.First().Groups["rhs"].Value) : null));
             var gates = new Dictionary<string, Gate>();
-            foreach (Match g in GateAssignment.Matches(region.Code))
+            foreach (Match g in Assignment.Matches(region.Code))
             {
                 var name = g.Groups["name"].Value;
+                var rhs = g.Groups["rhs"].Value;
                 if (name is "_role" or "required" || !fields.Contains(name)) continue;
-                var id = CatalogRole.Match(g.Groups["rhs"].Value) is { Success: true } c && c.Groups["arg"].Value.StartsWith('"')
-                    && !RoleLiteral.IsMatch(g.Groups["rhs"].Value) ? c.Groups["arg"].Value.Trim('"') : null;
+                string? id;
+                if (RoleCheck.IsMatch(rhs)) id = DecidedFor(rhs);
+                else if (Owner(g.Index) is { } owner && roleLocals[owner].Keys.FirstOrDefault(l => Regex.IsMatch(rhs, $@"(?<![\w.]){Regex.Escape(l)}\b")) is { } local)
+                    id = Regex.IsMatch(rhs.Trim(), $@"^{Regex.Escape(local)}$") ? roleLocals[owner][local] : null;
+                else continue;
                 if (!gates.TryGetValue(name, out var gate)) gates[name] = gate = new Gate(id, []);
                 else if (gate.Id != id) gates[name] = gate = gate with { Id = null };
                 gate.Assignments.Add(g.Groups["name"].Index);
@@ -559,6 +707,7 @@ public class PageRoleScanTests
                     var owner = Owner(u.Index);
                     var line = LineAt(u.Index);
                     if (owner is null && FieldDeclaration.IsMatch(line)) continue;
+                    if (owner is not null && owner.Property && owner.Name == gate && AutoProperty.IsMatch(owner.Body)) continue;
                     stats.GateUses++;
                     var name = owner?.Name ?? "(field)";
                     if (owner is not null && runs.Contains(owner.Name))
@@ -580,20 +729,43 @@ public class PageRoleScanTests
 
             // A computed capability id runs only next to a catalog check of that very expression, through a hand-off
             // parameter every caller fills with a literal id, or listed.
-            foreach (Match r in Regex.Matches(region.Code, @"(?<![\w.])Mutations\s*\.\s*Run\w*Async\s*\(\s*(?<x>[^,]+?)\s*,"))
+            // The runner is used only as `Mutations.<member>` or handed to a known helper of another file — never copied
+            // or passed anywhere else, so every capability id it runs is seen here.
+            foreach (Match u in Regex.Matches(region.Code, @"(?<![\w.])Mutations\b"))
             {
-                var x = r.Groups["x"].Value.Trim();
+                if (Regex.IsMatch(region.Code[u.Index..], @"^Mutations\s*\.\s*\w")) continue;
+                var before = region.Code[Math.Max(0, u.Index - 200)..u.Index];
+                if (CrossFileHelpers.Any(h => !h.Call.StartsWith("Mutations", StringComparison.Ordinal)
+                                              && Regex.IsMatch(before, $@"(?<![\w]){h.Call}\s*\(\s*$")))
+                    continue;
+                findings.Add($"{file}:{NameAt(u.Index)}: '{LineAt(u.Index)}' — the runner is copied or handed to an unknown helper");
+            }
+
+            foreach (Match r in Regex.Matches(region.Code, @"(?<![\w.])Mutations\s*\.\s*(?<method>\w+)\s*(?:<[^<>()]*>)?\s*\("))
+            {
+                if (!RunnerIdPositions.Value.TryGetValue(r.Groups["method"].Value, out var at)) continue;
+                var open = r.Index + r.Length - 1;
+                var close = open;
+                for (var depth = 0; close < region.Skeleton.Length; close++)
+                {
+                    if (region.Skeleton[close] == '(') depth++;
+                    else if (region.Skeleton[close] == ')' && --depth == 0) break;
+                }
+                var runArgs = Arguments(region.Code[(open + 1)..Math.Min(close, region.Code.Length)]);
+                var x = at < runArgs.Count ? runArgs[at] : "(none)";
                 if (LiteralIds(x)) continue;
                 var owner = Owner(r.Index);
                 var name = owner?.Name ?? "(field)";
                 if (ComputedRuns.Contains((file, name, x))) continue;
-                if (owner is not null && Regex.IsMatch(owner.Body, $@"\bRequire\w*Async\(\s*{Regex.Escape(x)}\s*,|CapabilityCatalog\.RoleOf\(\s*{Regex.Escape(x)}\s*\)"))
+                // The check of that very expression, before the run, in the same member.
+                if (owner is not null && Regex.Match(owner.Body, $@"\bRequire\w*Async\(\s*{Regex.Escape(x)}\s*,|CapabilityCatalog\.RoleOf\(\s*{Regex.Escape(x)}\s*\)")
+                        is { Success: true } check && owner.BodyStart + check.Index < r.Index)
                     continue;
                 var position = owner is null ? -1 : Arguments(owner.Parameters).Select(p => Regex.Match(p, @"(\w+)\s*(?:=.*)?$", RegexOptions.Singleline).Groups[1].Value)
                     .ToList().IndexOf(x);
                 if (position < 0)
                 {
-                    findings.Add($"{file}:{name}: runs the computed id {x} without RequireAsync({x}, …) or RoleOf({x}) in the same member");
+                    findings.Add($"{file}:{name}: runs the computed id {x} without RequireAsync({x}, …) or RoleOf({x}) before it in the same member");
                     continue;
                 }
                 var handOffs = HandOffArguments(StripComments(source), owner!.Name, position).ToList();
@@ -603,16 +775,25 @@ public class PageRoleScanTests
                     findings.Add($"{file}:{name}: a caller hands it the computed id {arg}");
             }
 
+            // What a running member must not reach (calls and property reads, transitively): a read role, a role-taking
+            // display member, or a member holding a listed line — except over the pinned ReachListed lines.
             var readChecks = Close(members.Where(m => m.Body.Contains("PageReads.", StringComparison.Ordinal)).Select(m => m.Name));
             var roleTakers = Close(RoleParameters.Where(r => r.File == file && r.Member != "RequireRoleAsync").Select(r => r.Member));
+            var listedOwners = allowed.Where(a => a.Member != "(field)" && !ListedData.Contains((file, a.Member, a.Line))
+                                                  && lines.Contains((file, a.Member, a.Line)))
+                .Select(a => a.Member);
+            bool Unpinned(Member from, string to) => from.Body.Split('\n').Select(l => l.Trim())
+                .Any(l => Reference(to).IsMatch(l) && !ReachListed.Contains((file, from.Name, l)));
+            var reachListed = Close(listedOwners, Unpinned);
             foreach (var member in members)
             {
                 var running = runs.Contains(member.Name);
                 if (Regex.IsMatch(member.Parameters, @"\bAppRole\b") && !RoleParameters.Contains((file, member.Name)))
                     findings.Add($"{file}:{member.Name}: takes a role ({member.Parameters}) — check by capability id");
-                // A read role, or a role-taking display member, never reached from where a capability runs.
                 if (running && (readChecks.Contains(member.Name) || roleTakers.Contains(member.Name)))
                     findings.Add($"{file}:{member.Name}: reaches a read role or a role-taking display member and runs a capability");
+                if (running && reachListed.Contains(member.Name) && !allowed.Any(a => a.Member == member.Name))
+                    findings.Add($"{file}:{member.Name}: reaches a listed line ({string.Join(", ", calls[member].Where(reachListed.Contains))}) and runs a capability");
                 if (Regex.IsMatch(member.Name, @"^Require\w*Async$") && !Regex.IsMatch(member.Parameters, @"\bAppRole\b")
                     && CodeRun.IsMatch(member.Body)
                     && !member.Body.Contains("CapabilityCatalog.RoleOf(capabilityId)", StringComparison.Ordinal))
@@ -749,10 +930,10 @@ public class PageRoleScanTests
         return text.ToString();
     }
 
-    /// <summary>The members of a code region: methods (generic ones too), local functions and expression-bodied members
-    /// (properties included), with their brace on the declaration line or the next; the body runs to the matching brace
-    /// or to the end of the expression. A declaration needs a modifier, except at the top level of a .razor code block
-    /// (where no statement can stand). A property with accessors is not a member: its lines count as "(field)".</summary>
+    /// <summary>The members of a code region: methods (generic ones too), local functions and properties (expression-bodied
+    /// or with accessors, <see cref="Member.Property"/>), with their brace on the declaration line or the next; the body
+    /// runs to the matching brace or to the end of the expression. A declaration needs a modifier, except at the top level
+    /// of a .razor code block (where no statement can stand).</summary>
     private static List<Member> Members(Region region, bool razor)
     {
         var depthAt = new int[region.Skeleton.Length + 1];
@@ -763,7 +944,7 @@ public class PageRoleScanTests
                      @"(?m)^[ \t]*(?:\[[^\]\n]*\][ \t]*)*(?<mods>(?:(?:private|protected|public|internal|static|async|override|virtual|sealed|new|partial|unsafe)\s+)*)" +
                      @"(?<type>[\w.<>\[\]?,() ]+?)\s+(?<name>\w+)\s*(?:<[^<>()\n]*>)?\s*(?:\((?<params>(?:[^()]|\([^()]*\))*)\)\s*(?:where[^{=]*)?)?(?<open>\{|=>)"))
         {
-            if (!m.Groups["params"].Success && m.Groups["open"].Value == "{") continue;   // a property with accessors, a type
+            if (Regex.IsMatch(m.Groups["type"].Value.Trim(), @"(?:^|\s)(?:class|struct|record|interface|enum|namespace)$")) continue;   // a type
             if (m.Groups["mods"].Length == 0
                 && (!razor || depthAt[m.Index] != 0
                     || !Regex.IsMatch(m.Groups["type"].Value.Trim(), @"^[A-Za-z_][\w.]*(?:<[\w.<>, ?\[\]]*>)?(?:\[\])*\??$")
@@ -790,7 +971,8 @@ public class PageRoleScanTests
             }
             members.Add(new Member(m.Groups["name"].Value,
                 m.Groups["params"].Success ? region.Code.Substring(m.Groups["params"].Index, m.Groups["params"].Length) : "",
-                start, bodyStart, end, region.Code[bodyStart..Math.Min(end, region.Code.Length)], m.Groups["open"].Value == "=>"));
+                start, bodyStart, end, region.Code[bodyStart..Math.Min(end, region.Code.Length)], m.Groups["open"].Value == "=>",
+                !m.Groups["params"].Success));
         }
         return members;
     }

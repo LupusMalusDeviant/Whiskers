@@ -99,13 +99,30 @@ public class UiMutationRunnerTests
         Assert.Contains("requires 'write'", refused.Message);
     }
 
+    /// <summary>The fixed rule, written out here rather than taken from the product: the levels each role holds.</summary>
+    private static readonly Dictionary<AppRole, string[]> LevelsHeld = new()
+    {
+        [AppRole.Viewer] = [McpPermissionLevels.Read],
+        [AppRole.Operator] = [McpPermissionLevels.Read, McpPermissionLevels.Write],
+        [AppRole.Admin] = [McpPermissionLevels.Read, McpPermissionLevels.Write, McpPermissionLevels.Admin],
+    };
+
+    /// <summary>Capabilities the safe-default policy protects as the control plane: decided at their level first, then
+    /// held for a human approval.</summary>
+    private static readonly string[] ControlPlane =
+    [
+        "certificate.issue_mtls", "certificate.renew_mtls", "mtls.client_migrate", "mtls.client_renew",
+        "mtls.shared_client_retire", "selfbackup.restore",
+    ];
+
     public static IEnumerable<object[]> CapabilitiesAndRoles() =>
         new CapabilityCatalog().All.SelectMany(c => new[] { AppRole.Viewer, AppRole.Operator, AppRole.Admin }
             .Select(r => new object[] { c.Id, r }));
 
     /// <summary>INV-13, the authoritative enforcement: whatever a page checks, the gateway decides every capability at
-    /// its catalog level for the signed-in role — below it the action is refused before it runs, at or above it the
-    /// level is never the reason for a refusal.</summary>
+    /// its catalog level for the signed-in role — below it the action is refused for its level before it runs, at or
+    /// above it the action runs (a control-plane change then waits for a human approval instead). The expected levels
+    /// come from the table above, not from the product.</summary>
     [Theory]
     [MemberData(nameof(CapabilitiesAndRoles))]
     public async Task Every_capability_is_decided_at_its_catalog_level_for_every_role(string id, AppRole role)
@@ -121,9 +138,15 @@ public class UiMutationRunnerTests
         }
         catch (MutationRefusedException e) { refused = e; }
 
-        if (McpPermissionLevels.HasAccess(CapabilityCatalog.LevelFor(role), required))
-            Assert.True(refused is null || !refused.Message.Contains(" requires '", StringComparison.Ordinal),
-                $"{role} was refused {id} for its level: {refused?.Message}");
+        if (LevelsHeld[role].Contains(required) && ControlPlane.Contains(id))
+        {
+            // Past the level, the safe-default guardrail asks even an Admin to approve a control-plane change.
+            Assert.False(ran);
+            Assert.NotNull(refused);
+            Assert.StartsWith("Human approval required", refused.Message);
+        }
+        else if (LevelsHeld[role].Contains(required))
+            Assert.True(ran, $"{role} holds '{required}' but {id} did not run: {refused?.Message}");
         else
         {
             Assert.False(ran);
