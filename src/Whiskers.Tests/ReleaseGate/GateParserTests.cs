@@ -15,7 +15,7 @@ public class InvariantTableParserTests
         Assert.Equal(InvariantStatus.Violated, inv18.Status);
         Assert.Contains(inv18.Tests, t => t.Planned && t.Class is null);
         var inv21 = rows.Single(r => r.Id == "INV-21");
-        Assert.Contains(inv21.Tests, t => t is { Planned: true, Class: "ReadOnlyKillSwitchWireTests", Method: null });
+        Assert.Contains(inv21.Tests, t => t is { Planned: false, Class: "ReadOnlyKillSwitchWireTests", Method: null });
         Assert.Contains(inv21.Tests, t => t is { Planned: false, Class: "UiMutationRunnerTests", Method: "The_kill_switch_stops_a_human_too" });
     }
 
@@ -170,7 +170,7 @@ public class ReleaseGateDocumentTests
         var gate = ReleaseGateDocument.Parse(GateFiles.Require(GateFiles.ReleaseGateDoc));
         Assert.Empty(gate.Problems);
         Assert.Equal("INV-62", gate.Pin);
-        Assert.Equal(13, gate.Open.Count);
+        Assert.Equal(12, gate.Open.Count);
         Assert.Contains(gate.Open, o => o is { Id: "INV-18", Status: InvariantStatus.Violated, Package: "WP10" });
         Assert.Contains(gate.Open, o => o is { Id: "INV-58", Status: InvariantStatus.Partial });
         Assert.Empty(gate.Exceptions);

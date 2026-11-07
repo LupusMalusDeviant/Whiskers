@@ -6,6 +6,10 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Tests: the read-only kill switch is proven on the booted app (INV-21 ✅).** `ReadOnlyKillSwitchWireTests` calls
+  every mutating MCP tool over `/mcp` and every mutating capability through the UI runner with the kill switch on:
+  each is denied by `read-only-mode` and recorded as Denied, nothing runs, no terminal session opens; only an Admin in
+  the UI can switch it off, and that is audited. No behaviour change.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,

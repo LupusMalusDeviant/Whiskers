@@ -41,7 +41,6 @@ Highest invariant ID: INV-62
 | INV-17 | ⚠️ | WP10 | no handler-level test pins the Servers pause/resume page (U-22) and the firewall dialog (U-15) | — |
 | INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |
 | INV-19 | ⚠️ | WP2 | root-equivalent capabilities are Admin, not yet proven for every surface | — |
-| INV-21 | ⚠️ | WP6 | the kill-switch wire test `ReadOnlyKillSwitchWireTests` is still owed | — |
 | INV-25 | ⚠️ | R1-02 | with neither policy file present the restrictive default is created, so deleting both looks like a first start | — |
 | INV-45 | ⚠️ | WP5 | one audit event per attempt is not yet proven for every path | — |
 | INV-52 | ⚠️ | WP7 | SSH private keys and mTLS client keys are stored in plaintext; no in-place `VAULT_KEY` rotation | — |
