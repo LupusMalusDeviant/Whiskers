@@ -846,7 +846,9 @@ public sealed class WebhookReplayTests : IDisposable
 
         stop.Cancel();
 
-        // Told while the run still holds the only worker (review round 8, MINOR-1): no worker had to come back for it.
+        // Told at the stop; the queued run never starts. (The running action is handed over at the stop — an overdue
+        // slot is free — so its worker comes back; that every worker may stay busy is pinned by
+        // Every_test_waiting_at_a_stop_is_told_at_once, review round 9, NIT-1.)
         var (success, output) = await test.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False(success);
         Assert.Equal(WebhookService.Stopping, output);

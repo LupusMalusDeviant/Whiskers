@@ -5156,6 +5156,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Webhook_Test_Busy" xml:space="preserve">
     <value>Die Zustell-Warteschlange ist voll; bitte gleich noch einmal versuchen.</value>
   </data>
+  <data name="Webhook_Test_Stopping" xml:space="preserve">
+    <value>Whiskers wird beendet: Die Zustellung steht in der Warteschlange und wird beim nächsten Start abgeschlossen; ihre Aktion ist nicht gelaufen.</value>
+  </data>
+  <data name="Webhook_Test_StoppingNotAccepted" xml:space="preserve">
+    <value>Whiskers wird beendet: Die Testzustellung wurde womöglich nicht angenommen und ist nicht gelaufen; bitte nach dem Neustart erneut versuchen.</value>
+  </data>
   <data name="Webhook_Test_NotAccepted" xml:space="preserve">
     <value>Die Testzustellung wurde nicht angenommen ({0}).</value>
   </data>

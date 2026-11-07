@@ -5156,6 +5156,12 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Webhook_Test_Busy" xml:space="preserve">
     <value>The delivery queue is full; try again shortly.</value>
   </data>
+  <data name="Webhook_Test_Stopping" xml:space="preserve">
+    <value>Whiskers is stopping: the delivery is queued and is settled at the next start; its action did not run.</value>
+  </data>
+  <data name="Webhook_Test_StoppingNotAccepted" xml:space="preserve">
+    <value>Whiskers is stopping: the test delivery may not have been accepted and has not run; try again after the restart.</value>
+  </data>
   <data name="Webhook_Test_NotAccepted" xml:space="preserve">
     <value>The test delivery was not accepted ({0}).</value>
   </data>

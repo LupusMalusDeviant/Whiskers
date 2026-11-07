@@ -401,7 +401,7 @@ public class WebhookService : IWebhookService
                     // A page's Test waiting for it — or for any run still in the queue — is told now, not at its own
                     // timeout (review rounds 6 and 7).
                     if (_waiting.TryRemove(run.RunId, out var waiting))
-                        waiting.TrySetResult(new RunEnd(false, Stopping, null));
+                        waiting.TrySetResult(new RunEnd(false, Stopping, StoppingMessage));
                     TellWaitingAtStop();
                     break;
                 }
@@ -437,7 +437,7 @@ public class WebhookService : IWebhookService
         while (_queue.Reader.TryRead(out var left))
         {
             if (_waiting.TryRemove(left.RunId, out var waiting))
-                waiting.TrySetResult(new RunEnd(false, Stopping, null));
+                waiting.TrySetResult(new RunEnd(false, Stopping, StoppingMessage));
         }
     }
 
@@ -667,10 +667,14 @@ public class WebhookService : IWebhookService
     internal const string Stopping =
         "Whiskers is stopping: the delivery is queued and is settled at the next start; its action did not run.";
 
-    /// <summary>What a page's Test hears when it is triggered while Whiskers stops: nothing is recorded, nothing runs
-    /// (review round 8, NIT-1).</summary>
+    /// <summary><see cref="Stopping"/> in the person's language (review round 9, NIT-4).</summary>
+    private static readonly RunMessage StoppingMessage = new("Webhook_Test_Stopping", Stopping, []);
+
+    /// <summary>What a page's Test hears when it is answered busy while Whiskers stops: as a rule nothing is recorded
+    /// and nothing runs (review round 8, NIT-1); in the rare case that the acceptance landed but its answer was lost,
+    /// the next start records it as not run — hence "may not" (review round 9, NIT-2).</summary>
     internal const string StoppingNotAccepted =
-        "Whiskers is stopping: the test delivery was not accepted and nothing ran; try again after the restart.";
+        "Whiskers is stopping: the test delivery may not have been accepted and has not run; try again after the restart.";
 
     /// <summary>Raised with the run id when a give-up returns unsettled because Whiskers is stopping (its claim stays
     /// held) — a signal for tests, nothing acts on it.</summary>
@@ -1591,7 +1595,7 @@ public class WebhookService : IWebhookService
         var completion = new TaskCompletionSource<RunEnd>(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepted = await QueueAsync(webhook, key, request.SourceIp, completion, CancellationToken.None);
         if (accepted.Reply == WebhookReply.Busy && _stopping.IsCancellationRequested)
-            return (false, StoppingNotAccepted);
+            return (false, Text("Webhook_Test_StoppingNotAccepted", StoppingNotAccepted));
         if (accepted.Reply != WebhookReply.Accepted)
             return (false, accepted.Reply == WebhookReply.Busy
                 ? Text("Webhook_Test_Busy", "The delivery queue is full; try again shortly.")
