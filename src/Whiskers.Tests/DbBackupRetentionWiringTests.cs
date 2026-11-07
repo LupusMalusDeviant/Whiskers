@@ -85,7 +85,7 @@ public class DbBackupRetentionWiringTests
             DataPathOptions.Default, notify: new FakeNotifications());
         var entity = new ScheduledTaskEntity
         {
-            TaskId = "t-db", Name = "nightly dump", TaskType = ScheduledTaskType.DbBackup, TargetId = "shop-db",
+            TaskId = "t-db", Name = "nightly dump", TaskType = ScheduledTaskType.DbBackup, TargetId = container.Id, // the id, so only the resolved name can key the dump
             CreatedBy = "user:admin@example.com", Config = """{"database":"app","maxBackups":"1"}""",
         };
         return (executor, runner, (taskExecutor, entity));
