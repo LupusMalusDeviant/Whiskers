@@ -20,7 +20,9 @@ All notable changes to Whiskers are documented here. The format follows
   notification), instead of waiting for a redelivery — it needs a new delivery. Deliveries a stop or crash left queued
   or running are recorded and settled at the next start; a delivery's acceptance is now stored before it is answered,
   a repeat of one an earlier process accepted is answered busy until it is settled (it is never run), and a
-  reconciliation that cannot settle every delivery is retried until it does.
+  reconciliation that cannot settle every delivery is retried until it does. The audit event of a delivery that did
+  not run is keyed by its run id, so the worker, the start reconciliation and the audit outbox can never write it
+  twice; a delivery given up during a stop is no longer taken over by a repeat.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,

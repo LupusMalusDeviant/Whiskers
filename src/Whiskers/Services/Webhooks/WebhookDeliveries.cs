@@ -28,10 +28,12 @@ public sealed record WebhookAcceptance(WebhookReply Reply, string? RunId = null,
 /// The accepted deliveries of all webhooks (table <c>WebhookDeliveries</c>, R1-10, INV-42). A delivery key is
 /// recorded once: a concurrent or later delivery with the same key — also after a restart — finds the run of the
 /// first. Each row names the claim (<see cref="WebhookDeliveryEntity.Instance"/>) that queued it; a claim is live
-/// while this process holds its run. A queued row whose claim is not live never ran and nothing will run it — its
-/// insert answer was lost, or a stopping worker could not settle it — so the next delivery with its key
-/// takes it over. What an earlier process left queued or running is settled at the next start (the service's
-/// <c>ReconcileAsync</c>, INV-45). One that was running stays "interrupted" and does not run again.
+/// while this process holds its run. A row whose claim is not live is taken over by the next delivery with its key
+/// only if it was never accepted (left <see cref="Recording"/>) or this process accepted it with the
+/// answer lost (<see cref="Orphaned"/>). A run its worker gave up keeps its claim until it is settled or the process
+/// ends, so it is never taken over. What an earlier process left queued or running is settled at the next start (the
+/// service's <c>ReconcileAsync</c>, INV-45); until then a repeat is busy. One that was running with its intent on
+/// record stays "interrupted" and does not run again.
 /// </summary>
 internal sealed class WebhookDeliveryStore
 {
@@ -176,16 +178,16 @@ internal sealed class WebhookDeliveryStore
     }
 
     /// <summary>Settles a run its worker gave up, in one update fenced by the claim: queued or running under
-    /// <paramref name="claim"/> → failed, final. True when this call settled it; false when it is settled already or
-    /// is not this claim's (a later delivery took it over). INV-45 (review round 3).</summary>
-    public async Task<bool> SettleAsync(string runId, string claim, CancellationToken ct)
+    /// <paramref name="claim"/> → <paramref name="state"/> (failed, or refused for one the gateway refused), final. True
+    /// when this call settled it; false when it is settled already or is not this claim's. INV-45 (review round 3).</summary>
+    public async Task<bool> SettleAsync(string runId, string claim, CancellationToken ct, string state = Failed)
     {
         var now = _time.GetUtcNow().UtcDateTime;
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         return await db.WebhookDeliveries
             .Where(d => d.RunId == runId && (d.State == Queued || d.State == Running) && d.Instance == claim)
-            .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, Failed).SetProperty(d => d.FinishedAt, now), ct) == 1;
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, state).SetProperty(d => d.FinishedAt, now), ct) == 1;
     }
 
     /// <summary>The queued and running deliveries of another process (one that stopped, crashed or could not settle
@@ -232,7 +234,8 @@ internal sealed class WebhookDeliveryStore
     /// <summary>What a reconciliation's claim begins with: it never reads as one of this process's own delivery claims.</summary>
     internal const string ReconcilePrefix = "reconcile:";
 
-    /// <summary>The run's claim is no longer held: a queued row of it is taken over by the next delivery.</summary>
+    /// <summary>The run's claim is no longer held. Only a row never accepted, or accepted here with its answer lost, is
+    /// then taken over by the next delivery (<see cref="Orphaned"/>); a given-up run releases it only once settled.</summary>
     public void Release(string claim) => _live.TryRemove(claim, out _);
 
     /// <summary>The run is in the queue: from now on a repeat of its delivery is answered with it. A claim released

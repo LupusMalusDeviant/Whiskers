@@ -126,6 +126,11 @@ public sealed record MutationRequest(
     /// <summary>The operation this one runs inside (a mutation nested in another one's execution), set by the gateway
     /// from the enclosing <see cref="MutationScope"/> (R1-18); the journal and the audit keep the link.</summary>
     public string? ParentOperationId { get; init; }
+
+    /// <summary>INV-45 (review round 5): names the one event a refusal may be, when several paths can write it — the
+    /// event id is derived from it (<see cref="AuditLogMutationSink.KeyedEventId"/>), so a second write of the same
+    /// event, from any path or from the audit outbox, finds the first row and never adds one. Null: a fresh id.</summary>
+    public string? EventKey { get; init; }
 }
 
 public enum MutationStatus

@@ -28,6 +28,10 @@ public sealed record AutomationActor(string RunnerId, string DisplayName, string
     /// <summary>The operation id of the run (R1-18), when the item has one of its own — a webhook delivery's run id.
     /// Otherwise the gateway assigns one per call.</summary>
     public string? OperationId { get; init; }
+
+    /// <summary>The key of the one event a refusal of this run may be (<see cref="MutationRequest.EventKey"/>): a webhook
+    /// delivery that did not run is recorded under it from every path that can record it (review round 5).</summary>
+    public string? EventKey { get; init; }
 }
 
 /// <summary>The owner's authority right now. Re-read on every run (INV-04).</summary>
@@ -290,7 +294,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
                 $"{actor.DisplayName} (no owner)", McpPermissionLevels.Read)
             : PrincipalOf(actor, capability);
         return _gateway.RefuseAsync(new MutationRequest(capabilityId, principal, MutationSurface.Automation, target, args,
-            OperationId: actor.OperationId), reason, ct);
+            OperationId: actor.OperationId) { EventKey = actor.EventKey }, reason, ct);
     }
 
     public string? LostAuthority(AutomationActor actor, string capabilityId)

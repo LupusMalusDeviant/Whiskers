@@ -271,7 +271,7 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         string details) => new()
     {
         Timestamp = _time.GetUtcNow().UtcDateTime,
-        EventId = Guid.NewGuid().ToString("N"),
+        EventId = request.EventKey is { } key ? KeyedEventId(key) : Guid.NewGuid().ToString("N"),
         Actor = request.Principal.DisplayName,
         // "web" / "mcp" match the rows AuditLogService writes, so the audit page filters keep working.
         ActorType = request.Surface == MutationSurface.Ui ? "web" : request.Surface.ToString().ToLowerInvariant(),
@@ -298,6 +298,12 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         SessionId = request.SessionId,
         Arguments = RedactedArguments(request.Arguments),
     };
+
+    /// <summary>The event id of a keyed event (<see cref="MutationRequest.EventKey"/>): the key's SHA-256, as 32 hex
+    /// characters like a fresh id. The same key is always the same event: the unique event id makes a second insert
+    /// find the first row (<see cref="InsertOnceAsync"/>, the outbox drain).</summary>
+    public static string KeyedEventId(string key) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..32];
 
     private static string Details(string operationId, MutationRequest request, string phase, string? status,
         string? verification, string? reason, long? durationMs, ApprovalGateResult? approval = null) => Fit(budget => JsonSerializer.Serialize(new

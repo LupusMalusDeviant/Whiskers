@@ -379,7 +379,8 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > (claim-fenced, retried with back-off); what a stop or crash leaves unsettled is recorded and settled at the next
 > start — the acceptance is persisted before the answer, a row an earlier process accepted is never taken over (a
 > repeat is busy until it is settled), and a reconciliation pass that cannot settle every row is retried until one
-> completes.
+> completes. The "did not run" event is keyed by the run id (one row whichever path writes it, the outbox included),
+> and a give-up cut off by a stop keeps its claim, so it is never taken over.
 
 **Out of scope:** Hash-chain construction and all caller migrations.
 
