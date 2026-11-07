@@ -133,15 +133,15 @@ staged restore. The account's password is removed and its sessions end; set a ne
   in [configuration.md](../configuration.md).
 - The audit row (`auth.recovery_issued`, actor `cli (--recover-local-account)`) is written **before** anything changes;
   if it cannot be written, nothing changes (exit code 1).
-- While a code could not be redeemed — the guardrail policy is fail-closed (`guardrails.json` unreadable), or the kill
-  switch is on and an Admin blocked recovery codes — the command refuses (exit code `4`, nothing changed): issuing would
+- While a code could not be redeemed — the guardrail policy is fail-closed (`guardrails.json` unreadable, or the policy
+  could not be checked at all), or the kill switch is on and an Admin blocked recovery codes — the command refuses (exit code `4`, nothing changed): issuing would
   remove the password and leave a code nobody can use. Fix that first: repair or remove `guardrails.json` in the data
   directory, or turn off `ReadOnlyMode` or the `recovery_code` block in it, then restart Whiskers. `--force` issues the
   code anyway (contract 0009, amendment A1.2), and the audit row says so. The CLI reads `guardrails.json` on disk
   (read-only); the running instance picks up a repaired file only after its restart.
 - Exit codes: `0` code issued, `2` usage, `3` no local account with that email, `4` refused because the code could not
-  be redeemed now, `1` nothing changed (audit or store unavailable, the guardrail policy could not be checked, or the account changed at the same moment — run it
-  again).
+  be redeemed now, `1` nothing changed (audit or store unavailable, or the account changed at the same moment — run
+  it again).
 - Scripts wrapping both host CLIs: exit code `4` means "refused, the code could not be redeemed now" here, but
   "ambiguous" for `--confirm-identity-binding`.
 

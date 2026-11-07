@@ -310,16 +310,40 @@ public sealed class KillSwitchExemptionTests : IDisposable
         Assert.Equal(before, Snapshot(dir));   // no guardrails.json.unreadable-* copy, nothing saved
     }
 
-    [Fact]
-    public async Task E3_the_recovery_cli_refuses_when_the_guardrail_store_behind_it_is_not_the_real_one()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task E3_an_unchecked_guardrail_policy_counts_as_fail_closed_refused_without_force_issued_with_it(bool storeMissing)
     {
-        // Fail closed: a policy it cannot load itself is not taken as "allowed".
-        var services = new ServiceCollection();
-        services.AddSingleton<IGuardrailStore>(new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault()));
-        await using var provider = services.BuildServiceProvider();
-        var output = new StringWriter();
-        Assert.Equal(1, await LocalAccountRecoveryCli.RunAsync(provider, [LocalOps], output));
-        Assert.Contains("could not be checked", output.ToString());
+        // No guardrail store, or one that is not the real store: the policy cannot be checked, so it counts as
+        // fail-closed (D4) — never as "allowed" — and, as for the fail-closed policy, --force still issues (A1.2).
+        await using var world = await LocalAccountWorld.CreateAsync(policy: Killed());
+        await world.AddUserAsync(LocalOps, AppRole.Admin);
+        var services = new GuardrailsReplaced(world.Services,
+            storeMissing ? null : new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault()));
+
+        var refused = new StringWriter();
+        Assert.Equal(4, await LocalAccountRecoveryCli.RunAsync(services, [LocalOps], refused));
+        Assert.Contains("could not be checked", refused.ToString());
+        Assert.Contains("repair or remove guardrails.json", refused.ToString());
+        Assert.Contains(LocalAccountRecoveryCli.ForceFlag, refused.ToString());
+        Assert.True(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
+        Assert.Empty(world.Audit.Rows.Where(r => r.Action == LocalAccountRecoveryCli.IssuedAction));
+
+        var forced = new StringWriter();
+        Assert.Equal(0, await LocalAccountRecoveryCli.RunAsync(services, [LocalOps, LocalAccountRecoveryCli.ForceFlag], forced));
+        Assert.Contains("Warning (--force)", forced.ToString());
+        Assert.False(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
+        var issued = Assert.Single(world.Audit.Rows, r => r.Action == LocalAccountRecoveryCli.IssuedAction);
+        Assert.Contains("forced (--force)", issued.Details);
+        Assert.Contains("policy unchecked", issued.Details);
+    }
+
+    /// <summary>The world's services with <see cref="IGuardrailStore"/> replaced (<c>null</c>: none registered).</summary>
+    private sealed class GuardrailsReplaced(IServiceProvider inner, IGuardrailStore? store) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IGuardrailStore) ? store : inner.GetService(serviceType);
     }
 
     [Fact]

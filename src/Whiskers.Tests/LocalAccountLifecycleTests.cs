@@ -1077,6 +1077,8 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         // instance's). The recovery CLI resolves IGuardrailStore from Services and, as in production, needs the real
         // store and reads guardrails.json itself (A1.2): a real store the test hands in, or one over a file holding
         // the policy, not yet loaded.
+        // Not for a fail-closed case: a FixedGuardrailStore holding GuardrailPolicy.FailClosed() would be written as a valid
+        // kill-switch policy (LoadError null). Hand in a real store over an unreadable file instead.
         guardrails ??= new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         services.AddSingleton<IGuardrailStore>(guardrails as GuardrailStore
                                                ?? await PolicyFileAsync(paths.GuardrailsJson, guardrails.Current));

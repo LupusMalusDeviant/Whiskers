@@ -67,22 +67,26 @@ public static class LocalAccountRecoveryCli
         // The CLI reads guardrails.json itself, read-only (no save, no unreadable copy), unless the store was already
         // loaded (a booted host): it does not depend on the start-up order of Program.cs. In the app the interface is
         // the mutation scope guard's proxy, so the store behind it is taken (as AddInitializable does). Anything else —
-        // not the real store, or a store still not loaded — is refused: an unchecked policy would read as "allowed".
+        // no store, not the real store, or a store still not loaded — counts as blocked, like the fail-closed policy
+        // (D4): an unchecked policy is never read as "allowed", and --force still issues (E3 is not refused outright).
         var guardrails = await LoadGuardrailsAsync(services, ct);
+        string? forcedPast = null;
+        string? why = null;
         if (guardrails is null)
         {
-            await output.WriteLineAsync("The guardrail policy (guardrails.json) could not be checked, so it is not known whether a");
-            await output.WriteLineAsync("recovery code could be redeemed. Nothing was changed.");
-            return 1;
+            forcedPast = "an unchecked guardrail policy (policy unchecked)";
+            why = "the guardrail policy (guardrails.json) could not be checked, so it counts as fail-closed, which blocks recovery codes";
         }
-        string? forcedPast = null;
-        if (guardrails.Current.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.RecoveryCode))
+        else if (guardrails.Current.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.RecoveryCode))
         {
             var failClosed = guardrails.LoadError is not null;
             forcedPast = failClosed ? "fail-closed guardrails" : "the recovery_code block under the kill switch";
-            var why = failClosed
+            why = failClosed
                 ? "the guardrail configuration (guardrails.json) cannot be read, so the fail-closed policy is enforced, and it blocks recovery codes"
                 : "the read-only kill switch is on and an Admin blocked recovery codes while it is on";
+        }
+        if (why is not null)
+        {
             if (!force)
             {
                 await output.WriteLineAsync($"Refused: a recovery code issued now could not be redeemed, because {why}.");
@@ -152,12 +156,12 @@ public static class LocalAccountRecoveryCli
         }
     }
 
-    /// <summary>The loaded guardrail store, read from disk now if nothing loaded it; <c>null</c> when it is not the real
-    /// store or could not be loaded (fail closed).</summary>
+    /// <summary>The loaded guardrail store, read from disk now if nothing loaded it; <c>null</c> when there is none, it is not
+    /// the real store or it could not be loaded (the caller treats that as fail-closed).</summary>
     private static async Task<Whiskers.Services.Guardrails.GuardrailStore?> LoadGuardrailsAsync(IServiceProvider services,
         CancellationToken ct)
     {
-        var resolved = services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
+        var resolved = services.GetService<Whiskers.Services.Guardrails.IGuardrailStore>();
         var inner = resolved is Whiskers.Services.Mutations.IMutationScopeProxy guarded ? guarded.Inner : resolved;
         if (inner is not Whiskers.Services.Guardrails.GuardrailStore store) return null;
         if (!store.IsLoaded)
