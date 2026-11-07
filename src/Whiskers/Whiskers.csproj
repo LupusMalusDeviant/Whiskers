@@ -28,7 +28,7 @@
     <PackageReference Include="Markdig" Version="1.6.0" />
     <PackageReference Include="MudBlazor" Version="9.12.0" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageReference Include="System.Reactive" Version="6.1.0" />
+    <PackageReference Include="System.Reactive" Version="7.0.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
