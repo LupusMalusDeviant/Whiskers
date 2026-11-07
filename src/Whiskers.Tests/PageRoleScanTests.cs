@@ -23,8 +23,12 @@ namespace Whiskers.Tests;
 /// <item>the member graph has an edge for every call and every read of a property (expression-bodied or with
 /// accessors) within the file; "runs a capability" is a use of <c>Mutations</c> or a <c>Require…Async</c> /
 /// <c>RefuseAsync</c> call, closed over that graph;</item>
-/// <item>the runner is used only as <c>Mutations.&lt;member&gt;</c> or handed to a known helper of another file
-/// (<see cref="CrossFileHelpers"/>, whose ids count as run where it is called) — never copied or passed elsewhere;</item>
+/// <item>the runner is used only as <c>Mutations.&lt;member&gt;</c> with a member the scan knows (the runner's own
+/// methods and every <c>this IUiMutationRunner</c> extension in the product, each held by its capability argument or
+/// by ids seeded in <see cref="CrossFileHelpers"/>), or handed to a known helper of another file — never copied,
+/// passed elsewhere or handed on in markup; no component declares a runner other than the injected one;</item>
+/// <item>every <c>Require…Async</c> helper asks <c>CapabilityCatalog.RoleOf(capabilityId)</c> (Scheduled tasks'
+/// <c>RequireRoleAsync</c> aside), so a name alone never counts as a check;</item>
 /// <item>a member that runs a capability neither holds a listed line nor reaches, over the graph, a member holding one
 /// (except over the pinned <see cref="ReachListed"/> lines; data defaults in <see cref="ListedData"/> are not
 /// followed), a read role or a role-taking display helper;</item>
@@ -32,8 +36,9 @@ namespace Whiskers.Tests;
 /// default over the whole code region: outside their assignment and declaration they appear only on listed lines in
 /// members that run no capability, or — for a gate decided for a catalog id — as <c>if (!gate)</c> in a handler;</item>
 /// <item>a handler's literal catalog check (<c>RequireAsync("id")</c>, <c>RoleOf("id")</c> in a comparison or
-/// <c>HasRoleAsync</c>, such a gate) is at least the strictest literal capability id it runs, through same-file
-/// helpers and known helpers of other files;</item>
+/// <c>HasRoleAsync</c>, such a gate — in its own body or in members it reaches that run nothing) is at least the
+/// strictest literal capability id it runs, through same-file helpers and known helpers of other files;</item>
+/// <item>a role-typed <c>[Parameter]</c> is a listed line;</item>
 /// <item>the capability argument of every runner call (<c>RunAsync</c> and each <c>IUiMutationRunner</c> extension
 /// with a <c>capabilityId</c>) is a literal id, follows <c>RequireAsync(x, …)</c> / <c>RoleOf(x)</c> of that very
 /// expression earlier in the same member, comes through a hand-off parameter every caller (markup included) fills
@@ -42,8 +47,9 @@ namespace Whiskers.Tests;
 /// component outside "Run now", and the role ↔ level rule has one spelling in the whole product.</item>
 /// </list>
 /// Not checked here: whether a computed check (<c>RequireAsync(capability, …)</c> with an id chosen at run time) matches
-/// the literal ids the handler then runs (Dashboard rows, cloud actions), and whether an earlier check sits on the
-/// same branch as the run — the gateway holds those. Methods are found by their modifiers (or, in a .razor code
+/// the literal ids the handler then runs (Dashboard rows, cloud actions), whether an earlier check sits on the
+/// same branch as the run, and what a statement governed by a <see cref="ReachListed"/> line does beyond that line
+/// — the gateway holds those. Methods are found by their modifiers (or, in a .razor code
 /// block, at the top level without them); code the member parser does not see still falls under the line rules and
 /// the gate rule, which run over the whole code region.
 /// </summary>
@@ -139,22 +145,40 @@ public class PageRoleScanTests
         (@"Mutations\s*\.\s*DeployAsync", "Services/Mutations/ComposeImpact.cs", "DeployAsync", ["compose.deploy"]),
         (@"Mutations\s*\.\s*RunForEachAsync", "Services/Mutations/ComposeImpact.cs", "RunForEachAsync", []),
         (@"Mutations\s*\.\s*GateFor", "Services/Mutations/ComposeImpact.cs", "GateFor", ["compose.deploy"]),
+        (@"Mutations\s*\.\s*RunMountsAsync", "Services/Mutations/ComposeImpact.cs", "RunMountsAsync", ["compose.deploy"]),
+        (@"Mutations\s*\.\s*RunExposuresAsync", "Services/Mutations/ComposeImpact.cs", "RunExposuresAsync", ["compose.deploy"]),
     ];
 
-    /// <summary>Which argument of a runner call is the capability id: the interface's RunAsync, and every
-    /// <c>IUiMutationRunner</c> extension with a <c>string capabilityId</c> parameter, read from its source.</summary>
-    private static readonly Lazy<Dictionary<string, int>> RunnerIdPositions = new(() =>
+    /// <summary>The runner's own methods; with the extensions below, every method a page may call on <c>Mutations</c>.</summary>
+    private static readonly string[] RunnerMethods = ["RunAsync", "RefuseAsync"];
+
+    /// <summary>Balanced generic arguments (<c>&lt;List&lt;T&gt;&gt;</c>).</summary>
+    private const string Generic = @"(?:<(?>[^<>()]+|<(?<g>)|>(?<-g>))*(?(g)(?!))>)?";
+
+    /// <summary>Every extension of <c>IUiMutationRunner</c> in the product (any visibility), with the position of its
+    /// <c>string capabilityId</c> parameter (-1 without one), read from source; and whether a C# extension block for the
+    /// runner exists (which this reading would not see).</summary>
+    private static readonly Lazy<(List<(string Name, string File, int Position)> Methods, bool ExtensionBlock)> RunnerExtensions = new(() =>
     {
-        var positions = new Dictionary<string, int> { ["RunAsync"] = 0 };
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(SourceRoot(), "src", "Whiskers", "Services"), "*.cs", SearchOption.AllDirectories))
-            foreach (Match m in Regex.Matches(StripComments(File.ReadAllText(file)),
-                         @"public\s+static\s+[^\n(]*?\s(?<name>\w+)\s*(?:<[^<>()]*>)?\(\s*this\s+IUiMutationRunner\s+\w+\s*(?:,(?<params>[^)]*))?\)"))
-            {
-                var at = Arguments(m.Groups["params"].Value).FindIndex(p => Regex.IsMatch(p, @"\bstring\s+capabilityId\b"));
-                if (at >= 0) positions[m.Groups["name"].Value] = at;
-            }
-        return positions;
+        var methods = new List<(string, string, int)>();
+        var block = false;
+        foreach (var file in ProductFiles(Path.Combine(SourceRoot(), "src", "Whiskers")).Where(f => f.EndsWith(".cs", StringComparison.Ordinal)))
+        {
+            var code = StripComments(File.ReadAllText(file));
+            block |= Regex.IsMatch(code, @"\bextension\s*(?:<[^>]*>)?\s*\(\s*(?:[\w.]+\.)?IUiMutationRunner\b");
+            foreach (Match m in Regex.Matches(code,
+                         @"\bstatic\s+[^\n(;{}]*?\s(?<name>\w+)\s*" + Generic + @"\(\s*this\s+(?:[\w.]+\.)?IUiMutationRunner\s+\w+\s*(?:,(?<params>[^)]*))?\)"))
+                methods.Add((m.Groups["name"].Value, Path.GetFileName(file),
+                    Arguments(m.Groups["params"].Value).FindIndex(p => Regex.IsMatch(p, @"\bstring\s+capabilityId\b"))));
+        }
+        return (methods, block);
     });
+
+    /// <summary>Which argument of a runner call is the capability id: the runner's RunAsync, and every extension with a
+    /// <c>string capabilityId</c> parameter.</summary>
+    private static readonly Lazy<Dictionary<string, int>> RunnerIdPositions = new(() =>
+        new[] { ("RunAsync", 0) }.Concat(RunnerExtensions.Value.Methods.Where(m => m.Position >= 0).Select(m => (m.Name, m.Position)))
+            .ToDictionary(p => p.Item1, p => p.Item2));
 
     /// <summary>The role every page holds before it is loaded: Viewer, fail closed.</summary>
     private const string RoleDefault = "private AppRole _role = AppRole.Viewer;";
@@ -192,7 +216,7 @@ public class PageRoleScanTests
     {
         var files = ComponentFiles();
         var stats = new Stats();
-        var findings = files.SelectMany(f => Findings(Path.GetFileName(f), File.ReadAllText(f), [.. Listed, .. ListedData], stats)).ToList();
+        var findings = files.SelectMany(f => Findings(Path.GetFileName(f), File.ReadAllText(f), Listed, stats)).ToList();
         Assert.True(findings.Count == 0, "INV-13:\n" + string.Join("\n", findings));
 
         // The scan sees what it is about.
@@ -224,6 +248,16 @@ public class PageRoleScanTests
             .ToList();
         Assert.True(injections.Count > 30, $"only {injections.Count} injections of IUiMutationRunner found");
         Assert.All(injections, i => Assert.True(i.Name == "Mutations", $"{i.File} injects the runner as {i.Name}"));
+
+        // In a component the runner is only ever the injected `Mutations`: no field, property, [Parameter],
+        // [CascadingParameter] or method parameter of the runner's type, so no component runs a capability unseen.
+        var declarations = ComponentFiles()
+            .SelectMany(f => Regex.Matches(Regex.Replace(StripComments(File.ReadAllText(f)), @"@\*.*?\*@", " ", RegexOptions.Singleline),
+                    @"(?<inject>@inject\s+|\[Inject\][^\n]*?)?(?<![\w.])(?:[\w.]+\.)?IUiMutationRunner\b\s*\??\s*(?<name>\w+)?")
+                .Where(m => !(m.Groups["inject"].Success && m.Groups["name"].Value == "Mutations"))
+                .Select(m => $"{Path.GetFileName(f)}: {m.Value.Trim()}"))
+            .ToList();
+        Assert.True(declarations.Count == 0, string.Join("\n", declarations));
     }
 
     /// <summary>The database panel's role parameter, which its own checks compare against, is the page role of the
@@ -268,6 +302,11 @@ public class PageRoleScanTests
     [Fact]
     public void The_cross_file_helper_ids_are_the_ids_the_helpers_run()
     {
+        // Constants anywhere in the product whose value is a catalog id.
+        var foreignIds = ProductFiles(Path.Combine(SourceRoot(), "src", "Whiskers"))
+            .SelectMany(f => Regex.Matches(StripComments(File.ReadAllText(f)), @"\bconst\s+string\s+(\w+)\s*=\s*""([^""]*)""")
+                .Where(c => Catalog.Find(c.Groups[2].Value) is not null).Select(c => c.Groups[1].Value))
+            .ToHashSet();
         foreach (var helper in CrossFileHelpers)
         {
             var path = Path.Combine(SourceRoot(), "src", "Whiskers", helper.File);
@@ -291,6 +330,24 @@ public class PageRoleScanTests
                 foreach (var callee in members.Where(c => !c.Property && Regex.IsMatch(m.Body, $@"(?<![\w]){Regex.Escape(c.Name)}\s*(?:<[^<>()]*>)?\s*\(")
                                                           && !c.Parameters.Contains("IAutomationMutationRunner", StringComparison.Ordinal)))
                     queue.Enqueue(callee);
+
+                // What this reading cannot follow fails instead of drifting: an id from another class's constant, or
+                // the runner handed on to (or called through) a method outside this file.
+                foreach (Match c in Regex.Matches(m.Body, @"(?<![\w])(?:\w+\.)+(?<name>\w+)\b(?!\s*\()"))
+                    Assert.False(foreignIds.Contains(c.Groups["name"].Value) && !constants.ContainsKey(c.Groups["name"].Value),
+                        $"{helper.Method}: takes a capability id from another class ({c.Value})");
+                foreach (var runner in Regex.Matches(start.Parameters + "," + m.Parameters, @"\b(?:[\w.]+\.)?I(?:Ui)?MutationRunner\s+(\w+)").Select(r => r.Groups[1].Value).Distinct())
+                {
+                    foreach (Match call in Regex.Matches(m.Body, $@"(?<![\w.]){Regex.Escape(runner)}\s*\.\s*(?<name>\w+)\s*{Generic}\s*\("))
+                        Assert.True(RunnerMethods.Contains(call.Groups["name"].Value) || members.Any(c => c.Name == call.Groups["name"].Value),
+                            $"{helper.Method}: calls {runner}.{call.Groups["name"].Value}, which is not in {helper.File}");
+                    foreach (Match use in Regex.Matches(m.Body, $@"(?<![\w.]){Regex.Escape(runner)}\b(?!\s*\.)"))
+                    {
+                        var callee = EnclosingCall(m.Body, use.Index);
+                        Assert.True(callee is "ThrowIfNull" || (callee is not null && members.Any(c => c.Name == callee)),
+                            $"{helper.Method}: hands {runner} to {callee ?? "something"} outside {helper.File}");
+                    }
+                }
             }
             Assert.True(ids.SequenceEqual(helper.Ids.Order(StringComparer.Ordinal)),
                 $"{helper.Method}: runs {string.Join(", ", ids)}, the scan counts {string.Join(", ", helper.Ids)}");
@@ -301,6 +358,17 @@ public class PageRoleScanTests
     [Fact]
     public void The_runner_calls_name_their_capability_argument()
     {
+        var (methods, extensionBlock) = RunnerExtensions.Value;
+        Assert.False(extensionBlock, "an extension block for IUiMutationRunner: the scan reads only `this IUiMutationRunner` methods");
+        Assert.True(methods.Count >= 6, $"only {methods.Count} runner extensions found");
+        // Names are unique (one position per name) and none hides one of the runner's own methods.
+        Assert.True(methods.Select(m => m.Name).Distinct().Count() == methods.Count, string.Join(", ", methods.Select(m => $"{m.File}:{m.Name}")));
+        Assert.DoesNotContain(methods, m => RunnerMethods.Contains(m.Name));
+        // Every extension is held: by its capability argument, or by the ids seeded for it.
+        foreach (var m in methods)
+            Assert.True(m.Position >= 0 || CrossFileHelpers.Any(h => h.Method == m.Name && h.Call.StartsWith("Mutations", StringComparison.Ordinal)),
+                $"{m.File}:{m.Name} takes no capabilityId and has no seeded ids");
+
         var positions = RunnerIdPositions.Value;
         Assert.Equal(0, positions["RunAsync"]);
         Assert.Equal(0, positions["RunForEachAsync"]);
@@ -386,6 +454,12 @@ public class PageRoleScanTests
     [InlineData("the check after the run", "    private async Task Go()\n    {\n        var id = Pick();\n        await Mutations.RunAsync(id, new { }, _ => Task.CompletedTask);\n        if (!await RequireAsync(id, new { })) return;\n    }\n")]
     [InlineData("the runner handed to an unknown helper", "    private async Task Save()\n    {\n        await Other.SaveAsync(Mutations, new { });\n    }\n")]
     [InlineData("weaker check than a helper in another file runs", "    private async Task Save()\n    {\n        if (!await RequireAsync(\"container.start\", new { })) return;\n        await Whiskers.Services.Vault.VaultBackedSettingsSave.SaveAgentAsync(Mutations, Vault);\n    }\n")]
+    [InlineData("a Require…Async that only confirms", "    private async Task<bool> RequireConfirmationAsync(string capability, object args)\n    {\n        return await Dialog.ShowAsync(capability);\n    }\n    private async Task Remove()\n    {\n        if (!await RequireConfirmationAsync(\"container.remove\", new { })) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a weaker check delegated to a property", "    private bool MayRemove => _role >= CapabilityCatalog.RoleOf(\"container.start\");\n    private async Task Remove()\n    {\n        if (!MayRemove) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("an unknown runner method", "    private async Task Go()\n    {\n        await Mutations.RunSomethingAsync(Pick(), new { });\n    }\n")]
+    [InlineData("a computed id behind nested generics", "    private async Task Go()\n    {\n        var action = Pick();\n        var r = await Mutations.RunAsync<List<string>>(action, new { }, _ => Task.FromResult(new List<string>()));\n    }\n")]
+    [InlineData("a gate from a capitalised Role", "    private AppRole Role { get; set; }\n    private bool _may;\n    protected override async Task OnInitializedAsync()\n    {\n        _may = Role >= Whiskers.Components.PageReads.MigrationStatus;\n    }\n    private async Task Go()\n    {\n        if (!_may) return;\n        await Mutations.RunAsync(\"container.exec\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("an unlisted role parameter", "    [Parameter] public AppRole Needed { get; set; }\n")]
     public void The_scan_catches_a_way_around_the_catalog(string what, string code)
     {
         (string, string, string)[] listed =
@@ -400,6 +474,7 @@ public class PageRoleScanTests
     [Theory]
     [InlineData("using static", "@using static Whiskers.Models.AppRole\n<p>x</p>\n@code {\n}\n")]
     [InlineData("handler in markup", "<button @onclick=\"@(async () => await Mutations.RunAsync(\"x.y\", new { }, _ => Task.CompletedTask))\">x</button>\n@code {\n}\n")]
+    [InlineData("the runner handed to a child component", "<Child Runner=\"@Mutations\" />\n@code {\n}\n")]
     [InlineData("computed id handed to a helper from markup", "<button @onclick=\"@(() => Exec(_picked))\">x</button>\n@code {\n    private async Task Exec(string capability)\n    {\n        await Mutations.RunAsync(capability, new { }, _ => Task.CompletedTask);\n    }\n}\n")]
     public void The_scan_catches_a_way_around_the_catalog_outside_the_code_block(string what, string page) =>
         Assert.True(Findings("P.razor", page, [], new Stats()).Count > 0, $"not caught: {what}");
@@ -449,11 +524,20 @@ public class PageRoleScanTests
             "        await Whiskers.Services.Vault.VaultBackedSettingsSave.SaveAgentAsync(Mutations, Vault);\n    }\n" +
             "    private async Task Restart()\n    {\n        if (!MayRestart) return;\n" +
             "        await Mutations.RunAsync(\"container.restart\", new { }, _ => Task.CompletedTask);\n    }\n" +
-            "    private async Task Decide()\n    {\n        var ok = await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf(\"container.restart\"));\n        MayRestart = ok;\n    }\n";
+            "    private async Task Decide()\n    {\n        var ok = await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf(\"container.restart\"));\n        MayRestart = ok;\n    }\n" +
+            "    [Parameter] public AppRole Role { get; set; } = AppRole.Viewer;\n" +
+            "    private AppRole PanelRole => Role;\n" +
+            "    private async Task Migrate()\n    {\n        if (PanelRole < CapabilityCatalog.RoleOf(\"container.exec\")) return;\n" +
+            "        await Mutations.RunAsync(\"container.exec\", new { }, _ => Task.CompletedTask);\n    }\n" +
+            "    private bool MayWipe => _role >= CapabilityCatalog.RoleOf(\"container.remove\");\n" +
+            "    private async Task Wipe2()\n    {\n        if (!MayWipe) return;\n" +
+            "        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n";
         var page = "@if (_role >= AppRole.Admin && _isAdmin) { <b>don't care: shown only</b> }\n" +
                    "<button @onclick=\"@(() => Exec(\"container.exec\"))\">x</button>\n" + Page(code);
         var stats = new Stats();
-        var findings = Findings("P.razor", page, listed, stats);
+        // A data line (a parameter's fail-closed default) is pinned but not followed: a handler may read the role.
+        (string, string, string)[] data = [("P.razor", "Role", "[Parameter] public AppRole Role { get; set; } = AppRole.Viewer;")];
+        var findings = Findings("P.razor", page, listed, stats, data);
         Assert.True(findings.Count == 0, string.Join("\n", findings));
         Assert.True(stats.Compared >= 7, $"only {stats.Compared} handlers compared");
     }
@@ -518,7 +602,7 @@ public class PageRoleScanTests
     /// that refuses on record.</summary>
     private static readonly Regex CodeRun = new(@"(?<![\w.])Mutations\b|\bRefuseAsync\(|\bRequire\w*Async\(");
     /// <summary>Running a capability in markup (where <c>@inject … Mutations</c> itself is not a use).</summary>
-    private static readonly Regex MarkupRun = new(@"(?<![\w.])Mutations\.\w+|\bRefuseAsync\(|\bRequire\w*Async\(");
+    private static readonly Regex MarkupRun = new(@"(?<![\w.])Mutations\b|\bRefuseAsync\(|\bRequire\w*Async\(");
     private static readonly Regex RoleLiteral = new(@"(?:Whiskers\.Models\.)?\bAppRole\.(?:Admin|Operator|Viewer)\b");
     private static readonly Regex HasRole = new(@"\bHasRoleAsync\s*\(\s*(?<arg>[^;]*)");
     private static readonly Regex RoleComparison = new(
@@ -532,7 +616,7 @@ public class PageRoleScanTests
         @"|\(\s*(?:Whiskers\.Models\.)?AppRole\s*\)\s*[\w(-]|\bAppRole\s+RoleOf\s*\(|\bEnum\.(?:Parse|TryParse)\s*<\s*(?:Whiskers\.Models\.)?AppRole\b");
     private static readonly Regex CatalogIdLiteral = new(@"""([a-z_]+\.[a-z_.]+)""");
     /// <summary>What makes a value a role decision.</summary>
-    private const string RoleCheckPattern = @"HasRoleAsync|GetRoleAsync|RoleOf\(|\.Role\b|\b_?role\b";
+    private const string RoleCheckPattern = @"HasRoleAsync|GetRoleAsync|RoleOf\(|\.Role\b|\b_?[rR]ole\b(?!\s*=[^=])";   // not `Role = …` in an initializer
     private static readonly Regex RoleCheck = new(RoleCheckPattern);
     /// <summary>An assignment at the start of a statement (a field assigned from a role check, or from a local holding
     /// one, is a gate field).</summary>
@@ -557,8 +641,11 @@ public class PageRoleScanTests
     private sealed record Gate(string? Id, HashSet<int> Assignments);
 
     /// <summary>Every rule's findings for one component file: "file:member: what".</summary>
-    private static List<string> Findings(string file, string source, (string File, string Member, string Line)[] listed, Stats stats)
+    private static List<string> Findings(string file, string source, (string File, string Member, string Line)[] listed, Stats stats,
+        (string File, string Member, string Line)[]? data = null)
     {
+        data ??= ListedData;
+        listed = [.. listed, .. data];
         var findings = new List<string>();
         var allowed = listed.Where(l => l.File == file).Select(l => (l.Member, l.Line)).ToList();
         var lines = MemberLines(file, source).ToList();
@@ -568,9 +655,17 @@ public class PageRoleScanTests
 
         foreach (Match m in Alias.Matches(StripComments(source)))
             findings.Add($"{file}: '{m.Value.Trim()}' — a role alias or page-defined RoleOf");
-        var markup = file.EndsWith(".razor", StringComparison.Ordinal) ? MarkupOnly(StripComments(source)) : "";
+        // Markup decides only what is shown: no runner call and no runner handed on (`Runner="@Mutations"`); the
+        // `@inject … Mutations` line is the one place the name may stand.
+        var markup = file.EndsWith(".razor", StringComparison.Ordinal)
+            ? Regex.Replace(MarkupOnly(StripComments(source)), @"@\*.*?\*@", c => Regex.Replace(c.Value, @"[^\n]", " "), RegexOptions.Singleline)
+            : "";
         foreach (Match m in MarkupRun.Matches(markup))
-            findings.Add($"{file}: '{m.Value}' in markup — handlers that run a capability belong in @code");
+        {
+            var lineStart = markup.LastIndexOf('\n', Math.Max(0, m.Index - 1)) + 1;
+            if (Regex.IsMatch(markup[lineStart..m.Index], @"^\s*@inject\s+(?:[\w.]+\.)?IUiMutationRunner\s+$")) continue;
+            findings.Add($"{file}: '{m.Value}' in markup — handlers that run a capability belong in @code, and the runner is not handed on");
+        }
 
         foreach (var region in CodeRegions(file, source))
         {
@@ -667,6 +762,9 @@ public class PageRoleScanTests
 
                 if (ForbiddenRoleSource.IsMatch(line) && !isListed)
                     findings.Add($"{where}: '{line}' — RoleFor, default(AppRole) or an enumeration of roles");
+                // A role handed in from markup is a role the page did not take from the catalog: listed, each one.
+                if (Regex.IsMatch(line, @"\[\s*(?:Parameter|CascadingParameter)\b[^\]]*\].*?\b(?:Whiskers\.Models\.)?AppRole\??\s+\w+\s*\{") && !isListed)
+                    findings.Add($"{where}: '{line}' — a role parameter that is not listed");
                 if (Regex.IsMatch(line, @"(?<![\w.])RequireRoleAsync\s*\(") && !line.Contains("Task<bool> RequireRoleAsync(", StringComparison.Ordinal)
                     && !RequireRoleCalls.Contains((file, owner?.Name ?? "(field)", line)))
                     findings.Add($"{where}: '{line}' — RequireRoleAsync outside its two call sites");
@@ -741,9 +839,15 @@ public class PageRoleScanTests
                 findings.Add($"{file}:{NameAt(u.Index)}: '{LineAt(u.Index)}' — the runner is copied or handed to an unknown helper");
             }
 
-            foreach (Match r in Regex.Matches(region.Code, @"(?<![\w.])Mutations\s*\.\s*(?<method>\w+)\s*(?:<[^<>()]*>)?\s*\("))
+            foreach (Match r in Regex.Matches(region.Code, @"(?<![\w.])Mutations\s*\.\s*(?<method>\w+)\s*" + Generic + @"\s*\("))
             {
-                if (!RunnerIdPositions.Value.TryGetValue(r.Groups["method"].Value, out var at)) continue;
+                var method = r.Groups["method"].Value;
+                if (!RunnerMethods.Contains(method) && !RunnerExtensions.Value.Methods.Any(e => e.Name == method))
+                {
+                    findings.Add($"{file}:{NameAt(r.Index)}: Mutations.{method} — not a runner method the scan knows");
+                    continue;
+                }
+                if (!RunnerIdPositions.Value.TryGetValue(method, out var at)) continue;   // RefuseAsync, or ids seeded
                 var open = r.Index + r.Length - 1;
                 var close = open;
                 for (var depth = 0; close < region.Skeleton.Length; close++)
@@ -779,11 +883,16 @@ public class PageRoleScanTests
             // display member, or a member holding a listed line — except over the pinned ReachListed lines.
             var readChecks = Close(members.Where(m => m.Body.Contains("PageReads.", StringComparison.Ordinal)).Select(m => m.Name));
             var roleTakers = Close(RoleParameters.Where(r => r.File == file && r.Member != "RequireRoleAsync").Select(r => r.Member));
-            var listedOwners = allowed.Where(a => a.Member != "(field)" && !ListedData.Contains((file, a.Member, a.Line))
+            var listedOwners = allowed.Where(a => a.Member != "(field)" && !data.Contains((file, a.Member, a.Line))
                                                   && lines.Contains((file, a.Member, a.Line)))
                 .Select(a => a.Member);
-            bool Unpinned(Member from, string to) => from.Body.Split('\n').Select(l => l.Trim())
-                .Any(l => Reference(to).IsMatch(l) && !ReachListed.Contains((file, from.Name, l)));
+            // An edge is pinned only if every reference (also one split over lines) starts on a ReachListed line.
+            bool Unpinned(Member from, string to) => Reference(to).Matches(from.Body).Any(r =>
+            {
+                var start = from.Body.LastIndexOf('\n', Math.Max(0, r.Index - 1)) + 1;
+                var stop = from.Body.IndexOf('\n', r.Index);
+                return !ReachListed.Contains((file, from.Name, from.Body[start..(stop < 0 ? from.Body.Length : stop)].Trim()));
+            });
             var reachListed = Close(listedOwners, Unpinned);
             foreach (var member in members)
             {
@@ -794,20 +903,34 @@ public class PageRoleScanTests
                     findings.Add($"{file}:{member.Name}: reaches a read role or a role-taking display member and runs a capability");
                 if (running && reachListed.Contains(member.Name) && !allowed.Any(a => a.Member == member.Name))
                     findings.Add($"{file}:{member.Name}: reaches a listed line ({string.Join(", ", calls[member].Where(reachListed.Contains))}) and runs a capability");
-                if (Regex.IsMatch(member.Name, @"^Require\w*Async$") && !Regex.IsMatch(member.Parameters, @"\bAppRole\b")
-                    && CodeRun.IsMatch(member.Body)
+                // Every Require…Async counts as a catalog check by its name, so each one must be one.
+                if (Regex.IsMatch(member.Name, @"^Require\w*Async$") && !RoleParameters.Contains((file, member.Name))
                     && !member.Body.Contains("CapabilityCatalog.RoleOf(capabilityId)", StringComparison.Ordinal))
-                    findings.Add($"{file}:{member.Name}: a role-check helper that does not ask CapabilityCatalog.RoleOf(capabilityId)");
+                    findings.Add($"{file}:{member.Name}: a Require…Async helper that does not ask CapabilityCatalog.RoleOf(capabilityId)");
 
                 // The literal check covers what the handler runs (literal ids, through same-file helpers too).
                 if (!running) continue;
-                var guards = LiteralCheck.Matches(member.Body).Select(g => g.Groups["id"].Value)
-                    .Concat(Regex.IsMatch(member.Body, @"(?:<=|>=|<|(?<![=-])>)\s*required\b|\brequired\s*(?:<=|>=|<|>)")
-                        ? Regex.Matches(member.Body, @"\brequired\s*=(?!=)\s*CapabilityCatalog\.RoleOf\(\s*""([^""]+)""\s*\)").Select(g => g.Groups[1].Value)
-                        : [])
-                    .Concat(gates.Where(g => g.Value.Id is not null
-                            && Regex.IsMatch(member.Body, $@"\bif\s*\(\s*!?\s*{Regex.Escape(g.Key)}\s*\)"))
-                        .Select(g => g.Value.Id!))
+                // Its own body, and the members it reaches that run nothing themselves (a check delegated to a
+                // `May…` property or method of the same file).
+                var checkedIn = new List<Member> { member };
+                var pending = new Queue<string>(calls[member].Where(n => !runs.Contains(n)));
+                var visited = new HashSet<string>();
+                while (pending.TryDequeue(out var next))
+                {
+                    if (!visited.Add(next)) continue;
+                    foreach (var m in members.Where(mb => mb.Name == next))
+                    {
+                        checkedIn.Add(m);
+                        foreach (var n in calls[m].Where(n => !runs.Contains(n))) pending.Enqueue(n);
+                    }
+                }
+                var guards = checkedIn.SelectMany(c => LiteralCheck.Matches(c.Body).Select(g => g.Groups["id"].Value)
+                        .Concat(Regex.IsMatch(c.Body, @"(?:<=|>=|<|(?<![=-])>)\s*required\b|\brequired\s*(?:<=|>=|<|>)")
+                            ? Regex.Matches(c.Body, @"\brequired\s*=(?!=)\s*CapabilityCatalog\.RoleOf\(\s*""([^""]+)""\s*\)").Select(g => g.Groups[1].Value)
+                            : [])
+                        .Concat(gates.Where(g => g.Value.Id is not null
+                                && Regex.IsMatch(c.Body, $@"\bif\s*\(\s*!?\s*{Regex.Escape(g.Key)}\s*\)"))
+                            .Select(g => g.Value.Id!)))
                     .Where(id => Catalog.Find(id) is not null)
                     .ToList();
                 var ran = RanIds(member.Name, []);
@@ -820,6 +943,19 @@ public class PageRoleScanTests
             }
         }
         return findings;
+    }
+
+    /// <summary>The name of the call whose argument list holds <paramref name="index"/> (null outside any call).</summary>
+    private static string? EnclosingCall(string code, int index)
+    {
+        var skeleton = Skeleton(code);
+        for (int i = index - 1, depth = 0; i >= 0; i--)
+        {
+            if (skeleton[i] == ')') depth++;
+            else if (skeleton[i] == '(' && depth-- == 0)
+                return Regex.Match(skeleton[..i], @"(\w+)\s*(?:<[^<>()]*>)?\s*$") is { Success: true } m ? m.Groups[1].Value : null;
+        }
+        return null;
     }
 
     /// <summary>A capability expression made of literal ids only: <c>"a.b"</c> or <c>cond ? "a.b" : "c.d"</c>.</summary>
