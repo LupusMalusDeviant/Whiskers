@@ -90,7 +90,13 @@ public class ReadOnlyKillSwitchWireTests
             .Select(t => (Tool: t, Capability: catalog.FindByMcpTool(t.Name)))
             .Where(t => t.Capability is { } c && McpPermissionLevels.Normalize(c.RequiredLevel) != McpPermissionLevels.Read)
             .ToList();
-        Assert.True(mutating.Count >= 30, $"only {mutating.Count} mutating tools are served — the sweep would prove little");
+        // Exactly the catalog's mutating MCP tools are served and swept: a module dropping out of the host, or a tool
+        // missing from the catalog, shows here instead of quietly shrinking the sweep.
+        var catalogued = catalog.All
+            .Where(c => c.McpTool is not null && McpPermissionLevels.Normalize(c.RequiredLevel) != McpPermissionLevels.Read)
+            .Select(c => c.McpTool!).Order(StringComparer.Ordinal).ToList();
+        Assert.Equal(catalogued, mutating.Select(m => m.Tool.Name).Order(StringComparer.Ordinal).ToList());
+        Assert.Equal(47, mutating.Count);
 
         var id = 1000;
         foreach (var (tool, _) in mutating)
@@ -115,6 +121,7 @@ public class ReadOnlyKillSwitchWireTests
                 && decisions[d].MatchedRules.Contains("read-only-mode"), $"{tool.Name}: not denied by the kill switch ({r.Details})"));
         }
         Assert.All(rows, r => Assert.Equal(nameof(MutationStatus.Denied), r.Outcome));
+        AssertFallbacksOnlyForUnknownTargets(host);
     }
 
     [Fact]
@@ -193,6 +200,7 @@ public class ReadOnlyKillSwitchWireTests
             Assert.All(own, r => Assert.True(r.DecisionId is { } d && decisions[d].Verdict == nameof(MutationVerdict.Deny)
                 && decisions[d].MatchedRules.Contains("read-only-mode"), $"{capability.Id}: not denied by the kill switch ({r.Details})"));
         }
+        AssertFallbacksOnlyForUnknownTargets(host);
     }
 
     [Fact]
@@ -202,7 +210,15 @@ public class ReadOnlyKillSwitchWireTests
         var guardrails = host.Factory.Services.GetRequiredService<IGuardrailStore>();
         var gateway = host.Factory.Services.GetRequiredService<IMutationGateway>();
 
-        // An Operator in the UI: refused, the switch stays on.
+        // Over the wire there is no way to it at all: no served tool performs a guardrail write.
+        var catalog = host.Factory.Services.GetRequiredService<ICapabilityCatalog>();
+        var session0 = await McpServedSurfaceTests.InitializeAsync(host.Client);
+        Assert.DoesNotContain(await ListToolsAsync(host.Client, session0),
+            t => catalog.FindByMcpTool(t.Name)?.Id is "guardrails.kill_switch_off" or "guardrails.save");
+        Assert.Null(catalog.Find(GuardrailMutationPolicy.KillSwitchOff)!.McpTool);
+
+        // An Operator in the UI: refused, the switch stays on. This refusal is the Admin level of the capability
+        // (decided before the policy step), not the kill switch: only an Admin may switch it off at all.
         host.User.Role = AppRole.Operator;
         await using (var scope = host.Factory.Services.CreateAsyncScope())
         {
@@ -212,7 +228,8 @@ public class ReadOnlyKillSwitchWireTests
         }
         Assert.True(guardrails.Current.ReadOnlyMode);
 
-        // An Admin API key is no person in the UI: the kill switch holds against it.
+        // An Admin API key is no person in the UI: handed to the host's gateway directly (no tool exists for it, see
+        // above), the kill switch holds against it.
         var key = new MutationPrincipal(MutationPrincipalKind.ApiKey, PrincipalIds.Key(host.ApiKeyId), "ops",
             McpPermissionLevels.Admin, CredentialId: host.ApiKeyId);
         var viaKey = await gateway.ExecuteAsync(new MutationRequest("guardrails.kill_switch_off", key, MutationSurface.Mcp,
@@ -254,6 +271,109 @@ public class ReadOnlyKillSwitchWireTests
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task An_agent_tool_call_is_denied_by_the_kill_switch_and_nothing_runs()
+    {
+        await using var host = await KillSwitchHost.StartAsync();
+        var invoker = host.Factory.Services.GetRequiredService<Whiskers.Services.Agent.IAgentToolInvoker>();
+        var guardrails = host.Factory.Services.GetRequiredService<IGuardrailStore>();
+
+        // The session's copy of the policy predates the kill switch; the gateway decides on the live store.
+        var stale = guardrails.Current.Clone();
+        stale.ReadOnlyMode = false;
+        var context = new AgentContext("agent-killswitch",
+            new AgentPrincipal(AgentPrincipalKind.WebUser, AdminEmail, McpPermissionLevels.Admin, null, UserEmail: AdminEmail),
+            AgentOrigin.WebUi, stale);
+
+        var result = await invoker.InvokeAsync(
+            new AgentToolCall("call-1", "restart_container", """{"containerId":"web-1"}"""), context);
+
+        Assert.True(result.IsError);
+        Assert.Equal(GuardrailVerdict.Deny, result.Decision.Verdict);
+        Assert.Contains("read-only-mode", result.Decision.MatchedRuleIds);
+        Assert.Empty(host.Docker.Actions);
+        using var db = host.Db();
+        var row = Assert.Single(db.Context.AuditLog.Where(r => r.Action == "container.restart").ToList());
+        Assert.Equal((nameof(MutationStatus.Denied), nameof(MutationSurface.Agent), false), (row.Outcome, row.Surface, row.Success));
+        Assert.Contains("read-only-mode", db.Context.PolicyDecisions.Single(d => d.Id == row.DecisionId).MatchedRules);
+    }
+
+    [Fact]
+    public async Task An_approval_granted_before_the_kill_switch_does_not_carry_the_call_past_it()
+    {
+        await using var host = await KillSwitchHost.StartAsync(killSwitch: false, confirmWrites: true);
+        var session = await McpServedSurfaceTests.InitializeAsync(host.Client);
+        const string call = """{"containerId":"web-1"}""";
+
+        // Kill switch off: the write waits for a person, who approves it.
+        Assert.Contains("Human approval required", await CallToolAsync(host.Client, session, 1, "restart_container", call));
+        var approvals = host.Factory.Services.GetRequiredService<Whiskers.Services.Approvals.IApprovalStore>();
+        var approval = Assert.Single(approvals.GetPending());
+        Assert.True(await approvals.ResolveAsync(approval.Id, true, "second-admin@example.com", McpPermissionLevels.Admin));
+
+        // Then the kill switch goes on, and the approved call is sent again.
+        await host.SetKillSwitchAsync(true);
+        var retried = await CallToolAsync(host.Client, session, 2, "restart_container", call);
+
+        Assert.Contains("Read-only mode active", retried);
+        Assert.Empty(host.Docker.Actions);
+        var after = approvals.Get(approval.Id)!;
+        Assert.Equal(Whiskers.Models.Agent.ApprovalStatus.Approved, after.Status);
+        Assert.Null(after.ConsumedAt);   // not used up by a call that did not run
+        using var db = host.Db();
+        var rows = db.Context.AuditLog.Where(r => r.Action == "container.restart").OrderBy(r => r.Id).ToList();
+        Assert.DoesNotContain(rows, r => r.Outcome == nameof(MutationStatus.Executed));
+        var last = rows[^1];
+        Assert.Equal(nameof(MutationStatus.Denied), last.Outcome);
+        Assert.Contains("read-only-mode", db.Context.PolicyDecisions.Single(d => d.Id == last.DecisionId).MatchedRules);
+    }
+
+    [Fact]
+    public async Task Scheduled_tasks_autoupdate_and_autopatch_are_denied_by_the_kill_switch_and_nothing_runs()
+    {
+        await using var host = await KillSwitchHost.StartAsync();
+        var owner = PrincipalIds.User(AdminEmail);
+        await host.AddLocalAdminAsync(AdminEmail);
+        // The owner holds Admin: a refusal below is the kill switch, not a lost authority.
+        Assert.Equal(McpPermissionLevels.Admin,
+            host.Factory.Services.GetRequiredService<IAutomationOwnerResolver>().Resolve(owner).PermissionLevel);
+
+        // A scheduled task through the real executor.
+        var executor = host.Factory.Services.GetRequiredService<Whiskers.Services.Scheduler.ITaskExecutor>();
+        var task = new Whiskers.Models.ScheduledTaskEntity
+        {
+            TaskId = "t-killswitch", Name = "nightly", TaskType = Whiskers.Models.ScheduledTaskType.ContainerRestart,
+            TargetId = "web-1", CreatedBy = owner, CreatedVia = owner,
+        };
+        var (success, _) = await executor.ExecuteAsync(task);
+        Assert.False(success);
+        Assert.True(task.Enabled);   // a refusal by policy does not suspend the task
+
+        // AutoUpdate and AutoPatch, as their services call the runner (actor, capability, arguments).
+        var runner = host.Factory.Services.GetRequiredService<IAutomationMutationRunner>();
+        var update = await runner.RunAsync(new AutomationActor("autoupdate", "AutoUpdate", owner, owner), "container.update",
+            new { containerId = ContainerId, name = "web-1", serverId = "local" },
+            _ => host.Docker.RecreateContainerAsync(ContainerId, "local"));
+        var patched = false;
+        var patch = await runner.RunAsync(new AutomationActor("autopatch", "AutoPatch", owner, owner), "autopatch.run",
+            new { dryRun = false }, _ => { patched = true; return Task.CompletedTask; });
+
+        foreach (var outcome in new[] { update.Status, patch.Status })
+            Assert.Equal(MutationStatus.Denied, outcome);
+        Assert.Contains("read-only-mode", update.MatchedRules);
+        Assert.Contains("read-only-mode", patch.MatchedRules);
+        Assert.False(patched);
+        Assert.Empty(host.Docker.Actions);
+        using var db = host.Db();
+        foreach (var capability in new[] { "container.restart", "container.update", "autopatch.run" })
+        {
+            var row = Assert.Single(db.Context.AuditLog.Where(r => r.Action == capability).ToList());
+            Assert.Equal((nameof(MutationStatus.Denied), nameof(MutationSurface.Automation), owner),
+                (row.Outcome, row.Surface, row.OnBehalfOfId));
+            Assert.Contains("read-only-mode", db.Context.PolicyDecisions.Single(d => d.Id == row.DecisionId).MatchedRules);
+        }
+    }
 
     /// <summary>Arguments for the UI sweep: the keys the capability table reads a target from, each naming something
     /// that exists where it can (the container, the server, the guardrail section).</summary>
@@ -343,11 +463,12 @@ public class ReadOnlyKillSwitchWireTests
         public RefusingLauncher Launcher { get; } = new();
         public SignedInPerson User { get; } = new();
         public string ApiKeyId { get; private set; } = "";
+        public EveryTargetKnown? Resolver { get; private set; }
 
         /// <param name="everyTargetKnown">For the sweeps: a target the inventory does not know (a cloud server, a DNS
         /// zone, a webhook) is taken as named instead of refused before the policy step, so every call reaches the
         /// policy and the kill switch must be what refuses it. A target the inventory knows resolves as always.</param>
-        public static async Task<KillSwitchHost> StartAsync(bool everyTargetKnown = false)
+        public static async Task<KillSwitchHost> StartAsync(bool everyTargetKnown = false, bool killSwitch = true, bool confirmWrites = false)
         {
             var dataDir = Path.Combine(Path.GetTempPath(), "whiskers-killswitch-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dataDir);
@@ -367,7 +488,7 @@ public class ReadOnlyKillSwitchWireTests
                             s.AddSingleton<ITerminalLauncher>(host.Launcher);
                             s.AddScoped<ICurrentUserService>(_ => host.User);
                             if (everyTargetKnown)
-                                s.AddSingleton<IMutationTargetResolver>(sp =>
+                                s.AddSingleton<IMutationTargetResolver>(sp => host.Resolver =
                                     new EveryTargetKnown(ActivatorUtilities.CreateInstance<MutationTargetResolver>(sp)));
                         });
                     });
@@ -382,10 +503,10 @@ public class ReadOnlyKillSwitchWireTests
                 var config = guardrails.Config;
                 var policy = config.ActivePolicy();
                 policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
-                policy.RequireConfirmationForWrites = false;
-                policy.ReadOnlyMode = true;
+                policy.RequireConfirmationForWrites = confirmWrites;
+                policy.ReadOnlyMode = killSwitch;
                 await GatewayArrange.RunAsync("guardrails.save", () => guardrails.SaveConfigAsync(config, AdminEditor));
-                Assert.True(guardrails.Current.ReadOnlyMode);
+                Assert.Equal(killSwitch, guardrails.Current.ReadOnlyMode);
                 return host;
             }
             catch
@@ -393,6 +514,30 @@ public class ReadOnlyKillSwitchWireTests
                 await host.DisposeAsync();
                 throw;
             }
+        }
+
+        /// <summary>Switches the kill switch on or off as an arrangement (not under test here).</summary>
+        public async Task SetKillSwitchAsync(bool on)
+        {
+            var guardrails = Factory.Services.GetRequiredService<IGuardrailStore>();
+            var config = guardrails.Config;
+            config.ActivePolicy().ReadOnlyMode = on;
+            await GatewayArrange.RunAsync("guardrails.save", () => guardrails.SaveConfigAsync(config, AdminEditor));
+            Assert.Equal(on, guardrails.Current.ReadOnlyMode);
+        }
+
+        /// <summary>A local account with the Admin role, so an item it owns runs on an Admin's authority.</summary>
+        public async Task AddLocalAdminAsync(string email)
+        {
+            using (var scope = Factory.Services.CreateScope())
+            {
+                var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Whiskers.Services.Persistence.AppUser>>();
+                var created = await users.CreateAsync(
+                    new Whiskers.Services.Persistence.AppUser { UserName = email, Email = email, EmailConfirmed = true }, "CorrectHorse12!!");
+                Assert.True(created.Succeeded, string.Join("; ", created.Errors.Select(e => e.Code)));
+            }
+            var roles = Factory.Services.GetRequiredService<IRoleService>();
+            await GatewayArrange.RunAsync("config.roles", () => roles.SetRoleAsync(email, AppRole.Admin));
         }
 
         public DbLease Db()
@@ -426,22 +571,51 @@ public class ReadOnlyKillSwitchWireTests
         public Task<bool> HasRoleAsync(AppRole required) => Task.FromResult(Role >= required);
     }
 
-    /// <summary>The real resolver; where it finds no target, the target as the caller named it.</summary>
+    /// <summary>The real resolver; only where it answers "not found" (a refusal with a reason, no exception), the target
+    /// as the caller named it. Every fallback is recorded so the test can check it happened only for targets the
+    /// doubles do not hold; a resolver that throws is not covered up (the gateway then refuses before the policy and
+    /// the sweep's per-call decision check fails).</summary>
     private sealed class EveryTargetKnown(IMutationTargetResolver inner) : IMutationTargetResolver
     {
+        /// <summary>The kinds the doubles hold (one server, one container, the configuration sections).</summary>
+        public static readonly string[] HeldKinds = ["container", "host", "server", "config"];
+
+        public System.Collections.Concurrent.ConcurrentQueue<(string Capability, string Kind, string Error)> Fallbacks { get; } = new();
+
         public async Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct)
         {
+            TargetResolution resolution;
             try
             {
-                var resolution = await inner.ResolveAsync(request, capability, ct);
-                if (resolution.Target is not null) return resolution;
+                resolution = await inner.ResolveAsync(request, capability, ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException && !HeldKinds.Contains(capability.TargetKind))
             {
-                // Unknown to the inventory doubles; taken as named below.
+                // A kind with no backend in this host (Kubernetes workloads): its lookup throws instead of answering.
+                Fallbacks.Enqueue((capability.Id, capability.TargetKind, ex.GetType().Name));
+                return new TargetResolution(request.Target, null);
             }
+            if (resolution.Target is not null) return resolution;
+            Assert.False(string.IsNullOrWhiteSpace(resolution.Error), $"{capability.Id}: refused without a reason");
+            Fallbacks.Enqueue((capability.Id, capability.TargetKind, resolution.Error!));
             return new TargetResolution(request.Target, null);
         }
+    }
+
+    /// <summary>The doubles hold one server ("local") and one container ("web-1") and nothing else: a fallback is
+    /// allowed only for the other kinds, and for a container action whose compose project the double cannot show
+    /// (its impact is planned before the policy). A capability whose target the doubles hold never falls back.</summary>
+    private static void AssertFallbacksOnlyForUnknownTargets(KillSwitchHost host)
+    {
+        var fallbacks = host.Resolver!.Fallbacks.ToList();
+        Assert.NotEmpty(fallbacks);   // the sweep did meet unknown targets: the decorator is not idle
+        string[] composePlanned = ["container.env_set", "compose.deploy", "container.env_file_save"];
+        string[] held = ["container.restart", "container.stop", "container.start", "container.update", "container.remove",
+            "container.exec", "terminal.host_open", "terminal.container_open", "host.exec", "config.save", "guardrails.save"];
+        Assert.All(fallbacks, f => Assert.True(
+            !EveryTargetKnown.HeldKinds.Contains(f.Kind) || composePlanned.Contains(f.Capability),
+            $"{f.Capability} ({f.Kind}) fell back although the doubles hold its target: {f.Error}"));
+        Assert.DoesNotContain(fallbacks, f => held.Contains(f.Capability));
     }
 
     /// <summary>Counts every attempt to start a shell and starts none.</summary>
