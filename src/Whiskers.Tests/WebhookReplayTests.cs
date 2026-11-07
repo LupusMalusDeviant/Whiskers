@@ -509,6 +509,19 @@ public sealed class WebhookReplayTests : IDisposable
 
     private IServiceScopeFactory Scopes => _sp.GetRequiredService<IServiceScopeFactory>();
 
+    /// <summary>What a worker's read of a webhook contains.</summary>
+    private const string WebhookReads = "FROM \"Webhooks\"";
+
+    private static async Task Until(Func<bool> condition)
+    {
+        var until = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > until) throw new TimeoutException("The signal never came.");
+            await Task.Delay(10);
+        }
+    }
+
     /// <summary>Refusals go through the real gateway into this test's <c>AuditLog</c> (the runs stay the recording
     /// runner's: they are not what these tests prove).</summary>
     private void RecordRefusals()
@@ -573,9 +586,10 @@ public sealed class WebhookReplayTests : IDisposable
         _runner.Hold();
         await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0303"));
         await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var reads = _faults.RunCommands(WebhookReads);
         var accepted = await service.AcceptAsync(waiting.WebhookId, Signed(waiting, "delivery-0304"));
-        // The waiting run has read its webhook and waits for the target.
-        await Task.Delay(200);
+        // The waiting run has read its webhook (a signal, not a time) and waits for the target, which the holder keeps.
+        await Until(() => _faults.RunCommands(WebhookReads) > reads);
 
         if (change == "removed") Remove(waiting.WebhookId);
         else Update(waiting.WebhookId, w => w.Enabled = false);
@@ -686,23 +700,55 @@ public sealed class WebhookReplayTests : IDisposable
 
     // ---------------------------------------------------------------- database faults
 
+    /// <summary>INV-45 (review M-1): a run its worker gives up before it started (its first read of the webhook fails)
+    /// is not left queued for a redelivery the provider, told "accepted", never sends: it ends failed and final, and is
+    /// on record once — one Denied event under its run id on the owner's authority. While it is being given up and
+    /// after, a repeat of the delivery is that run, never a new chance to run it; nothing runs.</summary>
     [Fact]
-    public async Task A_run_its_worker_could_not_start_is_taken_over_by_its_next_delivery()
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task A_run_its_worker_gave_up_before_it_started_is_final_and_on_record_once()
     {
+        RecordRefusals();
         var wh = Seed(WebhookSignatures.Whiskers);
         var service = Service();
         var request = Signed(wh, "delivery-0171");
-        // The worker's read of the webhook fails.
-        _faults.Arm("FROM \"Webhooks\"", Fault.Fail, runsOnly: true);
+        _faults.Arm(WebhookReads, Fault.Fail, runsOnly: true);
 
         var first = await service.AcceptAsync(wh.WebhookId, request);
         Assert.Equal(WebhookReply.Accepted, first.Reply);
-        var again = await Eventually(() => service.AcceptAsync(wh.WebhookId, request), r => r.Reply != WebhookReply.Duplicate);
+        for (var i = 0; i < 20 && (await Delivery(first.RunId!)).State is "Queued" or "Running"; i++)
+            Assert.Equal(WebhookReply.Duplicate, (await service.AcceptAsync(wh.WebhookId, request)).Reply);
 
-        // Not "queued" for ever: nothing held it any more, so the next delivery runs it.
-        Assert.Equal(new WebhookAcceptance(WebhookReply.Accepted, first.RunId, "queued"), again);
-        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
-        Assert.Equal(1, _runner.Runs);
+        Assert.Equal("Failed", (await Finished(first.RunId!)).State);
+        var row = await NotRunAsync(first.RunId!, "container.restart");
+        Assert.Contains(WebhookService.GivenUp, row.Details);
+        Assert.Equal("user:admin@example.com", row.OnBehalfOfId);
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Duplicate, first.RunId, "failed"),
+            await service.AcceptAsync(wh.WebhookId, request));
+        Assert.Equal(0, _runner.Runs);
+    }
+
+    /// <summary>Review M-1, the race: the run's start lands, but its answer reaches the worker only after the deadline,
+    /// so the worker never learns it started. Giving it up settles it by what the database says — running under its
+    /// claim, so failed by this call — and it is on record once.</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task A_start_that_landed_unseen_before_the_deadline_is_on_record_once()
+    {
+        RecordRefusals();
+        _options.RunTimeout = TimeSpan.FromMilliseconds(500);
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        // The start is written; its answer is held past the deadline.
+        _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.HoldAnswer, runsOnly: true);
+
+        var accepted = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0179"));
+        await _faults.Holding.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal("Failed", (await Finished(accepted.RunId!)).State);
+        _faults.Resume();
+        Assert.Contains(WebhookService.GivenUp, (await NotRunAsync(accepted.RunId!, "container.restart")).Details);
+        Assert.Equal(0, _runner.Runs);
     }
 
     [Fact]
@@ -760,9 +806,10 @@ public sealed class WebhookReplayTests : IDisposable
         var first = await service.AcceptAsync(stalled.WebhookId, Signed(stalled, "delivery-0173"));
         var second = await service.AcceptAsync(next.WebhookId, Signed(next, "delivery-0174"));
 
-        // The only worker is free again within the deadline: the next run goes on, the stalled one never started.
+        // The only worker is free again within the deadline: the next run goes on; the stalled one never ran and was
+        // given up, final (INV-45: on record, see A_run_its_worker_gave_up_before_it_started_is_final_and_on_record_once).
         Assert.Equal("Succeeded", (await Finished(second.RunId!)).State);
-        Assert.Equal("Queued", (await Delivery(first.RunId!)).State);
+        Assert.Equal("Failed", (await Finished(first.RunId!)).State);
         Assert.Equal(1, _runner.Runs);
     }
 
@@ -782,26 +829,6 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal("Succeeded", (await Finished(second.RunId!)).State);
     }
 
-    [Fact]
-    public async Task A_run_given_up_by_its_worker_never_touches_the_run_that_took_it_over()
-    {
-        var wh = Seed(WebhookSignatures.Whiskers);
-        var service = Service();
-        var request = Signed(wh, "delivery-0177");
-        _faults.Arm("FROM \"Webhooks\"", Fault.Fail, runsOnly: true);
-        var first = await service.AcceptAsync(wh.WebhookId, request);
-        _runner.Hold();
-
-        var again = await Eventually(() => service.AcceptAsync(wh.WebhookId, request), r => r.Reply != WebhookReply.Duplicate);
-        Assert.Equal(WebhookReply.Accepted, again.Reply);
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
-        await Task.Delay(200);
-
-        // The run that took it over is running; the worker that gave it up did not mark it failed.
-        Assert.Equal("Running", (await Delivery(first.RunId!)).State);
-        _runner.Release();
-        Assert.Equal("Succeeded", (await Finished(first.RunId!)).State);
-    }
 
     [Fact]
     public async Task A_real_database_lock_does_not_hold_a_worker_past_its_deadline()
@@ -1187,6 +1214,19 @@ public sealed class WebhookReplayTests : IDisposable
         {
             await Break(command, ct);
             return result;
+        }
+
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _runCommands = new();
+
+        /// <summary>How many reads of a run (a cancellable token: the worker's, not the acceptance's) containing
+        /// <paramref name="fragment"/> have executed — a signal to wait on instead of time.</summary>
+        public int RunCommands(string fragment) => _runCommands.Count(c => c.Contains(fragment, StringComparison.Ordinal));
+
+        public override ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            DbDataReader result, CancellationToken ct = default)
+        {
+            if (ct.CanBeCanceled) _runCommands.Enqueue(command.CommandText);
+            return ValueTask.FromResult(result);
         }
 
         private async Task Break(DbCommand command, CancellationToken ct)

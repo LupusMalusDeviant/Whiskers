@@ -427,13 +427,13 @@ internal sealed class McpFilterHarness : IDisposable
         ValueTask.FromResult(new CallToolResult { Content = [new TextContentBlock { Text = "done" }] });
 
     public Task<CallToolResult> CallAsync(string tool, Func<CancellationToken, ValueTask<CallToolResult>> next,
-        object? arguments = null, string? requestId = null) =>
+        object? arguments = null, string? requestId = null, CancellationToken ct = default) =>
         McpGuardrailFilter.HandleAsync(Services(), new CallToolRequestParams
         {
             Name = tool,
             Arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
                 JsonSerializer.Serialize(arguments ?? new { containerId = "web", serverId = "local" })),
-        }, requestId, next, CancellationToken.None).AsTask();
+        }, requestId, next, ct).AsTask();
 
     public async Task<List<AuditLogEntity>> EventsAsync()
     {

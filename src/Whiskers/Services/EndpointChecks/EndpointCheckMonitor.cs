@@ -34,8 +34,9 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
     private readonly BreachTracker _tracker = new(new HostLoadThresholds());
     private readonly IEndpointCheckSlots _slots;   // shared with "Run now" (review m1)
     private readonly ConcurrentDictionary<string, Task> _inFlight = new(StringComparer.Ordinal);
-    /// <summary>When each check's run was last refused before the gateway (in memory: a restart may refuse once more).</summary>
-    private readonly ConcurrentDictionary<string, DateTime> _refusedAt = new(StringComparer.Ordinal);
+    /// <summary>When each check's run was last refused before the gateway, and the definition it was refused as (its
+    /// <c>UpdatedUtc</c>) — in memory: a restart may refuse once more.</summary>
+    private readonly ConcurrentDictionary<string, (DateTime At, DateTime Saved)> _refusedAt = new(StringComparer.Ordinal);
     private DateTime _lastPrune = DateTime.MinValue;
     private bool _restored;
     private readonly SemaphoreSlim _saveLock = new(1, 1);
@@ -104,8 +105,12 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         var checks = _store.List();
         await CloseDroppedAsync(checks, now, ct);
         // A run refused before the gateway counts as a run for the interval: a check whose suspension could not be
-        // saved stays on and is refused again at its interval, not every tick (each refusal is an audit event).
-        checks = checks.Select(c => _refusedAt.TryGetValue(c.Id, out var at) && (c.LastRunUtc is not { } last || last < at)
+        // saved stays on and is refused again at its interval, not every tick (each refusal is an audit event). A check
+        // saved since its refusal (taken over, given an owner) is a new definition: the refusal no longer holds it back.
+        foreach (var c in checks)
+            if (_refusedAt.TryGetValue(c.Id, out var refused) && c.UpdatedUtc != refused.Saved)
+                _refusedAt.TryRemove(new KeyValuePair<string, (DateTime, DateTime)>(c.Id, refused));
+        checks = checks.Select(c => _refusedAt.TryGetValue(c.Id, out var r) && r.At is var at && (c.LastRunUtc is not { } last || last < at)
             ? c with { LastRunUtc = at }
             : c).ToList();
 
@@ -165,6 +170,8 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
                 return;
             }
 
+            // It runs: a refusal before no longer stands in for its last run (review NIT-1).
+            _refusedAt.TryRemove(check.Id, out _);
             var run = await _runner.RunAsync(check, ct);
             await _store.RecordAsync(run, ct);
             await ConsiderAsync(check, run, ct);
@@ -195,7 +202,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
     /// (INV-45, as the VPN bring-up does, R1-43). Nothing runs.</summary>
     private async Task RefuseRunAsync(EndpointCheckDefinition check, string reason, CancellationToken ct)
     {
-        _refusedAt[check.Id] = _time.GetUtcNow().UtcDateTime;
+        _refusedAt[check.Id] = (_time.GetUtcNow().UtcDateTime, check.UpdatedUtc);
         try
         {
             await _automation.RefuseAsync(EndpointCheckRunner.ActorOf(check), "endpointcheck.run",

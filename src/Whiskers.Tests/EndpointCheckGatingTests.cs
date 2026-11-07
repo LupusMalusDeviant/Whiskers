@@ -581,6 +581,14 @@ public sealed class EndpointCheckGatingTests : IDisposable
         clock.Advance(TimeSpan.FromHours(1));              // past the interval: refused again, one event
         AuditTrail.One(await TickAsync(), AuditTrail.Denied, "endpointcheck.run", "Automation", decided: false);
         Assert.Empty(host.Calls);
+
+        // Review NIT-1: saved since (an Admin who holds the role took it over) it is a new definition — due at once, not
+        // an interval after the refusal; it runs, and the refusal no longer holds it back.
+        fixture.Roles.Map[Admin] = AppRole.Admin;
+        await RawStore().SaveAsync(RawStore().List().Single().ToDraft(), AdminId, CancellationToken.None);
+        clock.Advance(EndpointCheckMonitor.Tick);
+        Assert.Single(await TickAsync());
+        Assert.NotEmpty(host.Calls);
     }
 
     private sealed class MutableUser(AppRole role) : ICurrentUserService

@@ -66,14 +66,13 @@ public sealed class AuditPathMatrixTests : IDisposable
     internal static bool NeedsApproval(PathRow row, IReadOnlyDictionary<string, string> approvalCells)
     {
         if (row.Class is "A" or "T" or "U" && row.Capabilities.Any(ControlPlaneResources.Capabilities.Contains)) return true;
-        if (!approvalCells.TryGetValue(row.Id, out var cell)) return false;
-        var text = cell.Trim();
-        return text.Length > 0 && text is not ("—" or "-" or "n/a")
-               && !text.StartsWith("n/a", StringComparison.OrdinalIgnoreCase)
-               && !text.StartsWith("none", StringComparison.OrdinalIgnoreCase)
-               && !text.Contains("deny", StringComparison.OrdinalIgnoreCase)
-               && !text.Contains("approve-then-retry", StringComparison.OrdinalIgnoreCase);   // A-04: dead code
+        // Review MINOR-5: the explicit marker §7 defines, not the wording — a cell that begins with ✅ is a path on which
+        // a person gives an approval; anything else ("none", "n/a", "Confirm → Deny …", a ✅ further on) is not.
+        return approvalCells.TryGetValue(row.Id, out var cell) && cell.TrimStart().StartsWith(ApprovalMarker, StringComparison.Ordinal);
     }
+
+    /// <summary>How §7 marks an "Approval" cell of a path on which a person gives an approval (its legend says so).</summary>
+    internal const string ApprovalMarker = "✅";
 
     /// <summary>The "Approval" cell of every §7 row in a table that has that column, by row id.</summary>
     internal static IReadOnlyDictionary<string, string> ApprovalCells(string contract)
@@ -239,6 +238,23 @@ public sealed class AuditPathMatrixTests : IDisposable
         Assert.True(NeedsApproval(rows.Single(r => r.Id == "A-01"), approvals));
         Assert.True(NeedsApproval(rows.Single(r => r.Id == "T-01"), approvals));
         Assert.False(NeedsApproval(rows.Single(r => r.Id == "A-03"), approvals));
+        // The legend defines the marker the reader relies on.
+        Assert.Contains("an \"Approval\" cell that begins with ✅", GateFiles.Require(GateFiles.Contract));
+    }
+
+    /// <summary>Review MINOR-5: the marker decides, not words in the cell — a terminal deny further on, a ✅ that does not
+    /// lead, or a "none" never turn a path into one that waits for an approval, and a leading ✅ always does.</summary>
+    [Theory]
+    [InlineData("✅ approval by a second Admin; trigger Confirm → Deny", true)]
+    [InlineData(" ✅ open + one close event", true)]
+    [InlineData("Confirm → Deny in the gateway ✅; Allow runs unattended", false)]
+    [InlineData("none; a key-owned `Confirm` → Deny", false)]
+    [InlineData("approve-then-retry", false)]
+    [InlineData("—", false)]
+    public void Only_the_leading_marker_makes_a_path_wait_for_an_approval(string cell, bool waits)
+    {
+        var row = new PathRow("S-98", "S", null, "", ["container.restart"], null, 1);
+        Assert.Equal(waits, NeedsApproval(row, new Dictionary<string, string> { ["S-98"] = cell }));
     }
 
     [Fact]
@@ -432,7 +448,11 @@ public sealed class AuditPathMatrixTests : IDisposable
         var direct = new System.Text.RegularExpressions.Regex(
             @"\bMetricsDbContext\b|\bIDbContextFactory\b|\bSaveChanges(Async)?\(|\bExecute(Update|Delete)(Async)?\(|" +
             @"\bFile\.(Write|Append|Delete|Move|Copy|Create|Replace)\w*\(|\bDirectory\.(Delete|Move|Create)\w*\(|" +
-            @"\bProcess\.Start\(|\bnew\s+(FileStream|StreamWriter)\(");
+            @"\bProcess\.Start\(|\bnew\s+(FileStream|StreamWriter|FileInfo|DirectoryInfo)\(|" +
+            // Review MINOR-3: what else writes without the gateway — Identity (it writes through its own context), a
+            // file opened for writing (not a browser upload's OpenReadStream), any DbContext, an outgoing HTTP call.
+            @"\b(UserManager|SignInManager|RoleManager)<|\bWhiskersIdentityDbContext\b|\bDbContext\b|" +
+            @"(?<![\w.])File\.Open(Write|Handle)?\(|\.OpenWrite\(|\bI?HttpClient(Factory)?\b");
         var files = Directory.EnumerateFiles(components, "*.*", SearchOption.AllDirectories)
             .Where(f => f.EndsWith(".razor", StringComparison.Ordinal) || f.EndsWith(".cs", StringComparison.Ordinal)).ToList();
         Assert.NotEmpty(files);
@@ -513,6 +533,128 @@ public sealed class AuditPathMatrixTests : IDisposable
         var hosting = File.ReadAllText(Path.Combine(GateFiles.Root, "src", "Whiskers", "Startup", "WhiskersHostingExtensions.cs"));
         Assert.Contains(".WithRequestFilters(filters => filters.AddCallToolFilter(McpGuardrailFilter.Create))", hosting);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(hosting, @"AddCallToolFilter\("));
+    }
+
+    // ------------------------------------------------------------------------------------------------ cancelled attempts
+
+    /// <summary>A host whose container listing does not answer until its caller gives up, behind the production target
+    /// resolver.</summary>
+    private static (FakeDocker Docker, MutationTargetResolver Targets) HangingTargets()
+    {
+        var docker = new FakeDocker(new ContainerInfo { Id = "web-1", Name = "web", ServerId = "local", State = "running" },
+            new ContainerInfo { Id = "whiskers-1", Name = "whiskers", ServerId = "local", State = "running" })
+        {
+            ListContainersHangs = true,
+        };
+        return (docker, new MutationTargetResolver(new TestServices(docker,
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true }))));
+    }
+
+    /// <summary>M-xx (review B-1): an MCP client that goes away while the gateway resolves the target has begun its
+    /// attempt — it asked for the capability — so the attempt is one Denied event, "cancelled before its decision",
+    /// recorded although the call's token is cancelled; the tool never runs and the caller still sees the
+    /// cancellation.</summary>
+    [Fact]
+    public async Task An_mcp_call_cancelled_while_its_target_resolves_is_one_denied_event()
+    {
+        var (docker, targets) = HangingTargets();
+        using var mcp = new McpFilterHarness { Targets = targets };
+        using var gone = new CancellationTokenSource();
+        var ran = 0;
+
+        var call = mcp.CallAsync("restart_container", t => { ran++; return McpFilterHarness.Ok(t); },
+            new { containerId = "web", serverId = "local" }, ct: gone.Token);
+        await docker.ListingStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await gone.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => call);
+        var row = One(await mcp.EventsAsync(), Denied, "container.restart", "Mcp", decided: false);
+        Assert.Contains(MutationGateway.CancelledBeforeDecision, row.Details);
+        Assert.Equal(0, ran);
+    }
+
+    /// <summary>Review B-1, every step before the intent: a call cancelled while its target resolves, while it waits
+    /// for its approval, or after its decision and before its intent is one Denied event and nothing runs; a call
+    /// cancelled while it runs is one Failed outcome — never a refusal and an outcome both.</summary>
+    [Theory]
+    [InlineData("target")]
+    [InlineData("approval")]
+    [InlineData("intent")]
+    [InlineData("run")]
+    public async Task A_gateway_call_cancelled_at_any_step_is_exactly_one_event(string step)
+    {
+        var (docker, hanging) = HangingTargets();
+        docker.ListContainersHangs = step == "target";
+        var policy = Permissive();
+        // The control plane waits for an Admin's approval (INV-59), for a person at the UI too.
+        var container = step == "approval" ? "whiskers-1" : "web-1";
+        var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
+        using var gone = new CancellationTokenSource();
+        var approvals = new HangingApprovals(gone, step == "approval");
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+            new AuditLogMutationSink(_db.Scopes), [], NullLogger<MutationGateway>.Instance, targets: hanging,
+            approvals: approvals, decisions: step == "intent" ? new CancelOnRecord(new DbPolicyDecisionStore(_db.Scopes), gone)
+                : new DbPolicyDecisionStore(_db.Scopes),
+            journal: new DbOperationJournal(_db.Scopes));
+        var ui = new UiMutationRunner(gateway, new CapabilityCatalog(), new Person(AppRole.Admin, Admin));
+        var ran = 0;
+
+        var rows = await AttemptAsync(_db.Scopes, async () =>
+        {
+            var attempt = ui.RunAsync("container.restart", new { containerId = container, serverId = "local" }, async t =>
+            {
+                ran++;
+                await gone.CancelAsync();
+                t.ThrowIfCancellationRequested();
+                return true;
+            }, gone.Token);
+            if (step == "target")
+            {
+                await docker.ListingStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await gone.CancelAsync();
+            }
+            try { await attempt; }
+            catch (OperationCanceledException) { /* the caller sees its cancellation */ }
+        });
+
+        if (step == "run")
+        {
+            Assert.Equal(1, ran);
+            Assert.Contains("cancelled while it ran", One(rows, Failed, "container.restart", "Ui").Details);
+            return;
+        }
+        var row = One(rows, Denied, "container.restart", "Ui", decided: step != "target");
+        var expected = step == "target" ? MutationGateway.CancelledBeforeDecision : MutationGateway.CancelledBeforeRun;
+        Assert.True(row.Details!.Contains(expected, StringComparison.Ordinal), $"{step}: {row.Details}");
+        Assert.Equal(0, ran);
+    }
+
+    /// <summary>An approval gate that, asked for this call's approval, finds the caller gone (with
+    /// <c>cancel</c>); otherwise every call is approved by nobody — a Confirm never reaches it then.</summary>
+    private sealed class HangingApprovals(CancellationTokenSource caller, bool cancel) : IApprovalGate
+    {
+        public async Task<ApprovalGateResult> CheckAsync(ApprovalSubject subject, string reason,
+            IReadOnlyList<string> matchedRules, CancellationToken ct)
+        {
+            if (cancel) await caller.CancelAsync();
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException("unreachable");
+        }
+
+        public string? OpenOperationOf(string binding) => null;
+
+        public Task<bool> TryConsumeAsync(string approvalId, string operationId, CancellationToken ct) =>
+            Task.FromResult(false);
+    }
+
+    /// <summary>A decision store that records the decision, then finds its caller gone.</summary>
+    private sealed class CancelOnRecord(IPolicyDecisionStore inner, CancellationTokenSource caller) : IPolicyDecisionStore
+    {
+        public async Task RecordAsync(PolicyDecisionRecord record, CancellationToken ct)
+        {
+            await inner.RecordAsync(record, ct);
+            await caller.CancelAsync();
+        }
     }
 
     /// <summary>T-01, T-02: a shell in a control-plane container waits for an explicit Admin approval — one

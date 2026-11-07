@@ -29,7 +29,7 @@ public sealed record WebhookAcceptance(WebhookReply Reply, string? RunId = null,
 /// recorded once: a concurrent or later delivery with the same key — also after a restart — finds the run of the
 /// first. Each row names the claim (<see cref="WebhookDeliveryEntity.Instance"/>) that queued it; a claim is live
 /// while this process holds its run. A queued row whose claim is not live never ran and nothing will run it — its
-/// process stopped, its worker gave it up, or the answer to its insert was lost — so the next delivery with its key
+/// process stopped, its worker gave it up and could not settle it, or the answer to its insert was lost — so the next delivery with its key
 /// takes it over. One that was running stays "interrupted" and does not run again.
 /// </summary>
 internal sealed class WebhookDeliveryStore
@@ -132,15 +132,16 @@ internal sealed class WebhookDeliveryStore
     }
 
     /// <summary>Records how the run ended — only under the claim that ran it: a run a later delivery took over is
-    /// not touched. A failed write leaves it Running: once its claim is released it reads as interrupted.</summary>
-    public async Task FinishAsync(string runId, string claim, string state, CancellationToken ct)
+    /// not touched. A failed write leaves it Running: once its claim is released it reads as interrupted. True when this
+    /// call ended it (it was running under the claim).</summary>
+    public async Task<bool> FinishAsync(string runId, string claim, string state, CancellationToken ct)
     {
         var now = _time.GetUtcNow().UtcDateTime;
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        await db.WebhookDeliveries
+        return await db.WebhookDeliveries
             .Where(d => d.RunId == runId && d.State == Running && d.Instance == claim)
-            .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, state).SetProperty(d => d.FinishedAt, now), ct);
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, state).SetProperty(d => d.FinishedAt, now), ct) == 1;
     }
 
     /// <summary>The run's claim is no longer held: a queued row of it is taken over by the next delivery.</summary>

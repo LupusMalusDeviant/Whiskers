@@ -152,12 +152,19 @@ and the invariants the path violates.
 
 Legend: ✅ holds · ⚠️ partial · ❌ missing · n/a not applicable · **GR?** guardrails only when the Agent module is on
 (INV-26; fixed for every path in WP2 step 2.1 — guardrails are core) · **AL** AuditLog row · **AH** Agent History row only.
+In §7.2–7.4 an "Approval" cell that begins with ✅ marks a path on which a person gives an approval (a call can wait
+for it and run after it; `AuditPathMatrixTests` then requires both events); any other cell — none, n/a, a terminal
+`Confirm → Deny` — marks a path that never waits for one.
 
 **When a mutation attempt begins (user decision 2026-11-07, INV-45).** An attempt begins when the handler requests the
 capability from the gateway (`RunAsync`/`RefuseAsync` or the surface's equivalent: the MCP filter's gateway call, the
 agent invoker's, the automation runner's); returning before that — invalid input, a cancelled confirmation, an object
 not found — changes nothing and is not an attempt, so it has no audit event. It changes nothing because no page writes
 state itself and every guarded service refuses outside a gateway decision (the tests are named in INV-45's evidence).
+Likewise no attempt: an AI trigger run refused before its session starts (too many runs in parallel, its preset
+missing, its owner without authority — A-03) and a backup retention skipped before it asks to delete (S-01). An attempt
+that has begun and is cancelled before its decision — the caller gone, a run's deadline passed — is still one Denied
+event.
 
 **Gaps shared by every path today** (not repeated per row): INV-01 (string actor), INV-20 for UI/automation/terminal,
 INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-45 (closed: since R1-19 every gateway attempt is one complete event with typed fields, MCP tools and UI pages write none of their own since R1-20/R1-21/R1-22, and every row below is proved by `AuditPathMatrixTests` — each attempt one complete event for every outcome the path can have),
@@ -268,8 +275,8 @@ reach a model. Every error of the five, the gateway's refusals and a pending app
 
 | ID | Path | AuthZ | Policy | Approval | Execution | Audit | Path-specific gaps |
 |---|---|---|---|---|---|---|---|
-| T-01 | Container terminal `/terminal/{srv}/{ctr}` | **Admin** (PC-D2, WP2) | ✅ GW `terminal.container_open` (R1-17) | Control plane only (INV-59) | `docker exec` (remote: SSH as root first) | ✅ open + one close event | — (unknown server refused, no local fallback) |
-| T-02 | Embedded terminal in container detail | **Admin** (PC-D2, WP2) | ✅ GW `terminal.container_open` (R1-17) | Control plane only (INV-59) | same | ✅ open + one close event | — |
+| T-01 | Container terminal `/terminal/{srv}/{ctr}` | **Admin** (PC-D2, WP2) | ✅ GW `terminal.container_open` (R1-17) | ✅ an Admin's approval, control plane only (INV-59) | `docker exec` (remote: SSH as root first) | ✅ open + one close event | — (unknown server refused, no local fallback) |
+| T-02 | Embedded terminal in container detail | **Admin** (PC-D2, WP2) | ✅ GW `terminal.container_open` (R1-17) | ✅ an Admin's approval, control plane only (INV-59) | same | ✅ open + one close event | — |
 | T-03 | Host shell `/server-terminal/{srv}` | Admin | ✅ GW `terminal.host_open` (R1-17) | n/a | `nsenter` / SSH root | ✅ open + one close event | Session ends ≤ 15 s after demotion or kill switch (R1-17) |
 
 ### 7.5 Web UI handlers

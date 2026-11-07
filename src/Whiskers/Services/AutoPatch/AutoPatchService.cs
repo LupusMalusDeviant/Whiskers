@@ -220,11 +220,15 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         var dryRun = _settings.CurrentValue.DryRun;
         if (_owners.IsBlocked(IAutomationOwnerStore.AutoPatch))
         {
-            _logger.LogError("Auto-patch owner could not be read; tonight's cycle did not run. Take AutoPatch over " +
-                             "again in Settings → Automation owners");
-            const string blocked = "Not run: the AutoPatch owner could not be read.";
-            // A suspended entry still names its owner: the refusal is on record for them, not as unowned.
-            await RefuseNightAsync(new { dryRun }, blocked, BlockedOwner(), ct);
+            // A suspended entry still names its owner: the refusal is on record for them, not as unowned — and says
+            // that it is suspended, not that it could not be read (review NIT-2).
+            var suspended = BlockedOwner();
+            var blocked = suspended is null
+                ? "Not run: the AutoPatch owner could not be read."
+                : "Not run: the AutoPatch owner is suspended (they lost their authority).";
+            _logger.LogError("Auto-patch blocked ({Reason}); tonight's cycle did not run. Take AutoPatch over " +
+                             "again in Settings → Automation owners", blocked);
+            await RefuseNightAsync(new { dryRun }, blocked, suspended, ct);
             return blocked;
         }
         var owner = _owners.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId;

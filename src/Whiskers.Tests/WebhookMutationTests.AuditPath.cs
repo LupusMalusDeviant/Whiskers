@@ -18,7 +18,10 @@ public sealed partial class WebhookMutationTests
     /// <summary>One delivery through the signed test (the same queue, worker and decision as an external call): its
     /// rows read by the delivery's operation (its run id, and everything nested in it), exactly one per operation, and
     /// the delivery's own event. Nothing else was written by the attempt.</summary>
-    private async Task<(List<AuditLogEntity> Rows, AuditLogEntity Delivery)> DeliverAsync(WebhookEntity webhook)
+    /// <param name="nestedDenialsDecided">Whether a refusal nested in the delivery came from the policy step (a
+    /// protected resource, the kill switch: it names its decision) or before it (an owner below the level: none).</param>
+    private async Task<(List<AuditLogEntity> Rows, AuditLogEntity Delivery)> DeliverAsync(WebhookEntity webhook,
+        bool nestedDenialsDecided = true)
     {
         _trail = true;
         var scopes = _sp.GetRequiredService<IServiceScopeFactory>();
@@ -36,8 +39,8 @@ public sealed partial class WebhookMutationTests
         foreach (var nested in rows.Where(r => !ReferenceEquals(r, delivery)))
         {
             Assert.Contains(rows, r => r.OperationId == nested.ParentOperationId);
-            AuditTrail.AssertComplete(nested, nested.Outcome!, nested.Action, "Automation", decided: nested.DecisionId is not null
-                || nested.Outcome != AuditTrail.Denied);
+            AuditTrail.AssertComplete(nested, nested.Outcome!, nested.Action, "Automation",
+                decided: nested.Outcome != AuditTrail.Denied || nestedDenialsDecided);
         }
         return (rows, delivery);
     }
@@ -74,6 +77,42 @@ public sealed partial class WebhookMutationTests
         var (unownedRows, unowned) = await DeliverAsync(Seed("restart", "web-1", owner: null));
         AuditTrail.AssertComplete(Assert.Single(unownedRows), AuditTrail.Denied, "container.restart", "Automation", owned: false, decided: false);
         Assert.StartsWith("unowned:", unowned.PrincipalId);
+    }
+
+    /// <summary>S-04 (review B-1): the run's deadline passes while the gateway resolves the delivery's target with the
+    /// production resolver (the host does not answer). The delivery had asked for its capability, so it is one Denied
+    /// event under its run id — "cancelled before its decision", written although the run's token is cancelled — and
+    /// nothing runs; the delivery ends failed.</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task A_delivery_whose_deadline_passes_while_the_gateway_resolves_its_target_is_one_event()
+    {
+        _trail = true;
+        _runTimeout = TimeSpan.FromSeconds(1);
+        _resolverDocker = new FakeDocker(Container("web-1", "aaa111", "running")) { ListContainersHangs = true };
+        var webhook = Seed("restart", "web-1");
+
+        var (success, _) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.True(_resolverDocker.ListingStarted.Task.IsCompleted, "the gateway never asked the host");
+        var scopes = _sp.GetRequiredService<IServiceScopeFactory>();
+        WebhookDeliveryEntity delivery;
+        var until = DateTime.UtcNow.AddSeconds(10);
+        do
+        {
+            using var scope = _sp.CreateScope();
+            delivery = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.AsNoTracking()
+                .SingleAsync(d => d.WebhookId == webhook.WebhookId);
+            if (delivery.State is not (WebhookDeliveryStore.Queued or WebhookDeliveryStore.Running)) break;
+            await Task.Delay(20);
+        } while (DateTime.UtcNow < until);
+        Assert.Equal(WebhookDeliveryStore.Failed, delivery.State);
+        var row = AuditTrail.One(await AuditTrail.ForOperationAsync(scopes, delivery.RunId), AuditTrail.Denied,
+            "container.restart", "Automation", decided: false);
+        Assert.Contains(MutationGateway.CancelledBeforeDecision, row.Details);
+        Assert.Equal(AdminId, row.OnBehalfOfId);
+        Assert.Empty(_docker.Actions);
     }
 
     /// <summary>S-04: a rebuild delivery is one <c>container.update</c> event — executed, failed.</summary>
@@ -178,7 +217,8 @@ public sealed partial class WebhookMutationTests
         _roles.Map[Other] = AppRole.Admin;
         _roles.Map[Admin] = AppRole.Viewer;
         var ups = _host.Executed.Count(c => c.Contains("docker compose") && c.Contains(" up "));
-        var (appRows, appRefused) = await DeliverAsync(Seed("git-deploy", AppId, owner: PrincipalIds.User(Other)));
+        var (appRows, appRefused) = await DeliverAsync(Seed("git-deploy", AppId, owner: PrincipalIds.User(Other)),
+            nestedDenialsDecided: false);
         Assert.Equal(PrincipalIds.User(Other), appRefused.OnBehalfOfId);
         Assert.NotEqual(AuditTrail.Executed, appRefused.Outcome);
         AuditTrail.AssertComplete(appRefused, appRefused.Outcome!, "gitdeploy.deploy", "Automation");

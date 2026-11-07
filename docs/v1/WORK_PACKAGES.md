@@ -373,7 +373,9 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > gateway's Denied event. User decision 2026-11-07: an attempt begins when the handler requests the capability from
 > the gateway; a page returning before that (validation, a cancelled confirmation, not found) changes nothing and is no
 > attempt — backed by a static check that no page writes state itself and by the scope-guard tests. The fail-closed
-> exits for a missing service cannot occur: the boot matrix resolves every service of the boundary.
+> exits for a missing service cannot occur: the boot matrix resolves every service of the boundary. A call cancelled
+> after it asked the gateway and before its intent is one Denied event (also at a webhook run's deadline during target
+> resolution); an accepted webhook delivery given up before its start is settled failed and final and recorded once.
 
 **Out of scope:** Hash-chain construction and all caller migrations.
 

@@ -392,9 +392,9 @@ public class WebhookService : IWebhookService
         ResourceLocks.Lease? gate = null;
         var handedOver = false;
         WebhookEntity? queued = null;
-        // Whether the delivery was started, and whether its event is written by now (by the gateway, or as not run).
-        var started = false;
+        // Whether the delivery's event is written by now (by the gateway, or as not run).
         var decided = false;
+        var abandoning = false;
         try
         {
             queued = await ReadWebhookAsync(run.WebhookId, ct);
@@ -441,9 +441,8 @@ public class WebhookService : IWebhookService
 
             // The work this run starts holds its lock: a Git deployment it starts does not wait for its own server.
             _locks.Holding(target.Key);
-            if (!await StartAsync(run, queued, ct)) return;
+            if (!await StartAsync(run, ct)) return;
             // Started: from here on the delivery ends — run, refused or failed — and is on record (INV-45).
-            started = true;
             var webhook = await ReadWebhookAsync(run.WebhookId, ct);
             if (webhook is null || !webhook.Enabled || queued is null || !SameTarget(queued, webhook))
             {
@@ -511,20 +510,21 @@ public class WebhookService : IWebhookService
         }
         catch (Exception ex) when (!handedOver)
         {
-            // Given up: running, it failed; queued, the next delivery takes it over once the claim is released
-            // below. Recorded beside the worker — the database may be what failed — and fenced by the claim.
+            // Given up: it failed, and it is final. Recorded beside the worker — the database may be what failed — and
+            // fenced by the claim. An accepted run nothing recorded yet (it failed before or at its start, or after it
+            // and before its decision) is on record once, as a delivery that did not run (INV-45).
             _logger.LogError(ex, "Webhook run {RunId} failed outside its action", run.RunId);
-            // A started run that failed before anything recorded it (the second read of its webhook threw, or its
-            // deadline passed there) ends here as failed: on record once, as a delivery that did not run (INV-45).
-            var unrecorded = started && !decided;
-            _ = Task.Run(() => AbandonAsync(run, unrecorded ? queued : null, unrecorded));
+            var unrecorded = !decided;
+            // The claim stays held until the run is settled: no later delivery takes over a run being given up.
+            abandoning = true;
+            _ = Task.Run(() => AbandonAsync(run, queued, unrecorded));
         }
         finally
         {
             if (!handedOver)
             {
                 gate?.Dispose();
-                _deliveries.Release(run.Claim);
+                if (!abandoning) _deliveries.Release(run.Claim);
             }
             completion?.TrySetResult(new RunEnd(result.Success, result.Output, message));
             // Not on the worker: pruning has its own time and never holds a run's worker (SQLite runs its commands
@@ -581,22 +581,12 @@ public class WebhookService : IWebhookService
             : (false, work.Exception?.GetBaseException().Message ?? Cancelled);
 
     /// <summary>Starts the run within its deadline. The database may not answer in time (SQLite runs its commands
-    /// synchronously and does not cancel them): the worker goes on, and a start that still lands later is recorded
-    /// as failed — the run never runs.</summary>
-    private async Task<bool> StartAsync(QueuedRun run, WebhookEntity? queued, CancellationToken ct)
+    /// synchronously and does not cancel them): the worker gives the run up (<see cref="AbandonAsync"/>), which
+    /// settles it whether this start lands before, after or never — the run never runs.</summary>
+    private async Task<bool> StartAsync(QueuedRun run, CancellationToken ct)
     {
         var start = Task.Run(() => _deliveries.StartAsync(run.RunId, run.Claim, ct), CancellationToken.None);
-        try
-        {
-            return await start.WaitAsync(ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested && !start.IsCompleted)
-        {
-            // A start that lands after the deadline is a delivery that ends without its decision: on record once.
-            _ = start.ContinueWith(t => t.IsCompletedSuccessfully && t.Result ? AbandonAsync(run, queued, record: true) : Task.CompletedTask,
-                CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
-            throw;
-        }
+        return await start.WaitAsync(ct);
     }
 
     /// <summary>
@@ -613,26 +603,53 @@ public class WebhookService : IWebhookService
         return task.WaitAsync(ct);
     }
 
-    /// <summary>A run its worker gave up: running, it failed (a queued one is taken over by its next delivery). With
-    /// <paramref name="record"/> — started, but nothing recorded it yet — it is on record once as a delivery that did
-    /// not run (INV-45).</summary>
+    /// <summary>The reason of an accepted delivery its worker gave up before its decision (INV-45).</summary>
+    internal const string GivenUp = "Failed: the delivery was given up before its decision (see the log); its action did not run.";
+
+    /// <summary>A run its worker gave up: it ends as failed, final — a delivery the provider was told is accepted is not
+    /// left queued for a redelivery that may never come. Still queued under its claim, it is started here so that
+    /// nothing else runs it. With <paramref name="record"/> — nothing recorded it yet — it is on record once as a
+    /// delivery that did not run (INV-45): only the call that moves it from running to failed records it, so a start
+    /// of the worker's that lands late, or never, is settled here once either way.</summary>
     private async Task AbandonAsync(QueuedRun run, WebhookEntity? queued = null, bool record = false)
     {
-        if (record)
-            await RecordNotRunAsync(queued, run.WebhookId, run.RunId,
-                "Failed: the delivery was given up before its decision (see the log); its action did not run.");
         try
         {
             using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
             await Bounded(async t =>
             {
-                await _deliveries.FinishAsync(run.RunId, run.Claim, WebhookDeliveryStore.Failed, t);
+                if (record) await _deliveries.StartAsync(run.RunId, run.Claim, t);
+                if (await _deliveries.FinishAsync(run.RunId, run.Claim, WebhookDeliveryStore.Failed, t) && record)
+                {
+                    // The webhook as the worker read it, or — the read is what failed — as it reads now.
+                    WebhookEntity? webhook = queued;
+                    if (webhook is null)
+                    {
+                        try
+                        {
+                            using var scope = _scopeFactory.CreateScope();
+                            webhook = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Webhooks
+                                .AsNoTracking().FirstOrDefaultAsync(w => w.WebhookId == run.WebhookId, t);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Webhook run {RunId}: its webhook could not be read for its record", run.RunId);
+                        }
+                    }
+                    await RecordNotRunAsync(webhook, run.WebhookId, run.RunId, GivenUp);
+                }
                 return true;
             }, bookkeeping.Token);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Webhook run {RunId}: its failure could not be recorded", run.RunId);
+        }
+        finally
+        {
+            // Settled (or its bookkeeping time is up): the claim, which the worker kept for this, is let go. Work still
+            // in flight stays fenced by it in the database.
+            _deliveries.Release(run.Claim);
         }
     }
 
@@ -948,7 +965,8 @@ public class WebhookService : IWebhookService
 
     /// <summary>
     /// INV-45: an accepted delivery that ends before its decision — its webhook changed, switched off or removed while
-    /// it waited, no turn on its target in time, an action none of the four, a run given up after it started — is
+    /// it waited, no turn on its target in time, an action none of the four, a run its worker gave up before or after its
+    /// start — is
     /// recorded as the gateway's Denied event of the delivery's operation (its run id), on the webhook owner's
     /// authority as for a run, so every accepted delivery is exactly one event. Its action did not run. A webhook that
     /// was gone before the worker read it (<paramref name="webhook"/> null) is recorded by its id, unowned, under

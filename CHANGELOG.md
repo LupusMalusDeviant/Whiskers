@@ -14,7 +14,9 @@ All notable changes to Whiskers are documented here. The format follows
   webhook delivery that ended before its decision or was given up after its start, a scheduled task refused before
   the gateway (no target or command, a missing database container, a protected stopped container) — are now recorded
   as denied events. An endpoint check whose suspension cannot be saved is refused again at its interval, not every
-  15 seconds.
+  15 seconds. A call cancelled after it asked the gateway and before it ran (the caller gone, a run's deadline
+  passed while the target resolved) is one denied event, and an accepted webhook delivery its worker gives up before
+  it started now ends failed and final, on record once, instead of waiting for a redelivery.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,
