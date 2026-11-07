@@ -46,6 +46,10 @@ Host CLI: `dotnet Whiskers.dll --recover-local-account <email>` — exit codes `
 account, `1` nothing changed. Audit actions: `auth.recovery_issued` (CLI, written before the change),
 `auth.recovery_redeemed`, `auth.recovery_refused` (reason only).
 
+> Note (7 November 2026, after acceptance): contract 0009, amendment A1.2, adds exit code `4` (refused, nothing changed,
+> while the guardrail policy would block redeeming the code) and the `--force` flag that issues it anyway. The decisions
+> above are unchanged.
+
 UI: `/account` (*My account*), `/account/recover` (anonymous), Settings panel *Local accounts* (`LocalAccountsPanel`).
 
 ## Rules

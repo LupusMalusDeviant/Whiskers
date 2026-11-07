@@ -147,10 +147,11 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] One authoritative table supplies UI/MCP levels, preserving Admin for root-equivalent operations.
-- [ ] `CapabilityTableConsistencyTests` enumerates every mutating capability and checks cross-surface equivalence.
-- [ ] `ApprovalSeparationOfDutyTests.Custom_command_requires_an_admin_approver` checks create and run; includes retention/self-backup requirements.
-- [ ] Firewall, nginx, systemd, network, cloud and Hetzner disagreements are resolved consistently and documented.
+- [x] One authoritative table supplies UI/MCP levels, preserving Admin for root-equivalent operations (`CapabilityCatalog`; `DefaultToolLevels` and the pages take their levels from it; roles map through `CapabilityCatalog.LevelFor` / `RoleFor`).
+- [x] `CapabilityTableConsistencyTests` enumerates every mutating capability and checks cross-surface equivalence.
+- [x] `ApprovalSeparationOfDutyTests.Custom_command_requires_an_admin_approver` checks create and run; includes retention/self-backup requirements. Retention and self-backup: `ApprovalSeparationOfDutyTests.Retention_and_self_backup_require_admin`.
+- [x] Firewall, nginx, systemd, network, cloud and Hetzner disagreements are resolved consistently and documented. Resolved to Admin, documented in INV-13 and pinned by `CapabilityTableConsistencyTests.Host_network_and_cloud_areas_are_admin_on_every_surface`.
+- [x] Pages take their role in front of a capability from the catalog (`CapabilityCatalog.RoleOf`); `PageRoleScanTests` forbids any other role there (deny by default) and any second spelling of the role ↔ level rule. The webhook test follows it too (INV-13 ✅, `WebhookTestPageRoleTests`).
 
 **Out of scope:** Approval persistence.
 
@@ -1020,7 +1021,7 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 > the pull request's base or the previous release tag). New records: `docs/v1/RELEASE_GATE.md` (pin `INV-62`, the thirteen
 > open invariants (INV-62 from contract 0006 merged), platform skips, mandatory suites), `PATH_CAPABILITIES.md`, the generated `CAPABILITY_INVENTORY.md`,
 > `PRODUCT_CONTRACT.md` §6.1 (empty) and five §7 rows that had none (M-48, M-49, S-16, U-37, U-38). D12: INV-58 ⚠️; D10:
-> the INV-21 marker names `ReadOnlyKillSwitchWireTests`. CI: `release-gate: release` from release.yml only, the base
+> the INV-21 marker names `ReadOnlyKillSwitchWireTests` (written since; INV-21 ✅). CI: `release-gate: release` from release.yml only, the base
 > comparison step on pull requests and release runs, release.yml calls security.yml and refuses a tag commit not on
 > `origin/main`, the image-runtime run is checked from its TRX file with `.github/required-tests/image-runtime.txt`; the
 > wiring is pinned by `ReleaseWorkflowTests` (with negative mutations). The version is 0.x, so the gate runs in
@@ -1593,7 +1594,7 @@ These original findings should be removed from the open backlog, while retaining
 - **PC-D3/TA-43/E-04:** UI arbitrary SQL requires Admin (`ContainerDetail.razor:1867`); catalog/tool tests pin the shared requirement.
 - **PC-D2 container-shell role:** Admin is enforced (`TerminalView.razor:51–56`). Gateway/session audit remains open.
 - **WP2 UI migration:** Kubernetes actions, `.env`, Artisan/import, server save/remove/onboarding, Git app save/delete, triggers and self-backup have gateway calls. Their blanket “not migrated” descriptions are stale.
-- **U-22/U-15 markup-only control:** Server pause/resume and firewall-dialog submit now call the gateway (`Servers.razor:368,391,424`; `AddFirewallRuleDialog.razor:56`). Complete handler coverage tests remain missing.
+- **U-22/U-15 markup-only control:** Server pause/resume and firewall-dialog submit now call the gateway (`Servers.razor:390,410,442`; `AddFirewallRuleDialog.razor:55`). Handler-level tests since: `ServersPauseResumeRoleTests`, `FirewallRuleRoleTests` (refusal below the catalog level, Denied event, service never called). The notification log (mark read, clear) and the manual CVE scan became Operator gateway capabilities by the user decision of 2026-11-07 (U-39, U-40: `NotificationsRoleTests`, `CveScanRoleTests`); approval decisions and job start are pinned on their handlers (`ApprovalDecisionRoleTests`, `ScheduledTaskRunNowRoleTests`, `EndpointCheckGatingTests`). INV-17 and INV-18 ✅ (WP10).
 - **TA-04 scheduler/AutoUpdate/AutoPatch blanket bypass:** Those execution paths now use the automation runner. The remaining provenance, revocation, confirmation and target defects must not be confused with the original complete absence of governance.
 - **B-18 mutating invoker Confirm bypass:** Mutating agent calls now use the gateway (`AgentToolInvoker.cs:73–74,135–140`). Read-side behavior and future capability omissions still need coverage.
 - **TA-49/F-11 stale installer advice:** Installer now directs users to the setup token (`deploy/install.sh:184–204`); the old recommendation to disable authentication is gone.

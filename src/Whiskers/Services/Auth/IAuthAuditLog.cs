@@ -50,4 +50,6 @@ public static class AuthAuditReasons
     public const string SubjectConflict = "subject_conflict";
     public const string StoreUnavailable = "store_unavailable";
     public const string AuditUnavailable = "audit_unavailable";
+    /// <summary>Contract 0009 (E6): binding a new identity at sign-in is blocked while the kill switch is on.</summary>
+    public const string KillSwitch = "kill_switch";
 }

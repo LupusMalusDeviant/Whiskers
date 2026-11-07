@@ -30,7 +30,12 @@ public sealed class NoopCveFindingsStore : ICveFindingsStore
 
 public sealed class NoopCveMonitorService : ICveMonitorService
 {
-    public Task RunOneCycleAsync(CancellationToken ct = default) => Task.CompletedTask;
+    /// <summary>Nothing is scanned with the CVE module off: says so, and is never reported as a scan that ran.</summary>
+    public Task<bool> RunOneCycleAsync(CancellationToken ct = default, Action? started = null)
+    {
+        Whiskers.Services.Mutations.MutationScope.Note("Skipped: the CVE module is off; nothing was scanned.", success: false);
+        return Task.FromResult(false);
+    }
 }
 
 public sealed class NoopCveAgeStore : ICveAgeStore

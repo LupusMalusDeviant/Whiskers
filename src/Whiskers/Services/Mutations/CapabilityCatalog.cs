@@ -22,12 +22,25 @@ public interface ICapabilityCatalog
 /// </summary>
 public sealed class CapabilityCatalog : ICapabilityCatalog
 {
-    /// <summary>The UI role that holds a catalog level, so pages take their requirement from this table (R1-05).</summary>
-    public static AppRole RoleFor(string level) => McpPermissionLevels.Normalize(level) switch
+    /// <summary>The UI role that holds a catalog level, so pages take their requirement from this table (R1-05). This
+    /// maps a <em>required</em> level: anything that is not read, write or admin is held to Admin (fail closed),
+    /// unlike <see cref="McpPermissionLevels.Normalize"/>, which reads an unknown <em>granted</em> level as read.</summary>
+    public static AppRole RoleFor(string level) => level?.Trim().ToLowerInvariant() switch
     {
-        McpPermissionLevels.Admin => AppRole.Admin,
+        McpPermissionLevels.Read => AppRole.Viewer,
         McpPermissionLevels.Write => AppRole.Operator,
-        _ => AppRole.Viewer,
+        _ => AppRole.Admin,
+    };
+
+    /// <summary>The one place the fixed rule turns a role into the level it holds (INV-13): Admin ↔ admin,
+    /// Operator ↔ write, Viewer (and anything else) ↔ read. Every surface that maps a signed-in person's role to a
+    /// level calls this; <c>PageRoleScanTests.The_role_level_rule_is_spelled_only_in_the_catalog</c> forbids a second
+    /// spelling.</summary>
+    public static string LevelFor(AppRole role) => role switch
+    {
+        AppRole.Admin => McpPermissionLevels.Admin,
+        AppRole.Operator => McpPermissionLevels.Write,
+        _ => McpPermissionLevels.Read,
     };
 
     private static readonly TimeSpan Short = TimeSpan.FromMinutes(2);
@@ -57,6 +70,16 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
     public static IReadOnlyDictionary<string, string> McpToolLevels { get; } = Definitions()
         .Where(c => c.McpTool is not null)
         .ToDictionary(c => c.McpTool!, c => c.RequiredLevel, StringComparer.Ordinal);
+
+    // After Short / Normal / Long: static fields initialise in order, and the definitions read them.
+    private static readonly IReadOnlyDictionary<string, string> LevelById = Definitions()
+        .ToDictionary(c => c.Id, c => c.RequiredLevel, StringComparer.Ordinal);
+
+    /// <summary>The UI role a page requires before it runs <paramref name="capabilityId"/>, straight from the table
+    /// below through <see cref="RoleFor"/> (INV-13): no page states its own role for a capability. An unknown id is
+    /// held to Admin — fail closed; the gateway refuses it in any case.</summary>
+    public static AppRole RoleOf(string capabilityId) =>
+        RoleFor(capabilityId is not null && LevelById.TryGetValue(capabilityId, out var level) ? level : McpPermissionLevels.Admin);
 
     private static Capability Tool(string id, string tool, string level, string target, CapabilityRisk risk, TimeSpan deadline) =>
         new(id, level, target, risk, tool, deadline);
@@ -202,6 +225,15 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("logalert.toggle", W, "log-alert", Rev, Short);
         yield return Tool("checks.pause", "pause_server_checks", W, "server", Rev, Short);
         yield return Tool("checks.resume", "resume_server_checks", W, "server", Rev, Short);
+        // INV-18 (user decision 2026-11-07): a manual CVE scan runs the scanners on every enabled host (apt index,
+        // Trivy image and cache), and the in-app notification log is shared by everyone — both Operator. The cycle
+        // scans one host after another, so it gets the fleet deadline. Risk: a scan changes caches only (package index,
+        // scanner image, findings that the next scan replaces) and stops no workload, so it is Reversible, not
+        // Disruptive; marking read loses no notification (the entries stay, only the unread badge goes), so it is
+        // Reversible too; clearing deletes the history, so it is Destructive.
+        yield return Ui("cve.scan", W, "fleet", Rev, TimeSpan.FromHours(4));
+        yield return Ui("notifications.mark_read", W, "whiskers", Rev, Short);
+        yield return Ui("notifications.clear", W, "whiskers", Des, Short);
         yield return Tool("autopatch.preview", "preview_auto_patch", W, "fleet", Rev, Long);
         // A cycle patches one container after another inside the nightly window; it must not be cut at 30 minutes.
         yield return Ui("autopatch.run", A, "fleet", Dis, TimeSpan.FromHours(4));

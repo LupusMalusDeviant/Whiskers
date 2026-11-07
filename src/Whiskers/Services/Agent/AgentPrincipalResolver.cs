@@ -42,12 +42,7 @@ public sealed class AgentPrincipalResolver : IAgentPrincipalResolver
 
         var email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;
         var role = _roles.GetRole(email);
-        var level = role switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        var level = Whiskers.Services.Mutations.CapabilityCatalog.LevelFor(role);
         return new AgentPrincipal(AgentPrincipalKind.WebUser, email ?? "unbekannt", level, null, UserEmail: email);
     }
 }

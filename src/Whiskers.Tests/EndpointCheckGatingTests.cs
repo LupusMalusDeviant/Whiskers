@@ -364,6 +364,25 @@ public sealed class EndpointCheckGatingTests : IDisposable
         Assert.Empty(host.Calls);
     }
 
+    [Theory]
+    [InlineData(AppRole.Viewer)]
+    [InlineData(AppRole.Operator)]
+    public async Task A_viewer_or_operator_cannot_run_a_check_now_and_nothing_reaches_the_host(AppRole role)
+    {
+        // INV-18 (job start): endpointcheck.run is Admin; the gateway refuses below it at the click.
+        var (runner, host, _) = RunFixture();
+        var store = Store();
+        var check = await Save(Ui(), store, Draft(EndpointCheckKind.Tcp, "example.com", 443));
+        _audit.Events.Clear();
+        _user.Role = role;
+
+        await Assert.ThrowsAsync<MutationRefusedException>(() => Ui().RunAsync("endpointcheck.run",
+            new { serverId = check.ServerId, checkId = check.Id }, ct => runner.RunInDecisionAsync(check.Id, ct)));
+
+        Assert.Equal(["denied:Denied"], _audit.Events);
+        Assert.Empty(host.Calls);
+    }
+
     [Fact]
     public async Task Run_now_runs_the_stored_check_inside_the_ui_decision_and_records_its_operation_id()
     {

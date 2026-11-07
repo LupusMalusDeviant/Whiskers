@@ -281,28 +281,31 @@ public sealed class UiAuditCompletenessTests : IDisposable
         {
             ["Pages/ContainerDatabasePanel.razor"] = ["CheckMigrationStatus"],
             ["Pages/NginxManager.razor"] = ["TestConfig"],
-            // Skips loading the admin-only settings into the circuit; changes nothing.
-            ["Pages/Settings.razor"] = ["OnInitializedAsync"],
+            // Skips loading the admin-only settings into the circuit; changes nothing. A test notification (INV-17 review)
+            // goes to the team's channels and changes no Whiskers state: no capability, so no gateway event to record.
+            ["Pages/Settings.razor"] = ["OnInitializedAsync", "CanSendTestNotificationsAsync"],
         }.GetValueOrDefault(page, []);
-        // Every plain Require( call — whatever its argument and wherever it sits in the handler — must be in a read.
+        // Every plain Require( call or read check (May…(), with a PageReads role) — whatever its argument and wherever
+        // it sits in the handler — must be in a read.
         var handlers = System.Text.RegularExpressions.Regex.Matches(source, @"(?:private|protected|public)[^\n(]*?\s(\w+)\(");
         // An inline role comparison that returns (`if (_role < AppRole.X)`) is a refusal too.
         foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(source,
-                     @"(?<![\w.])Require\(|if \(_role < "))
+                     @"(?<![\w.])Require\(|(?<![\w.])May[A-Z]\w*\(\)|if \(_role < "))
         {
             // `@if (_role < …)` in the markup only decides what is rendered.
             if (call.Index > 0 && source[call.Index - 1] == '@') continue;
             var handler = handlers.Where(h => h.Index < call.Index).LastOrDefault()?.Groups[1].Value;
-            if (handler is "Require" or "RequireAsync") continue;   // the helpers themselves
+            if (handler is "Require" or "RequireAsync" or "RequireRoleAsync" || (handler is not null && System.Text.RegularExpressions.Regex.IsMatch(handler, "^May[A-Z]")))
+                continue;   // the helpers themselves
             Assert.True(handler is not null && reads.Contains(handler),
                 $"{page}: a plain Require( in '{handler}' records no refusal — use RequireAsync.");
         }
 
-        // The configuration pages' own gate style (`if (!_isAdmin)`, `HasRoleAsync(AppRole.…)`): the handler holding it
-        // must record its refusal itself (RefuseAsync), unless it only loads what the page shows.
+        // The configuration pages' own gate style (`if (!_isAdmin)`, `if (!_mayX)`, `if (!allowed)`, `HasRoleAsync(…)`):
+        // the handler holding it must record its refusal itself (RefuseAsync), unless it only loads what the page shows.
         var all = handlers.ToList();
         foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(source,
-                     @"if \(!_isAdmin\)|HasRoleAsync\(AppRole\."))
+                     @"if \(!(?:_isAdmin|_may\w+|allowed)\)|HasRoleAsync\("))
         {
             if (call.Index > 0 && source[call.Index - 1] == '@') continue;
             var at = all.FindLastIndex(h => h.Index < call.Index);

@@ -27,12 +27,7 @@ public sealed record ApprovalResolver(string PrincipalId, string Level, string D
         return session.Valid ? User(email, session.Role) : null;
     }
 
-    public static string LevelOf(AppRole role) => role switch
-    {
-        AppRole.Admin => McpPermissionLevels.Admin,
-        AppRole.Operator => McpPermissionLevels.Write,
-        _ => McpPermissionLevels.Read,
-    };
+    public static string LevelOf(AppRole role) => Whiskers.Services.Mutations.CapabilityCatalog.LevelFor(role);
 }
 
 /// <summary>The outcome of a human decision on an approval.</summary>

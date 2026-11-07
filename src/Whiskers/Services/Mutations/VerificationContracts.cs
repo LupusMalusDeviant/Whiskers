@@ -155,6 +155,10 @@ public static class VerificationContracts
             ["logalert.toggle"] = VerificationContract.None(OwnRecord),
             ["checks.pause"] = VerificationContract.None(OwnRecord),
             ["checks.resume"] = VerificationContract.None(OwnRecord),
+            ["cve.scan"] = VerificationContract.None(
+                "a scan changes no workload: its findings are Whiskers' own record, with nothing external to read back."),
+            ["notifications.mark_read"] = VerificationContract.None(OwnRecord),
+            ["notifications.clear"] = VerificationContract.None(OwnRecord),
             ["autopatch.preview"] = VerificationContract.None("a preview pulls images to compare digests; it changes no container."),
             ["autopatch.run"] = VerificationContract.None(
                 "each container it patches is updated as container.update, which is verified."),

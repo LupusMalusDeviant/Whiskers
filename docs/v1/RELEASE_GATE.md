@@ -37,11 +37,7 @@ Highest invariant ID: INV-62
 | Invariant | Status | Package | Why it is open | Reference |
 |---|---|---|---|---|
 | INV-01 | ⚠️ | R1-03 | webhook and system principals come with their packages; humans are keyed by the account handle, not the credential | — |
-| INV-13 | ⚠️ | R1-05 | some pages still hard-code their role instead of taking it from the capability table | — |
-| INV-17 | ⚠️ | WP10 | no handler-level test pins the Servers pause/resume page (U-22) and the firewall dialog (U-15) | — |
-| INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |
 | INV-19 | ⚠️ | WP2 | root-equivalent capabilities are Admin, not yet proven for every surface | — |
-| INV-21 | ⚠️ | WP6 | the kill-switch wire test `ReadOnlyKillSwitchWireTests` is still owed | — |
 | INV-25 | ⚠️ | R1-02 | with neither policy file present the restrictive default is created, so deleting both looks like a first start | — |
 | INV-52 | ⚠️ | WP7 | SSH private keys and mTLS client keys are stored in plaintext; no in-place `VAULT_KEY` rotation | — |
 | INV-56 | ⚠️ | WP7 | readiness lines are German only, and no test compares README/SECURITY.md claims with the code | — |

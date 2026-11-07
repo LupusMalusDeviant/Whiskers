@@ -190,21 +190,14 @@ else
     private List<string> _deployLog = new();
     private Whiskers.Models.GitDeployApp? _deployApp;
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["GitDeployView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required) return true;
+        Snackbar.Add(L["GitDeployView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -232,7 +225,7 @@ else
 
     private async Task SaveApp()
     {
-        if (!await RequireAsync(AppRole.Admin, "gitdeploy.save",
+        if (!await RequireAsync("gitdeploy.save",
                 new { appId = _editing is null ? null : _form.Id, name = _form.Name, serverId = _form.ServerId, branch = _form.Branch })) return;
         try
         {
@@ -272,7 +265,7 @@ else
 
     private async Task DeleteApp(Whiskers.Models.GitDeployApp app)
     {
-        if (!await RequireAsync(AppRole.Admin, "gitdeploy.delete",
+        if (!await RequireAsync("gitdeploy.delete",
                 new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["GitDeployView_Dialog_DeleteTitle"].Value,
@@ -297,7 +290,7 @@ else
     // A deploy clones and runs `docker compose up` as root on the host: root-equivalent, Admin (R1-05).
     private async Task StartDeploy(Whiskers.Models.GitDeployApp app)
     {
-        if (!await RequireAsync(AppRole.Admin, "gitdeploy.deploy",
+        if (!await RequireAsync("gitdeploy.deploy",
                 new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch })) return;
         _deployApp = app;
         _deployLog = new();
@@ -344,7 +337,7 @@ else
     private async Task AdoptApp(Whiskers.Models.GitDeployApp app)
     {
         if (_me is null) return;
-        if (!await RequireAsync(AppRole.Admin, "gitdeploy.save",
+        if (!await RequireAsync("gitdeploy.save",
                 new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch, owner = _me })) return;
         try
         {

@@ -38,7 +38,10 @@ public static class FederatedSignIn
 
         if (!decision.Admitted || string.IsNullOrEmpty(decision.Account) || string.IsNullOrEmpty(decision.BindingId))
         {
-            context.Response.Redirect(pathBase + "/login?error=unauthorized");
+            // Contract 0009 (D5): a binding the kill switch blocked says so; every other refusal stays the same answer.
+            context.Response.Redirect(pathBase + (decision.Reason == AuthAuditReasons.KillSwitch
+                ? "/login?error=kill_switch"
+                : "/login?error=unauthorized"));
             context.HandleResponse();
             // The account only when the address is a configured entry; a stranger is recorded as anonymous.
             await authAudit.SignInRefusedAsync(context.HttpContext, method, decision.Account,

@@ -105,22 +105,25 @@ else
     private string _editContent = "";
     private AppRole _role = AppRole.Viewer;
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["NginxManager_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required) return true;
+        Snackbar.Add(L["NginxManager_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
+    /// <summary>The role check in front of <c>nginx -t</c>, a read; its role is fixed by the read
+    /// (<see cref="Whiskers.Components.PageReads"/>), not by a capability.</summary>
+    private bool MayTestConfig()
+    {
+        var required = Whiskers.Components.PageReads.NginxConfigTest;
+        if (_role >= required) return true;
+        Snackbar.Add(L["NginxManager_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         return false;
     }
 
@@ -152,7 +155,7 @@ else
 
     private async Task SaveConfig()
     {
-        if (!await RequireAsync(AppRole.Admin, "nginx.update", new { serverId = ServerId, siteName = _editingSite })) return;
+        if (!await RequireAsync("nginx.update", new { serverId = ServerId, siteName = _editingSite })) return;
         if (_editingSite == null) return;
 
         var confirmed = await DialogService.ShowMessageBoxAsync(
@@ -184,7 +187,7 @@ else
 
     private async Task ToggleSite(string name, bool enable)
     {
-        if (!await RequireAsync(AppRole.Admin, enable ? "nginx.site_enable" : "nginx.site_disable", new { serverId = ServerId, siteName = name })) return;
+        if (!await RequireAsync(enable ? "nginx.site_enable" : "nginx.site_disable", new { serverId = ServerId, siteName = name })) return;
 
         try
         {
@@ -208,7 +211,7 @@ else
 
     private async Task TestConfig()
     {
-        if (!Require(AppRole.Admin)) return;
+        if (!MayTestConfig()) return;
 
         try
         {
@@ -221,7 +224,7 @@ else
 
     private async Task ReloadNginx()
     {
-        if (!await RequireAsync(AppRole.Admin, "nginx.reload", new { serverId = ServerId })) return;
+        if (!await RequireAsync("nginx.reload", new { serverId = ServerId })) return;
 
         try
         {

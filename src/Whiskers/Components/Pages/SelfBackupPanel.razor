@@ -138,21 +138,14 @@ else
         await LoadBackups();
     }
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["SelfBackupPanel_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required) return true;
+        Snackbar.Add(L["SelfBackupPanel_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -165,7 +158,7 @@ else
 
     private async Task CreateBackup()
     {
-        if (!await RequireAsync(AppRole.Admin, "selfbackup.create", new { trigger = "manual" })) return;
+        if (!await RequireAsync("selfbackup.create", new { trigger = "manual" })) return;
         _busy = true;
         try
         {
@@ -199,7 +192,7 @@ else
 
     private async Task DeleteBackup(Whiskers.Services.Backup.SelfBackupInfo info)
     {
-        if (!await RequireAsync(AppRole.Admin, "selfbackup.delete", new { archive = info.FileName })) return;
+        if (!await RequireAsync("selfbackup.delete", new { archive = info.FileName })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["SelfBackupPanel_Dialog_DeleteTitle"].Value,
             L["SelfBackupPanel_Dialog_DeleteMessage", info.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yy HH:mm")].Value,
@@ -220,7 +213,7 @@ else
 
     private async Task RestoreExisting(Whiskers.Services.Backup.SelfBackupInfo info)
     {
-        if (!await RequireAsync(AppRole.Admin, "selfbackup.restore", new { archive = info.FileName })) return;
+        if (!await RequireAsync("selfbackup.restore", new { archive = info.FileName })) return;
         var path = BackupService.ResolveArchivePath(info.Id);
         if (path is null) { Snackbar.Add(L["SelfBackupPanel_Snackbar_ArchiveNotFound"].Value, Severity.Error); return; }
         await ConfirmAndRestore(path, L["SelfBackupPanel_Text_BackupFrom", info.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yy HH:mm")].Value);
@@ -228,7 +221,7 @@ else
 
     private async Task OnFileSelected(InputFileChangeEventArgs e)
     {
-        if (!await RequireAsync(AppRole.Admin, "selfbackup.restore", new { archive = e.File?.Name })) return;
+        if (!await RequireAsync("selfbackup.restore", new { archive = e.File?.Name })) return;
         var file = e.File;
         if (file is null) return;
         _busy = true;
@@ -256,7 +249,7 @@ else
 
     private async Task ConfirmAndRestore(string archivePath, string description)
     {
-        if (!await RequireAsync(AppRole.Admin, "selfbackup.restore", new { archive = Path.GetFileName(archivePath) })) return;
+        if (!await RequireAsync("selfbackup.restore", new { archive = Path.GetFileName(archivePath) })) return;
 
         // Validate before asking, so we can show a precise error instead of a scary confirm on a bad file.
         var validation = await BackupService.ValidateArchiveAsync(archivePath);

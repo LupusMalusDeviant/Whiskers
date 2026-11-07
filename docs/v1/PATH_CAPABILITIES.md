@@ -76,6 +76,8 @@ The joined view is generated into [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTO
 | U-36 | identity.binding_confirm, identity.binding_remove |
 | U-37 | mtls.client_migrate, mtls.shared_client_retire |
 | U-38 | endpointcheck.save, endpointcheck.delete, endpointcheck.run |
+| U-39 | notifications.mark_read, notifications.clear |
+| U-40 | cve.scan |
 
 ## Capabilities without a path
 

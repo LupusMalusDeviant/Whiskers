@@ -1212,8 +1212,19 @@ else
         }
     }
 
+    /// <summary>INV-17: a test message goes out to the team's channels, so the handler checks the role the user holds now
+    /// (not the page's cached one). It changes no Whiskers state and is not a gateway capability, so there is nothing to
+    /// audit; the refusal is shown.</summary>
+    private async Task<bool> CanSendTestNotificationsAsync()
+    {
+        if (await CurrentUser.HasRoleAsync(AppRole.Admin)) return true;
+        Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error);
+        return false;
+    }
+
     private async Task TestChannels()
     {
+        if (!await CanSendTestNotificationsAsync()) return;
         try
         {
             await NotificationService.SendTestAsync();
@@ -1222,13 +1233,14 @@ else
         catch (Exception ex) { Snackbar.Add(L["Settings_Snackbar_TestPartialFail", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Warning); }
     }
 
-    /// <summary>The Admin check in front of a write: a refusal is also the gateway's Denied event for
-    /// <paramref name="capabilityId"/>, so the attempt is on record once (R1-22).</summary>
-    private async Task<bool> RequireAdminAsync(string capabilityId, object arguments)
+    /// <summary>The role check in front of a write, with the role from the capability catalog (INV-13): a refusal is
+    /// also the gateway's Denied event for <paramref name="capabilityId"/>, so the attempt is on record once (R1-22).</summary>
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (await CurrentUser.HasRoleAsync(AppRole.Admin)) return true;
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (await CurrentUser.HasRoleAsync(required)) return true;
         Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error);
-        await Mutations.RefuseAsync(capabilityId, arguments, "Requires the Admin role.");
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
 
@@ -1264,7 +1276,7 @@ else
 
     private async Task AddApiKey()
     {
-        if (!await RequireAdminAsync("mcp.key_create", new { section = "mcp-api-keys", name = _newKeyName?.Trim(), level = _newKeyLevel })) return;
+        if (!await RequireAsync("mcp.key_create", new { section = "mcp-api-keys", name = _newKeyName?.Trim(), level = _newKeyLevel })) return;
         if (string.IsNullOrWhiteSpace(_newKeyName)) return;
         Whiskers.Models.McpApiKeyConfig newKey;
         try
@@ -1284,7 +1296,7 @@ else
     {
         // Same guard as every other write on this page — hiding the page is not authorization.
         var name = _mcpApiKeys.FirstOrDefault(k => k.Id == id)?.Name ?? id;
-        if (!await RequireAdminAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name })) return;
+        if (!await RequireAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name })) return;
         try
         {
             await Mutations.RunAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name },
@@ -1352,7 +1364,7 @@ else
 
     private async Task SaveWhitelist()
     {
-        if (!await RequireAdminAsync("config.whitelist", new { section = "whitelist" })) return;
+        if (!await RequireAsync("config.whitelist", new { section = "whitelist" })) return;
         // An enabled whitelist with zero entries denies everyone (fail-closed) — refuse to save that state
         // so an admin can't accidentally lock the whole instance (including themselves) out.
         if (_whitelistEnabled && _whitelistEmails.Count == 0)
@@ -1390,6 +1402,7 @@ else
 
     private async Task TestMattermost()
     {
+        if (!await CanSendTestNotificationsAsync()) return;
         try
         {
             await NotificationService.SendTestAsync();
@@ -1403,6 +1416,7 @@ else
 
     private async Task TestMatrix()
     {
+        if (!await CanSendTestNotificationsAsync()) return;
         // IMatrixNotificationService lives in the Notifications module — resolve it lazily so /settings still
         // loads when that module is disabled (in which case the Matrix panel and this button aren't rendered).
         var matrix = ServiceProvider.GetService<Whiskers.Services.Notifications.IMatrixNotificationService>();
@@ -1434,7 +1448,7 @@ else
 
     private async Task SaveRoles()
     {
-        if (!await RequireAdminAsync("config.roles", new { section = "roles" })) return;
+        if (!await RequireAsync("config.roles", new { section = "roles" })) return;
         // DefaultRole travels along: without it every role change reset a configured default to Viewer.
         try
         {
@@ -1475,7 +1489,7 @@ else
 
     private async Task DeleteVaultSecret(string key)
     {
-        if (!await RequireAdminAsync("vault.secret_delete", new { section = "vault", key })) return;
+        if (!await RequireAsync("vault.secret_delete", new { section = "vault", key })) return;
         try
         {
             await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key },
@@ -1487,7 +1501,7 @@ else
 
     private async Task AddVaultSecret()
     {
-        if (!await RequireAdminAsync("vault.secret_set", new { section = "vault", key = _newVaultKey?.Trim() })) return;
+        if (!await RequireAsync("vault.secret_set", new { section = "vault", key = _newVaultKey?.Trim() })) return;
         if (string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue)) return;
         var key = _newVaultKey.Trim();
         try
@@ -1520,11 +1534,20 @@ else
     {
         if (_cveScanRequested || CveStore.IsScanning) return Task.CompletedTask;
         _cveScanRequested = true;
-        Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info);
+        // The scan is the gateway's `cve.scan` decision (Operator, INV-18, user decision 2026-11-07), decided at the
+        // click; the decision lasts the whole cycle, run off the circuit.
         _ = Task.Run(async () =>
         {
             string? error = null;
-            try { await CveMonitor.RunOneCycleAsync(); }
+            string? refused = null;
+            var ran = true;
+            try
+            {
+                // "Started" only once the cycle holds the scan gate: a click that finds a cycle running hears only that.
+                ran = await Mutations.RunAsync("cve.scan", new { }, ct => CveMonitor.RunOneCycleAsync(ct,
+                    started: () => _ = InvokeAsync(() => Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info))));
+            }
+            catch (MutationRefusedException ex) { refused = ex.Message; }
             catch (Exception ex)
             {
                 error = ex.Message;
@@ -1537,10 +1560,14 @@ else
                 await InvokeAsync(() =>
                 {
                     _cveScanRequested = false;
-                    if (error is null)
-                        Snackbar.Add(L["Cves_Snackbar_ScanFinished"].Value, MudBlazor.Severity.Success);
-                    else
+                    if (refused is not null)
+                        Snackbar.Add(refused, MudBlazor.Severity.Warning);
+                    else if (error is not null)
                         Snackbar.Add(L["Cves_Snackbar_ScanFailed", error].Value, MudBlazor.Severity.Error);
+                    else if (!ran)
+                        Snackbar.Add(L["Cves_Snackbar_ScanNotStarted"].Value, MudBlazor.Severity.Info);
+                    else
+                        Snackbar.Add(L["Cves_Snackbar_ScanFinished"].Value, MudBlazor.Severity.Success);
                     StateHasChanged();
                 });
             }

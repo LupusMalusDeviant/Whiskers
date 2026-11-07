@@ -57,8 +57,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCleanup", "host.prune"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ApplyRetention", "db.backup_delete"),
         ("Whiskers.Services.Mutations.ComposeImpact", "SaveEnvAsync", "container.env_file_save"),
-        // Two separate calls in one helper: with a capability (migrate, rollback, SQL import) it runs the primitive inside
-        // that decision; without one (migrate:status) it reads through the plain executor — so it is in both lists.
+        // The write helper: migrate, rollback and SQL import run the primitive inside their capability decision.
         ("Whiskers.Components.Pages.ContainerDatabasePanel", "ExecInContainerViaHost", "container.exec, db.query"),
         ("Whiskers.Services.Mutations.ComposeImpact", "DeployAsync", "app.deploy, compose.deploy"),
         ("Whiskers.Services.Webhooks.WebhookService", "DeployCompose", "compose.deploy"),
@@ -276,7 +275,7 @@ public class MutationGatewayCoverageTests
     /// <summary>Plain-executor calls that read (the command changes nothing on the host).</summary>
     public static readonly (string Owner, string Handler, string Why)[] PlainExecutorReads =
     [
-        ("Whiskers.Components.Pages.ContainerDatabasePanel", "ExecInContainerViaHost", "artisan migrate:status (capability null); the write branch uses the primitive"),
+        ("Whiskers.Components.Pages.ContainerDatabasePanel", "ReadMigrationStatusAsync", "artisan migrate:status, a fixed command; the writes go through ExecInContainerViaHost and the primitive"),
         ("Whiskers.Components.Pages.ContainerDetail", "LoadEnvVars", "finds the compose directory and reads its .env"),
         ("Whiskers.Mcp.Tools.MonitoringTools", "GetServerLogs", "journalctl / log tail"),
         ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumesAsync", "docker volume ls"),
@@ -593,7 +592,6 @@ public class MutationGatewayCoverageTests
         ("ICveFindingsStore.Remove", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ICveFindingsStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ICveFindingsStore.Set", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
-        ("ICveMonitorService.RunOneCycleAsync", "a scan cycle; its host side effects are the designed exemption ScannerHostSideEffects (M2)"),
         ("IFleetSnapshotCache.PruneRemovedServers", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IFleetSnapshotCache.Put", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IHealthStore.AddRecord", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
@@ -602,8 +600,6 @@ public class MutationGatewayCoverageTests
         ("IImageUpdateStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IImageUpdateStore.Set", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IInAppNotificationStore.Add", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
-        ("IInAppNotificationStore.Clear", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
-        ("IInAppNotificationStore.MarkAllRead", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ILogMonitorService.SuspendedContainers", "a read (the list of suspended containers)"),
         ("IMetricRollupService.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("INotificationOutbox.AddAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
@@ -641,6 +637,19 @@ public class MutationGatewayCoverageTests
     }
 
     [Fact]
+    public void Only_the_trigger_dispatcher_detaches_a_scope()
+    {
+        // MutationScope.Detach drops the whole open scope — its authority and the restrictions nested calls inherit
+        // from it (pinned preset, trigger id). That is safe only for work that brings its own principal and pin: an AI
+        // trigger run. Anything else that starts work outside a decision suppresses the flow (test below).
+        var callers = MutationCallScanner.Callers(App, m => m.DeclaringType == typeof(MutationScope)
+                                                             && m.Name == nameof(MutationScope.Detach))
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().Order(StringComparer.Ordinal).ToList();
+
+        Assert.Equal(["Whiskers.Services.Agent.Triggers.AiTriggerDispatcher.OnEventAsync"], callers);
+    }
+
+    [Fact]
     public void Work_started_in_the_background_from_a_decision_does_not_inherit_its_scope()
     {
         // m3 (R1-48 review): a scope closed under work it started is refused from then on — also a nested decision begun
@@ -672,9 +681,9 @@ public class MutationGatewayCoverageTests
     /// decision (host start-up, hosted services, request handling before any decision, reads).</summary>
     private static readonly (string Handler, string Why)[] BackgroundStartsOutsideDecisions =
     [
-        ("Whiskers.Components.Pages.Cves.TriggerScan", "a page click that starts a CVE scan (no gateway operation); not inside a runner lambda"),
+        ("Whiskers.Components.Pages.Cves.TriggerScan", "a page click that opens the cve.scan decision off the circuit: the Task.Run is outside any decision, the scan runs inside the one it opens (INV-18)"),
         ("Whiskers.Components.Pages.Dashboard.OnInitializedAsync", "page initialisation loading stats (reads)"),
-        ("Whiskers.Components.Pages.Settings.TriggerCveScan", "a page click that starts a CVE scan (no gateway operation); not inside a runner lambda"),
+        ("Whiskers.Components.Pages.Settings.TriggerCveScan", "a page click that opens the cve.scan decision off the circuit: the Task.Run is outside any decision, the scan runs inside the one it opens (INV-18)"),
         ("Whiskers.Services.Auth.AuthAuditLog.StartAsync", "hosted-service start (host start-up)"),
         ("Whiskers.Services.Docker.SshTunnelManager.EstablishTunnelAsync", "the tunnel's pump forwards bytes and calls no service; a decision's scope it may carry authorizes nothing once closed"),
         ("Whiskers.Services.Notifications.OutboundTargetStartupCheck.StartAsync", "hosted-service start (host start-up)"),

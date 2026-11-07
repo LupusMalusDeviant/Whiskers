@@ -106,11 +106,13 @@
         if (string.IsNullOrWhiteSpace(_email)) return;
         var owner = PrincipalIds.User(_email);
         var featureId = feature.Id;
-        var isAdmin = _role >= AppRole.Admin;
-        if (!isAdmin)
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var allowed = _role >= CapabilityCatalog.RoleOf("automation.owner_set");
+        if (!allowed)
         {
             // The refused attempt is the gateway's Denied event (R1-22).
-            await Mutations.RefuseAsync("automation.owner_set", new { feature = featureId, owner }, "Requires the Admin role.");
+            await Mutations.RefuseAsync("automation.owner_set", new { feature = featureId, owner },
+                $"Requires the {CapabilityCatalog.RoleOf("automation.owner_set")} role.");
             return;
         }
         _busy = true;

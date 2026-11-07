@@ -44,6 +44,9 @@ public sealed class MutationRefusedException(string message, MutationStatus stat
 {
     public MutationStatus Status { get; } = status;
     public string OperationId { get; } = operationId;
+
+    /// <summary>The policy rules that decided the refusal (empty when the policy step did not decide it).</summary>
+    public IReadOnlyList<string> MatchedRules { get; init; } = [];
 }
 
 /// <summary>A UI mutation did not finish in time (the capability's deadline).</summary>
@@ -117,7 +120,7 @@ public sealed class UiMutationRunner : IUiMutationRunner
                 throw new MutationFailedException(outcome.Reason ?? "The action failed.", outcome.Error);
             default:
                 throw new MutationRefusedException(LocalizedReason(outcome) ?? outcome.Reason ?? "The action was refused.",
-                    outcome.Status, outcome.OperationId);
+                    outcome.Status, outcome.OperationId) { MatchedRules = outcome.MatchedRules };
         }
     }
 
@@ -172,12 +175,7 @@ public sealed class UiMutationRunner : IUiMutationRunner
         var email = await _user.GetEmailAsync();
         var session = await _user.CheckSessionAsync();
         var role = session.Valid ? session.Role : AppRole.Viewer;
-        var level = role switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        var level = CapabilityCatalog.LevelFor(role);
         var principal = string.IsNullOrWhiteSpace(email)
             ? new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.Anonymous, "unknown", level)
             : new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.User(email), email, level);

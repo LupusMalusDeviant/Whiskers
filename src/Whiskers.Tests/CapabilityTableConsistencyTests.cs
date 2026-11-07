@@ -81,17 +81,10 @@ public class CapabilityTableConsistencyTests
     {
         var level = Catalog.Find(id)!.RequiredLevel;
         var role = CapabilityCatalog.RoleFor(level);
-        Assert.True(McpPermissionLevels.HasAccess(Level(role), level));
+        Assert.True(McpPermissionLevels.HasAccess(CapabilityCatalog.LevelFor(role), level));
         if (role > AppRole.Viewer)
-            Assert.False(McpPermissionLevels.HasAccess(Level(role - 1), level));
+            Assert.False(McpPermissionLevels.HasAccess(CapabilityCatalog.LevelFor(role - 1), level));
     }
-
-    private static string Level(AppRole role) => role switch
-    {
-        AppRole.Admin => McpPermissionLevels.Admin,
-        AppRole.Operator => McpPermissionLevels.Write,
-        _ => McpPermissionLevels.Read,
-    };
 
     /// <summary>Every capability a page runs through the gateway is in the catalog (UI-only ones included), and the
     /// Scheduled tasks page takes the delete level from the catalog instead of a hard-coded role.</summary>
@@ -108,54 +101,56 @@ public class CapabilityTableConsistencyTests
         Assert.Contains(ids, x => Catalog.Find(x.Id)!.McpTool is null);
 
         var page = File.ReadAllText(Path.Combine(components, "Pages", "ScheduledTasksView.razor"));
-        Assert.Contains("RequireAsync(RoleOf(\"scheduler.delete\"), \"scheduler.delete\"", page);
+        Assert.Contains("RequireAsync(\"scheduler.delete\"", page);
+        Assert.Contains("RequireRoleAsync(CapabilityCatalog.RoleOf(capabilityId), capabilityId, arguments)", page);
     }
 
-    /// <summary>
-    /// Where a page handler guards a gateway call with a hard-coded role, that role is exactly the catalog's role
-    /// for what it runs (the strictest, when it runs several). Handlers that ask the catalog (<c>RoleOf</c>) or leave
-    /// the check to the gateway — which enforces the catalog level for the signed-in user in any case — pass.
-    /// </summary>
-    [Fact]
-    public void A_hard_coded_page_role_matches_the_catalog_for_what_the_handler_runs()
-    {
-        var components = Path.Combine(SourceRoot(), "src", "Whiskers", "Components");
-        var mismatches = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(components, "*.razor", SearchOption.AllDirectories))
-        {
-            var source = File.ReadAllText(file);
-            foreach (var (method, body) in Methods(source))
-            {
-                var ids = System.Text.RegularExpressions.Regex.Matches(body, @"Mutations\.RunAsync(?:<[^>]*>)?\(\s*""([a-z_]+\.[a-z_.]+)""")
-                    .Select(m => m.Groups[1].Value).Distinct().ToList();
-                var guards = System.Text.RegularExpressions.Regex.Matches(body, @"AppRole\.(Admin|Operator|Viewer)")
-                    .Select(m => Enum.Parse<AppRole>(m.Groups[1].Value)).ToList();
-                if (ids.Count == 0 || guards.Count == 0) continue;
-                var expected = ids.Select(id => CapabilityCatalog.RoleFor(Catalog.Find(id)!.RequiredLevel)).Max();
-                if (guards.Max() != expected)
-                    mismatches.Add($"{Path.GetFileName(file)}:{method} guards {guards.Max()} but runs {string.Join(",", ids)} ({expected})");
-            }
-        }
-        Assert.Empty(mismatches);
-    }
+    // ── INV-13: a page takes the role in front of a capability from the catalog, never from its own source ──────
 
-    /// <summary>The C# methods of a component (name and body), found by brace matching.</summary>
-    private static IEnumerable<(string Name, string Body)> Methods(string source)
-    {
-        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(source,
-                     @"\n\s+(?:private|protected|public|internal)[^\n;=]*?\b(\w+)\s*\([^)]*\)\s*\n\s*\{"))
-        {
-            var depth = 1;
-            var i = m.Index + m.Length;
-            while (depth > 0 && i < source.Length)
-            {
-                if (source[i] == '{') depth++;
-                else if (source[i] == '}') depth--;
-                i++;
-            }
-            yield return (m.Groups[1].Value, source[(m.Index + m.Length)..i]);
-        }
-    }
+    /// <summary>The role a page requires for a capability is the catalog's: <see cref="CapabilityCatalog.RoleOf"/>
+    /// is <see cref="CapabilityCatalog.RoleFor"/> of the table's level for every id, and an id the table does not know
+    /// is held to Admin (fail closed).</summary>
+    [Theory]
+    [MemberData(nameof(Capabilities))]
+    public void The_page_role_of_a_capability_is_the_catalog_role(string id) =>
+        Assert.Equal(CapabilityCatalog.RoleFor(Catalog.Find(id)!.RequiredLevel), CapabilityCatalog.RoleOf(id));
+
+    [Theory]
+    [InlineData("container.no_such_verb")]
+    [InlineData("cloud.unknown_action")]   // CloudView builds "cloud.{action}" for an action it does not map
+    [InlineData("")]
+    [InlineData(null)]
+    public void An_unknown_capability_needs_admin_on_a_page(string? id) =>
+        Assert.Equal(AppRole.Admin, CapabilityCatalog.RoleOf(id!));
+
+    /// <summary>The fixed rule, both ways (INV-13): <see cref="CapabilityCatalog.LevelFor"/> is the one role → level
+    /// mapping (anything but Admin and Operator holds read), and <see cref="CapabilityCatalog.RoleFor"/> maps a
+    /// required level to a role — a level that is not read, write or admin is held to Admin, never to Viewer.</summary>
+    [Theory]
+    [InlineData(AppRole.Admin, McpPermissionLevels.Admin)]
+    [InlineData(AppRole.Operator, McpPermissionLevels.Write)]
+    [InlineData(AppRole.Viewer, McpPermissionLevels.Read)]
+    [InlineData((AppRole)99, McpPermissionLevels.Read)]
+    [InlineData((AppRole)(-1), McpPermissionLevels.Read)]
+    public void A_role_holds_the_level_of_the_fixed_rule(AppRole role, string level) =>
+        Assert.Equal(level, CapabilityCatalog.LevelFor(role));
+
+    [Theory]
+    [InlineData("admin", AppRole.Admin)]
+    [InlineData(" Write ", AppRole.Operator)]
+    [InlineData("READ", AppRole.Viewer)]
+    [InlineData("wirte", AppRole.Admin)]
+    [InlineData("", AppRole.Admin)]
+    [InlineData(null, AppRole.Admin)]
+    public void A_required_level_maps_to_its_role_and_anything_else_to_admin(string? level, AppRole role) =>
+        Assert.Equal(role, CapabilityCatalog.RoleFor(level!));
+
+    [Theory]
+    [InlineData(AppRole.Viewer)]
+    [InlineData(AppRole.Operator)]
+    [InlineData(AppRole.Admin)]
+    public void The_two_directions_of_the_rule_agree(AppRole role) =>
+        Assert.Equal(role, CapabilityCatalog.RoleFor(CapabilityCatalog.LevelFor(role)));
 
     /// <summary>The same operation offered under different capability ids on different surfaces needs the same
     /// level everywhere (R1-05): one table, no cheaper door.</summary>

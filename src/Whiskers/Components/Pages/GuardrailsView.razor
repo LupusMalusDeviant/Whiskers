@@ -96,6 +96,34 @@
             }
         </MudPaper>
 
+        @* Contract 0009 (D6): the kill switch's exceptions — fixed in code, the last three blockable beforehand. *@
+        <MudPaper Class="pa-4 mb-4" id="killswitch-exemptions">
+            <MudText Typo="Typo.subtitle1">@L["GuardrailsView_Exemptions_Title"]</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">@L["GuardrailsView_Exemptions_Intro"]</MudText>
+            @foreach (var fixedId in new[] { "E1", "E2", "E3" })
+            {
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;" class="mb-1">
+                    <div style="flex:1; min-width:220px;">
+                        <MudText Typo="Typo.body2">@L[$"GuardrailsView_Exemption_{fixedId}_Name"]</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L[$"GuardrailsView_Exemption_{fixedId}_Reason"]</MudText>
+                    </div>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@L["GuardrailsView_Exemptions_Fixed"]</MudChip>
+                </div>
+            }
+            @foreach (var exemption in KillSwitchExemptions.Blockable)
+            {
+                var id = exemption;
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;" class="mb-1">
+                    <div style="flex:1; min-width:220px;">
+                        <MudText Typo="Typo.body2">@L[$"GuardrailsView_Exemption_{id}_Name"]</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L[$"GuardrailsView_Exemption_{id}_Reason"]</MudText>
+                    </div>
+                    <MudSwitch T="bool" Value="@IsBlocked(id)" ValueChanged="@(v => SetBlocked(id, v))" Color="Color.Warning"
+                               Label="@L["GuardrailsView_Exemptions_Block_Label"]" id="@($"block-{id}")" />
+                </div>
+            }
+        </MudPaper>
+
         <MudGrid>
             @* Autonomy *@
             <MudItem xs="12" md="6">
@@ -389,12 +417,7 @@
     {
         var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
         var role = await CurrentUser.GetRoleAsync();
-        var level = role switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        var level = CapabilityCatalog.LevelFor(role);
         return new Models.Agent.AgentPrincipal(Models.Agent.AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
     }
 
@@ -422,5 +445,19 @@
         // Contract 0006: not edited on this page, but a save must keep them (null = the default stays null).
         ExposureLabelPrefixes = s.ExposureLabelPrefixes is null ? null : new(s.ExposureLabelPrefixes),
         ExposureConfirmClasses = s.ExposureConfirmClasses is null ? null : new(s.ExposureConfirmClasses),
+        KillSwitchBlockedExemptions = s.KillSwitchBlockedExemptions is null ? null : new(s.KillSwitchBlockedExemptions),
     };
+
+    /// <summary>Contract 0009 (D6): whether the edited preset blocks <paramref name="exemption"/> under the kill switch.</summary>
+    private bool IsBlocked(string exemption) =>
+        _edit?.Policy.KillSwitchBlockedExemptions?.Contains(exemption, StringComparer.Ordinal) == true;
+
+    /// <summary>Changes the edit buffer only; the block takes effect with the next save (<c>guardrails.save</c>).</summary>
+    private void SetBlocked(string exemption, bool blocked)
+    {
+        if (_edit is null) return;
+        var list = KillSwitchExemptions.Blockable
+            .Where(e => e == exemption ? blocked : IsBlocked(e)).ToList();
+        _edit.Policy.KillSwitchBlockedExemptions = list.Count == 0 ? null : list;
+    }
 }

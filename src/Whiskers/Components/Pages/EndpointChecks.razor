@@ -277,12 +277,14 @@ else
     };
 
     /// <summary>The role check in front of a mutation; a refusal is also the gateway's Denied event (R1-22).</summary>
-    private async Task<bool> RequireAdminAsync(string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
         _role = (await CurrentUser.CheckSessionAsync()).Role;
-        if (_role >= AppRole.Admin && _me is not null) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required && _me is not null) return true;
         Snackbar.Add(L["Checks_Snackbar_AdminOnly"].Value, Severity.Warning);
-        await Mutations.RefuseAsync(capabilityId, arguments, "Requires the Admin role.");
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
 
@@ -315,7 +317,7 @@ else
             f.Kind == EndpointCheckKind.TlsExpiry ? f.TlsWarnDays : null,
             f.IntervalSeconds, f.TimeoutSeconds, ParseExceptions(f.Exceptions), f.Enabled);
         var arguments = new { serverId = draft.ServerId, checkId = draft.Id };
-        if (!await RequireAdminAsync("endpointcheck.save", arguments)) return;
+        if (!await RequireAsync("endpointcheck.save", arguments)) return;
         _busy = true;
         try
         {
@@ -334,7 +336,7 @@ else
     private async Task DeleteAsync(EndpointCheckDefinition c)
     {
         var arguments = new { serverId = c.ServerId, checkId = c.Id };
-        if (!await RequireAdminAsync("endpointcheck.delete", arguments)) return;
+        if (!await RequireAsync("endpointcheck.delete", arguments)) return;
         _busy = true;
         try
         {
@@ -349,7 +351,7 @@ else
     private async Task RunNowAsync(EndpointCheckDefinition c)
     {
         var arguments = new { serverId = c.ServerId, checkId = c.Id };
-        if (!await RequireAdminAsync("endpointcheck.run", arguments)) return;
+        if (!await RequireAsync("endpointcheck.run", arguments)) return;
         // Review m1: the same slots as the monitor — one run per check and per server, four across the fleet.
         if (!Slots.TryAcquire(c.Id, c.ServerId))
         {

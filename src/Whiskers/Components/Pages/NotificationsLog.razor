@@ -4,6 +4,8 @@
 @inject Whiskers.Services.Notifications.IInAppNotificationStore Store
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject IUiMutationRunner Mutations
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["NotificationsLog_PageTitle"]</PageTitle>
@@ -39,8 +41,12 @@
     </MudSelect>
     <MudSpacer />
     <MudText Typo="Typo.body2" Style="color: #888;">@L["NotificationsLog_EntryCount", _totalCount]</MudText>
-    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.DoneAll" OnClick="MarkAllRead">@L["NotificationsLog_Button_MarkAllRead"]</MudButton>
-    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearAll">@L["NotificationsLog_Button_ClearAll"]</MudButton>
+    @* Shown from Operator on: presentation only — the gateway decides both at the click (INV-18). *@
+    @if (_role >= AppRole.Operator)
+    {
+        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.DoneAll" OnClick="MarkAllRead">@L["NotificationsLog_Button_MarkAllRead"]</MudButton>
+        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearAll">@L["NotificationsLog_Button_ClearAll"]</MudButton>
+    }
 </MudStack>
 
 <MudTable Items="@_entries" Dense="true" Hover="true" Striped="true" Loading="@_loading"
@@ -125,8 +131,11 @@
             : type;
     }
 
+    private AppRole _role = AppRole.Viewer;
+
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         await LoadEventTypes();
         await LoadData();
     }
@@ -164,11 +173,35 @@
     private async Task OnTypeChanged(string value) { _typeFilter = value; _currentPage = 0; await LoadData(); }
     private async Task OnPageChanged(int page) { _currentPage = page - 1; await LoadData(); }
 
-    private void MarkAllRead() { Store.MarkAllRead(); Snackbar.Add(L["NotificationsLog_Snackbar_MarkedRead"].Value, Severity.Success); }
+    // INV-18 (user decision 2026-11-07): the log is shared, so marking it read and clearing it are Operator writes,
+    // decided by the gateway at the click — one audit event per attempt, a Viewer refused whatever the page shows.
+    private async Task MarkAllRead()
+    {
+        try
+        {
+            await Mutations.RunAsync("notifications.mark_read", new { },
+                _ => { Store.MarkAllRead(); return Task.CompletedTask; });
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return;
+        }
+        Snackbar.Add(L["NotificationsLog_Snackbar_MarkedRead"].Value, Severity.Success);
+    }
 
     private async Task ClearAll()
     {
-        Store.Clear();
+        try
+        {
+            await Mutations.RunAsync("notifications.clear", new { },
+                _ => { Store.Clear(); return Task.CompletedTask; });
+        }
+        catch (MutationRefusedException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return;
+        }
         _currentPage = 0;
         _typeFilter = null;
         await LoadEventTypes();

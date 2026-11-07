@@ -461,6 +461,10 @@ generated, and the two are joined by tests.
 | `ReleaseWorkflowTests` (extended) | `release.yml` passes `release-gate: release` and `ci.yml` sets the variable only from that input; with D8, `publish-image` needs the called `security.yml`; with D14, the image-runtime step writes TRX and checks its manifest; with D16, the base-diff step exists on pull requests and its checkout has `fetch-depth: 0` (or fetches the base SHA); with D16 (a), `prepare` refuses a tag commit not reachable from `origin/main` and the release run repeats the comparison against the previous release tag; with D16 (a) or D15 (d), `build-test` fetches tags only when `release-gate` is `release`, and the gate's previous-tag lookup (highest `vX.Y.Z` strictly below `<Version>`) turns a missing or unreadable tag into a finding |
 | `RequiredTestsManifestTests` (extended) | still green with the generated blocks; uses the shared `TestCatalog` |
 
+> Note (7 November 2026, after acceptance): the R6 example "planned `Class` that exists (today's INV-21 form)" no longer
+> matches the table: INV-21 is ✅ since contract 0009 and carries no planned marker. `ReleaseGateTests` now injects the
+> R6 markers on INV-01. The rule R6 itself is unchanged.
+
 Negative tests mutate the text of the real files in memory, as `ReleaseWorkflowTests` does; nothing is written to the
 repository except a `.actual` file on a snapshot difference.
 

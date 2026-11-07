@@ -1241,7 +1241,7 @@ internal sealed class BindingWorld : IAsyncDisposable
     public IServiceProvider Services => _sp;
     private readonly ILoggerFactory _loggers;
 
-    private BindingWorld(string dir, IConfiguration configuration)
+    private BindingWorld(string dir, IConfiguration configuration, Whiskers.Services.Guardrails.IGuardrailStore? guardrails)
     {
         Directory = dir;
         Configuration = configuration;
@@ -1253,6 +1253,8 @@ internal sealed class BindingWorld : IAsyncDisposable
         services.AddSingleton<IWhitelistService>(_ => Whitelist);
         services.AddSingleton<IAuditLogService>(Audit);
         services.AddSingleton(configuration);
+        // Contract 0009: the guardrail policy the sign-in binding reads, as the app registers it (Core).
+        services.AddSingleton(guardrails ?? new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault()));
         _sp = services.BuildServiceProvider();
         _loggers = _sp.GetRequiredService<ILoggerFactory>();
     }
@@ -1260,7 +1262,7 @@ internal sealed class BindingWorld : IAsyncDisposable
     public TimeProvider? Time { get; private set; }
 
     public static async Task<BindingWorld> CreateAsync(bool seedAdmin = true, bool trustOidc = false, bool authDisabled = false,
-        TimeProvider? time = null)
+        TimeProvider? time = null, Whiskers.Services.Guardrails.IGuardrailStore? guardrails = null)
     {
         var dir = Path.Combine(Path.GetTempPath(), $"sw-r127-{Guid.NewGuid():N}");
         System.IO.Directory.CreateDirectory(dir);
@@ -1270,7 +1272,7 @@ internal sealed class BindingWorld : IAsyncDisposable
             ["Auth:Disabled"] = authDisabled ? "true" : "false",
         };
         if (seedAdmin) settings["WHISKERS_ADMIN_EMAIL"] = OidcIdentityBindingTests.Root;
-        var world = new BindingWorld(dir, new ConfigurationBuilder().AddInMemoryCollection(settings).Build()) { Time = time };
+        var world = new BindingWorld(dir, new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), guardrails) { Time = time };
         using (var scope = world._sp.CreateScope())
             await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.EnsureCreatedAsync();
         var paths = new DataPathOptions(dir);
