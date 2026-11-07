@@ -380,7 +380,8 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > start — the acceptance is persisted before the answer, a row an earlier process accepted is never taken over (a
 > repeat is busy until it is settled), and a reconciliation pass that cannot settle every row is retried until one
 > completes. The "did not run" event is keyed by the run id (one row whichever path writes it, the outbox included),
-> and a give-up cut off by a stop keeps its claim, so it is never taken over.
+> and a give-up cut off by a stop keeps its claim, so it is never taken over. The worker's own refusals have a key
+> kind of their own and are reconciled as refused; only a refusal honours an event key.
 
 **Out of scope:** Hash-chain construction and all caller migrations.
 

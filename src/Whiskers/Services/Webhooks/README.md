@@ -53,7 +53,9 @@ and final in one claim-fenced update, tried again until it lands or Whiskers sto
 up to 5 minutes, a new attempt only once the previous one ended, logged at the first failure and then at doubling
 intervals; the claim is released once it is settled — a give-up cut off by a stop keeps it until the process ends — so
 no later delivery takes it over; its event is keyed by its run id (`NotRunEventKey`), so the give-up, the
-reconciliation and the audit outbox's later insert are always one row;
+reconciliation and the audit outbox's later insert are always one row (the worker's own refusals — its webhook
+changed, an unknown action — have a key kind of their own, `RefusedEventKey`, and are reconciled as refused, not
+logged again; the reconciliation settles a row it records only once that event is provably on record);
 it is then in the webhook's log and sends `automation_refused`, and it needs a new delivery: a new delivery id, or for
 GitHub a new push — a GitHub "Redeliver" is a duplicate of it), and a start that still lands later finds it settled
 (it never runs). What a stop, a crash or a give-up during a stop leaves queued or running is settled at the next start

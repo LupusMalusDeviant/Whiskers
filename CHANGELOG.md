@@ -22,7 +22,11 @@ All notable changes to Whiskers are documented here. The format follows
   a repeat of one an earlier process accepted is answered busy until it is settled (it is never run), and a
   reconciliation that cannot settle every delivery is retried until it does. The audit event of a delivery that did
   not run is keyed by its run id, so the worker, the start reconciliation and the audit outbox can never write it
-  twice; a delivery given up during a stop is no longer taken over by a repeat.
+  twice; a delivery given up during a stop is no longer taken over by a repeat. A delivery the worker refused itself
+  (its webhook changed while it waited, an unknown action) keeps the state "refused" and one log entry when the start
+  reconciliation finds it; a page's Test waiting on a run that a stop left queued is told at once. Development builds
+  only: deliveries given up by an unreleased build of this branch before this change carry an unkeyed refusal and are
+  settled as refused at the next start, without a log entry or notification.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,

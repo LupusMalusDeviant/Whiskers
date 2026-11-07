@@ -246,6 +246,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
             Details(operationId, request, phase: "outcome", status: status.ToString(), verification: null,
                 reason: reason, durationMs: 0,
                 approval: approvalId is null ? null : new ApprovalGateResult(false, "", approvalId))));
+        // INV-45 (review rounds 5 and 6): only a refusal honours the event key — one row, whichever path writes it.
+        if (request.EventKey is { } key) entity.EventId = KeyedEventId(key);
         entity.Phase = "outcome";
         entity.Outcome = status.ToString();
         entity.Verification = nameof(VerificationStatus.NotRun);
@@ -271,7 +273,8 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         string details) => new()
     {
         Timestamp = _time.GetUtcNow().UtcDateTime,
-        EventId = request.EventKey is { } key ? KeyedEventId(key) : Guid.NewGuid().ToString("N"),
+        // A fresh id; only a refusal is keyed (RecordDeniedAsync): an intent never merges two attempts into one row.
+        EventId = Guid.NewGuid().ToString("N"),
         Actor = request.Principal.DisplayName,
         // "web" / "mcp" match the rows AuditLogService writes, so the audit page filters keep working.
         ActorType = request.Surface == MutationSurface.Ui ? "web" : request.Surface.ToString().ToLowerInvariant(),

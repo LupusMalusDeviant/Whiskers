@@ -383,7 +383,13 @@ public class WebhookService : IWebhookService
                 _slots.Release();
                 // ReadAllAsync checks the token only while it waits: a worker that was busy at the stop would take the
                 // next item. It is left queued under its live claim — the next start reconciles it (review round 5).
-                if (_stopping.IsCancellationRequested) break;
+                if (_stopping.IsCancellationRequested)
+                {
+                    // A page's Test waiting for it is told now, not at its own timeout (review round 6, NIT-3).
+                    if (_waiting.TryRemove(run.RunId, out var waiting))
+                        waiting.TrySetResult(new RunEnd(false, Stopping, null));
+                    break;
+                }
                 try
                 {
                     await ExecuteRunAsync(run);
@@ -471,7 +477,7 @@ public class WebhookService : IWebhookService
                 // INV-45: the accepted delivery is refused before its decision — on record as the delivery it was
                 // (by its id, unowned, when the webhook was gone before the worker read it).
                 decided = true;
-                await RecordNotRunAsync(queued ?? webhook, run.WebhookId, run.RunId, message.English);
+                await RecordNotRunAsync(queued ?? webhook, run.WebhookId, run.RunId, message.English, refused: true);
                 result = await FinishAsync(run, webhook, (false, message.English), WebhookDeliveryStore.Refused);
                 return;
             }
@@ -623,6 +629,14 @@ public class WebhookService : IWebhookService
         return task.WaitAsync(ct);
     }
 
+    /// <summary>What a page's Test waiting for a run hears when Whiskers stops before the run started.</summary>
+    internal const string Stopping =
+        "Whiskers is stopping: the delivery is queued and is settled at the next start; its action did not run.";
+
+    /// <summary>Raised with the run id when a give-up returns unsettled because Whiskers is stopping (its claim stays
+    /// held) — a signal for tests, nothing acts on it.</summary>
+    internal event Action<string>? StoppedUnsettled;
+
     /// <summary>The reason of an accepted delivery its worker gave up before its decision (INV-45).</summary>
     internal const string GivenUp = "Failed: the delivery was given up before its decision (see the log); its action did not run.";
 
@@ -755,6 +769,7 @@ public class WebhookService : IWebhookService
                 _givingUp.TryRemove(run.RunId, out _);
                 _deliveries.Release(run.Claim);
             }
+            else StoppedUnsettled?.Invoke(run.RunId);   // after the claim was (not) let go
         }
     }
 
@@ -886,6 +901,10 @@ public class WebhookService : IWebhookService
                             // Keyed (NotRunEventKey): a copy still on its way from the audit outbox, or one an earlier
                             // pass wrote, is the same row — never a second event.
                             await RecordNotRunAsync(webhook, row.WebhookId, row.RunId, NotSettled);
+                            // Settled only once its event provably exists, in the log or the outbox (review round 6,
+                            // NIT-2): with both unavailable the row stays unsettled and a later pass writes it.
+                            if (!await EventOnRecordAsync(NotRunEventId(row.RunId), ct))
+                                throw new InvalidOperationException("The delivery's event is not on record yet.");
                             recorded++;
                         }
                     }
@@ -942,6 +961,17 @@ public class WebhookService : IWebhookService
     private readonly SemaphoreSlim _reconcile = new(1, 1);
 
     private sealed record RunEvent(string? EventId, string? Phase, string? Outcome);
+
+    /// <summary>Whether the event with this id is in the audit outbox or the audit log.</summary>
+    private async Task<bool> EventOnRecordAsync(string eventId, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        if (scope.ServiceProvider.GetService<Whiskers.Services.Mutations.AuditOutbox>() is { } outbox
+            && outbox.Load().Any(k => k.Row?.EventId == eventId))
+            return true;
+        return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking()
+            .AnyAsync(a => a.EventId == eventId, ct);
+    }
 
     /// <summary>The events under each run id — kept in the outbox to be written, and in the audit log — read once per
     /// pass (review round 4, NIT-2). The outbox first (review round 5, MINOR-1): the drain inserts before it deletes, so
@@ -1237,7 +1267,7 @@ public class WebhookService : IWebhookService
                 // INV-45: a stored action none of the four is refused before any decision — on record all the same,
                 // under its raw name, which the gateway refuses as no capability.
                 var unknown = $"Unknown action: {webhook.Action}";
-                await RecordNotRunAsync(webhook, webhook.WebhookId, runId, unknown);
+                await RecordNotRunAsync(webhook, webhook.WebhookId, runId, unknown, refused: true);
                 return (false, unknown, true);
             }
         }
@@ -1292,6 +1322,14 @@ public class WebhookService : IWebhookService
     /// <summary>The event id of <see cref="NotRunEventKey"/>.</summary>
     internal static string NotRunEventId(string runId) => AuditLogMutationSink.KeyedEventId(NotRunEventKey(runId));
 
+    /// <summary>INV-45 (review round 6, MINOR-1): the key of a delivery the worker refused itself before the gateway —
+    /// its webhook changed while it waited, or an action none of the four. A kind of its own: the run settles it as
+    /// refused and writes its log entry, so the start reconciliation treats it like any refusal (refused, not logged
+    /// again), never as a delivery that did not run.</summary>
+    internal static string RefusedEventKey(string runId) => "webhook-refused/" + runId;
+
+    private static string KeyOf(string runId, bool refused) => refused ? RefusedEventKey(runId) : NotRunEventKey(runId);
+
     /// <summary>
     /// INV-45: an accepted delivery that ends before its decision — its webhook changed, switched off or removed while
     /// it waited, no turn on its target in time, an action none of the four, a run its worker gave up before or after its
@@ -1312,7 +1350,8 @@ public class WebhookService : IWebhookService
     /// this process its next delivery takes it over and runs it (nothing was recorded for it yet); otherwise the start
     /// reconciliation records it once as not run, and a repeat is a duplicate of that run.</para>
     /// </summary>
-    private async Task RecordNotRunAsync(WebhookEntity? webhook, string webhookId, string runId, string reason)
+    private async Task RecordNotRunAsync(WebhookEntity? webhook, string webhookId, string runId, string reason,
+        bool refused = false)
     {
         using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
         try
@@ -1323,7 +1362,7 @@ public class WebhookService : IWebhookService
             {
                 await automation.RefuseAsync(
                     new AutomationActor("webhook:" + webhookId, $"Webhook {webhookId} (removed)", null)
-                        { OperationId = runId, EventKey = NotRunEventKey(runId) },
+                        { OperationId = runId, EventKey = KeyOf(runId, refused) },
                     RemovedWebhook, new { webhookId }, reason, bookkeeping.Token);
                 return;
             }
@@ -1334,7 +1373,7 @@ public class WebhookService : IWebhookService
                 "git-deploy" => new { appId = webhook.TargetId, serverId = sid },
                 _ => new { containerId = webhook.TargetId, name = webhook.TargetId, serverId = sid },
             };
-            await automation.RefuseAsync(ActorOf(webhook) with { OperationId = runId, EventKey = NotRunEventKey(runId) },
+            await automation.RefuseAsync(ActorOf(webhook) with { OperationId = runId, EventKey = KeyOf(runId, refused) },
                 CapabilityOf(webhook.Action) ?? (string.IsNullOrWhiteSpace(webhook.Action) ? "(no action)" : webhook.Action),
                 arguments, reason, bookkeeping.Token);
         }
