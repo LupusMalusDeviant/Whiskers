@@ -109,6 +109,11 @@ public class MutationBypassArchitectureTests
             var declared = Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.VariableDeclaratorSyntax>(),
                 v => v.Identifier.Text == local);
             Assert.Same(call, declared.Initializer?.Value);
+            // …and nothing replaces it before it is returned: no assignment, no ref/out use of the local (round 14).
+            Assert.DoesNotContain(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.AssignmentExpressionSyntax>(),
+                a => a.Left.ToString() == local);
+            Assert.DoesNotContain(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.ArgumentSyntax>(),
+                a => a.RefKindKeyword.Text is "ref" or "out" && a.Expression.ToString() == local);
         }
     }
 

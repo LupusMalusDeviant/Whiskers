@@ -22,9 +22,9 @@ All notable changes to Whiskers are documented here. The format follows
   delivery its worker gives up before it started now ends failed and final, on record once (also in the webhook log,
   with an `automation_refused` notification), instead of waiting for a redelivery — it needs a new delivery. An
   automation whose owner cannot be read (the owner store fails) is refused as one denied event marked "owner
-  unreadable", for every capability. Deliveries a stop or crash left queued
-  or running are recorded and settled at the next start; a delivery's acceptance is now stored before it is answered,
-  a repeat of one an earlier process accepted is answered busy until it is settled (it is never run), and a
+  unreadable", for every capability, and the cause is logged as an error. Deliveries a stop or crash left queued or
+  running are recorded and settled at the next start; a delivery's acceptance is now stored before it is answered, a
+  repeat of one an earlier process accepted is answered busy until it is settled (it is never run), and a
   reconciliation that cannot settle every delivery is retried until it does. The audit event of a delivery that did
   not run is keyed by its run id, so the worker, the start reconciliation and the audit outbox can never write it
   twice; a delivery given up during a stop is no longer taken over by a repeat. A delivery the worker refused itself
@@ -36,6 +36,11 @@ All notable changes to Whiskers are documented here. The format follows
   carry an unkeyed refusal and are settled as refused at the next start, without a log entry or notification;
   deliveries such a build refused itself (webhook changed, unknown action) and left unsettled were keyed as "did not
   run" and are settled failed, with a second log entry and a notification.
+- **MCP permission levels fail closed (behaviour change).** A tool whose stored required level is not `read`, `write`
+  or `admin` is no longer allowed to every key (it ranked below `read`); it is allowed to none. Creating a key or
+  saving Settings → MCP with any other level — `none` in any case included — is refused. A permissions file that
+  already holds one is corrected on start and written back: such a key is switched off (level `read`, to be
+  re-enabled deliberately), such a tool is raised to `admin`. Levels written by Whiskers itself are unaffected.
 - **Root-equivalent capabilities are proven Admin on every surface (INV-19 ✅).** `CapabilityCatalog.RootEquivalent`
   names the set; tests drive each member over `/mcp`, through the agent, the UI runner (pages, "Run now", host and
   container terminals), the automation runner and the scheduler's own run, and show that only Admin passes and that a

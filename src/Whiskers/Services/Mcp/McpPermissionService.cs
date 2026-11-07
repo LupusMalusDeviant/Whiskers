@@ -58,6 +58,7 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
             changed |= MigratePlaintextKeys(data);
 
             changed |= EnforceCodeFloor(data);
+            changed |= EnforceKnownLevels(data);
 
             if (changed)
                 await _store.SaveAsync(data);
@@ -180,7 +181,8 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
             return keyConfig.AllowedTools.Contains(toolName);
 
         // Otherwise check permission level
-        var allowed = McpPermissionLevels.HasAccess(keyConfig.PermissionLevel, toolConfig.RequiredLevel);
+        // Fail-closed: a stored required level that is not read / write / admin grants nothing (it used to rank 0).
+        var allowed = McpPermissionLevels.Grants(keyConfig.PermissionLevel, toolConfig.RequiredLevel);
         if (!allowed)
             _logger.LogWarning("IsToolAllowed: level '{KeyLevel}' insufficient for tool '{Tool}' (requires '{Required}')",
                 keyConfig.PermissionLevel, toolName, toolConfig.RequiredLevel);
@@ -206,7 +208,7 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
                 if (keyConfig.AllowedTools.Contains(toolName))
                     allowed.Add(toolName);
             }
-            else if (McpPermissionLevels.HasAccess(keyConfig.PermissionLevel, toolConfig.RequiredLevel))
+            else if (McpPermissionLevels.Grants(keyConfig.PermissionLevel, toolConfig.RequiredLevel))
             {
                 allowed.Add(toolName);
             }
@@ -267,12 +269,49 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         return raised;
     }
 
+    /// <summary>A file written by hand (or before this check) may hold a level that is not read / write / admin —
+    /// <c>none</c> included, which elsewhere would read as <c>read</c>. Made fail-closed on load and written back:
+    /// such a key is switched off (its level set to <c>read</c>, so an admin sees it and must re-enable it with a
+    /// level deliberately); such a tool is raised to <c>admin</c> (a code floor, where one exists, is applied first).
+    /// Returns whether anything changed.</summary>
+    internal bool EnforceKnownLevels(McpPermissionData data)
+    {
+        var changed = false;
+        foreach (var key in data.ApiKeys.Where(k => !McpPermissionLevels.IsKnown(k.PermissionLevel)))
+        {
+            _logger.LogWarning("MCP key {Name}: stored level {Level} is not read, write or admin — switched off",
+                key.Name, key.PermissionLevel);
+            key.PermissionLevel = McpPermissionLevels.Read;
+            key.Enabled = false;
+            changed = true;
+        }
+        foreach (var (tool, config) in data.Tools.Where(t => !McpPermissionLevels.IsKnown(t.Value.RequiredLevel)))
+        {
+            _logger.LogWarning("MCP tool {Tool}: stored level {Level} is not read, write or admin — raised to admin",
+                tool, config.RequiredLevel);
+            config.RequiredLevel = McpPermissionLevels.Admin;
+            changed = true;
+        }
+        return changed;
+    }
+
+    /// <summary>Refuses a level that is not exactly read / write / admin — <c>none</c> in any case included: no key
+    /// and no tool is stored at a level the checks would not read as written.</summary>
+    private static void RequireKnownLevel(string? level, string what)
+    {
+        if (!McpPermissionLevels.IsKnown(level))
+            throw new ArgumentException($"'{level}' is not a permission level for {what}; use read, write or admin.");
+    }
+
     /// <summary>
     /// Updates the full permission data from the UI. Levels below the code's floor are raised (see
-    /// <see cref="EnforceCodeFloor"/>).
+    /// <see cref="EnforceCodeFloor"/>); a level other than read / write / admin is refused.
     /// </summary>
     public async Task SavePermissionDataAsync(McpPermissionData data)
     {
+        foreach (var key in data.ApiKeys) RequireKnownLevel(key.PermissionLevel, $"key '{key.Name}'");
+        foreach (var (tool, config) in data.Tools) RequireKnownLevel(config.RequiredLevel, $"tool '{tool}'");
+
         await _lock.WaitAsync();
         try
         {
@@ -316,6 +355,7 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
     /// </summary>
     public async Task<McpApiKeyConfig> AddApiKeyAsync(string name, string permissionLevel)
     {
+        RequireKnownLevel(permissionLevel, $"key '{name}'");
         // 256 bits from the CSPRNG, 64 hex characters — the same shape as the GUID-based keys before.
         var plaintext = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
         var keyConfig = new McpApiKeyConfig

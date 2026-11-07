@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Whiskers.Configuration;
+using Whiskers.Models;
 using Whiskers.Services.Mcp;
 
 namespace Whiskers.Tests;
@@ -145,6 +146,69 @@ public sealed class McpPermissionServiceTests : IDisposable
     public void Dispose()
     {
         try { Directory.Delete(_dir, recursive: true); } catch { /* best-effort temp cleanup */ }
+    }
+
+    /// <summary>INV-45 review round 14 (NIT-2): a required level that is not read / write / admin grants nothing to
+    /// any key — it used to rank 0, which every key met.</summary>
+    [Fact]
+    public void An_unknown_required_level_grants_nothing_to_any_key()
+    {
+        string[] keys = [McpPermissionLevels.Read, McpPermissionLevels.Write, McpPermissionLevels.Admin, "none", "bogus", ""];
+        foreach (var unknown in new[] { "none", "None", "NONE", "bogus", "", "Write", " admin" })
+            foreach (var key in keys)
+                Assert.False(McpPermissionLevels.Grants(key, unknown), $"key '{key}', required '{unknown}'");
+        Assert.True(McpPermissionLevels.Grants(McpPermissionLevels.Admin, McpPermissionLevels.Write));
+        Assert.False(McpPermissionLevels.Grants(McpPermissionLevels.Read, McpPermissionLevels.Write));
+    }
+
+    /// <summary>INV-45 review round 14 (NIT-2): "none" — in any case — or any other unknown level is never stored: a
+    /// key cannot be created with it, and a save holding it for a key or a tool is refused and changes nothing.</summary>
+    [Fact]
+    public async Task None_or_any_unknown_level_is_refused_on_add_and_on_save()
+    {
+        Directory.CreateDirectory(_dir);
+        var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), new DataPathOptions(_dir));
+        await svc.InitializeAsync();
+        foreach (var level in new[] { "none", "None", " none ", "bogus", "" })
+            await Assert.ThrowsAsync<ArgumentException>(() => svc.AddApiKeyAsync("x", level));
+        Assert.Empty(svc.GetPermissionData().ApiKeys);
+
+        await svc.AddApiKeyAsync("ops", McpPermissionLevels.Write);
+        var keyed = svc.GetPermissionData();
+        keyed.ApiKeys[0].PermissionLevel = "None";
+        await Assert.ThrowsAsync<ArgumentException>(() => svc.SavePermissionDataAsync(keyed));
+        var tooled = svc.GetPermissionData();
+        tooled.Tools["list_servers"].RequiredLevel = "none";
+        await Assert.ThrowsAsync<ArgumentException>(() => svc.SavePermissionDataAsync(tooled));
+
+        var now = svc.GetPermissionData();
+        Assert.Equal(McpPermissionLevels.Write, now.ApiKeys[0].PermissionLevel);
+        Assert.Equal(McpPermissionLevels.Read, now.Tools["list_servers"].RequiredLevel);
+    }
+
+    /// <summary>INV-45 review round 14 (NIT-2): a file that already holds such a level is made fail-closed on load
+    /// and written back — the key is switched off (level read, so an admin re-enables it deliberately), a tool without
+    /// a code floor is raised to admin.</summary>
+    [Fact]
+    public async Task A_stored_unknown_level_is_made_fail_closed_on_load()
+    {
+        Directory.CreateDirectory(_dir);
+        var paths = new DataPathOptions(_dir);
+        await File.WriteAllTextAsync(paths.McpPermissionsJson, """
+            {"ApiKeys":[{"Id":"k1","Name":"legacy","KeyHash":"00","KeyHint":"","PermissionLevel":"None","Enabled":true}],
+             "Tools":{"retired_tool":{"Enabled":true,"RequiredLevel":"none","Category":"Other"}}}
+            """);
+
+        var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
+        await svc.InitializeAsync();
+
+        var data = svc.GetPermissionData();
+        Assert.False(data.ApiKeys[0].Enabled);
+        Assert.Equal(McpPermissionLevels.Read, data.ApiKeys[0].PermissionLevel);
+        Assert.Equal(McpPermissionLevels.Admin, data.Tools["retired_tool"].RequiredLevel);
+        var file = await File.ReadAllTextAsync(paths.McpPermissionsJson);
+        Assert.DoesNotContain("\"None\"", file);
+        Assert.DoesNotContain("\"none\"", file);
     }
 
     private sealed class ListLogger<T> : ILogger<T>

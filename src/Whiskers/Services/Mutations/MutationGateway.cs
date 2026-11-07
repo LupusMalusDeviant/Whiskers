@@ -286,7 +286,7 @@ public sealed class MutationGateway : IMutationGateway
                 $"Unknown capability '{request.CapabilityId}'.", ct));
         // A principal without authority (its owner could not be read) is refused outright, whatever the capability's
         // level or a setting makes of it — not normalised to read (INV-45 review round 13).
-        if (string.Equals(request.Principal.PermissionLevel, McpPermissionLevels.None, StringComparison.Ordinal))
+        if (McpPermissionLevels.IsNone(request.Principal.PermissionLevel))
             return Prepared.Refused(await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied,
                 $"'{capability.Id}' was refused: {request.Principal.DisplayName} holds no authority.", ct));
 

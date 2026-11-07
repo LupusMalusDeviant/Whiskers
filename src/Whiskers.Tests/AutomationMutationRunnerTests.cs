@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models;
@@ -107,7 +108,8 @@ public class AutomationMutationRunnerTests
     /// <param name="gateway">A gateway to run on instead (the one an agent's tool calls go through, so a nested
     /// automation run shares its trigger checks); <paramref name="policy"/> and <paramref name="trail"/> are then unused.</param>
     internal static Fixture Build(bool requireOwner = false, GuardrailPolicy? policy = null,
-        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? trail = null, IMutationGateway? gateway = null)
+        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? trail = null, IMutationGateway? gateway = null,
+        Microsoft.Extensions.Logging.ILogger<AutomationMutationRunner>? logger = null)
     {
         var roles = new Roles();
         var whitelist = new Whitelist();
@@ -122,7 +124,8 @@ public class AutomationMutationRunnerTests
             : new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
                 NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals, store));
         var runner = new AutomationMutationRunner(gateway, new CapabilityCatalog(),
-            new AutomationOwnerResolver(roles, whitelist, keys, accounts), new StaticOptionsMonitor<AutomationOptions>(options));
+            new AutomationOwnerResolver(roles, whitelist, keys, accounts), new StaticOptionsMonitor<AutomationOptions>(options),
+            logger: logger);
         return new Fixture(runner, audit, roles, whitelist, keys, options, approvals, accounts);
     }
 
@@ -686,7 +689,10 @@ public class AutomationMutationRunnerTests
     [Fact]
     public async Task An_owner_that_cannot_be_read_is_refused_for_every_capability()
     {
-        var f = WithOperator(requireOwner: true);
+        var log = new ListLogger();
+        var f = Build(requireOwner: true, logger: log);
+        f.Whitelist.Allowed.Add(Ops);
+        f.Roles.Map[Ops] = AppRole.Operator;
         f.Accounts.Unreadable = true;
         var ran = 0;
         var capabilities = new CapabilityCatalog().All.ToList();
@@ -716,6 +722,29 @@ public class AutomationMutationRunnerTests
         });
         Assert.Equal(2 * capabilities.Count, f.Audit.Principals.Count);
         Assert.Null(f.Runner.LostAuthority(Task1, "container.restart"));
+        // The cause stays visible (review round 14): one error per refused run or refusal, a warning for the
+        // suspension question — each with the exception, the owner and the runner.
+        Assert.Equal(2 * capabilities.Count, log.Entries.Count(e => e.Level == LogLevel.Error));
+        Assert.Single(log.Entries, e => e.Level == LogLevel.Warning);
+        Assert.All(log.Entries, e =>
+        {
+            Assert.IsType<InvalidOperationException>(e.Exception);
+            Assert.Contains(Ops, e.Message);
+            Assert.Contains("task:t1", e.Message);
+        });
+    }
+
+    /// <summary>Keeps every log entry: its level, its rendered message and its exception.</summary>
+    private sealed class ListLogger : ILogger<AutomationMutationRunner>
+    {
+        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            lock (Entries) Entries.Add((logLevel, formatter(state, exception), exception));
+        }
     }
 
     /// <summary>INV-45 (review round 7, NIT-1): an event key is honoured only on a refusal. A request that is decided or

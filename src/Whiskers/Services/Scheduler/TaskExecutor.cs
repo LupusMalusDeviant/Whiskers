@@ -153,7 +153,8 @@ public class TaskExecutor : ITaskExecutor
         Func<CancellationToken, Task<T>> action)
     {
         // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
-        // (its argument checks, the owner's resolution) wrote no event and still reaches the backstop (review round 12).
+        // (its argument checks) wrote no event and still reaches the backstop (review round 12); an owner that cannot be
+        // read does not throw — the runner refuses it as a principal without authority (round 13).
         var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
         if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
         return pending;
@@ -165,7 +166,8 @@ public class TaskExecutor : ITaskExecutor
         Func<CancellationToken, Task> action)
     {
         // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
-        // (its argument checks, the owner's resolution) wrote no event and still reaches the backstop (review round 12).
+        // (its argument checks) wrote no event and still reaches the backstop (review round 12); an owner that cannot be
+        // read does not throw — the runner refuses it as a principal without authority (round 13).
         var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
         if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
         return pending;

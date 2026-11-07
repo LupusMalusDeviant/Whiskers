@@ -232,12 +232,14 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
     private readonly IAutomationOwnerResolver _owners;
     private readonly IOptionsMonitor<AutomationOptions> _options;
     private readonly ICapabilityOverrides? _overrides;
+    private readonly ILogger<AutomationMutationRunner> _logger;
 
     public AutomationMutationRunner(IMutationGateway gateway, ICapabilityCatalog catalog,
         IAutomationOwnerResolver owners, IOptionsMonitor<AutomationOptions> options,
-        ICapabilityOverrides? overrides = null)
+        ICapabilityOverrides? overrides = null, ILogger<AutomationMutationRunner>? logger = null)
     {
         _overrides = overrides;
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AutomationMutationRunner>.Instance;
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _owners = owners ?? throw new ArgumentNullException(nameof(owners));
@@ -309,6 +311,9 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Unknown, not lost: the run was refused (PrincipalOf), the item is not suspended for a store that failed.
+            _logger.LogWarning(ex, "The owner {OwnerId} of automation {Runner} could not be resolved; its authority is " +
+                "unknown, it is not suspended",
+                actor.OwnerId, actor.RunnerId);
             return null;
         }
         // Unverified is refused but not suspended: it runs again once the owner signs in (or an admin takes over).
@@ -350,6 +355,9 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                // Logged with its cause (review round 14): a fault in the owner lookup must not read as a refusal.
+                _logger.LogError(ex, "The owner {OwnerId} of automation {Runner} could not be resolved; the run is refused",
+                    actor.OwnerId, actor.RunnerId);
                 // The owner's authority cannot be read (INV-45 review round 13): the run is still one event — the
                 // gateway refuses this principal for every capability (McpPermissionLevels.None, never normalised to
                 // read) — and the audit row says why and names the stored owner, itself without authority. Nothing is

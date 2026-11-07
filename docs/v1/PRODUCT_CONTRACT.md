@@ -167,9 +167,8 @@ was requested to delete — S-01). A DB retention lists inside its `db.backup_de
 truncated listing is that event's Failed outcome; a DB-retention deletion a safety check skips (an unsafe database name
 or container key) is the gateway's Denied event of `db.backup_delete`. A scheduled run is one event even when a call
 it makes before its decision fails: the scheduler records it as the gateway's Denied event of the task's capability
-(S-01). An attempt
-that has begun and is cancelled before its decision — the caller gone, a run's deadline passed — is still one Denied
-event.
+(S-01). An attempt that has begun and is cancelled before its decision — the caller gone, a run's deadline passed —
+is still one Denied event.
 
 **Gaps shared by every path today** (not repeated per row): INV-01 (string actor), INV-20 for UI/automation/terminal,
 INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-45 (closed: since R1-19 every gateway attempt is one complete event with typed fields, MCP tools and UI pages write none of their own since R1-20/R1-21/R1-22, and every row below is proved by `AuditPathMatrixTests` — each attempt one complete event for every outcome the path can have),
