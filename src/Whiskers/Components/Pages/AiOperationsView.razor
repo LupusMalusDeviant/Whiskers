@@ -215,7 +215,9 @@ else
 
     private async Task<AgentPrincipal> BuildPrincipalAsync()
     {
+        // The editor's own level (the fixed rule), never a synthetic Admin: the store's own check then holds as well.
         var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
-        return new AgentPrincipal(AgentPrincipalKind.WebUser, email, McpPermissionLevels.Admin, null, UserEmail: email);
+        var level = CapabilityCatalog.LevelFor(await CurrentUser.GetRoleAsync());
+        return new AgentPrincipal(AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
     }
 }

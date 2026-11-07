@@ -117,7 +117,7 @@ Contract 0008, D7: §7 stays hand-written; this file is generated and the releas
 | `vault.secret_set` | admin | config | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | `gitdeploy.save`, `registry.save` | U-34 |
 | `volume.backup` | write | volume | Reversible | — | read back: the archive is recorded and on disk, not empty. | — | — | `volume.restore` | S-01, U-24 |
 | `volume.backup_delete` | admin | volume | Destructive | — | read back: the archive is no longer recorded or on disk. | background | — | — | S-01, U-24 |
-| `volume.restore` | admin | volume | Destructive | — | `NotVerifiable`: the volume's content is the application's data: Whiskers cannot tell restored data from other data. | — | `volume.backup` | — | U-24 |
+| `volume.restore` | admin | volume | RootEquivalent | — | `NotVerifiable`: the volume's content is the application's data: Whiskers cannot tell restored data from other data. | — | `volume.backup` | — | U-24 |
 | `vpn.bootstrap` | admin | whiskers | RootEquivalent | — | `NotVerifiable`: the VPN CLI's own exit code decides (a failure is recorded as failed); the mesh state is read live on the status page, not by the gateway. | background | — | — | S-07 |
 | `webhook.delete` | admin | webhook | Destructive | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | ui | — | — | U-28 |
 | `webhook.rotate_secret` | admin | webhook | Disruptive | `rotate_git_deploy_webhook_secret` | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | ui | — | — | M-46, U-28 |

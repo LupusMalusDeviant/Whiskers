@@ -138,7 +138,7 @@ public sealed partial class NginxUpdateVerifier(IServiceProvider services) : Ser
             : throw new MutationNotVerifiableException("the call named no valid site to read back.");
     }
 
-    [GeneratedRegex(@"^[a-zA-Z0-9._-]+$")]
+    [GeneratedRegex(@"^[a-zA-Z0-9._-]+\z")]
     private static partial Regex SafeName();
 }
 
@@ -235,7 +235,7 @@ public sealed partial class SystemdVerifier(IServiceProvider services) : Service
         return word;
     }
 
-    [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._@-]*$")]
+    [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._@-]*\z")]
     private static partial Regex SafeUnit();
 }
 

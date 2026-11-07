@@ -140,6 +140,15 @@ public class TaskExecutor : ITaskExecutor
         var env = await _docker.GetContainerEnvAsync(container.Id, ScheduledTaskServer.Of(task));
         var creds = DatabaseDetector.ExtractCredentials(env, container.DatabaseType);
         if (string.IsNullOrEmpty(database)) database = creds.Database;
+        // INV-19: the name becomes a dump-tool operand and part of a host file name; a stored task is no exception.
+        try
+        {
+            DatabaseService.CheckDatabaseName(database, container.DatabaseType);
+        }
+        catch (Whiskers.Utils.UnsafeOperandException ex)
+        {
+            return (false, ex.Message);
+        }
 
         var outcome = await _automation.RunAsync(ActorOf(task), "db.backup",
             new { containerId = container.Id, name = container.Name, serverId = ScheduledTaskServer.Of(task), database },
@@ -452,7 +461,7 @@ public class TaskExecutor : ITaskExecutor
     // DB name embedded into a host shell glob for retention pruning: alphanumeric start, then
     // alphanumerics plus _ . - only. Anything else is rejected (no pruning) rather than risking injection.
     private static readonly System.Text.RegularExpressions.Regex SafeDbName =
-        new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", System.Text.RegularExpressions.RegexOptions.Compiled);
+        new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*\z", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     /// <summary>The command of a custom-command task, or <c>null</c>.</summary>
     public static string? CommandOf(ScheduledTaskEntity task) =>

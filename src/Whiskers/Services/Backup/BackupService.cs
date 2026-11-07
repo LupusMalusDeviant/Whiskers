@@ -31,7 +31,7 @@ public sealed class BackupService : IBackupService
 
     // Backup ids and file names: must start alphanumeric, then alphanumerics plus _ . - only. Rejects any
     // path-traversal or separator character. Same shape as VolumeBackupService's guard.
-    private static readonly Regex SafeName = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.Compiled);
+    private static readonly Regex SafeName = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*\z", RegexOptions.Compiled);
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
 

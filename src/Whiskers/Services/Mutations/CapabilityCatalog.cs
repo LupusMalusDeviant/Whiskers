@@ -271,7 +271,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
 
         // Volume backups
         yield return Ui("volume.backup", W, "volume", Rev, Long);
-        yield return Ui("volume.restore", A, "volume", Des, Long);
+        // INV-19: restores any recorded archive into any named volume, also one a privileged container or Whiskers
+        // itself mounts, so it is root-equivalent (Admin already, no level changed).
+        yield return Ui("volume.restore", A, "volume", Root, Long);
         yield return Ui("volume.backup_delete", A, "volume", Des, Short);
 
         // Security configuration (R1-11): who may sign in, with which role, which keys and tools the MCP surface

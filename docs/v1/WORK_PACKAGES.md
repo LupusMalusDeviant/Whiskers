@@ -152,7 +152,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [x] `ApprovalSeparationOfDutyTests.Custom_command_requires_an_admin_approver` checks create and run; includes retention/self-backup requirements. Retention and self-backup: `ApprovalSeparationOfDutyTests.Retention_and_self_backup_require_admin`.
 - [x] Firewall, nginx, systemd, network, cloud and Hetzner disagreements are resolved consistently and documented. Resolved to Admin, documented in INV-13 and pinned by `CapabilityTableConsistencyTests.Host_network_and_cloud_areas_are_admin_on_every_surface`.
 - [x] Pages take their role in front of a capability from the catalog (`CapabilityCatalog.RoleOf`); `PageRoleScanTests` forbids any other role there (deny by default) and any second spelling of the role ↔ level rule. The webhook test follows it too (INV-13 ✅, `WebhookTestPageRoleTests`).
-- [x] Root-equivalent capabilities are one named set (`CapabilityCatalog.RootEquivalent`), each Admin on every surface — MCP keys, agent, UI pages and terminals, automation owners, the scheduler's run of a stored command, approvals — proven on the booted app and pinned (INV-19 ✅, `RootEquivalentAdminTests`, `RootEquivalentAdminWireTests`).
+- [x] Root-equivalent capabilities are one named set (`CapabilityCatalog.RootEquivalent`), each Admin on every surface — MCP keys, agent, UI pages and terminals, automation owners, the scheduler's run of a stored command, approvals — proven on the booted app and pinned (INV-19 ✅, 44 members, `RootEquivalentAdminTests`, `RootEquivalentAdminWireTests`).
 
 **Out of scope:** Approval persistence.
 

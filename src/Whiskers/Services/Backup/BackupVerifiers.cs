@@ -41,7 +41,7 @@ internal static partial class BackupReadBack
         if (test.Success) throw new MutationVerificationFailedException($"'{path}' is still on the host.");
     }
 
-    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$")]
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.-]*\z")]
     private static partial Regex SafeName();
 }
 
@@ -155,7 +155,7 @@ public sealed partial class DbBackupDeleteVerifier(IServiceProvider services) : 
     }
 
     // The same charset the retention itself accepts before the name enters a shell glob.
-    [GeneratedRegex(@"^[A-Za-z0-9_-]+$")]
+    [GeneratedRegex(@"^[A-Za-z0-9_-]+\z")]
     private static partial Regex SafeDb();
 }
 

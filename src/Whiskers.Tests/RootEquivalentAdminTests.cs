@@ -41,7 +41,7 @@ public class RootEquivalentAdminTests
         "db.query",
         // Root-run configuration and trust on a host
         "nginx.update", "certificate.renew_mtls", "certificate.issue_mtls", "mtls.client_migrate", "mtls.client_renew",
-        "server.onboard", "server.save", "hetzner.rescue_enable", "vpn.bootstrap", "selfbackup.restore",
+        "server.onboard", "server.save", "hetzner.rescue_enable", "vpn.bootstrap", "selfbackup.restore", "volume.restore",
         // Who and what may do any of the above
         "aitrigger.save", "automation.owner_set", "config.save", "config.whitelist", "config.roles",
         "config.mcp_permissions", "config.agent", "mcp.key_create", "guardrails.save", "guardrails.kill_switch_off",
@@ -140,9 +140,12 @@ public class RootEquivalentAdminTests
 
     // ── The sinks: whatever runs caller-chosen code belongs to a member ────────────────────────────────────────────
 
-    /// <summary>The interface operations that run code the caller chooses — a command, a shell, SQL, a compose file or
-    /// image, a site configuration nginx loads as root. Each is marked with a member capability, so the gateway
-    /// decides it at Admin before it runs; a new such operation is added here and must be a member too.</summary>
+    /// <summary>The named interface operations that run code the caller chooses — a command, a shell, SQL, a compose
+    /// file or image, a site configuration nginx loads as root. Each is marked with a member capability, so the gateway
+    /// decides it at Admin before it runs. This is a reviewed list, not a discovery: a new such operation must be
+    /// added here by hand (the raw-command primitive's callers, by contrast, are found by
+    /// <c>MutationGatewayCoverageTests</c>). Operations that only hand a caller's name to a command (a database, a
+    /// volume, a site, a service) check it with <c>CommandOperands</c> or an equivalent allow-list instead.</summary>
     public static readonly (Type Interface, string Method)[] CallerChosenCodeSinks =
     [
         (typeof(IDatabaseService), nameof(IDatabaseService.ExecuteQueryAsync)),
@@ -232,7 +235,7 @@ public class RootEquivalentAdminTests
     [Theory]
     [InlineData("app")]
     [InlineData("app_db")]
-    [InlineData("my-app.v2")]
+    [InlineData("my-app_v2")]
     public async Task A_plain_database_name_is_listed(string database)
     {
         var host = new RecordingHost();
@@ -240,6 +243,63 @@ public class RootEquivalentAdminTests
         await service.GetTablesAsync("db-1", database, DatabaseType.MongoDB, new DatabaseCredentials { User = "app" }, "local");
         var command = Assert.Single(host.Commands);
         Assert.Contains($" 'mongosh' '--quiet' '{database}' '--eval' ", command);
+    }
+
+    /// <summary>Review M1: the dump path takes the same name — as an operand of pg_dump / mysqldump / mongodump (a
+    /// <c>--file=…</c> would choose where the dump is written) and as part of the file name <c>docker cp</c> writes as
+    /// root on the host (a <c>../</c> would leave the backup directory). Both are refused before anything runs, and so
+    /// is the database a query runs in.</summary>
+    [Theory]
+    [InlineData("../x")]
+    [InlineData("../../../../etc/logrotate.d/x")]
+    [InlineData("--file=x")]
+    [InlineData("--result-file=/etc/cron.d/x")]
+    [InlineData("a/b")]
+    [InlineData("")]
+    public async Task A_dump_or_a_query_refuses_a_name_that_is_an_option_or_a_path(string database)
+    {
+        var host = new RecordingHost();
+        var service = new DatabaseService(host, NullLogger<DatabaseService>.Instance);
+        foreach (var type in new[] { DatabaseType.MongoDB, DatabaseType.PostgreSQL, DatabaseType.MySQL })
+        {
+            await Assert.ThrowsAsync<UnsafeOperandException>(() =>
+                service.BackupDatabaseAsync("db-1", database, type, new DatabaseCredentials { User = "app" }, "local"));
+            if (database.Length > 0)
+                await Assert.ThrowsAsync<UnsafeOperandException>(() => service.ExecuteQueryAsync("db-1", "select 1", type,
+                    new DatabaseCredentials { User = "app", Database = database }, "local"));
+        }
+        Assert.Empty(host.Commands);
+    }
+
+    [Fact]
+    public async Task A_plain_name_is_dumped_into_the_backup_directory()
+    {
+        var host = new RecordingHost(exitCode: 0);
+        var service = new DatabaseService(host, NullLogger<DatabaseService>.Instance);
+        await service.BackupDatabaseAsync("db-1", "app_db", DatabaseType.PostgreSQL, new DatabaseCredentials { User = "app" }, "local");
+        var copy = Assert.Single(host.Commands, c => c.StartsWith("docker cp -- ", StringComparison.Ordinal));
+        Assert.Matches(@"backups/app_db_\d{8}_\d{6}\.sql' 2>&1\z", copy);
+        // A query without a database of its own keeps the client's default, as before.
+        await service.ExecuteQueryAsync("db-1", "select 1", DatabaseType.PostgreSQL, new DatabaseCredentials { User = "app" }, "local");
+    }
+
+    /// <summary>Review m2: MongoDB forbids <c>.</c> in a database name, and the mongo shells read a dotted positional
+    /// argument as a host; a dotted name is refused for MongoDB on every database path, kept for the others.</summary>
+    [Theory]
+    [InlineData("attacker.example")]
+    [InlineData("10.0.0.5")]
+    [InlineData("db.example.com")]
+    public async Task A_dotted_name_is_refused_for_mongodb(string database)
+    {
+        var host = new RecordingHost();
+        var service = new DatabaseService(host, NullLogger<DatabaseService>.Instance);
+        var creds = new DatabaseCredentials { User = "app", Database = database };
+        await Assert.ThrowsAsync<UnsafeOperandException>(() => service.GetTablesAsync("db-1", database, DatabaseType.MongoDB, creds, "local"));
+        await Assert.ThrowsAsync<UnsafeOperandException>(() => service.BackupDatabaseAsync("db-1", database, DatabaseType.MongoDB, creds, "local"));
+        await Assert.ThrowsAsync<UnsafeOperandException>(() => service.ExecuteQueryAsync("db-1", "db.x.find()", DatabaseType.MongoDB, creds, "local"));
+        Assert.Empty(host.Commands);
+        await service.GetTablesAsync("db-1", database, DatabaseType.PostgreSQL, creds, "local");
+        Assert.Single(host.Commands);
     }
 
     // ── Approvals: nothing below Admin covers a member ─────────────────────────────────────────────────────────────
@@ -297,19 +357,46 @@ public class RootEquivalentAdminTests
         Assert.False(await approvals.ResolveAsync(approval.Id, approved: true, "operator@example.com", McpPermissionLevels.Write));
         Assert.NotEqual(MutationStatus.Executed, (await gateway.ExecuteAsync(Request(id, "op-1"), Run)).Status);
 
-        // A Write approval an Operator granted for exactly this session, operation and arguments is never used.
+        // A Write approval an Operator granted for exactly this call — same session, operation, tool, arguments and the
+        // binding the gateway itself computes for it — is never used, and the reason is its level (review m3).
         var (gateway2, approvals2, audit2) = Build();
-        var lowered = await approvals2.CreateAsync(new ApprovalRequest("s1", "call-1", "admin@example.com", "agent-web",
-            Catalog.Find(id)!.McpTool!, McpPermissionLevels.Write, null, "needs a human", CorrelationId: "op-2",
-            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(ArgumentsOf(id))), Requesters: ["key:test-requester"]),
-            _ => Task.CompletedTask);
-        Assert.True(await approvals2.ResolveAsync(lowered.Id, approved: true, "operator@example.com", McpPermissionLevels.Write));
+        await PlantAsync(gateway2, approvals2, id, "op-2", McpPermissionLevels.Write, "operator@example.com");
         var outcome = await gateway2.ExecuteAsync(Request(id, "op-2"), Run);
         Assert.NotEqual(MutationStatus.Executed, outcome.Status);
+        Assert.Contains("was given at level 'write'", outcome.Reason);
+        Assert.Contains("requires 'admin'", outcome.Reason);
 
         Assert.Equal(0, runs);
         Assert.DoesNotContain(audit.Events, e => e.StartsWith("begin:", StringComparison.Ordinal));
         Assert.DoesNotContain(audit2.Events, e => e.StartsWith("begin:", StringComparison.Ordinal));
+
+        // Positive control: the identical planted approval at Admin, decided by another Admin, is used for exactly this
+        // call, once — so the only thing that kept the Write one out above was its level.
+        var (gateway3, approvals3, audit3) = Build();
+        await PlantAsync(gateway3, approvals3, id, "op-3", McpPermissionLevels.Admin, "second-admin@example.com");
+        Assert.Equal(MutationStatus.Executed, (await gateway3.ExecuteAsync(Request(id, "op-3"), Run)).Status);
+        Assert.NotEqual(MutationStatus.Executed, (await gateway3.ExecuteAsync(Request(id, "op-3"), Run)).Status);
+        Assert.Equal(1, runs);
+        Assert.Contains(audit3.Events, e => e.StartsWith($"begin:{id}:", StringComparison.Ordinal));
+
+        // …and the approval the gateway raised itself runs once after another Admin decided it.
+        Assert.True(await approvals.ResolveAsync(approval.Id, approved: true, "second-admin@example.com", McpPermissionLevels.Admin));
+        Assert.Equal(MutationStatus.Executed, (await gateway.ExecuteAsync(Request(id, "op-1"), Run)).Status);
+        Assert.Equal(2, runs);
+    }
+
+    /// <summary>Plants a decided approval for exactly the call <c>Request(id, operation)</c> at <paramref name="level"/>,
+    /// bound as the gateway binds it (its own <c>DecideAsync</c>).</summary>
+    private static async Task PlantAsync(MutationGateway gateway, ApprovalStore approvals, string id, string operation,
+        string level, string decider)
+    {
+        var decided = await gateway.DecideAsync(Request(id, operation));
+        Assert.NotNull(decided?.Binding);
+        var planted = await approvals.CreateAsync(new ApprovalRequest("s1", "call-1", "admin@example.com", "agent-web",
+            Catalog.Find(id)!.McpTool!, level, null, "needs a human", CorrelationId: operation,
+            ArgumentsHash: ApprovalFingerprint.OfArguments(Args(ArgumentsOf(id))), Binding: decided!.Binding,
+            Requesters: ["key:test-requester"]), _ => Task.CompletedTask);
+        Assert.True(await approvals.ResolveAsync(planted.Id, approved: true, decider, level));
     }
 
     private static Dictionary<string, JsonElement> Args(object args) =>
@@ -320,7 +407,7 @@ public class RootEquivalentAdminTests
         public object? GetService(Type serviceType) => serviceType == typeof(ISchedulerService) ? scheduler : null;
     }
 
-    private sealed class RecordingHost : IHostCommandExecutor
+    private sealed class RecordingHost(int exitCode = 1) : IHostCommandExecutor
     {
         public List<string> Commands { get; } = [];
 
@@ -328,7 +415,7 @@ public class RootEquivalentAdminTests
             CancellationToken ct = default, int? maxOutputChars = null)
         {
             Commands.Add(command);
-            return Task.FromResult(new CommandResult { ExitCode = 1 });
+            return Task.FromResult(new CommandResult { ExitCode = exitCode });
         }
     }
 }

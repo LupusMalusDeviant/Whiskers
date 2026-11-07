@@ -601,6 +601,21 @@ else
 
     private async Task OnDatabaseChanged(string database)
     {
+        if (_container != null)
+        {
+            // INV-19: a name the client could read as an option or a connection string is refused and never kept as
+            // the selection, so the query, import and backup paths do not pick it up later.
+            try
+            {
+                Whiskers.Services.Database.DatabaseService.CheckDatabaseName(database, _container.DatabaseType);
+            }
+            catch (Whiskers.Utils.UnsafeOperandException ex)
+            {
+                Snackbar.Add(L["ContainerDetail_Db_LoadError", ex.Message].Value, Severity.Error);
+                return;
+            }
+        }
+
         State.DbSelectedDatabase = database;
         State.DbTables.Clear();
         State.DbColumns.Clear();
@@ -609,15 +624,7 @@ else
         if (State.DbCreds != null && _container != null)
         {
             State.DbCreds.Database = database;
-            try
-            {
-                State.DbTables = await DatabaseService.GetTablesAsync(ContainerId, database, _container.DatabaseType, State.DbCreds, _resolvedServerId);
-            }
-            catch (Whiskers.Utils.UnsafeOperandException ex)
-            {
-                // INV-19: a name the client could read as an option or a connection string is not listed.
-                Snackbar.Add(L["ContainerDetail_Db_LoadError", ex.Message].Value, Severity.Error);
-            }
+            State.DbTables = await DatabaseService.GetTablesAsync(ContainerId, database, _container.DatabaseType, State.DbCreds, _resolvedServerId);
         }
     }
 
@@ -876,6 +883,8 @@ else
         {
             var b64 = Convert.ToBase64String(State.MigrationFileData);
             var db = State.DbSelectedDatabase ?? State.DbCreds.Database;
+            // INV-19: the database is an operand of psql / mysql / mongoimport here too.
+            if (!string.IsNullOrEmpty(db)) Whiskers.Services.Database.DatabaseService.CheckDatabaseName(db, _container.DatabaseType);
             var cmd = _container.DatabaseType switch
             {
                 DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(State.DbCreds.Password)} psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
@@ -917,6 +926,8 @@ else
         {
             var b64 = Convert.ToBase64String(State.SeedFileData);
             var db = State.DbSelectedDatabase ?? State.DbCreds.Database;
+            // INV-19: the database is an operand of psql / mysql / mongoimport here too.
+            if (!string.IsNullOrEmpty(db)) Whiskers.Services.Database.DatabaseService.CheckDatabaseName(db, _container.DatabaseType);
             var ext = System.IO.Path.GetExtension(State.SeedFileName)?.ToLower();
             var cmd = (_container.DatabaseType, ext) switch
             {

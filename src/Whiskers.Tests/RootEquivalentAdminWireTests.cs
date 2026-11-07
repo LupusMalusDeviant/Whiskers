@@ -39,7 +39,7 @@ public class RootEquivalentAdminWireTests
     {
         await using var host = await Host.StartAsync(everyTargetKnown: true);
         var commandTask = await SeedCommandTaskAsync(host, owner: PrincipalIds.Key(host.ApiKeyId));
-        var keys = await KeysAsync(host);
+        using var keys = await KeysAsync(host);
         var catalog = host.Factory.Services.GetRequiredService<ICapabilityCatalog>();
 
         var adminSession = await McpServedSurfaceTests.InitializeAsync(host.Client);
@@ -116,9 +116,39 @@ public class RootEquivalentAdminWireTests
             }
         }
 
+        // Review m5: the two other principal kinds that reach the invoker — a key instructing the agent over MCP
+        // (instruct_agent) and an AI trigger — are held to the same level: at Write every member is refused by it.
+        var permissions = host.Factory.Services.GetRequiredService<IMcpPermissionService>();
+        var writeKey = await GatewayArrange.RunAsync("mcp.key_create", () => permissions.AddApiKeyAsync("agent-write-key", McpPermissionLevels.Write));
+        var others = new[]
+        {
+            new AgentContext("s-key", new AgentPrincipal(AgentPrincipalKind.McpKey, "agent-write-key", McpPermissionLevels.Write,
+                null, McpKeyId: writeKey.Id), AgentOrigin.McpTool, guardrails.Current),
+            new AgentContext("s-trigger", new AgentPrincipal(AgentPrincipalKind.Trigger, "AI trigger 'nightly'",
+                McpPermissionLevels.Write, null, TriggerId: "trigger-1"), AgentOrigin.Trigger, guardrails.Current),
+        };
+        foreach (var context in others)
+            foreach (var tool in tools)
+            {
+                var result = await invoker.InvokeAsync(new AgentToolCall("call-" + tool, tool,
+                    McpArguments(catalog.FindByMcpTool(tool)!.Id, schemas[tool], commandTask).ToJsonString()), context);
+                Assert.True(result.IsError, $"agent {tool} for {context.Principal.Kind}: ran");
+                Assert.Equal(GuardrailVerdict.Deny, result.Decision.Verdict);
+                Assert.DoesNotContain(KillSwitchRule, result.Decision.MatchedRuleIds);
+                Assert.Contains("requires 'admin'", result.Decision.Reason);
+            }
+
         AssertNothingRan(host);
         using var db = host.Db();
         var decisions = db.Context.PolicyDecisions.ToList().ToDictionary(d => d.Id);
+        foreach (var context in others)
+            foreach (var tool in tools)
+            {
+                var capability = catalog.FindByMcpTool(tool)!.Id;
+                var row = Assert.Single(db.Context.AuditLog
+                    .Where(r => r.Action == capability && r.PrincipalId == PrincipalIds.Agent(context.SessionId)).ToList());
+                AssertDecided(row, decisions, McpPermissionLevels.Write, $"agent {tool} for {context.Principal.Kind}");
+            }
         foreach (var level in Levels)
             foreach (var tool in tools)
             {
@@ -131,7 +161,8 @@ public class RootEquivalentAdminWireTests
     }
 
     /// <summary>Pages, "Run now", both terminals: every root-equivalent capability through the host's UI runner, as a
-    /// Viewer, an Operator and an Admin. The terminals open through the real terminal manager.</summary>
+    /// Viewer, an Operator and an Admin. The terminals are opened as the pages call them (the terminal manager's own scope guard is
+    /// pinned by <c>TerminalAuditTests</c>; every call here is refused before it would run).</summary>
     [Fact]
     public async Task In_the_ui_only_an_admin_gets_past_the_level_of_a_root_equivalent_capability()
     {
@@ -210,7 +241,7 @@ public class RootEquivalentAdminWireTests
     public async Task An_unattended_run_gets_past_the_level_of_a_root_equivalent_capability_only_for_an_admin_owner()
     {
         await using var host = await Host.StartAsync(everyTargetKnown: true);
-        var keys = await KeysAsync(host);
+        using var keys = await KeysAsync(host);
         var commandTask = await SeedCommandTaskAsync(host, owner: PrincipalIds.Key(host.ApiKeyId));
         var automation = host.Factory.Services.GetRequiredService<IAutomationMutationRunner>();
         var ran = new List<string>();
@@ -250,7 +281,7 @@ public class RootEquivalentAdminWireTests
     public async Task A_stored_custom_command_runs_only_on_an_admin_owners_authority()
     {
         await using var host = await Host.StartAsync(everyTargetKnown: true);
-        var keys = await KeysAsync(host);
+        using var keys = await KeysAsync(host);
         var executor = host.Factory.Services.GetRequiredService<ITaskExecutor>();
 
         var tasks = new Dictionary<string, ScheduledTaskEntity>();
@@ -304,10 +335,10 @@ public class RootEquivalentAdminWireTests
     }
 
     /// <summary>A read, a write and the host's admin key, each with a client of its own.</summary>
-    private static async Task<List<(string Level, string KeyId, HttpClient Client)>> KeysAsync(Host host)
+    private static async Task<KeySet> KeysAsync(Host host)
     {
         var permissions = host.Factory.Services.GetRequiredService<IMcpPermissionService>();
-        var result = new List<(string, string, HttpClient)>();
+        var result = new KeySet(host.Client);
         foreach (var level in new[] { McpPermissionLevels.Read, McpPermissionLevels.Write })
         {
             var key = await GatewayArrange.RunAsync("mcp.key_create", () => permissions.AddApiKeyAsync(level + "-key", level));
@@ -319,6 +350,16 @@ public class RootEquivalentAdminWireTests
         return result;
     }
 
+    /// <summary>The keys of a test and their clients; disposing it disposes the clients it made (not the host's).</summary>
+    private sealed class KeySet(HttpClient hostClient) : List<(string Level, string KeyId, HttpClient Client)>, IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (var (_, _, client) in this)
+                if (!ReferenceEquals(client, hostClient)) client.Dispose();
+        }
+    }
+
     /// <summary>Stores a custom-command task (an arrangement, not under test) and returns its id.</summary>
     private static async Task<string> SeedCommandTaskAsync(Host host, string owner)
     {
@@ -326,7 +367,9 @@ public class RootEquivalentAdminWireTests
         var task = new ScheduledTaskEntity
         {
             Name = "nightly command", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.CustomCommand,
-            ServerId = "local", Config = "{\"command\":\"id\"}", CreatedBy = owner, CreatedVia = owner,
+            // Off, so the hosted scheduler never fires it itself if a run spans 02:00 UTC (review m4); the paths under test
+            // (the tools, "Run now", the executor) read the stored task whatever its switch says.
+            Enabled = false, ServerId = "local", Config = "{\"command\":\"id\"}", CreatedBy = owner, CreatedVia = owner,
         };
         await GatewayArrange.RunAsync("scheduler.create", () => scheduler.CreateTaskAsync(task));
         return task.TaskId;

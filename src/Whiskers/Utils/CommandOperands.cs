@@ -73,19 +73,30 @@ public static class CommandOperands
     public static bool IsSafeContainerRef(string? value)
         => !string.IsNullOrEmpty(value) && value.Length <= 255 && ContainerRefRegex.IsMatch(value);
 
-    // Database names handed to a database client as an operand (psql -d, mysql -D, mongosh's positional database).
+    // Database names handed to a database client as an operand (psql -d, mysql -D, mongosh's positional database,
+    // pg_dump / mysqldump / mongodump / mongoimport) and used in a dump's file name on the host.
     private static readonly Regex DatabaseNameRegex = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*\z", RegexOptions.Compiled);
 
-    /// <summary>True for a database name a read listing may hand to the database client (INV-19): leading letter or
-    /// digit, then letters, digits and <c>_ . -</c>, at most 128 characters. Never a leading <c>-</c> (mongosh reads
-    /// a positional <c>--eval=…</c> as an option and runs it), never <c>= / : </c> or whitespace (a psql connection
-    /// string or URI that connects elsewhere or sets server options).</summary>
+    /// <summary>True for a database name that may become an operand of a database client or part of a host file name
+    /// (INV-19): leading letter or digit, then letters, digits and <c>_ . -</c>, at most 128 characters. Never a leading
+    /// <c>-</c> (mongosh reads a positional <c>--eval=…</c> as an option and runs it, pg_dump a <c>--file=…</c>),
+    /// never <c>/</c> (a dump written by <c>docker cp</c> outside the backup directory), never <c>= :</c> or whitespace
+    /// (a psql connection string or URI that connects elsewhere or sets server options). For MongoDB also no
+    /// <c>.</c> (<see cref="IsSafeMongoDatabaseName"/>).</summary>
     public static bool IsSafeDatabaseName(string? value)
         => !string.IsNullOrEmpty(value) && value.Length <= 128 && DatabaseNameRegex.IsMatch(value);
 
-    /// <summary>Returns <paramref name="value"/> when it is a safe database name, otherwise throws.</summary>
-    public static string RequireDatabaseName(string? value)
-        => IsSafeDatabaseName(value) ? value! : throw new UnsafeOperandException("database", value);
+    /// <summary><see cref="IsSafeDatabaseName"/> without <c>.</c>: MongoDB forbids it in a database name, and the mongo
+    /// shells read a dotted positional argument as a host address.</summary>
+    public static bool IsSafeMongoDatabaseName(string? value) => IsSafeDatabaseName(value) && !value!.Contains('.');
+
+    /// <summary>Returns <paramref name="value"/> when it is a safe database name (for MongoDB when
+    /// <paramref name="mongo"/>), otherwise throws.</summary>
+    public static string RequireDatabaseName(string? value, bool mongo = false)
+        => (mongo ? IsSafeMongoDatabaseName(value) : IsSafeDatabaseName(value)) ? value!
+            : throw new UnsafeOperandException("database", value, mongo
+                ? "it must start with a letter or digit and use only letters, digits and _ - (no '.', no spaces)"
+                : null);
 
     /// <summary>Returns <paramref name="value"/> when it is a safe git ref, otherwise throws.</summary>
     public static string RequireGitRef(string? value)

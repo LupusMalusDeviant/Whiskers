@@ -39,6 +39,10 @@ public class DatabaseService : IDatabaseService
     public async Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
         var sw = Stopwatch.StartNew();
+        // INV-19: the database the query runs in is an operand of the client (psql -d, mysql -D, mongosh's
+        // positional database); an empty one keeps the client's default.
+        if (!string.IsNullOrEmpty(creds.Database) && dbType is DatabaseType.PostgreSQL or DatabaseType.MySQL or DatabaseType.MongoDB)
+            CheckDatabaseName(creds.Database, dbType);
         var cmd = BuildQueryCommand(dbType, creds, query);
         var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromSeconds(30));
         sw.Stop();
@@ -100,7 +104,7 @@ public class DatabaseService : IDatabaseService
     {
         // INV-19: a read listing must not become arbitrary execution — the name is an operand of the client
         // (mongosh would read "--eval=…" as an option and run it), so it is checked before it reaches one.
-        CommandOperands.RequireDatabaseName(database);
+        CheckDatabaseName(database, dbType);
         var cmd = dbType switch
         {
             DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", database, "-t", "-A", "-c",
@@ -136,7 +140,7 @@ public class DatabaseService : IDatabaseService
     public async Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
         // INV-19: as in GetTablesAsync, the database name is a client operand of a read.
-        CommandOperands.RequireDatabaseName(database);
+        CheckDatabaseName(database, dbType);
         // Escape the table identifier before embedding it in the query strings: '' for the
         // SQL string literals (psql) and `` for the backtick-quoted identifier (MySQL).
         var pgTable = table.Replace("'", "''");
@@ -176,6 +180,9 @@ public class DatabaseService : IDatabaseService
 
     public async Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        // INV-19: the name is an operand of pg_dump / mysqldump / mongodump (a leading '-' would be an option such as
+        // --file=) and part of the dump's file name, which docker cp writes as root on the host (no '/', so it stays in the backup directory).
+        CheckDatabaseName(database, dbType);
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{database}_{timestamp}.sql";
         var backupPath = $"/tmp/{fileName}";
@@ -235,6 +242,12 @@ public class DatabaseService : IDatabaseService
     };
 
     /// <summary>POSIX single-quote escaping for values interpolated into a <c>sh -c</c> string.</summary>
+    /// <summary>INV-19: the one check for a database name before it becomes a client operand or part of a host file
+    /// name (<see cref="CommandOperands.RequireDatabaseName"/>; for MongoDB without '.'). Throws
+    /// <see cref="UnsafeOperandException"/>; nothing has run then.</summary>
+    public static string CheckDatabaseName(string? database, DatabaseType dbType) =>
+        CommandOperands.RequireDatabaseName(database, mongo: dbType == DatabaseType.MongoDB);
+
     private static string Sq(string? s) => "'" + (s ?? "").Replace("'", "'\\''") + "'";
 
     private static string[] BuildMysqlCmd(DatabaseCredentials creds, params string[] extraArgs)

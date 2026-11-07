@@ -129,7 +129,12 @@ public class DatabaseTools
         if (error != null) return MutationScope.Fail(error);
 
         if (!string.IsNullOrEmpty(database))
+        {
+            // INV-19: the name is an operand of the client; refused before anything runs (DatabaseService checks too).
+            try { DatabaseService.CheckDatabaseName(database, container!.DatabaseType); }
+            catch (Whiskers.Utils.UnsafeOperandException ex) { return MutationScope.Fail(ex.Message); }
             creds!.Database = database;
+        }
 
         var result = await dbService.ExecuteQueryAsync(container!.Id, query, container.DatabaseType, creds!, serverId);
 
