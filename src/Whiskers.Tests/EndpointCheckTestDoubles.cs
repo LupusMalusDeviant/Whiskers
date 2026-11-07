@@ -64,7 +64,7 @@ internal static class EndpointCheckTestDoubles
         public void Dispose()
         {
             Services.Dispose();
-            SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPool(_path);   // only this database: a global clear tears into parallel tests' pools
             try { File.Delete(_path); } catch (IOException) { /* best effort */ }
         }
     }

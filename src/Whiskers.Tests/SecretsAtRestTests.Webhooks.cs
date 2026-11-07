@@ -164,20 +164,36 @@ public partial class SecretsAtRestTests
             await ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), await Vault(), NullLogger.Instance);
 
         // Read while the connection pool is still alive: closing it would fold the log back on its own.
-        foreach (var file in Directory.EnumerateFiles(_root, "metrics.db*"))
+        // SQLite deletes -wal/-shm only when the last connection to the database closes — never on a checkpoint. A file
+        // that vanishes mid-read therefore means something closed this test's pool (a global pool clear in a parallel
+        // test did that). Skipping it could pass without the log ever being read, so the whole read is retried once on
+        // a stable listing, and a second vanish fails with that cause named.
+        if (ReadsAllDatabaseFiles(secret) is { } vanished)
+            Assert.True(ReadsAllDatabaseFiles(secret) is null,
+                $"{vanished} vanished while it was read twice: something closed this test's connection pool, so the log could not be inspected");
+        TestSqlite.ClearPools(_root);
+    }
+
+    /// <summary>Reads every <c>metrics.db*</c> file and asserts none holds <paramref name="secret"/>; returns the name of a
+    /// file that disappeared between the listing and the read (null when all were read).</summary>
+    private string? ReadsAllDatabaseFiles(string secret)
+    {
+        foreach (var file in Directory.EnumerateFiles(_root, "metrics.db*").ToList())
         {
-            // SQLite may remove the -wal/-shm file between the listing and the open (a checkpoint on another
-            // connection): a file that no longer exists holds no secret, so it is skipped, not a failure.
-            FileStream stream;
-            try { stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete); }
-            catch (FileNotFoundException) { continue; }
-            using var _ = stream;
-            using var copy = new MemoryStream();
-            stream.CopyTo(copy);
-            Assert.False(System.Text.Encoding.UTF8.GetString(copy.ToArray()).Contains(secret, StringComparison.Ordinal),
+            byte[] bytes;
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var copy = new MemoryStream();
+                stream.CopyTo(copy);
+                bytes = copy.ToArray();
+            }
+            // Gone (FileNotFound), or deleted but still pending on Windows (UnauthorizedAccess / IOException).
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return Path.GetFileName(file); }
+            Assert.False(System.Text.Encoding.UTF8.GetString(bytes).Contains(secret, StringComparison.Ordinal),
                 $"{Path.GetFileName(file)} still holds the replaced secret");
         }
-        TestSqlite.ClearPools(_root);
+        return null;
     }
 
     [Fact]

@@ -98,7 +98,7 @@ public class CveModuleTests
     {
         // The real monitor, with its scan gate already held (as by the loop's own cycle): the manual cycle returns false,
         // never calls "started" and leaves the gate to its holder.
-        static T Null<T>() where T : class => ComponentTests.ServersKubeconfigSaveTests.NullProxy<T>.Create();
+        static T Null<T>() where T : class => NullProxy<T>.Create();
         var monitor = new CveMonitorService(Null<ICveFindingsStore>(),
             new StaticOptionsMonitor<Whiskers.Configuration.CveMonitorSettings>(new Whiskers.Configuration.CveMonitorSettings()),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CveMonitorService>.Instance,
@@ -111,9 +111,16 @@ public class CveModuleTests
         gate.SetValue(monitor, 1);
         var started = false;
 
+        // Inside the person's cve.scan decision, as the pages run it: the skip is the operation's failed result.
+        using var scope = Whiskers.Services.Mutations.MutationScope.Begin("cve.scan", "op-manual-scan");
         Assert.False(await monitor.RunOneCycleAsync(started: () => started = true));
         Assert.False(started);
         Assert.Equal(1, gate.GetValue(monitor));   // still held by its holder, not released by the refused call
+        var noted = Assert.Single(scope.Results);
+        Assert.False(noted.Success);
+        Assert.Equal("cve.scan", noted.Action);
+        Assert.Contains("already running", noted.Details);
+        Assert.Contains("already running", scope.FailureReason);
     }
 
     // --- Enable/disable gate -----------------------------------------------------------------------------
