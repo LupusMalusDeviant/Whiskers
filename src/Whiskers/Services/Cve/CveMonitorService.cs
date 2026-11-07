@@ -95,7 +95,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                         _logger.LogInformation("CVE scan not due yet (last {Last:u}, every {H}h) — using persisted results",
                             last, interval.TotalHours);
                     else
-                        await RunOneCycleAsync(ct);
+                        await RunCycleAsync(ct);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
@@ -125,8 +125,12 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
     // overlapping full scans; the bool _store.IsScanning is kept only as the UI indicator.
     private int _scanning;
 
-    /// <summary>Run a single scan cycle across all enabled servers. Public for manual triggers.</summary>
-    public async Task RunOneCycleAsync(CancellationToken ct = default)
+    /// <summary>A manual scan cycle (<c>cve.scan</c>): a page runs it inside its gateway decision.</summary>
+    public Task RunOneCycleAsync(CancellationToken ct = default) => RunCycleAsync(ct);
+
+    /// <summary>Run a single scan cycle across all enabled servers: the loop's own unattended cycle (S-06) and the
+    /// body of a manual one.</summary>
+    private async Task RunCycleAsync(CancellationToken ct)
     {
         if (Interlocked.CompareExchange(ref _scanning, 1, 0) != 0)
         {

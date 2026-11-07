@@ -8,7 +8,7 @@ its compositions (`MutationCompositions`) and the rows of [`PRODUCT_CONTRACT.md`
 that name it (M rows through their tool, the others through [`PATH_CAPABILITIES.md`](PATH_CAPABILITIES.md)).
 Contract 0008, D7: §7 stays hand-written; this file is generated and the release gate joins the two (R12–R15).
 
-111 capabilities, 47 of them with an MCP tool; by level: admin 86, read 1, write 24.
+114 capabilities, 47 of them with an MCP tool; by level: admin 86, read 1, write 27.
 
 | Capability | Level | Target | Risk | MCP tool | Verification | Surfaces | Composes | Composed by | §7 rows |
 |---|---|---|---|---|---|---|---|---|---|
@@ -48,6 +48,7 @@ Contract 0008, D7: §7 stays hand-written; this file is generated and the releas
 | `container.start` | write | container | Reversible | `start_container` | read back: the container runs, or a one-shot container exited 0. | ui | — | `workload.start` | M-01, U-01, U-05 |
 | `container.stop` | write | container | Disruptive | `stop_container` | read back: the container no longer runs. | — | — | `compose.deploy`, `container.env_set`, `gitdeploy.deploy`, `workload.stop` | M-02, U-01, U-05 |
 | `container.update` | write | container | Disruptive | `update_container` | read back: the recreated container runs. | background | — | — | M-04, S-02, S-04, U-03 |
+| `cve.scan` | write | fleet | Reversible | — | `NotVerifiable`: a scan changes no workload: its findings are Whiskers' own record, with nothing external to read back. | — | — | — | U-40 |
 | `db.backup` | admin | container | Reversible | `backup_database` | read back: the dump file exists on the host and is not empty. | — | — | — | M-16, S-01, U-09 |
 | `db.backup_delete` | admin | container | Destructive | — | read back: no more than the kept number of dumps remain. | background | — | — | S-01 |
 | `db.query` | admin | container | RootEquivalent | `execute_query` | `NotVerifiable`: an arbitrary SQL statement: no semantic read-back. | — | — | — | M-15, U-07, U-08 |
@@ -93,6 +94,8 @@ Contract 0008, D7: §7 stays hand-written; this file is generated and the releas
 | `nginx.site_disable` | admin | host | Disruptive | — | read back: the site is no longer linked in sites-enabled. | — | `nginx.reload` | — | U-16 |
 | `nginx.site_enable` | admin | host | Disruptive | — | read back: the site is linked in sites-enabled. | — | `nginx.reload` | — | U-16 |
 | `nginx.update` | admin | host | Disruptive | `update_nginx_config` | read back: the site's file holds the written configuration. | — | `nginx.reload` | — | M-11, U-16 |
+| `notifications.clear` | write | whiskers | Destructive | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-39 |
+| `notifications.mark_read` | write | whiskers | Reversible | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-39 |
 | `registry.delete` | admin | config | Disruptive | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `vault.secret_delete` | — | U-34 |
 | `registry.save` | admin | config | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `vault.secret_delete`, `vault.secret_set` | — | U-34 |
 | `scheduler.create` | write | scheduled-task | RootEquivalent | `create_scheduled_task` | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | M-23, U-26 |

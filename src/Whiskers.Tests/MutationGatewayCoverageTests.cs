@@ -592,7 +592,6 @@ public class MutationGatewayCoverageTests
         ("ICveFindingsStore.Remove", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ICveFindingsStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ICveFindingsStore.Set", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
-        ("ICveMonitorService.RunOneCycleAsync", "a scan cycle; its host side effects are the designed exemption ScannerHostSideEffects (M2)"),
         ("IFleetSnapshotCache.PruneRemovedServers", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IFleetSnapshotCache.Put", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IHealthStore.AddRecord", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
@@ -601,8 +600,6 @@ public class MutationGatewayCoverageTests
         ("IImageUpdateStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IImageUpdateStore.Set", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IInAppNotificationStore.Add", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
-        ("IInAppNotificationStore.Clear", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
-        ("IInAppNotificationStore.MarkAllRead", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ILogMonitorService.SuspendedContainers", "a read (the list of suspended containers)"),
         ("IMetricRollupService.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("INotificationOutbox.AddAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
@@ -671,9 +668,9 @@ public class MutationGatewayCoverageTests
     /// decision (host start-up, hosted services, request handling before any decision, reads).</summary>
     private static readonly (string Handler, string Why)[] BackgroundStartsOutsideDecisions =
     [
-        ("Whiskers.Components.Pages.Cves.TriggerScan", "a page click that starts a CVE scan (no gateway operation); not inside a runner lambda"),
+        ("Whiskers.Components.Pages.Cves.TriggerScan", "a page click that opens the cve.scan decision off the circuit: the Task.Run is outside any decision, the scan runs inside the one it opens (INV-18)"),
         ("Whiskers.Components.Pages.Dashboard.OnInitializedAsync", "page initialisation loading stats (reads)"),
-        ("Whiskers.Components.Pages.Settings.TriggerCveScan", "a page click that starts a CVE scan (no gateway operation); not inside a runner lambda"),
+        ("Whiskers.Components.Pages.Settings.TriggerCveScan", "a page click that opens the cve.scan decision off the circuit: the Task.Run is outside any decision, the scan runs inside the one it opens (INV-18)"),
         ("Whiskers.Services.Auth.AuthAuditLog.StartAsync", "hosted-service start (host start-up)"),
         ("Whiskers.Services.Docker.SshTunnelManager.EstablishTunnelAsync", "the tunnel's pump forwards bytes and calls no service; a decision's scope it may carry authorizes nothing once closed"),
         ("Whiskers.Services.Notifications.OutboundTargetStartupCheck.StartAsync", "hosted-service start (host start-up)"),

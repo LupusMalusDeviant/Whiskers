@@ -11,6 +11,8 @@
 @inject ICveMonitorService Monitor
 @inject IOptionsMonitor<CveMonitorSettings> SettingsMonitor
 @inject ISnackbar Snackbar
+@inject IUiMutationRunner Mutations
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["Cves_PageTitle"]</PageTitle>
@@ -48,9 +50,13 @@
 
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.Refresh" OnClick="RebuildAsync">@L["Cves_Button_Refresh"]</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                   StartIcon="@Icons.Material.Filled.Search" OnClick="TriggerScan"
-                   Disabled="@(_scanRequested || Store.IsScanning || !SettingsMonitor.CurrentValue.Enabled)">@L["Cves_Button_ScanNow"]</MudButton>
+        @* Shown from Operator on: presentation only — the gateway decides cve.scan at the click (INV-18). *@
+        @if (_role >= AppRole.Operator)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Search" OnClick="TriggerScan"
+                       Disabled="@(_scanRequested || Store.IsScanning || !SettingsMonitor.CurrentValue.Enabled)">@L["Cves_Button_ScanNow"]</MudButton>
+        }
     </MudStack>
 
     @* Per-server overview cards *@
@@ -259,8 +265,11 @@
     private string _filterSearch = "";
     private bool _onlyFixable;
 
+    private AppRole _role = AppRole.Viewer;
+
     protected override async Task OnInitializedAsync()
     {
+        _role = await CurrentUser.GetRoleAsync();
         _servers = ServerConfig.GetServers();
         await RebuildAsync();
     }
@@ -351,13 +360,23 @@
     {
         if (_scanRequested || Store.IsScanning) return Task.CompletedTask;
         _scanRequested = true;
-        Snackbar.Add(L["Cves_Snackbar_ScanStarted"].Value, Severity.Info);
         // Run off the circuit so the page stays responsive, then refresh the findings once the
         // cycle is done (the store is updated in place, but this page only rebuilds on demand).
+        // The scan is the gateway's `cve.scan` decision (Operator, INV-18, user decision 2026-11-07): the gateway
+        // refuses a Viewer here, whatever the page shows, and the decision lasts the whole cycle.
         _ = Task.Run(async () =>
         {
             string? error = null;
-            try { await Monitor.RunOneCycleAsync(); }
+            string? refused = null;
+            try
+            {
+                await Mutations.RunAsync("cve.scan", new { }, ct =>
+                {
+                    _ = InvokeAsync(() => Snackbar.Add(L["Cves_Snackbar_ScanStarted"].Value, Severity.Info));
+                    return Monitor.RunOneCycleAsync(ct);
+                });
+            }
+            catch (MutationRefusedException ex) { refused = ex.Message; }
             catch (Exception ex)
             {
                 error = ex.Message;
@@ -369,7 +388,12 @@
                 await InvokeAsync(async () =>
                 {
                     _scanRequested = false;
-                    if (error is null)
+                    if (refused is not null)
+                    {
+                        Snackbar.Add(refused, Severity.Warning);
+                        StateHasChanged();
+                    }
+                    else if (error is null)
                     {
                         await RebuildAsync();
                         Snackbar.Add(L["Cves_Snackbar_ScanFinished"].Value, Severity.Success);

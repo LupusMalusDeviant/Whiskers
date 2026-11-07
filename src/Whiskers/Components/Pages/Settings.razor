@@ -1520,11 +1520,20 @@ else
     {
         if (_cveScanRequested || CveStore.IsScanning) return Task.CompletedTask;
         _cveScanRequested = true;
-        Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info);
+        // The scan is the gateway's `cve.scan` decision (Operator, INV-18, user decision 2026-11-07), decided at the
+        // click; the decision lasts the whole cycle, run off the circuit.
         _ = Task.Run(async () =>
         {
             string? error = null;
-            try { await CveMonitor.RunOneCycleAsync(); }
+            try
+            {
+                await Mutations.RunAsync("cve.scan", new { }, ct =>
+                {
+                    _ = InvokeAsync(() => Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info));
+                    return CveMonitor.RunOneCycleAsync(ct);
+                });
+            }
+            catch (MutationRefusedException ex) { error = ex.Message; }
             catch (Exception ex)
             {
                 error = ex.Message;

@@ -15,7 +15,11 @@ public interface IInAppNotificationStore
     IReadOnlyList<InAppNotification> Recent { get; }
     int UnreadCount { get; }
     void Add(NotificationEvent evt);
+    /// <summary>Marks every notification read for everyone: the log is shared (INV-18, user decision 2026-11-07).</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("notifications.mark_read")]
     void MarkAllRead();
+    /// <summary>Deletes the whole shared notification history (INV-18, user decision 2026-11-07).</summary>
+    [Whiskers.Services.Mutations.MutatingOperation("notifications.clear")]
     void Clear();
     event Action? Changed;
     event Action<InAppNotification>? Added;
