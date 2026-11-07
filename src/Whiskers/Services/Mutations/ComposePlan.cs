@@ -351,7 +351,7 @@ public static partial class ComposeModel
     public static readonly IReadOnlyList<string> OverrideFiles =
         ["compose.override.yml", "compose.override.yaml", "docker-compose.override.yml", "docker-compose.override.yaml"];
 
-    private static readonly Regex ValidProjectName = new("^[a-z0-9][a-z0-9_-]*$", RegexOptions.CultureInvariant);
+    private static readonly Regex ValidProjectName = new(@"^[a-z0-9][a-z0-9_-]*\z", RegexOptions.CultureInvariant);
 
     /// <summary>A directory name made into a project name the way compose does: lower case, only <c>a-z0-9_-</c>,
     /// no leading <c>_</c> or <c>-</c>.</summary>

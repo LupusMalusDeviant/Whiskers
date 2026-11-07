@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Whiskers.Models;
 
 namespace Whiskers.Services.Mutations;
@@ -81,6 +82,28 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
     public static AppRole RoleOf(string capabilityId) =>
         RoleFor(capabilityId is not null && LevelById.TryGetValue(capabilityId, out var level) ? level : McpPermissionLevels.Admin);
 
+    /// <summary>
+    /// INV-19: the root-equivalent capabilities — every row of the table below marked
+    /// <see cref="CapabilityRisk.RootEquivalent"/>: anything that runs a caller-chosen command on a host or in a
+    /// container, opens a host or container shell, deploys compose / apps / Git, writes a container's <c>.env</c> and
+    /// brings it up, runs arbitrary SQL, or decides who and what may do any of that. Each needs Admin on every
+    /// surface; <see cref="RootEquivalentPerCall"/> names the two whose level the gateway resolves per call.
+    /// <c>RootEquivalentAdminTests</c> pins the membership.
+    /// </summary>
+    public static IReadOnlySet<string> RootEquivalent { get; } = Definitions()
+        .Where(c => c.Risk == CapabilityRisk.RootEquivalent)
+        .Select(c => c.Id)
+        .ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The root-equivalent capabilities whose catalog level is below Admin because what they do depends on the task:
+    /// <c>scheduler.create</c> / <c>scheduler.run</c>. <see cref="SchedulerRequirementResolver"/> raises a call to
+    /// Admin when the task runs a custom command (<c>host.exec</c>) — before the caller check and before an approval
+    /// is requested — and an unrecognised task type or task id to Admin as well (fail closed).
+    /// </summary>
+    public static IReadOnlySet<string> RootEquivalentPerCall { get; } =
+        new[] { "scheduler.create", "scheduler.run" }.ToFrozenSet(StringComparer.Ordinal);
+
     private static Capability Tool(string id, string tool, string level, string target, CapabilityRisk risk, TimeSpan deadline) =>
         new(id, level, target, risk, tool, deadline);
 
@@ -156,7 +179,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("firewall.rule_add", "add_firewall_rule", A, "host", Dis, Short);
         yield return Tool("firewall.rule_remove", "remove_firewall_rule", A, "host", Dis, Short);
         yield return Ui("firewall.set_status", A, "host", Dis, Short);
-        yield return Tool("nginx.update", "update_nginx_config", A, "host", Dis, Short);
+        // INV-19: a site file with any content is loaded by the nginx master, which runs as root (a log or pid path
+        // writes any file on the host), so the write is root-equivalent; it was Admin already.
+        yield return Tool("nginx.update", "update_nginx_config", A, "host", Root, Short);
         yield return Ui("nginx.reload", A, "host", Dis, Short);
         yield return Ui("nginx.site_enable", A, "host", Dis, Short);
         yield return Ui("nginx.site_disable", A, "host", Dis, Short);
@@ -246,7 +271,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
 
         // Volume backups
         yield return Ui("volume.backup", W, "volume", Rev, Long);
-        yield return Ui("volume.restore", A, "volume", Des, Long);
+        // INV-19: restores any recorded archive into any named volume, also one a privileged container or Whiskers
+        // itself mounts, so it is root-equivalent (Admin already, no level changed).
+        yield return Ui("volume.restore", A, "volume", Root, Long);
         yield return Ui("volume.backup_delete", A, "volume", Des, Short);
 
         // Security configuration (R1-11): who may sign in, with which role, which keys and tools the MCP surface

@@ -22,7 +22,7 @@ public class VolumeBackupService : IVolumeBackupService
 
     // Docker volume/container names and backup file names: must start alphanumeric, then
     // alphanumerics plus _ . - only. Rejects anything that could break out of the shell command.
-    private static readonly Regex SafeName = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.Compiled);
+    private static readonly Regex SafeName = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*\z", RegexOptions.Compiled);
 
     private static string ValidateName(string value, string what)
     {
