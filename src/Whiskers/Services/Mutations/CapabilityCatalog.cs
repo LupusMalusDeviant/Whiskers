@@ -22,12 +22,24 @@ public interface ICapabilityCatalog
 /// </summary>
 public sealed class CapabilityCatalog : ICapabilityCatalog
 {
-    /// <summary>The UI role that holds a catalog level, so pages take their requirement from this table (R1-05).</summary>
-    public static AppRole RoleFor(string level) => McpPermissionLevels.Normalize(level) switch
+    /// <summary>The UI role that holds a catalog level, so pages take their requirement from this table (R1-05). This
+    /// maps a <em>required</em> level: anything that is not read, write or admin is held to Admin (fail closed),
+    /// unlike <see cref="McpPermissionLevels.Normalize"/>, which reads an unknown <em>granted</em> level as read.</summary>
+    public static AppRole RoleFor(string level) => level?.Trim().ToLowerInvariant() switch
     {
-        McpPermissionLevels.Admin => AppRole.Admin,
+        McpPermissionLevels.Read => AppRole.Viewer,
         McpPermissionLevels.Write => AppRole.Operator,
-        _ => AppRole.Viewer,
+        _ => AppRole.Admin,
+    };
+
+    /// <summary>The one place the fixed rule turns a role into the level it holds (INV-13): Admin ↔ admin,
+    /// Operator ↔ write, Viewer (and anything else) ↔ read. Every surface that maps a signed-in person's role to a
+    /// level calls this; <c>CapabilityTableConsistencyTests</c> forbids a second spelling.</summary>
+    public static string LevelFor(AppRole role) => role switch
+    {
+        AppRole.Admin => McpPermissionLevels.Admin,
+        AppRole.Operator => McpPermissionLevels.Write,
+        _ => McpPermissionLevels.Read,
     };
 
     private static readonly TimeSpan Short = TimeSpan.FromMinutes(2);

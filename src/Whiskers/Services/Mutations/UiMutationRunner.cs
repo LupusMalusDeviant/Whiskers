@@ -172,12 +172,7 @@ public sealed class UiMutationRunner : IUiMutationRunner
         var email = await _user.GetEmailAsync();
         var session = await _user.CheckSessionAsync();
         var role = session.Valid ? session.Role : AppRole.Viewer;
-        var level = role switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        var level = CapabilityCatalog.LevelFor(role);
         var principal = string.IsNullOrWhiteSpace(email)
             ? new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.Anonymous, "unknown", level)
             : new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.User(email), email, level);

@@ -8,7 +8,6 @@
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IOptionsMonitor<AutomationOptions> AutomationOptions
 @inject IStringLocalizer<SharedResource> L
-@inject Whiskers.Services.Mutations.ICapabilityCatalog Capabilities
 @inject Whiskers.Services.Mutations.IEffectiveRequirementResolver Requirements
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
@@ -25,7 +24,7 @@
         </div>
         <MudSpacer />
         @* The catalog level of scheduler.create; the gateway then holds each task type to what it runs (R1-05). *@
-        @if (_role >= RoleOf("scheduler.create"))
+        @if (_role >= CapabilityCatalog.RoleOf("scheduler.create"))
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                        OnClick="ShowCreateDialog">@L["ScheduledTasksView_Button_CreateTask"]</MudButton>
@@ -180,7 +179,7 @@ else
                                    ValueChanged="@((bool v) => ToggleEnabled(context, v))" />
                     }
                     @* Deleting takes its level from the capability catalog, like its handler (R1-05). *@
-                    @if (_role >= RoleOf("scheduler.delete"))
+                    @if (_role >= CapabilityCatalog.RoleOf("scheduler.delete"))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
                                        OnClick="@(() => DeleteTask(context))" title="@L["ScheduledTasksView_Tooltip_Delete"]" />
@@ -349,10 +348,6 @@ else
         maxBackups, command,
     };
 
-    private AppRole RoleOf(string capabilityId) =>
-        Whiskers.Services.Mutations.CapabilityCatalog.RoleFor(
-            Capabilities.Find(capabilityId)?.RequiredLevel ?? McpPermissionLevels.Admin);
-
     private bool Require(AppRole required)
     {
         if (_role < required)
@@ -365,7 +360,7 @@ else
 
     /// <summary>The role check in front of a mutation, with the role from the capability catalog (INV-13).</summary>
     private Task<bool> RequireAsync(string capabilityId, object arguments) =>
-        RequireRoleAsync(RoleOf(capabilityId), capabilityId, arguments);
+        RequireRoleAsync(CapabilityCatalog.RoleOf(capabilityId), capabilityId, arguments);
 
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).

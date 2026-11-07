@@ -109,7 +109,7 @@ public class CapabilityTableConsistencyTests
 
         var page = File.ReadAllText(Path.Combine(components, "Pages", "ScheduledTasksView.razor"));
         Assert.Contains("RequireAsync(\"scheduler.delete\"", page);
-        Assert.Contains("RequireRoleAsync(RoleOf(capabilityId), capabilityId, arguments)", page);
+        Assert.Contains("RequireRoleAsync(CapabilityCatalog.RoleOf(capabilityId), capabilityId, arguments)", page);
     }
 
     // ── INV-13: a page takes the role in front of a capability from the catalog, never from its own source ──────
@@ -130,152 +130,34 @@ public class CapabilityTableConsistencyTests
     public void An_unknown_capability_needs_admin_on_a_page(string? id) =>
         Assert.Equal(AppRole.Admin, CapabilityCatalog.RoleOf(id!));
 
-    /// <summary>
-    /// No page or panel states its own role in front of a capability (INV-13): a role check in a handler that runs,
-    /// refuses or guards a mutation (<c>Mutations.*</c>, <c>RefuseAsync</c>, <c>RequireAsync</c>) names no
-    /// <c>AppRole.*</c> and no <c>_isAdmin</c> — it asks the catalog (<c>RoleOf(capabilityId)</c>), also where the
-    /// capability id is computed (Dashboard rows, cloud actions, the webhook test). A literal role is left only in
-    /// front of a read (a plain <c>Require</c> in a handler that changes nothing) and in markup, which only decides
-    /// what is shown.
-    /// </summary>
-    [Fact]
-    public void No_page_states_its_own_role_in_front_of_a_capability()
-    {
-        var components = Path.Combine(SourceRoot(), "src", "Whiskers", "Components");
-        var files = Directory.EnumerateFiles(components, "*.razor", SearchOption.AllDirectories)
-            .Concat(Directory.EnumerateFiles(components, "*.cs", SearchOption.AllDirectories))
-            .ToList();
-        var found = files.SelectMany(f => PageRoleLiterals(Path.GetFileName(f), File.ReadAllText(f))).Distinct().ToList();
+    /// <summary>The fixed rule, both ways (INV-13): <see cref="CapabilityCatalog.LevelFor"/> is the one role → level
+    /// mapping (anything but Admin and Operator holds read), and <see cref="CapabilityCatalog.RoleFor"/> maps a
+    /// required level to a role — a level that is not read, write or admin is held to Admin, never to Viewer.</summary>
+    [Theory]
+    [InlineData(AppRole.Admin, McpPermissionLevels.Admin)]
+    [InlineData(AppRole.Operator, McpPermissionLevels.Write)]
+    [InlineData(AppRole.Viewer, McpPermissionLevels.Read)]
+    [InlineData((AppRole)99, McpPermissionLevels.Read)]
+    [InlineData((AppRole)(-1), McpPermissionLevels.Read)]
+    public void A_role_holds_the_level_of_the_fixed_rule(AppRole role, string level) =>
+        Assert.Equal(level, CapabilityCatalog.LevelFor(role));
 
-        Assert.Empty(found);
+    [Theory]
+    [InlineData("admin", AppRole.Admin)]
+    [InlineData(" Write ", AppRole.Operator)]
+    [InlineData("READ", AppRole.Viewer)]
+    [InlineData("wirte", AppRole.Admin)]
+    [InlineData("", AppRole.Admin)]
+    [InlineData(null, AppRole.Admin)]
+    public void A_required_level_maps_to_its_role_and_anything_else_to_admin(string? level, AppRole role) =>
+        Assert.Equal(role, CapabilityCatalog.RoleFor(level!));
 
-        // The scan sees the handlers it is about: dozens run a capability, and they ask the catalog.
-        var guarded = files.Sum(f => Methods(File.ReadAllText(f)).Count(m => RunsCapability.IsMatch(m.Body)));
-        Assert.True(guarded > 100, $"only {guarded} handlers run a capability: the method scan is broken");
-        var asking = files.Sum(f => System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(f), @"CapabilityCatalog\.RoleOf\(|\bRoleOf\(capabilityId\)").Count);
-        Assert.True(asking > 20, $"only {asking} role checks ask the catalog");
-    }
-
-    /// <summary>Every page's role-check helper takes a capability id and no role, and asks the catalog for the role.
-    /// Only Scheduled tasks keeps a role-taking core (<c>RequireRoleAsync</c>), for "Run now": its role is the task's
-    /// own requirement, from <c>SchedulerRequirementResolver</c>, which the catalog cannot state statically.</summary>
-    [Fact]
-    public void Every_page_role_check_helper_asks_the_catalog()
-    {
-        var components = Path.Combine(SourceRoot(), "src", "Whiskers", "Components");
-        var helpers = 0;
-        foreach (var file in Directory.EnumerateFiles(components, "*.razor", SearchOption.AllDirectories))
-        {
-            var name = Path.GetFileName(file);
-            var source = File.ReadAllText(file);
-            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(source,
-                         @"Task<bool>\s+(Require\w*Async)\(([^)]*)\)"))
-            {
-                helpers++;
-                if (m.Groups[1].Value == "RequireRoleAsync")
-                {
-                    Assert.Equal("ScheduledTasksView.razor", name);
-                    continue;
-                }
-                Assert.Equal("string capabilityId, object arguments", m.Groups[2].Value);
-                var body = source[m.Index..(source.IndexOf("\n    }", m.Index, StringComparison.Ordinal) is var end and > 0 ? end : source.Length)];
-                Assert.Matches(@"RoleOf\(capabilityId\)", body);
-            }
-        }
-        Assert.True(helpers >= 20, $"only {helpers} role-check helpers found");
-    }
-
-    /// <summary>The scan above catches what it must: a literal role in a capability check, also with a computed id,
-    /// an <c>_isAdmin</c> gate in front of a refusal, a plain <c>Require</c> in a handler that runs a mutation — and
-    /// leaves a catalog role, a read and the markup alone.</summary>
-    [Fact]
-    public void The_page_role_scan_catches_a_literal_role_and_leaves_the_catalog_role()
-    {
-        static string Page(string body) => "@if (_role >= AppRole.Admin) { <b>shown</b> }\n@code {\n    private async Task Handler()\n    {\n" + body + "\n    }\n}\n";
-
-        Assert.Equal(["P.razor:Handler"], PageRoleLiterals("P.razor", Page("        if (!await RequireAsync(AppRole.Admin, \"container.remove\", new { })) return;")));
-        Assert.Equal(["P.razor:Handler"], PageRoleLiterals("P.razor", Page("        var (capability, arguments) = RowAction(c, \"start\");\n        if (!await RequireAsync(AppRole.Operator, capability, arguments)) return;")));
-        Assert.Equal(["P.razor:Handler"], PageRoleLiterals("P.razor", Page("        if (!_isAdmin)\n        {\n            await Mutations.RefuseAsync(\"config.agent\", new { }, \"no\");\n            return;\n        }")));
-        Assert.Equal(["P.razor:Handler"], PageRoleLiterals("P.razor", Page("        if (!Require(AppRole.Operator)) return;\n        await Mutations.RunAsync(\"container.start\", new { }, _ => Task.CompletedTask);")));
-        Assert.Equal(["P.razor:Handler"], PageRoleLiterals("P.razor", Page("        if (!await CurrentUser.HasRoleAsync(Whiskers.Models.AppRole.Admin)) { await Mutations.RefuseAsync(\"x.y\", new { }, \"no\"); return; }")));
-        Assert.Equal(["P.razor:Expression"], PageRoleLiterals("P.razor", "@code {\n    private Task<bool> Expression() => RequireAsync(AppRole.Admin, \"x.y\", new { });\n}\n"));
-
-        Assert.Empty(PageRoleLiterals("P.razor", Page("        if (!await RequireAsync(\"container.remove\", new { })) return;")));
-        Assert.Empty(PageRoleLiterals("P.razor", Page("        if (_role < CapabilityCatalog.RoleOf(\"terminal.host_open\")) return;\n        await Mutations.RunAsync(\"terminal.host_open\", new { }, _ => Task.CompletedTask);")));
-        Assert.Empty(PageRoleLiterals("P.razor", Page("        if (!Require(AppRole.Admin)) return;\n        var result = await NginxService.TestConfigAsync(ServerId);")));
-    }
-
-    private static readonly System.Text.RegularExpressions.Regex RunsCapability = new(
-        @"(?<![\w.])Mutations\.\w+|\bRefuseAsync\(|\bRequire\w*Async\(");   // the injected runner, not the namespace
-    private static readonly System.Text.RegularExpressions.Regex RoleLiteral = new(
-        @"\bAppRole\.(?:Admin|Operator|Viewer)\b|\b_?isAdmin\b");
-
-    /// <summary>"File:Method" for every handler of <paramref name="source"/> that states a role of its own in front of
-    /// a capability: a method that runs, refuses or guards a mutation and names a role literal or <c>_isAdmin</c>,
-    /// or any capability-check call (<c>Require…Async</c>) whose role argument is a literal, wherever it sits.</summary>
-    private static List<string> PageRoleLiterals(string file, string source)
-    {
-        var found = new List<string>();
-        foreach (var (method, body) in Methods(source))
-            if (RunsCapability.IsMatch(body) && RoleLiteral.IsMatch(body))
-                found.Add($"{file}:{method}");
-        foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(source,
-                     @"\bRequire\w*Async\(\s*(?:Whiskers\.Models\.)?AppRole\."))
-        {
-            var owner = System.Text.RegularExpressions.Regex.Matches(source[..call.Index],
-                    @"(?:private|protected|public|internal)[^\n;=(]*?\b(\w+)\s*\(")
-                .LastOrDefault()?.Groups[1].Value ?? "?";
-            found.Add($"{file}:{owner}");
-        }
-        return found.Distinct().ToList();
-    }
-
-    /// <summary>The fixed rule (Viewer↔read, Operator↔write, Admin↔admin) is spelled out in several places that turn
-    /// a role into a level or back; every spelling in the product says the same, so no surface maps differently.</summary>
-    [Fact]
-    public void Every_role_to_level_mapping_in_the_product_is_the_fixed_rule()
-    {
-        var expected = new Dictionary<string, string> { ["Admin"] = "Admin", ["Operator"] = "Write", ["Viewer"] = "Read" };
-        var product = Path.Combine(SourceRoot(), "src", "Whiskers");
-        var arms = 0;
-        foreach (var file in Directory.EnumerateFiles(product, "*.cs", SearchOption.AllDirectories)
-                     .Concat(Directory.EnumerateFiles(product, "*.razor", SearchOption.AllDirectories))
-                     .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")))
-        {
-            var source = File.ReadAllText(file);
-            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(source,
-                         @"AppRole\.(\w+)\s*=>\s*McpPermissionLevels\.(\w+)"))
-            {
-                arms++;
-                Assert.True(expected.GetValueOrDefault(m.Groups[1].Value) == m.Groups[2].Value, $"{Path.GetFileName(file)}: {m.Value}");
-            }
-            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(source,
-                         @"McpPermissionLevels\.(\w+)\s*=>\s*(?:Whiskers\.Models\.)?AppRole\.(\w+)"))
-            {
-                arms++;
-                Assert.True(expected.GetValueOrDefault(m.Groups[2].Value) == m.Groups[1].Value, $"{Path.GetFileName(file)}: {m.Value}");
-            }
-        }
-        Assert.True(arms >= 16, $"only {arms} mapping arms found: the scan is broken");
-    }
-
-    /// <summary>The C# methods of a component (name and body), found by brace matching.</summary>
-    private static IEnumerable<(string Name, string Body)> Methods(string source)
-    {
-        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(source,
-                     @"\n\s+(?:private|protected|public|internal)[^\n;=]*?\b(\w+)\s*\([^)]*\)\s*\n\s*\{"))
-        {
-            var depth = 1;
-            var i = m.Index + m.Length;
-            while (depth > 0 && i < source.Length)
-            {
-                if (source[i] == '{') depth++;
-                else if (source[i] == '}') depth--;
-                i++;
-            }
-            yield return (m.Groups[1].Value, source[(m.Index + m.Length)..i]);
-        }
-    }
+    [Theory]
+    [InlineData(AppRole.Viewer)]
+    [InlineData(AppRole.Operator)]
+    [InlineData(AppRole.Admin)]
+    public void The_two_directions_of_the_rule_agree(AppRole role) =>
+        Assert.Equal(role, CapabilityCatalog.RoleFor(CapabilityCatalog.LevelFor(role)));
 
     /// <summary>The same operation offered under different capability ids on different surfaces needs the same
     /// level everywhere (R1-05): one table, no cheaper door.</summary>

@@ -543,12 +543,7 @@
     {
         var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
         var role = await CurrentUser.GetRoleAsync();
-        var level = role switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        var level = CapabilityCatalog.LevelFor(role);
         return new AgentPrincipal(AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
     }
 
@@ -559,7 +554,7 @@
             Snackbar.Add(L["AgentView_Snackbar_AdminOnly"].Value, Severity.Error);
             // The refused attempt is the gateway's Denied event (R1-22).
             await Mutations.RefuseAsync("config.agent", new { section = "agent", provider = _llmProvider, model = _llmModel },
-                "Requires the Admin role.");
+                $"Requires the {CapabilityCatalog.RoleOf("config.agent")} role.");
             return;
         }
         // Through the gateway (R1-11): Admin at the click, kill switch, audit before the file is written. The API key

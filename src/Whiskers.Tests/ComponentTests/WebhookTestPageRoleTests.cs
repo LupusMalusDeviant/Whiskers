@@ -106,8 +106,10 @@ public sealed class WebhookTestPageRoleTests : BunitContext, IAsyncLifetime
     private Task TestAsync(WebhookEntity webhook)
     {
         var page = Render<WebhooksView>();
-        var handler = typeof(WebhooksView).GetMethod("TestWebhook", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        return page.InvokeAsync(() => (Task)handler.Invoke(page.Instance, [webhook])!);
+        var handler = typeof(WebhooksView).GetMethod("TestWebhook", BindingFlags.NonPublic | BindingFlags.Instance,
+            [typeof(WebhookEntity)]);
+        Assert.True(handler is not null, "WebhooksView no longer has TestWebhook(WebhookEntity): update this test");
+        return page.InvokeAsync(() => (Task)handler!.Invoke(page.Instance, [webhook])!);
     }
 
     private async Task<List<AuditLogEntity>> OutcomesAsync()

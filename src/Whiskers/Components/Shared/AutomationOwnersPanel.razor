@@ -111,7 +111,8 @@
         if (!allowed)
         {
             // The refused attempt is the gateway's Denied event (R1-22).
-            await Mutations.RefuseAsync("automation.owner_set", new { feature = featureId, owner }, "Requires the Admin role.");
+            await Mutations.RefuseAsync("automation.owner_set", new { feature = featureId, owner },
+                $"Requires the {CapabilityCatalog.RoleOf("automation.owner_set")} role.");
             return;
         }
         _busy = true;

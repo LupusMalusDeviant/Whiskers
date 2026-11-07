@@ -154,7 +154,7 @@ else
         {
             // The refused attempt is the gateway's Denied event (R1-22).
             await Mutations.RefuseAsync("mcp.key_create", new { section = "mcp-api-keys", level = McpPermissionLevels.Read },
-                "Requires the Admin role.");
+                $"Requires the {CapabilityCatalog.RoleOf("mcp.key_create")} role.");
             return;
         }
         _busy = true;
@@ -175,7 +175,8 @@ else
     {
         if (!_maySavePreset)
         {
-            await Mutations.RefuseAsync("guardrails.save", new { section = "guardrails", preset = name }, "Requires the Admin role.");
+            await Mutations.RefuseAsync("guardrails.save", new { section = "guardrails", preset = name },
+                $"Requires the {CapabilityCatalog.RoleOf("guardrails.save")} role.");
             return;
         }
         _busy = true;

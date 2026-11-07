@@ -98,12 +98,7 @@ public sealed class AgentAuthority : IAgentAuthority
             });
         // The account state was read once above (it reads the account store); the level comes from the role alone,
         // mapped as the owner resolver maps it.
-        var level = _roles.GetRole(started.UserEmail) switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        var level = Whiskers.Services.Mutations.CapabilityCatalog.LevelFor(_roles.GetRole(started.UserEmail));
         return new AgentAuthorityCheck(started with { PermissionLevel = Lower(started.PermissionLevel, level) });
     }
 
