@@ -130,8 +130,9 @@ public sealed record MutationRequest(
     /// <summary>INV-45 (review round 5): names the one event a refusal may be, when several paths can write it — the
     /// event id is derived from it (<see cref="AuditLogMutationSink.KeyedEventId"/>), so a second write of the same
     /// event, from any path or from the audit outbox, finds the first row and never adds one. Null: a fresh id. Honoured
-    /// only for a refusal written before any intent (<c>RecordDeniedAsync</c>); an intent and its outcome always get a
-    /// fresh id, so two attempts are never merged into one row (review round 6, NIT-1).</summary>
+    /// only on <c>IMutationGateway.RefuseAsync</c> (a refusal written before any intent); <c>DecideAsync</c> and
+    /// <c>ExecuteAsync</c> reject a request that carries one, and an intent and its outcome always get a
+    /// fresh id, so two attempts are never merged into one row (review rounds 6 and 7, NIT-1).</summary>
     public string? EventKey { get; init; }
 }
 

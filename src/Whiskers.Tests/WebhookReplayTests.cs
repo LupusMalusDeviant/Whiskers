@@ -837,14 +837,12 @@ public sealed class WebhookReplayTests : IDisposable
         _runner.Hold();
         var running = await service.AcceptAsync(first.WebhookId, Signed(first, "delivery-0322"));
         await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        // Waited for in the process, once the run is in the queue — not by its database state, which is written before
+        // (review round 7, MINOR-2).
+        var enqueued = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.RunEnqueued += runId => enqueued.TrySetResult(runId);
         var test = service.TriggerSignedTestAsync(second.WebhookId);
-        string queuedRunId;
-        using (var scope = _sp.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            await Until(() => db.WebhookDeliveries.AsNoTracking().Any(d => d.WebhookId == second.WebhookId && d.State == "Queued"));
-            queuedRunId = db.WebhookDeliveries.AsNoTracking().Single(d => d.WebhookId == second.WebhookId).RunId;
-        }
+        var queuedRunId = await enqueued.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         stop.Cancel();
         _runner.Release();
@@ -862,6 +860,39 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(1, _runner.Runs);
     }
 
+    /// <summary>Review round 7 (MINOR-1): at a stop every page Test waiting for a run is told at once — also with one
+    /// worker busy and one idle and two Tests waiting: the one the idle worker took (waiting for the busy target) ends at
+    /// the stop, the one still in the queue is told that Whiskers is stopping — both before the busy run ends. Neither
+    /// runs.</summary>
+    [Fact]
+    public async Task Every_test_waiting_at_a_stop_is_told_at_once()
+    {
+        _options.MaxConcurrentRuns = 2;
+        var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var firstTest = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var secondTest = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        using var stop = new CancellationTokenSource();
+        var service = Service(stop: stop);
+        _runner.Hold();
+        await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0325"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));   // one worker busy, one idle
+        var enqueued = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        service.RunEnqueued += enqueued.Enqueue;
+        var first = service.TriggerSignedTestAsync(firstTest.WebhookId);
+        await Until(() => enqueued.Count == 1);
+        var second = service.TriggerSignedTestAsync(secondTest.WebhookId);
+        await Until(() => enqueued.Count == 2);
+
+        stop.Cancel();
+
+        // Both answered while the busy run still holds its worker: no worker had to come back for them.
+        var answers = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.All(answers, a => Assert.False(a.Success));
+        Assert.Contains(answers, a => a.Output == WebhookService.Stopping);
+        Assert.Equal(1, _runner.Runs);
+        _runner.Release();
+    }
+
     /// <summary>INV-45 (review round 6, MINOR-3): the interleaving the key closes — the next start's reconciliation
     /// records a delivery as not run while the give-up's own copy of that event is still kept in the audit outbox
     /// (its database write failed and the pass did not see it), then the audit recovery drains the outbox: one row,
@@ -873,14 +904,23 @@ public sealed class WebhookReplayTests : IDisposable
         var wh = Seed(WebhookSignatures.Whiskers);
         SeedDelivery(wh, Signed(wh, "delivery-0324"), "kept-then-drained", "Queued");
         Assert.Equal(1, await Service().ReconcileAsync());
-        // The give-up's copy, kept in the outbox under the same key.
-        Assert.True(_outbox.TryKeep(new AuditLogEntity
+        // The give-up's copy, written by the real sink under the same key while the database is unavailable to it:
+        // its insert fails (here on the unique event id) and so does the read-back, so the sink keeps it in the outbox
+        // (review round 7, NIT-2).
+        _faults.Arm(".\"EventId\" = @", Fault.Fail);
+        var sink = new AuditLogMutationSink(Scopes, outbox: _outbox);
+        var giveUp = new MutationRequest("container.restart",
+            new MutationPrincipal(MutationPrincipalKind.Automation, "webhook:" + wh.WebhookId, "Webhook",
+                McpPermissionLevels.Write),
+            MutationSurface.Automation, new MutationTarget("container", "web-1"),
+            new Dictionary<string, System.Text.Json.JsonElement>(), OperationId: "kept-then-drained")
         {
-            EventId = WebhookService.NotRunEventId("kept-then-drained"), OperationId = "kept-then-drained",
-            Phase = "outcome", Outcome = nameof(MutationStatus.Denied), Action = "container.restart",
-            Actor = "Webhook", ActorType = "automation", TargetType = "container", TargetId = "web-1",
-        }));
-        Assert.Equal(1, _outbox.Count);
+            EventKey = WebhookService.NotRunEventKey("kept-then-drained"),
+        };
+        await Assert.ThrowsAnyAsync<Exception>(() => sink.RecordDeniedAsync("kept-then-drained", giveUp, null,
+            MutationStatus.Denied, WebhookService.GivenUp, CancellationToken.None));
+        Assert.Equal(1, _faults.Tripped);
+        Assert.Equal(WebhookService.NotRunEventId("kept-then-drained"), Assert.Single(_outbox.Load()).Row!.EventId);
 
         var recovery = new AuditRecovery(new AuditLogMutationSink(Scopes, outbox: _outbox), Scopes,
             NullLogger<AuditRecovery>.Instance, outbox: _outbox);

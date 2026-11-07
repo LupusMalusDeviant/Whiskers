@@ -81,6 +81,9 @@ public class WebhookService : IWebhookService
         _slots = new SemaphoreSlim(Math.Max(1, _options.QueueCapacity));
         _overdue = new SemaphoreSlim(Math.Max(1, _options.MaxConcurrentRuns));
         _rates = new RateWindow(_time);
+        // At a stop, the runs no worker has taken are taken out of the queue and their waiting Tests told at once, also
+        // while every worker is busy (review round 7, MINOR-1).
+        _stopping.Register(TellWaitingAtStop);
     }
 
     public async Task<List<WebhookEntity>> GetWebhooksAsync()
@@ -346,6 +349,9 @@ public class WebhookService : IWebhookService
         // Unbounded channel, bounded by the slot taken above: the write cannot fail.
         _queue.Writer.TryWrite(new QueuedRun(webhook.WebhookId, row.RunId, row.Instance, sourceIp));
         _deliveries.Enqueued(row.Instance);
+        RunEnqueued?.Invoke(row.RunId);
+        // Queued while Whiskers stops: no worker takes it any more; a Test waiting for it is told now.
+        if (_stopping.IsCancellationRequested) TellWaitingAtStop();
         _logger.LogInformation("Webhook {Name}: delivery accepted as run {RunId}", webhook.Name, row.RunId);
         return new WebhookAcceptance(WebhookReply.Accepted, row.RunId, "queued");
     }
@@ -385,9 +391,11 @@ public class WebhookService : IWebhookService
                 // next item. It is left queued under its live claim — the next start reconciles it (review round 5).
                 if (_stopping.IsCancellationRequested)
                 {
-                    // A page's Test waiting for it is told now, not at its own timeout (review round 6, NIT-3).
+                    // A page's Test waiting for it — or for any run still in the queue — is told now, not at its own
+                    // timeout (review rounds 6 and 7).
                     if (_waiting.TryRemove(run.RunId, out var waiting))
                         waiting.TrySetResult(new RunEnd(false, Stopping, null));
+                    TellWaitingAtStop();
                     break;
                 }
                 try
@@ -403,7 +411,26 @@ public class WebhookService : IWebhookService
         catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
         {
             // Shutting down: a run still queued keeps its live claim (a repeat is its duplicate); the next start
-            // records it once as not run and settles it (ReconcileAsync, INV-45).
+            // records it once as not run and settles it (ReconcileAsync, INV-45). An idle worker tells the Tests
+            // waiting for the runs left in the queue.
+            TellWaitingAtStop();
+        }
+    }
+
+    /// <summary>Raised with the run id once a run is in the queue — a signal for tests, nothing acts on it.</summary>
+    internal event Action<string>? RunEnqueued;
+
+    /// <summary>At a stop (review round 7, MINOR-1): takes every run still in the queue out of it — no worker will take
+    /// it; it stays queued in the database under its live claim and the next start reconciles it — and tells a page's
+    /// Test waiting for it that Whiskers is stopping. A run is in the queue or taken by a worker, never both, so every
+    /// waiting Test is told once: by the worker that took its run, or here.</summary>
+    private void TellWaitingAtStop()
+    {
+        while (_queue.Reader.TryRead(out var left))
+        {
+            _slots.Release();
+            if (_waiting.TryRemove(left.RunId, out var waiting))
+                waiting.TrySetResult(new RunEnd(false, Stopping, null));
         }
     }
 

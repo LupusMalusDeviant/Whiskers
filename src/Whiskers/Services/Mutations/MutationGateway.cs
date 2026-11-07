@@ -193,6 +193,7 @@ public sealed class MutationGateway : IMutationGateway
         ArgumentNullException.ThrowIfNull(request.Principal);
         ArgumentNullException.ThrowIfNull(request.Target);
         ArgumentNullException.ThrowIfNull(request.Arguments);
+        RejectEventKey(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CapabilityId);
 
         var prepared = await PrepareAsync(request, ct);
@@ -510,6 +511,7 @@ public sealed class MutationGateway : IMutationGateway
         ArgumentNullException.ThrowIfNull(request.Principal);
         ArgumentNullException.ThrowIfNull(request.Target);
         ArgumentNullException.ThrowIfNull(request.Arguments);
+        RejectEventKey(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CapabilityId);
         ArgumentNullException.ThrowIfNull(execute);
 
@@ -991,6 +993,15 @@ public sealed class MutationGateway : IMutationGateway
     /// <summary>How long a refusal's audit write may take (INV-45): long enough for a queue of audit writes, bounded
     /// so a stop never waits on it — a write that runs out of time is kept in the audit outbox (R1-19).</summary>
     internal static readonly TimeSpan RefusalWriteTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>INV-45 (review round 7, NIT-1): an event key names the one refusal several paths may write; it is
+    /// honoured only on <see cref="RefuseAsync"/>. A request that is decided or executed carries none — its denials and
+    /// approvals are attempts of their own and must never merge into one row.</summary>
+    private static void RejectEventKey(MutationRequest request)
+    {
+        if (request.EventKey is not null)
+            throw new ArgumentException("An event key is honoured only for a refusal (RefuseAsync).", nameof(request));
+    }
 
     /// <summary>How far <see cref="PrepareCoreAsync"/> got: the request as decided so far and its capability, for the
     /// refusal a cancellation on the way leaves on record (INV-45).</summary>

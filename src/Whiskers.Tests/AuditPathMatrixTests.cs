@@ -112,7 +112,7 @@ public sealed class AuditPathMatrixTests : IDisposable
             Pin(nameof(BackupServiceTests), nameof(BackupServiceTests.A_start_up_deletion_refuses_every_backup_but_a_pre_upgrade_one))),
         ["S-10"] = new("Host access outside the app; the next start writes selfbackup.restored.",
             Pin(nameof(BackupServiceTests), nameof(BackupServiceTests.A_restore_stages_checks_and_commits_and_the_next_start_applies_it))),
-        ["S-11"] = new("Host access outside the app; auth.recovery_issued is written before the change, without it nothing changes.",
+        ["S-11"] = new("Host access outside the app; auth.recovery_issued is written before the change, without it nothing changes. A policy refusal of the host CLI (without --force, contract 0009) changes nothing and is no attempt: it is not recorded.",
             Pin(nameof(LocalAccountLifecycleTests),
                 nameof(LocalAccountLifecycleTests.Host_recovery_needs_an_existing_account_writes_its_record_first_and_prints_the_code_only_to_the_terminal)),
             Pin(nameof(MutationGatewayCoverageTests), nameof(MutationGatewayCoverageTests.The_account_recovery_paths_have_exactly_their_callers))),

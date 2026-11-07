@@ -181,6 +181,10 @@ public sealed partial class WebhookMutationTests
         Assert.Single(rows);
         AuditTrail.AssertComplete(delivery, AuditTrail.Denied, "reboot", "Automation", decided: false, targetId: "");
         Assert.Equal("unknown", delivery.TargetType);
+        // Keyed as the worker's own refusal, not as a delivery that did not run (review rounds 6 and 7): a reconciliation
+        // settles it as refused and does not log it again.
+        Assert.Equal(Whiskers.Services.Mutations.AuditLogMutationSink.KeyedEventId(
+            Whiskers.Services.Webhooks.WebhookService.RefusedEventKey(delivery.OperationId!)), delivery.EventId);
         Assert.Empty(_docker.Actions);
     }
 

@@ -24,9 +24,11 @@ All notable changes to Whiskers are documented here. The format follows
   not run is keyed by its run id, so the worker, the start reconciliation and the audit outbox can never write it
   twice; a delivery given up during a stop is no longer taken over by a repeat. A delivery the worker refused itself
   (its webhook changed while it waited, an unknown action) keeps the state "refused" and one log entry when the start
-  reconciliation finds it; a page's Test waiting on a run that a stop left queued is told at once. Development builds
+  reconciliation finds it; every page Test waiting on a run that a stop left queued is told at once, also while every worker is busy. Development builds
   only: deliveries given up by an unreleased build of this branch before this change carry an unkeyed refusal and are
-  settled as refused at the next start, without a log entry or notification.
+  settled as refused at the next start, without a log entry or notification; deliveries such a build refused itself
+  (webhook changed, unknown action) and left unsettled were keyed as "did not run" and are settled failed, with a
+  second log entry and a notification.
 - **Pages take their role from the capability catalog (INV-13, R1-05).** Every role check in front of a capability
   asks `CapabilityCatalog.RoleOf` instead of naming a role; no page helper takes a role any more, the three reads a
   page guards itself take a named role from `PageReads` (the migration-status read runs one fixed command), the

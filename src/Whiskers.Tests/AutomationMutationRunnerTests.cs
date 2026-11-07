@@ -675,6 +675,29 @@ public class AutomationMutationRunnerTests
         Assert.Contains("may no longer use", f.Runner.LostAuthority(keyTask, "container.restart"));
     }
 
+    /// <summary>INV-45 (review round 7, NIT-1): an event key is honoured only on a refusal. A request that is decided or
+    /// executed with one is rejected before anything is decided or written, so two attempts never share a row.</summary>
+    [Fact]
+    public async Task An_event_key_is_rejected_on_a_decided_or_executed_request()
+    {
+        var gateway = new MutationGateway(new CapabilityCatalog(),
+            AgentToolTestHelpers.Policy(new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault())),
+            new PrincipalAudit(), [], NullLogger<MutationGateway>.Instance);
+        var keyed = new MutationRequest("container.restart",
+            new MutationPrincipal(MutationPrincipalKind.Automation, "webhook:w1", "Webhook", McpPermissionLevels.Write),
+            MutationSurface.Automation, new MutationTarget("container", "web-1"),
+            new Dictionary<string, System.Text.Json.JsonElement>(), OperationId: "run-1") { EventKey = "webhook-not-run/run-1" };
+        var ran = false;
+
+        await Assert.ThrowsAsync<ArgumentException>(() => gateway.ExecuteAsync(keyed, (_, _) =>
+        {
+            ran = true;
+            return Task.FromResult(true);
+        }));
+        await Assert.ThrowsAsync<ArgumentException>(() => gateway.DecideAsync(keyed));
+        Assert.False(ran);
+    }
+
     private sealed class RaisedTo(string level) : ICapabilityOverrides
     {
         public CapabilityAvailability Resolve(Capability capability) => new(true, level);
