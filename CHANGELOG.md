@@ -6,6 +6,20 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Tests: the read-only kill switch is proven on the booted app (INV-21 ✅).** `ReadOnlyKillSwitchWireTests` calls
+  every mutating MCP tool over `/mcp` and every mutating capability through the UI runner with the kill switch on:
+  each is denied by `read-only-mode` and recorded as Denied, nothing runs, no terminal session opens; only an Admin in
+  the UI can switch it off, and that is audited. No behaviour change.
+- **The kill switch's exceptions are fixed, shown and can be blocked beforehand (contract 0009, INV-21).** The
+  *Guardrails* page lists them: switching it off, the first-run setup and the host CLIs always pass; a user's own
+  password change, recovery-code redemption and binding a Google/OIDC identity at a first sign-in pass unless an Admin
+  blocked them beforehand (new optional policy field `KillSwitchBlockedExemptions`, left out of the policy version while
+  empty; an unknown id fails the guardrails closed). **Behaviour change:** while `guardrails.json` is fail-closed these
+  three are refused too, and `--recover-local-account` refuses without `--force` while a code could not be redeemed
+  (new exit code 4); the way back is repairing or removing `guardrails.json` on the host (or turning off `ReadOnlyMode`
+  or the block in it) and restarting. A refused one says "Blocked while the kill switch is on" and names that way back;
+  a refused sign-in binding goes to `/login?error=kill_switch`. Pending sign-in requests, the last sign-in day, lockout
+  counters and the audit keep being recorded under the kill switch; they are records, not mutations (amendment A1.1).
 - **Tests: the Servers pause/resume handlers and the firewall rule dialog are pinned at handler level (INV-17).** A role
   below the catalog level is refused at the click, recorded as Denied and never reaches the service.
 - **Marking the notification log read, clearing it and starting a manual CVE scan now need the Operator role

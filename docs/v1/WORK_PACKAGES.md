@@ -999,7 +999,7 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 > the pull request's base or the previous release tag). New records: `docs/v1/RELEASE_GATE.md` (pin `INV-62`, the thirteen
 > open invariants (INV-62 from contract 0006 merged), platform skips, mandatory suites), `PATH_CAPABILITIES.md`, the generated `CAPABILITY_INVENTORY.md`,
 > `PRODUCT_CONTRACT.md` §6.1 (empty) and five §7 rows that had none (M-48, M-49, S-16, U-37, U-38). D12: INV-58 ⚠️; D10:
-> the INV-21 marker names `ReadOnlyKillSwitchWireTests`. CI: `release-gate: release` from release.yml only, the base
+> the INV-21 marker names `ReadOnlyKillSwitchWireTests` (written since; INV-21 ✅). CI: `release-gate: release` from release.yml only, the base
 > comparison step on pull requests and release runs, release.yml calls security.yml and refuses a tag commit not on
 > `origin/main`, the image-runtime run is checked from its TRX file with `.github/required-tests/image-runtime.txt`; the
 > wiring is pinned by `ReleaseWorkflowTests` (with negative mutations). The version is 0.x, so the gate runs in

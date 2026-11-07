@@ -5981,4 +5981,61 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Checks_Snackbar_Deleted" xml:space="preserve">
     <value>Endpoint check deleted.</value>
   </data>
+  <data name="KillSwitch_Blocked_Message" xml:space="preserve">
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
+  </data>
+  <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
+  </data>
+  <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
+    <value>Preset '{0}': '{1}' is not a kill-switch exemption that can be blocked. Nothing was saved.</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Title" xml:space="preserve">
+    <value>While the kill switch is on, still allowed</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Intro" xml:space="preserve">
+    <value>These exceptions are fixed in code; none can be added. The last three can be blocked here beforehand — the kill switch refuses this save while it is on.</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Fixed" xml:space="preserve">
+    <value>Always allowed</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Block_Label" xml:space="preserve">
+    <value>Also block while the kill switch is on</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E1_Name" xml:space="preserve">
+    <value>Switching the kill switch off</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E1_Reason" xml:space="preserve">
+    <value>The way out of the kill switch: an Admin in the UI, audited.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E2_Name" xml:space="preserve">
+    <value>First-run setup</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E2_Reason" xml:space="preserve">
+    <value>Runs only while no Admin exists, so there is nothing to protect yet.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E3_Name" xml:space="preserve">
+    <value>Host command-line tools</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
+    <value>Need a shell in the container (root-equivalent). While recovery codes are blocked, the recovery CLI asks for --force: repair guardrails.json on the host instead.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
+    <value>Own password change</value>
+  </data>
+  <data name="GuardrailsView_Exemption_password_change_Reason" xml:space="preserve">
+    <value>A person changes their own access; needs the current password.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_recovery_code_Name" xml:space="preserve">
+    <value>Recovery-code redemption</value>
+  </data>
+  <data name="GuardrailsView_Exemption_recovery_code_Reason" xml:space="preserve">
+    <value>Restores a person's own access with a one-time code.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_federated_binding_at_sign_in_Name" xml:space="preserve">
+    <value>Federated identity binding at sign-in</value>
+  </data>
+  <data name="GuardrailsView_Exemption_federated_binding_at_sign_in_Reason" xml:space="preserve">
+    <value>Binds a verified Google/OIDC identity to a configured account at its first sign-in.</value>
+  </data>
 </root>

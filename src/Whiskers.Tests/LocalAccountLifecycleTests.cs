@@ -1012,10 +1012,13 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     public IConfiguration Configuration { get; }
     public RecoveryAttemptLimiter Limiter { get; }
     public CountingHasher Hasher { get; }
+    /// <summary>The guardrail policy the gateway, the account service and the binding store read (contract 0009).</summary>
+    public IGuardrailStore Guardrails { get; }
 
     private LocalAccountWorld(string dir, ServiceProvider sp, RoleService roles, WhitelistService whitelist,
         IConfiguration configuration, DataPathOptions paths, RecordingAuditLog audit,
-        NotificationDeliveryTests.ListLoggerProvider logs, GuardrailPolicy policy, TimeProvider time, CountingHasher hasher)
+        NotificationDeliveryTests.ListLoggerProvider logs, GuardrailPolicy policy, TimeProvider time, CountingHasher hasher,
+        IGuardrailStore? guardrails = null)
     {
         Configuration = configuration;
         Hasher = hasher;
@@ -1029,17 +1032,18 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         Logs = logs;
         var scopes = sp.GetRequiredService<IServiceScopeFactory>();
         // R1-27: the identity bindings a federated session is checked against (roles and whitelist read lazily).
-        Bindings = new IdentityBindingStore(new BindingServices(roles, whitelist, sp), audit, configuration,
+        var store = guardrails ?? new AgentToolTestHelpers.FixedGuardrailStore(policy);
+        Guardrails = store;
+        Bindings = new IdentityBindingStore(new BindingServices(roles, whitelist, sp, store), audit, configuration,
             dataPaths: paths);
         Validator = new SessionValidator(scopes, whitelist, roles, configuration, bindings: Bindings);
         Owners = new OwnerAccounts(scopes, configuration, paths);
-        var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         Gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), Sink, [],
             NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
     }
 
     public static async Task<LocalAccountWorld> CreateAsync(bool seedRoot = true, GuardrailPolicy? policy = null,
-        TimeProvider? time = null, bool authDisabled = false)
+        TimeProvider? time = null, bool authDisabled = false, IGuardrailStore? guardrails = null)
     {
         var dir = Path.Combine(Path.GetTempPath(), $"sw-r149-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
@@ -1069,6 +1073,15 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
             .AddEntityFrameworkStores<WhiskersIdentityDbContext>();
         services.AddSingleton<IAuditLogService>(audit);
         if (time is not null) services.AddSingleton(time);
+        // Contract 0009: the guardrail policy the account service, the binding store and the gateway read (the live
+        // instance's). The recovery CLI resolves IGuardrailStore from Services and, as in production, needs the real
+        // store and reads guardrails.json itself (A1.2): a real store the test hands in, or one over a file holding
+        // the policy, not yet loaded.
+        // Not for a fail-closed case: a FixedGuardrailStore holding GuardrailPolicy.FailClosed() would be written as a valid
+        // kill-switch policy (LoadError null). Hand in a real store over an unreadable file instead.
+        guardrails ??= new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
+        services.AddSingleton<IGuardrailStore>(guardrails as GuardrailStore
+                                               ?? await PolicyFileAsync(paths.GuardrailsJson, guardrails.Current));
         var sp = services.BuildServiceProvider();
         using (var scope = sp.CreateScope())
             await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.EnsureCreatedAsync();
@@ -1078,9 +1091,23 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         var whitelist = new WhitelistService(configuration, roles, NullLogger<WhitelistService>.Instance, paths);
         await whitelist.InitializeAsync();
         var world = new LocalAccountWorld(dir, sp, roles, whitelist, configuration, paths, audit, logs,
-            policy ?? GuardrailPolicy.SafeDefault(), time ?? TimeProvider.System, hasher);
+            policy ?? GuardrailPolicy.SafeDefault(), time ?? TimeProvider.System, hasher, guardrails);
         if (seedRoot) await world.AddUserAsync(Root, role: null);   // the seeded Admin (role from WHISKERS_ADMIN_EMAIL)
         return world;
+    }
+
+    /// <summary>A <c>guardrails.json</c> at <paramref name="path"/> holding <paramref name="policy"/>, and a store over it
+    /// that has not loaded it yet (what the recovery CLI's process holds).</summary>
+    private static async Task<GuardrailStore> PolicyFileAsync(string path, GuardrailPolicy policy)
+    {
+        var seed = new GuardrailStore(filePath: path);
+        await seed.InitializeAsync();
+        var config = seed.Config;
+        config.Presets.Single(p => p.Name == config.ActivePreset).Policy = policy.Clone();
+        var admin = new Whiskers.Models.Agent.AgentPrincipal(Whiskers.Models.Agent.AgentPrincipalKind.WebUser, Root,
+            McpPermissionLevels.Admin, null, UserEmail: Root);
+        await GatewayArrange.RunAsync("guardrails.save", () => seed.SaveConfigAsync(config, admin));
+        return new GuardrailStore(filePath: path);
     }
 
     /// <summary>A local account; <paramref name="password"/> <c>null</c> = none yet (waiting for a recovery code).</summary>
@@ -1129,10 +1156,12 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
 
     /// <summary>The binding store sees the world's roles and whitelist; everything else (the account database's scopes)
     /// comes from the world's provider.</summary>
-    private sealed class BindingServices(IRoleService roles, IWhitelistService whitelist, IServiceProvider app) : IServiceProvider
+    private sealed class BindingServices(IRoleService roles, IWhitelistService whitelist, IServiceProvider app,
+        IGuardrailStore guardrails) : IServiceProvider
     {
         public object? GetService(Type serviceType) =>
-            serviceType == typeof(IRoleService) ? roles
+            serviceType == typeof(IGuardrailStore) ? guardrails
+            : serviceType == typeof(IRoleService) ? roles
             : serviceType == typeof(IWhitelistService) ? whitelist
             : app.GetService(serviceType);
     }
@@ -1144,8 +1173,8 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         var user = new SessionUser(Validator, principal);
         var accounts = new LocalAccountService(
             users?.Invoke(scope.ServiceProvider) ?? scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
-            scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, _time,
-            scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings);
+            scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, Guardrails,
+            _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings);
         return new Acting(scope, accounts, new UiMutationRunner(Gateway, new CapabilityCatalog(), user), user);
     }
 

@@ -2,6 +2,27 @@ using System.Text.Json.Serialization;
 
 namespace Whiskers.Configuration;
 
+/// <summary>Contract 0009: the exemptions of the read-only kill switch. E1 switching it off, E2 the first-run setup and
+/// E3 the host CLIs are fixed; the three below are allowed by default and can be blocked beforehand
+/// (<see cref="GuardrailPolicy.KillSwitchBlockedExemptions"/>). Nobody can add one.</summary>
+public static class KillSwitchExemptions
+{
+    /// <summary>E4: a user's own password change (<c>account.password_change</c>, contract 0002 D4).</summary>
+    public const string PasswordChange = "password_change";
+
+    /// <summary>E5: setting a new password with a recovery code (contract 0002 D8).</summary>
+    public const string RecoveryCode = "recovery_code";
+
+    /// <summary>E6: the federated identity binding written at a verified sign-in (contract 0003).</summary>
+    public const string FederatedBindingAtSignIn = "federated_binding_at_sign_in";
+
+    /// <summary>The ids <see cref="GuardrailPolicy.KillSwitchBlockedExemptions"/> may hold, in the order the UI shows them.</summary>
+    public static IReadOnlyList<string> Blockable { get; } = [PasswordChange, RecoveryCode, FederatedBindingAtSignIn];
+
+    /// <summary>The rule a refusal of a blocked exemption names, as the kill switch's own.</summary>
+    public const string RuleId = "read-only-mode";
+}
+
 /// <summary>The configurable but code-enforced security policy of the agent. Persisted in its
 /// own guardrails.json (admin-only). Defaults are deliberately restrictive:
 /// read-only autonomous, writes need confirmation, Whiskers itself is protected.</summary>
@@ -42,6 +63,24 @@ public class GuardrailPolicy
     /// of the stored and hashed policy while off, so existing policies keep their version.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool RequireSecondApprover { get; set; }
+
+    private List<string>? _killSwitchBlockedExemptions;
+
+    /// <summary>Contract 0009 (D3): the exemptions of the kill switch an Admin blocked beforehand, out of
+    /// <see cref="KillSwitchExemptions.Blockable"/>. While the kill switch is on, a blocked exemption is refused like any
+    /// other mutation. Optional in <c>guardrails.json</c>, and left out of the stored and hashed policy while empty (an
+    /// empty list reads as <c>null</c>), so existing policies keep their version. An unknown id makes the configuration
+    /// invalid (the store fails closed, INV-25).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? KillSwitchBlockedExemptions
+    {
+        get => _killSwitchBlockedExemptions is { Count: > 0 } ? _killSwitchBlockedExemptions : null;
+        set => _killSwitchBlockedExemptions = value;
+    }
+
+    /// <summary>Contract 0009: whether the kill switch is on and <paramref name="exemption"/> is blocked under it.</summary>
+    public bool KillSwitchBlocks(string exemption) =>
+        ReadOnlyMode && KillSwitchBlockedExemptions?.Contains(exemption, StringComparer.Ordinal) == true;
 
     /// <summary>The label prefixes Whiskers built in for exposure changes (contract 0006): a tool on the host turns a label
     /// with one of them into a route (Tailscale Funnel or Serve through DockTail, Traefik, caddy-docker-proxy).</summary>
@@ -91,10 +130,12 @@ public class GuardrailPolicy
         // null (the default) stays null.
         ExposureLabelPrefixes = ExposureLabelPrefixes is null ? null : [.. ExposureLabelPrefixes],
         ExposureConfirmClasses = ExposureConfirmClasses is null ? null : [.. ExposureConfirmClasses],
+        KillSwitchBlockedExemptions = KillSwitchBlockedExemptions is null ? null : [.. KillSwitchBlockedExemptions],
     };
 
     /// <summary>What applies while no valid policy could be loaded (INV-25): every mutation refused (kill switch),
-    /// no tool allowed for agents and MCP clients, every resource protected.</summary>
+    /// no tool allowed for agents and MCP clients, every resource protected, and every blockable kill-switch exemption
+    /// blocked (contract 0009, D4: the host CLIs stay usable; the way back is repairing guardrails.json, A1.2).</summary>
     public static GuardrailPolicy FailClosed() => new()
     {
         MaxAutonomousLevel = "read",
@@ -104,6 +145,7 @@ public class GuardrailPolicy
         ProtectedResources = { "*" },
         MaxActionsPerSession = 0,
         RequireSecondApprover = true,
+        KillSwitchBlockedExemptions = [.. KillSwitchExemptions.Blockable],
     };
 
     /// <summary>Restrictive default: read-only autonomous, writes via confirmation, Whiskers protected,

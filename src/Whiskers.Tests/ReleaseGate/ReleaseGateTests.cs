@@ -28,7 +28,7 @@ public class ReleaseGateTests
     private static readonly Lazy<GateInputs> ViolatedInputs = new(() => Real with
     {
         Invariants = Mutate(Mutate(SetCell(Real.Invariants, "| INV-18 |", 2, "❌"),
-            "| ✅ | 51 |", "| ✅ | 50 |"), "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
+            "| ✅ | 52 |", "| ✅ | 51 |"), "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
         ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-13 |",
             "| INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |"),
     });
@@ -191,8 +191,8 @@ public class ReleaseGateTests
         var example = Real with { Invariants = Mutate(Real.Invariants, "## 11.", "```\n| INV-63 | example |\n```\n\n## 11.") };
         Assert.DoesNotContain(Evaluate(example, GateMode.Development, Dev), f => f.Subject == "INV-63");
 
-        var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 51 |", "| ✅ | 52 |") };
-        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 52, the table has 51"));
+        var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 52 |", "| ✅ | 53 |") };
+        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 53, the table has 52"));
 
         var pipe = Real with { Invariants = Mutate(Real.Invariants, "`docker system\\|container", "`docker system|container") };
         Assert.Contains(Evaluate(pipe, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("cells"));
@@ -203,7 +203,7 @@ public class ReleaseGateTests
     {
         var deleted = Real with
         {
-            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 51 |", "| ✅ | 50 |"), "| **Total** | **62** |", "| **Total** | **61** |"),
+            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 52 |", "| ✅ | 51 |"), "| **Total** | **62** |", "| **Total** | **61** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
@@ -266,17 +266,20 @@ public class ReleaseGateTests
     [Fact]
     public void A_planned_marker_must_name_the_owed_test()
     {
-        var existingClass = Real with { Invariants = Mutate(Real.Invariants, "`ReadOnlyKillSwitchWireTests` *(planned", "`KillSwitchTests` *(planned") };
-        Assert.Contains(Evaluate(existingClass, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-21");
+        // On a ⚠️ row (INV-01). INV-21's marker, the first of this kind, was paid with ReadOnlyKillSwitchWireTests.
+        var existingClass = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |", "`KillSwitchTests` *(planned, WP6)*") };
+        Assert.Contains(Evaluate(existingClass, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-01");
 
-        var existingMethod = Real with { Invariants = Mutate(Real.Invariants, "`ReadOnlyKillSwitchWireTests` *(planned",
-            "`UiMutationRunnerTests.The_kill_switch_stops_a_human_too` *(planned") };
-        Assert.Contains(Evaluate(existingMethod, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-21");
+        var existingMethod = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |",
+            "`UiMutationRunnerTests.The_kill_switch_stops_a_human_too` *(planned, WP6)*") };
+        Assert.Contains(Evaluate(existingMethod, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-01");
 
-        var nameless = Real with { Invariants = Mutate(Real.Invariants, "`ReadOnlyKillSwitchWireTests` *(planned", "a wire test *(planned") };
-        Assert.Contains(Evaluate(nameless, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-21" && f.Message.Contains("only on a ❌ or ❓ row"));
+        var nameless = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |", "a wire test *(planned, WP6)*") };
+        Assert.Contains(Evaluate(nameless, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-01" && f.Message.Contains("only on a ❌ or ❓ row"));
 
-        // Today's forms pass: the owed class does not exist.
+        // The owed form passes: a class that does not exist yet, named; and today's table passes.
+        var owed = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |", "`PrincipalKeyWireTests` *(planned, R1-03)*") };
+        Assert.DoesNotContain(Evaluate(owed, GateMode.Development, Dev), f => f.Rule == "R6");
         Assert.DoesNotContain(Evaluate(Real, GateMode.Development, Dev), f => f.Rule == "R6");
 
         // A ❌ row may name its owed test without a class: INV-18 as it stood before it was closed.

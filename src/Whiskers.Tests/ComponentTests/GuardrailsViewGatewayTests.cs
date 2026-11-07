@@ -130,6 +130,27 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
         Assert.True(_store.Current.ReadOnlyMode);
     }
 
+    [Fact]
+    public void The_page_lists_every_kill_switch_exemption_and_saves_a_block_through_the_gateway()
+    {
+        var cut = Render<GuardrailsView>();
+        var section = cut.Find("#killswitch-exemptions");
+        // Contract 0009 (D6): E1–E3 shown as fixed, E4–E6 each with a toggle.
+        foreach (var id in new[] { "E1", "E2", "E3" }.Concat(KillSwitchExemptions.Blockable))
+        {
+            Assert.Contains($"GuardrailsView_Exemption_{id}_Name", section.TextContent);
+            Assert.Contains($"GuardrailsView_Exemption_{id}_Reason", section.TextContent);
+        }
+        Assert.Equal(3, cut.FindAll("#killswitch-exemptions input[type=checkbox]").Count);
+
+        cut.FindAll("#killswitch-exemptions input[type=checkbox]")[1].Change(true);   // recovery_code
+        Assert.Null(_store.Current.KillSwitchBlockedExemptions);                    // the edit buffer only
+        Save(cut);
+
+        cut.WaitForAssertion(() => Assert.Equal([KillSwitchExemptions.RecoveryCode], _store.Current.KillSwitchBlockedExemptions));
+        Assert.Contains("begin:guardrails.save:", Events());
+    }
+
     private List<string> Events() { lock (_audit.Events) return _audit.Events.ToList(); }
 
     private static void Save(IRenderedComponent<GuardrailsView> cut) =>
