@@ -1008,12 +1008,13 @@ else
             var db = State.DbSelectedDatabase ?? State.DbCreds.Database;
             var containerId = ContainerId;
             var dbType = _container.DatabaseType;
+            var containerName = _container.Name;
             var creds = State.DbCreds;
             var sid = _resolvedServerId;
             var (success, filePath, size, error) = await Mutations.RunAsync("db.backup", new { containerId, serverId = sid, database = db },
                 async _ =>
                 {
-                    var backup = await DatabaseService.BackupDatabaseAsync(containerId, db, dbType, creds, sid);
+                    var backup = await DatabaseService.BackupDatabaseAsync(containerId, db, dbType, creds, sid, containerName);
                     if (backup.Success) MutationScope.Note($"Backup file: {backup.FilePath} ({backup.SizeBytes} bytes)");
                     return backup;
                 });

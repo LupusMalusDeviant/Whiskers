@@ -185,7 +185,7 @@ public class RootEquivalentAdminTests
         string[] fixedCommands =
         [
             "host.prune",         // TaskExecutor.CleanupCommandFor: docker rm of listed ids (quoted), image / builder prune
-            "db.backup_delete",   // TaskExecutor.ApplyRetention: ls of the backup dir, rm of exactly that database's quoted dump names (DbDumpFiles)
+            "db.backup_delete",   // TaskExecutor.ApplyRetention: rm of exactly that container's dumps of that database, quoted (DbDumpFiles; the ls is a read)
         ];
         var outside = MutationCompositions.RawHostCommands.Where(c => !CapabilityCatalog.RootEquivalent.Contains(c))
             .Order(StringComparer.Ordinal).ToArray();
@@ -278,7 +278,10 @@ public class RootEquivalentAdminTests
         var service = new DatabaseService(host, NullLogger<DatabaseService>.Instance);
         await service.BackupDatabaseAsync("db-1", "app_db", DatabaseType.PostgreSQL, new DatabaseCredentials { User = "app" }, "local");
         var copy = Assert.Single(host.Commands, c => c.StartsWith("docker cp -- ", StringComparison.Ordinal));
-        Assert.Matches(@"backups/app_db_\d{8}_\d{6}\.sql' 2>&1\z", copy);
+        Assert.Matches(@"backups/db-1@app_db_\d{8}_\d{9}_[0-9a-f]{8}\.sql' 2>&1\z", copy);
+        // The container's name, when given, keys the dump (stable across a re-create); an unusable one is never used.
+        await service.BackupDatabaseAsync("0123456789abcdef", "app", DatabaseType.PostgreSQL, new DatabaseCredentials { User = "app" }, "local", "shop-db");
+        Assert.Contains(host.Commands, c => c.StartsWith("docker cp -- ", StringComparison.Ordinal) && c.Contains("backups/shop-db@app_"));
         // A query without a database of its own keeps the client's default, as before.
         await service.ExecuteQueryAsync("db-1", "select 1", DatabaseType.PostgreSQL, new DatabaseCredentials { User = "app" }, "local");
     }

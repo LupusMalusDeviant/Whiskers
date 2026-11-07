@@ -684,18 +684,20 @@ public class ReadBackVerificationTests
     }
 
     [Theory]
-    [InlineData(0, "app_20261107_010101.sql.gz\napp_20261106_010101.sql.gz\nother_20261105_010101.sql.gz\napp-old.txt\n", true, false)]
-    // another database whose name starts with the task's is not counted (nor pruned: DbDumpFilesTests)
-    [InlineData(0, "app_20261107_010101.sql\napp_20261106_010101.sql\napp_db_20261105_010101.sql\napp_db_20261104_010101.sql\n", true, false)]
-    [InlineData(0, "app_20261107_010101.sql.gz\napp_20261106_010101.sql.gz\napp_20261105_010101.sql\n", false, false)]
+    [InlineData(0, "db1@app_20261107_010101000_0a1b2c3d.sql.gz\ndb1@app_20261106_010101000_0a1b2c3d.sql.gz\ndb1@other_20261105_010101000_0a1b2c3d.sql.gz\napp-old.txt\n", true, false)]
+    // another database whose name starts with the task's, the same database in another container and legacy dumps
+    // (no container in the name, never pruned) are not counted: DbDumpFilesTests
+    [InlineData(0, "db1@app_20261107_010101000_0a1b2c3d.sql\ndb1@app_20261106_010101000_0a1b2c3d.sql\ndb1@app_db_20261105_010101000_0a1b2c3d.sql\ndb2@app_20261104_010101000_0a1b2c3d.sql\napp_20261103_010101.sql\napp_20261102_010101.sql\n", true, false)]
+    [InlineData(0, "db1@app_20261107_010101000_0a1b2c3d.sql.gz\ndb1@app_20261106_010101000_0a1b2c3d.sql.gz\ndb1@app_20261105_010101000_0a1b2c3d.sql\n", false, false)]
     [InlineData(2, "", false, true)]   // the directory could not be listed: never "nothing left"
     public async Task A_dump_retention_must_leave_no_more_than_it_keeps(int exit, string listing, bool verified, bool stateUnknown)
     {
         var gateway = Gateway(new ServiceCollection()
-            .AddSingleton(HostReads(($"ls -1 '{DataPathOptions.Default.BackupsDir}'", exit, listing)).GetRequiredService<IHostCommandExecutor>())
+            .AddSingleton(HostReads(($"ls -1Aq -- '{DataPathOptions.Default.BackupsDir}'", exit, listing)).GetRequiredService<IHostCommandExecutor>())
             .AddSingleton(DataPathOptions.Default).BuildServiceProvider());
 
-        var outcome = await gateway.ExecuteAsync(Request("db.backup_delete", new { serverId = "srv1", database = "app", keep = 2 },
+        var outcome = await gateway.ExecuteAsync(Request("db.backup_delete",
+                new { serverId = "srv1", dumpContainer = "db1", database = "app", keep = 2 },
             new MutationTarget("container", "c1", null, "srv1")), (_, _) => Task.FromResult("pruned"));
 
         if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);

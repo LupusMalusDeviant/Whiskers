@@ -152,14 +152,14 @@ public class TaskExecutor : ITaskExecutor
 
         var outcome = await _automation.RunAsync(ActorOf(task), "db.backup",
             new { containerId = container.Id, name = container.Name, serverId = ScheduledTaskServer.Of(task), database },
-            _ => _dbService.BackupDatabaseAsync(container.Id, database, container.DatabaseType, creds, ScheduledTaskServer.Of(task)));
+            _ => _dbService.BackupDatabaseAsync(container.Id, database, container.DatabaseType, creds, ScheduledTaskServer.Of(task), container.Name));
         if (Problem(outcome, "db.backup") is { } problem) return (false, problem);
         var (success, filePath, sizeBytes, error) = outcome.Value;
 
         if (!success) return (false, error);
 
         // Retention cleanup (pass the resolved DB name — config["database"] may have been empty)
-        await ApplyRetention(task, config, database);
+        await ApplyRetention(task, config, database, DbDumpFiles.ContainerKey(container.Name, container.Id));
 
         return (true, $"DB backup: {filePath} ({sizeBytes / 1024}KB)");
     }
@@ -288,7 +288,8 @@ public class TaskExecutor : ITaskExecutor
     public static int RetentionOf(ScheduledTaskEntity task) =>
         int.TryParse(ParseConfig(task.Config).GetValueOrDefault("maxBackups", "0"), out var m) && m > 0 ? m : 0;
 
-    private async Task ApplyRetention(ScheduledTaskEntity task, Dictionary<string, string> config, string? dbName = null)
+    private async Task ApplyRetention(ScheduledTaskEntity task, Dictionary<string, string> config, string? dbName = null,
+        string? containerKey = null)
     {
         try
         {
@@ -324,25 +325,36 @@ public class TaskExecutor : ITaskExecutor
             }
             else if (task.TaskType == ScheduledTaskType.DbBackup && !string.IsNullOrWhiteSpace(dbName))
             {
-                // DB dumps are host files named "{db}_{timestamp}.sql[.gz]" and are not tracked in the DB, so they are
-                // pruned on the host — exactly this database's (DbDumpFiles.IsDumpOf), never another one whose name
-                // starts the same ("app" vs "app_db"). The name is checked like every database name (INV-19).
-                if (!Whiskers.Utils.CommandOperands.IsSafeDatabaseName(dbName))
+                // DB dumps are host files named "{container}@{db}_{timestamp}_{suffix}.sql[.gz]" (DbDumpFiles) and are
+                // not tracked in the DB, so they are pruned on the host: exactly this container's dumps of exactly this
+                // database, never a same-named database's in another container, never "app_db" for "app". Dumps in the
+                // format before ("{db}_{timestamp}.sql") name no container: they are neither counted nor deleted.
+                // Both names are checked like every operand (INV-19).
+                if (!Whiskers.Utils.CommandOperands.IsSafeDatabaseName(dbName)
+                    || !Whiskers.Utils.CommandOperands.IsSafeContainerRef(containerKey))
                 {
-                    _logger.LogWarning("DB-backup retention skipped for task {Name}: unsafe database name '{Db}'", task.Name, dbName);
+                    _logger.LogWarning("DB-backup retention skipped for task {Name}: unsafe database '{Db}' or container '{Container}'",
+                        task.Name, dbName, containerKey);
                     return;
                 }
                 var sid = ScheduledTaskServer.Of(task);
                 // Deleting dumps is its own decision, taken now: the owner may have lost the right since the backup.
                 var outcome = await _automation.RunAsync(ActorOf(task), "db.backup_delete",
-                    new { containerId = task.TargetId, database = dbName, keep = maxBackups, serverId = ScheduledTaskServer.Of(task) },
+                    new { containerId = task.TargetId, dumpContainer = containerKey, database = dbName, keep = maxBackups, serverId = sid },
                     async _ =>
                     {
-                        var listing = await _executor.ExecuteMutationAsync(sid,
-                            $"ls -1t -- {Whiskers.Utils.ShellUtils.Quote(_hostBackupDir)} 2>/dev/null || true", TimeSpan.FromSeconds(15));
+                        // The listing is a read (ExecuteAsync); only the rm runs on the raw primitive.
+                        var listing = await _executor.ExecuteAsync(sid, DbDumpFiles.ListingCommand(_hostBackupDir), TimeSpan.FromSeconds(15));
                         if (!listing.Success) return listing;
+                        if (listing.OutputTruncated)
+                        {
+                            // A cut listing may lack dumps, so which ones are the newest is unknown: prune nothing.
+                            _logger.LogWarning("DB-backup retention for task {Name} pruned nothing: the listing of {Dir} was truncated",
+                                task.Name, _hostBackupDir);
+                            return listing;
+                        }
                         return await _executor.ExecuteMutationAsync(sid,
-                            RetentionCommandFor(_hostBackupDir, DbDumpFiles.ToPrune(listing.Output, dbName, maxBackups)),
+                            RetentionCommandFor(_hostBackupDir, DbDumpFiles.ToPrune(listing.Output, containerKey!, dbName, maxBackups)),
                             TimeSpan.FromSeconds(15));
                     });
                 if (Problem(outcome, "db.backup_delete") is { } problem)

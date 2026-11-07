@@ -175,7 +175,7 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
         }
 
         public Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database,
-            DatabaseType dbType, DatabaseCredentials creds, string? serverId = null) =>
+            DatabaseType dbType, DatabaseCredentials creds, string? serverId = null, string? containerName = null) =>
             throw new InvalidOperationException("not expected");
     }
 

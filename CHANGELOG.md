@@ -15,9 +15,13 @@ All notable changes to Whiskers are documented here. The format follows
   the container, and in a backup (Admin) it could be a dump-tool option or put the dump, written as root, outside the
   backup directory. Every database path (listings, query, backup, import, the scheduled DB backup) now requires a name
   that starts with a letter or digit and uses only letters, digits and `_ . -` (for MongoDB no `.`). Name checks of
-  volumes, services, certificates, sites, compose projects, networks and autopatch containers no longer accept a trailing
-  line break. The DB-backup retention removed the oldest dumps of every database whose name starts with the task's
-  (`app` also pruned `app_db`); it now matches the exact database name. The AI
+  volumes, services, certificates, sites, compose projects and autopatch containers (and the compose-deploy
+  verifier's project name) no longer accept a trailing line break. **Behaviour change, DB dump file names:** a dump is
+  now written as `{container}@{db}_{yyyyMMdd}_{HHmmssfff}_{8 hex}.sql` (`.sql.gz` for MongoDB) instead of
+  `{db}_{yyyyMMdd}_{HHmmss}.sql`. The DB-backup retention removed the oldest dumps of every database whose name started
+  with the task's (`app` also pruned `app_db`) and of a same-named database in every other container on the server, and
+  two dumps in the same second overwrote each other; it now prunes only the task's container's dumps of exactly that
+  database. Dumps in the old format are kept: a retention neither counts nor deletes them. The AI
   Operations page saves a preset as the signed-in user's own level instead of a fixed Admin.
 - **Pages take their role from the capability catalog (INV-13, R1-05).** Every role check in front of a capability
   asks `CapabilityCatalog.RoleOf` instead of naming a role; no page helper takes a role any more, the three reads a

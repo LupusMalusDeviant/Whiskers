@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services.Database;
 using Whiskers.Services.Mutations;
 using Whiskers.Utils;
 
@@ -130,7 +131,7 @@ public sealed partial class DbBackupVerifier(IServiceProvider services) : Servic
     private static partial Regex FileLine();
 }
 
-/// <summary>db.backup_delete: no more than the kept number of dumps of the database remain on the host.</summary>
+/// <summary>db.backup_delete: no more than the kept number of dumps of the container's database remain on the host.</summary>
 public sealed partial class DbBackupDeleteVerifier(IServiceProvider services) : ServiceVerifier(services)
 {
     public override string CapabilityId => "db.backup_delete";
@@ -138,19 +139,21 @@ public sealed partial class DbBackupDeleteVerifier(IServiceProvider services) : 
     protected override async Task CheckAsync(MutationContext context, object? result, CancellationToken ct)
     {
         var database = VerifierSupport.Arg(context, "database");
+        var container = VerifierSupport.Arg(context, "dumpContainer");
         var keep = VerifierSupport.LongArg(context, "keep");
-        if (database is null || keep is null) throw new MutationNotVerifiableException(BackupReadBack.RunNow);
-        if (!Whiskers.Utils.CommandOperands.IsSafeDatabaseName(database))
-            throw new MutationNotVerifiableException("the call named no valid database to read back.");
+        if (database is null || container is null || keep is null) throw new MutationNotVerifiableException(BackupReadBack.RunNow);
+        if (!Whiskers.Utils.CommandOperands.IsSafeDatabaseName(database) || !Whiskers.Utils.CommandOperands.IsSafeContainerRef(container))
+            throw new MutationNotVerifiableException("the call named no valid container and database to read back.");
         var dir = Services.GetRequiredService<DataPathOptions>().BackupsDir;
         // The directory is listed as a whole (an unreadable directory is an error) and filtered as the retention
-        // filters it: exactly this database's dumps (DbDumpFiles.IsDumpOf). A backup taken meanwhile can make a legitimate
-        // retention look short; that race is accepted: it fails towards "check again", never towards success.
-        var listing = await VerifierSupport.HostOutputAsync(Services, RequireServer(context), $"ls -1 {ShellUtils.Quote(dir)}", ct);
-        var left = listing.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Count(f => Whiskers.Services.Database.DbDumpFiles.IsDumpOf(f, database));
+        // filters it: exactly this container's dumps of this database in the current format (DbDumpFiles.DumpsOf;
+        // legacy dumps are never pruned, so never counted). A backup taken meanwhile can make a legitimate retention
+        // look short; that race is accepted: it fails towards "check again", never towards success.
+        var listing = await VerifierSupport.HostOutputAsync(Services, RequireServer(context), DbDumpFiles.ListingCommand(dir), ct);
+        var left = DbDumpFiles.DumpsOf(listing, container, database).Count;
         if (left > keep)
-            throw new MutationVerificationFailedException($"{left} dumps of '{database}' remain, more than the {keep} kept.");
+            throw new MutationVerificationFailedException(
+                $"{left} dumps of '{database}' in '{container}' remain, more than the {keep} kept.");
     }
 }
 

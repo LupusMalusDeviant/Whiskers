@@ -178,13 +178,14 @@ public class DatabaseService : IDatabaseService
         return columns;
     }
 
-    public async Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    public async Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null, string? containerName = null)
     {
         // INV-19: the name is an operand of pg_dump / mysqldump / mongodump (a leading '-' would be an option such as
         // --file=) and part of the dump's file name, which docker cp writes as root on the host (no '/', so it stays in the backup directory).
         CheckDatabaseName(database, dbType);
-        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        var fileName = $"{database}_{timestamp}.sql";
+        // The container is part of the file name (DbDumpFiles): a retention prunes one container's dumps of one
+        // database, never a same-named database's in another container; the suffix keeps same-second dumps apart.
+        var fileName = DbDumpFiles.NewFileName(DbDumpFiles.ContainerKey(containerName, containerId), database, DateTime.UtcNow);
         var backupPath = $"/tmp/{fileName}";
 
         // Interpolated values run through `sh -c`, so every one is POSIX-single-quoted (Sq) to prevent
@@ -209,7 +210,7 @@ public class DatabaseService : IDatabaseService
 
         // The dump currently lives in the container's /tmp, which is lost on the next container recreate
         // (image update, redeploy). Copy it out to the host backup dir and delete the in-container copy so
-        // the backup is actually durable. The file name is derived from a timestamp + DB name; quote it.
+        // the backup is actually durable. The file name is container, DB name, time stamp and suffix (DbDumpFiles); quote it.
         var containerFile = dbType == DatabaseType.MongoDB ? $"{backupPath}.gz" : backupPath;
         var hostFileName = dbType == DatabaseType.MongoDB ? $"{fileName}.gz" : fileName;
         var hostPath = $"{_hostBackupDir}/{hostFileName}";
