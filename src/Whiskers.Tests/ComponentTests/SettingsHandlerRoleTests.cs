@@ -95,9 +95,10 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
         await Invoke(page, "TriggerCveScan");
 
         page.WaitForAssertion(() => Assert.Equal(["begin:cve.scan:", "complete:Failed"], Events()), TimeSpan.FromSeconds(10));
-        page.WaitForAssertion(() => Assert.Contains(Snackbars(), s => s.Message == "Cves_Snackbar_ScanAlreadyRunning"),
+        page.WaitForAssertion(() => Assert.Contains(Snackbars(), s => s.Message == "Cves_Snackbar_ScanNotStarted"),
             TimeSpan.FromSeconds(10));
         Assert.DoesNotContain(Snackbars(), s => s.Message == "Cves_Snackbar_ScanFinished");
+        Assert.DoesNotContain(Snackbars(), s => s.Message == "Settings_Snackbar_CveScanStarted");   // no "started" for a scan that did not start
     }
 
     [Theory]
@@ -123,9 +124,12 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
         _user.Role = AppRole.Admin;   // promoted since the page rendered: the handler reads the role now
 
         await Invoke(page, "TestChannels");
+        await Invoke(page, "TestMattermost");
         await Invoke(page, "TestMatrix");
 
-        lock (_sent) Assert.Equal(["channels.SendTestAsync", "matrix.SendTestAsync"], _sent);
+        // Mattermost has no service of its own: its test goes through the channel service.
+        lock (_sent) Assert.Equal(["channels.SendTestAsync", "channels.SendTestAsync", "matrix.SendTestAsync"], _sent);
+        Assert.Contains(Snackbars(), s => s.Message == "Settings_Snackbar_MattermostTestSent");
     }
 
     private List<string> Events() { lock (_audit.Events) return _audit.Events.ToList(); }
@@ -141,9 +145,10 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
         public int Runs => Volatile.Read(ref _runs);
         public bool AlreadyRunning { get; set; }
 
-        public Task<bool> RunOneCycleAsync(CancellationToken ct = default)
+        public Task<bool> RunOneCycleAsync(CancellationToken ct = default, Action? started = null)
         {
             if (AlreadyRunning) return Task.FromResult(false);
+            started?.Invoke();
             Interlocked.Increment(ref _runs);
             return Task.FromResult(true);
         }

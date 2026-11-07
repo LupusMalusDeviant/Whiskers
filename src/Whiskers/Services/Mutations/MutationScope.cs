@@ -444,6 +444,22 @@ public sealed class MutationScope : IDisposable
         return scope;
     }
 
+    /// <summary>
+    /// Takes the open scope off the current async flow until the returned handle is disposed, and changes nothing else
+    /// on the flow (budget lane, correlation id). For unattended work started from inside a decision that is not part
+    /// of that decision — an AI trigger run fired by an event a person's operation raised: what it starts there sees
+    /// no scope, so its own gateway calls do not become children of the person's operation. It only removes authority,
+    /// it grants none. Dispose in the same synchronous frame that called it.
+    /// </summary>
+    internal static IDisposable Detach() => new Detached();
+
+    private sealed class Detached : IDisposable
+    {
+        private readonly MutationScope? _previous = CurrentScope.Value;
+        public Detached() => CurrentScope.Value = null;
+        public void Dispose() => CurrentScope.Value = _previous;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

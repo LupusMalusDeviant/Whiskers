@@ -49,6 +49,14 @@ missing preset.
 **Summary (R1-25).** What the run reports — the model's text, provider errors, refused calls — is redacted whole and
 then cut at a complete word (1500 characters) before it is sent as the `agent_action` notification.
 
+**Lane and flow.** A run starts on the flow of the event that fired it and keeps it: its budget lane, its correlation id. A
+run fired by a background loop's event (health monitor, log monitor, the CVE monitor's own cycle, image updates) stays in
+the **background lane** (`ServerBudget`): it does not take the interactive slots kept for people, its duplicate calls are
+dropped, and a server paused with `checks.pause` (U-22) refuses its Docker calls (`ServerSuspendedException`). A run fired
+from an interactive flow (a person's action whose notification matches) stays interactive, as before. The one thing it
+does **not** take along is the open gateway decision (`MutationScope.Detach`): an event raised inside a person's operation
+(a manual CVE scan, `cve.scan`, U-40) does not make the run's own decisions children of that operation.
+
 Safety: recursion guard (ignores its own `agent_action` events), per-container cooldown, and a
 concurrency cap. Runs only when the agent is enabled.
 

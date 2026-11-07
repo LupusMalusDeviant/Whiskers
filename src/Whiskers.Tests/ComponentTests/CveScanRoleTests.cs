@@ -88,6 +88,7 @@ public class CveScanRoleTests : BunitContext, IAsyncLifetime
         page.WaitForAssertion(() => Assert.Equal(["begin:cve.scan:", "complete:Executed"], Events()), TimeSpan.FromSeconds(10));
         Assert.Equal(1, _monitor.Runs);
         Assert.True(_monitor.RanInsideTheDecision);
+        page.WaitForAssertion(() => Assert.Contains(Snackbars(), s => s.Message == "Cves_Snackbar_ScanStarted"), TimeSpan.FromSeconds(10));
     }
 
     [Fact]
@@ -100,9 +101,10 @@ public class CveScanRoleTests : BunitContext, IAsyncLifetime
         ScanButton(page).Click();
 
         page.WaitForAssertion(() => Assert.Equal(["begin:cve.scan:", "complete:Failed"], Events()), TimeSpan.FromSeconds(10));
-        page.WaitForAssertion(() => Assert.Contains(Snackbars(), s => s.Message == "Cves_Snackbar_ScanAlreadyRunning"),
+        page.WaitForAssertion(() => Assert.Contains(Snackbars(), s => s.Message == "Cves_Snackbar_ScanNotStarted"),
             TimeSpan.FromSeconds(10));
         Assert.DoesNotContain(Snackbars(), s => s.Message == "Cves_Snackbar_ScanFinished");
+        Assert.DoesNotContain(Snackbars(), s => s.Message == "Cves_Snackbar_ScanStarted");   // no "started" for a scan that did not start
     }
 
     private List<Snackbar> Snackbars() => Services.GetRequiredService<ISnackbar>().ShownSnackbars.ToList();
@@ -121,9 +123,10 @@ public class CveScanRoleTests : BunitContext, IAsyncLifetime
 
         public bool AlreadyRunning { get; set; }
 
-        public Task<bool> RunOneCycleAsync(CancellationToken ct = default)
+        public Task<bool> RunOneCycleAsync(CancellationToken ct = default, Action? started = null)
         {
             if (AlreadyRunning) return Task.FromResult(false);
+            started?.Invoke();
             Interlocked.Increment(ref _runs);
             RanInsideTheDecision = MutationScope.Current is { } scope && scope.CapabilityId == "cve.scan";
             return Task.FromResult(true);

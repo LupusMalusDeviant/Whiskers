@@ -38,6 +38,12 @@ the opposite of what a monitoring tool should say. Callers mark background work 
 anything unmarked counts as **interactive**, which is the safe default: mistaking a loop for a user costs a
 slot, mistaking a user for a loop costs responsiveness.
 
+The mark is ambient and flows with everything a loop starts. That includes AI trigger runs fired by a loop's event:
+the dispatcher starts them on the event's flow and takes off only the open gateway decision (`MutationScope.Detach`),
+never the whole execution context, so such a run stays background — and a server paused with `checks.pause` refuses
+its Docker calls. Code that must drop a person's decision for work it starts uses that helper, not
+`ExecutionContext.SuppressFlow`, which would drop the lane too.
+
 ## Defaults
 
 Four concurrent background calls and four interactive, per server. Sized for the smallest host in a typical

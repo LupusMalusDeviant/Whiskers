@@ -87,7 +87,10 @@ public class CveModuleTests
     {
         Assert.Empty(new NoopCveFindingsStore().GetAll());
         Assert.Empty(await new NoopCveAgeStore().GetFirstSeenAsync());
-        await new NoopCveMonitorService().RunOneCycleAsync(); // completes without error
+        // Nothing is scanned with the module off: never reported as a scan that ran, and "started" is never said.
+        var started = false;
+        Assert.False(await new NoopCveMonitorService().RunOneCycleAsync(started: () => started = true));
+        Assert.False(started);
     }
 
     // --- Enable/disable gate -----------------------------------------------------------------------------
