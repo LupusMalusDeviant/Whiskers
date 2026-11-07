@@ -57,8 +57,11 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
             // be shown again. Keys are created in the UI (Settings → MCP) and displayed once to their creator.
             changed |= MigratePlaintextKeys(data);
 
-            // Spellings first, then the floor: a level read case- or space-insensitively elsewhere is kept as written
-            // (canonical form), only a value still unknown is made fail-closed — and admin is never below a floor.
+            // Spellings first, then the floor: another spelling of a level is rewritten to its exact form (a behaviour
+            // change for the exact-match checks, see EnforceKnownLevels), only a value still unknown is made
+            // fail-closed — and admin is never below a floor.
+            // No ConfigChange is recorded here: ConfigChange.Record writes into the current gateway scope only, and a
+            // load has no principal and no scope; a scope for it would need a synthetic principal. Log + .bak show it.
             changed |= EnforceKnownLevels(data);
             changed |= EnforceCodeFloor(data);
 
@@ -274,8 +277,12 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
     /// <summary>A file written by hand (or before this check) may hold a level that is not exactly read / write /
     /// admin. Settled on load, before the code floor, and written back:
     /// <list type="bullet">
-    /// <item>Another spelling of one of them (<c>"Admin"</c>, <c>" write"</c>) — which the rest of the code already
-    /// read as that level — is rewritten to its exact form: the key or tool keeps working as before.</item>
+    /// <item>Another spelling of one of them (<c>"Admin"</c>, <c>" write"</c>) — which the gateway, the automation
+    /// owner resolver and approvals already read as that level — is rewritten to its exact form. That changes what
+    /// the exact-match checks decide: a key without a tool list ranked 0 at <c>/mcp</c> and was refused every tool,
+    /// now it gets the tools of its level; the Claude Code runtime's key-vs-caller check is stricter for it (it
+    /// ranked 0, which any caller met); a tool now requires exactly its written level (it used to fall to its code
+    /// floor).</item>
     /// <item>A value that is still unknown (<c>none</c>, anything else, empty) is made fail-closed: such a key is
     /// switched off (its level set to <c>read</c>, so an admin re-enables it with a level deliberately; automations
     /// it owns are suspended meanwhile), such a tool is raised to <c>admin</c>, which no code floor exceeds.</item>

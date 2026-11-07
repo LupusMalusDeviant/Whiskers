@@ -213,33 +213,58 @@ public sealed class McpPermissionServiceTests : IDisposable
         Assert.DoesNotContain("\"none\"", file);
     }
 
-    /// <summary>INV-45 review round 15 (MINOR-1): another spelling of a known level — which the rest of the code
-    /// already read as that level — is not a reason to switch a key off: on load it is rewritten to its exact form and
-    /// keeps working, on a key and on a tool (also a tool with a code floor, which a wrong spelling used to drop to the
-    /// floor).</summary>
+    /// <summary>INV-45 review rounds 15/16 (MINOR-1): another spelling of a known level is not a reason to switch a key
+    /// off — on load it is rewritten to its exact form, on a key and on a tool. That is a behaviour change, pinned here:
+    /// <list type="bullet">
+    /// <item>A key spelled differently without a tool list ranked 0 at the <c>/mcp</c> check, so every MCP tool was
+    /// refused; after the rewrite it gets the tools of its level (and no more).</item>
+    /// <item>The Claude Code runtime's check (key level ≤ caller level) is stricter for such a key: <c>"Admin"</c>
+    /// ranked 0, which any caller met; <c>admin</c> only an admin caller meets.</item>
+    /// <item>A tool spelled differently now requires exactly its written level (<c>list_servers</c> at
+    /// <c>"Admin"</c> used to fall to its read floor, it now requires admin).</item>
+    /// </list></summary>
     [Fact]
     public async Task Another_spelling_of_a_known_level_is_rewritten_on_load_not_switched_off()
     {
+        const string plaintext = "inv45-spelled-key-plaintext";
         Directory.CreateDirectory(_dir);
         var paths = new DataPathOptions(_dir);
-        await File.WriteAllTextAsync(paths.McpPermissionsJson, """
+        await File.WriteAllTextAsync(paths.McpPermissionsJson, $$$"""
             {"ApiKeys":[
                {"Id":"k1","Name":"upper","KeyHash":"00","KeyHint":"","PermissionLevel":"Admin","Enabled":true},
-               {"Id":"k2","Name":"spaced","KeyHash":"01","KeyHint":"","PermissionLevel":" write","Enabled":true}],
+               {"Id":"k2","Name":"spaced","KeyHash":"01","KeyHint":"","PermissionLevel":" write","Enabled":true},
+               {"Id":"k3","Name":"real","KeyHash":"{{{McpPermissionService.HashKey(plaintext)}}}","KeyHint":"","PermissionLevel":"Write","Enabled":true}],
              "Tools":{
                "list_servers":{"Enabled":true,"RequiredLevel":"Admin","Category":"Server"},
-               "retired_tool":{"Enabled":true,"RequiredLevel":" write","Category":"Other"}}}
+               "retired_tool":{"Enabled":true,"RequiredLevel":" write","Category":"Other"} } }
             """);
 
         var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
+        // Before: the key is refused — nothing loaded yet, and the level as stored ("Write") ranks 0, which is what
+        // the /mcp check of the old code compared, so no tool was granted to it.
+        Assert.False(svc.IsToolAllowed(plaintext, "list_containers"));
+        Assert.False(McpPermissionLevels.Grants("Write", McpPermissionLevels.Read));
+        Assert.True(McpPermissionLevels.HasAccess(McpPermissionLevels.Read, "Admin"));   // old runtime check: any caller
+
         await svc.InitializeAsync();
 
         var data = svc.GetPermissionData();
         Assert.All(data.ApiKeys, k => Assert.True(k.Enabled, k.Name));
         Assert.Equal(McpPermissionLevels.Admin, data.ApiKeys.Single(k => k.Id == "k1").PermissionLevel);
         Assert.Equal(McpPermissionLevels.Write, data.ApiKeys.Single(k => k.Id == "k2").PermissionLevel);
-        Assert.Equal(McpPermissionLevels.Admin, data.Tools["list_servers"].RequiredLevel);   // read floor: admin kept
+        Assert.Equal(McpPermissionLevels.Write, data.ApiKeys.Single(k => k.Id == "k3").PermissionLevel);
+        Assert.Equal(McpPermissionLevels.Admin, data.Tools["list_servers"].RequiredLevel);   // not its read floor
         Assert.Equal(McpPermissionLevels.Write, data.Tools["retired_tool"].RequiredLevel);
+
+        // After: the real key gets the tools up to its level, and no more.
+        Assert.True(svc.IsToolAllowed(plaintext, "list_containers"));    // read
+        Assert.True(svc.IsToolAllowed(plaintext, "start_container"));    // write
+        Assert.True(svc.IsToolAllowed(plaintext, "retired_tool"));       // " write" → write
+        Assert.False(svc.IsToolAllowed(plaintext, "list_servers"));      // "Admin" → admin, above the key
+        Assert.Contains("start_container", svc.GetAllowedTools(plaintext));
+        Assert.DoesNotContain("list_servers", svc.GetAllowedTools(plaintext));
+        // The runtime check is now stricter for the former "Admin" key: a read caller no longer meets it.
+        Assert.False(McpPermissionLevels.HasAccess(McpPermissionLevels.Read, data.ApiKeys.Single(k => k.Id == "k1").PermissionLevel));
         var file = await File.ReadAllTextAsync(paths.McpPermissionsJson);
         Assert.DoesNotMatch("\"(PermissionLevel|RequiredLevel)\":\\s*\"(Admin| write)\"", file);   // written back exactly
         Assert.Matches("\"PermissionLevel\":\\s*\"admin\"", file);

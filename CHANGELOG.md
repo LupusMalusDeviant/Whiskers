@@ -39,8 +39,12 @@ All notable changes to Whiskers are documented here. The format follows
 - **MCP permission levels fail closed (behaviour change).** A tool whose stored required level is not `read`, `write`
   or `admin` is no longer allowed to every key (it ranked below `read`); it is allowed to none. Creating a key or
   saving Settings → MCP with any other level — `none` in any case included — is refused. A permissions file edited by
-  hand is settled on start and written back: another spelling of a level (`"Admin"`, `" write"`) is rewritten to its
-  exact form and keeps working; a level that is still unknown (`none`, anything else, empty) switches the key off
+  hand is settled on start and written back. Another spelling of a level (`"Admin"`, `" write"`) is rewritten to its
+  exact form, which changes what it allows: a key spelled differently without a tool list was refused every MCP tool
+  until now and now gets the tools of its level over `/mcp` (and in its tool list); the Claude Code agent's check that
+  its configured key has no more rights than the caller is stricter for such a key (`"Admin"` used to rank below
+  `read`, which any caller met; now only an admin caller does); a tool spelled differently now requires exactly its
+  written level instead of falling to its code floor. A level that is still unknown (`none`, anything else, empty) switches the key off
   (level `read`, to be re-enabled deliberately) — scheduled tasks, webhooks and AutoUpdate/AutoPatch items that key
   owns are then suspended until an admin re-enables it or takes them over — and raises the tool to `admin`. Levels
   written by Whiskers itself are unaffected.
