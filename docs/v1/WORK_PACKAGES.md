@@ -376,7 +376,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > exits for a missing service cannot occur: the boot matrix resolves every service of the boundary. A call cancelled
 > after it asked the gateway and before its intent is one Denied event (also at a webhook run's deadline during target
 > resolution); an accepted webhook delivery its worker gives up is recorded once, then settled failed and final
-> (claim-fenced, retried); what a stop or crash leaves unsettled is recorded and settled at the next start.
+> (claim-fenced, retried with back-off); what a stop or crash leaves unsettled is recorded and settled at the next
+> start — the acceptance is persisted before the answer, a row an earlier process accepted is never taken over (a
+> repeat is busy until it is settled), and a reconciliation pass that cannot settle every row is retried until one
+> completes.
 
 **Out of scope:** Hash-chain construction and all caller migrations.
 

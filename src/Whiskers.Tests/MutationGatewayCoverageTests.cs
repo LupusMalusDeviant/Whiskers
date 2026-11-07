@@ -681,6 +681,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Scheduler.SchedulerService.CheckAndRunDueTasks", "the scheduler loop (a hosted service); each task run opens its own decision"),
         ("Whiskers.Services.Webhooks.WebhookService.Bounded", "runs on the webhook worker, which StartAsync starts with the flow suppressed: never inside a decision"),
         ("Whiskers.Services.Webhooks.WebhookService.ExecuteRunAsync", "runs on the webhook worker, which StartAsync starts with the flow suppressed: never inside a decision"),
+        ("Whiskers.Services.Webhooks.WebhookService.GiveUpAsync", "runs on the webhook worker (started from ExecuteRunAsync after its decision ended): never inside a decision"),
         ("Whiskers.Services.Webhooks.WebhookService.StartAsync", "runs on the webhook worker, which StartAsync starts with the flow suppressed: never inside a decision"),
     ];
 

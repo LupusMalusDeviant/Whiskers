@@ -581,7 +581,10 @@ public sealed class MutationGateway : IMutationGateway
         long auditId;
         try
         {
-            auditId = await _audit.BeginAsync(operationId, request, capability, approval, CancellationToken.None);
+            // Not the caller's token (the race above), but bounded: a write that runs out is the intent's refusal, kept
+            // in the outbox (review round 4, NIT-4).
+            using var intentTime = new CancellationTokenSource(RefusalWriteTimeout);
+            auditId = await _audit.BeginAsync(operationId, request, capability, approval, intentTime.Token);
         }
         catch (Exception ex)
         {

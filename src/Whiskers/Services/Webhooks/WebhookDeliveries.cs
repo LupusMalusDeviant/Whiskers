@@ -37,6 +37,12 @@ internal sealed class WebhookDeliveryStore
 {
     internal const string Queued = "Queued", Running = "Running", Succeeded = "Succeeded", Failed = "Failed", Refused = "Refused";
 
+    /// <summary>Written, not yet accepted (INV-45, review round 4): a row moves to <see cref="Queued"/> only when its
+    /// acceptance is on record (<see cref="AcceptAsync"/>), right before the caller is told it is accepted. A row left
+    /// <c>Recording</c> was never accepted: any later delivery with its key takes it over, and the start reconciliation
+    /// leaves it alone.</summary>
+    internal const string Recording = "Recording";
+
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
 
@@ -86,7 +92,7 @@ internal sealed class WebhookDeliveryStore
             WebhookId = webhookId,
             DeliveryKey = deliveryKey,
             RunId = Guid.NewGuid().ToString("N"),
-            State = Queued,
+            State = Recording,
             Instance = token,
             ReceivedAt = now,
         };
@@ -108,9 +114,10 @@ internal sealed class WebhookDeliveryStore
         if (existing.Instance == token) return (true, existing);
         if (!Orphaned(existing)) return (false, existing);
 
-        // Queued, but nothing holds it: exactly one later delivery takes it over.
+        // Not accepted (or, in this process, accepted with its answer lost), and nothing holds it: exactly one later
+        // delivery takes it over.
         var taken = await db.WebhookDeliveries
-            .Where(d => d.Id == existing.Id && d.State == Queued && d.Instance == existing.Instance)
+            .Where(d => d.Id == existing.Id && d.State == existing.State && d.Instance == existing.Instance)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.Instance, token).SetProperty(d => d.ReceivedAt, now), ct);
         if (taken == 1)
         {
@@ -120,6 +127,29 @@ internal sealed class WebhookDeliveryStore
         // Nothing changed — or a retried update after its commit answer was lost: the row as it is now tells.
         var current = await db.WebhookDeliveries.AsNoTracking().SingleAsync(d => d.Id == existing.Id, ct);
         return (current.Instance == token, current);
+    }
+
+    /// <summary>Puts the delivery's acceptance on record (recording → queued, under its claim), right before the caller
+    /// is told it is accepted. A write whose answer is lost is read back: queued under the claim is accepted; anything
+    /// else throws, and the caller is told busy — the row is then still this process's, so a repeat takes it over.</summary>
+    public async Task AcceptAsync(string runId, string claim, CancellationToken ct)
+    {
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        try
+        {
+            if (await db.WebhookDeliveries
+                    .Where(d => d.RunId == runId && d.Instance == claim && (d.State == Recording || d.State == Queued))
+                    .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, Queued), ct) == 1)
+                return;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            // The answer may be lost although the write landed: the row tells.
+        }
+        if (!await db.WebhookDeliveries.AsNoTracking()
+                .AnyAsync(d => d.RunId == runId && d.Instance == claim && d.State == Queued, ct))
+            throw new InvalidOperationException("The delivery's acceptance could not be recorded.");
     }
 
     /// <summary>Starts the run: only under the claim that queued it (not one a later delivery took over), and only once.</summary>
@@ -159,24 +189,28 @@ internal sealed class WebhookDeliveryStore
     }
 
     /// <summary>The queued and running deliveries of another process (one that stopped, crashed or could not settle
-    /// them) received since <paramref name="since"/> — what <see cref="AdoptAsync"/> reconciles at start.</summary>
-    public async Task<List<WebhookDeliveryEntity>> UnsettledOfOthersAsync(DateTime since, CancellationToken ct)
+    /// them), whatever their age — what <see cref="AdoptAsync"/> reconciles at start. A row left recording was never
+    /// accepted and is not among them.</summary>
+    public async Task<List<WebhookDeliveryEntity>> UnsettledOfOthersAsync(CancellationToken ct)
     {
         using var scope = _scopes.CreateScope();
         var prefix = ProcessInstance + "/";
         return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.AsNoTracking()
-            .Where(d => (d.State == Queued || d.State == Running) && d.ReceivedAt >= since && !d.Instance.StartsWith(prefix))
+            .Where(d => (d.State == Queued || d.State == Running) && !d.Instance.StartsWith(prefix))
             .OrderBy(d => d.Id)
             .ToListAsync(ct);
     }
 
     /// <summary>Takes an unsettled row of another process over for reconciling it, fenced like a delivery's takeover
-    /// (same claim, same state): the new claim is live, so no delivery takes it over meanwhile. Null when it changed
-    /// since it was read (a delivery took it over first); then nothing was taken.</summary>
+    /// (same claim, same state). The claim is live while the pass judges the row — a repeat is busy, not told a state
+    /// that is about to change — and is not one of this process's delivery claims (<see cref="ReconcilePrefix"/>): if the
+    /// pass fails before it settled the row, the row stays awaiting reconciliation — never taken over by a delivery (its
+    /// run id may already say "did not run") and found again by the next pass. Null when it changed since it was read
+    /// (a delivery took it over first); then nothing was taken.</summary>
     public async Task<string?> AdoptAsync(WebhookDeliveryEntity row, CancellationToken ct)
     {
-        var token = $"{ProcessInstance}/{Guid.NewGuid():N}";
-        _live[token] = true;
+        var token = $"{ReconcilePrefix}{ProcessInstance}/{Guid.NewGuid():N}";
+        _live[token] = false;
         try
         {
             using var scope = _scopes.CreateScope();
@@ -195,6 +229,9 @@ internal sealed class WebhookDeliveryStore
         return null;
     }
 
+    /// <summary>What a reconciliation's claim begins with: it never reads as one of this process's own delivery claims.</summary>
+    internal const string ReconcilePrefix = "reconcile:";
+
     /// <summary>The run's claim is no longer held: a queued row of it is taken over by the next delivery.</summary>
     public void Release(string claim) => _live.TryRemove(claim, out _);
 
@@ -205,7 +242,7 @@ internal sealed class WebhookDeliveryStore
     /// <summary>Queued under a claim whose delivery is still being recorded: whether it runs is not known yet, so a
     /// repeat must not be told it is queued — it is busy and may come again.</summary>
     public bool Admitting(WebhookDeliveryEntity row) =>
-        row.State == Queued && _live.TryGetValue(row.Instance, out var enqueued) && !enqueued;
+        row.State is Recording or Queued && _live.TryGetValue(row.Instance, out var enqueued) && !enqueued;
 
     /// <summary>The delivery recorded under this key, or <c>null</c>; records nothing.</summary>
     public async Task<WebhookDeliveryEntity?> FindAsync(string webhookId, string deliveryKey, CancellationToken ct)
@@ -233,8 +270,16 @@ internal sealed class WebhookDeliveryStore
         _ => row.State.ToLowerInvariant(),
     };
 
-    /// <summary>Queued, but nothing holds it: nothing runs it until a delivery with its key takes it over.</summary>
-    public bool Orphaned(WebhookDeliveryEntity row) => row.State == Queued && !Live(row);
+    /// <summary>Nothing holds it and nothing runs it until a delivery with its key takes it over: never accepted (left
+    /// recording), or accepted in this process whose acceptance answer was lost.</summary>
+    public bool Orphaned(WebhookDeliveryEntity row) =>
+        !Live(row) && (row.State == Recording || (row.State == Queued && Own(row)));
+
+    /// <summary>Accepted by an earlier process and left queued: the start reconciliation settles it (INV-45, review round
+    /// 4) — no delivery takes it over, so a run id that may already say "did not run" never runs.</summary>
+    public bool AwaitingReconcile(WebhookDeliveryEntity row) => row.State == Queued && !Own(row) && !Live(row);
+
+    private bool Own(WebhookDeliveryEntity row) => row.Instance.StartsWith(ProcessInstance + "/", StringComparison.Ordinal);
 
     private bool Live(WebhookDeliveryEntity row) => _live.ContainsKey(row.Instance);
 }

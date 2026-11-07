@@ -32,12 +32,16 @@ public sealed class WebhookReplayTests : IDisposable
     private readonly ManualTime _time = new(new DateTimeOffset(2026, 10, 29, 12, 0, 0, TimeSpan.Zero));
     private readonly WebhookOptions _options = new();
     private readonly Faults _faults = new();
+    private readonly string _outboxRoot = Path.Combine(Path.GetTempPath(), $"webhook-replay-outbox-{Guid.NewGuid():N}");
+    private readonly AuditOutbox _outbox;
 
     public WebhookReplayTests()
     {
         var services = new ServiceCollection();
         services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_dbPath};Pooling=False").AddInterceptors(_faults));
         services.AddSingleton<IAutomationMutationRunner>(_runner);
+        _outbox = new AuditOutbox(new Whiskers.Configuration.DataPathOptions(_outboxRoot));
+        services.AddSingleton(_outbox);
         _sp = services.BuildServiceProvider();
         using var scope = _sp.CreateScope();
         scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
@@ -50,6 +54,7 @@ public sealed class WebhookReplayTests : IDisposable
         _runner.Release();
         _sp.Dispose();
         try { File.Delete(_dbPath); } catch (IOException) { }
+        try { Directory.Delete(_outboxRoot, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     /// <summary>A new service is a new process: what another one queued or ran reads as cut off by a restart.</summary>
@@ -243,28 +248,52 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
-    public async Task A_delivery_still_queued_at_a_restart_runs_on_its_next_delivery()
+    public async Task A_delivery_never_accepted_before_a_restart_runs_on_its_next_delivery()
     {
         var wh = Seed(WebhookSignatures.Whiskers);
         var request = Signed(wh, "delivery-0007");
-        var (key, _) = WebhookSignatures.Verify(wh, request, _time.GetUtcNow(), _options.TimestampTolerance);
-        using (var scope = _sp.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            db.WebhookDeliveries.Add(new WebhookDeliveryEntity
-            {
-                WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = "queued-before-restart", State = "Queued",
-                Instance = "stopped-process/claim", ReceivedAt = _time.GetUtcNow().UtcDateTime,
-            });
-            await db.SaveChangesAsync();
-        }
+        SeedDelivery(wh, request, "recording-before-restart", "Recording");
 
         var again = await Service().AcceptAsync(wh.WebhookId, request);
 
         Assert.Equal(WebhookReply.Accepted, again.Reply);
-        Assert.Equal("queued-before-restart", again.RunId);
+        Assert.Equal("recording-before-restart", again.RunId);
         Assert.Equal("Succeeded", (await Finished(again.RunId!)).State);
         Assert.Equal(1, _runner.Runs);
+    }
+
+    /// <summary>INV-45 (review round 4, MAJOR-1): a delivery an earlier process accepted and left queued is never taken
+    /// over — its run id may already say it did not run. A repeat is busy until the reconciliation settled it, then a
+    /// duplicate of the failed run; it is one event and never runs.</summary>
+    [Fact]
+    public async Task A_delivery_accepted_before_a_restart_is_settled_never_taken_over()
+    {
+        RecordRefusals();
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var request = Signed(wh, "delivery-0008");
+        SeedDelivery(wh, request, "queued-before-restart", "Queued");
+        var service = Service();
+
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Busy), await service.AcceptAsync(wh.WebhookId, request));
+        await service.ReconcileAsync();
+
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Duplicate, "queued-before-restart", "failed"),
+            await service.AcceptAsync(wh.WebhookId, request));
+        await NotRunAsync("queued-before-restart", "container.restart");
+        Assert.Equal(0, _runner.Runs);
+    }
+
+    private void SeedDelivery(WebhookEntity wh, WebhookRequest request, string runId, string state)
+    {
+        var (key, _) = WebhookSignatures.Verify(wh, request, _time.GetUtcNow(), _options.TimestampTolerance);
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        db.WebhookDeliveries.Add(new WebhookDeliveryEntity
+        {
+            WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = runId, State = state,
+            Instance = "stopped-process/" + runId, ReceivedAt = _time.GetUtcNow().UtcDateTime,
+        });
+        db.SaveChanges();
     }
 
     // ---------------------------------------------------------------- serialization and bounds
@@ -683,7 +712,7 @@ public sealed class WebhookReplayTests : IDisposable
         var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var waiting = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var service = Service();
-        service.BookkeepingTimeout = TimeSpan.FromMilliseconds(300);
+        service.BookkeepingTimeout = TimeSpan.FromSeconds(1);
         service.SettleRetryDelay = TimeSpan.FromMilliseconds(50);
         _runner.Hold();
         await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0311"));
@@ -694,6 +723,7 @@ public sealed class WebhookReplayTests : IDisposable
         var accepted = await service.AcceptAsync(waiting.WebhookId, Signed(waiting, "delivery-0312"));
 
         Assert.Equal("Failed", (await Finished(accepted.RunId!)).State);
+        Assert.Equal(1, _faults.Tripped);   // the settlement really stalled once, and was tried again
         // Recorded before it was settled: nothing of it can come later.
         var rows = (await AuditTrail.RowsAsync(Scopes)).Where(r => r.OperationId == accepted.RunId).ToList();
         AuditTrail.One(rows, AuditTrail.Denied, "container.restart", "Automation", decided: false, targetId: "web-1");
@@ -711,12 +741,14 @@ public sealed class WebhookReplayTests : IDisposable
         var store = new WebhookDeliveryStore(Scopes, _time);
         var (fresh, row) = await store.RecordAsync(wh.WebhookId, "key-0313", CancellationToken.None);
         Assert.True(fresh);
+        await store.AcceptAsync(row.RunId, row.Instance, CancellationToken.None);
         var givenUp = row.Instance;
         store.Release(givenUp);   // its worker gave it up without settling it (Whiskers was stopping)
 
         var (again, taken) = await store.RecordAsync(wh.WebhookId, "key-0313", CancellationToken.None);
         Assert.True(again);
         Assert.Equal(row.RunId, taken.RunId);
+        await store.AcceptAsync(taken.RunId, taken.Instance, CancellationToken.None);
         Assert.True(await store.StartAsync(taken.RunId, taken.Instance, CancellationToken.None));
 
         Assert.False(await store.StartAsync(row.RunId, givenUp, CancellationToken.None));
@@ -727,9 +759,10 @@ public sealed class WebhookReplayTests : IDisposable
 
     /// <summary>INV-45 (review round 3, MAJOR-1): what an earlier process accepted and left unsettled — runs still
     /// waiting at a stop or crash, a give-up it could not settle — is recorded once at the next start and settled:
-    /// queued or running without an event → one Denied event, failed; queued with its event already on record →
-    /// failed, no second event; running with an event (cut off while it ran) → left as it is. A second pass, and
-    /// another start, record nothing.</summary>
+    /// queued or running without an event → one Denied event, failed; queued or running with only its refusal on
+    /// record (a give-up recorded before the stop) → failed, no second event; running with its intent on record (cut off
+    /// while it ran) → left as it is. Every settled one is in the webhook's log. A second pass, and another start,
+    /// record nothing.</summary>
     [Fact]
     [AuditPath("S-04", AuditTrail.Denied)]
     public async Task Deliveries_an_earlier_process_left_unsettled_are_recorded_once_at_the_next_start()
@@ -757,8 +790,20 @@ public sealed class WebhookReplayTests : IDisposable
         var running = Row("Running");
         var queuedOnRecord = Row("Queued");
         var runningOnRecord = Row("Running");
+        var runningCutOff = Row("Running");
         await OnRecordAsync(queuedOnRecord);
         await OnRecordAsync(runningOnRecord);
+        using (var scope = _sp.CreateScope())
+        {
+            // Its intent is on record: it was running when the process stopped.
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.AuditLog.Add(new AuditLogEntity
+            {
+                EventId = Guid.NewGuid().ToString("N"), OperationId = runningCutOff, Phase = "intent",
+                Action = "container.restart", Surface = "Automation",
+            });
+            db.SaveChanges();
+        }
 
         var service = Service();
         Assert.Equal(2, await service.ReconcileAsync());
@@ -768,16 +813,124 @@ public sealed class WebhookReplayTests : IDisposable
             Assert.Equal("Failed", (await Delivery(runId)).State);
             Assert.Contains(WebhookService.NotSettled, (await NotRunAsync(runId, "container.restart")).Details);
         }
+        // Refused before the stop (a give-up it could not settle): settled, no second event.
         Assert.Equal("Failed", (await Delivery(queuedOnRecord)).State);
-        Assert.Equal("Running", (await Delivery(runningOnRecord)).State);
-        foreach (var runId in new[] { queuedOnRecord, runningOnRecord })
+        Assert.Equal("Failed", (await Delivery(runningOnRecord)).State);
+        Assert.Equal("Running", (await Delivery(runningCutOff)).State);   // read as "interrupted"
+        foreach (var runId in new[] { queuedOnRecord, runningOnRecord, runningCutOff })
             Assert.Single(await AuditTrail.RowsAsync(Scopes), r => r.OperationId == runId);
 
         var before = (await AuditTrail.RowsAsync(Scopes)).Count;
         Assert.Equal(0, await service.ReconcileAsync());
         Assert.Equal(0, await Service().ReconcileAsync());
         Assert.Equal(before, (await AuditTrail.RowsAsync(Scopes)).Count);
-        Assert.Equal(2, Logs(wh.WebhookId).Count(l => !l.Success));   // the two recorded ones, in the webhook's log
+        Assert.Equal(4, Logs(wh.WebhookId).Count(l => !l.Success));   // the four settled ones, in the webhook's log
+        Assert.Equal(0, _runner.Runs);
+    }
+
+    /// <summary>INV-45 (review round 4, MAJOR-1): the reconciliation records a left-behind delivery and then cannot
+    /// settle it. The row is not lost and not taken over: a repeat is busy, a later pass (retried without being asked)
+    /// settles it without a second event, then the repeat is a duplicate of the failed run — and it never runs.</summary>
+    [Fact]
+    public async Task A_reconciliation_that_could_not_settle_is_retried_and_its_delivery_never_runs()
+    {
+        RecordRefusals();
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var request = Signed(wh, "delivery-0009");
+        SeedDelivery(wh, request, "settle-failed", "Queued");
+        var service = Service();
+        service.ReconcileRetryDelay = TimeSpan.FromSeconds(2);
+        // The pass's own writes carry its token; the first is the adoption, the second the settlement.
+        _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.Fail, runsOnly: true, skip: 1);
+        using var start = new CancellationTokenSource();
+
+        Assert.Equal(1, await service.ReconcileAsync(start.Token));
+        Assert.Equal(1, _faults.Tripped);
+        Assert.Equal("Queued", (await Delivery("settle-failed")).State);
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Busy), await service.AcceptAsync(wh.WebhookId, request));
+
+        // The log entry is written after the settlement: once it is there, the retry has settled the row.
+        await Until(() => Logs(wh.WebhookId).Any(l => !l.Success));
+        Assert.Equal("Failed", (await Delivery("settle-failed")).State);
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Duplicate, "settle-failed", "failed"),
+            await service.AcceptAsync(wh.WebhookId, request));
+        await NotRunAsync("settle-failed", "container.restart");
+        Assert.Single(Logs(wh.WebhookId), l => !l.Success);
+        Assert.Equal(0, _runner.Runs);
+    }
+
+    /// <summary>INV-45 (review round 4, MAJOR-1): a row that fails is skipped, not the pass — the rows after it are
+    /// reconciled at once, and the retry reconciles the one that failed. Each is one event.</summary>
+    [Fact]
+    public async Task A_row_the_reconciliation_could_not_take_does_not_stop_the_rows_after_it()
+    {
+        RecordRefusals();
+        var wh = Seed(WebhookSignatures.Whiskers);
+        SeedDelivery(wh, Signed(wh, "delivery-0010"), "first-fails", "Queued");
+        SeedDelivery(wh, Signed(wh, "delivery-0011"), "second-settles", "Queued");
+        var service = Service();
+        service.ReconcileRetryDelay = TimeSpan.FromMilliseconds(20);
+        _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.Fail, runsOnly: true);
+        using var start = new CancellationTokenSource();
+
+        Assert.Equal(1, await service.ReconcileAsync(start.Token));
+        Assert.Equal(1, _faults.Tripped);
+        Assert.Equal("Failed", (await Delivery("second-settles")).State);
+
+        await Until(() => Logs(wh.WebhookId).Count(l => !l.Success) == 2);   // written after each settlement
+        Assert.Equal("Failed", (await Delivery("first-fails")).State);
+        foreach (var runId in new[] { "first-fails", "second-settles" })
+            Assert.Contains(WebhookService.NotSettled, (await NotRunAsync(runId, "container.restart")).Details);
+        Assert.Equal(2, Logs(wh.WebhookId).Count(l => !l.Success));
+        Assert.Equal(0, _runner.Runs);
+    }
+
+    /// <summary>INV-45 (review round 4, MINOR-5): the start reconciles — the Webhooks module's initialisation (run
+    /// before Kestrel listens) settles what an earlier process left queued.</summary>
+    [Fact]
+    public async Task The_webhooks_module_reconciles_at_start()
+    {
+        RecordRefusals();
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var request = Signed(wh, "delivery-0012");
+        SeedDelivery(wh, request, "left-at-stop", "Queued");
+        var service = Service();
+
+        await new Whiskers.Modules.Webhooks.WebhooksModule().InitializeAsync(new WithWebhooks(_sp, service), CancellationToken.None);
+
+        Assert.Equal("Failed", (await Delivery("left-at-stop")).State);
+        await NotRunAsync("left-at-stop", "container.restart");
+        Assert.Equal(new WebhookAcceptance(WebhookReply.Duplicate, "left-at-stop", "failed"),
+            await service.AcceptAsync(wh.WebhookId, request));
+        Assert.Equal(0, _runner.Runs);
+    }
+
+    private sealed class WithWebhooks(IServiceProvider inner, IWebhookService webhooks) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IWebhookService) ? webhooks : inner.GetService(serviceType);
+    }
+
+    /// <summary>INV-45 (review round 4, MINOR-5): an event still in the audit outbox (written there while the
+    /// database was unavailable, not yet in the log) counts — the reconciliation settles the row without a second
+    /// event.</summary>
+    [Fact]
+    public async Task A_refusal_kept_in_the_outbox_is_not_recorded_twice_by_the_reconciliation()
+    {
+        RecordRefusals();
+        var wh = Seed(WebhookSignatures.Whiskers);
+        SeedDelivery(wh, Signed(wh, "delivery-0013"), "kept-in-outbox", "Queued");
+        Assert.True(_outbox.TryKeep(new AuditLogEntity
+        {
+            EventId = Guid.NewGuid().ToString("N"), OperationId = "kept-in-outbox", Phase = "outcome",
+            Outcome = nameof(MutationStatus.Denied), Action = "container.restart", Success = false,
+        }));
+
+        Assert.Equal(0, await Service().ReconcileAsync());
+
+        Assert.DoesNotContain(await AuditTrail.RowsAsync(Scopes), r => r.OperationId == "kept-in-outbox");
+        Assert.Equal("Failed", (await Delivery("kept-in-outbox")).State);
+        Assert.Single(Logs(wh.WebhookId), l => !l.Success);
         Assert.Equal(0, _runner.Runs);
     }
 
@@ -1054,24 +1207,14 @@ public sealed class WebhookReplayTests : IDisposable
     }
 
     [Fact]
-    public async Task A_full_queue_answers_busy_for_a_delivery_a_stopped_process_left_queued()
+    public async Task A_full_queue_answers_busy_for_a_delivery_a_stopped_process_left_unaccepted()
     {
         _options.MaxConcurrentRuns = 1;
         _options.QueueCapacity = 1;
         var wh = Seed(WebhookSignatures.Whiskers);
         var service = Service();
         var request = Signed(wh, "delivery-0204");
-        var (key, _) = WebhookSignatures.Verify(wh, request, _time.GetUtcNow(), _options.TimestampTolerance);
-        using (var scope = _sp.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-            db.WebhookDeliveries.Add(new WebhookDeliveryEntity
-            {
-                WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = "left-queued", State = "Queued",
-                Instance = "stopped-process/claim", ReceivedAt = _time.GetUtcNow().UtcDateTime,
-            });
-            await db.SaveChangesAsync();
-        }
+        SeedDelivery(wh, request, "left-queued", "Recording");
         _runner.Hold();
         await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0205"));
         await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
@@ -1098,7 +1241,7 @@ public sealed class WebhookReplayTests : IDisposable
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
             db.WebhookDeliveries.Add(new WebhookDeliveryEntity
             {
-                WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = "left-queued", State = "Queued",
+                WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = "left-queued", State = "Recording",
                 Instance = "stopped-process/claim", ReceivedAt = _time.GetUtcNow().UtcDateTime,
             });
             await db.SaveChangesAsync();
@@ -1124,7 +1267,7 @@ public sealed class WebhookReplayTests : IDisposable
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
             db.WebhookDeliveries.Add(new WebhookDeliveryEntity
             {
-                WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = "left-queued", State = "Queued",
+                WebhookId = wh.WebhookId, DeliveryKey = key!, RunId = "left-queued", State = "Recording",
                 Instance = "stopped-process/claim", ReceivedAt = _time.GetUtcNow().UtcDateTime,
             });
             await db.SaveChangesAsync();
@@ -1303,6 +1446,10 @@ public sealed class WebhookReplayTests : IDisposable
         public void Unlock() => Interlocked.Exchange(ref _locker, null)?.Dispose();
 
         private int _skip;
+        private int _tripped;
+
+        /// <summary>How many armed faults have fired — a test that relies on one asserts it did.</summary>
+        public int Tripped => Volatile.Read(ref _tripped);
 
         /// <param name="skip">How many matching commands pass before the one that breaks.</param>
         public void Arm(string fragment, Fault fault, bool runsOnly = false, int skip = 0)
@@ -1318,6 +1465,7 @@ public sealed class WebhookReplayTests : IDisposable
                 if (_runsOnly && !ct.CanBeCanceled) return null;
                 if (_skip-- > 0) return null;
                 _fragment = null;
+                Interlocked.Increment(ref _tripped);
                 return _fault;
             }
         }

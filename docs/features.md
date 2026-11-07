@@ -65,7 +65,11 @@ The remaining risks of this check are listed in the [README](../README.md#compos
   endpoint requires authentication unless it explicitly opts out. A webhook delivery runs at most once: one Whiskers
   accepted but had to give up (no turn on its target in time, its database unavailable, a stop) ends failed, is in the
   webhook's log and the audit log and raises an `automation_refused` notification, and needs a new delivery (a new
-  delivery id, or for GitHub a new push — "Redeliver" repeats the same delivery and is answered as a duplicate).
+  delivery id, or for GitHub a new push — "Redeliver" repeats the same delivery and is answered as a duplicate). While its
+  database is unavailable, its settlement is retried until it lands, then the log entry and notification follow. One
+  a stop or crash left accepted but not settled is recorded once (unless it already was), settled, written to the
+  webhook's log and named in one combined `automation_refused` notification at the next start; until then a repeat
+  is answered busy.
 - **SSH host-key verification** (trust-on-first-use) on every ssh path.
 - **Mesh + mTLS** steady-state operation (see [security-architecture.md](security-architecture.md)).
 
