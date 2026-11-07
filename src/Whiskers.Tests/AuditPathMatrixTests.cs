@@ -1037,6 +1037,8 @@ public sealed class AuditPathMatrixTests : IDisposable
                 yield return ("not a database", (t, _, _) => t.TargetId = "web-1", "web-1");
                 yield return ("listing throws", (_, w, _) => w.Docker.ListContainersThrows = true, "db-1");
                 yield return ("environment throws", (_, w, _) => w.Docker.Env = null, "db-1");
+                // A Docker call that timed out escapes the lookup; the dispatcher's backstop records it (review round 11).
+                yield return ("listing cancelled", (_, w, _) => w.Docker.ListContainersException = new TaskCanceledException("The request timed out."), "db-1");
                 // INV-19's name check (review round 10, BLOCKER-1): refused before the gateway, never without an event.
                 yield return ("unsafe database name", (t, _, _) => t.Config = "{\"database\":\"-x\"}", "db-1");
                 yield return ("unsafe default name from the container",
@@ -1053,6 +1055,7 @@ public sealed class AuditPathMatrixTests : IDisposable
             case ScheduledTaskType.Cleanup:
                 yield return ("protected stopped container", (_, _, p) => p.ProtectedResources = ["old*"], "local");
                 yield return ("listing throws", (_, w, _) => w.Docker.ListContainersThrows = true, "local");
+                yield return ("listing cancelled", (_, w, _) => w.Docker.ListContainersException = new TaskCanceledException("The request timed out."), "local");
                 break;
         }
     }
@@ -1095,6 +1098,18 @@ public sealed class AuditPathMatrixTests : IDisposable
             targetId: TargetOf(type));
         policy.ReadOnlyMode = false;
 
+        if (type == ScheduledTaskType.DbBackup)
+        {
+            // An environment that repeats a key in another case (Docker's client proxy configuration sets HTTP_PROXY
+            // and http_proxy) is read, not a failure: the backup runs, one event (review round 11, B-1).
+            var duplicated = new TaskWorld(works: true);
+            duplicated.Docker.Env = [new("POSTGRES_USER", "app"), new("POSTGRES_PASSWORD", Probe), new("POSTGRES_DB", "app"),
+                new("HTTP_PROXY", "http://proxy:3128"), new("http_proxy", "http://proxy:3128")];
+            One(await AttemptAsync(_db.Scopes, () => Run(true, world: duplicated)), Executed, capability, "Automation",
+                targetId: TargetOf(type));
+            Assert.Equal(["db.backup"], duplicated.Ran);
+        }
+
         foreach (var (name, set, targetId) in PreGatewayRefusals(type))
         {
             var world = new TaskWorld(works: true);
@@ -1102,7 +1117,23 @@ public sealed class AuditPathMatrixTests : IDisposable
             set(task, world, policy);
             var refused = await AttemptAsync(_db.Scopes, () => Run(true, task, world));
             Assert.True(refused.Count == 1, $"{type}, {name}: {refused.Count} events");
-            One(refused, Denied, capability, "Automation", decided: false, targetId: targetId);
+            var refusal = One(refused, Denied, capability, "Automation", decided: false, targetId: targetId);
+            // The resolved name and the reason (review round 11, m-3); the backstop names the exception's type only.
+            switch (name)
+            {
+                case "unsafe database name" or "unsafe default name from the container":
+                    Assert.Contains("\"database\":\"-x\"", refusal.Arguments);
+                    Assert.Contains("Invalid database '-x'", refusal.Details);
+                    break;
+                case "dotted MongoDB name":
+                    Assert.Contains("\"database\":\"app.x\"", refusal.Arguments);
+                    Assert.Contains("Invalid database 'app.x'", refusal.Details);
+                    Assert.Contains("no '.'", refusal.Details);
+                    break;
+                case "listing cancelled":
+                    Assert.Contains("The run ended before its decision (TaskCanceledException).", refusal.Details);
+                    break;
+            }
             Assert.Empty(world.Ran);
             Assert.Empty(world.Host.Commands);
             Assert.Empty(world.Docker.Actions);

@@ -13,8 +13,11 @@ All notable changes to Whiskers are documented here. The format follows
   unreadable owner entry, an AutoUpdate with a blocked owner entry, an endpoint-check run the monitor refused, a
   webhook delivery that ended before its decision or was given up after its start, a scheduled task refused before
   the gateway (no target or command, a missing database container, a database name the INV-19 check refuses, a
-  protected stopped container) — are now recorded as denied events. An endpoint check whose suspension cannot be saved is refused again at its interval, not every
-  15 seconds. A call cancelled after it asked the gateway and before it ran (the caller gone, a run's deadline
+  protected stopped container, and any failure of a call before its decision, such as a Docker call that timed out)
+  — are now recorded as denied events. **Fix:** a scheduled DB backup of a container whose environment repeats a key
+  in another case (Docker's client proxy configuration sets `HTTP_PROXY` and `http_proxy`) failed every run; the
+  environment is now read with the upper-case spelling first. An endpoint check whose suspension cannot be saved is
+  refused again at its interval, not every 15 seconds. A call cancelled after it asked the gateway and before it ran (the caller gone, a run's deadline
   passed while the target resolved) is one denied event, and an accepted webhook delivery its worker gives up before
   it started now ends failed and final, on record once (also in the webhook log, with an `automation_refused`
   notification), instead of waiting for a redelivery — it needs a new delivery. Deliveries a stop or crash left queued

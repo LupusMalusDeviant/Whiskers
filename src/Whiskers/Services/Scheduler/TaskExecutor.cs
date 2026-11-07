@@ -108,8 +108,56 @@ public class TaskExecutor : ITaskExecutor
         catch (Exception ex)
         {
             _logger.LogError(ex, "Task {Name} failed", task.Name);
+            // The backstop (INV-45, review round 11): whatever ended the run before it reached its decision — an
+            // exception from a call the task method made, which no written refusal covers — is the gateway's Denied
+            // event of the task's capability, once. A run that reached the gateway has its event there, and one already
+            // refused has its own; neither is recorded again. A cancellation counts the same: the run takes no
+            // caller's token, so it is a timeout of a call it made (or the host stopping under it), and the refusal is
+            // written on the gateway's own bounded time, which a stop does not cut off. The reason names the
+            // exception's type only — its message may carry what the environment holds (never log secrets).
+            if (!refusal.ReachedGateway && !refusal.Recorded)
+                return await RefusedAsync(task,
+                    CapabilityOf(task.TaskType) is { Length: > 0 } capability ? capability : $"scheduler.task_type.{task.TaskType}",
+                    BackstopArgumentsOf(task), $"The run ended before its decision ({ex.GetType().Name}).");
             return (false, ex.Message);
         }
+    }
+
+    /// <summary>The arguments the backstop's refusal names: the target the task's own run or refusal would name.</summary>
+    private static object BackstopArgumentsOf(ScheduledTaskEntity task)
+    {
+        var sid = ScheduledTaskServer.Of(task);
+        return task.TaskType switch
+        {
+            ScheduledTaskType.ContainerRestart or ScheduledTaskType.DbBackup =>
+                new { containerId = task.TargetId ?? "", name = task.TargetName, serverId = sid },
+            ScheduledTaskType.VolumeBackup => new { volumeName = task.TargetId ?? "", containerName = task.TargetName, serverId = sid },
+            ScheduledTaskType.SelfBackup => new { label = $"scheduled-{task.Name}" },
+            ScheduledTaskType.CustomCommand => new { serverId = sid, taskId = task.TaskId, command = ParseConfig(task.Config).GetValueOrDefault("command", "") },
+            ScheduledTaskType.Cleanup => new { serverId = sid, taskId = task.TaskId, containerIds = "" },
+            _ => new { taskId = task.TaskId },
+        };
+    }
+
+    /// <summary>Every gateway run of a scheduled task goes through here: it marks the run as having reached its
+    /// decision, so the dispatcher's backstop never records a second event for it (INV-45). Nothing in this class
+    /// calls <c>_automation.RunAsync</c> directly (TaskExecutorRefusalInventoryTests). It only forwards to the runner, so
+    /// it is a <see cref="MutationEntryPointAttribute"/> like the runner itself: a lambda handed to it is gated.</summary>
+    [MutationEntryPoint]
+    private Task<MutationOutcome<T>> RunGatedAsync<T>(ScheduledTaskEntity task, string capabilityId, object arguments,
+        Func<CancellationToken, Task<T>> action)
+    {
+        if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
+        return _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
+    }
+
+    /// <inheritdoc cref="RunGatedAsync{T}"/>
+    [MutationEntryPoint]
+    private Task<MutationOutcome<bool>> RunGatedAsync(ScheduledTaskEntity task, string capabilityId, object arguments,
+        Func<CancellationToken, Task> action)
+    {
+        if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
+        return _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
     }
 
     private async Task<(bool, string)> ExecuteContainerRestart(ScheduledTaskEntity task)
@@ -119,7 +167,7 @@ public class TaskExecutor : ITaskExecutor
                 new { containerId = "", name = task.TargetName, serverId = ScheduledTaskServer.Of(task) }, "No container ID specified");
 
         var containerId = task.TargetId;
-        var outcome = await _automation.RunAsync(ActorOf(task), "container.restart",
+        var outcome = await RunGatedAsync(task, "container.restart",
             new { containerId, name = task.TargetName, serverId = ScheduledTaskServer.Of(task) },
             _ => _docker.RestartContainerAsync(containerId, ScheduledTaskServer.Of(task)));
         return Problem(outcome, "container.restart") is { } problem
@@ -137,8 +185,9 @@ public class TaskExecutor : ITaskExecutor
 
         // Detect DB type and credentials. A lookup that fails, or finds no database, refuses the backup before its
         // decision — on record as the gateway's Denied event (INV-45).
+        // A cancellation (a Docker call that timed out) is not caught here: the dispatcher's backstop records it.
         ContainerInfo? container;
-        List<KeyValuePair<string, string>> env;
+        DatabaseCredentials creds;
         try
         {
             var containers = await _docker.ListContainersAsync(serverId: ScheduledTaskServer.Of(task));
@@ -146,7 +195,8 @@ public class TaskExecutor : ITaskExecutor
             if (container == null) return await RefusedAsync(task, "db.backup", named, $"Container not found: {task.TargetId}");
             if (!container.IsDatabase)
                 return await RefusedAsync(task, "db.backup", named, $"Container {container.Name} is not a database.");
-            env = await _docker.GetContainerEnvAsync(container.Id, ScheduledTaskServer.Of(task));
+            var env = await _docker.GetContainerEnvAsync(container.Id, ScheduledTaskServer.Of(task));
+            creds = DatabaseDetector.ExtractCredentials(env, container.DatabaseType);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -154,7 +204,6 @@ public class TaskExecutor : ITaskExecutor
             return await RefusedAsync(task, "db.backup", named,
                 $"The database container could not be looked up ({ex.GetType().Name}).");
         }
-        var creds = DatabaseDetector.ExtractCredentials(env, container.DatabaseType);
         if (string.IsNullOrEmpty(database)) database = creds.Database;
         var resolved = new { containerId = container.Id, name = container.Name, serverId = ScheduledTaskServer.Of(task), database };
         // INV-19: the name becomes a dump-tool operand and part of a host file name; a stored task is no exception —
@@ -169,7 +218,7 @@ public class TaskExecutor : ITaskExecutor
             return await RefusedAsync(task, "db.backup", resolved, ex.Message);
         }
 
-        var outcome = await _automation.RunAsync(ActorOf(task), "db.backup", resolved,
+        var outcome = await RunGatedAsync(task, "db.backup", resolved,
             _ => _dbService.BackupDatabaseAsync(container.Id, database, container.DatabaseType, creds, ScheduledTaskServer.Of(task), container.Name));
         if (Problem(outcome, "db.backup") is { } problem) return (false, problem);
         var (success, filePath, sizeBytes, error) = outcome.Value;
@@ -189,7 +238,7 @@ public class TaskExecutor : ITaskExecutor
                 new { volumeName = "", containerName = task.TargetName, serverId = ScheduledTaskServer.Of(task) }, "No volume name specified");
 
         var volumeName = task.TargetId;
-        var outcome = await _automation.RunAsync(ActorOf(task), "volume.backup",
+        var outcome = await RunGatedAsync(task, "volume.backup",
             new { volumeName, containerName = task.TargetName, serverId = ScheduledTaskServer.Of(task) },
             _ => _backupService.BackupVolumeAsync(volumeName, task.TargetName ?? "", ScheduledTaskServer.Of(task), $"Scheduled: {task.Name}"));
         if (Problem(outcome, "volume.backup") is { } problem) return (false, problem);
@@ -205,7 +254,7 @@ public class TaskExecutor : ITaskExecutor
     {
         // Whiskers self-backup of /app/data (F3). Backs up the app itself, so ServerId/TargetId are ignored.
         var label = $"scheduled-{task.Name}";
-        var outcome = await _automation.RunAsync(ActorOf(task), "selfbackup.create", new { label },
+        var outcome = await RunGatedAsync(task, "selfbackup.create", new { label },
             _ => _selfBackupService.CreateBackupAsync(label));
         if (Problem(outcome, "selfbackup.create") is { } problem) return (false, problem);
         var info = outcome.Value!;
@@ -227,7 +276,7 @@ public class TaskExecutor : ITaskExecutor
         // The raw execution is the executor's primitive (R1-48): it runs only inside this scope; gating the call re-checks the owner, who must
         // hold host.exec (Admin), and applies the kill switch. The command goes to the policy (forbidden arguments as
         // they are today, not when the task was created); the audit row keeps only its length.
-        var outcome = await _automation.RunAsync(ActorOf(task), "host.exec",
+        var outcome = await RunGatedAsync(task, "host.exec",
             new { serverId = sid, taskId = task.TaskId, command },
             _ => _executor.ExecuteMutationAsync(sid, command, TimeSpan.FromMinutes(5)));
         if (Problem(outcome, "host.exec") is { } problem) return (false, problem);
@@ -266,7 +315,7 @@ public class TaskExecutor : ITaskExecutor
 
         // Those containers, dangling images and build cache. Not networks (R1-16): which ones are unused cannot be
         // told before the prune, so a protected network could not be decided on — they stay.
-        var outcome = await _automation.RunAsync(ActorOf(task), "host.prune",
+        var outcome = await RunGatedAsync(task, "host.prune",
             new { serverId = sid, taskId = task.TaskId, containerIds = string.Join('\n', ids) },
             _ => _executor.ExecuteMutationAsync(sid, CleanupCommandFor(ids), TimeSpan.FromMinutes(2)));
         if (Problem(outcome, "host.prune") is { } problem) return (false, problem);
@@ -339,7 +388,7 @@ public class TaskExecutor : ITaskExecutor
                 foreach (var b in toDelete)
                 {
                     var backupId = b.BackupId;
-                    var outcome = await _automation.RunAsync(ActorOf(task), "volume.backup_delete",
+                    var outcome = await RunGatedAsync(task, "volume.backup_delete",
                         new { volumeName = task.TargetId, backupId, fileName = b.FileName, serverId = ScheduledTaskServer.Of(task) },
                         _ => _backupService.DeleteBackupAsync(backupId));
                     if (Problem(outcome, "volume.backup_delete") is { } problem)
@@ -353,7 +402,7 @@ public class TaskExecutor : ITaskExecutor
             else if (task.TaskType == ScheduledTaskType.SelfBackup)
             {
                 // Self-backups are tracked by the self-backup service (files + sidecars); keep the newest N.
-                var outcome = await _automation.RunAsync(ActorOf(task), "selfbackup.prune", new { keep = maxBackups },
+                var outcome = await RunGatedAsync(task, "selfbackup.prune", new { keep = maxBackups },
                     _ => _selfBackupService.PruneAsync(maxBackups));
                 if (Problem(outcome, "selfbackup.prune") is { } problem)
                     _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);
@@ -379,7 +428,7 @@ public class TaskExecutor : ITaskExecutor
                     return;
                 }
                 // Deleting dumps is its own decision, taken now: the owner may have lost the right since the backup.
-                var outcome = await _automation.RunAsync(ActorOf(task), "db.backup_delete",
+                var outcome = await RunGatedAsync(task, "db.backup_delete",
                     new { containerId = task.TargetId, dumpContainer = containerKey, database = dbName, keep = maxBackups, serverId = sid },
                     async _ =>
                     {
@@ -424,6 +473,10 @@ public class TaskExecutor : ITaskExecutor
     {
         public string? Reason { get; set; }
         public List<string> Capabilities { get; } = [];
+        /// <summary>The run asked the gateway (<c>RunGatedAsync</c>): its event is the gateway's.</summary>
+        public bool ReachedGateway { get; set; }
+        /// <summary>The run was refused before its decision and that refusal was handed to the gateway.</summary>
+        public bool Recorded { get; set; }
     }
 
     internal static AutomationActor ActorOf(ScheduledTaskEntity task) =>
@@ -431,12 +484,14 @@ public class TaskExecutor : ITaskExecutor
             string.IsNullOrWhiteSpace(task.CreatedBy) ? null : task.CreatedBy, task.CreatedVia);
 
     /// <summary>A run refused before its decision — no target or command, a database container that is missing or is
-    /// none, a lookup that failed, a protected container in a cleanup, an unknown type — is recorded as the gateway's
-    /// Denied event of the capability it would have run, on the task owner's authority (INV-45, as R1-43). Nothing
-    /// runs.</summary>
+    /// none, a lookup that failed, a database name INV-19 refuses, a protected container in a cleanup, an unknown type,
+    /// and (the dispatcher's backstop) any exception before the gateway — is recorded as the gateway's Denied event of
+    /// the capability it would have run, on the task owner's authority (INV-45, as R1-43). Nothing runs. The run is
+    /// marked as refused first, so the backstop never records it a second time.</summary>
     private async Task<(bool, string)> RefusedAsync(ScheduledTaskEntity task, string capabilityId, object arguments,
         string reason)
     {
+        if (RefusalOfRun.Value is { } run) run.Recorded = true;
         try
         {
             await _automation.RefuseAsync(ActorOf(task), capabilityId, arguments, reason);

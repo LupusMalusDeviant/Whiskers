@@ -178,6 +178,10 @@ internal sealed class FakeDocker : IDockerService
     /// <summary>Whether listing one server's containers throws, as the real service does when the host is unreachable.</summary>
     public bool ListContainersThrows { get; set; }
 
+    /// <summary>When set, listing containers throws exactly this — e.g. a <see cref="TaskCanceledException"/>, as the
+    /// Docker client's timeout surfaces.</summary>
+    public Exception? ListContainersException { get; set; }
+
     /// <summary>Whether listing containers hangs until its token is cancelled, as a host that does not answer does;
     /// <see cref="ListingStarted"/> completes once a listing waits.</summary>
     public bool ListContainersHangs { get; set; }
@@ -192,6 +196,7 @@ internal sealed class FakeDocker : IDockerService
             await Task.Delay(Timeout.Infinite, ct);
         }
         if (ListContainersThrows) throw new InvalidOperationException("The host is unreachable.");
+        if (ListContainersException is { } thrown) throw thrown;
         // Like the real service, an id in another case names the same server.
         return _containers.Where(c => string.Equals(c.ServerId, serverId ?? DefaultServerId,
             StringComparison.OrdinalIgnoreCase)).ToList();

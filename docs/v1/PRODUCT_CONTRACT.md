@@ -162,7 +162,10 @@ agent invoker's, the automation runner's); returning before that — invalid inp
 not found — changes nothing and is not an attempt, so it has no audit event. It changes nothing because no page writes
 state itself and every guarded service refuses outside a gateway decision (the tests are named in INV-45's evidence).
 Likewise no attempt: an AI trigger run refused before its session starts (too many runs in parallel, its preset
-missing, its owner without authority — A-03) and a backup retention skipped before it asks to delete (S-01). An attempt
+missing, its owner without authority — A-03) and a backup retention whose backup list cannot be read (nothing was
+requested to delete — S-01); a retention deletion a safety check skips (an unsafe database name or container key) is
+the gateway's Denied event of `db.backup_delete`. A scheduled run is one event even when a call it makes before its
+decision fails: the scheduler records it as the gateway's Denied event of the task's capability (S-01). An attempt
 that has begun and is cancelled before its decision — the caller gone, a run's deadline passed — is still one Denied
 event.
 
