@@ -204,7 +204,10 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("checks.resume", "resume_server_checks", W, "server", Rev, Short);
         // INV-18 (user decision 2026-11-07): a manual CVE scan runs the scanners on every enabled host (apt index,
         // Trivy image and cache), and the in-app notification log is shared by everyone — both Operator. The cycle
-        // scans one host after another, so it gets the fleet deadline.
+        // scans one host after another, so it gets the fleet deadline. Risk: a scan changes caches only (package index,
+        // scanner image, findings that the next scan replaces) and stops no workload, so it is Reversible, not
+        // Disruptive; marking read loses no notification (the entries stay, only the unread badge goes), so it is
+        // Reversible too; clearing deletes the history, so it is Destructive.
         yield return Ui("cve.scan", W, "fleet", Rev, TimeSpan.FromHours(4));
         yield return Ui("notifications.mark_read", W, "whiskers", Rev, Short);
         yield return Ui("notifications.clear", W, "whiskers", Des, Short);

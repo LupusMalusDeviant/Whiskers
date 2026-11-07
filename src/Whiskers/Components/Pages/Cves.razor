@@ -368,9 +368,10 @@
         {
             string? error = null;
             string? refused = null;
+            var ran = true;
             try
             {
-                await Mutations.RunAsync("cve.scan", new { }, ct =>
+                ran = await Mutations.RunAsync("cve.scan", new { }, ct =>
                 {
                     _ = InvokeAsync(() => Snackbar.Add(L["Cves_Snackbar_ScanStarted"].Value, Severity.Info));
                     return Monitor.RunOneCycleAsync(ct);
@@ -391,6 +392,11 @@
                     if (refused is not null)
                     {
                         Snackbar.Add(refused, Severity.Warning);
+                        StateHasChanged();
+                    }
+                    else if (error is null && !ran)
+                    {
+                        Snackbar.Add(L["Cves_Snackbar_ScanAlreadyRunning"].Value, Severity.Info);
                         StateHasChanged();
                     }
                     else if (error is null)

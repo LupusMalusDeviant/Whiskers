@@ -125,17 +125,24 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
     // overlapping full scans; the bool _store.IsScanning is kept only as the UI indicator.
     private int _scanning;
 
-    /// <summary>A manual scan cycle (<c>cve.scan</c>): a page runs it inside its gateway decision.</summary>
-    public Task RunOneCycleAsync(CancellationToken ct = default) => RunCycleAsync(ct);
+    /// <summary>A manual scan cycle (<c>cve.scan</c>): a page runs it inside its gateway decision. <c>false</c> when
+    /// another cycle was already running and this one did nothing — the gateway then records a reported failure, not
+    /// a scan that ran.</summary>
+    public async Task<bool> RunOneCycleAsync(CancellationToken ct = default)
+    {
+        if (await RunCycleAsync(ct)) return true;
+        Whiskers.Services.Mutations.MutationScope.Note("Skipped: a CVE scan cycle was already running.", success: false);
+        return false;
+    }
 
     /// <summary>Run a single scan cycle across all enabled servers: the loop's own unattended cycle (S-06) and the
     /// body of a manual one.</summary>
-    private async Task RunCycleAsync(CancellationToken ct)
+    private async Task<bool> RunCycleAsync(CancellationToken ct)
     {
         if (Interlocked.CompareExchange(ref _scanning, 1, 0) != 0)
         {
             _logger.LogInformation("CVE scan cycle already in progress — skipping");
-            return;
+            return false;
         }
         _store.IsScanning = true;
         var settings = _settings.CurrentValue;
@@ -346,6 +353,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
             _store.IsScanning = false;
             Interlocked.Exchange(ref _scanning, 0);
         }
+        return true;
     }
 
     private async Task TrySendAggregateNotificationAsync(

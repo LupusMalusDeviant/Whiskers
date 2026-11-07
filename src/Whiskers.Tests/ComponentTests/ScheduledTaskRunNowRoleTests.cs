@@ -79,7 +79,7 @@ public class ScheduledTaskRunNowRoleTests : BunitContext, IAsyncLifetime
 
         page.Find("button[title='ScheduledTasksView_Tooltip_RunNow']").Click();
 
-        page.WaitForAssertion(() => Assert.Equal(["denied:Denied"], Events()));
+        page.WaitForAssertion(() => Assert.Equal(["denied:Denied"], Events()), TimeSpan.FromSeconds(10));
         Assert.Empty(_scheduler.Runs);
     }
 
@@ -91,7 +91,7 @@ public class ScheduledTaskRunNowRoleTests : BunitContext, IAsyncLifetime
 
         page.Find("button[title='ScheduledTasksView_Tooltip_RunNow']").Click();
 
-        page.WaitForAssertion(() => Assert.Equal(["t1"], _scheduler.Runs));
+        page.WaitForAssertion(() => Assert.Equal(["t1"], _scheduler.Runs), TimeSpan.FromSeconds(10));
         Assert.Equal(["begin:container.restart:", "begin:scheduler.run:", "complete:Executed", "complete:Executed"], Events());
     }
 

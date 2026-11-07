@@ -134,6 +134,20 @@ public class TriggerPolicyPinningTests
     }
 
     [Fact]
+    public async Task A_trigger_started_from_a_manual_scan_has_no_parent_operation()
+    {
+        // INV-18 review: a manual CVE scan runs inside the person's cve.scan decision and raises its findings there;
+        // the trigger run those findings start must not inherit that decision as its parent.
+        var (dispatcher, agents, _) = Dispatcher(Store(active: "Strict"), preset: "Repair");
+
+        using (MutationScope.Begin("cve.scan", "op-person-scan"))
+            await dispatcher.OnEventAsync(Event());
+        await agents.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Null(agents.ScopeAtStart);
+    }
+
+    [Fact]
     public async Task A_run_starts_at_the_level_its_authority_returns()
     {
         var (dispatcher, agents, _) = Dispatcher(Store(active: "Strict"), preset: "Repair",
@@ -442,9 +456,13 @@ public class TriggerPolicyPinningTests
     {
         public TaskCompletionSource<AgentContext> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <summary>The gateway scope open when the run started its session: none, for a run of its own.</summary>
+        public string? ScopeAtStart { get; private set; }
+
         public Task<IAgentSession> StartSessionAsync(AgentContext context, IReadOnlyList<AgentMessage>? seedHistory = null,
             CancellationToken ct = default)
         {
+            ScopeAtStart = MutationScope.Current?.OperationId;
             Started.TrySetResult(context);
             throw new InvalidOperationException("no provider in this test");
         }

@@ -1,5 +1,6 @@
 using System.Reflection;
 using Bunit;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using MudBlazor;
@@ -26,6 +27,7 @@ public class NotificationsRoleTests : BunitContext, IAsyncLifetime
     private readonly RecordingStore _store = new();
     private readonly AgentToolTestHelpers.NullMutationAudit _audit = new();
     private readonly ServersPauseResumeRoleTests.MutableUser _user = new(AppRole.Viewer);
+    private readonly GuardrailPolicy _policy = GuardrailPolicy.SafeDefault();
 
     public NotificationsRoleTests()
     {
@@ -35,7 +37,7 @@ public class NotificationsRoleTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IKeyInterceptorService>(NullProxy<IKeyInterceptorService>.Create());
         Services.AddSingleton<ICurrentUserService>(_user);
         Services.AddSingleton<IInAppNotificationStore>(_store);
-        var policy = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
+        var policy = new AgentToolTestHelpers.FixedGuardrailStore(_policy);
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(policy), _audit, [],
             NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), policy));
         Services.AddSingleton<IUiMutationRunner>(new UiMutationRunner(gateway, new CapabilityCatalog(), _user));
@@ -55,7 +57,7 @@ public class NotificationsRoleTests : BunitContext, IAsyncLifetime
         await Invoke(page, "MarkAllRead");
         await Invoke(page, "ClearAll");
 
-        Assert.Empty(_store.Writes);
+        Assert.Empty(Writes());
         Assert.Equal(["denied:Denied", "denied:Denied"], Events());
     }
 
@@ -68,31 +70,61 @@ public class NotificationsRoleTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public void An_operator_demoted_while_the_page_is_open_cannot_clear_the_log()
+    public async Task An_operator_demoted_while_the_page_is_open_cannot_clear_the_log()
     {
         _user.Role = AppRole.Operator;
         var page = Render<NotificationsLog>();
         _user.Role = AppRole.Viewer;   // the buttons are still on screen
 
-        Button(page, "NotificationsLog_Button_ClearAll").Click();
-        Button(page, "NotificationsLog_Button_MarkAllRead").Click();
+        await Button(page, "NotificationsLog_Button_ClearAll").ClickAsync(new MouseEventArgs());
+        await Button(page, "NotificationsLog_Button_MarkAllRead").ClickAsync(new MouseEventArgs());
 
-        page.WaitForAssertion(() => Assert.Equal(["denied:Denied", "denied:Denied"], Events()));
-        Assert.Empty(_store.Writes);
+        Assert.Equal(["denied:Denied", "denied:Denied"], Events());
+        Assert.Empty(Writes());
     }
 
     [Fact]
-    public void An_operator_marks_the_log_read_and_clears_it_inside_the_gateway()
+    public async Task An_operator_marks_the_log_read_and_clears_it_inside_the_gateway()
     {
         _user.Role = AppRole.Operator;
         var page = Render<NotificationsLog>();
 
-        Button(page, "NotificationsLog_Button_MarkAllRead").Click();
-        Button(page, "NotificationsLog_Button_ClearAll").Click();
+        await Button(page, "NotificationsLog_Button_MarkAllRead").ClickAsync(new MouseEventArgs());
+        await Button(page, "NotificationsLog_Button_ClearAll").ClickAsync(new MouseEventArgs());
 
-        page.WaitForAssertion(() => Assert.Equal(["mark_read", "clear"], _store.Writes));
+        Assert.Equal(["mark_read", "clear"], Writes());
         Assert.Equal(["begin:notifications.mark_read:", "complete:Executed", "begin:notifications.clear:", "complete:Executed"],
             Events());
+    }
+
+    [Fact]
+    public async Task Opening_the_bell_with_nothing_unread_writes_nothing()
+    {
+        _user.Role = AppRole.Operator;
+        var bell = Render<NotificationBell>();
+
+        await Invoke(bell, "OnOpenChanged", true);
+
+        Assert.Empty(Writes());
+        Assert.Empty(Events());
+    }
+
+    [Fact]
+    public async Task With_the_kill_switch_on_the_automatic_mark_is_refused_silently_and_an_explicit_clear_says_why()
+    {
+        _user.Role = AppRole.Operator;
+        _policy.ReadOnlyMode = true;
+        _store.Items.Add(new InAppNotification("n1", DateTime.UtcNow, "container_down", "web down", "", "Error"));
+        var bell = Render<NotificationBell>();
+
+        await Invoke(bell, "OnOpenChanged", true);
+        Assert.Equal(["denied:Denied"], Events());
+        Assert.Empty(Snackbars());   // nobody clicked: recorded, not shown
+
+        await Invoke(bell, "Clear");
+        Assert.Equal(["denied:Denied", "denied:Denied"], Events());
+        Assert.Single(Snackbars(), s => s.Severity == Severity.Warning);
+        Assert.Empty(Writes());
     }
 
     [Fact]
@@ -105,7 +137,7 @@ public class NotificationsRoleTests : BunitContext, IAsyncLifetime
         await Invoke(bell, "OnOpenChanged", true);
         await Invoke(bell, "Clear");
 
-        Assert.Empty(_store.Writes);
+        Assert.Empty(Writes());
         Assert.Equal(["denied:Denied"], Events());   // the clear attempt; opening attempted nothing
     }
 
@@ -119,12 +151,16 @@ public class NotificationsRoleTests : BunitContext, IAsyncLifetime
         await Invoke(bell, "OnOpenChanged", true);
         await Invoke(bell, "Clear");
 
-        Assert.Equal(["mark_read", "clear"], _store.Writes);
+        Assert.Equal(["mark_read", "clear"], Writes());
         Assert.Equal(["begin:notifications.mark_read:", "complete:Executed", "begin:notifications.clear:", "complete:Executed"],
             Events());
     }
 
     private List<string> Events() { lock (_audit.Events) return _audit.Events.ToList(); }
+
+    private List<string> Writes() { lock (_store.Writes) return _store.Writes.ToList(); }
+
+    private List<Snackbar> Snackbars() => Services.GetRequiredService<ISnackbar>().ShownSnackbars.ToList();
 
     private static AngleSharp.Dom.IElement Button<T>(IRenderedComponent<T> page, string text) where T : Microsoft.AspNetCore.Components.IComponent =>
         page.FindAll("button").First(b => b.TextContent.Contains(text));

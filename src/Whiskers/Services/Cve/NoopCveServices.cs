@@ -30,7 +30,7 @@ public sealed class NoopCveFindingsStore : ICveFindingsStore
 
 public sealed class NoopCveMonitorService : ICveMonitorService
 {
-    public Task RunOneCycleAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public Task<bool> RunOneCycleAsync(CancellationToken ct = default) => Task.FromResult(true);
 }
 
 public sealed class NoopCveAgeStore : ICveAgeStore

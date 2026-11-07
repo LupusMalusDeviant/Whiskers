@@ -1212,8 +1212,19 @@ else
         }
     }
 
+    /// <summary>INV-17: a test message goes out to the team's channels, so the handler checks the role the user holds now
+    /// (not the page's cached one). It changes no Whiskers state and is not a gateway capability, so there is nothing to
+    /// audit; the refusal is shown.</summary>
+    private async Task<bool> RequireAdminToSendTestAsync()
+    {
+        if (await CurrentUser.HasRoleAsync(AppRole.Admin)) return true;
+        Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error);
+        return false;
+    }
+
     private async Task TestChannels()
     {
+        if (!await RequireAdminToSendTestAsync()) return;
         try
         {
             await NotificationService.SendTestAsync();
@@ -1390,6 +1401,7 @@ else
 
     private async Task TestMattermost()
     {
+        if (!await RequireAdminToSendTestAsync()) return;
         try
         {
             await NotificationService.SendTestAsync();
@@ -1403,6 +1415,7 @@ else
 
     private async Task TestMatrix()
     {
+        if (!await RequireAdminToSendTestAsync()) return;
         // IMatrixNotificationService lives in the Notifications module — resolve it lazily so /settings still
         // loads when that module is disabled (in which case the Matrix panel and this button aren't rendered).
         var matrix = ServiceProvider.GetService<Whiskers.Services.Notifications.IMatrixNotificationService>();
@@ -1525,15 +1538,17 @@ else
         _ = Task.Run(async () =>
         {
             string? error = null;
+            string? refused = null;
+            var ran = true;
             try
             {
-                await Mutations.RunAsync("cve.scan", new { }, ct =>
+                ran = await Mutations.RunAsync("cve.scan", new { }, ct =>
                 {
                     _ = InvokeAsync(() => Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info));
                     return CveMonitor.RunOneCycleAsync(ct);
                 });
             }
-            catch (MutationRefusedException ex) { error = ex.Message; }
+            catch (MutationRefusedException ex) { refused = ex.Message; }
             catch (Exception ex)
             {
                 error = ex.Message;
@@ -1546,10 +1561,14 @@ else
                 await InvokeAsync(() =>
                 {
                     _cveScanRequested = false;
-                    if (error is null)
-                        Snackbar.Add(L["Cves_Snackbar_ScanFinished"].Value, MudBlazor.Severity.Success);
-                    else
+                    if (refused is not null)
+                        Snackbar.Add(refused, MudBlazor.Severity.Warning);
+                    else if (error is not null)
                         Snackbar.Add(L["Cves_Snackbar_ScanFailed", error].Value, MudBlazor.Severity.Error);
+                    else if (!ran)
+                        Snackbar.Add(L["Cves_Snackbar_ScanAlreadyRunning"].Value, MudBlazor.Severity.Info);
+                    else
+                        Snackbar.Add(L["Cves_Snackbar_ScanFinished"].Value, MudBlazor.Severity.Success);
                     StateHasChanged();
                 });
             }

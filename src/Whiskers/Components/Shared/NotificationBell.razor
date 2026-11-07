@@ -102,22 +102,22 @@
     private bool _open;
 
     // INV-18 (user decision 2026-11-07): the log is shared, so marking it read and clearing it are Operator writes
-    // decided by the gateway. Opening the bell as a Viewer does not attempt the write (it would only be refused and
-    // recorded on every open); whenever it is attempted, the gateway decides.
+    // decided by the gateway. Opening the bell attempts the write only for an Operator and only when something is
+    // unread (a Viewer's attempt would only be refused, and an empty mark would still be an audited write, on every
+    // open); whenever it is attempted, the gateway decides. A refusal of this automatic mark (the kill switch, a
+    // demotion) is recorded by the gateway but not shown: nobody clicked anything.
     private async Task OnOpenChanged(bool open)
     {
         _open = open;
-        if (open && _role >= AppRole.Operator) await MarkAllRead();
-    }
-
-    private async Task MarkAllRead()
-    {
-        try
+        if (open && _role >= AppRole.Operator && Store.UnreadCount > 0)
         {
-            await Mutations.RunAsync("notifications.mark_read", new { },
-                _ => { Store.MarkAllRead(); return Task.CompletedTask; });
+            try
+            {
+                await Mutations.RunAsync("notifications.mark_read", new { },
+                    _ => { Store.MarkAllRead(); return Task.CompletedTask; });
+            }
+            catch (MutationRefusedException) { /* recorded as Denied; the list stays unread */ }
         }
-        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }
 
     private void OnRowClick(InAppNotification n)

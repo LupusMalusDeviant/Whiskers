@@ -276,8 +276,15 @@ public class ReleaseGateTests
         var nameless = Real with { Invariants = Mutate(Real.Invariants, "`ReadOnlyKillSwitchWireTests` *(planned", "a wire test *(planned") };
         Assert.Contains(Evaluate(nameless, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-21" && f.Message.Contains("only on a ❌ or ❓ row"));
 
-        // Today's forms pass: the owed class does not exist (a ❌ or ❓ row may name none).
+        // Today's forms pass: the owed class does not exist.
         Assert.DoesNotContain(Evaluate(Real, GateMode.Development, Dev), f => f.Rule == "R6");
+
+        // A ❌ row may name its owed test without a class: INV-18 as it stood before it was closed.
+        var namelessOnViolated = Violated with
+        {
+            Invariants = SetCell(Violated.Invariants, "| INV-18 |", 4, "the in-handler checks of these actions *(planned, WP10)*"),
+        };
+        Assert.DoesNotContain(Evaluate(namelessOnViolated, GateMode.Development, Dev), f => f.Rule == "R6");
     }
 
     // ---- R7, R8, R9 --------------------------------------------------------------------------------------------

@@ -6,7 +6,8 @@ namespace Whiskers.Services.Cve;
 public interface ICveMonitorService
 {
     /// <summary>One scan cycle across all enabled servers, started by a person (INV-18, user decision 2026-11-07:
-    /// Operator). The monitor's own unattended cycle does not go through this method.</summary>
+    /// Operator). The monitor's own unattended cycle does not go through this method. Returns <c>false</c> when a cycle
+    /// was already running and this call did nothing.</summary>
     [MutatingOperation("cve.scan")]
-    Task RunOneCycleAsync(CancellationToken ct = default);
+    Task<bool> RunOneCycleAsync(CancellationToken ct = default);
 }

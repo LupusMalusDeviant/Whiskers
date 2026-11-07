@@ -11,7 +11,10 @@ All notable changes to Whiskers are documented here. The format follows
 - **Marking the notification log read, clearing it and starting a manual CVE scan now need the Operator role
   (INV-17, INV-18).** They are gateway capabilities (`notifications.mark_read`, `notifications.clear`, `cve.scan`):
   each attempt is audited and a Viewer is refused at the click. **Behaviour change:** Viewers no longer see these
-  buttons, and opening the bell as a Viewer no longer marks the shared log read.
+  buttons, and opening the bell as a Viewer no longer marks the shared log read. The bell marks read only when
+  something is unread; a scan started while one is running says so and is recorded as not run; the Settings
+  test-notification buttons check for Admin when clicked; AI triggers started by a scan's findings no longer
+  inherit the person's open decision.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,

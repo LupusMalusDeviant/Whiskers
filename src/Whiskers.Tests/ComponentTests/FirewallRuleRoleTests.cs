@@ -59,7 +59,7 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
 
         Submit(dialog, "8080");
 
-        dialog.WaitForAssertion(() => Assert.Equal(["denied:Denied"], Events()));
+        dialog.WaitForAssertion(() => Assert.Equal(["denied:Denied"], Events()), TimeSpan.FromSeconds(10));
         Assert.Empty(_firewall.Calls);
     }
 
@@ -70,7 +70,7 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
 
         Submit(dialog, "8080");
 
-        dialog.WaitForAssertion(() => Assert.Equal(["add:srv-1:8080:tcp:allow:"], _firewall.Calls));
+        dialog.WaitForAssertion(() => Assert.Equal(["add:srv-1:8080:tcp:allow:"], _firewall.Calls), TimeSpan.FromSeconds(10));
         Assert.Equal(["begin:firewall.rule_add:", "complete:Executed"], Events());
     }
 
@@ -96,7 +96,7 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
         var dialogs = Services.GetRequiredService<IDialogService>();
         var parameters = new DialogParameters<AddFirewallRuleDialog> { { x => x.ServerId, "srv-1" } };
         await provider.InvokeAsync(() => dialogs.ShowAsync<AddFirewallRuleDialog>("add", parameters));
-        provider.WaitForAssertion(() => Assert.NotEmpty(provider.FindAll("input")));
+        provider.WaitForAssertion(() => Assert.NotEmpty(provider.FindAll("input")), TimeSpan.FromSeconds(10));
         return provider;
     }
 

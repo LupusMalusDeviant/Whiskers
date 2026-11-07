@@ -4715,6 +4715,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Cves_Snackbar_ScanFinished" xml:space="preserve">
     <value>CVE scan finished.</value>
   </data>
+  <data name="Cves_Snackbar_ScanAlreadyRunning" xml:space="preserve">
+    <value>A CVE scan is already running; no second one was started.</value>
+  </data>
   <data name="Cves_Snackbar_ScanFailed" xml:space="preserve">
     <value>CVE scan failed: {0}</value>
   </data>

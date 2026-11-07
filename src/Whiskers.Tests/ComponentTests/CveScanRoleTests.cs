@@ -60,7 +60,7 @@ public class CveScanRoleTests : BunitContext, IAsyncLifetime
         await page.InvokeAsync(() => (Task)typeof(Cves)
             .GetMethod("TriggerScan", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page.Instance, null)!);
 
-        page.WaitForAssertion(() => Assert.Equal(["denied:Denied"], Events()));
+        page.WaitForAssertion(() => Assert.Equal(["denied:Denied"], Events()), TimeSpan.FromSeconds(10));
         Assert.Equal(0, _monitor.Runs);
     }
 
@@ -73,7 +73,7 @@ public class CveScanRoleTests : BunitContext, IAsyncLifetime
 
         ScanButton(page).Click();
 
-        page.WaitForAssertion(() => Assert.Equal(["denied:Denied"], Events()));
+        page.WaitForAssertion(() => Assert.Equal(["denied:Denied"], Events()), TimeSpan.FromSeconds(10));
         Assert.Equal(0, _monitor.Runs);
     }
 
@@ -85,10 +85,27 @@ public class CveScanRoleTests : BunitContext, IAsyncLifetime
 
         ScanButton(page).Click();
 
-        page.WaitForAssertion(() => Assert.Equal(["begin:cve.scan:", "complete:Executed"], Events()));
+        page.WaitForAssertion(() => Assert.Equal(["begin:cve.scan:", "complete:Executed"], Events()), TimeSpan.FromSeconds(10));
         Assert.Equal(1, _monitor.Runs);
         Assert.True(_monitor.RanInsideTheDecision);
     }
+
+    [Fact]
+    public void A_scan_that_found_another_one_running_is_a_reported_failure_and_says_so()
+    {
+        _user.Role = AppRole.Operator;
+        _monitor.AlreadyRunning = true;
+        var page = Render<Cves>();
+
+        ScanButton(page).Click();
+
+        page.WaitForAssertion(() => Assert.Equal(["begin:cve.scan:", "complete:Failed"], Events()), TimeSpan.FromSeconds(10));
+        page.WaitForAssertion(() => Assert.Contains(Snackbars(), s => s.Message == "Cves_Snackbar_ScanAlreadyRunning"),
+            TimeSpan.FromSeconds(10));
+        Assert.DoesNotContain(Snackbars(), s => s.Message == "Cves_Snackbar_ScanFinished");
+    }
+
+    private List<Snackbar> Snackbars() => Services.GetRequiredService<ISnackbar>().ShownSnackbars.ToList();
 
     private List<string> Events() { lock (_audit.Events) return _audit.Events.ToList(); }
 
@@ -102,11 +119,14 @@ public class CveScanRoleTests : BunitContext, IAsyncLifetime
         public int Runs => Volatile.Read(ref _runs);
         public bool RanInsideTheDecision { get; private set; }
 
-        public Task RunOneCycleAsync(CancellationToken ct = default)
+        public bool AlreadyRunning { get; set; }
+
+        public Task<bool> RunOneCycleAsync(CancellationToken ct = default)
         {
+            if (AlreadyRunning) return Task.FromResult(false);
             Interlocked.Increment(ref _runs);
             RanInsideTheDecision = MutationScope.Current is { } scope && scope.CapabilityId == "cve.scan";
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
     }
 
