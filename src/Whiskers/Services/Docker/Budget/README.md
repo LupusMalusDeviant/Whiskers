@@ -38,6 +38,19 @@ the opposite of what a monitoring tool should say. Callers mark background work 
 anything unmarked counts as **interactive**, which is the safe default: mistaking a loop for a user costs a
 slot, mistaking a user for a loop costs responsiveness.
 
+The mark is ambient and flows with everything a loop starts. That includes AI trigger runs fired by a loop's event:
+the trigger dispatcher starts them on the event's flow and takes off only the open gateway decision
+(`MutationScope.Detach`, used there and nowhere else), so such a run stays background — and a server paused with
+`checks.pause` refuses its Docker calls. A trigger run is an agent run of its own that decides every call itself, so
+keeping the rest of the flow (lane, correlation id) is what it needs.
+
+The other places that start work outside a decision use `ExecutionContext.SuppressFlow` on purpose, as
+`MutationGatewayCoverageTests.Work_started_in_the_background_from_a_decision_does_not_inherit_its_scope` requires: a
+clean-up, sweep or delivery that outlives the operation must carry nothing of it — no scope, no lock, no pin. That
+also drops this lane mark. **Known caveat:** `HostShellOperations.InBackground` (the helper clean-up after a host-shell
+command) therefore always runs in the interactive lane and is not refused on a paused server, even when a background
+loop started the command. That predates the trigger change and is left as it is for now.
+
 ## Defaults
 
 Four concurrent background calls and four interactive, per server. Sized for the smallest host in a typical
