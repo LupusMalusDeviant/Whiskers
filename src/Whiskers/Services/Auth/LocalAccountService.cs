@@ -38,14 +38,18 @@ public sealed class LocalAccountService : ILocalAccountService
     private readonly TimeProvider _time;
     private readonly ILogger<LocalAccountService>? _logger;
     private readonly IIdentityBindingStore? _bindings;
+    private readonly Whiskers.Services.Guardrails.IGuardrailStore? _guardrails;
 
     /// <param name="bindings">R1-27: an Admin with an active Google/OIDC binding can sign in (last-Admin rule).</param>
     public LocalAccountService(UserManager<AppUser> users, WhiskersIdentityDbContext db, IRoleService roles,
         ICurrentUserService user, IOwnerAccounts owners, IAuditLogService audit, IRecoveryAttemptLimiter limiter,
         IClientAddress client, IConfiguration configuration, TimeProvider? time = null,
-        ILogger<LocalAccountService>? logger = null, IIdentityBindingStore? bindings = null)
+        ILogger<LocalAccountService>? logger = null, IIdentityBindingStore? bindings = null,
+        Whiskers.Services.Guardrails.IGuardrailStore? guardrails = null)
     {
         _bindings = bindings;
+        // Contract 0009 (E5): the kill switch may block recovery-code redemption. Registered in the app (Core).
+        _guardrails = guardrails;
         _limiter = limiter ?? throw new ArgumentNullException(nameof(limiter));
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -335,6 +339,16 @@ public sealed class LocalAccountService : ILocalAccountService
                 _logger?.LogWarning("{Count} recovery-code attempts of one client were throttled in the current window",
                     attempt.RefusedInWindow);
             return LocalAccountResult.Refused(LocalAccountErrors.InvalidCode);
+        }
+
+        // Contract 0009 (D5, E5): while the kill switch is on and an Admin blocked this exemption beforehand — or the
+        // policy store is fail-closed (D4) — nothing is read or changed; one refusal names the kill switch's rule.
+        if (_guardrails?.Current.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.RecoveryCode) == true)
+        {
+            // The typed address is not recorded: no account was looked up (as for an unknown one).
+            await _audit.TryLogAsync("anonymous", "web", RecoveryRefusedAction, AuthAuditLog.Target, "", "",
+                $"reason=kill_switch; rule={Whiskers.Configuration.KillSwitchExemptions.RuleId}", success: false);
+            return LocalAccountResult.Refused(LocalAccountErrors.KillSwitch);
         }
 
         _db.ChangeTracker.Clear();   // read the account as it is now, not as this scope last saw it

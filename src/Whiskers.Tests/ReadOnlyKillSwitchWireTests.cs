@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Auth;
@@ -375,6 +376,77 @@ public class ReadOnlyKillSwitchWireTests
         }
     }
 
+    // ---- Contract 0009: the exemptions on the booted app ----------------------------------------------------------
+
+    [Fact]
+    public async Task E2_the_first_run_setup_creates_the_first_admin_while_the_kill_switch_is_on_whatever_is_blocked()
+    {
+        await using var host = await KillSwitchHost.StartAsync(blocked: [.. KillSwitchExemptions.Blockable]);
+        var setup = host.Factory.Services.GetRequiredService<Whiskers.Services.Setup.ISetupStateService>();
+        var paths = host.Factory.Services.GetRequiredService<DataPathOptions>();
+        Assert.False(setup.IsSetupComplete);
+
+        var done = await setup.CompleteSetupAsync(new Whiskers.Services.Setup.SetupAdminRequest
+        {
+            IsLocal = false, Email = "first@example.com", SetupToken = (await File.ReadAllTextAsync(paths.SetupTokenFile)).Trim(),
+        });
+
+        Assert.Equal(Whiskers.Services.Setup.SetupCompletionStatus.Success, done.Status);
+        Assert.Equal(AppRole.Admin, host.Factory.Services.GetRequiredService<IRoleService>().GetRole("first@example.com"));
+        Assert.True(host.Factory.Services.GetRequiredService<IGuardrailStore>().Current.ReadOnlyMode);
+    }
+
+    [Fact]
+    public async Task E4_an_own_password_change_runs_under_the_kill_switch_and_blocked_it_is_one_denied_event()
+    {
+        // Not blocked: the person changes their own password while the switch is on.
+        await using (var host = await KillSwitchHost.StartAsync())
+        {
+            await host.AddLocalAdminAsync(AdminEmail);
+            var result = await host.ChangeOwnPasswordAsync();
+            Assert.True(result.Success, result.Error);
+            using var db = host.Db();
+            var row = Assert.Single(db.Context.AuditLog.Where(r => r.Action == "account.password_change").ToList());
+            Assert.Equal(nameof(MutationStatus.Executed), row.Outcome);
+        }
+
+        // Blocked beforehand: refused by the kill switch's rule, the password unchanged, one Denied event.
+        await using (var host = await KillSwitchHost.StartAsync(blocked: [KillSwitchExemptions.PasswordChange]))
+        {
+            await host.AddLocalAdminAsync(AdminEmail);
+            var refused = await Assert.ThrowsAsync<MutationRefusedException>(host.ChangeOwnPasswordAsync);
+            Assert.Equal(MutationStatus.Denied, refused.Status);
+            Assert.True(await host.PasswordWorksAsync(AdminEmail, KillSwitchHost.LocalPassword));
+            using var db = host.Db();
+            var row = Assert.Single(db.Context.AuditLog.Where(r => r.Action == "account.password_change").ToList());
+            Assert.Equal((nameof(MutationStatus.Denied), nameof(MutationSurface.Ui)), (row.Outcome, row.Surface));
+            Assert.Equal(["read-only-mode"],
+                JsonSerializer.Deserialize<string[]>(db.Context.PolicyDecisions.Single(d => d.Id == row.DecisionId).MatchedRules)!);
+        }
+    }
+
+    [Fact]
+    public async Task Blocking_an_exemption_is_refused_while_the_kill_switch_is_on()
+    {
+        await using var host = await KillSwitchHost.StartAsync();
+        var guardrails = host.Factory.Services.GetRequiredService<IGuardrailStore>();
+        var config = guardrails.Config;
+        config.ActivePolicy().KillSwitchBlockedExemptions = [KillSwitchExemptions.RecoveryCode];
+
+        await using (var scope = host.Factory.Services.CreateAsyncScope())
+        {
+            var mutations = scope.ServiceProvider.GetRequiredService<IUiMutationRunner>();
+            var refused = await Assert.ThrowsAsync<MutationRefusedException>(() => mutations.RunAsync("guardrails.save",
+                new { section = "guardrails" }, _ => guardrails.SaveConfigAsync(config, AdminEditor)));
+            Assert.Equal(MutationStatus.Denied, refused.Status);
+        }
+
+        Assert.Null(guardrails.Current.KillSwitchBlockedExemptions);
+        using var db = host.Db();
+        var row = Assert.Single(db.Context.AuditLog.Where(r => r.Action == "guardrails.save").ToList());
+        Assert.Contains("read-only-mode", db.Context.PolicyDecisions.Single(d => d.Id == row.DecisionId).MatchedRules);
+    }
+
     /// <summary>Arguments for the UI sweep: the keys the capability table reads a target from, each naming something
     /// that exists where it can (the container, the server, the guardrail section).</summary>
     private static readonly object UiArguments = new
@@ -468,7 +540,8 @@ public class ReadOnlyKillSwitchWireTests
         /// <param name="everyTargetKnown">For the sweeps: a target the inventory does not know (a cloud server, a DNS
         /// zone, a webhook) is taken as named instead of refused before the policy step, so every call reaches the
         /// policy and the kill switch must be what refuses it. A target the inventory knows resolves as always.</param>
-        public static async Task<KillSwitchHost> StartAsync(bool everyTargetKnown = false, bool killSwitch = true, bool confirmWrites = false)
+        public static async Task<KillSwitchHost> StartAsync(bool everyTargetKnown = false, bool killSwitch = true, bool confirmWrites = false,
+            string[]? blocked = null)
         {
             var dataDir = Path.Combine(Path.GetTempPath(), "whiskers-killswitch-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dataDir);
@@ -505,6 +578,7 @@ public class ReadOnlyKillSwitchWireTests
                 policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
                 policy.RequireConfirmationForWrites = confirmWrites;
                 policy.ReadOnlyMode = killSwitch;
+                policy.KillSwitchBlockedExemptions = blocked is null ? null : [.. blocked];
                 await GatewayArrange.RunAsync("guardrails.save", () => guardrails.SaveConfigAsync(config, AdminEditor));
                 Assert.Equal(killSwitch, guardrails.Current.ReadOnlyMode);
                 return host;
@@ -533,11 +607,31 @@ public class ReadOnlyKillSwitchWireTests
             {
                 var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Whiskers.Services.Persistence.AppUser>>();
                 var created = await users.CreateAsync(
-                    new Whiskers.Services.Persistence.AppUser { UserName = email, Email = email, EmailConfirmed = true }, "CorrectHorse12!!");
+                    new Whiskers.Services.Persistence.AppUser { UserName = email, Email = email, EmailConfirmed = true }, LocalPassword);
                 Assert.True(created.Succeeded, string.Join("; ", created.Errors.Select(e => e.Code)));
             }
             var roles = Factory.Services.GetRequiredService<IRoleService>();
             await GatewayArrange.RunAsync("config.roles", () => roles.SetRoleAsync(email, AppRole.Admin));
+        }
+
+        public const string LocalPassword = "CorrectHorse12!!";
+
+        /// <summary>The signed-in person changes their own password as the Account page does (E4).</summary>
+        public async Task<LocalAccountResult> ChangeOwnPasswordAsync()
+        {
+            await using var scope = Factory.Services.CreateAsyncScope();
+            var mutations = scope.ServiceProvider.GetRequiredService<IUiMutationRunner>();
+            var accounts = scope.ServiceProvider.GetRequiredService<ILocalAccountService>();
+            return await mutations.RunAsync("account.password_change", new { account = AdminEmail },
+                ct => accounts.ChangeOwnPasswordAsync(LocalPassword, "Battery-Staple-34", ct));
+        }
+
+        public async Task<bool> PasswordWorksAsync(string email, string password)
+        {
+            using var scope = Factory.Services.CreateScope();
+            var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Whiskers.Services.Persistence.AppUser>>();
+            var user = await users.FindByEmailAsync(email);
+            return user is not null && await users.CheckPasswordAsync(user, password);
         }
 
         public DbLease Db()

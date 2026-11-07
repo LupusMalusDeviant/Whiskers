@@ -321,7 +321,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     private static readonly string[] OptionalPolicyFields =
     [
         nameof(GuardrailPolicy.RequireSecondApprover), nameof(GuardrailPolicy.ExposureLabelPrefixes),
-        nameof(GuardrailPolicy.ExposureConfirmClasses),
+        nameof(GuardrailPolicy.ExposureConfirmClasses), nameof(GuardrailPolicy.KillSwitchBlockedExemptions),
     ];
 
     private static JsonNode? Field(JsonObject obj, string name, out bool present)

@@ -10,6 +10,13 @@ All notable changes to Whiskers are documented here. The format follows
   every mutating MCP tool over `/mcp` and every mutating capability through the UI runner with the kill switch on:
   each is denied by `read-only-mode` and recorded as Denied, nothing runs, no terminal session opens; only an Admin in
   the UI can switch it off, and that is audited. No behaviour change.
+- **The kill switch's exceptions are fixed, shown and can be blocked beforehand (contract 0009, INV-21).** The
+  *Guardrails* page lists them: switching it off, the first-run setup and the host CLIs always pass; a user's own
+  password change, recovery-code redemption and binding a Google/OIDC identity at a first sign-in pass unless an Admin
+  blocked them beforehand (new optional policy field `KillSwitchBlockedExemptions`, left out of the policy version while
+  empty; an unknown id fails the guardrails closed). **Behaviour change:** while `guardrails.json` is fail-closed these
+  three are refused too (the host CLIs are the way back in); a refused one says "Blocked while the kill switch is on",
+  a refused sign-in binding goes to `/login?error=kill_switch`.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,

@@ -121,6 +121,7 @@ public sealed class FederatedAdmission : IFederatedAdmission
             IdentityBindingErrors.AuditUnavailable => AuthAuditReasons.AuditUnavailable,
             IdentityBindingErrors.Conflict => AuthAuditReasons.SubjectConflict,
             IdentityBindingErrors.NotFound => AuthAuditReasons.NotWhitelisted,
+            IdentityBindingErrors.KillSwitch => AuthAuditReasons.KillSwitch,
             _ => AuthAuditReasons.StoreUnavailable,
         }, account);
     }

@@ -40,7 +40,7 @@ readable form and never writes them to a log or the audit trail — not even a p
 
 | Action | Where | Who | Capability (audited) |
 |---|---|---|---|
-| Change your own password | *My account* (person icon in the top bar) | every signed-in user with a local account; needs the current password | `account.password_change` (read level — also allowed while the kill switch is on) |
+| Change your own password | *My account* (person icon in the top bar) | every signed-in user with a local account; needs the current password | `account.password_change` (read level — also allowed while the kill switch is on, unless an Admin blocked it beforehand, contract 0009) |
 | Add a local account | *Settings → Local accounts* | Admin | `account.create` |
 | Reset another account's password | *Settings → Local accounts* | Admin (not for the own account) | `account.password_reset` |
 | Delete a local account | *Settings → Local accounts* | Admin (not the own account, never the last Admin who can sign in) | `account.delete` |
@@ -97,8 +97,10 @@ audit trail of refusals no longer hold for it (the per-account limit and the loc
 or address stops the start, naming the reason (for example host bits set in `172.18.0.2/16`). Do not set
 `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`: it makes ASP.NET Core trust every peer, so Whiskers refuses to start with it.
 
-The recovery page and the host CLI are not stopped by the kill switch (a person recovering their own access is not
-a write to managed infrastructure). Adding, resetting and deleting accounts — and redeeming a code — are refused while
+The host CLI is never stopped by the kill switch, and the recovery page is not stopped by default (a person recovering
+their own access is not a write to managed infrastructure). An Admin can block the recovery page — and the own password
+change and the Google/OIDC binding at a first sign-in — under the kill switch beforehand on the *Guardrails* page
+(contract 0009); while the guardrail policy is fail-closed they are blocked, and the host CLI is the way back in. Adding, resetting and deleting accounts — and redeeming a code — are refused while
 `AUTH_DISABLED` is set: every client is the synthetic Admin then, and there is no local sign-in to recover. A code
 issued on the host meanwhile can be redeemed once authentication is on again (within its 24 hours).
 

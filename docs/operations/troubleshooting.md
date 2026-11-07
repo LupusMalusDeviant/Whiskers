@@ -65,7 +65,10 @@ Both are anonymous and answer only a status word.
 ## Actions are refused
 
 - **"read-only" / kill switch:** the guardrails' read-only kill switch is on; every mutation is refused and no
-  terminal opens. An Admin switches it off on the *Guardrails* page (audited).
+  terminal opens. An Admin switches it off on the *Guardrails* page (audited). The exceptions are listed there
+  (contract 0009): switching it off, the first-run setup and the host CLIs always; the own password change, the
+  recovery page and binding a Google/OIDC identity at a first sign-in unless an Admin blocked them beforehand. A
+  blocked one says "Blocked while the kill switch is on".
 - **Everything is refused and the guardrails page cannot save:** `guardrails.json` is unreadable or invalid, so the
   policy is fail-closed (kill switch, everything protected). Repair the file on the host (or remove it together with
   `guardrails.json.bak`) and restart.
