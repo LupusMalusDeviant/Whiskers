@@ -66,8 +66,9 @@ public class MutationBypassArchitectureTests
 
     /// <summary>INV-45 review round 12 (MINOR-4): the scheduler's wrapper is trusted only because it forwards — its body
     /// is one call of <c>_automation.RunAsync</c> with its own <c>capabilityId</c>, <c>arguments</c> and
-    /// <c>action</c>, none of them reassigned — so a lambda handed to it is gated for the capability written next to
-    /// it.</summary>
+    /// <c>action</c>, none of them reassigned; it calls nothing else (only <c>ActorOf(task)</c>), hands the action on
+    /// once and returns exactly the runner's task (rounds 12 and 13) — so a lambda handed to it is gated for the
+    /// capability written next to it.</summary>
     [Fact]
     public void The_schedulers_wrapper_forwards_its_own_capability_and_action_to_the_runner()
     {
@@ -96,6 +97,18 @@ public class MutationBypassArchitectureTests
             // None of the forwarded parameters is written to in the body.
             Assert.DoesNotContain(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.AssignmentExpressionSyntax>(),
                 a => a.Left.ToString() is "capabilityId" or "arguments" or "action" or "task");
+            // Nothing else is called — the wrapper never runs the action itself — and the action is handed on once.
+            Assert.Equal(["ActorOf(task)", call.ToString()],
+                wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
+                    .Select(i => i.ToString()).Order(StringComparer.Ordinal));
+            Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>(),
+                n => n.Identifier.Text == "action");
+            // What it returns is exactly the runner's task.
+            var returned = Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.ReturnStatementSyntax>());
+            var local = Assert.IsType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>(returned.Expression).Identifier.Text;
+            var declared = Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.VariableDeclaratorSyntax>(),
+                v => v.Identifier.Text == local);
+            Assert.Same(call, declared.Initializer?.Value);
         }
     }
 

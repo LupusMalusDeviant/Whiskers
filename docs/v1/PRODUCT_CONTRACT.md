@@ -165,8 +165,9 @@ Likewise no attempt: an AI trigger run refused before its session starts (too ma
 missing, its owner without authority — A-03) and a volume-backup retention whose backup list cannot be read (nothing
 was requested to delete — S-01). A DB retention lists inside its `db.backup_delete` decision, so an unreadable or
 truncated listing is that event's Failed outcome; a DB-retention deletion a safety check skips (an unsafe database name
-or container key) is the gateway's Denied event of `db.backup_delete`. A scheduled run is one event even when a call it makes before its
-decision fails: the scheduler records it as the gateway's Denied event of the task's capability (S-01). An attempt
+or container key) is the gateway's Denied event of `db.backup_delete`. A scheduled run is one event even when a call
+it makes before its decision fails: the scheduler records it as the gateway's Denied event of the task's capability
+(S-01). An attempt
 that has begun and is cancelled before its decision — the caller gone, a run's deadline passed — is still one Denied
 event.
 

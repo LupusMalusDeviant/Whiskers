@@ -38,6 +38,11 @@ public static class McpPermissionLevels
     public const string Write = "write";
     public const string Admin = "admin";
 
+    /// <summary>No authority at all: a principal whose authority could not be read (an automation whose owner store
+    /// failed). The Mutation Gateway refuses it for every capability before anything else is checked; it is never
+    /// a level anything can be granted at, and <see cref="Normalize"/> is never applied to it there.</summary>
+    public const string None = "none";
+
     public static int GetRank(string level) => level switch
     {
         Read => 1,

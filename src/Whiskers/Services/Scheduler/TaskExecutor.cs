@@ -509,7 +509,10 @@ public class TaskExecutor : ITaskExecutor
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // The refusal stands either way; the audit trail's own failure is reported by the gateway.
+            // The refusal stands either way. What can still throw here: the gateway's audit write, whose failure the
+            // gateway reports itself (the audit outbox, the `audit` readiness check), or the runner's argument checks
+            // before the gateway — then this log line is the only trace. An owner that cannot be read no longer
+            // throws: the runner refuses it as a principal without authority (INV-45 review round 13).
             _logger.LogError(ex, "The refused run of scheduled task {Name} could not be recorded", task.Name);
         }
         return (false, reason);

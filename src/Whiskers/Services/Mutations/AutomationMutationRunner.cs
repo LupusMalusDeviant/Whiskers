@@ -299,8 +299,18 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         if (capability is null) return null;
         if (string.IsNullOrWhiteSpace(actor.OwnerId))
             return _options.CurrentValue.RequireOwner ? "it has no owner, and owners are required" : null;
-        var owner = _owners.Resolve(actor.OwnerId);
-        var state = _owners.Describe(actor.OwnerId).State;
+        MutationPrincipal owner;
+        OwnerState state;
+        try
+        {
+            owner = _owners.Resolve(actor.OwnerId);
+            state = _owners.Describe(actor.OwnerId).State;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Unknown, not lost: the run was refused (PrincipalOf), the item is not suspended for a store that failed.
+            return null;
+        }
         // Unverified is refused but not suspended: it runs again once the owner signs in (or an admin takes over).
         if (state == OwnerState.Unverified) return null;
         if (state != OwnerState.Active)
@@ -333,7 +343,24 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
     {
         if (!string.IsNullOrWhiteSpace(actor.OwnerId))
         {
-            var owner = _owners.Resolve(actor.OwnerId);
+            MutationPrincipal owner;
+            try
+            {
+                owner = _owners.Resolve(actor.OwnerId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The owner's authority cannot be read (INV-45 review round 13): the run is still one event — the
+                // gateway refuses this principal for every capability (McpPermissionLevels.None, never normalised to
+                // read) — and the audit row says why and names the stored owner, itself without authority. Nothing is
+                // granted to anyone; no level is guessed.
+                var unreadable = new MutationPrincipal(
+                    PrincipalIds.KeyIdOf(actor.OwnerId) is not null ? MutationPrincipalKind.ApiKey : MutationPrincipalKind.Human,
+                    actor.OwnerId, $"{actor.OwnerId} (unreadable: {ex.GetType().Name})", McpPermissionLevels.None);
+                return new MutationPrincipal(MutationPrincipalKind.Automation, actor.RunnerId,
+                    $"{actor.DisplayName} (owner unreadable)", McpPermissionLevels.None, OnBehalfOf: unreadable,
+                    DelegatedBy: actor.CreatedVia);
+            }
             return new MutationPrincipal(MutationPrincipalKind.Automation, actor.RunnerId,
                 $"{actor.DisplayName} (owner {owner.DisplayName})", owner.PermissionLevel,
                 OnBehalfOf: owner, AllowedTools: owner.AllowedTools, DelegatedBy: actor.CreatedVia);

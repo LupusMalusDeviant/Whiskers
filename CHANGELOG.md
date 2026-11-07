@@ -19,9 +19,10 @@ All notable changes to Whiskers are documented here. The format follows
   environment is now read with the upper-case spelling first. An endpoint check whose suspension cannot be saved is
   refused again at its interval, not every 15 seconds. A call cancelled after it asked the gateway and before it ran
   (the caller gone, a run's deadline passed while the target resolved) is one denied event, and an accepted webhook
-  delivery its worker gives up before
-  it started now ends failed and final, on record once (also in the webhook log, with an `automation_refused`
-  notification), instead of waiting for a redelivery — it needs a new delivery. Deliveries a stop or crash left queued
+  delivery its worker gives up before it started now ends failed and final, on record once (also in the webhook log,
+  with an `automation_refused` notification), instead of waiting for a redelivery — it needs a new delivery. An
+  automation whose owner cannot be read (the owner store fails) is refused as one denied event marked "owner
+  unreadable", for every capability. Deliveries a stop or crash left queued
   or running are recorded and settled at the next start; a delivery's acceptance is now stored before it is answered,
   a repeat of one an earlier process accepted is answered busy until it is settled (it is never run), and a
   reconciliation that cannot settle every delivery is retried until it does. The audit event of a delivery that did

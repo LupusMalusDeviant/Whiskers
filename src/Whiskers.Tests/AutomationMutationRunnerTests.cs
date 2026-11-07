@@ -93,8 +93,11 @@ public class AutomationMutationRunnerTests
         public HashSet<string> Deleted { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> Unverified { get; } = new(StringComparer.OrdinalIgnoreCase);
         public bool Exists(string email) => StateOf(email) == OwnerAccountState.Present;
+        /// <summary>The account store cannot be read: every lookup throws.</summary>
+        public bool Unreadable { get; set; }
         public OwnerAccountState StateOf(string email) =>
-            Deleted.Contains(email) ? OwnerAccountState.Deleted
+            Unreadable ? throw new InvalidOperationException("The account store could not be read.")
+            : Deleted.Contains(email) ? OwnerAccountState.Deleted
             : Unverified.Contains(email) ? OwnerAccountState.Unverified
             : OwnerAccountState.Present;
     }
@@ -673,6 +676,46 @@ public class AutomationMutationRunnerTests
         });
         var keyTask = new AutomationActor("task:t3", "ci", PrincipalIds.Key("k1"), PrincipalIds.Key("k1"));
         Assert.Contains("may no longer use", f.Runner.LostAuthority(keyTask, "container.restart"));
+    }
+
+    /// <summary>INV-45 (review round 13, MINOR-1): an owner whose authority cannot be read — the account store throws
+    /// on every lookup — makes the automation a principal without authority (<c>none</c>, owner named, marked
+    /// "owner unreadable"). The gateway refuses it for every capability in the catalog, whatever its level, through a
+    /// run and through a refusal; nothing runs, nothing is executed. Its suspension is not decided on a store that
+    /// failed.</summary>
+    [Fact]
+    public async Task An_owner_that_cannot_be_read_is_refused_for_every_capability()
+    {
+        var f = WithOperator(requireOwner: true);
+        f.Accounts.Unreadable = true;
+        var ran = 0;
+        var capabilities = new CapabilityCatalog().All.ToList();
+        Assert.Contains(capabilities, c => c.RequiredLevel == McpPermissionLevels.Read);   // not merely "below read"
+
+        foreach (var capability in capabilities)
+        {
+            var run = await f.Runner.RunAsync(Task1, capability.Id, new { }, _ =>
+            {
+                Interlocked.Increment(ref ran);
+                return Task.FromResult(true);
+            });
+            Assert.True(run.Status == MutationStatus.Denied, $"{capability.Id}: {run.Status}");
+            Assert.Contains("holds no authority", run.Reason);
+            var refused = await f.Runner.RefuseAsync(Task1, capability.Id, new { }, "refused before the gateway");
+            Assert.True(refused.Status == MutationStatus.Denied, $"{capability.Id}: {refused.Status}");
+        }
+
+        Assert.Equal(0, ran);
+        Assert.All(f.Audit.Events, e => Assert.StartsWith("denied:", e));   // no intent, nothing begun
+        Assert.All(f.Audit.Principals, p =>
+        {
+            Assert.Equal(McpPermissionLevels.None, p.PermissionLevel);
+            Assert.Contains("owner unreadable", p.DisplayName);
+            Assert.Equal(OpsId, p.OnBehalfOf?.Id);
+            Assert.Equal(McpPermissionLevels.None, p.OnBehalfOf?.PermissionLevel);
+        });
+        Assert.Equal(2 * capabilities.Count, f.Audit.Principals.Count);
+        Assert.Null(f.Runner.LostAuthority(Task1, "container.restart"));
     }
 
     /// <summary>INV-45 (review round 7, NIT-1): an event key is honoured only on a refusal. A request that is decided or

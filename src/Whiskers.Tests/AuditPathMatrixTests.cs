@@ -1153,6 +1153,18 @@ public sealed class AuditPathMatrixTests : IDisposable
         var refusal = One(refusedRows, Denied, "db.backup", "Automation", decided: false, targetId: "");
         Assert.Contains("No container ID specified", refusal.Details);
         Assert.Empty(refused.Ran);
+
+        // The owner's store fails on every read (review round 13): not a throw before the gateway any more, but a
+        // principal without authority — one Denied event naming the cause, nothing ran.
+        f.Accounts.Unreadable = true;
+        var unreadable = new TaskWorld(works: true);
+        var unreadableRows = await AttemptAsync(_db.Scopes,
+            () => unreadable.Executor(f, policy).ExecuteAsync(TaskOf(ScheduledTaskType.ContainerRestart)));
+        var denied = One(unreadableRows, Denied, "container.restart", "Automation", decided: false, targetId: "web-1");
+        Assert.Contains("owner unreadable", denied.Details);
+        Assert.Contains("holds no authority", denied.Details);
+        Assert.Equal(AdminId, denied.OnBehalfOfId);
+        Assert.Empty(unreadable.Docker.Actions);
     }
 
     public static TheoryData<ScheduledTaskType> TaskTypes()
