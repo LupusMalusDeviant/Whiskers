@@ -36,8 +36,12 @@ the action gets exactly what was found then (a compose deployment whose project 
 refused). The webhook is read again once the run holds its resource: switched off, removed or
 pointed elsewhere meanwhile → refused; taken over → it runs on the new owner. `RunTimeout` bounds the run: a run that
 cannot get its resource in time fails; a delivery that ends before its decision (no turn, changed meanwhile, an unknown
-action) is recorded as the gateway's Denied event of its run id on the webhook owner's authority (INV-45: every accepted
-delivery is one event); lookups are abandoned at the deadline (they only read); the run's database work
+action, given up after its start, a start that landed after its deadline) is recorded as the gateway's Denied event of
+its run id on the webhook owner's authority — by the webhook's id, unowned, when the webhook was gone before the worker
+read it — within its own bookkeeping time, never the run's deadline (INV-45: every accepted delivery is one event). Not
+accepted, so no event: an unknown id, a webhook switched off, an unreadable secret, a signature that does not verify, a
+stale timestamp, and a delivery answered `Busy` (queue full, not recordable, a repeat still being recorded) — nothing
+was recorded or queued and the provider may retry; a `Duplicate` names the run whose event it is; lookups are abandoned at the deadline (they only read); the run's database work
 (its reads and its start) and the action's own start (the owner's authority is looked up synchronously) run on the
 thread pool and are waited for only until the deadline — SQLite executes commands
 synchronously and does not cancel them — so a locked database never holds a worker past it: the run is given up

@@ -362,11 +362,16 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [ ] Required security fields cannot disappear through string truncation.
 - [ ] Outcome-write failure leaves a recoverable incomplete operation and a visible health condition.
 
-> INV-45 ✅ (WP5 path matrix): `AuditPathMatrixTests` reads every row of `PRODUCT_CONTRACT.md` §7 and requires a
-> test that drives it against a real `AuditLog` for each outcome it can have (one complete event per attempt), or an
-> exemption with the record that pins it. Four paths that refused themselves before the gateway wrote no event —
-> AutoPatch nights without an owner, AutoUpdate with a blocked owner entry, endpoint-check runs the monitor refused,
-> webhook deliveries that ended before their decision — and now record the gateway's Denied event.
+> INV-45 ⚠️ (WP5 path matrix): `AuditPathMatrixTests` reads every row of `PRODUCT_CONTRACT.md` §7 and requires a
+> test that drives it against a real `AuditLog` for each outcome it can have (one complete event per attempt, every
+> field checked: decision id exactly when the policy step was reached, resolved target, redacted arguments), or an
+> exemption pinned by named test methods; the outcomes a row must prove are derived from §7. Paths that refused
+> themselves before the gateway wrote no event — AutoPatch nights without an owner, AutoUpdate with a blocked owner
+> entry, endpoint-check runs the monitor refused, webhook deliveries that ended before their decision (also with the
+> webhook gone, or given up after the start), scheduled tasks refused before the gateway (no target or command, a
+> missing or unreadable database container, a protected stopped container, an unknown type) — and now record the
+> gateway's Denied event. Still open: a UI page's own early exit before it calls the runner (validation, a cancelled
+> confirmation, not found) is not proved to be an event; whether it is an attempt needs a decision.
 
 **Out of scope:** Hash-chain construction and all caller migrations.
 

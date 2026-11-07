@@ -34,6 +34,8 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
     private readonly BreachTracker _tracker = new(new HostLoadThresholds());
     private readonly IEndpointCheckSlots _slots;   // shared with "Run now" (review m1)
     private readonly ConcurrentDictionary<string, Task> _inFlight = new(StringComparer.Ordinal);
+    /// <summary>When each check's run was last refused before the gateway (in memory: a restart may refuse once more).</summary>
+    private readonly ConcurrentDictionary<string, DateTime> _refusedAt = new(StringComparer.Ordinal);
     private DateTime _lastPrune = DateTime.MinValue;
     private bool _restored;
     private readonly SemaphoreSlim _saveLock = new(1, 1);
@@ -101,6 +103,11 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         foreach (var done in _inFlight.Where(kv => kv.Value.IsCompleted).ToList()) _inFlight.TryRemove(done);
         var checks = _store.List();
         await CloseDroppedAsync(checks, now, ct);
+        // A run refused before the gateway counts as a run for the interval: a check whose suspension could not be
+        // saved stays on and is refused again at its interval, not every tick (each refusal is an audit event).
+        checks = checks.Select(c => _refusedAt.TryGetValue(c.Id, out var at) && (c.LastRunUtc is not { } last || last < at)
+            ? c with { LastRunUtc = at }
+            : c).ToList();
 
         foreach (var check in Due(checks, now, _slots.Running))
         {
@@ -188,6 +195,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
     /// (INV-45, as the VPN bring-up does, R1-43). Nothing runs.</summary>
     private async Task RefuseRunAsync(EndpointCheckDefinition check, string reason, CancellationToken ct)
     {
+        _refusedAt[check.Id] = _time.GetUtcNow().UtcDateTime;
         try
         {
             await _automation.RefuseAsync(EndpointCheckRunner.ActorOf(check), "endpointcheck.run",

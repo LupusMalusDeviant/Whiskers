@@ -69,7 +69,10 @@ public class TaskExecutor : ITaskExecutor
                 ScheduledTaskType.SelfBackup => await ExecuteSelfBackup(task),
                 ScheduledTaskType.CustomCommand => await ExecuteCustomCommand(task),
                 ScheduledTaskType.Cleanup => await ExecuteCleanup(task),
-                _ => (false, $"Unknown task type: {task.TaskType}")
+                // INV-45: a type none of the six is refused before any decision — on record all the same, under its raw
+                // name, which the gateway refuses as no capability.
+                _ => await RefusedAsync(task, $"scheduler.task_type.{task.TaskType}", new { taskId = task.TaskId },
+                    $"Unknown task type: {task.TaskType}")
             };
             if (refusal.Reason is { } reason)
             {
@@ -112,7 +115,8 @@ public class TaskExecutor : ITaskExecutor
     private async Task<(bool, string)> ExecuteContainerRestart(ScheduledTaskEntity task)
     {
         if (string.IsNullOrEmpty(task.TargetId))
-            return (false, "No container ID specified");
+            return await RefusedAsync(task, "container.restart",
+                new { containerId = "", name = task.TargetName, serverId = ScheduledTaskServer.Of(task) }, "No container ID specified");
 
         var containerId = task.TargetId;
         var outcome = await _automation.RunAsync(ActorOf(task), "container.restart",
@@ -125,19 +129,31 @@ public class TaskExecutor : ITaskExecutor
 
     private async Task<(bool, string)> ExecuteDbBackup(ScheduledTaskEntity task)
     {
-        if (string.IsNullOrEmpty(task.TargetId))
-            return (false, "No container ID specified");
-
         var config = ParseConfig(task.Config);
         var database = config.GetValueOrDefault("database", "");
+        var named = new { containerId = task.TargetId ?? "", name = task.TargetName, serverId = ScheduledTaskServer.Of(task), database };
+        if (string.IsNullOrEmpty(task.TargetId))
+            return await RefusedAsync(task, "db.backup", named, "No container ID specified");
 
-        // Detect DB type and credentials
-        var containers = await _docker.ListContainersAsync(serverId: ScheduledTaskServer.Of(task));
-        var container = containers.FirstOrDefault(c => c.Id == task.TargetId || c.Name == task.TargetId);
-        if (container == null) return (false, $"Container not found: {task.TargetId}");
-        if (!container.IsDatabase) return (false, $"Container {container.Name} is not a database.");
-
-        var env = await _docker.GetContainerEnvAsync(container.Id, ScheduledTaskServer.Of(task));
+        // Detect DB type and credentials. A lookup that fails, or finds no database, refuses the backup before its
+        // decision — on record as the gateway's Denied event (INV-45).
+        ContainerInfo? container;
+        List<KeyValuePair<string, string>> env;
+        try
+        {
+            var containers = await _docker.ListContainersAsync(serverId: ScheduledTaskServer.Of(task));
+            container = containers.FirstOrDefault(c => c.Id == task.TargetId || c.Name == task.TargetId);
+            if (container == null) return await RefusedAsync(task, "db.backup", named, $"Container not found: {task.TargetId}");
+            if (!container.IsDatabase)
+                return await RefusedAsync(task, "db.backup", named, $"Container {container.Name} is not a database.");
+            env = await _docker.GetContainerEnvAsync(container.Id, ScheduledTaskServer.Of(task));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Scheduled task {Name}: the database container could not be looked up", task.Name);
+            return await RefusedAsync(task, "db.backup", named,
+                $"The database container could not be looked up ({ex.GetType().Name}).");
+        }
         var creds = DatabaseDetector.ExtractCredentials(env, container.DatabaseType);
         if (string.IsNullOrEmpty(database)) database = creds.Database;
 
@@ -158,7 +174,8 @@ public class TaskExecutor : ITaskExecutor
     private async Task<(bool, string)> ExecuteVolumeBackup(ScheduledTaskEntity task)
     {
         if (string.IsNullOrEmpty(task.TargetId))
-            return (false, "No volume name specified");
+            return await RefusedAsync(task, "volume.backup",
+                new { volumeName = "", containerName = task.TargetName, serverId = ScheduledTaskServer.Of(task) }, "No volume name specified");
 
         var volumeName = task.TargetId;
         var outcome = await _automation.RunAsync(ActorOf(task), "volume.backup",
@@ -192,10 +209,10 @@ public class TaskExecutor : ITaskExecutor
     {
         var config = ParseConfig(task.Config);
         var command = config.GetValueOrDefault("command", "");
-        if (string.IsNullOrEmpty(command))
-            return (false, "No command specified");
-
         var sid = ScheduledTaskServer.Of(task);
+        if (string.IsNullOrEmpty(command))
+            return await RefusedAsync(task, "host.exec", new { serverId = sid, taskId = task.TaskId, command }, "No command specified");
+
         // The raw execution is the executor's primitive (R1-48): it runs only inside this scope; gating the call re-checks the owner, who must
         // hold host.exec (Admin), and applies the kill switch. The command goes to the policy (forbidden arguments as
         // they are today, not when the task was created); the audit row keeps only its length.
@@ -215,13 +232,29 @@ public class TaskExecutor : ITaskExecutor
         // The stopped containers are listed once: exactly these are decided (each by id and name) and removed, by
         // id — a container that stops between the decision and the run is not touched (R1-16). A stopped protected
         // one refuses the cleanup (fail closed without policy).
-        var stopped = await StoppedContainersAsync(sid);
+        IReadOnlyList<ContainerInfo> stopped;
+        try
+        {
+            stopped = await StoppedContainersAsync(sid);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Nothing can be decided on containers that cannot be listed: refused, on record (INV-45).
+            _logger.LogWarning(ex, "Scheduled task {Name}: the stopped containers could not be listed", task.Name);
+            return await RefusedAsync(task, "host.prune", new { serverId = sid, taskId = task.TaskId, containerIds = "" },
+                $"Cleanup refused: the stopped containers could not be listed ({ex.GetType().Name}).");
+        }
+        var ids = stopped.Select(c => c.Id).ToList();
+        // Kept in front of the gateway, fail closed: without a guardrail store every stopped container counts as
+        // protected, and the gateway's own match needs a target resolver. The refusal is recorded as the gateway's
+        // Denied event of exactly this cleanup, with the containers it would have removed (INV-45).
         if (StoppedProtectedContainers(stopped) is { Count: > 0 } blocked)
-            return (false, $"Cleanup refused: it would remove stopped protected container(s) {string.Join(", ", blocked)}.");
+            return await RefusedAsync(task, "host.prune",
+                new { serverId = sid, taskId = task.TaskId, containerIds = string.Join('\n', ids) },
+                $"Cleanup refused: it would remove stopped protected container(s) {string.Join(", ", blocked)}.");
 
         // Those containers, dangling images and build cache. Not networks (R1-16): which ones are unused cannot be
         // told before the prune, so a protected network could not be decided on — they stay.
-        var ids = stopped.Select(c => c.Id).ToList();
         var outcome = await _automation.RunAsync(ActorOf(task), "host.prune",
             new { serverId = sid, taskId = task.TaskId, containerIds = string.Join('\n', ids) },
             _ => _executor.ExecuteMutationAsync(sid, CleanupCommandFor(ids), TimeSpan.FromMinutes(2)));
@@ -349,6 +382,25 @@ public class TaskExecutor : ITaskExecutor
     internal static AutomationActor ActorOf(ScheduledTaskEntity task) =>
         new("task:" + task.TaskId, $"Scheduled task '{task.Name}'",
             string.IsNullOrWhiteSpace(task.CreatedBy) ? null : task.CreatedBy, task.CreatedVia);
+
+    /// <summary>A run refused before its decision — no target or command, a database container that is missing or is
+    /// none, a lookup that failed, a protected container in a cleanup, an unknown type — is recorded as the gateway's
+    /// Denied event of the capability it would have run, on the task owner's authority (INV-45, as R1-43). Nothing
+    /// runs.</summary>
+    private async Task<(bool, string)> RefusedAsync(ScheduledTaskEntity task, string capabilityId, object arguments,
+        string reason)
+    {
+        try
+        {
+            await _automation.RefuseAsync(ActorOf(task), capabilityId, arguments, reason);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The refusal stands either way; the audit trail's own failure is reported by the gateway.
+            _logger.LogError(ex, "The refused run of scheduled task {Name} could not be recorded", task.Name);
+        }
+        return (false, reason);
+    }
 
     /// <summary>Null when the gateway executed the call; otherwise the message for the task result.</summary>
     private string? Problem<T>(MutationOutcome<T> outcome, string capabilityId)

@@ -1,5 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Models;
+using Whiskers.Services.Mutations;
+using Whiskers.Services.Persistence;
 using Whiskers.Services.Webhooks;
 
 namespace Whiskers.Tests;
@@ -7,24 +10,34 @@ namespace Whiskers.Tests;
 /// <summary>
 /// INV-45 (S-04, S-05): every webhook delivery is exactly one complete event in the real <c>AuditLog</c> — the
 /// delivery's own, under its run id — and each decision nested in it (the containers of a compose plan, the Git app
-/// owner's deployment) is one event of its own operation, linked to the delivery.
+/// owner's deployment) is one event of its own operation, linked to the delivery. The deliveries that end before their
+/// decision (no turn, changed, removed, given up) are driven in <see cref="WebhookReplayTests"/>.
 /// </summary>
 public sealed partial class WebhookMutationTests
 {
     /// <summary>One delivery through the signed test (the same queue, worker and decision as an external call): its
-    /// rows, exactly one per operation, and the delivery's own event.</summary>
+    /// rows read by the delivery's operation (its run id, and everything nested in it), exactly one per operation, and
+    /// the delivery's own event. Nothing else was written by the attempt.</summary>
     private async Task<(List<AuditLogEntity> Rows, AuditLogEntity Delivery)> DeliverAsync(WebhookEntity webhook)
     {
         _trail = true;
         var scopes = _sp.GetRequiredService<IServiceScopeFactory>();
-        var rows = await AuditTrail.AttemptAsync(scopes, () => Service().TriggerSignedTestAsync(webhook.WebhookId));
+        var written = await AuditTrail.AttemptAsync(scopes, () => Service().TriggerSignedTestAsync(webhook.WebhookId));
+        string runId;
+        using (var scope = _sp.CreateScope())
+            runId = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.AsNoTracking()
+                .Where(d => d.WebhookId == webhook.WebhookId).Select(d => d.RunId).SingleAsync();
+        var rows = await AuditTrail.ForOperationAsync(scopes, runId);
+        Assert.Equal(written.Select(r => r.Id).Order(), rows.Select(r => r.Id).Order());
         Assert.Equal(rows.Count, rows.Select(r => r.OperationId).Distinct(StringComparer.Ordinal).Count());
-        var delivery = Assert.Single(rows, r => r.ParentOperationId is null);
+        var delivery = Assert.Single(rows, r => r.OperationId == runId);
+        Assert.Null(delivery.ParentOperationId);
         Assert.EndsWith("webhook:" + webhook.WebhookId, delivery.PrincipalId);   // or "unowned:webhook:…"
         foreach (var nested in rows.Where(r => !ReferenceEquals(r, delivery)))
         {
             Assert.Contains(rows, r => r.OperationId == nested.ParentOperationId);
-            AuditTrail.AssertComplete(nested, nested.Outcome!, nested.Action, "Automation");
+            AuditTrail.AssertComplete(nested, nested.Outcome!, nested.Action, "Automation", decided: nested.DecisionId is not null
+                || nested.Outcome != AuditTrail.Denied);
         }
         return (rows, delivery);
     }
@@ -54,18 +67,87 @@ public sealed partial class WebhookMutationTests
         var demoted = Seed("restart", "web-1");
         _roles.Map[Admin] = AppRole.Viewer;
         var (_, refused) = await DeliverAsync(demoted);
-        AuditTrail.AssertComplete(refused, AuditTrail.Denied, "container.restart", "Automation");
+        AuditTrail.AssertComplete(refused, AuditTrail.Denied, "container.restart", "Automation", decided: false);
         Assert.False(Stored(demoted.WebhookId).Enabled);
         _roles.Map[Admin] = AppRole.Admin;
 
         var (unownedRows, unowned) = await DeliverAsync(Seed("restart", "web-1", owner: null));
-        AuditTrail.AssertComplete(Assert.Single(unownedRows), AuditTrail.Denied, "container.restart", "Automation", owned: false);
+        AuditTrail.AssertComplete(Assert.Single(unownedRows), AuditTrail.Denied, "container.restart", "Automation", owned: false, decided: false);
         Assert.StartsWith("unowned:", unowned.PrincipalId);
+    }
+
+    /// <summary>S-04: a rebuild delivery is one <c>container.update</c> event — executed, failed.</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Executed, AuditTrail.Failed)]
+    public async Task Each_rebuild_delivery_is_one_complete_event_in_the_audit_log()
+    {
+        var (rows, executed) = await DeliverAsync(Seed("rebuild", "web-1"));
+        Assert.Single(rows);
+        AuditTrail.AssertComplete(executed, AuditTrail.Executed, "container.update", "Automation");
+        Assert.True(Ran("rebuild"));
+
+        _docker.AllowMutations = false;
+        var (failedRows, failed) = await DeliverAsync(Seed("rebuild", "web-1"));
+        Assert.Single(failedRows);
+        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "container.update", "Automation");
+    }
+
+    /// <summary>S-04: a compose deployment is the delivery's <c>compose.deploy</c> event and one event per planned
+    /// container nested in it, each decided on its own; failed when compose up fails; refused by the kill switch
+    /// (one event, nothing nested).</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Executed, AuditTrail.Denied, AuditTrail.Failed)]
+    public async Task Each_compose_deploy_delivery_is_one_event_and_one_per_planned_container()
+    {
+        // Two services whose containers exist: `up` recreates both, so both are decided.
+        _host.Files["/opt/duo/docker-compose.yml"] =
+            "name: shop\nservices:\n  web:\n    image: nginx\n  db:\n    image: postgres\n";
+        var webhook = Seed("deploy", "/opt/duo");
+        var (plan, planError) = await WebhookTargets.ComposePlanAsync(new ComposePlanner(_docker, _host), webhook);
+        Assert.True(plan is not null, planError);
+        Assert.True(plan.Containers.Count >= 2, $"{plan.Containers.Count} planned containers");
+        var (rows, delivery) = await DeliverAsync(webhook);
+        AuditTrail.AssertComplete(delivery, AuditTrail.Executed, "compose.deploy", "Automation");
+        // Each container's decision is nested in the one before it (the deployment runs inside the last): every one is
+        // a descendant of the delivery (DeliverAsync checks the links).
+        var containers = rows.Where(r => !ReferenceEquals(r, delivery)).ToList();
+        Assert.Equal(plan.Containers.Count, containers.Count);              // one event per planned container
+        // compose.deploy acts on the host; each event names its own container in its arguments.
+        foreach (var planned in plan.Containers)
+            Assert.Single(containers, c => c.Arguments!.Contains(planned.Id, StringComparison.Ordinal));
+        Assert.All(containers, c => Assert.Equal("compose.deploy", c.Action));
+        Assert.True(Ran("deploy"));
+
+        _host.Effect = command => command.Contains(" up ", StringComparison.Ordinal)
+            ? new Whiskers.Services.Server.CommandResult { ExitCode = 1, Output = "compose up failed" }
+            : null;
+        var (_, failed) = await DeliverAsync(Seed("deploy", "/opt/duo"));
+        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "compose.deploy", "Automation");
+        _host.Effect = null;
+
+        _readOnly = true;
+        var (killedRows, killed) = await DeliverAsync(Seed("deploy", "/opt/duo"));
+        Assert.Single(killedRows);
+        AuditTrail.AssertComplete(killed, AuditTrail.Denied, "compose.deploy", "Automation");
+    }
+
+    /// <summary>S-04: a stored action none of the four is refused before any decision — one Denied event under the
+    /// delivery's run id, as its raw name, which names no capability; nothing runs.</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task A_delivery_of_an_unknown_action_is_one_denied_event()
+    {
+        var (rows, delivery) = await DeliverAsync(Seed("reboot", "web-1"));
+
+        Assert.Single(rows);
+        AuditTrail.AssertComplete(delivery, AuditTrail.Denied, "reboot", "Automation", decided: false, targetId: "");
+        Assert.Equal("unknown", delivery.TargetType);
+        Assert.Empty(_docker.Actions);
     }
 
     /// <summary>S-05 via S-04: a Git deployment fired by a push — the delivery's event, the app owner's deployment
     /// nested in it with every planned container decided, each one event; failed when compose up fails; refused by the
-    /// kill switch.</summary>
+    /// kill switch; refused for the app's owner who lost the role while the webhook's owner holds it.</summary>
     [Fact]
     [AuditPath("S-05", AuditTrail.Executed, AuditTrail.Denied, AuditTrail.Failed)]
     public async Task Each_git_deployment_by_webhook_is_one_complete_event_per_decision()
@@ -87,5 +169,22 @@ public sealed partial class WebhookMutationTests
         _readOnly = true;
         var (killedRows, _) = await DeliverAsync(Seed("git-deploy", AppId));
         AuditTrail.AssertComplete(Assert.Single(killedRows), AuditTrail.Denied, "gitdeploy.deploy", "Automation");
+        _readOnly = false;
+
+        // The app's owner lost Admin, the webhook's owner holds it: the delivery is decided and refused for the app
+        // owner's refusal, and the app owner's deployment is one Denied event of its own, nested in it.
+        const string Other = "other@example.com";
+        _whitelist.Allowed.Add(Other);
+        _roles.Map[Other] = AppRole.Admin;
+        _roles.Map[Admin] = AppRole.Viewer;
+        var ups = _host.Executed.Count(c => c.Contains("docker compose") && c.Contains(" up "));
+        var (appRows, appRefused) = await DeliverAsync(Seed("git-deploy", AppId, owner: PrincipalIds.User(Other)));
+        Assert.Equal(PrincipalIds.User(Other), appRefused.OnBehalfOfId);
+        Assert.NotEqual(AuditTrail.Executed, appRefused.Outcome);
+        AuditTrail.AssertComplete(appRefused, appRefused.Outcome!, "gitdeploy.deploy", "Automation");
+        var appDeployment = Assert.Single(appRows, r => r.ParentOperationId == appRefused.OperationId);
+        AuditTrail.AssertComplete(appDeployment, AuditTrail.Denied, "gitdeploy.deploy", "Automation", decided: false);
+        Assert.Equal(AdminId, appDeployment.OnBehalfOfId);
+        Assert.Equal(ups, _host.Executed.Count(c => c.Contains("docker compose") && c.Contains(" up ")));
     }
 }

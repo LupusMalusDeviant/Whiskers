@@ -359,16 +359,16 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
     /// <summary>The result an update attempt carries while it runs (R1-39).</summary>
     internal const string InProgressResult = "IN PROGRESS: the update has started.";
 
-    /// <summary>Tells the admins that AutoUpdate was suspended and how to take it over (R1-04). An administrative
-    /// event: no container mute or update preference hides it.</summary>
     /// <summary>An update refused before the gateway because the owner entry is blocked: recorded as the gateway's Denied
-    /// event for <c>container.update</c> of that container, at read level, so the attempt is on record exactly once
-    /// (INV-45, as the VPN bring-up does, R1-43). Nothing runs.</summary>
+    /// event for <c>container.update</c> of that container, so the attempt is on record exactly once (INV-45, as the
+    /// VPN bring-up does, R1-43) — on behalf of the owner a suspended entry still names, else at read level as
+    /// unowned (the owner file could not be read). Nothing runs.</summary>
     private async Task RefuseBlockedAsync(ContainerInfo container, string reason, CancellationToken ct)
     {
         try
         {
-            await _automation.RefuseAsync(new AutomationActor("autoupdate", "AutoUpdate", null), "container.update",
+            var owner = _owners.GetBlocked(IAutomationOwnerStore.AutoUpdate)?.OwnerId is { Length: > 0 } o ? o : null;
+            await _automation.RefuseAsync(new AutomationActor("autoupdate", "AutoUpdate", owner, owner), "container.update",
                 new { containerId = container.Id, name = container.Name, serverId = container.ServerId }, reason, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -378,6 +378,8 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         }
     }
 
+    /// <summary>Tells the admins that AutoUpdate was suspended and how to take it over (R1-04). An administrative
+    /// event: no container mute or update preference hides it.</summary>
     private async Task NotifySuspendedAsync(string lost, bool saved)
     {
         try

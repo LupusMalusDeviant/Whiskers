@@ -505,13 +505,40 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal("[Webhook_Run_NoTurn]", output);
     }
 
-    /// <summary>INV-45: a delivery that never reaches its decision is still one event — refused under its own run id,
-    /// as the webhook's capability, on its owner's authority — and nothing runs.</summary>
+    // ---------------------------------------------------------------- INV-45: deliveries that end before their decision
+
+    private IServiceScopeFactory Scopes => _sp.GetRequiredService<IServiceScopeFactory>();
+
+    /// <summary>Refusals go through the real gateway into this test's <c>AuditLog</c> (the runs stay the recording
+    /// runner's: they are not what these tests prove).</summary>
+    private void RecordRefusals()
+    {
+        var f = AutomationMutationRunnerTests.Build(requireOwner: true, trail: Scopes);
+        f.Whitelist.Allowed.Add("admin@example.com");
+        f.Roles.Map["admin@example.com"] = AppRole.Admin;
+        _runner.Audit = f.Runner;
+    }
+
+    /// <summary>The delivery's one event, read by its run id once it is written: Denied before any decision.</summary>
+    private async Task<AuditLogEntity> NotRunAsync(string runId, string capability, bool owned = true, string? targetId = "web-1")
+    {
+        var rows = await AuditTrail.ForOperationAsync(Scopes, runId);
+        var row = AuditTrail.One(rows, AuditTrail.Denied, capability, "Automation", owned: owned, decided: false,
+            targetId: targetId);
+        Assert.Equal(runId, row.OperationId);
+        return row;
+    }
+
+    /// <summary>INV-45: a delivery that got no turn on its target is still one event — refused under its own run id,
+    /// as the webhook's capability, on its owner's authority — and nothing runs. Its run timeout is the mechanism (the
+    /// target stays held until the test releases it); the event is waited for by the run id, not by time.</summary>
     [Fact]
+    [AuditPath("S-04", AuditTrail.Denied)]
     public async Task A_delivery_that_got_no_turn_is_on_record_once_as_not_run()
     {
+        RecordRefusals();
         _options.MaxConcurrentRuns = 2;
-        _options.RunTimeout = TimeSpan.FromSeconds(2);
+        _options.RunTimeout = TimeSpan.FromSeconds(1);
         var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var waiting = Seed(WebhookSignatures.Whiskers, target: "web-1");
         var service = Service();
@@ -522,16 +549,22 @@ public sealed class WebhookReplayTests : IDisposable
         var accepted = await service.AcceptAsync(waiting.WebhookId, Signed(waiting, "delivery-0302"));
 
         Assert.Equal("Failed", (await Finished(accepted.RunId!)).State);
-        var refusal = Assert.Single(_runner.Refusals);
-        Assert.Equal(("webhook:" + waiting.WebhookId, accepted.RunId, "container.restart"),
-            (refusal.Actor.RunnerId, refusal.Actor.OperationId, refusal.Capability));
-        Assert.Equal("user:admin@example.com", refusal.Actor.OwnerId);
+        var row = await NotRunAsync(accepted.RunId!, "container.restart");
+        Assert.Equal("webhook:" + waiting.WebhookId, row.PrincipalId);
+        Assert.Equal("user:admin@example.com", row.OnBehalfOfId);
         Assert.Equal(1, _runner.Runs);   // only the holder ran
+        _runner.Release();
     }
 
-    [Fact]
-    public async Task A_delivery_whose_webhook_was_switched_off_while_it_waited_is_on_record_once_as_not_run()
+    /// <summary>INV-45: a webhook switched off, or removed, while its delivery waited — one Denied event under the
+    /// run id, as the delivery it was accepted for; nothing runs.</summary>
+    [Theory]
+    [InlineData("switched off")]
+    [InlineData("removed")]
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task A_delivery_whose_webhook_changed_while_it_waited_is_on_record_once_as_not_run(string change)
     {
+        RecordRefusals();
         _options.MaxConcurrentRuns = 2;
         _options.RunTimeout = TimeSpan.FromSeconds(20);
         var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
@@ -541,15 +574,94 @@ public sealed class WebhookReplayTests : IDisposable
         await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0303"));
         await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
         var accepted = await service.AcceptAsync(waiting.WebhookId, Signed(waiting, "delivery-0304"));
+        // The waiting run has read its webhook and waits for the target.
+        await Task.Delay(200);
 
-        Update(waiting.WebhookId, w => w.Enabled = false);
+        if (change == "removed") Remove(waiting.WebhookId);
+        else Update(waiting.WebhookId, w => w.Enabled = false);
         _runner.Release();
 
         Assert.Equal("Refused", (await Finished(accepted.RunId!)).State);
-        var refusal = Assert.Single(_runner.Refusals);
-        Assert.Equal(("webhook:" + waiting.WebhookId, accepted.RunId, "container.restart"),
-            (refusal.Actor.RunnerId, refusal.Actor.OperationId, refusal.Capability));
+        Assert.Equal("webhook:" + waiting.WebhookId, (await NotRunAsync(accepted.RunId!, "container.restart")).PrincipalId);
         Assert.Equal(1, _runner.Runs);
+    }
+
+    /// <summary>INV-45 (review B2): a webhook removed before the worker read it at all — both reads find nothing — is
+    /// still one event: by the delivery's webhook id, unowned, under <see cref="WebhookService.RemovedWebhook"/>.</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task A_delivery_whose_webhook_was_gone_before_its_worker_read_it_is_on_record_once()
+    {
+        RecordRefusals();
+        _options.MaxConcurrentRuns = 1;
+        _options.RunTimeout = TimeSpan.FromSeconds(20);
+        var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var gone = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var service = Service();
+        _runner.Hold();
+        await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0305"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        // Queued behind the only worker; removed before that worker reads it.
+        var accepted = await service.AcceptAsync(gone.WebhookId, Signed(gone, "delivery-0306"));
+        Remove(gone.WebhookId);
+        _runner.Release();
+
+        await Finished(accepted.RunId!);
+        var row = await NotRunAsync(accepted.RunId!, WebhookService.RemovedWebhook, owned: false, targetId: "");
+        Assert.Equal("unowned:webhook:" + gone.WebhookId, row.PrincipalId);
+        Assert.Equal(1, _runner.Runs);
+    }
+
+    /// <summary>INV-45 (review B2): a run that was started and then failed before anything recorded it (the second read
+    /// of its webhook fails) is given up as failed — and on record once, as a delivery that did not run.</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task A_started_run_given_up_before_its_decision_is_on_record_once()
+    {
+        RecordRefusals();
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        // The worker's first read of the webhook passes, the one after the start fails.
+        _faults.Arm("FROM \"Webhooks\"", Fault.Fail, runsOnly: true, skip: 1);
+
+        var accepted = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0307"));
+
+        Assert.Equal("Failed", (await Finished(accepted.RunId!)).State);
+        await NotRunAsync(accepted.RunId!, "container.restart");
+        Assert.Equal(0, _runner.Runs);
+    }
+
+    /// <summary>INV-45 (review B2): a start that lands after the run's deadline (a database lock) is recorded as
+    /// failed — and the delivery, which never ran, is on record once.</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task A_start_that_landed_after_the_deadline_is_on_record_once()
+    {
+        RecordRefusals();
+        _options.MaxConcurrentRuns = 1;
+        _options.RunTimeout = TimeSpan.FromMilliseconds(300);
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var service = Service();
+        _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true);
+
+        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(success);
+        _faults.Unlock();
+        string runId;
+        using (var scope = _sp.CreateScope())
+            runId = (await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.SingleAsync()).RunId;
+
+        Assert.Equal("Failed", (await Finished(runId)).State);
+        await NotRunAsync(runId, "container.restart");
+        Assert.Equal(0, _runner.Runs);
+    }
+
+    private void Remove(string webhookId)
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        db.Webhooks.Remove(db.Webhooks.Single(w => w.WebhookId == webhookId));
+        db.SaveChanges();
     }
 
     [Fact]
@@ -1043,9 +1155,12 @@ public sealed class WebhookReplayTests : IDisposable
         /// <summary>Ends a <see cref="Fault.LockDatabase"/> lock (closing the connection rolls it back).</summary>
         public void Unlock() => Interlocked.Exchange(ref _locker, null)?.Dispose();
 
-        public void Arm(string fragment, Fault fault, bool runsOnly = false)
+        private int _skip;
+
+        /// <param name="skip">How many matching commands pass before the one that breaks.</param>
+        public void Arm(string fragment, Fault fault, bool runsOnly = false, int skip = 0)
         {
-            lock (_lock) (_fragment, _fault, _runsOnly) = (fragment, fault, runsOnly);
+            lock (_lock) (_fragment, _fault, _runsOnly, _skip) = (fragment, fault, runsOnly, skip);
         }
 
         private Fault? Trip(DbCommand command, CancellationToken ct)
@@ -1054,6 +1169,7 @@ public sealed class WebhookReplayTests : IDisposable
             {
                 if (_fragment is null || !command.CommandText.Contains(_fragment, StringComparison.Ordinal)) return null;
                 if (_runsOnly && !ct.CanBeCanceled) return null;
+                if (_skip-- > 0) return null;
                 _fragment = null;
                 return _fault;
             }
@@ -1228,12 +1344,17 @@ public sealed class WebhookReplayTests : IDisposable
         /// <summary>The deliveries recorded as not run (INV-45): who, under which operation, as which capability.</summary>
         public List<(AutomationActor Actor, string Capability, string Reason)> Refusals { get; } = [];
 
+        /// <summary>When set, refusals are recorded through it as well — the real gateway writing <c>AuditLog</c>
+        /// rows (INV-45).</summary>
+        public IAutomationMutationRunner? Audit { get; set; }
+
         public Task<MutationOutcome<object?>> RefuseAsync(AutomationActor actor, string capabilityId, object arguments,
             string reason, CancellationToken ct = default)
         {
             lock (Refusals) Refusals.Add((actor, capabilityId, reason));
-            return Task.FromResult(new MutationOutcome<object?>(actor.OperationId ?? "op", MutationStatus.Denied, null, reason,
-                VerificationStatus.NotRun));
+            return Audit?.RefuseAsync(actor, capabilityId, arguments, reason, ct)
+                   ?? Task.FromResult(new MutationOutcome<object?>(actor.OperationId ?? "op", MutationStatus.Denied, null, reason,
+                       VerificationStatus.NotRun));
         }
     }
 

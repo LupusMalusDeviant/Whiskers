@@ -502,13 +502,14 @@ public sealed class AutoRollbackTests : IDisposable
     [AuditPath("S-02", AuditTrail.Executed, AuditTrail.Denied, AuditTrail.Failed)]
     public async Task An_automatic_update_is_one_complete_event_per_attempt()
     {
-        static async Task<List<AuditLogEntity>> AttemptAsync(bool killSwitch, Action<AutoRollbackTests> arrange)
+        static async Task<List<AuditLogEntity>> AttemptAsync(bool killSwitch, Action<AutoRollbackTests> arrange,
+            bool autoRollback = false)
         {
             using var f = new AutoRollbackTests { Trail = true, KillSwitch = killSwitch };
-            var service = await f.ServiceAsync(autoRollback: false);
+            var service = await f.ServiceAsync(autoRollback: autoRollback);
             arrange(f);
             var rows = await AuditTrail.AttemptAsync(f.Scopes, () => service.CheckAndUpdateAsync(CancellationToken.None));
-            Assert.DoesNotContain(nameof(IDockerService.RollbackContainerAsync), f.Docker.Calls);
+            Assert.Equal(autoRollback, f.Docker.Calls.Contains(nameof(IDockerService.RollbackContainerAsync)));
             return rows;
         }
         void Healthy(AutoRollbackTests f) => f.Docker.On[nameof(IDockerService.RecreateContainerAsync)] = _ =>
@@ -531,13 +532,33 @@ public sealed class AutoRollbackTests : IDisposable
         var killed = await AttemptAsync(true, Healthy);
         AuditTrail.One(killed, AuditTrail.Denied, "container.update", "Automation");
 
+        // A suspended owner entry keeps its owner: the refusal is on record on their behalf.
         var blocked = await AttemptAsync(false, f =>
         {
             Healthy(f);
             f.Owners.Blocked.Add(IAutomationOwnerStore.AutoUpdate);
         });
-        Assert.Equal("unowned:autoupdate", AuditTrail.One(blocked, AuditTrail.Denied, "container.update", "Automation",
-            owned: false).PrincipalId);
+        Assert.Equal("user:admin@example.com", AuditTrail.One(blocked, AuditTrail.Denied, "container.update", "Automation",
+            decided: false).OnBehalfOfId);
+
+        // An owner file that could not be read names nobody.
+        var unreadable = await AttemptAsync(false, f =>
+        {
+            Healthy(f);
+            f.Owners.Unreadable(IAutomationOwnerStore.AutoUpdate);
+        });
+        Assert.Equal("unowned:autoupdate", AuditTrail.One(unreadable, AuditTrail.Denied, "container.update", "Automation",
+            owned: false, decided: false).PrincipalId);
+
+        // An update whose new container is down is rolled back: the update is one Failed event, the rollback one
+        // event of its own (container.rollback, executed and verified), on the same owner's authority.
+        var rolledBack = await AttemptAsync(false, f => f.FailingUpdate(), autoRollback: true);
+        Assert.Equal(2, rolledBack.Count);
+        AuditTrail.AssertComplete(rolledBack.Single(r => r.Action == "container.update"), AuditTrail.Failed,
+            "container.update", "Automation");
+        var rollback = rolledBack.Single(r => r.Action == "container.rollback");
+        AuditTrail.AssertComplete(rollback, AuditTrail.Executed, "container.rollback", "Automation");
+        Assert.Equal("user:admin@example.com", rollback.OnBehalfOfId);
     }
 
     private sealed class Updates : IImageUpdateStore

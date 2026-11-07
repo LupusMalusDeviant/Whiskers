@@ -330,12 +330,12 @@ public class VpnMutationTests
         var killSwitch = GuardrailPolicy.SafeDefault();
         killSwitch.ReadOnlyMode = true;
         AuditTrail.One(await StartAsync(await OwnedAsync(AdminId, killSwitch)), AuditTrail.Denied, "vpn.bootstrap", "Automation");
-        AuditTrail.One(await StartAsync(await OwnedAsync(OpsId)), AuditTrail.Denied, "vpn.bootstrap", "Automation");
+        AuditTrail.One(await StartAsync(await OwnedAsync(OpsId)), AuditTrail.Denied, "vpn.bootstrap", "Automation", decided: false);
 
-        AuditTrail.One(await StartAsync(Build(trail: db.Scopes)), AuditTrail.Denied, "vpn.bootstrap", "Automation", owned: false);
+        AuditTrail.One(await StartAsync(Build(trail: db.Scopes)), AuditTrail.Denied, "vpn.bootstrap", "Automation", owned: false, decided: false);
         var blocked = Build(trail: db.Scopes);
         blocked.Owners.Block(IAutomationOwnerStore.VpnBootstrap);
-        AuditTrail.One(await StartAsync(blocked), AuditTrail.Denied, "vpn.bootstrap", "Automation", owned: false);
+        AuditTrail.One(await StartAsync(blocked), AuditTrail.Denied, "vpn.bootstrap", "Automation", owned: false, decided: false);
     }
 
     // ---- Failure is explicit ---------------------------------------------------------------------------------------

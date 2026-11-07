@@ -101,8 +101,10 @@ public class AutomationMutationRunnerTests
 
     /// <param name="trail">INV-45: when set, the gateway writes its events as <c>AuditLog</c> rows into that database
     /// (<see cref="AuditTrail.Gateway"/>) instead of <see cref="Fixture.Audit"/>.</param>
+    /// <param name="gateway">A gateway to run on instead (the one an agent's tool calls go through, so a nested
+    /// automation run shares its trigger checks); <paramref name="policy"/> and <paramref name="trail"/> are then unused.</param>
     internal static Fixture Build(bool requireOwner = false, GuardrailPolicy? policy = null,
-        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? trail = null)
+        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? trail = null, IMutationGateway? gateway = null)
     {
         var roles = new Roles();
         var whitelist = new Whitelist();
@@ -112,7 +114,7 @@ public class AutomationMutationRunnerTests
         var audit = new PrincipalAudit();
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var approvals = new ApprovalStore();
-        var gateway = trail is not null
+        gateway ??= trail is not null
             ? AuditTrail.Gateway(trail, store, approvals)
             : new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
                 NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals, store));

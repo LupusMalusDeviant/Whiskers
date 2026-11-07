@@ -54,7 +54,10 @@ internal static class AuditTrail
             .OrderBy(a => a.Id).ToListAsync();
     }
 
-    /// <summary>The rows <paramref name="attempt"/> added — whatever it throws, it is one attempt.</summary>
+    /// <summary>The rows <paramref name="attempt"/> added — whatever it throws, it is one attempt. For an attempt
+    /// that finishes in the call (every path but the webhook worker's): the gateway writes the outcome before the
+    /// attempt returns, so nothing of it can arrive later and be counted in the next one. An attempt a background
+    /// worker finishes is read by its operation id (<see cref="ForOperationAsync"/>).</summary>
     public static async Task<List<AuditLogEntity>> AttemptAsync(IServiceScopeFactory scopes, Func<Task> attempt)
     {
         var before = (await RowsAsync(scopes)).Select(r => r.Id).ToHashSet();
@@ -67,22 +70,53 @@ internal static class AuditTrail
         return (await RowsAsync(scopes)).Where(r => !before.Contains(r.Id)).ToList();
     }
 
+    /// <summary>The events of one operation and of the operations nested in it, once its own outcome is written —
+    /// read by its id, not by what else was written meanwhile, for an attempt a background worker finishes (a webhook
+    /// delivery). Waits at most <paramref name="timeout"/> (10 s) for the outcome.</summary>
+    public static async Task<List<AuditLogEntity>> ForOperationAsync(IServiceScopeFactory scopes, string operationId,
+        TimeSpan? timeout = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(10));
+        while (true)
+        {
+            var all = await RowsAsync(scopes);
+            var ids = new HashSet<string>(StringComparer.Ordinal) { operationId };
+            // The operation and everything nested in it, at any depth.
+            while (all.Where(r => r.ParentOperationId is { } parent && ids.Contains(parent) && r.OperationId is not null)
+                       .Select(r => r.OperationId!).Where(ids.Add).ToList() is { Count: > 0 }) { }
+            var rows = all.Where(r => r.OperationId is { } id && ids.Contains(id)).ToList();
+            if (rows.Any(r => r.OperationId == operationId && r.Phase == "outcome") || DateTime.UtcNow > deadline)
+                return rows;
+            await Task.Delay(20);
+        }
+    }
+
+    /// <summary>A marker no audit field may ever hold: the tests put it into payload arguments (a password, a token,
+    /// a command line, a container environment) and every event is checked for it (the "redacted arguments" of
+    /// INV-45, INV-51).</summary>
+    public const string Probe = "inv45-redaction-probe";
+
     /// <summary>Exactly one event for the attempt, complete for <paramref name="outcome"/>.</summary>
+    /// <param name="decided">Whether the attempt reached the policy step: then the event names its decision. A refusal
+    /// before it — the role below the capability, no owner, a page's own check, a run refused before it asked the
+    /// gateway — has none, by design, and must have none.</param>
+    /// <param name="targetId">The resolved target the event must name; by default any non-empty one.</param>
     public static AuditLogEntity One(IReadOnlyList<AuditLogEntity> rows, string outcome, string capability, string surface,
-        bool owned = true)
+        bool owned = true, bool decided = true, string? targetId = null)
     {
         var row = Assert.Single(rows);
-        AssertComplete(row, outcome, capability, surface, owned);
+        AssertComplete(row, outcome, capability, surface, owned, decided, targetId);
         return row;
     }
 
     /// <summary>
     /// Every field INV-45 names, as columns of the event: principal (kind, id; for an agent or an owned automation the
-    /// principal it acts for), surface, capability, resolved target, the redacted arguments, the decision id (set
-    /// whenever the policy step was reached — a refusal before it, e.g. a page's role check or a missing owner, has none
-    /// by design), the approval and approver, outcome, verification, duration and operation id.
+    /// principal it acts for), surface, capability, resolved target (kind and id), the redacted arguments (no
+    /// <see cref="Probe"/> anywhere in the event), the decision id (set exactly when the policy step was reached:
+    /// <paramref name="decided"/>), the approval and approver, outcome, verification, duration and operation id.
     /// </summary>
-    public static void AssertComplete(AuditLogEntity row, string outcome, string capability, string surface, bool owned = true)
+    public static void AssertComplete(AuditLogEntity row, string outcome, string capability, string surface, bool owned = true,
+        bool decided = true, string? targetId = null)
     {
         var context = $"{capability} ({outcome}): {row.Details}";
         Assert.True(row.Phase == "outcome", $"{context}: phase {row.Phase}");
@@ -99,6 +133,12 @@ internal static class AuditTrail
             Assert.False(string.IsNullOrEmpty(row.OnBehalfOfKind), context);
         }
         Assert.False(string.IsNullOrEmpty(row.TargetType), context);
+        // The Whiskers instance and the fleet are one target each: their kind names them, they have no id.
+        if (targetId is not null) Assert.Equal(targetId, row.TargetId);
+        else if (row.TargetType is not ("whiskers" or "fleet"))
+            Assert.False(string.IsNullOrEmpty(row.TargetId), $"{context}: no target id");
+        foreach (var field in new[] { row.Arguments, row.Details, row.TargetId, row.TargetName })
+            Assert.DoesNotContain(Probe, field ?? "", StringComparison.Ordinal);
         Assert.NotNull(row.Arguments);
         using (JsonDocument.Parse(row.Arguments)) { }
         Assert.NotNull(row.Details);
@@ -106,7 +146,11 @@ internal static class AuditTrail
         Assert.False(string.IsNullOrEmpty(row.Verification), context);
         Assert.NotNull(row.DurationMs);
         Assert.Equal(outcome is Executed or Approved, row.Success);
-        if (outcome is Executed or Approved or Failed or Pending) Assert.False(string.IsNullOrEmpty(row.DecisionId), context);
+        // Decided: every run, wait and failure, and every refusal at or after the policy step (kill switch, protected
+        // resource, forbidden argument). Not decided: only a refusal before it.
+        Assert.True(decided || outcome == Denied, $"{context}: only a refusal comes before the decision");
+        Assert.True(decided != string.IsNullOrEmpty(row.DecisionId),
+            $"{context}: decision id '{row.DecisionId}', expected {(decided ? "one" : "none (refused before the policy step)")}");
         if (outcome is Denied or Pending) Assert.Equal("NotRun", row.Verification);
         if (outcome is Pending)
         {

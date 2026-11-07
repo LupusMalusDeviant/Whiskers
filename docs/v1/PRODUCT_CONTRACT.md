@@ -154,7 +154,7 @@ Legend: ✅ holds · ⚠️ partial · ❌ missing · n/a not applicable · **GR
 (INV-26; fixed for every path in WP2 step 2.1 — guardrails are core) · **AL** AuditLog row · **AH** Agent History row only.
 
 **Gaps shared by every path today** (not repeated per row): INV-01 (string actor), INV-20 for UI/automation/terminal,
-INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-45 (closed: since R1-19 every gateway attempt is one complete event with typed fields, MCP tools and UI pages write none of their own since R1-20/R1-21/R1-22, and every row below is proved by `AuditPathMatrixTests` — each attempt one complete event for every outcome the path can have),
+INV-22 (no decision record — since R1-12 every gateway decision is recorded, so it remains only for paths not yet on the gateway), INV-38 (no gateway — MCP tools and agent go through it since WP2 step 2.1), INV-45 (since R1-19 every gateway attempt is one complete event with typed fields, MCP tools and UI pages write none of their own since R1-20/R1-21/R1-22, and every row below is proved by `AuditPathMatrixTests` — each attempt one complete event for every outcome the path can have; it remains for the U rows' own early exits before the page calls the runner — input validation, a cancelled confirmation, an object not found — which are not proved to be events, pending a decision whether they are attempts),
 INV-48 (audit after the fact, fail-open — since R1-19 the gateway refuses without a durable intent and keeps a failed outcome or refusal recoverable and visible; it remains for `AuditLogService` callers outside the gateway, whose lost rows are now at least visible). INV-49 holds since R1-23 for every audit row (hash chain with signed checkpoints, ADR-0006). Rows below list only the path-specific gaps.
 
 ### 7.1 MCP tools (direct `/mcp` calls; the in-process agent invokes the same methods)
@@ -355,7 +355,7 @@ The 90 paths of the WP11a baseline (2026-10-26):
 | UI handler groups | 34 | 34 |
 | **Total** | **90** | **88** (M-24 and S-08 have no path-specific gap) |
 
-All 90 paths were blocked by the shared gaps (INV-01, 22, 38, 39, 45, 48, 49; INV-49 closed by R1-23, INV-45 by the WP5 path matrix). WP2 (gateway) closes most of
+All 90 paths were blocked by the shared gaps (INV-01, 22, 38, 39, 45, 48, 49; INV-49 closed by R1-23; INV-45 proved by the WP5 path matrix except the UI pages' own early exits). WP2 (gateway) closes most of
 them structurally. The path-specific gaps then close in WP3–WP7.
 
 **Rows today (R1-51, counted from the tables above).** Later packages added rows: M-42…M-47 (contract 0001, R1-48),

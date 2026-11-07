@@ -16,7 +16,7 @@ Scheduled **automatic container updates**. When an image update is detected ([`.
 - **Suspension:** when the owner lost their authority (account deleted, whitelist/role/key revoked, demoted) AutoUpdate
   is suspended in the owner store and an `automation_suspended` notification goes out; it stays off until an admin
   takes it over. An update refused for a blocked owner entry is recorded as the gateway's Denied `container.update`
-  event at read level (INV-45).
+  event (INV-45): on behalf of the owner a suspended entry still names, else at read level as unowned.
 - **Server-scoped matching:** a policy applies only to its own `ServerId` — a same-named container on another host is never auto-recreated (id-match before name-match; an empty policy `ServerId` matches any host for back-compat).
 
 ## Related
