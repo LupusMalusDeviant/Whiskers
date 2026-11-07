@@ -13,7 +13,8 @@ public class DatabaseDetectorTests
     {
         List<KeyValuePair<string, string>> env =
         [
-            new("postgres_db", "lower"), new("HTTP_PROXY", "a"), new("http_proxy", "b"),
+            new("postgres_db", "lower"), new("postgres_password", "wrong"), new("HTTP_PROXY", "a"), new("http_proxy", "b"),
+            new("POSTGRES_PASSWORD", "right"),
             new("POSTGRES_DB", "upper"), new("POSTGRES_USER", "app"), new("pguser", "other"),
         ];
 
@@ -21,5 +22,6 @@ public class DatabaseDetectorTests
 
         Assert.Equal("upper", creds.Database);
         Assert.Equal("app", creds.User);
+        Assert.Equal("right", creds.Password);   // never the lower-case one listed first
     }
 }

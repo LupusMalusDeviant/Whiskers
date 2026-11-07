@@ -989,8 +989,9 @@ public sealed class AuditPathMatrixTests : IDisposable
             (_db, _volumes, _self) = (db, volumes, self);
         }
 
-        public TaskExecutor Executor(AutomationMutationRunnerTests.Fixture f, GuardrailPolicy policy) =>
-            new(Docker, _db, _volumes, _self, Host, f.Runner, NullLogger<TaskExecutor>.Instance,
+        public TaskExecutor Executor(AutomationMutationRunnerTests.Fixture f, GuardrailPolicy policy,
+            IAutomationMutationRunner? runner = null) =>
+            new(Docker, _db, _volumes, _self, Host, runner ?? f.Runner, NullLogger<TaskExecutor>.Instance,
                 notify: new FakeNotifications(), guardrails: new AgentToolTestHelpers.FixedGuardrailStore(policy));
     }
 
@@ -1058,6 +1059,100 @@ public sealed class AuditPathMatrixTests : IDisposable
                 yield return ("listing cancelled", (_, w, _) => w.Docker.ListContainersException = new TaskCanceledException("The request timed out."), "local");
                 break;
         }
+    }
+
+    /// <summary>The real runner, with faults around it: it throws synchronously before it hands a run to the gateway
+    /// (as its owner resolution can), or after the gateway wrote the run's event or a refusal.</summary>
+    private sealed class FaultingRunner(IAutomationMutationRunner inner) : IAutomationMutationRunner
+    {
+        /// <summary>The next run throws before the gateway sees it — once.</summary>
+        public bool ThrowBeforeGatewayOnce { get; set; }
+        /// <summary>Thrown once — the first time the gateway has executed a run (its event is written).</summary>
+        public Exception? AfterRun { get; set; }
+        /// <summary>Thrown once — the first time the gateway has recorded a refusal: a second refusal would be on record.</summary>
+        public Exception? AfterRefusal { get; set; }
+
+        public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
+        {
+            if (ThrowBeforeGatewayOnce)
+            {
+                ThrowBeforeGatewayOnce = false;
+                throw new InvalidOperationException("The owner's key store could not be read.");
+            }
+            return Then(inner.RunAsync(actor, capabilityId, arguments, action, ct), Take(() => AfterRun, () => AfterRun = null));
+        }
+
+        public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
+            Func<CancellationToken, Task> action, CancellationToken ct = default)
+        {
+            if (ThrowBeforeGatewayOnce)
+            {
+                ThrowBeforeGatewayOnce = false;
+                throw new InvalidOperationException("The owner's key store could not be read.");
+            }
+            return Then(inner.RunAsync(actor, capabilityId, arguments, action, ct), Take(() => AfterRun, () => AfterRun = null));
+        }
+
+        public Task<MutationOutcome<object?>> RefuseAsync(AutomationActor actor, string capabilityId, object arguments,
+            string reason, CancellationToken ct = default) =>
+            Then(inner.RefuseAsync(actor, capabilityId, arguments, reason, ct), Take(() => AfterRefusal, () => AfterRefusal = null));
+
+        public string? LostAuthority(AutomationActor actor, string capabilityId) => inner.LostAuthority(actor, capabilityId);
+
+        private static Exception? Take(Func<Exception?> read, Action clear)
+        {
+            var fault = read();
+            clear();
+            return fault;
+        }
+
+        private static async Task<TOut> Then<TOut>(Task<TOut> written, Exception? fault)
+        {
+            var outcome = await written;
+            if (fault is not null) throw fault;
+            return outcome;
+        }
+    }
+
+    /// <summary>S-01, the dispatcher's backstop (review round 12, MINOR-2 and MINOR-3): a run is one event whatever
+    /// throws, and never two. A runner that throws before it hands the run to the gateway leaves the backstop's one
+    /// Denied event; an exception after the gateway executed the run, or an <see cref="OperationCanceledException"/>
+    /// after the gateway recorded a refusal, adds none.</summary>
+    [Fact]
+    public async Task A_scheduled_run_is_one_event_whatever_throws_around_the_gateway()
+    {
+        var policy = Permissive();
+        var f = Automation(policy: policy);
+
+        // Thrown synchronously before the gateway: the run never reached it — one Denied event, nothing ran.
+        var before = new TaskWorld(works: true);
+        var beforeRunner = new FaultingRunner(f.Runner) { ThrowBeforeGatewayOnce = true };
+        var beforeRows = await AttemptAsync(_db.Scopes,
+            () => before.Executor(f, policy, beforeRunner).ExecuteAsync(TaskOf(ScheduledTaskType.ContainerRestart)));
+        var backstop = One(beforeRows, Denied, "container.restart", "Automation", decided: false, targetId: "web-1");
+        Assert.Contains("The run ended before its decision (InvalidOperationException).", backstop.Details);
+        Assert.Empty(before.Docker.Actions);
+
+        // Thrown after the gateway executed the run: its event is the gateway's, no second one.
+        var after = new TaskWorld(works: true);
+        var afterRunner = new FaultingRunner(f.Runner) { AfterRun = new InvalidOperationException("after the run") };
+        var (ok, output) = (false, "");
+        var afterRows = await AttemptAsync(_db.Scopes, async () =>
+            (ok, output) = await after.Executor(f, policy, afterRunner).ExecuteAsync(TaskOf(ScheduledTaskType.ContainerRestart)));
+        One(afterRows, Executed, "container.restart", "Automation", targetId: "web-1");
+        Assert.False(ok);
+        Assert.Equal("after the run", output);
+
+        // A cancellation after the gateway recorded the run's refusal: that refusal is its one event.
+        var refused = new TaskWorld(works: true);
+        var refusedRunner = new FaultingRunner(f.Runner) { AfterRefusal = new OperationCanceledException("after the refusal") };
+        var task = TaskOf(ScheduledTaskType.DbBackup);
+        task.TargetId = null;
+        var refusedRows = await AttemptAsync(_db.Scopes, () => refused.Executor(f, policy, refusedRunner).ExecuteAsync(task));
+        var refusal = One(refusedRows, Denied, "db.backup", "Automation", decided: false, targetId: "");
+        Assert.Contains("No container ID specified", refusal.Details);
+        Assert.Empty(refused.Ran);
     }
 
     public static TheoryData<ScheduledTaskType> TaskTypes()

@@ -8,7 +8,8 @@ namespace Whiskers.Tests;
 /// INV-45, S-01 (review rounds 10 and 11): the scheduler's refusals before the gateway are found in the source, not
 /// kept by hand.
 /// <list type="bullet">
-/// <item>The task methods are the ones the dispatcher's switch arms call (<c>ExecuteAsync</c>), whatever their names.</item>
+/// <item>The task methods are the ones the dispatcher's switch arms call (<c>ExecuteAsync</c>), whatever their names; an
+/// arm that is not <c>await X(…)</c> or <c>await this.X(…)</c> is a violation, never skipped.</item>
 /// <item>In each, every <c>return</c> written before the first <c>RunGatedAsync</c> must be
 /// <c>return await RefusedAsync(…)</c> — the gateway's Denied event — and no <c>throw</c> may be written there.</item>
 /// <item>Only <c>RunGatedAsync</c> calls <c>_automation.RunAsync</c>: it marks the run as having reached the gateway.</item>
@@ -54,6 +55,7 @@ public class TaskExecutorRefusalInventoryTests
                         3 => await ExecuteThrows(t),
                         4 => await ExecuteDirect(t),
                         5 => await ExecuteMissing(t),
+                        6 => await _helper.Run(t),
                         _ => await RefusedAsync(t, "x", new { }, "unknown"),
                     };
                     return r;
@@ -106,7 +108,8 @@ public class TaskExecutorRefusalInventoryTests
 
         Assert.Equal(["ExecuteDirect", "ExecuteGood", "ExecuteMissing", "ExecuteThrows", "RunSilent"],
             methods.Order(StringComparer.Ordinal));
-        Assert.Equal(5, violations.Count);
+        Assert.Equal(6, violations.Count);
+        Assert.Contains(violations, v => v.StartsWith("ExecuteAsync:") && v.Contains("_helper.Run(t)"));
         Assert.Contains(violations, v => v.StartsWith("RunSilent:") && v.Contains("refused without an event"));
         Assert.Contains(violations, v => v.StartsWith("ExecuteThrows:") && v.Contains("throw"));
         Assert.Contains(violations, v => v.StartsWith("ExecuteMissing:") && v.Contains("not found"));
@@ -132,20 +135,24 @@ public class TaskExecutorRefusalInventoryTests
         var executor = root.DescendantNodes().OfType<ClassDeclarationSyntax>().Single(c => c.Identifier.Text == "TaskExecutor");
         var members = executor.Members.OfType<MethodDeclarationSyntax>().ToList();
         var dispatcher = members.Single(m => m.Identifier.Text == "ExecuteAsync");
-        var methods = dispatcher.DescendantNodes().OfType<SwitchExpressionArmSyntax>()
-            .Select(arm => arm.Expression.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault())
-            .Select(call => call?.Expression switch
-            {
-                IdentifierNameSyntax n => n.Identifier.Text,
-                MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax } m => m.Name.Identifier.Text,
-                _ => null,
-            })
-            .OfType<string>()
-            .Where(n => n != "RefusedAsync")   // an arm that refuses is on record itself
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
         var violations = new List<string>();
+        var methods = new List<string>();
+        foreach (var arm in dispatcher.DescendantNodes().OfType<SwitchExpressionArmSyntax>())
+        {
+            // The arm's own call: `await X(task)` or `await this.X(task)`. Anything else — a helper on another object,
+            // a ConfigureAwait chain — is a method this check cannot follow, so it is a violation, never skipped.
+            var name = arm.Expression is AwaitExpressionSyntax { Expression: InvocationExpressionSyntax call }
+                ? call.Expression switch
+                {
+                    IdentifierNameSyntax n => n.Identifier.Text,
+                    MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax } m => m.Name.Identifier.Text,
+                    _ => null,
+                }
+                : null;
+            if (name is null) violations.Add($"ExecuteAsync: the arm `{arm}` calls no task method the check can follow");
+            else if (name != "RefusedAsync" && !methods.Contains(name)) methods.Add(name);   // a refusing arm is on record itself
+        }
+
         foreach (var name in methods)
         {
             var method = members.FirstOrDefault(m => m.Identifier.Text == name);

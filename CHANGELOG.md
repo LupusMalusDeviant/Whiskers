@@ -17,8 +17,9 @@ All notable changes to Whiskers are documented here. The format follows
   — are now recorded as denied events. **Fix:** a scheduled DB backup of a container whose environment repeats a key
   in another case (Docker's client proxy configuration sets `HTTP_PROXY` and `http_proxy`) failed every run; the
   environment is now read with the upper-case spelling first. An endpoint check whose suspension cannot be saved is
-  refused again at its interval, not every 15 seconds. A call cancelled after it asked the gateway and before it ran (the caller gone, a run's deadline
-  passed while the target resolved) is one denied event, and an accepted webhook delivery its worker gives up before
+  refused again at its interval, not every 15 seconds. A call cancelled after it asked the gateway and before it ran
+  (the caller gone, a run's deadline passed while the target resolved) is one denied event, and an accepted webhook
+  delivery its worker gives up before
   it started now ends failed and final, on record once (also in the webhook log, with an `automation_refused`
   notification), instead of waiting for a redelivery — it needs a new delivery. Deliveries a stop or crash left queued
   or running are recorded and settled at the next start; a delivery's acceptance is now stored before it is answered,
@@ -27,11 +28,13 @@ All notable changes to Whiskers are documented here. The format follows
   not run is keyed by its run id, so the worker, the start reconciliation and the audit outbox can never write it
   twice; a delivery given up during a stop is no longer taken over by a repeat. A delivery the worker refused itself
   (its webhook changed while it waited, an unknown action) keeps the state "refused" and one log entry when the start
-  reconciliation finds it; every page Test waiting on a run that a stop left queued is told at once, also while every worker is busy; a new delivery arriving while Whiskers stops is answered busy and not recorded, so the provider may deliver it again (a repeat of a known delivery is still its duplicate; a page Test is told that Whiskers is stopping). Development builds
-  only: deliveries given up by an unreleased build of this branch before this change carry an unkeyed refusal and are
-  settled as refused at the next start, without a log entry or notification; deliveries such a build refused itself
-  (webhook changed, unknown action) and left unsettled were keyed as "did not run" and are settled failed, with a
-  second log entry and a notification.
+  reconciliation finds it; every page Test waiting on a run that a stop left queued is told at once, also while every
+  worker is busy; a new delivery arriving while Whiskers stops is answered busy and not recorded, so the provider may
+  deliver it again (a repeat of a known delivery is still its duplicate; a page Test is told that Whiskers is
+  stopping). Development builds only: deliveries given up by an unreleased build of this branch before this change
+  carry an unkeyed refusal and are settled as refused at the next start, without a log entry or notification;
+  deliveries such a build refused itself (webhook changed, unknown action) and left unsettled were keyed as "did not
+  run" and are settled failed, with a second log entry and a notification.
 - **Root-equivalent capabilities are proven Admin on every surface (INV-19 ✅).** `CapabilityCatalog.RootEquivalent`
   names the set; tests drive each member over `/mcp`, through the agent, the UI runner (pages, "Run now", host and
   container terminals), the automation runner and the scheduler's own run, and show that only Admin passes and that a

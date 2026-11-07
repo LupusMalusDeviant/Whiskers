@@ -129,8 +129,13 @@ public class TaskExecutor : ITaskExecutor
         var sid = ScheduledTaskServer.Of(task);
         return task.TaskType switch
         {
-            ScheduledTaskType.ContainerRestart or ScheduledTaskType.DbBackup =>
-                new { containerId = task.TargetId ?? "", name = task.TargetName, serverId = sid },
+            ScheduledTaskType.ContainerRestart => new { containerId = task.TargetId ?? "", name = task.TargetName, serverId = sid },
+            // As the backup's own refusals before the lookup name it: with the configured database (review round 12).
+            ScheduledTaskType.DbBackup => new
+            {
+                containerId = task.TargetId ?? "", name = task.TargetName, serverId = sid,
+                database = ParseConfig(task.Config).GetValueOrDefault("database", ""),
+            },
             ScheduledTaskType.VolumeBackup => new { volumeName = task.TargetId ?? "", containerName = task.TargetName, serverId = sid },
             ScheduledTaskType.SelfBackup => new { label = $"scheduled-{task.Name}" },
             ScheduledTaskType.CustomCommand => new { serverId = sid, taskId = task.TaskId, command = ParseConfig(task.Config).GetValueOrDefault("command", "") },
@@ -147,8 +152,11 @@ public class TaskExecutor : ITaskExecutor
     private Task<MutationOutcome<T>> RunGatedAsync<T>(ScheduledTaskEntity task, string capabilityId, object arguments,
         Func<CancellationToken, Task<T>> action)
     {
+        // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
+        // (its argument checks, the owner's resolution) wrote no event and still reaches the backstop (review round 12).
+        var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
         if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
-        return _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
+        return pending;
     }
 
     /// <inheritdoc cref="RunGatedAsync{T}"/>
@@ -156,8 +164,11 @@ public class TaskExecutor : ITaskExecutor
     private Task<MutationOutcome<bool>> RunGatedAsync(ScheduledTaskEntity task, string capabilityId, object arguments,
         Func<CancellationToken, Task> action)
     {
+        // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
+        // (its argument checks, the owner's resolution) wrote no event and still reaches the backstop (review round 12).
+        var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
         if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
-        return _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
+        return pending;
     }
 
     private async Task<(bool, string)> ExecuteContainerRestart(ScheduledTaskEntity task)
