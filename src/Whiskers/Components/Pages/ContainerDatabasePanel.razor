@@ -710,7 +710,7 @@ else
     // the Docker API exec endpoint: the mTLS socket-proxy blocks container exec (EXEC=0), but the host's
     // own docker.sock has full access, so this works uniformly on Local, SSH and TCP+mTLS servers.
     // A changing command runs through the gateway under <paramref name="capability"/> (container target); a
-    // read goes through ReadInContainerViaHost instead. What it does — the command, or the SQL it feeds the database — goes along as
+    // read goes through ReadMigrationStatusAsync instead. What it does — the command, or the SQL it feeds the database — goes along as
     // <paramref name="command"/> / <paramref name="query"/> (with the <paramref name="database"/> it runs in) so the
     // gateway can check it for protected resources (R1-16); the shell line itself, which carries the database password, stays in the delegate, and the audit
     // keeps only the length of both.
@@ -734,10 +734,12 @@ else
         return (r.Output, r.Error, r.ExitCode);
     }
 
-    /// <summary>A read inside the container (no capability, no gateway): only the status check uses it.</summary>
-    private async Task<(string StdOut, string StdErr, int ExitCode)> ReadInContainerViaHost(string[] cmd, TimeSpan timeout)
+    /// <summary>The one read inside the container (no capability, no gateway): <c>artisan migrate:status</c>. The command
+    /// is fixed here, so nothing else can run through the plain executor from this page.</summary>
+    private async Task<(string StdOut, string StdErr, int ExitCode)> ReadMigrationStatusAsync()
     {
-        var read = await HostCommandExecutor.ExecuteAsync(_resolvedServerId ?? "local", DockerExecCommand(cmd), timeout);
+        string[] cmd = ["sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'"];
+        var read = await HostCommandExecutor.ExecuteAsync(_resolvedServerId ?? "local", DockerExecCommand(cmd), TimeSpan.FromMinutes(1));
         return (read.Output, read.Error, read.ExitCode);
     }
 
@@ -821,7 +823,7 @@ else
         State.DbMigrating = true; State.MigrationOutput = null;
         try
         {
-            var result = await ReadInContainerViaHost(new[] { "sh", "-c", "which php && php artisan migrate:status 2>&1 || echo 'NO_ARTISAN'" }, TimeSpan.FromMinutes(1));
+            var result = await ReadMigrationStatusAsync();
             State.MigrationOutput = result.StdOut.Contains("NO_ARTISAN") ? L["ContainerDetail_Db_NoFramework"].Value : result.StdOut;
             State.MigrationSuccess = result.ExitCode == 0 && !result.StdOut.Contains("NO_ARTISAN");
         }

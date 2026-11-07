@@ -99,6 +99,39 @@ public class UiMutationRunnerTests
         Assert.Contains("requires 'write'", refused.Message);
     }
 
+    public static IEnumerable<object[]> CapabilitiesAndRoles() =>
+        new CapabilityCatalog().All.SelectMany(c => new[] { AppRole.Viewer, AppRole.Operator, AppRole.Admin }
+            .Select(r => new object[] { c.Id, r }));
+
+    /// <summary>INV-13, the authoritative enforcement: whatever a page checks, the gateway decides every capability at
+    /// its catalog level for the signed-in role — below it the action is refused before it runs, at or above it the
+    /// level is never the reason for a refusal.</summary>
+    [Theory]
+    [MemberData(nameof(CapabilitiesAndRoles))]
+    public async Task Every_capability_is_decided_at_its_catalog_level_for_every_role(string id, AppRole role)
+    {
+        var (runner, _) = Runner(role);
+        var required = new CapabilityCatalog().Find(id)!.RequiredLevel;
+        var ran = false;
+        MutationRefusedException? refused = null;
+        try
+        {
+            await runner.RunAsync(id, new { containerId = "web-1", serverId = "local", name = "web-1" },
+                _ => { ran = true; return Task.CompletedTask; });
+        }
+        catch (MutationRefusedException e) { refused = e; }
+
+        if (McpPermissionLevels.HasAccess(CapabilityCatalog.LevelFor(role), required))
+            Assert.True(refused is null || !refused.Message.Contains(" requires '", StringComparison.Ordinal),
+                $"{role} was refused {id} for its level: {refused?.Message}");
+        else
+        {
+            Assert.False(ran);
+            Assert.NotNull(refused);
+            Assert.Contains($"'{id}' requires '{required}'", refused.Message);
+        }
+    }
+
     [Fact]
     public async Task Arbitrary_sql_needs_admin_on_the_ui_too()
     {

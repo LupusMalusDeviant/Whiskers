@@ -275,7 +275,7 @@ public class MutationGatewayCoverageTests
     /// <summary>Plain-executor calls that read (the command changes nothing on the host).</summary>
     public static readonly (string Owner, string Handler, string Why)[] PlainExecutorReads =
     [
-        ("Whiskers.Components.Pages.ContainerDatabasePanel", "ReadInContainerViaHost", "artisan migrate:status; the writes go through ExecInContainerViaHost and the primitive"),
+        ("Whiskers.Components.Pages.ContainerDatabasePanel", "ReadMigrationStatusAsync", "artisan migrate:status, a fixed command; the writes go through ExecInContainerViaHost and the primitive"),
         ("Whiskers.Components.Pages.ContainerDetail", "LoadEnvVars", "finds the compose directory and reads its .env"),
         ("Whiskers.Mcp.Tools.MonitoringTools", "GetServerLogs", "journalctl / log tail"),
         ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumesAsync", "docker volume ls"),
