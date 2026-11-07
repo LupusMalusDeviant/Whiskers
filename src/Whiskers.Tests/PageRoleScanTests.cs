@@ -60,8 +60,9 @@ namespace Whiskers.Tests;
 /// Not checked here: whether a computed check (<c>RequireAsync(capability, …)</c> with an id chosen at run time) matches
 /// the literal ids the handler then runs (Dashboard rows, cloud actions), an id constant of another class a helper uses
 /// unqualified through <c>using static</c> (the seed check sees qualified constants only), whether an earlier check
-/// sits on the
-/// same branch as the run, and what a statement governed by a <see cref="ReachListed"/> line does beyond that line
+/// sits on the same branch as the run, a check of the handler's own body that comes after its first run (its own checks count
+/// wherever they stand), a delegated check between two runs (only conditions before the first run count),
+/// and what a statement governed by a <see cref="ReachListed"/> line does beyond that line
 /// — the gateway holds those. Methods are found by their modifiers (or, in a .razor code
 /// block, at the top level without them); code the member parser does not see still falls under the line rules and
 /// the gate rule, which run over the whole code region.
@@ -1078,7 +1079,10 @@ public class PageRoleScanTests
     }
 
     /// <summary><paramref name="names"/> plus, one step, the names in the initializer of each of them that is a local
-    /// assigned exactly once in <paramref name="skeleton"/> (<c>var ok = MayX; if (!ok) …</c>).</summary>
+    /// assigned exactly once with a plain <c>=</c> in <paramref name="skeleton"/> and declared as <c>var</c>, <c>bool</c> or
+    /// a simple (optionally nullable) type name (<c>var ok = MayX; if (!ok) …</c>). Compound assignments, <c>out</c> /
+    /// <c>ref</c> writes and generic or tuple declarations are not followed; that can only miss a check, never add
+    /// a finding.</summary>
     private static HashSet<string> WithLocals(string skeleton, HashSet<string> names)
     {
         foreach (var name in names.ToList())
