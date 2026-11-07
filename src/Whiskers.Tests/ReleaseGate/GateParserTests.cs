@@ -174,8 +174,8 @@ public class ReleaseGateDocumentTests
         var gate = ReleaseGateDocument.Parse(GateFiles.Require(GateFiles.ReleaseGateDoc));
         Assert.Empty(gate.Problems);
         Assert.Equal("INV-62", gate.Pin);
-        Assert.Equal(10, gate.Open.Count);
-        Assert.Contains(gate.Open, o => o is { Id: "INV-13", Status: InvariantStatus.Partial, Package: "R1-05" });
+        Assert.Equal(9, gate.Open.Count);
+        Assert.Contains(gate.Open, o => o is { Id: "INV-19", Status: InvariantStatus.Partial, Package: "WP2" });
         Assert.Contains(gate.Open, o => o is { Id: "INV-58", Status: InvariantStatus.Partial });
         Assert.Empty(gate.Exceptions);
         Assert.Empty(gate.Known);
@@ -191,7 +191,7 @@ public class ReleaseGateDocumentTests
         Assert.Contains(ReleaseGateDocument.Parse(text.Replace("## Platform skips", "## Skips")).Problems, p => p.Contains("Platform skips"));
         Assert.Contains(ReleaseGateDocument.Parse(text + "\nHighest invariant ID: INV-63\n").Problems, p => p.Contains("2 times"));
         Assert.Contains(ReleaseGateDocument.Parse(text.Replace("Highest invariant ID: INV-62", "Highest ID INV-62")).Problems, p => p.Contains("no line"));
-        Assert.Contains(ReleaseGateDocument.Parse(ReleaseGateTests.InsertAfter(text, "| INV-13 |", "| INV-99 | ❌ | WP1 |")).Problems, p => p.Contains("cells"));
+        Assert.Contains(ReleaseGateDocument.Parse(ReleaseGateTests.InsertAfter(text, "| INV-01 |", "| INV-99 | ❌ | WP1 |")).Problems, p => p.Contains("cells"));
     }
 
     [Fact]

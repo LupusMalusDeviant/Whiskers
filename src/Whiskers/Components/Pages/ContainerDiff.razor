@@ -110,7 +110,7 @@ else if (_left != null || _right != null)
     // the env tab on the detail page (MIT-37) — a Viewer gets the diff without it.
     private async Task<List<KeyValuePair<string, string>>?> LoadEnvAsync(ContainerInfo c)
     {
-        if (_role < AppRole.Operator) return null;
+        if (_role < Whiskers.Components.PageReads.ContainerEnvironment) return null;
         try { return await DockerService.GetContainerEnvAsync(c.Id, c.ServerId); }
         catch (Exception ex)
         {

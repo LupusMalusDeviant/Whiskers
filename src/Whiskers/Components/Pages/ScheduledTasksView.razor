@@ -8,7 +8,6 @@
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IOptionsMonitor<AutomationOptions> AutomationOptions
 @inject IStringLocalizer<SharedResource> L
-@inject Whiskers.Services.Mutations.ICapabilityCatalog Capabilities
 @inject Whiskers.Services.Mutations.IEffectiveRequirementResolver Requirements
 
 @* The interactive scheduled-tasks UI. Rendered by ScheduledTasks.razor only when the Scheduler module is
@@ -25,7 +24,7 @@
         </div>
         <MudSpacer />
         @* The catalog level of scheduler.create; the gateway then holds each task type to what it runs (R1-05). *@
-        @if (_role >= RoleOf("scheduler.create"))
+        @if (_role >= CapabilityCatalog.RoleOf("scheduler.create"))
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                        OnClick="ShowCreateDialog">@L["ScheduledTasksView_Button_CreateTask"]</MudButton>
@@ -180,7 +179,7 @@ else
                                    ValueChanged="@((bool v) => ToggleEnabled(context, v))" />
                     }
                     @* Deleting takes its level from the capability catalog, like its handler (R1-05). *@
-                    @if (_role >= RoleOf("scheduler.delete"))
+                    @if (_role >= CapabilityCatalog.RoleOf("scheduler.delete"))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
                                        OnClick="@(() => DeleteTask(context))" title="@L["ScheduledTasksView_Tooltip_Delete"]" />
@@ -349,25 +348,17 @@ else
         maxBackups, command,
     };
 
-    private AppRole RoleOf(string capabilityId) =>
-        Whiskers.Services.Mutations.CapabilityCatalog.RoleFor(
-            Capabilities.Find(capabilityId)?.RequiredLevel ?? McpPermissionLevels.Admin);
-
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["ScheduledTasksView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
+    /// <summary>The role check in front of a mutation, with the role from the capability catalog (INV-13).</summary>
+    private Task<bool> RequireAsync(string capabilityId, object arguments) =>
+        RequireRoleAsync(CapabilityCatalog.RoleOf(capabilityId), capabilityId, arguments);
 
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
-    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).
+    /// Called directly only by "Run now", whose role is the task's own requirement (<see cref="RunNowRole"/>).</summary>
+    private async Task<bool> RequireRoleAsync(AppRole required, string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        if (_role >= required) return true;
+        Snackbar.Add(L["ScheduledTasksView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -431,7 +422,7 @@ else
 
     private async Task CreateTask()
     {
-        if (!await RequireAsync(RoleOf("scheduler.create"), "scheduler.create",
+        if (!await RequireAsync("scheduler.create",
                 new { name = _formName, taskType = _formType.ToString(), serverId = _formServerId })) return;
         if (!CanCreate) return;
         // The creator owns the task: every run re-checks their authority (PC-D6). Without an email the task would
@@ -533,7 +524,7 @@ else
 
     private async Task RunNow(Whiskers.Models.ScheduledTaskEntity task)
     {
-        if (!await RequireAsync(RunNowRole(task), "scheduler.run",
+        if (!await RequireRoleAsync(RunNowRole(task), "scheduler.run",
                 new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId })) return;
         Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskRunning", task.Name].Value, Severity.Info);
         bool success;
@@ -572,7 +563,7 @@ else
 
     private async Task ToggleEnabled(Whiskers.Models.ScheduledTaskEntity task, bool enabled)
     {
-        if (!await RequireAsync(AppRole.Admin, "scheduler.update",
+        if (!await RequireAsync("scheduler.update",
                 new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, enabled })) return;
         task.Enabled = enabled;
         try
@@ -597,7 +588,7 @@ else
     /// other; its runs then use this admin's authority. The previous owner goes into the audit row.</summary>
     private async Task AdoptTask(Whiskers.Models.ScheduledTaskEntity task)
     {
-        if (!await RequireAsync(AppRole.Admin, "scheduler.update",
+        if (!await RequireAsync("scheduler.update",
                 new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId })) return;
         if (await AdoptAsync(task))
         {
@@ -619,7 +610,7 @@ else
 
     private async Task AdoptAll()
     {
-        if (!await RequireAsync(AppRole.Admin, "scheduler.update", new { owner = "adopt-all" })) return;
+        if (!await RequireAsync("scheduler.update", new { owner = "adopt-all" })) return;
         foreach (var task in _tasks.Where(t => string.IsNullOrWhiteSpace(t.CreatedBy) || OwnerRevoked(t)
                                                || ProvenanceNeedsAdoption(t)).ToList())
             if (!await AdoptAsync(task)) break;
@@ -667,7 +658,7 @@ else
     private async Task DeleteTask(Whiskers.Models.ScheduledTaskEntity task)
     {
         // The level comes from the capability catalog, the one table the MCP tool uses too (R1-05).
-        if (!await RequireAsync(RoleOf("scheduler.delete"), "scheduler.delete",
+        if (!await RequireAsync("scheduler.delete",
                 new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ScheduledTasksView_Dialog_DeleteTitle"].Value,

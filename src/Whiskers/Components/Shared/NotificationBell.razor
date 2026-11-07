@@ -109,7 +109,7 @@
     private async Task OnOpenChanged(bool open)
     {
         _open = open;
-        if (open && _role >= AppRole.Operator && Store.UnreadCount > 0)
+        if (open && _role >= CapabilityCatalog.RoleOf("notifications.mark_read") && Store.UnreadCount > 0)
         {
             try
             {

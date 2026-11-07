@@ -147,10 +147,11 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] One authoritative table supplies UI/MCP levels, preserving Admin for root-equivalent operations.
-- [ ] `CapabilityTableConsistencyTests` enumerates every mutating capability and checks cross-surface equivalence.
-- [ ] `ApprovalSeparationOfDutyTests.Custom_command_requires_an_admin_approver` checks create and run; includes retention/self-backup requirements.
-- [ ] Firewall, nginx, systemd, network, cloud and Hetzner disagreements are resolved consistently and documented.
+- [x] One authoritative table supplies UI/MCP levels, preserving Admin for root-equivalent operations (`CapabilityCatalog`; `DefaultToolLevels` and the pages take their levels from it; roles map through `CapabilityCatalog.LevelFor` / `RoleFor`).
+- [x] `CapabilityTableConsistencyTests` enumerates every mutating capability and checks cross-surface equivalence.
+- [x] `ApprovalSeparationOfDutyTests.Custom_command_requires_an_admin_approver` checks create and run; includes retention/self-backup requirements. Retention and self-backup: `ApprovalSeparationOfDutyTests.Retention_and_self_backup_require_admin`.
+- [x] Firewall, nginx, systemd, network, cloud and Hetzner disagreements are resolved consistently and documented. Resolved to Admin, documented in INV-13 and pinned by `CapabilityTableConsistencyTests.Host_network_and_cloud_areas_are_admin_on_every_surface`.
+- [x] Pages take their role in front of a capability from the catalog (`CapabilityCatalog.RoleOf`); `PageRoleScanTests` forbids any other role there (deny by default) and any second spelling of the role ↔ level rule. The webhook test follows it too (INV-13 ✅, `WebhookTestPageRoleTests`).
 
 **Out of scope:** Approval persistence.
 

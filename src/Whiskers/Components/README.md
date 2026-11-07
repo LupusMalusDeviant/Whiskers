@@ -11,6 +11,7 @@ User-facing strings here are German (the product's UI language); in-code comment
 | `App.razor` | Root HTML document / host page for the Blazor app. |
 | `Routes.razor` | Router, maps URLs to page components and applies the layout. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
+| `PageReads.cs` | The role of each read a page guards itself (not capabilities): `migrate:status`, `nginx -t`, the container diff's environment. Every role in front of a capability comes from `CapabilityCatalog.RoleOf` instead (INV-13, `PageRoleScanTests`). |
 
 ## Subfolders
 

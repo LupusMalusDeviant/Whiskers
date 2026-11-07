@@ -177,12 +177,7 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
         // A user who can no longer sign in — removed from the whitelist, or whose local account was deleted — has no
         // authority left, whatever role entry remains.
         var state = UserState(email);
-        var userLevel = state != OwnerState.Active ? McpPermissionLevels.Read : _roles.GetRole(email) switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        var userLevel = state != OwnerState.Active ? McpPermissionLevels.Read : CapabilityCatalog.LevelFor(_roles.GetRole(email));
         return new MutationPrincipal(MutationPrincipalKind.Human, ownerId, state switch
         {
             OwnerState.AccountDeleted => $"{email} (account deleted)",

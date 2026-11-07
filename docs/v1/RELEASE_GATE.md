@@ -37,7 +37,6 @@ Highest invariant ID: INV-62
 | Invariant | Status | Package | Why it is open | Reference |
 |---|---|---|---|---|
 | INV-01 | ⚠️ | R1-03 | webhook and system principals come with their packages; humans are keyed by the account handle, not the credential | — |
-| INV-13 | ⚠️ | R1-05 | some pages still hard-code their role instead of taking it from the capability table | — |
 | INV-19 | ⚠️ | WP2 | root-equivalent capabilities are Admin, not yet proven for every surface | — |
 | INV-25 | ⚠️ | R1-02 | with neither policy file present the restrictive default is created, so deleting both looks like a first start | — |
 | INV-45 | ⚠️ | WP5 | one audit event per attempt is not yet proven for every path | — |

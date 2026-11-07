@@ -92,21 +92,14 @@ else
     private List<Whiskers.Services.Server.FirewallRule> _rules = new();
     private AppRole _role = AppRole.Viewer;
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["Firewall_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required) return true;
+        Snackbar.Add(L["Firewall_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -137,7 +130,7 @@ else
 
     private async Task ToggleFirewall(bool enable)
     {
-        if (!await RequireAsync(AppRole.Admin, "firewall.set_status", new { serverId = ServerId, enable })) return;
+        if (!await RequireAsync("firewall.set_status", new { serverId = ServerId, enable })) return;
 
         // Disabling the firewall exposes the host — confirm explicitly.
         if (!enable)
@@ -168,7 +161,7 @@ else
 
     private async Task DeleteRule(int ruleNumber)
     {
-        if (!await RequireAsync(AppRole.Admin, "firewall.rule_remove", new { serverId = ServerId, ruleNumber })) return;
+        if (!await RequireAsync("firewall.rule_remove", new { serverId = ServerId, ruleNumber })) return;
 
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["Firewall_Dialog_DeleteTitle"].Value, L["Firewall_Dialog_DeleteMessage", ruleNumber].Value, yesText: L["Firewall_Dialog_DeleteYes"].Value, cancelText: L["Firewall_Dialog_Cancel"].Value);
@@ -193,7 +186,7 @@ else
 
     private async Task OpenAddDialog()
     {
-        if (!await RequireAsync(AppRole.Admin, "firewall.rule_add", new { serverId = ServerId })) return;
+        if (!await RequireAsync("firewall.rule_add", new { serverId = ServerId })) return;
 
         var parameters = new DialogParameters<AddFirewallRuleDialog>
         {
