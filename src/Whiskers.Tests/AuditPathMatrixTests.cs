@@ -32,8 +32,9 @@ namespace Whiskers.Tests;
 /// outcome: <see cref="Every_mutating_mcp_tool_call_is_one_complete_event_per_outcome"/>), or it names no capability
 /// and is listed in <see cref="Exempt"/> with the reason and the test methods that pin its own record. A new row
 /// without such proof fails <see cref="Every_path_of_the_matrix_proves_one_complete_event_per_attempt"/>.
-/// <para>Not proved here (INV-45 stays open for it): a UI page's own early exit before it calls the runner — input
-/// validation, a confirmation the person cancels, an object not found. The U rows are driven at the runner.</para>
+/// <para>The U rows are driven at the runner: an attempt begins when the handler requests the capability from the
+/// gateway (user decision 2026-11-07); a page returning before that changes nothing
+/// (<see cref="A_ui_page_changes_nothing_itself_so_returning_before_the_gateway_is_no_attempt"/>).</para>
 /// <para>Approve-then-execute is two attempts: the one that waited (one <c>PendingApproval</c> event naming the
 /// approval) and the run after the approval (one <c>Executed</c> event naming the approval and the approver).</para>
 /// </summary>
@@ -414,6 +415,33 @@ public sealed class AuditPathMatrixTests : IDisposable
         if (stopped.Outcome != Denied)
             // Switching the kill switch off, and changing one's own password (read level) stay possible under it.
             Assert.Contains(capabilityId, new[] { "guardrails.kill_switch_off", "guardrails.save", "account.password_change" });
+    }
+
+    /// <summary>
+    /// INV-45, user decision 2026-11-07: an attempt begins when the handler requests the capability from the gateway
+    /// (<c>RunAsync</c>/<c>RefuseAsync</c> or the surface's equivalent); a page returning before that — invalid input,
+    /// a cancelled confirmation, an object not found — changes nothing and is no attempt. That holds because no page
+    /// changes state itself: no component reaches the database, the file system or a process directly, so a change
+    /// can only go through a guarded service, which refuses outside a gateway decision
+    /// (<c>MutationScopeGuardTests</c>, <c>MutationEnforcementBootTests</c>, <c>MutationGatewayCoverageTests</c>).
+    /// </summary>
+    [Fact]
+    public void A_ui_page_changes_nothing_itself_so_returning_before_the_gateway_is_no_attempt()
+    {
+        var components = Path.Combine(GateFiles.Root, "src", "Whiskers", "Components");
+        var direct = new System.Text.RegularExpressions.Regex(
+            @"\bMetricsDbContext\b|\bIDbContextFactory\b|\bSaveChanges(Async)?\(|\bExecute(Update|Delete)(Async)?\(|" +
+            @"\bFile\.(Write|Append|Delete|Move|Copy|Create|Replace)\w*\(|\bDirectory\.(Delete|Move|Create)\w*\(|" +
+            @"\bProcess\.Start\(|\bnew\s+(FileStream|StreamWriter)\(");
+        var files = Directory.EnumerateFiles(components, "*.*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".razor", StringComparison.Ordinal) || f.EndsWith(".cs", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(files);
+        var offenders = files.SelectMany(f => File.ReadAllLines(f)
+                .Select((line, i) => (line, i))
+                .Where(x => direct.IsMatch(x.line))
+                .Select(x => $"{Path.GetRelativePath(components, f)}:{x.i + 1}: {x.line.Trim()}"))
+            .ToList();
+        Assert.True(offenders.Count == 0, "A page changes state itself, outside a gateway decision:\n" + string.Join("\n", offenders));
     }
 
     // ------------------------------------------------------------------------------------------------ M rows

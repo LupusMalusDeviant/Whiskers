@@ -362,7 +362,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [ ] Required security fields cannot disappear through string truncation.
 - [ ] Outcome-write failure leaves a recoverable incomplete operation and a visible health condition.
 
-> INV-45 ⚠️ (WP5 path matrix): `AuditPathMatrixTests` reads every row of `PRODUCT_CONTRACT.md` §7 and requires a
+> INV-45 ✅ (WP5 path matrix): `AuditPathMatrixTests` reads every row of `PRODUCT_CONTRACT.md` §7 and requires a
 > test that drives it against a real `AuditLog` for each outcome it can have (one complete event per attempt, every
 > field checked: decision id exactly when the policy step was reached, resolved target, redacted arguments), or an
 > exemption pinned by named test methods; the outcomes a row must prove are derived from §7. Paths that refused
@@ -370,8 +370,10 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > entry, endpoint-check runs the monitor refused, webhook deliveries that ended before their decision (also with the
 > webhook gone, or given up after the start), scheduled tasks refused before the gateway (no target or command, a
 > missing or unreadable database container, a protected stopped container, an unknown type) — and now record the
-> gateway's Denied event. Still open: a UI page's own early exit before it calls the runner (validation, a cancelled
-> confirmation, not found) is not proved to be an event; whether it is an attempt needs a decision.
+> gateway's Denied event. User decision 2026-11-07: an attempt begins when the handler requests the capability from
+> the gateway; a page returning before that (validation, a cancelled confirmation, not found) changes nothing and is no
+> attempt — backed by a static check that no page writes state itself and by the scope-guard tests. The fail-closed
+> exits for a missing service cannot occur: the boot matrix resolves every service of the boundary.
 
 **Out of scope:** Hash-chain construction and all caller migrations.
 

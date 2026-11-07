@@ -58,12 +58,35 @@ public class BootMatrixTests
             var actual = ModuleCatalog.All().Select(m => m.Id).Where(registry.IsEnabled).ToHashSet(StringComparer.Ordinal);
             Assert.Equal(expectedModules.Order(StringComparer.Ordinal), actual.Order(StringComparer.Ordinal));
             BootSettings.AssertBoot(factory.Services, config);
+            AssertMutationBoundaryResolves(factory.Services);
         }
         finally
         {
             Environment.SetEnvironmentVariable("WHISKERS_DATA_DIR", prev);
             TestSqlite.ClearPools(dataDir);
             try { Directory.Delete(dataDir, recursive: true); } catch { /* best-effort temp cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// INV-45: the MCP filter (<c>McpGuardrailFilter</c>) and the webhook worker refuse fail-closed, without an event,
+    /// when a service of the mutation boundary is missing from the container — the principal resolver, the direct-call
+    /// guard, the catalog, the gateway, the capability settings, the automation runner. Those exits cannot occur in the
+    /// production graph: in every module configuration the app boots with, each of them resolves, from the root and
+    /// from a request scope (where the filter and the worker look them up).
+    /// </summary>
+    internal static void AssertMutationBoundaryResolves(IServiceProvider root)
+    {
+        using var scope = root.CreateScope();
+        foreach (var provider in new[] { root, scope.ServiceProvider })
+        {
+            Assert.NotNull(provider.GetService<Microsoft.AspNetCore.Http.IHttpContextAccessor>());
+            Assert.NotNull(provider.GetService<Whiskers.Services.Agent.IAgentPrincipalResolver>());
+            Assert.NotNull(provider.GetService<Whiskers.Services.Guardrails.IDirectMcpCallGuard>());
+            Assert.NotNull(provider.GetService<Whiskers.Services.Mutations.ICapabilityCatalog>());
+            Assert.NotNull(provider.GetService<Whiskers.Services.Mutations.IMutationGateway>());
+            Assert.NotNull(provider.GetService<Whiskers.Services.Mutations.ICapabilityOverrides>());
+            Assert.NotNull(provider.GetService<Whiskers.Services.Mutations.IAutomationMutationRunner>());
         }
     }
 

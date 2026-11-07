@@ -6,7 +6,8 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-- **One audit event per mutation attempt, proved per path (INV-45, still open for UI page pre-checks).** A path-matrix
+- **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
+  gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
   test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can
   have. Refusals that were made before the gateway and left no event — an AutoPatch night without an owner or with an
   unreadable owner entry, an AutoUpdate with a blocked owner entry, an endpoint-check run the monitor refused, a
