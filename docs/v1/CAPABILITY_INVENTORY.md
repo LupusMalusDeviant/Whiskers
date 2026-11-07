@@ -93,7 +93,7 @@ Contract 0008, D7: §7 stays hand-written; this file is generated and the releas
 | `nginx.reload` | admin | host | Disruptive | — | read back: nginx is active after the reload. | — | — | `nginx.site_disable`, `nginx.site_enable`, `nginx.update` | U-17 |
 | `nginx.site_disable` | admin | host | Disruptive | — | read back: the site is no longer linked in sites-enabled. | — | `nginx.reload` | — | U-16 |
 | `nginx.site_enable` | admin | host | Disruptive | — | read back: the site is linked in sites-enabled. | — | `nginx.reload` | — | U-16 |
-| `nginx.update` | admin | host | Disruptive | `update_nginx_config` | read back: the site's file holds the written configuration. | — | `nginx.reload` | — | M-11, U-16 |
+| `nginx.update` | admin | host | RootEquivalent | `update_nginx_config` | read back: the site's file holds the written configuration. | — | `nginx.reload` | — | M-11, U-16 |
 | `notifications.clear` | write | whiskers | Destructive | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-39 |
 | `notifications.mark_read` | write | whiskers | Reversible | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | — | — | U-39 |
 | `registry.delete` | admin | config | Disruptive | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `vault.secret_delete` | — | U-34 |

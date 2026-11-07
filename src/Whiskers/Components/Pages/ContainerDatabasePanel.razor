@@ -609,7 +609,15 @@ else
         if (State.DbCreds != null && _container != null)
         {
             State.DbCreds.Database = database;
-            State.DbTables = await DatabaseService.GetTablesAsync(ContainerId, database, _container.DatabaseType, State.DbCreds, _resolvedServerId);
+            try
+            {
+                State.DbTables = await DatabaseService.GetTablesAsync(ContainerId, database, _container.DatabaseType, State.DbCreds, _resolvedServerId);
+            }
+            catch (Whiskers.Utils.UnsafeOperandException ex)
+            {
+                // INV-19: a name the client could read as an option or a connection string is not listed.
+                Snackbar.Add(L["ContainerDetail_Db_LoadError", ex.Message].Value, Severity.Error);
+            }
         }
     }
 
@@ -624,7 +632,14 @@ else
         State.DbColumns.Clear();
         if (State.DbSelectedTable != null && State.DbCreds != null && _container != null && State.DbSelectedDatabase != null)
         {
-            State.DbColumns = await DatabaseService.GetSchemaAsync(ContainerId, State.DbSelectedDatabase, State.DbSelectedTable, _container.DatabaseType, State.DbCreds, _resolvedServerId);
+            try
+            {
+                State.DbColumns = await DatabaseService.GetSchemaAsync(ContainerId, State.DbSelectedDatabase, State.DbSelectedTable, _container.DatabaseType, State.DbCreds, _resolvedServerId);
+            }
+            catch (Whiskers.Utils.UnsafeOperandException ex)
+            {
+                Snackbar.Add(L["ContainerDetail_Db_LoadError", ex.Message].Value, Severity.Error);
+            }
         }
     }
 
@@ -650,9 +665,16 @@ else
 
         if (table != null && State.DbCreds != null && _container != null && State.DbSelectedDatabase != null)
         {
-            var schema = await DatabaseService.GetSchemaAsync(ContainerId, State.DbSelectedDatabase, table, _container.DatabaseType, State.DbCreds, _resolvedServerId);
-            State.QbTableColumns = schema.Select(c => c.Name).ToList();
-            State.QbSetFields = schema.Select(c => (c.Name, "")).ToList();
+            try
+            {
+                var schema = await DatabaseService.GetSchemaAsync(ContainerId, State.DbSelectedDatabase, table, _container.DatabaseType, State.DbCreds, _resolvedServerId);
+                State.QbTableColumns = schema.Select(c => c.Name).ToList();
+                State.QbSetFields = schema.Select(c => (c.Name, "")).ToList();
+            }
+            catch (Whiskers.Utils.UnsafeOperandException ex)
+            {
+                Snackbar.Add(L["ContainerDetail_Db_LoadError", ex.Message].Value, Severity.Error);
+            }
         }
     }
 

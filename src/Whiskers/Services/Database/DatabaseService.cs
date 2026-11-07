@@ -98,6 +98,9 @@ public class DatabaseService : IDatabaseService
 
     public async Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        // INV-19: a read listing must not become arbitrary execution — the name is an operand of the client
+        // (mongosh would read "--eval=…" as an option and run it), so it is checked before it reaches one.
+        CommandOperands.RequireDatabaseName(database);
         var cmd = dbType switch
         {
             DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", database, "-t", "-A", "-c",
@@ -132,6 +135,8 @@ public class DatabaseService : IDatabaseService
 
     public async Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        // INV-19: as in GetTablesAsync, the database name is a client operand of a read.
+        CommandOperands.RequireDatabaseName(database);
         // Escape the table identifier before embedding it in the query strings: '' for the
         // SQL string literals (psql) and `` for the backtick-quoted identifier (MySQL).
         var pgTable = table.Replace("'", "''");

@@ -6,6 +6,13 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Root-equivalent capabilities are proven Admin on every surface (INV-19 ✅).** `CapabilityCatalog.RootEquivalent`
+  names the set; tests drive each member over `/mcp`, through the agent, the UI runner (pages, "Run now", host and
+  container terminals), the automation runner and the scheduler's own run, and show that only Admin passes and that a
+  Write approval never covers one. `nginx.update` is now marked root-equivalent (it was Admin already; no level
+  changed). **Fix:** the Read-level database listings (`list_tables`, `get_schema`, the database panel) passed the
+  database name to the client unchecked, so a name starting with `--` could make mongosh run code in the container; a
+  name must now start with a letter or digit and use only letters, digits and `_ . -`.
 - **Pages take their role from the capability catalog (INV-13, R1-05).** Every role check in front of a capability
   asks `CapabilityCatalog.RoleOf` instead of naming a role; no page helper takes a role any more, the three reads a
   page guards itself take a named role from `PageReads` (the migration-status read runs one fixed command), the
