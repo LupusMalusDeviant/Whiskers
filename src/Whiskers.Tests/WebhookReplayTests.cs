@@ -670,6 +670,124 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(0, _runner.Runs);
     }
 
+    /// <summary>INV-45 (review round 3, BLOCKER-1): a delivery that got no turn, whose settlement stalls past its
+    /// bookkeeping time (a locked database), is still exactly one event: it is recorded once, before it is settled, and
+    /// the settlement is tried again until it lands. It ends failed, in the webhook's log too.</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task A_no_turn_delivery_whose_bookkeeping_stalls_is_still_one_event()
+    {
+        RecordRefusals();
+        _options.MaxConcurrentRuns = 2;
+        _options.RunTimeout = TimeSpan.FromSeconds(1);
+        var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var waiting = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var service = Service();
+        service.BookkeepingTimeout = TimeSpan.FromMilliseconds(300);
+        service.SettleRetryDelay = TimeSpan.FromMilliseconds(50);
+        _runner.Hold();
+        await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0311"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        // The waiting run's settlement hangs past its bookkeeping time once.
+        _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.Stall, runsOnly: true);
+
+        var accepted = await service.AcceptAsync(waiting.WebhookId, Signed(waiting, "delivery-0312"));
+
+        Assert.Equal("Failed", (await Finished(accepted.RunId!)).State);
+        // Recorded before it was settled: nothing of it can come later.
+        var rows = (await AuditTrail.RowsAsync(Scopes)).Where(r => r.OperationId == accepted.RunId).ToList();
+        AuditTrail.One(rows, AuditTrail.Denied, "container.restart", "Automation", decided: false, targetId: "web-1");
+        await Until(() => Logs(waiting.WebhookId).Any(l => !l.Success));
+        Assert.Equal(1, _runner.Runs);
+        _runner.Release();
+    }
+
+    /// <summary>Review round 3 (MINOR-5): the claim fences every late write of a worker that gave a run up and could not
+    /// settle it — once a repeat took it over, neither its start, its settlement nor its finish touches that run.</summary>
+    [Fact]
+    public async Task A_run_given_up_by_its_worker_never_touches_the_run_that_took_it_over()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var store = new WebhookDeliveryStore(Scopes, _time);
+        var (fresh, row) = await store.RecordAsync(wh.WebhookId, "key-0313", CancellationToken.None);
+        Assert.True(fresh);
+        var givenUp = row.Instance;
+        store.Release(givenUp);   // its worker gave it up without settling it (Whiskers was stopping)
+
+        var (again, taken) = await store.RecordAsync(wh.WebhookId, "key-0313", CancellationToken.None);
+        Assert.True(again);
+        Assert.Equal(row.RunId, taken.RunId);
+        Assert.True(await store.StartAsync(taken.RunId, taken.Instance, CancellationToken.None));
+
+        Assert.False(await store.StartAsync(row.RunId, givenUp, CancellationToken.None));
+        Assert.False(await store.SettleAsync(row.RunId, givenUp, CancellationToken.None));
+        Assert.False(await store.FinishAsync(row.RunId, givenUp, "Failed", CancellationToken.None));
+        Assert.Equal("Running", (await Delivery(row.RunId)).State);
+    }
+
+    /// <summary>INV-45 (review round 3, MAJOR-1): what an earlier process accepted and left unsettled — runs still
+    /// waiting at a stop or crash, a give-up it could not settle — is recorded once at the next start and settled:
+    /// queued or running without an event → one Denied event, failed; queued with its event already on record →
+    /// failed, no second event; running with an event (cut off while it ran) → left as it is. A second pass, and
+    /// another start, record nothing.</summary>
+    [Fact]
+    [AuditPath("S-04", AuditTrail.Denied)]
+    public async Task Deliveries_an_earlier_process_left_unsettled_are_recorded_once_at_the_next_start()
+    {
+        RecordRefusals();
+        var wh = Seed(WebhookSignatures.Whiskers);
+        string Row(string state)
+        {
+            using var scope = _sp.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            var row = new WebhookDeliveryEntity
+            {
+                WebhookId = wh.WebhookId, DeliveryKey = Guid.NewGuid().ToString("N"), RunId = Guid.NewGuid().ToString("N"),
+                State = state, Instance = "stopped-process/" + Guid.NewGuid().ToString("N"),
+                ReceivedAt = _time.GetUtcNow().UtcDateTime,
+            };
+            db.WebhookDeliveries.Add(row);
+            db.SaveChanges();
+            return row.RunId;
+        }
+        async Task OnRecordAsync(string runId) => await _runner.Audit!.RefuseAsync(
+            WebhookService.ActorOf(wh) with { OperationId = runId }, "container.restart",
+            new { containerId = "web-1", serverId = "local" }, "recorded before the stop");
+        var queued = Row("Queued");
+        var running = Row("Running");
+        var queuedOnRecord = Row("Queued");
+        var runningOnRecord = Row("Running");
+        await OnRecordAsync(queuedOnRecord);
+        await OnRecordAsync(runningOnRecord);
+
+        var service = Service();
+        Assert.Equal(2, await service.ReconcileAsync());
+
+        foreach (var runId in new[] { queued, running })
+        {
+            Assert.Equal("Failed", (await Delivery(runId)).State);
+            Assert.Contains(WebhookService.NotSettled, (await NotRunAsync(runId, "container.restart")).Details);
+        }
+        Assert.Equal("Failed", (await Delivery(queuedOnRecord)).State);
+        Assert.Equal("Running", (await Delivery(runningOnRecord)).State);
+        foreach (var runId in new[] { queuedOnRecord, runningOnRecord })
+            Assert.Single(await AuditTrail.RowsAsync(Scopes), r => r.OperationId == runId);
+
+        var before = (await AuditTrail.RowsAsync(Scopes)).Count;
+        Assert.Equal(0, await service.ReconcileAsync());
+        Assert.Equal(0, await Service().ReconcileAsync());
+        Assert.Equal(before, (await AuditTrail.RowsAsync(Scopes)).Count);
+        Assert.Equal(2, Logs(wh.WebhookId).Count(l => !l.Success));   // the two recorded ones, in the webhook's log
+        Assert.Equal(0, _runner.Runs);
+    }
+
+    private List<WebhookLogEntity> Logs(string webhookId)
+    {
+        using var scope = _sp.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookLogs.AsNoTracking()
+            .Where(l => l.WebhookId == webhookId).ToList();
+    }
+
     private void Remove(string webhookId)
     {
         using var scope = _sp.CreateScope();
@@ -722,6 +840,8 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal("Failed", (await Finished(first.RunId!)).State);
         var row = await NotRunAsync(first.RunId!, "container.restart");
         Assert.Contains(WebhookService.GivenUp, row.Details);
+        // The Webhooks page shows it: one failed entry in the webhook's log (review round 3, MINOR-4).
+        await Until(() => Logs(wh.WebhookId).Count(l => !l.Success && l.Error!.Contains("given up", StringComparison.Ordinal)) == 1);
         Assert.Equal("user:admin@example.com", row.OnBehalfOfId);
         Assert.Equal(new WebhookAcceptance(WebhookReply.Duplicate, first.RunId, "failed"),
             await service.AcceptAsync(wh.WebhookId, request));

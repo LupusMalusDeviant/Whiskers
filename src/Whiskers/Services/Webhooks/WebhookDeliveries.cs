@@ -29,8 +29,9 @@ public sealed record WebhookAcceptance(WebhookReply Reply, string? RunId = null,
 /// recorded once: a concurrent or later delivery with the same key — also after a restart — finds the run of the
 /// first. Each row names the claim (<see cref="WebhookDeliveryEntity.Instance"/>) that queued it; a claim is live
 /// while this process holds its run. A queued row whose claim is not live never ran and nothing will run it — its
-/// process stopped, its worker gave it up and could not settle it, or the answer to its insert was lost — so the next delivery with its key
-/// takes it over. One that was running stays "interrupted" and does not run again.
+/// insert answer was lost, or a stopping worker could not settle it — so the next delivery with its key
+/// takes it over. What an earlier process left queued or running is settled at the next start (the service's
+/// <c>ReconcileAsync</c>, INV-45). One that was running stays "interrupted" and does not run again.
 /// </summary>
 internal sealed class WebhookDeliveryStore
 {
@@ -142,6 +143,56 @@ internal sealed class WebhookDeliveryStore
         return await db.WebhookDeliveries
             .Where(d => d.RunId == runId && d.State == Running && d.Instance == claim)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, state).SetProperty(d => d.FinishedAt, now), ct) == 1;
+    }
+
+    /// <summary>Settles a run its worker gave up, in one update fenced by the claim: queued or running under
+    /// <paramref name="claim"/> → failed, final. True when this call settled it; false when it is settled already or
+    /// is not this claim's (a later delivery took it over). INV-45 (review round 3).</summary>
+    public async Task<bool> SettleAsync(string runId, string claim, CancellationToken ct)
+    {
+        var now = _time.GetUtcNow().UtcDateTime;
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+        return await db.WebhookDeliveries
+            .Where(d => d.RunId == runId && (d.State == Queued || d.State == Running) && d.Instance == claim)
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.State, Failed).SetProperty(d => d.FinishedAt, now), ct) == 1;
+    }
+
+    /// <summary>The queued and running deliveries of another process (one that stopped, crashed or could not settle
+    /// them) received since <paramref name="since"/> — what <see cref="AdoptAsync"/> reconciles at start.</summary>
+    public async Task<List<WebhookDeliveryEntity>> UnsettledOfOthersAsync(DateTime since, CancellationToken ct)
+    {
+        using var scope = _scopes.CreateScope();
+        var prefix = ProcessInstance + "/";
+        return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.AsNoTracking()
+            .Where(d => (d.State == Queued || d.State == Running) && d.ReceivedAt >= since && !d.Instance.StartsWith(prefix))
+            .OrderBy(d => d.Id)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>Takes an unsettled row of another process over for reconciling it, fenced like a delivery's takeover
+    /// (same claim, same state): the new claim is live, so no delivery takes it over meanwhile. Null when it changed
+    /// since it was read (a delivery took it over first); then nothing was taken.</summary>
+    public async Task<string?> AdoptAsync(WebhookDeliveryEntity row, CancellationToken ct)
+    {
+        var token = $"{ProcessInstance}/{Guid.NewGuid():N}";
+        _live[token] = true;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            if (await db.WebhookDeliveries
+                    .Where(d => d.Id == row.Id && d.Instance == row.Instance && d.State == row.State)
+                    .ExecuteUpdateAsync(s => s.SetProperty(d => d.Instance, token), ct) == 1)
+                return token;
+        }
+        catch
+        {
+            Release(token);
+            throw;
+        }
+        Release(token);
+        return null;
     }
 
     /// <summary>The run's claim is no longer held: a queued row of it is taken over by the next delivery.</summary>

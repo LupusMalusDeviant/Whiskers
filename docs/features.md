@@ -62,7 +62,10 @@ The remaining risks of this check are listed in the [README](../README.md#compos
 - **Secrets vault** — stored secrets encrypted at rest (AES-256-GCM); sensitive values redacted before logging and
   persistence.
 - **Mandatory HMAC webhook secrets** (`X-Hub-Signature-256`-compatible) and **fail-closed authorization** — every
-  endpoint requires authentication unless it explicitly opts out.
+  endpoint requires authentication unless it explicitly opts out. A webhook delivery runs at most once: one Whiskers
+  accepted but had to give up (no turn on its target in time, its database unavailable, a stop) ends failed, is in the
+  webhook's log and the audit log and raises an `automation_refused` notification, and needs a new delivery (a new
+  delivery id, or for GitHub a new push — "Redeliver" repeats the same delivery and is answered as a duplicate).
 - **SSH host-key verification** (trust-on-first-use) on every ssh path.
 - **Mesh + mTLS** steady-state operation (see [security-architecture.md](security-architecture.md)).
 

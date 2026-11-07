@@ -546,7 +546,9 @@ public sealed class MutationGateway : IMutationGateway
             catch (OperationCanceledException)
             {
                 // INV-45: decided, cancelled before it ran: one refusal on record, and the caller sees the cancellation.
-                await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied, CancelledBeforeRun, ct);
+                // The gate may have raised the approval before the cancellation reached it: the event names it.
+                await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied, CancelledBeforeRun, ct,
+                    RaisedApprovalOf(request, capability, decision, operationId));
                 throw;
             }
             if (!approval.Approved)
@@ -565,8 +567,9 @@ public sealed class MutationGateway : IMutationGateway
         }
 
         // INV-45: a caller that went away after the decision gets one refusal, not an intent for a run it no longer
-        // waits for. (A cancellation that races the intent write below is the intent's refusal, kept in the outbox; one
-        // after the intent is the run's outcome — either way one event.)
+        // waits for. A cancellation that races the intent write below does not break that write (it gets no caller
+        // token); it is seen right after it and ends the intent as that same refusal — either way one event, and the
+        // caller sees its cancellation.
         if (ct.IsCancellationRequested)
         {
             await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied, CancelledBeforeRun, ct,
@@ -578,7 +581,7 @@ public sealed class MutationGateway : IMutationGateway
         long auditId;
         try
         {
-            auditId = await _audit.BeginAsync(operationId, request, capability, approval, ct);
+            auditId = await _audit.BeginAsync(operationId, request, capability, approval, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -588,6 +591,15 @@ public sealed class MutationGateway : IMutationGateway
             return new MutationOutcome<T>(operationId, MutationStatus.Denied, default,
                 "The audit record could not be written; the mutation was refused.", VerificationStatus.NotRun, ex)
                 { DecisionId = request.DecisionId };
+        }
+        if (ct.IsCancellationRequested)
+        {
+            // Cancelled while the intent was written: nothing ran, nothing was claimed or used — the intent ends as the
+            // refusal (INV-45, the intent race).
+            await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, MutationStatus.Denied,
+                VerificationStatus.NotRun, CancelledBeforeRun, TimeSpan.Zero), capability);
+            LogNotRun(operationId, capability.Id, MutationStatus.Denied, approval?.ApprovalId, request.DecisionId);
+            ct.ThrowIfCancellationRequested();
         }
 
         // R1-18 (INV-39): the operation id is claimed before anything runs, so the same id never runs twice — not as a
@@ -912,9 +924,10 @@ public sealed class MutationGateway : IMutationGateway
         reason = AuditLogMutationSink.WithoutPayloadValues(reason, request.Arguments) ?? reason;
         try
         {
-            // INV-45: the refusal is recorded even when the caller has gone away, like an outcome (step 8): the caller's
-            // token is not passed on.
-            await _audit.RecordDeniedAsync(operationId, request, capability, status, reason, approvalId, CancellationToken.None);
+            // INV-45: the refusal is recorded even when the caller has gone away, like an outcome (step 8): not on the
+            // caller's token, but within its own bounded time — one that runs out goes to the outbox below.
+            using var bounded = new CancellationTokenSource(RefusalWriteTimeout);
+            await _audit.RecordDeniedAsync(operationId, request, capability, status, reason, approvalId, bounded.Token);
         }
         catch (Exception ex)
         {
@@ -953,6 +966,28 @@ public sealed class MutationGateway : IMutationGateway
         public static Prepared Refused(MutationOutcome<object?> refusal, string? preset = null) =>
             new(refusal, null, null, null, null, preset);
     }
+
+    /// <summary>The approval the gate raised (or holds open) for this operation, if any — for the event of a call
+    /// cancelled while the gate answered. A failed lookup names none; the refusal stands.</summary>
+    private string? RaisedApprovalOf(MutationRequest request, Capability capability, MutationPolicyDecision decision,
+        string operationId)
+    {
+        try
+        {
+            return ApprovalBinding.Of(request, capability, decision.Policy?.VersionHash) is { } binding
+                ? _approvals?.OpenApprovalOf(binding, operationId)
+                : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Open approval of operation {OperationId} could not be looked up", operationId);
+            return null;
+        }
+    }
+
+    /// <summary>How long a refusal's audit write may take (INV-45): long enough for a queue of audit writes, bounded
+    /// so a stop never waits on it — a write that runs out of time is kept in the audit outbox (R1-19).</summary>
+    internal static readonly TimeSpan RefusalWriteTimeout = TimeSpan.FromSeconds(20);
 
     /// <summary>How far <see cref="PrepareCoreAsync"/> got: the request as decided so far and its capability, for the
     /// refusal a cancellation on the way leaves on record (INV-45).</summary>

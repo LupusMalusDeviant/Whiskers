@@ -76,6 +76,11 @@ public interface IApprovalGate
     /// <summary>The operation id the open approval (pending, or approved and unused) bound to <paramref name="binding"/>
     /// was raised for; <c>null</c> when there is none (R1-18). An approve-then-retry continues that operation.</summary>
     string? OpenOperationOf(string binding) => null;
+
+    /// <summary>The id of the open approval (pending, or approved and unused) raised for operation
+    /// <paramref name="operationId"/> under <paramref name="binding"/>, or <c>null</c> — for the event of a call cancelled
+    /// while the gate answered (INV-45).</summary>
+    string? OpenApprovalOf(string binding, string operationId) => null;
 }
 
 /// <summary>
@@ -199,6 +204,9 @@ public sealed class ApprovalGate : IApprovalGate
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
         return _approvals.TryConsumeAsync(approvalId, operationId, _time.GetUtcNow().UtcDateTime, ct);
     }
+
+    public string? OpenApprovalOf(string binding, string operationId) =>
+        string.IsNullOrWhiteSpace(binding) ? null : _approvals.FindOpen(binding, operationId)?.Id;
 
     public string? OpenOperationOf(string binding)
     {

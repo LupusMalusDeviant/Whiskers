@@ -506,6 +506,7 @@ public class MutationGatewayCoverageTests
         // The gateway and its records.
         ("IActionOutcomeService.RecordAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
         ("IApprovalGate.OpenOperationOf", "a lookup of the open approval of an operation (no write)"),
+        ("IApprovalGate.OpenApprovalOf", "a lookup of the open approval of an operation, for the event of a cancelled call (no write)"),
         ("IApprovalPersistence.ConsumeAsync", "the gateway uses up an approval (R1-14), its own record"),
         ("IAuditRecovery.RecoverAsync", "settles and re-writes the gateway's own audit events (R1-19)"),
         ("IApprovalStore.CreateAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),

@@ -573,12 +573,15 @@ public sealed class AuditPathMatrixTests : IDisposable
         Assert.Equal(0, ran);
     }
 
-    /// <summary>Review B-1, every step before the intent: a call cancelled while its target resolves, while it waits
-    /// for its approval, or after its decision and before its intent is one Denied event and nothing runs; a call
-    /// cancelled while it runs is one Failed outcome — never a refusal and an outcome both.</summary>
+    /// <summary>Review B-1 and round 3, every step before the intent: a call cancelled while its target resolves, while
+    /// the gate raises its approval (the event names that approval), after its decision and before its intent, or
+    /// while its intent is written (the race: the intent ends as the refusal) is one Denied event, nothing runs and the
+    /// caller sees its cancellation; a call cancelled while it runs is one Failed outcome — never a refusal and an
+    /// outcome both.</summary>
     [Theory]
     [InlineData("target")]
     [InlineData("approval")]
+    [InlineData("decided")]
     [InlineData("intent")]
     [InlineData("run")]
     public async Task A_gateway_call_cancelled_at_any_step_is_exactly_one_event(string step)
@@ -590,14 +593,18 @@ public sealed class AuditPathMatrixTests : IDisposable
         var container = step == "approval" ? "whiskers-1" : "web-1";
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         using var gone = new CancellationTokenSource();
-        var approvals = new HangingApprovals(gone, step == "approval");
-        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
-            new AuditLogMutationSink(_db.Scopes), [], NullLogger<MutationGateway>.Instance, targets: hanging,
-            approvals: approvals, decisions: step == "intent" ? new CancelOnRecord(new DbPolicyDecisionStore(_db.Scopes), gone)
+        var approvalStore = new ApprovalStore(policy: store, persistence: _db.Persistence());
+        var approvals = new CancelAfterRaising(new ApprovalGate(approvalStore, store), gone);
+        IMutationAuditSink sink = new AuditLogMutationSink(_db.Scopes);
+        if (step == "intent") sink = new CancelOnIntent(sink, gone);
+        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), sink, [],
+            NullLogger<MutationGateway>.Instance, targets: hanging, approvals: approvals,
+            decisions: step == "decided" ? new CancelOnRecord(new DbPolicyDecisionStore(_db.Scopes), gone)
                 : new DbPolicyDecisionStore(_db.Scopes),
             journal: new DbOperationJournal(_db.Scopes));
         var ui = new UiMutationRunner(gateway, new CapabilityCatalog(), new Person(AppRole.Admin, Admin));
         var ran = 0;
+        var cancelled = false;
 
         var rows = await AttemptAsync(_db.Scopes, async () =>
         {
@@ -614,7 +621,7 @@ public sealed class AuditPathMatrixTests : IDisposable
                 await gone.CancelAsync();
             }
             try { await attempt; }
-            catch (OperationCanceledException) { /* the caller sees its cancellation */ }
+            catch (OperationCanceledException) { cancelled = true; }
         });
 
         if (step == "run")
@@ -623,28 +630,46 @@ public sealed class AuditPathMatrixTests : IDisposable
             Assert.Contains("cancelled while it ran", One(rows, Failed, "container.restart", "Ui").Details);
             return;
         }
+        Assert.True(cancelled, $"{step}: the caller did not see its cancellation");
         var row = One(rows, Denied, "container.restart", "Ui", decided: step != "target");
         var expected = step == "target" ? MutationGateway.CancelledBeforeDecision : MutationGateway.CancelledBeforeRun;
         Assert.True(row.Details!.Contains(expected, StringComparison.Ordinal), $"{step}: {row.Details}");
         Assert.Equal(0, ran);
+        if (step == "approval")
+        {
+            // The gate had raised (persisted) the approval before the cancellation: the event names it.
+            Assert.NotNull(approvals.Raised);
+            Assert.Equal(approvals.Raised, row.ApprovalId);
+            Assert.NotNull(approvalStore.Get(approvals.Raised!));
+        }
+        else
+        {
+            Assert.Null(row.ApprovalId);
+        }
     }
 
-    /// <summary>An approval gate that, asked for this call's approval, finds the caller gone (with
-    /// <c>cancel</c>); otherwise every call is approved by nobody — a Confirm never reaches it then.</summary>
-    private sealed class HangingApprovals(CancellationTokenSource caller, bool cancel) : IApprovalGate
+    /// <summary>The real approval gate, except that once it has raised (and persisted) this call's approval, the caller
+    /// is gone: the answer never reaches the gateway, which sees the cancellation.</summary>
+    private sealed class CancelAfterRaising(ApprovalGate inner, CancellationTokenSource caller) : IApprovalGate
     {
+        public string? Raised { get; private set; }
+
         public async Task<ApprovalGateResult> CheckAsync(ApprovalSubject subject, string reason,
             IReadOnlyList<string> matchedRules, CancellationToken ct)
         {
-            if (cancel) await caller.CancelAsync();
-            await Task.Delay(Timeout.Infinite, ct);
-            throw new InvalidOperationException("unreachable");
+            var answer = await inner.CheckAsync(subject, reason, matchedRules, CancellationToken.None);
+            Raised = answer.ApprovalId;
+            await caller.CancelAsync();
+            ct.ThrowIfCancellationRequested();
+            return answer;
         }
 
         public string? OpenOperationOf(string binding) => null;
 
+        public string? OpenApprovalOf(string binding, string operationId) => inner.OpenApprovalOf(binding, operationId);
+
         public Task<bool> TryConsumeAsync(string approvalId, string operationId, CancellationToken ct) =>
-            Task.FromResult(false);
+            inner.TryConsumeAsync(approvalId, operationId, ct);
     }
 
     /// <summary>A decision store that records the decision, then finds its caller gone.</summary>
@@ -656,6 +681,35 @@ public sealed class AuditPathMatrixTests : IDisposable
             await caller.CancelAsync();
         }
     }
+
+    /// <summary>An audit sink whose caller goes away while the intent is written (the race after the gateway's last
+    /// check before the intent).</summary>
+    private sealed class CancelOnIntent(IMutationAuditSink inner, CancellationTokenSource caller) : IMutationAuditSink
+    {
+        public async Task<long> BeginAsync(string operationId, MutationRequest request, Capability capability,
+            ApprovalGateResult? approval, CancellationToken ct)
+        {
+            await caller.CancelAsync();
+            return await inner.BeginAsync(operationId, request, capability, approval, ct);
+        }
+
+        public Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
+            string? reason, TimeSpan duration, CancellationToken ct) =>
+            inner.CompleteAsync(auditId, operationId, status, verification, reason, duration, ct);
+
+        public Task CompleteAsync(long auditId, string operationId, MutationStatus status, VerificationStatus verification,
+            string? reason, TimeSpan duration, IReadOnlyList<MutationDomainResult>? results, CancellationToken ct) =>
+            inner.CompleteAsync(auditId, operationId, status, verification, reason, duration, results, ct);
+
+        public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
+            MutationStatus status, string reason, CancellationToken ct) =>
+            inner.RecordDeniedAsync(operationId, request, capability, status, reason, ct);
+
+        public Task RecordDeniedAsync(string operationId, MutationRequest request, Capability? capability,
+            MutationStatus status, string reason, string? approvalId, CancellationToken ct) =>
+            inner.RecordDeniedAsync(operationId, request, capability, status, reason, approvalId, ct);
+    }
+
 
     /// <summary>T-01, T-02: a shell in a control-plane container waits for an explicit Admin approval — one
     /// PendingApproval event naming the approval — and opens once after it: one event naming approval and approver.</summary>

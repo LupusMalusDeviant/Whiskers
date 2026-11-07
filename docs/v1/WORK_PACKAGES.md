@@ -375,7 +375,8 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 > attempt — backed by a static check that no page writes state itself and by the scope-guard tests. The fail-closed
 > exits for a missing service cannot occur: the boot matrix resolves every service of the boundary. A call cancelled
 > after it asked the gateway and before its intent is one Denied event (also at a webhook run's deadline during target
-> resolution); an accepted webhook delivery given up before its start is settled failed and final and recorded once.
+> resolution); an accepted webhook delivery its worker gives up is recorded once, then settled failed and final
+> (claim-fenced, retried); what a stop or crash leaves unsettled is recorded and settled at the next start.
 
 **Out of scope:** Hash-chain construction and all caller migrations.
 
