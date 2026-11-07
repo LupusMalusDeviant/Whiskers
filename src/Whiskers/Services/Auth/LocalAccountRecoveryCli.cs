@@ -64,10 +64,17 @@ public static class LocalAccountRecoveryCli
         // Contract 0009 A1.2: issuing clears the password. While the policy blocks redeeming the code (the store is
         // fail-closed, or the kill switch is on and blocks recovery codes), that would leave the account without any
         // way to sign in. The CLI stays usable (E3, D1) but asks for an explicit --force and says what helps instead.
+        // The CLI reads guardrails.json itself, read-only (no save, no unreadable copy), unless the store was already
+        // loaded (a booted host): it does not depend on the start-up order of Program.cs.
         var guardrails = services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
+        if (guardrails is Whiskers.Services.Guardrails.GuardrailStore { IsLoaded: false } unloaded)
+            await unloaded.InspectAsync(ct);
+        string? forcedPast = null;
         if (guardrails.Current.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.RecoveryCode))
         {
-            var why = guardrails.LoadError is not null
+            var failClosed = guardrails.LoadError is not null;
+            forcedPast = failClosed ? "fail-closed guardrails" : "the recovery_code block under the kill switch";
+            var why = failClosed
                 ? "the guardrail configuration (guardrails.json) cannot be read, so the fail-closed policy is enforced, and it blocks recovery codes"
                 : "the read-only kill switch is on and an Admin blocked recovery codes while it is on";
             if (!force)
@@ -100,7 +107,8 @@ public static class LocalAccountRecoveryCli
 
             // The record first: a credential handed out on the host that the trail does not show is not handed out.
             if (!await audit.TryLogAsync(Actor, "system", IssuedAction, AuthAuditLog.Target, account, account,
-                    "a recovery code was issued on the host; the password was removed and every session of the account ended",
+                    "a recovery code was issued on the host; the password was removed and every session of the account ended"
+                    + (forcedPast is null ? "" : $"; forced (--force): redeeming is blocked by {forcedPast}"),
                     success: true))
             {
                 await output.WriteLineAsync("The audit log could not be written. Nothing was changed.");

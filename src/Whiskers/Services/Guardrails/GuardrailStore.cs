@@ -79,21 +79,52 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
     }
 
-    /// <summary>Loads the config from disk; creates the SafeDefault on first run and migrates a
-    /// legacy single-policy file into a "Standard" preset.</summary>
     public int Order => 80;
 
-    public async Task InitializeAsync(CancellationToken ct = default)
+    private volatile bool _loaded;
+
+    /// <summary>Whether a failed load keeps the unreadable file as a copy (not for a read-only inspection).</summary>
+    private bool _keepUnreadableCopy = true;
+
+    /// <summary>True once the configuration was read from disk (<see cref="InitializeAsync"/> or
+    /// <see cref="InspectAsync"/>). Before that <see cref="Current"/> is only the in-memory SafeDefault.</summary>
+    public bool IsLoaded => _loaded;
+
+    /// <summary>Loads the config from disk; creates the SafeDefault on first run and migrates a
+    /// legacy single-policy file into a "Standard" preset.</summary>
+    public Task InitializeAsync(CancellationToken ct = default) => LoadAsync(persist: true, ct);
+
+    /// <summary>Contract 0009 A1.2: the same load and validation for a host CLI next to the running instance, but
+    /// read-only: nothing is saved, no unreadable copy is kept, a missing file is the SafeDefault in memory and a
+    /// legacy file is migrated in memory only.</summary>
+    public Task InspectAsync(CancellationToken ct = default) => LoadAsync(persist: false, ct);
+
+    private async Task LoadAsync(bool persist, CancellationToken ct)
     {
-        await _lock.WaitAsync();
+        await _lock.WaitAsync(ct);
+        try
+        {
+            _keepUnreadableCopy = persist;
+            await LoadLockedAsync(persist, ct);
+            _loaded = true;
+        }
+        finally
+        {
+            _keepUnreadableCopy = true;
+            _lock.Release();
+        }
+    }
+
+    private async Task LoadLockedAsync(bool persist, CancellationToken ct)
+    {
         try
         {
             if (!_store.Exists())
             {
                 var initial = GuardrailConfig.SafeDefault();
-                await _store.SaveAsync(initial);
+                if (persist) await _store.SaveAsync(initial);
                 _state = new State(initial, null);
-                _logger?.LogInformation("Guardrails: SafeDefault created.");
+                _logger?.LogInformation(persist ? "Guardrails: SafeDefault created." : "Guardrails: no file; SafeDefault (not saved).");
                 return;
             }
 
@@ -159,7 +190,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                     FailClosed($"guardrails.json is invalid: {legacyProblem}", null);
                     return;
                 }
-                await _store.SaveAsync(migrated);
+                if (persist) await _store.SaveAsync(migrated);
                 loaded = migrated;
                 _logger?.LogInformation("Guardrails: legacy policy migrated into preset 'Standard'.");
             }
@@ -180,10 +211,6 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         {
             // Whatever else goes wrong while loading, the store stays recoverable and enforces nothing weaker.
             FailClosed($"guardrails.json could not be loaded ({ex.GetType().Name}).", ex);
-        }
-        finally
-        {
-            _lock.Release();
         }
     }
 
@@ -257,7 +284,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             reason);
         try
         {
-            if (File.Exists(_filePath))
+            if (_keepUnreadableCopy && File.Exists(_filePath))
                 File.Copy(_filePath, $"{_filePath}.unreadable-{DateTime.UtcNow:yyyyMMddHHmmss}", overwrite: true);
         }
         catch (Exception copyEx) when (copyEx is IOException or UnauthorizedAccessException)

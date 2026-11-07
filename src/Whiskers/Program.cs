@@ -57,8 +57,6 @@ if (restoreCli)
 // local account, prints it to this terminal only and exits without starting the web host.
 if (recoveryCli)
 {
-    // Contract 0009 A1.2: the CLI reads the guardrail policy the app enforces; load it from guardrails.json first.
-    await app.Services.GetRequiredService<Whiskers.Services.Guardrails.GuardrailStore>().InitializeAsync();
     return await Whiskers.Services.Auth.LocalAccountRecoveryCli.RunAsync(app.Services,
         Whiskers.Services.Auth.LocalAccountRecoveryCli.Arguments(args), Console.Out);
 }

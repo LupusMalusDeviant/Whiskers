@@ -260,6 +260,10 @@ public sealed class KillSwitchExemptionTests : IDisposable
         Assert.Contains("repair or remove guardrails.json", forced.ToString());
         Assert.Matches("([2-9A-HJ-NP-Z]{4}-){5}[2-9A-HJ-NP-Z]{4}", forced.ToString());
         Assert.False(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
+        // The audit trail shows the issue was forced past the block, and which one.
+        var issued = Assert.Single(world.Audit.Rows, r => r.Action == LocalAccountRecoveryCli.IssuedAction);
+        Assert.Contains("forced (--force)", issued.Details);
+        Assert.Contains(failClosed ? "fail-closed guardrails" : "the recovery_code block", issued.Details);
     }
 
     [Fact]
@@ -271,7 +275,45 @@ public sealed class KillSwitchExemptionTests : IDisposable
         Assert.Equal(2, await LocalAccountRecoveryCli.RunAsync(world.Services, [LocalOps, "--forced"], output));
         Assert.True(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
         Assert.DoesNotContain("Warning", (await IssueOutputAsync(world, LocalOps)));
+        Assert.DoesNotContain("forced", Assert.Single(world.Audit.Rows, r => r.Action == LocalAccountRecoveryCli.IssuedAction).Details);
     }
+
+    [Fact]
+    public async Task E3_the_recovery_cli_reads_guardrails_json_itself_read_only_and_refuses_on_a_broken_file()
+    {
+        // As in the CLI process: the registered store was never loaded (no start-up ran). The CLI loads it itself,
+        // whatever Program.cs does first, and leaves the data directory as it was (no copy, no save).
+        var dir = Path.Combine(_dir, "data");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "guardrails.json");
+        await File.WriteAllTextAsync(path, "{ not json");
+        var store = new GuardrailStore(filePath: path);
+        Assert.False(store.IsLoaded);
+        Assert.False(store.Current.ReadOnlyMode);   // unloaded: only the in-memory SafeDefault
+        await using var world = await LocalAccountWorld.CreateAsync(guardrails: store);
+        await world.AddUserAsync(LocalOps, AppRole.Admin);
+        var before = Snapshot(dir);
+
+        var output = new StringWriter();
+        Assert.Equal(4, await LocalAccountRecoveryCli.RunAsync(world.Services, [LocalOps], output));
+
+        Assert.True(store.IsLoaded);
+        Assert.NotNull(store.LoadError);
+        Assert.Contains("cannot be read", output.ToString());
+        Assert.True(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
+        Assert.Equal(before, Snapshot(dir));   // byte-identical, no guardrails.json.unreadable-* copy
+
+        // A missing file is the SafeDefault in memory: the code is issued, and no guardrails.json is written.
+        File.Delete(path);
+        await using var fresh = await LocalAccountWorld.CreateAsync(guardrails: new GuardrailStore(filePath: path));
+        await fresh.AddUserAsync(LocalOps, AppRole.Admin);
+        Assert.Equal(0, await LocalAccountRecoveryCli.RunAsync(fresh.Services, [LocalOps], new StringWriter()));
+        Assert.Empty(Directory.GetFiles(dir));
+    }
+
+    /// <summary>Every file of <paramref name="dir"/> with its content.</summary>
+    private static string Snapshot(string dir) => string.Join("\n", Directory.GetFiles(dir).Order(StringComparer.Ordinal)
+        .Select(f => Path.GetFileName(f) + ":" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(f)))));
 
     private static async Task<string> IssueOutputAsync(LocalAccountWorld world, string account)
     {

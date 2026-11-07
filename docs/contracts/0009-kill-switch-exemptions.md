@@ -35,7 +35,7 @@ Maintainer decision, 7 November 2026: "fixed in code, shown in the UI, configura
   - E1 is the way out of the switch.
   - E2 runs only while no admin exists, so nothing is there yet to protect.
   - E3 needs a shell in the container, which is root-equivalent and outside the product contract (PRODUCT_CONTRACT §5.2).
-    It is also the last way back in when the blockable exemptions are blocked.
+    It is also the last way back in when the blockable exemptions are blocked (see A1.2: the recovery CLI asks for `--force` then).
 - **D2 — Blockable exemptions, allowed by default: E4, E5, E6.** Each one restores or changes a person's own access.
   Allowing them by default keeps an admin from being locked out at the moment they need to sign in and turn the switch
   off.
@@ -49,7 +49,7 @@ Maintainer decision, 7 November 2026: "fixed in code, shown in the UI, configura
     the blocks are set **before** an emergency, never during one.
 - **D4 — Fail closed.** When the guardrail store is in its fail-closed state, every blockable exemption counts as
   blocked. That state already has the switch on (`GuardrailPolicy.FailClosed()`). The host CLIs (E3) remain the way back
-  in.
+  in (see A1.2: the way back is repairing `guardrails.json`).
 - **D5 — Where the check is made.**
   - E4 is checked in `ReadOnlyModeRule`. While the switch is on and `password_change` is blocked, `account.password_change`
     is refused with rule `read-only-mode`.
