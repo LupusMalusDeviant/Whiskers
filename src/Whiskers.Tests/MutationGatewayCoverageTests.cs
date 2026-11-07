@@ -295,6 +295,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Mutations.ComposeRunner", "RecheckAsync", "docker inspect of the containers the run created (contract 0006); the stop goes through ComposeExposureStopper"),
         ("Whiskers.Services.Mutations.ComposeRunner", "RestoreTagsAsync", "docker image inspect before the tags are put back; the docker tag itself runs through the run's mutate delegate"),
         ("Whiskers.Services.Mutations.VerifierSupport", "HostReadAsync", "the verifiers' read-back (R1-37)"),
+        ("Whiskers.Services.Scheduler.TaskExecutor", "ApplyRetention", "ls -1Aq of the DB backup directory, inside db.backup_delete (INV-19 review); the rm of the chosen dumps runs on the primitive"),
         ("Whiskers.Services.Server.FirewallService", "GetStatusAsync", "ufw status"),
         ("Whiskers.Services.Server.NginxService", "GetSiteConfigAsync", "cat of a site file"),
         ("Whiskers.Services.Server.NginxService", "ListSitesAsync", "ls of sites-available / -enabled"),

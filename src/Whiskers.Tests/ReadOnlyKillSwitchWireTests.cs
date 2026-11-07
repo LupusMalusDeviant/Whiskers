@@ -29,8 +29,8 @@ namespace Whiskers.Tests;
 [Collection("WebAppBoot")] // serialized: the boot needs the process-wide WHISKERS_DATA_DIR env var
 public class ReadOnlyKillSwitchWireTests
 {
-    private const string ContainerId = "c0ffee0000a1";
-    private const string AdminEmail = "admin@example.com";
+    internal const string ContainerId = "c0ffee0000a1";
+    internal const string AdminEmail = "admin@example.com";
 
     [Fact]
     public async Task Over_mcp_a_mutating_tool_is_denied_by_the_kill_switch_before_it_runs_and_recorded_as_denied()
@@ -495,17 +495,17 @@ public class ReadOnlyKillSwitchWireTests
 
     /// <summary>Arguments for the UI sweep: the keys the capability table reads a target from, each naming something
     /// that exists where it can (the container, the server, the guardrail section).</summary>
-    private static readonly object UiArguments = new
+    internal static readonly object UiArguments = new
     {
         containerId = "web-1", serverId = "local", section = "guardrails", name = "web-1", networkId = "net-1",
         zone = "example.com", server = "cloud-1", taskId = "task-1", volumeName = "data", workloadId = "default/web",
         appId = "app-1", webhookId = "hook-1", account = "someone@example.com", binding = "binding-1",
     };
 
-    private static readonly AgentPrincipal AdminEditor =
+    internal static readonly AgentPrincipal AdminEditor =
         new(AgentPrincipalKind.WebUser, AdminEmail, McpPermissionLevels.Admin, null, UserEmail: AdminEmail);
 
-    private static async Task<string> CallToolAsync(HttpClient client, string session, int id, string tool, string argsJson)
+    internal static async Task<string> CallToolAsync(HttpClient client, string session, int id, string tool, string argsJson)
     {
         using var response = await McpServedSurfaceTests.PostAsync(client, session,
             $$$"""{"jsonrpc":"2.0","id":{{{id}}},"method":"tools/call","params":{"name":"{{{tool}}}","arguments":{{{argsJson}}}}}""");
@@ -513,7 +513,7 @@ public class ReadOnlyKillSwitchWireTests
         return McpServedSurfaceTests.ExtractJsonRpcPayload(await response.Content.ReadAsStringAsync());
     }
 
-    private static async Task<List<(string Name, JsonElement Schema)>> ListToolsAsync(HttpClient client, string session)
+    internal static async Task<List<(string Name, JsonElement Schema)>> ListToolsAsync(HttpClient client, string session)
     {
         using var response = await McpServedSurfaceTests.PostAsync(client, session,
             """{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}""");
@@ -526,7 +526,7 @@ public class ReadOnlyKillSwitchWireTests
 
     /// <summary>A value for every required parameter of a tool's input schema, naming the existing container and
     /// server where the parameter asks for one.</summary>
-    private static JsonObject ArgumentsFor(JsonElement schema)
+    internal static JsonObject ArgumentsFor(JsonElement schema)
     {
         var args = new JsonObject();
         if (!schema.TryGetProperty("properties", out var properties)) return args;
@@ -561,7 +561,7 @@ public class ReadOnlyKillSwitchWireTests
 
     /// <summary>The booted app with the kill switch on under an otherwise permissive policy (writes up to Admin, no
     /// confirmation): whatever is refused is refused by the kill switch, not by another rule.</summary>
-    private sealed class KillSwitchHost : IAsyncDisposable
+    internal sealed class KillSwitchHost : IAsyncDisposable
     {
         private readonly string _dataDir;
         private readonly string? _previousDataDir;
@@ -696,14 +696,14 @@ public class ReadOnlyKillSwitchWireTests
         }
     }
 
-    private sealed class DbLease(IServiceScope scope, Whiskers.Services.Persistence.MetricsDbContext context) : IDisposable
+    internal sealed class DbLease(IServiceScope scope, Whiskers.Services.Persistence.MetricsDbContext context) : IDisposable
     {
         public Whiskers.Services.Persistence.MetricsDbContext Context { get; } = context;
         public void Dispose() => scope.Dispose();
     }
 
     /// <summary>The person signed in to the UI; the role is read anew for every mutation, as the real service does.</summary>
-    private sealed class SignedInPerson : ICurrentUserService
+    internal sealed class SignedInPerson : ICurrentUserService
     {
         public AppRole Role { get; set; } = AppRole.Admin;
         public Task<string?> GetEmailAsync() => Task.FromResult<string?>(AdminEmail);
@@ -715,7 +715,7 @@ public class ReadOnlyKillSwitchWireTests
     /// as the caller named it. Every fallback is recorded so the test can check it happened only for targets the
     /// doubles do not hold; a resolver that throws is not covered up (the gateway then refuses before the policy and
     /// the sweep's per-call decision check fails).</summary>
-    private sealed class EveryTargetKnown(IMutationTargetResolver inner) : IMutationTargetResolver
+    internal sealed class EveryTargetKnown(IMutationTargetResolver inner) : IMutationTargetResolver
     {
         /// <summary>The kinds the doubles hold (one server, one container, the configuration sections).</summary>
         public static readonly string[] HeldKinds = ["container", "host", "server", "config"];
@@ -759,7 +759,7 @@ public class ReadOnlyKillSwitchWireTests
     }
 
     /// <summary>Counts every attempt to start a shell and starts none.</summary>
-    private sealed class RefusingLauncher : ITerminalLauncher
+    internal sealed class RefusingLauncher : ITerminalLauncher
     {
         private int _starts;
         public int Starts => Volatile.Read(ref _starts);
