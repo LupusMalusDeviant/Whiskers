@@ -303,6 +303,20 @@ public class PageRoleScanTests
         Assert.Empty(RunnerDeclarations("[Inject] private IUiMutationRunner Mutations { get; set; } = null!;"));
     }
 
+    /// <summary>A local is followed only when its declaration is its one write: a second write (compound or out/ref)
+    /// could weaken what the initializer checked, and a keyword in front of a plain assignment is no declaration.</summary>
+    [Theory]
+    [InlineData("var ok = MayRemove; if (!ok) return;", true)]
+    [InlineData("bool ok = MayRemove; if (!ok) return;", true)]
+    [InlineData("var ok = MayRemove; ok |= MayStart; if (!ok) return;", false)]
+    [InlineData("var ok = MayRemove; ok &= MayStart; if (!ok) return;", false)]
+    [InlineData("var ok = MayRemove; ok ??= MayStart; if (!ok) return;", false)]
+    [InlineData("var ok = MayRemove; TryStart(out ok); if (!ok) return;", false)]
+    [InlineData("var ok = MayRemove; Refresh(ref ok); if (!ok) return;", false)]
+    [InlineData("bool ok; if (x) { } else ok = MayRemove; if (!ok) return;", false)]
+    public void A_local_is_followed_only_through_its_one_write(string body, bool followed) =>
+        Assert.Equal(followed, WithLocals(body, ["ok"]).Contains("MayRemove"));
+
     /// <summary>The database panel's role parameter, which its own checks compare against, is the page role of the
     /// container page that hosts it — set in markup, so pinned here.</summary>
     [Fact]
@@ -1079,16 +1093,19 @@ public class PageRoleScanTests
     }
 
     /// <summary><paramref name="names"/> plus, one step, the names in the initializer of each of them that is a local
-    /// assigned exactly once with a plain <c>=</c> in <paramref name="skeleton"/> and declared as <c>var</c>, <c>bool</c> or
-    /// a simple (optionally nullable) type name (<c>var ok = MayX; if (!ok) …</c>). Compound assignments, <c>out</c> /
-    /// <c>ref</c> writes and generic or tuple declarations are not followed; that can only miss a check, never add
-    /// a finding.</summary>
+    /// written exactly once in <paramref name="skeleton"/> — by its declaration as <c>var</c>, <c>bool</c> or a simple
+    /// (optionally nullable) type name (<c>var ok = MayX; if (!ok) …</c>). Every write counts: a plain or compound
+    /// assignment (<c>&amp;=</c>, <c>|=</c>, <c>^=</c>, <c>??=</c>) and an <c>out</c> / <c>ref</c> argument, so a local
+    /// written more than once is not followed at all. A local that is not followed (more than one write, a generic or
+    /// tuple declaration, no declaration) loses its check: the handler is then held to its remaining checks or not
+    /// compared.</summary>
     private static HashSet<string> WithLocals(string skeleton, HashSet<string> names)
     {
         foreach (var name in names.ToList())
         {
-            if (Regex.Matches(skeleton, $@"(?<![\w.]){Regex.Escape(name)}\s*=(?![=>])").Count != 1) continue;
-            foreach (Match d in Regex.Matches(skeleton, $@"(?<![\w.])(?:var|bool|[\w.]+\??)\s+{Regex.Escape(name)}\s*=(?![=>])\s*([^;]*);"))
+            var n = Regex.Escape(name);
+            if (Regex.Matches(skeleton, $@"(?<![\w.]){n}\s*(?:[&|^]|\?\?)?=(?![=>])|(?<![\w.])(?:out|ref)\s+(?:var\s+|[\w.]+\??\s+)?{n}\b").Count != 1) continue;
+            foreach (Match d in Regex.Matches(skeleton, $@"(?<![\w.])(?!(?:else|return|await|throw|yield|in|is|as|new|case)\b)(?:var|bool|[\w.]+\??)\s+{n}\s*=(?![=>])\s*([^;]*);"))
                 foreach (Match w in Regex.Matches(d.Groups[1].Value, @"(?<![\w.])\w+"))
                     names.Add(w.Value);
         }
