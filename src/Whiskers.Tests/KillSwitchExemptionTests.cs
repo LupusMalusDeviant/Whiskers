@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Configuration;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
@@ -7,6 +9,7 @@ using Whiskers.Services.Auth;
 using Whiskers.Services.Guardrails;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Persistence;
+using Whiskers.Startup;
 
 namespace Whiskers.Tests;
 
@@ -279,10 +282,51 @@ public sealed class KillSwitchExemptionTests : IDisposable
     }
 
     [Fact]
-    public async Task E3_the_recovery_cli_reads_guardrails_json_itself_read_only_and_refuses_on_a_broken_file()
+    public async Task E3_the_recovery_cli_on_the_production_service_graph_reads_guardrails_json_itself_and_refuses()
     {
-        // As in the CLI process: the registered store was never loaded (no start-up ran). The CLI loads it itself,
-        // whatever Program.cs does first, and leaves the data directory as it was (no copy, no save).
+        // The registrations of the app (guardrail policy, gateway, scope guard) and no start-up initialiser, as in the
+        // CLI process: IGuardrailStore is the scope guard's proxy over a store that never loaded. The CLI takes the
+        // store behind the proxy, loads it read-only and refuses; the data directory stays byte-identical.
+        var dir = Path.Combine(_dir, "production");
+        Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(Path.Combine(dir, "guardrails.json"), "{ not json");
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(new DataPathOptions(dir));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddGuardrailPolicy();
+        services.AddMutationGateway();
+        services.AddMutationScopeGuard();
+        await using var provider = services.BuildServiceProvider();
+        Assert.IsAssignableFrom<IMutationScopeProxy>(provider.GetRequiredService<IGuardrailStore>());
+        Assert.False(provider.GetRequiredService<GuardrailStore>().IsLoaded);
+        var before = Snapshot(dir);
+
+        var output = new StringWriter();
+        Assert.Equal(4, await LocalAccountRecoveryCli.RunAsync(provider, [LocalOps], output));
+
+        Assert.Contains("cannot be read", output.ToString());
+        Assert.True(provider.GetRequiredService<GuardrailStore>().IsLoaded);
+        Assert.Equal(before, Snapshot(dir));   // no guardrails.json.unreadable-* copy, nothing saved
+    }
+
+    [Fact]
+    public async Task E3_the_recovery_cli_refuses_when_the_guardrail_store_behind_it_is_not_the_real_one()
+    {
+        // Fail closed: a policy it cannot load itself is not taken as "allowed".
+        var services = new ServiceCollection();
+        services.AddSingleton<IGuardrailStore>(new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault()));
+        await using var provider = services.BuildServiceProvider();
+        var output = new StringWriter();
+        Assert.Equal(1, await LocalAccountRecoveryCli.RunAsync(provider, [LocalOps], output));
+        Assert.Contains("could not be checked", output.ToString());
+    }
+
+    [Fact]
+    public async Task E3_the_recovery_cli_loads_an_unloaded_store_read_only_a_broken_file_refuses_a_missing_one_writes_nothing()
+    {
+        // The store itself, unloaded (as behind the proxy above): the CLI loads it read-only, whatever Program.cs does
+        // first, and leaves the data directory as it was (no copy, no save).
         var dir = Path.Combine(_dir, "data");
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, "guardrails.json");

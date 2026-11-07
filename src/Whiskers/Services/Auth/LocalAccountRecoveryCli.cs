@@ -65,10 +65,16 @@ public static class LocalAccountRecoveryCli
         // fail-closed, or the kill switch is on and blocks recovery codes), that would leave the account without any
         // way to sign in. The CLI stays usable (E3, D1) but asks for an explicit --force and says what helps instead.
         // The CLI reads guardrails.json itself, read-only (no save, no unreadable copy), unless the store was already
-        // loaded (a booted host): it does not depend on the start-up order of Program.cs.
-        var guardrails = services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
-        if (guardrails is Whiskers.Services.Guardrails.GuardrailStore { IsLoaded: false } unloaded)
-            await unloaded.InspectAsync(ct);
+        // loaded (a booted host): it does not depend on the start-up order of Program.cs. In the app the interface is
+        // the mutation scope guard's proxy, so the store behind it is taken (as AddInitializable does). Anything else —
+        // not the real store, or a store still not loaded — is refused: an unchecked policy would read as "allowed".
+        var guardrails = await LoadGuardrailsAsync(services, ct);
+        if (guardrails is null)
+        {
+            await output.WriteLineAsync("The guardrail policy (guardrails.json) could not be checked, so it is not known whether a");
+            await output.WriteLineAsync("recovery code could be redeemed. Nothing was changed.");
+            return 1;
+        }
         string? forcedPast = null;
         if (guardrails.Current.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.RecoveryCode))
         {
@@ -144,6 +150,22 @@ public static class LocalAccountRecoveryCli
             await output.WriteLineAsync($"The local account store could not be used ({ex.GetType().Name}). Nothing was changed.");
             return 1;
         }
+    }
+
+    /// <summary>The loaded guardrail store, read from disk now if nothing loaded it; <c>null</c> when it is not the real
+    /// store or could not be loaded (fail closed).</summary>
+    private static async Task<Whiskers.Services.Guardrails.GuardrailStore?> LoadGuardrailsAsync(IServiceProvider services,
+        CancellationToken ct)
+    {
+        var resolved = services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
+        var inner = resolved is Whiskers.Services.Mutations.IMutationScopeProxy guarded ? guarded.Inner : resolved;
+        if (inner is not Whiskers.Services.Guardrails.GuardrailStore store) return null;
+        if (!store.IsLoaded)
+        {
+            try { await store.InspectAsync(ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return null; }
+        }
+        return store.IsLoaded ? store : null;
     }
 
     /// <summary>The real way back while redeeming is blocked (contract 0009 A1.2).</summary>

@@ -83,9 +83,6 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
 
     private volatile bool _loaded;
 
-    /// <summary>Whether a failed load keeps the unreadable file as a copy (not for a read-only inspection).</summary>
-    private bool _keepUnreadableCopy = true;
-
     /// <summary>True once the configuration was read from disk (<see cref="InitializeAsync"/> or
     /// <see cref="InspectAsync"/>). Before that <see cref="Current"/> is only the in-memory SafeDefault.</summary>
     public bool IsLoaded => _loaded;
@@ -101,16 +98,14 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
 
     private async Task LoadAsync(bool persist, CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
+        await _lock.WaitAsync();   // as before: the start-up load is not cancelled while it waits for the lock
         try
         {
-            _keepUnreadableCopy = persist;
             await LoadLockedAsync(persist, ct);
             _loaded = true;
         }
         finally
         {
-            _keepUnreadableCopy = true;
             _lock.Release();
         }
     }
@@ -138,7 +133,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
             {
-                FailClosed($"guardrails.json could not be read ({ex.GetType().Name}).", ex);
+                FailClosed(persist, $"guardrails.json could not be read ({ex.GetType().Name}).", ex);
                 return;
             }
 
@@ -146,7 +141,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             // any casing) could pass the check and enforce the other value. Such a file is refused.
             if (DuplicateProperty(root) is { } duplicate)
             {
-                FailClosed($"guardrails.json is invalid: the property '{duplicate}' appears more than once.", null);
+                FailClosed(persist, $"guardrails.json is invalid: the property '{duplicate}' appears more than once.", null);
                 return;
             }
 
@@ -157,7 +152,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 // default by the deserializer, so the file is refused instead (INV-25).
                 if (IncompletePresetFile(root) is { } incomplete)
                 {
-                    FailClosed($"guardrails.json is invalid: {incomplete}", null);
+                    FailClosed(persist, $"guardrails.json is invalid: {incomplete}", null);
                     return;
                 }
                 try
@@ -167,7 +162,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 }
                 catch (Exception ex) when (ex is JsonException or NotSupportedException)
                 {
-                    FailClosed($"guardrails.json could not be read ({ex.GetType().Name}).", ex);
+                    FailClosed(persist, $"guardrails.json could not be read ({ex.GetType().Name}).", ex);
                     return;
                 }
             }
@@ -177,7 +172,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 // else (unrelated JSON) is invalid and is neither guessed at nor overwritten.
                 if (LegacyPolicy(root) is not { } legacy)
                 {
-                    FailClosed("guardrails.json is invalid: it holds no presets and no legacy policy.", null);
+                    FailClosed(persist, "guardrails.json is invalid: it holds no presets and no legacy policy.", null);
                     return;
                 }
                 var migrated = new GuardrailConfig
@@ -187,19 +182,21 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 };
                 if (migrated.Problem() is { } legacyProblem)
                 {
-                    FailClosed($"guardrails.json is invalid: {legacyProblem}", null);
+                    FailClosed(persist, $"guardrails.json is invalid: {legacyProblem}", null);
                     return;
                 }
                 if (persist) await _store.SaveAsync(migrated);
                 loaded = migrated;
-                _logger?.LogInformation("Guardrails: legacy policy migrated into preset 'Standard'.");
+                _logger?.LogInformation(persist
+                    ? "Guardrails: legacy policy migrated into preset 'Standard'."
+                    : "Guardrails: legacy policy read as preset 'Standard' (not saved).");
             }
 
             // An active preset that does not exist (or any other invalid content) is not guessed at: picking another
             // preset could enforce a weaker policy than the one an admin chose.
             if (loaded.Problem() is { } problem)
             {
-                FailClosed($"guardrails.json is invalid: {problem}", null);
+                FailClosed(persist, $"guardrails.json is invalid: {problem}", null);
                 return;
             }
 
@@ -210,7 +207,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Whatever else goes wrong while loading, the store stays recoverable and enforces nothing weaker.
-            FailClosed($"guardrails.json could not be loaded ({ex.GetType().Name}).", ex);
+            FailClosed(persist, $"guardrails.json could not be loaded ({ex.GetType().Name}).", ex);
         }
     }
 
@@ -276,15 +273,15 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
 
     /// <summary>Enforces <see cref="GuardrailPolicy.FailClosed"/> until <c>guardrails.json</c> is repaired (or removed
     /// together with <c>guardrails.json.bak</c>, which recreates the SafeDefault) on the host and Whiskers restarted. The
-    /// unreadable file is kept next to it.</summary>
-    private void FailClosed(string reason, Exception? ex)
+    /// unreadable file is kept next to it (<paramref name="keepCopy"/>; not for a read-only inspection).</summary>
+    private void FailClosed(bool keepCopy, string reason, Exception? ex)
     {
         _state = new State(new GuardrailConfig(), reason);
         _logger?.LogError(ex, "Guardrails: {Reason} Every mutation is refused until guardrails.json is repaired, or removed together with guardrails.json.bak, on the host and Whiskers is restarted",
             reason);
         try
         {
-            if (_keepUnreadableCopy && File.Exists(_filePath))
+            if (keepCopy && File.Exists(_filePath))
                 File.Copy(_filePath, $"{_filePath}.unreadable-{DateTime.UtcNow:yyyyMMddHHmmss}", overwrite: true);
         }
         catch (Exception copyEx) when (copyEx is IOException or UnauthorizedAccessException)

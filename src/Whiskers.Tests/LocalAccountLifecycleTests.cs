@@ -1073,9 +1073,13 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
             .AddEntityFrameworkStores<WhiskersIdentityDbContext>();
         services.AddSingleton<IAuditLogService>(audit);
         if (time is not null) services.AddSingleton(time);
-        // Contract 0009: the guardrail policy the account service, the binding store and the recovery CLI read (Core).
+        // Contract 0009: the guardrail policy the account service, the binding store and the gateway read (the live
+        // instance's). The recovery CLI resolves IGuardrailStore from Services and, as in production, needs the real
+        // store and reads guardrails.json itself (A1.2): a real store the test hands in, or one over a file holding
+        // the policy, not yet loaded.
         guardrails ??= new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
-        services.AddSingleton(guardrails);
+        services.AddSingleton<IGuardrailStore>(guardrails as GuardrailStore
+                                               ?? await PolicyFileAsync(paths.GuardrailsJson, guardrails.Current));
         var sp = services.BuildServiceProvider();
         using (var scope = sp.CreateScope())
             await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.EnsureCreatedAsync();
@@ -1088,6 +1092,20 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
             policy ?? GuardrailPolicy.SafeDefault(), time ?? TimeProvider.System, hasher, guardrails);
         if (seedRoot) await world.AddUserAsync(Root, role: null);   // the seeded Admin (role from WHISKERS_ADMIN_EMAIL)
         return world;
+    }
+
+    /// <summary>A <c>guardrails.json</c> at <paramref name="path"/> holding <paramref name="policy"/>, and a store over it
+    /// that has not loaded it yet (what the recovery CLI's process holds).</summary>
+    private static async Task<GuardrailStore> PolicyFileAsync(string path, GuardrailPolicy policy)
+    {
+        var seed = new GuardrailStore(filePath: path);
+        await seed.InitializeAsync();
+        var config = seed.Config;
+        config.Presets.Single(p => p.Name == config.ActivePreset).Policy = policy.Clone();
+        var admin = new Whiskers.Models.Agent.AgentPrincipal(Whiskers.Models.Agent.AgentPrincipalKind.WebUser, Root,
+            McpPermissionLevels.Admin, null, UserEmail: Root);
+        await GatewayArrange.RunAsync("guardrails.save", () => seed.SaveConfigAsync(config, admin));
+        return new GuardrailStore(filePath: path);
     }
 
     /// <summary>A local account; <paramref name="password"/> <c>null</c> = none yet (waiting for a recovery code).</summary>
