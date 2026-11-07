@@ -705,6 +705,24 @@ public class ReadBackVerificationTests
     }
 
     [Fact]
+    public async Task A_truncated_dump_listing_never_verifies_a_retention()
+    {
+        // INV-19 review round 4 (m1): a cut listing hides names, and "fewer than kept" must not read as success.
+        var (executor, script) = Scripted<IHostCommandExecutor>.Create();
+        script.On[nameof(IHostCommandExecutor.ExecuteAsync)] = args => Task.FromResult(
+            (string)args[1]! == $"ls -1Aq -- '{DataPathOptions.Default.BackupsDir}'"
+                ? new CommandResult { ExitCode = 0, Output = "db1@app_20261107_010101000_0a1b2c3d.sql\n", OutputTruncated = true }
+                : new CommandResult { ExitCode = -1, Error = "unscripted" });
+        var gateway = Gateway(new ServiceCollection().AddSingleton(executor).AddSingleton(DataPathOptions.Default).BuildServiceProvider());
+
+        var outcome = await gateway.ExecuteAsync(Request("db.backup_delete",
+                new { serverId = "srv1", dumpContainer = "db1", database = "app", keep = 2 },
+            new MutationTarget("container", "c1", null, "srv1")), (_, _) => Task.FromResult("pruned"));
+
+        AssertFailed(outcome, stateUnknown: true);
+    }
+
+    [Fact]
     public async Task A_plan_reports_its_project_and_services_for_the_read_back()
     {
         var plan = new ComposePlan("srv1", "shop", "/opt/shop", [], [], null, false, false,

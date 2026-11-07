@@ -11,8 +11,10 @@ namespace Whiskers.Services.Database;
 /// <list type="bullet">
 /// <item><c>{container}@{database}_{yyyyMMdd}_{HHmmssfff}_{8 hex}.sql</c> (<c>.sql.gz</c> for MongoDB) since INV-19
 /// round 3: the container (<see cref="ContainerKey"/>) and the database name together name the set a retention prunes,
-/// so a same-named database in another container is never touched, and the milliseconds plus a random suffix keep two
-/// dumps taken in the same second apart. <c>@</c> occurs in neither a container nor a database name, so the split is
+/// so a same-named database in another container is never touched; two dumps taken in the same second practically
+/// never share a name (milliseconds plus a 32-bit random suffix). A renamed container, or one keyed by its id (see
+/// <see cref="ContainerKey"/>) and re-created, gets a new key: its older dumps leave the retention set and are left to
+/// an admin, like legacy dumps. <c>@</c> occurs in neither a container nor a database name, so the split is
 /// unambiguous.</item>
 /// <item><c>{database}_{yyyyMMdd}_{HHmmss}.sql[.gz]</c>, the format before: it says nothing about the container, so such
 /// a file is <b>legacy</b> — still recognised (<see cref="IsLegacyDumpOf"/>), never counted toward a retention's keep
@@ -24,22 +26,30 @@ namespace Whiskers.Services.Database;
 /// </summary>
 public static partial class DbDumpFiles
 {
-    /// <summary>Container names longer than this are keyed by their short id instead, so a dump's file name stays
+    /// <summary>Container names longer than this are keyed by a hash of the name instead, so a dump's file name stays
     /// within 255 characters (64 + database 128 + the fixed parts).</summary>
     public const int MaxContainerKeyLength = 64;
 
-    /// <summary>The container part of a dump's file name: the container's name (stable across a re-create) when it is a
-    /// safe, short one, else its 12-character short id. Throws when neither is usable.</summary>
+    /// <summary>The container part of a dump's file name, stable across a re-create wherever the name allows it:
+    /// <list type="bullet">
+    /// <item>the container's name, when it is a safe one of at most 64 characters;</item>
+    /// <item><c>name-{16 hex}</c>, the start of the SHA-256 of the full name, for a safe longer name;</item>
+    /// <item><c>id-{12 hex}</c>, the short id, when the name is unusable (this key changes with every re-create).</item>
+    /// </list>
+    /// The prefixes keep the fallbacks apart from each other; only a container literally named like another one's
+    /// fallback key could share it. Throws when neither name nor id is usable.</summary>
     public static string ContainerKey(string? containerName, string? containerId)
     {
         var name = containerName?.TrimStart('/');
-        if (CommandOperands.IsSafeContainerRef(name) && name!.Length <= MaxContainerKeyLength) return name;
+        if (CommandOperands.IsSafeContainerRef(name))
+            return name!.Length <= MaxContainerKeyLength
+                ? name
+                : "name-" + Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name)))[..16];
         var shortId = containerId is { Length: >= 12 } ? containerId[..12] : containerId;
-        if (CommandOperands.IsSafeContainerRef(shortId) && shortId!.Length <= MaxContainerKeyLength) return shortId;
+        if (shortId is { Length: 12 } && ShortId().IsMatch(shortId)) return "id-" + shortId;
         throw new UnsafeOperandException("container", containerName ?? containerId,
-            "a dump needs a container name or id of letters, digits and _ . - (at most 64 characters)");
+            "a dump needs a container name of letters, digits and _ . - or a container id");
     }
-
     /// <summary>A new dump's file name (without <c>.gz</c>) for <paramref name="containerKey"/> and
     /// <paramref name="database"/> at <paramref name="utcNow"/>; unique even within one millisecond.</summary>
     public static string NewFileName(string containerKey, string database, DateTime utcNow)
@@ -95,4 +105,7 @@ public static partial class DbDumpFiles
 
     [GeneratedRegex(@"^(?<db>[A-Za-z0-9][A-Za-z0-9_.-]*)_[0-9]{8}_[0-9]{6}\.sql(?:\.gz)?\z")]
     private static partial Regex LegacyDumpName();
+
+    [GeneratedRegex(@"^[0-9a-f]{12}\z")]
+    private static partial Regex ShortId();
 }

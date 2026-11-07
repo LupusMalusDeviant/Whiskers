@@ -276,9 +276,9 @@ public class RootEquivalentAdminTests
     {
         var host = new RecordingHost(exitCode: 0);
         var service = new DatabaseService(host, NullLogger<DatabaseService>.Instance);
-        await service.BackupDatabaseAsync("db-1", "app_db", DatabaseType.PostgreSQL, new DatabaseCredentials { User = "app" }, "local");
+        await service.BackupDatabaseAsync("0123456789abcdef", "app_db", DatabaseType.PostgreSQL, new DatabaseCredentials { User = "app" }, "local");
         var copy = Assert.Single(host.Commands, c => c.StartsWith("docker cp -- ", StringComparison.Ordinal));
-        Assert.Matches(@"backups/db-1@app_db_\d{8}_\d{9}_[0-9a-f]{8}\.sql' 2>&1\z", copy);
+        Assert.Matches(@"backups/id-0123456789ab@app_db_\d{8}_\d{9}_[0-9a-f]{8}\.sql' 2>&1\z", copy);
         // The container's name, when given, keys the dump (stable across a re-create); an unusable one is never used.
         await service.BackupDatabaseAsync("0123456789abcdef", "app", DatabaseType.PostgreSQL, new DatabaseCredentials { User = "app" }, "local", "shop-db");
         Assert.Contains(host.Commands, c => c.StartsWith("docker cp -- ", StringComparison.Ordinal) && c.Contains("backups/shop-db@app_"));

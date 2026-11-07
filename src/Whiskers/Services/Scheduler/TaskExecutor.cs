@@ -348,10 +348,15 @@ public class TaskExecutor : ITaskExecutor
                         if (!listing.Success) return listing;
                         if (listing.OutputTruncated)
                         {
-                            // A cut listing may lack dumps, so which ones are the newest is unknown: prune nothing.
+                            // A cut listing may lack dumps, so which ones are the newest is unknown: prune nothing, and
+                            // fail the call so the decision is not recorded as a retention that happened.
                             _logger.LogWarning("DB-backup retention for task {Name} pruned nothing: the listing of {Dir} was truncated",
                                 task.Name, _hostBackupDir);
-                            return listing;
+                            return new CommandResult
+                            {
+                                ExitCode = 1, OutputTruncated = true,
+                                Error = "the backup directory's listing was truncated; nothing was pruned.",
+                            };
                         }
                         return await _executor.ExecuteMutationAsync(sid,
                             RetentionCommandFor(_hostBackupDir, DbDumpFiles.ToPrune(listing.Output, containerKey!, dbName, maxBackups)),

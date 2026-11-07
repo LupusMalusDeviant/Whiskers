@@ -21,7 +21,8 @@ All notable changes to Whiskers are documented here. The format follows
   `{db}_{yyyyMMdd}_{HHmmss}.sql`. The DB-backup retention removed the oldest dumps of every database whose name started
   with the task's (`app` also pruned `app_db`) and of a same-named database in every other container on the server, and
   two dumps in the same second overwrote each other; it now prunes only the task's container's dumps of exactly that
-  database. Dumps in the old format are kept: a retention neither counts nor deletes them. The AI
+  database. Dumps in the old format, and older dumps of a renamed container, are kept: a retention neither counts nor
+  deletes them. A container name longer than 64 characters is keyed by a hash of the name. The AI
   Operations page saves a preset as the signed-in user's own level instead of a fixed Admin.
 - **Pages take their role from the capability catalog (INV-13, R1-05).** Every role check in front of a capability
   asks `CapabilityCatalog.RoleOf` instead of naming a role; no page helper takes a role any more, the three reads a

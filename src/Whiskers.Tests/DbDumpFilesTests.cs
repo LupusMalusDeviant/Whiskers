@@ -108,16 +108,30 @@ public class DbDumpFilesTests
     [Theory]
     [InlineData("web-db-1", "0123456789abcdef", "web-db-1")]
     [InlineData("/web-db-1", "0123456789abcdef", "web-db-1")]
-    [InlineData(null, "0123456789abcdef0123", "0123456789ab")]
-    [InlineData("-rf", "0123456789abcdef", "0123456789ab")]
-    public void The_container_key_is_the_name_else_the_short_id(string? name, string id, string expected) =>
+    [InlineData(null, "0123456789abcdef0123", "id-0123456789ab")]
+    [InlineData("-rf", "0123456789abcdef", "id-0123456789ab")]
+    public void The_container_key_is_the_name_else_the_prefixed_short_id(string? name, string id, string expected) =>
         Assert.Equal(expected, DbDumpFiles.ContainerKey(name, id));
 
     [Fact]
-    public void A_long_name_falls_back_to_the_short_id_and_no_usable_one_is_refused()
+    public void A_long_name_is_keyed_by_a_hash_of_the_whole_name_that_survives_a_re_create()
     {
-        Assert.Equal("0123456789ab", DbDumpFiles.ContainerKey(new string('n', 65), "0123456789abcdef"));
+        // INV-19 review round 4 (m2): a re-created container keeps its name, not its id; two long names that only share
+        // their start get two keys.
+        var name = "my-very-long-compose-project-name-for-the-shop-" + new string('x', 30) + "-postgres-1";
+        var key = DbDumpFiles.ContainerKey(name, "0123456789abcdef");
+
+        Assert.Matches(@"^name-[0-9a-f]{16}\z", key);
+        Assert.Equal(key, DbDumpFiles.ContainerKey(name, "fedcba9876543210"));
+        Assert.NotEqual(key, DbDumpFiles.ContainerKey(name[..^1] + "2", "0123456789abcdef"));
+        Assert.True(DbDumpFiles.IsDumpOf(DbDumpFiles.NewFileName(key, "app", DateTime.UtcNow), key, "app"));
+    }
+
+    [Fact]
+    public void A_container_without_a_usable_name_or_id_is_refused()
+    {
         Assert.Throws<UnsafeOperandException>(() => DbDumpFiles.ContainerKey("a b", "--x"));
+        Assert.Throws<UnsafeOperandException>(() => DbDumpFiles.ContainerKey(null, "not-an-id-at-all"));
         Assert.Throws<UnsafeOperandException>(() => DbDumpFiles.NewFileName("web", "-app", DateTime.UtcNow));
         Assert.Throws<UnsafeOperandException>(() => DbDumpFiles.NewFileName("a@b", "app", DateTime.UtcNow));
     }

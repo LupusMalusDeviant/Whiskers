@@ -149,8 +149,15 @@ public sealed partial class DbBackupDeleteVerifier(IServiceProvider services) : 
         // filters it: exactly this container's dumps of this database in the current format (DbDumpFiles.DumpsOf;
         // legacy dumps are never pruned, so never counted). A backup taken meanwhile can make a legitimate retention
         // look short; that race is accepted: it fails towards "check again", never towards success.
-        var listing = await VerifierSupport.HostOutputAsync(Services, RequireServer(context), DbDumpFiles.ListingCommand(dir), ct);
-        var left = DbDumpFiles.DumpsOf(listing, container, database).Count;
+        var read = await VerifierSupport.HostReadAsync(Services, RequireServer(context), DbDumpFiles.ListingCommand(dir), ct);
+        if (!read.Success)
+            throw new MutationVerificationFailedException(
+                $"the backup directory could not be listed (exit code {read.ExitCode}).", stateUnknown: true);
+        // A cut listing hides names, so too few dumps would look like a retention that worked.
+        if (read.OutputTruncated)
+            throw new MutationVerificationFailedException(
+                "the backup directory's listing was truncated; the dumps left cannot be counted.", stateUnknown: true);
+        var left = DbDumpFiles.DumpsOf(read.Output, container, database).Count;
         if (left > keep)
             throw new MutationVerificationFailedException(
                 $"{left} dumps of '{database}' in '{container}' remain, more than the {keep} kept.");

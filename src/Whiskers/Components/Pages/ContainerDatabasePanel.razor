@@ -1009,12 +1009,13 @@ else
             var containerId = ContainerId;
             var dbType = _container.DatabaseType;
             var containerName = _container.Name;
+            var dockerId = _container.Id;   // the resolved id, not the route parameter (a name): it runs the dump and backs the key
             var creds = State.DbCreds;
             var sid = _resolvedServerId;
             var (success, filePath, size, error) = await Mutations.RunAsync("db.backup", new { containerId, serverId = sid, database = db },
                 async _ =>
                 {
-                    var backup = await DatabaseService.BackupDatabaseAsync(containerId, db, dbType, creds, sid, containerName);
+                    var backup = await DatabaseService.BackupDatabaseAsync(dockerId, db, dbType, creds, sid, containerName);
                     if (backup.Success) MutationScope.Note($"Backup file: {backup.FilePath} ({backup.SizeBytes} bytes)");
                     return backup;
                 });
