@@ -279,7 +279,10 @@ public class WebhookService : IWebhookService
     private async Task<WebhookAcceptance> QueueAsync(WebhookEntity webhook, string key, string? sourceIp,
         TaskCompletionSource<RunEnd>? completion, CancellationToken ct)
     {
-        if (!_slots.Wait(0))
+        // Stopping (review round 8, NIT-1): no worker takes a run any more, so a new delivery is not recorded at all —
+        // answered busy like a full queue, the provider may deliver it again to the next start. No slot is taken.
+        var stopping = _stopping.IsCancellationRequested;
+        if (stopping || !_slots.Wait(0))
         {
             // Full. A delivery seen before still gets its run; a new one is not recorded — the provider may retry.
             // One left unaccepted (or accepted here, its answer lost) runs only if a delivery takes it over, which needs
@@ -288,7 +291,10 @@ public class WebhookService : IWebhookService
             if (known is not null && !_deliveries.Orphaned(known) && !_deliveries.Admitting(known)
                 && !_deliveries.AwaitingReconcile(known))
                 return Repeat(webhook, known);
-            _logger.LogWarning("Webhook {Name}: the delivery queue is full; refused as busy", webhook.Name);
+            if (stopping)
+                _logger.LogWarning("Webhook {Name}: Whiskers is stopping; the delivery is refused as busy", webhook.Name);
+            else
+                _logger.LogWarning("Webhook {Name}: the delivery queue is full; refused as busy", webhook.Name);
             return new WebhookAcceptance(WebhookReply.Busy);
         }
 
@@ -350,7 +356,8 @@ public class WebhookService : IWebhookService
         _queue.Writer.TryWrite(new QueuedRun(webhook.WebhookId, row.RunId, row.Instance, sourceIp));
         _deliveries.Enqueued(row.Instance);
         RunEnqueued?.Invoke(row.RunId);
-        // Queued while Whiskers stops: no worker takes it any more; a Test waiting for it is told now.
+        // Queued while Whiskers began to stop (after the check above): no worker takes it any more; a Test waiting for
+        // it is told now.
         if (_stopping.IsCancellationRequested) TellWaitingAtStop();
         _logger.LogInformation("Webhook {Name}: delivery accepted as run {RunId}", webhook.Name, row.RunId);
         return new WebhookAcceptance(WebhookReply.Accepted, row.RunId, "queued");
@@ -423,12 +430,12 @@ public class WebhookService : IWebhookService
     /// <summary>At a stop (review round 7, MINOR-1): takes every run still in the queue out of it — no worker will take
     /// it; it stays queued in the database under its live claim and the next start reconciles it — and tells a page's
     /// Test waiting for it that Whiskers is stopping. A run is in the queue or taken by a worker, never both, so every
-    /// waiting Test is told once: by the worker that took its run, or here.</summary>
+    /// waiting Test is told once: by the worker that took its run, or here. The drained runs keep their queue slots
+    /// (review round 8, NIT-1): the drain does not lift the queue limit.</summary>
     private void TellWaitingAtStop()
     {
         while (_queue.Reader.TryRead(out var left))
         {
-            _slots.Release();
             if (_waiting.TryRemove(left.RunId, out var waiting))
                 waiting.TrySetResult(new RunEnd(false, Stopping, null));
         }
@@ -659,6 +666,11 @@ public class WebhookService : IWebhookService
     /// <summary>What a page's Test waiting for a run hears when Whiskers stops before the run started.</summary>
     internal const string Stopping =
         "Whiskers is stopping: the delivery is queued and is settled at the next start; its action did not run.";
+
+    /// <summary>What a page's Test hears when it is triggered while Whiskers stops: nothing is recorded, nothing runs
+    /// (review round 8, NIT-1).</summary>
+    internal const string StoppingNotAccepted =
+        "Whiskers is stopping: the test delivery was not accepted and nothing ran; try again after the restart.";
 
     /// <summary>Raised with the run id when a give-up returns unsettled because Whiskers is stopping (its claim stays
     /// held) — a signal for tests, nothing acts on it.</summary>
@@ -1578,6 +1590,8 @@ public class WebhookService : IWebhookService
         if (key is null) return (false, Text("Webhook_Test_Invalid", "The test delivery was not valid: {0}", problem!));
         var completion = new TaskCompletionSource<RunEnd>(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepted = await QueueAsync(webhook, key, request.SourceIp, completion, CancellationToken.None);
+        if (accepted.Reply == WebhookReply.Busy && _stopping.IsCancellationRequested)
+            return (false, StoppingNotAccepted);
         if (accepted.Reply != WebhookReply.Accepted)
             return (false, accepted.Reply == WebhookReply.Busy
                 ? Text("Webhook_Test_Busy", "The delivery queue is full; try again shortly.")

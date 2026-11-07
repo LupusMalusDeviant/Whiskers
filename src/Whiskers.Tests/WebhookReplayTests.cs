@@ -845,11 +845,13 @@ public sealed class WebhookReplayTests : IDisposable
         var queuedRunId = await enqueued.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         stop.Cancel();
-        _runner.Release();
 
-        var (success, output) = await test.WaitAsync(TimeSpan.FromSeconds(10));   // told now, not at its timeout
+        // Told while the run still holds the only worker (review round 8, MINOR-1): no worker had to come back for it.
+        var (success, output) = await test.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False(success);
         Assert.Equal(WebhookService.Stopping, output);
+        Assert.Equal(1, _runner.Runs);
+        _runner.Release();
         await Finished(running.RunId!);
         Assert.Equal(1, _runner.Runs);   // only the run that was already running
         Assert.Equal("Queued", (await Delivery(queuedRunId)).State);
@@ -860,37 +862,100 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(1, _runner.Runs);
     }
 
-    /// <summary>Review round 7 (MINOR-1): at a stop every page Test waiting for a run is told at once — also with one
-    /// worker busy and one idle and two Tests waiting: the one the idle worker took (waiting for the busy target) ends at
-    /// the stop, the one still in the queue is told that Whiskers is stopping — both before the busy run ends. Neither
-    /// runs.</summary>
+    /// <summary>Review rounds 7 and 8 (MINOR-1): at a stop every page Test waiting for a run is told at once, also while
+    /// every worker is busy. A stop cuts a running action loose from its worker while an overdue slot is free, so the
+    /// two overdue slots are taken first (two actions past their time, handed over); then both workers hold an action
+    /// that keeps them whatever the stop (no overdue slot free), and two Tests wait in the queue. At the stop both are
+    /// told that Whiskers is stopping before any held action ends — no worker comes back for them. Their rows stay
+    /// queued and the next start records each once as not run; neither runs. A Test triggered after the stop is not
+    /// accepted: nothing is recorded, nothing runs (round 8, NIT-1).</summary>
     [Fact]
     public async Task Every_test_waiting_at_a_stop_is_told_at_once()
     {
+        RecordRefusals();
         _options.MaxConcurrentRuns = 2;
-        var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
-        var firstTest = Seed(WebhookSignatures.Whiskers, target: "web-1");
-        var secondTest = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        // Long enough for a healthy run's own lookups on a loaded CI runner (as in the overdue tests above).
+        _options.RunTimeout = TimeSpan.FromMilliseconds(1500);
+        var holders = Enumerable.Range(1, 4).Select(i => Seed(WebhookSignatures.Whiskers, target: $"web-{i}")).ToArray();
+        var firstTest = Seed(WebhookSignatures.Whiskers, target: "web-5");
+        var secondTest = Seed(WebhookSignatures.Whiskers, target: "web-5");
+        var lateTest = Seed(WebhookSignatures.Whiskers, target: "web-5");
         using var stop = new CancellationTokenSource();
         var service = Service(stop: stop);
         _runner.Hold();
-        await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0325"));
-        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));   // one worker busy, one idle
+        var held = new List<string>();
+        // The first two run past their time and are handed over: both overdue slots taken, both workers free again.
+        foreach (var (wh, i) in holders.Take(2).Select((w, i) => (w, i)))
+            held.Add((await service.AcceptAsync(wh.WebhookId, Signed(wh, $"delivery-03{25 + i}"))).RunId!);
+        await Until(() => _runner.Runs == 2);
+        // The next two take both workers and keep them: no overdue slot is free for them.
+        foreach (var (wh, i) in holders.Skip(2).Select((w, i) => (w, i)))
+            held.Add((await service.AcceptAsync(wh.WebhookId, Signed(wh, $"delivery-03{27 + i}"))).RunId!);
+        await Until(() => _runner.Runs == 4);   // both workers busy
         var enqueued = new System.Collections.Concurrent.ConcurrentQueue<string>();
         service.RunEnqueued += enqueued.Enqueue;
         var first = service.TriggerSignedTestAsync(firstTest.WebhookId);
-        await Until(() => enqueued.Count == 1);
         var second = service.TriggerSignedTestAsync(secondTest.WebhookId);
         await Until(() => enqueued.Count == 2);
 
         stop.Cancel();
 
-        // Both answered while the busy run still holds its worker: no worker had to come back for them.
+        // Both answered while every held action still runs and keeps its worker.
         var answers = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.All(answers, a => Assert.False(a.Success));
-        Assert.Contains(answers, a => a.Output == WebhookService.Stopping);
-        Assert.Equal(1, _runner.Runs);
+        Assert.Equal([(false, WebhookService.Stopping), (false, WebhookService.Stopping)], answers);
+        Assert.Equal(4, _runner.Runs);
+        var queued = enqueued.ToArray();
+        foreach (var runId in queued) Assert.Equal("Queued", (await Delivery(runId)).State);
+
+        // Triggered after the stop: not accepted, not recorded, not run.
+        Assert.Equal((false, WebhookService.StoppingNotAccepted),
+            await service.TriggerSignedTestAsync(lateTest.WebhookId).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(2, enqueued.Count);
+        using (var scope = _sp.CreateScope())
+            Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries
+                .CountAsync(d => d.WebhookId == lateTest.WebhookId));
+
         _runner.Release();
+        foreach (var runId in held) await Finished(runId);
+        Assert.Equal(4, _runner.Runs);
+
+        Assert.Equal(2, await Service().ReconcileAsync());   // the next start: each queued Test once
+        foreach (var runId in queued)
+        {
+            Assert.Equal("Failed", (await Delivery(runId)).State);
+            await NotRunAsync(runId, "container.restart", targetId: "web-5");
+        }
+        Assert.Equal(4, _runner.Runs);
+    }
+
+    /// <summary>Review round 8 (NIT-1): while Whiskers stops, a new delivery is answered busy and not recorded — the
+    /// provider may deliver it again to the next start — although the queue has room; the drain of the queue at the stop
+    /// does not lift its limit. A delivery seen before is still answered as its duplicate.</summary>
+    [Fact]
+    public async Task A_delivery_while_stopping_is_busy_and_not_recorded()
+    {
+        _options.QueueCapacity = 4;
+        var wh = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        using var stop = new CancellationTokenSource();
+        var service = Service(stop: stop);
+        _runner.Hold();
+        var before = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0327"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+
+        stop.Cancel();
+        var during = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0328"));
+        var repeat = await service.AcceptAsync(wh.WebhookId, Signed(wh, "delivery-0327"));
+
+        Assert.Equal(WebhookReply.Busy, during.Reply);
+        Assert.Null(during.RunId);
+        Assert.Equal(WebhookReply.Duplicate, repeat.Reply);
+        Assert.Equal(before.RunId, repeat.RunId);
+        using (var scope = _sp.CreateScope())
+            Assert.Equal([before.RunId], await scope.ServiceProvider.GetRequiredService<MetricsDbContext>()
+                .WebhookDeliveries.Where(d => d.WebhookId == wh.WebhookId).Select(d => d.RunId).ToListAsync());
+        _runner.Release();
+        await Finished(before.RunId!);
+        Assert.Equal(1, _runner.Runs);
     }
 
     /// <summary>INV-45 (review round 6, MINOR-3): the interleaving the key closes — the next start's reconciliation

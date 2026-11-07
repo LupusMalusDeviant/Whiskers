@@ -12,6 +12,11 @@ namespace Whiskers.Services.Mutations;
 /// </summary>
 public interface IMutationGateway
 {
+    /// <summary>
+    /// Runs the whole pipeline for one attempt. A request carrying an <see cref="MutationRequest.EventKey"/> is
+    /// rejected with <see cref="ArgumentException"/> before anything is decided or run: a key is honoured only for a
+    /// refusal (<see cref="RefuseAsync"/>, INV-45).
+    /// </summary>
     Task<MutationOutcome<T>> ExecuteAsync<T>(
         MutationRequest request,
         Func<MutationContext, CancellationToken, Task<T>> execute,
@@ -21,7 +26,8 @@ public interface IMutationGateway
     /// Steps 1–5 without executing (R1-12): authorizes, resolves the target, asks the policy and records the decision
     /// (INV-22); a refusal is audited as in <see cref="ExecuteAsync{T}"/>. An agent session uses it before it pauses
     /// for an approval or reports a block, so the approval names a recorded decision and a block is on record. Null
-    /// from a gateway that cannot decide on its own (test doubles).
+    /// from a gateway that cannot decide on its own (test doubles). A request carrying an
+    /// <see cref="MutationRequest.EventKey"/> is rejected with <see cref="ArgumentException"/> (INV-45).
     /// </summary>
     Task<MutationDecisionResult?> DecideAsync(MutationRequest request, CancellationToken ct = default) =>
         Task.FromResult<MutationDecisionResult?>(null);

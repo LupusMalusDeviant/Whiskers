@@ -67,7 +67,7 @@ gateway's refusal is settled refused and not logged again (its run did); a runni
 `automation_refused` notification per pass names the webhooks. A row that cannot be taken or settled is skipped, not
 the pass, and passes are retried in the background (`ReconcileRetryDelay` 5 s, doubling up to 5 minutes) until one
 completes. There is no age cut-off: retention prunes only finished rows and never-accepted `Recording` rows, so every
-left-behind queued or running row is reconciled. A worker busy at a stop takes no further queued run; at the stop the runs no worker took are taken out of the queue and every page Test waiting for one is told at once that Whiskers is stopping. Recording
+left-behind queued or running row is reconciled. A worker busy at a stop takes no further queued run; at the stop the runs no worker took are taken out of the queue and every page Test waiting for one is told at once that Whiskers is stopping (the drained runs keep their queue slots). A delivery arriving while Whiskers stops is answered `Busy` and recorded nowhere — the provider may deliver it again; a repeat of a known delivery is still its duplicate. Recording
 its outcome (only under the run's own claim, so a run a later delivery took over is never touched) and the hourly
 retention pass get a bounded time of their own the same way, and pruning runs beside the workers; the action gets the
 cancellation (the gateway, the planner and the host executor honour it); an action that still does not stop keeps its
