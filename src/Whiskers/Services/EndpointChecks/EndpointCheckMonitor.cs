@@ -145,6 +145,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
             // own level (Admin, root-equivalent). Only a row written past the store can have none.
             if (string.IsNullOrWhiteSpace(check.OwnerId))
             {
+                await RefuseRunAsync(check, "The check has no owner; an Admin must save it again before it runs.", ct);
                 await SuspendAsync(check, "it has no owner", ct);
                 return;
             }
@@ -152,6 +153,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
             // INV-04: an owner who lost the authority suspends the check instead of running it.
             if (_automation.LostAuthority(EndpointCheckRunner.ActorOf(check), "endpointcheck.run") is { } lost)
             {
+                await RefuseRunAsync(check, $"Refused: {lost}.", ct);
                 await SuspendAsync(check, lost, ct);
                 return;
             }
@@ -178,6 +180,23 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         finally
         {
             _slots.Release(check.Id);
+        }
+    }
+
+    /// <summary>A due run the monitor refuses before the gateway — no owner, an owner who lost the authority — is
+    /// recorded as the gateway's Denied event for <c>endpointcheck.run</c>, so the attempt is on record exactly once
+    /// (INV-45, as the VPN bring-up does, R1-43). Nothing runs.</summary>
+    private async Task RefuseRunAsync(EndpointCheckDefinition check, string reason, CancellationToken ct)
+    {
+        try
+        {
+            await _automation.RefuseAsync(EndpointCheckRunner.ActorOf(check), "endpointcheck.run",
+                new { serverId = check.ServerId, checkId = check.Id }, reason, ct);
+        }
+        catch (Exception ex) when (!IsHostStopping(ex, ct))
+        {
+            // The refusal stands either way; the audit trail's own failure is reported by the gateway.
+            _logger.LogError(ex, "The refused run of endpoint check {Check} could not be recorded", check.Name);
         }
     }
 

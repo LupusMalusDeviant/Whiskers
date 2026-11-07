@@ -197,8 +197,13 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
             {
                 // A broken owner file must not read as "no owner" (that would be the grace period): fail closed.
                 if (_owners.IsBlocked(IAutomationOwnerStore.AutoUpdate))
-                    throw new InvalidOperationException(
-                        "AutoUpdate is blocked (its owner could not be read or lost their authority); take it over again in Settings → Automation owners.");
+                {
+                    const string blocked =
+                        "AutoUpdate is blocked (its owner could not be read or lost their authority); take it over again in Settings → Automation owners.";
+                    // INV-45: the refused attempt is on record as the gateway's Denied event, at read level (R1-43).
+                    await RefuseBlockedAsync(container, blocked, ct);
+                    throw new InvalidOperationException(blocked);
+                }
 
                 var progress = new Progress<string>(msg => _logger.LogDebug("Update {Container}: {Msg}", container.Name, msg));
                 // Through the gateway on the authority of the admin who took AutoUpdate over (PC-D6), re-checked
@@ -356,6 +361,23 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
 
     /// <summary>Tells the admins that AutoUpdate was suspended and how to take it over (R1-04). An administrative
     /// event: no container mute or update preference hides it.</summary>
+    /// <summary>An update refused before the gateway because the owner entry is blocked: recorded as the gateway's Denied
+    /// event for <c>container.update</c> of that container, at read level, so the attempt is on record exactly once
+    /// (INV-45, as the VPN bring-up does, R1-43). Nothing runs.</summary>
+    private async Task RefuseBlockedAsync(ContainerInfo container, string reason, CancellationToken ct)
+    {
+        try
+        {
+            await _automation.RefuseAsync(new AutomationActor("autoupdate", "AutoUpdate", null), "container.update",
+                new { containerId = container.Id, name = container.Name, serverId = container.ServerId }, reason, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The refusal stands either way; the audit trail's own failure is reported by the gateway.
+            _logger.LogError(ex, "The refused auto-update of {Container} could not be recorded", container.Name);
+        }
+    }
+
     private async Task NotifySuspendedAsync(string lost, bool saved)
     {
         try

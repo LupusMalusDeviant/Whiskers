@@ -410,7 +410,11 @@ public class WebhookService : IWebhookService
                     await Bounded(async t =>
                     {
                         if (await _deliveries.StartAsync(run.RunId, run.Claim, t))
+                        {
+                            // INV-45: the delivery ends before its decision; its action did not run.
+                            if (queued is not null) await RecordNotRunAsync(queued, run.RunId, noTurn.Item2, t);
                             await FinishAsync(run, queued, noTurn, WebhookDeliveryStore.Failed);
+                        }
                         return true;
                     }, bookkeeping.Token);
                     return;
@@ -439,6 +443,8 @@ public class WebhookService : IWebhookService
                 // Removed, switched off or pointed elsewhere while it waited: it does not run.
                 message = new("Webhook_Run_Changed",
                     "Refused: the webhook was removed, switched off or changed before the delivery ran.", []);
+                // INV-45: the accepted delivery is refused before its decision — on record as the delivery it was.
+                if ((queued ?? webhook) is { } accepted) await RecordNotRunAsync(accepted, run.RunId, message.English, ct);
                 result = await FinishAsync(run, webhook, (false, message.English), WebhookDeliveryStore.Refused);
                 return;
             }
@@ -869,7 +875,13 @@ public class WebhookService : IWebhookService
                 break;
             }
             default:
-                return (false, $"Unknown action: {webhook.Action}", true);
+            {
+                // INV-45: a stored action none of the four is refused before any decision — on record all the same,
+                // under its raw name, which the gateway refuses as no capability.
+                var unknown = $"Unknown action: {webhook.Action}";
+                await RecordNotRunAsync(webhook, runId, unknown, ct);
+                return (false, unknown, true);
+            }
         }
 
         var refused = outcome.Error as MutationRefusedException;
@@ -898,6 +910,47 @@ public class WebhookService : IWebhookService
         await NotifyAsync(scope, NotificationEventTypes.AutomationRefused, webhook,
             $"Webhook \"{webhook.Name}\" was called, but its action did not run. {reason}");
         return (false, $"Refused: {reason}", true);
+    }
+
+    /// <summary>The capability a webhook action is decided as; <c>null</c> for an action that is none of the four.</summary>
+    internal static string? CapabilityOf(string? action) => action switch
+    {
+        "restart" => "container.restart",
+        "rebuild" => "container.update",
+        "deploy" => "compose.deploy",
+        "git-deploy" => "gitdeploy.deploy",
+        _ => null,
+    };
+
+    /// <summary>
+    /// INV-45: an accepted delivery that ends before its decision — its webhook changed, switched off or removed while
+    /// it waited, no turn on its target in time, an action none of the four — is recorded as the gateway's Denied event
+    /// of the delivery's operation (its run id), on the webhook owner's authority as for a run, so every accepted
+    /// delivery is exactly one event. Its action did not run. A delivery refused at acceptance (unknown id, switched
+    /// off, a signature that does not verify) is no attempt: nothing authenticated it.
+    /// </summary>
+    private async Task RecordNotRunAsync(WebhookEntity webhook, string runId, string reason, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            if (scope.ServiceProvider.GetService<IAutomationMutationRunner>() is not { } automation) return;
+            var sid = WebhookTargets.ServerOf(webhook);
+            object arguments = webhook.Action switch
+            {
+                "deploy" => new { projectDir = webhook.TargetId, serverId = sid },
+                "git-deploy" => new { appId = webhook.TargetId, serverId = sid },
+                _ => new { containerId = webhook.TargetId, name = webhook.TargetId, serverId = sid },
+            };
+            await automation.RefuseAsync(ActorOf(webhook) with { OperationId = runId },
+                CapabilityOf(webhook.Action) ?? (string.IsNullOrWhiteSpace(webhook.Action) ? "(no action)" : webhook.Action),
+                arguments, reason, ct);
+        }
+        catch (Exception ex)
+        {
+            // The delivery stays refused; the audit trail's own failure is reported by the gateway.
+            _logger.LogWarning(ex, "Webhook {Name}: the delivery that did not run could not be recorded", webhook.Name);
+        }
     }
 
     /// <summary>What the action acts on, looked up before the decision. A lookup that throws (a removed server, an

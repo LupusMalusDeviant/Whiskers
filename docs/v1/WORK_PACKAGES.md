@@ -357,10 +357,16 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `AuditCompletenessTests` checks every required field for allowed, denied, pending and failed attempts.
+- [x] `AuditCompletenessTests` checks every required field for allowed, denied, pending and failed attempts.
 - [ ] `AuditFailClosedTests` proves no execution or configuration publication without durable intent.
 - [ ] Required security fields cannot disappear through string truncation.
 - [ ] Outcome-write failure leaves a recoverable incomplete operation and a visible health condition.
+
+> INV-45 ✅ (WP5 path matrix): `AuditPathMatrixTests` reads every row of `PRODUCT_CONTRACT.md` §7 and requires a
+> test that drives it against a real `AuditLog` for each outcome it can have (one complete event per attempt), or an
+> exemption with the record that pins it. Four paths that refused themselves before the gateway wrote no event —
+> AutoPatch nights without an owner, AutoUpdate with a blocked owner entry, endpoint-check runs the monitor refused,
+> webhook deliveries that ended before their decision — and now record the gateway's Denied event.
 
 **Out of scope:** Hash-chain construction and all caller migrations.
 

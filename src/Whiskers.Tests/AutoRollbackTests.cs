@@ -53,6 +53,15 @@ public sealed class AutoRollbackTests : IDisposable
 
     internal VerificationOutcomeTests.StatefulDocker Docker => _docker;
 
+    /// <summary>INV-45: the gateway writes its events as <c>AuditLog</c> rows into this fixture's database.</summary>
+    internal bool Trail { get; init; }
+
+    /// <summary>The kill switch is on for the runs of this fixture.</summary>
+    internal bool KillSwitch { get; init; }
+
+    /// <summary>The AutoUpdate owner store the service reads.</summary>
+    internal MemoryAutomationOwners Owners { get; } = new();
+
     internal IServiceScopeFactory Scopes => _sp.GetRequiredService<IServiceScopeFactory>();
 
     /// <summary>The service with an opt-in policy for "web"; with <paramref name="second"/> also one for a second
@@ -97,7 +106,7 @@ public sealed class AutoRollbackTests : IDisposable
                 new ContainerInfo { Id = SecondId, Name = second, ServerId = "local", Image = "api:latest", State = "running" },
             ]);
         }
-        var owners = new MemoryAutomationOwners();
+        var owners = Owners;
         await owners.SetAsync(IAutomationOwnerStore.AutoUpdate, "user:admin@example.com");
         return new AutoUpdateService(_sp.GetRequiredService<IServiceScopeFactory>(), _service, updates,
             notifications ?? new FakeNotifications(), null!, Runner(), owners, NullLogger<AutoUpdateService>.Instance,
@@ -111,13 +120,16 @@ public sealed class AutoRollbackTests : IDisposable
         f.Roles.Map["admin@example.com"] = AppRole.Admin;
         var policy = GuardrailPolicy.SafeDefault();
         policy.ProtectedResources = [];
+        policy.ReadOnlyMode = KillSwitch;
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         var verifiers = VerificationOutcomeTests.Verifiers(new ServiceCollection().AddSingleton(_service).BuildServiceProvider());
-        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
-            new AgentToolTestHelpers.NullMutationAudit(), verifiers, NullLogger<MutationGateway>.Instance,
-            targets: new MutationTargetResolver(new TestServices(_service,
-                new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true }))),
-            approvals: new ApprovalGate(new ApprovalStore(), store));
+        var targets = new MutationTargetResolver(new TestServices(_service,
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Local", IsDefault = true })));
+        var gateway = Trail
+            ? AuditTrail.Gateway(Scopes, store, targets: targets, verifiers: verifiers)
+            : new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
+                new AgentToolTestHelpers.NullMutationAudit(), verifiers, NullLogger<MutationGateway>.Instance,
+                targets: targets, approvals: new ApprovalGate(new ApprovalStore(), store));
         return new AutomationMutationRunner(gateway, new CapabilityCatalog(),
             new AutomationOwnerResolver(f.Roles, f.Whitelist, f.Keys, f.Accounts),
             new StaticOptionsMonitor<AutomationOptions>(f.Options));
@@ -481,6 +493,51 @@ public sealed class AutoRollbackTests : IDisposable
         var (history, _, snapshots) = await ResultAsync();
         Assert.True(history.Success);
         Assert.Equal(1, snapshots);
+    }
+
+    /// <summary>INV-45, S-02: each automatic update is one complete <c>container.update</c> event on the owner's
+    /// authority — executed (verified), failed (the recreate threw), refused by the kill switch, refused because the
+    /// owner entry is blocked (found by the path matrix: that refusal wrote no event).</summary>
+    [Fact]
+    [AuditPath("S-02", AuditTrail.Executed, AuditTrail.Denied, AuditTrail.Failed)]
+    public async Task An_automatic_update_is_one_complete_event_per_attempt()
+    {
+        static async Task<List<AuditLogEntity>> AttemptAsync(bool killSwitch, Action<AutoRollbackTests> arrange)
+        {
+            using var f = new AutoRollbackTests { Trail = true, KillSwitch = killSwitch };
+            var service = await f.ServiceAsync(autoRollback: false);
+            arrange(f);
+            var rows = await AuditTrail.AttemptAsync(f.Scopes, () => service.CheckAndUpdateAsync(CancellationToken.None));
+            Assert.DoesNotContain(nameof(IDockerService.RollbackContainerAsync), f.Docker.Calls);
+            return rows;
+        }
+        void Healthy(AutoRollbackTests f) => f.Docker.On[nameof(IDockerService.RecreateContainerAsync)] = _ =>
+        {
+            f.Docker.States.Remove(OldId);
+            f.Docker.States[NewId] = "running";
+            return NewId;
+        };
+
+        var executed = await AttemptAsync(false, Healthy);
+        var row = AuditTrail.One(executed, AuditTrail.Executed, "container.update", "Automation");
+        Assert.Equal("autoupdate", row.PrincipalId);
+        Assert.Equal("user:admin@example.com", row.OnBehalfOfId);
+        Assert.Equal("Verified", row.Verification);
+
+        var failed = await AttemptAsync(false, f => f.Docker.On[nameof(IDockerService.RecreateContainerAsync)] =
+            _ => throw new InvalidOperationException("the pull failed"));
+        AuditTrail.One(failed, AuditTrail.Failed, "container.update", "Automation");
+
+        var killed = await AttemptAsync(true, Healthy);
+        AuditTrail.One(killed, AuditTrail.Denied, "container.update", "Automation");
+
+        var blocked = await AttemptAsync(false, f =>
+        {
+            Healthy(f);
+            f.Owners.Blocked.Add(IAutomationOwnerStore.AutoUpdate);
+        });
+        Assert.Equal("unowned:autoupdate", AuditTrail.One(blocked, AuditTrail.Denied, "container.update", "Automation",
+            owned: false).PrincipalId);
     }
 
     private sealed class Updates : IImageUpdateStore

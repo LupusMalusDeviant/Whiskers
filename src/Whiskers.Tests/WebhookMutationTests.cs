@@ -55,6 +55,7 @@ public sealed partial class WebhookMutationTests : IDisposable
     private bool _requireOwner = true;
     private bool _dockerThrows;
     private bool _dockerTimesOut;
+    private bool _trail;
 
     private readonly McpCallOutcomeTests.RecordingAuditLog _rows = new();
 
@@ -1002,9 +1003,12 @@ public sealed partial class WebhookMutationTests : IDisposable
         policy.ReadOnlyMode = _readOnly;
         policy.ProtectedResources = _protect is null ? [] : [_protect];
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
+        var targets = new MutationTargetResolver(new TestServices(_docker, _servers, _git, Service()));
+        // INV-45: with a trail, the gateway writes its events as AuditLog rows into this fixture's database.
+        if (_trail) return AuditTrail.Gateway(_sp.GetRequiredService<IServiceScopeFactory>(), store, targets: targets);
         return new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
             NullLogger<MutationGateway>.Instance,
-            targets: new MutationTargetResolver(new TestServices(_docker, _servers, _git, Service())),
+            targets: targets,
             approvals: new ApprovalGate(new ApprovalStore(), store));
     }
 
@@ -1040,6 +1044,10 @@ public sealed partial class WebhookMutationTests : IDisposable
 
         public string? LostAuthority(AutomationActor actor, string capabilityId) =>
             build().LostAuthority(actor, capabilityId);
+
+        public Task<MutationOutcome<object?>> RefuseAsync(AutomationActor actor, string capabilityId, object arguments,
+            string reason, CancellationToken ct = default) =>
+            build().RefuseAsync(actor, capabilityId, arguments, reason, ct);
     }
 
     /// <summary>Remembers every request the gateway audits; <see cref="Fail"/> makes the intent unwritable.</summary>

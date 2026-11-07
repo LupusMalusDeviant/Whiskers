@@ -6,6 +6,11 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Every mutation attempt is one audit event on every path (INV-45).** A path-matrix test reads the rows of
+  `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can have. Refusals that
+  were made before the gateway and left no event — an AutoPatch night without an owner or with an unreadable owner
+  entry, an AutoUpdate with a blocked owner entry, an endpoint-check run the monitor refused, a webhook delivery that
+  ended before its decision — are now recorded as denied events.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,

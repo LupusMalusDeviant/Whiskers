@@ -217,21 +217,25 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     /// for tests.</summary>
     internal async Task<string?> RunNightlyAsync(CancellationToken ct)
     {
+        var dryRun = _settings.CurrentValue.DryRun;
         if (_owners.IsBlocked(IAutomationOwnerStore.AutoPatch))
         {
             _logger.LogError("Auto-patch owner could not be read; tonight's cycle did not run. Take AutoPatch over " +
                              "again in Settings → Automation owners");
-            return "Not run: the AutoPatch owner could not be read.";
+            const string blocked = "Not run: the AutoPatch owner could not be read.";
+            await RefuseNightAsync(new { dryRun }, blocked, ct);
+            return blocked;
         }
         var owner = _owners.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId;
         if (owner is null)
         {
             _logger.LogWarning("Auto-patch is switched on but no admin has taken it over (Settings → Automation); " +
                                "tonight's cycle did not run");
-            return "Not run: no admin has taken AutoPatch over.";
+            const string noOwner = "Not run: no admin has taken AutoPatch over.";
+            await RefuseNightAsync(new { dryRun }, noOwner, ct);
+            return noOwner;
         }
 
-        var dryRun = _settings.CurrentValue.DryRun;
         // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
         var actor = new AutomationActor(NightlyRunner, "AutoPatch", owner, owner);
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
@@ -248,6 +252,23 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             return $"Failed: {outcome.Reason}";
         }
         return null;
+    }
+
+    /// <summary>A night that refused itself before the gateway — no owner, an unreadable owner entry — is recorded as
+    /// the gateway's Denied event for <c>autopatch.run</c>, at read level, so the attempt is on record exactly once
+    /// (INV-45, as the VPN bring-up does, R1-43). Nothing runs.</summary>
+    private async Task RefuseNightAsync(object arguments, string reason, CancellationToken ct)
+    {
+        try
+        {
+            await _automation.RefuseAsync(new AutomationActor(NightlyRunner, "AutoPatch", null), "autopatch.run",
+                arguments, reason, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The refusal stands either way; the audit trail's own failure is reported by the gateway.
+            _logger.LogError(ex, "The refused auto-patch night could not be recorded");
+        }
     }
 
     /// <summary>The owner lost their authority (PC-D6): AutoPatch is suspended until an admin takes it over, and the

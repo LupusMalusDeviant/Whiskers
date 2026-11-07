@@ -505,6 +505,53 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal("[Webhook_Run_NoTurn]", output);
     }
 
+    /// <summary>INV-45: a delivery that never reaches its decision is still one event — refused under its own run id,
+    /// as the webhook's capability, on its owner's authority — and nothing runs.</summary>
+    [Fact]
+    public async Task A_delivery_that_got_no_turn_is_on_record_once_as_not_run()
+    {
+        _options.MaxConcurrentRuns = 2;
+        _options.RunTimeout = TimeSpan.FromSeconds(2);
+        var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var waiting = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var service = Service();
+        _runner.Hold();
+        await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0301"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var accepted = await service.AcceptAsync(waiting.WebhookId, Signed(waiting, "delivery-0302"));
+
+        Assert.Equal("Failed", (await Finished(accepted.RunId!)).State);
+        var refusal = Assert.Single(_runner.Refusals);
+        Assert.Equal(("webhook:" + waiting.WebhookId, accepted.RunId, "container.restart"),
+            (refusal.Actor.RunnerId, refusal.Actor.OperationId, refusal.Capability));
+        Assert.Equal("user:admin@example.com", refusal.Actor.OwnerId);
+        Assert.Equal(1, _runner.Runs);   // only the holder ran
+    }
+
+    [Fact]
+    public async Task A_delivery_whose_webhook_was_switched_off_while_it_waited_is_on_record_once_as_not_run()
+    {
+        _options.MaxConcurrentRuns = 2;
+        _options.RunTimeout = TimeSpan.FromSeconds(20);
+        var holder = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var waiting = Seed(WebhookSignatures.Whiskers, target: "web-1");
+        var service = Service();
+        _runner.Hold();
+        await service.AcceptAsync(holder.WebhookId, Signed(holder, "delivery-0303"));
+        await _runner.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var accepted = await service.AcceptAsync(waiting.WebhookId, Signed(waiting, "delivery-0304"));
+
+        Update(waiting.WebhookId, w => w.Enabled = false);
+        _runner.Release();
+
+        Assert.Equal("Refused", (await Finished(accepted.RunId!)).State);
+        var refusal = Assert.Single(_runner.Refusals);
+        Assert.Equal(("webhook:" + waiting.WebhookId, accepted.RunId, "container.restart"),
+            (refusal.Actor.RunnerId, refusal.Actor.OperationId, refusal.Capability));
+        Assert.Equal(1, _runner.Runs);
+    }
+
     [Fact]
     public async Task The_test_shows_a_cancelled_action_in_the_persons_language()
     {
@@ -1177,6 +1224,17 @@ public sealed class WebhookReplayTests : IDisposable
         public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
             Func<CancellationToken, Task> action, CancellationToken ct = default) =>
             throw new NotSupportedException();
+
+        /// <summary>The deliveries recorded as not run (INV-45): who, under which operation, as which capability.</summary>
+        public List<(AutomationActor Actor, string Capability, string Reason)> Refusals { get; } = [];
+
+        public Task<MutationOutcome<object?>> RefuseAsync(AutomationActor actor, string capabilityId, object arguments,
+            string reason, CancellationToken ct = default)
+        {
+            lock (Refusals) Refusals.Add((actor, capabilityId, reason));
+            return Task.FromResult(new MutationOutcome<object?>(actor.OperationId ?? "op", MutationStatus.Denied, null, reason,
+                VerificationStatus.NotRun));
+        }
     }
 
     private sealed class ThrowingStream : MemoryStream

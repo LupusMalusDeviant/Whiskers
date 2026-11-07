@@ -35,7 +35,9 @@ is locked by its id (`ServerKey`), whichever alias is stored — the id in anoth
 the action gets exactly what was found then (a compose deployment whose project changes again before it writes is
 refused). The webhook is read again once the run holds its resource: switched off, removed or
 pointed elsewhere meanwhile → refused; taken over → it runs on the new owner. `RunTimeout` bounds the run: a run that
-cannot get its resource in time fails; lookups are abandoned at the deadline (they only read); the run's database work
+cannot get its resource in time fails; a delivery that ends before its decision (no turn, changed meanwhile, an unknown
+action) is recorded as the gateway's Denied event of its run id on the webhook owner's authority (INV-45: every accepted
+delivery is one event); lookups are abandoned at the deadline (they only read); the run's database work
 (its reads and its start) and the action's own start (the owner's authority is looked up synchronously) run on the
 thread pool and are waited for only until the deadline — SQLite executes commands
 synchronously and does not cancel them — so a locked database never holds a worker past it: the run is given up
