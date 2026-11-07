@@ -38,9 +38,12 @@ All notable changes to Whiskers are documented here. The format follows
   run" and are settled failed, with a second log entry and a notification.
 - **MCP permission levels fail closed (behaviour change).** A tool whose stored required level is not `read`, `write`
   or `admin` is no longer allowed to every key (it ranked below `read`); it is allowed to none. Creating a key or
-  saving Settings → MCP with any other level — `none` in any case included — is refused. A permissions file that
-  already holds one is corrected on start and written back: such a key is switched off (level `read`, to be
-  re-enabled deliberately), such a tool is raised to `admin`. Levels written by Whiskers itself are unaffected.
+  saving Settings → MCP with any other level — `none` in any case included — is refused. A permissions file edited by
+  hand is settled on start and written back: another spelling of a level (`"Admin"`, `" write"`) is rewritten to its
+  exact form and keeps working; a level that is still unknown (`none`, anything else, empty) switches the key off
+  (level `read`, to be re-enabled deliberately) — scheduled tasks, webhooks and AutoUpdate/AutoPatch items that key
+  owns are then suspended until an admin re-enables it or takes them over — and raises the tool to `admin`. Levels
+  written by Whiskers itself are unaffected.
 - **Root-equivalent capabilities are proven Admin on every surface (INV-19 ✅).** `CapabilityCatalog.RootEquivalent`
   names the set; tests drive each member over `/mcp`, through the agent, the UI runner (pages, "Run now", host and
   container terminals), the automation runner and the scheduler's own run, and show that only Admin passes and that a

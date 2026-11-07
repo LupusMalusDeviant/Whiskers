@@ -57,8 +57,10 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
             // be shown again. Keys are created in the UI (Settings → MCP) and displayed once to their creator.
             changed |= MigratePlaintextKeys(data);
 
-            changed |= EnforceCodeFloor(data);
+            // Spellings first, then the floor: a level read case- or space-insensitively elsewhere is kept as written
+            // (canonical form), only a value still unknown is made fail-closed — and admin is never below a floor.
             changed |= EnforceKnownLevels(data);
+            changed |= EnforceCodeFloor(data);
 
             if (changed)
                 await _store.SaveAsync(data);
@@ -269,16 +271,29 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         return raised;
     }
 
-    /// <summary>A file written by hand (or before this check) may hold a level that is not read / write / admin —
-    /// <c>none</c> included, which elsewhere would read as <c>read</c>. Made fail-closed on load and written back:
-    /// such a key is switched off (its level set to <c>read</c>, so an admin sees it and must re-enable it with a
-    /// level deliberately); such a tool is raised to <c>admin</c> (a code floor, where one exists, is applied first).
+    /// <summary>A file written by hand (or before this check) may hold a level that is not exactly read / write /
+    /// admin. Settled on load, before the code floor, and written back:
+    /// <list type="bullet">
+    /// <item>Another spelling of one of them (<c>"Admin"</c>, <c>" write"</c>) — which the rest of the code already
+    /// read as that level — is rewritten to its exact form: the key or tool keeps working as before.</item>
+    /// <item>A value that is still unknown (<c>none</c>, anything else, empty) is made fail-closed: such a key is
+    /// switched off (its level set to <c>read</c>, so an admin re-enables it with a level deliberately; automations
+    /// it owns are suspended meanwhile), such a tool is raised to <c>admin</c>, which no code floor exceeds.</item>
+    /// </list>
     /// Returns whether anything changed.</summary>
     internal bool EnforceKnownLevels(McpPermissionData data)
     {
         var changed = false;
         foreach (var key in data.ApiKeys.Where(k => !McpPermissionLevels.IsKnown(k.PermissionLevel)))
         {
+            if (Canonical(key.PermissionLevel) is { } level)
+            {
+                _logger.LogInformation("MCP key {Name}: stored level {Stored} rewritten as {Level}", key.Name,
+                    key.PermissionLevel, level);
+                key.PermissionLevel = level;
+                changed = true;
+                continue;
+            }
             _logger.LogWarning("MCP key {Name}: stored level {Level} is not read, write or admin — switched off",
                 key.Name, key.PermissionLevel);
             key.PermissionLevel = McpPermissionLevels.Read;
@@ -287,6 +302,14 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         }
         foreach (var (tool, config) in data.Tools.Where(t => !McpPermissionLevels.IsKnown(t.Value.RequiredLevel)))
         {
+            if (Canonical(config.RequiredLevel) is { } level)
+            {
+                _logger.LogInformation("MCP tool {Tool}: stored level {Stored} rewritten as {Level}", tool,
+                    config.RequiredLevel, level);
+                config.RequiredLevel = level;
+                changed = true;
+                continue;
+            }
             _logger.LogWarning("MCP tool {Tool}: stored level {Level} is not read, write or admin — raised to admin",
                 tool, config.RequiredLevel);
             config.RequiredLevel = McpPermissionLevels.Admin;
@@ -294,6 +317,10 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         }
         return changed;
     }
+
+    /// <summary>The exact form of another spelling of read / write / admin, or <c>null</c> when it is none of them.</summary>
+    private static string? Canonical(string? level) =>
+        level?.Trim().ToLowerInvariant() is { } lowered && McpPermissionLevels.IsKnown(lowered) ? lowered : null;
 
     /// <summary>Refuses a level that is not exactly read / write / admin — <c>none</c> in any case included: no key
     /// and no tool is stored at a level the checks would not read as written.</summary>

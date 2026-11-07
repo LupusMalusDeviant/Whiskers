@@ -187,8 +187,8 @@ public sealed class McpPermissionServiceTests : IDisposable
     }
 
     /// <summary>INV-45 review round 14 (NIT-2): a file that already holds such a level is made fail-closed on load
-    /// and written back — the key is switched off (level read, so an admin re-enables it deliberately), a tool without
-    /// a code floor is raised to admin.</summary>
+    /// and written back — the key is switched off (level read, so an admin re-enables it deliberately), a tool is
+    /// raised to admin, also one with a lower code floor (the unknown value is settled before the floor).</summary>
     [Fact]
     public async Task A_stored_unknown_level_is_made_fail_closed_on_load()
     {
@@ -196,7 +196,8 @@ public sealed class McpPermissionServiceTests : IDisposable
         var paths = new DataPathOptions(_dir);
         await File.WriteAllTextAsync(paths.McpPermissionsJson, """
             {"ApiKeys":[{"Id":"k1","Name":"legacy","KeyHash":"00","KeyHint":"","PermissionLevel":"None","Enabled":true}],
-             "Tools":{"retired_tool":{"Enabled":true,"RequiredLevel":"none","Category":"Other"}}}
+             "Tools":{"retired_tool":{"Enabled":true,"RequiredLevel":"none","Category":"Other"},
+                      "start_container":{"Enabled":true,"RequiredLevel":"bogus","Category":"Container"}}}
             """);
 
         var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
@@ -206,9 +207,42 @@ public sealed class McpPermissionServiceTests : IDisposable
         Assert.False(data.ApiKeys[0].Enabled);
         Assert.Equal(McpPermissionLevels.Read, data.ApiKeys[0].PermissionLevel);
         Assert.Equal(McpPermissionLevels.Admin, data.Tools["retired_tool"].RequiredLevel);
+        Assert.Equal(McpPermissionLevels.Admin, data.Tools["start_container"].RequiredLevel);   // not its write floor
         var file = await File.ReadAllTextAsync(paths.McpPermissionsJson);
         Assert.DoesNotContain("\"None\"", file);
         Assert.DoesNotContain("\"none\"", file);
+    }
+
+    /// <summary>INV-45 review round 15 (MINOR-1): another spelling of a known level — which the rest of the code
+    /// already read as that level — is not a reason to switch a key off: on load it is rewritten to its exact form and
+    /// keeps working, on a key and on a tool (also a tool with a code floor, which a wrong spelling used to drop to the
+    /// floor).</summary>
+    [Fact]
+    public async Task Another_spelling_of_a_known_level_is_rewritten_on_load_not_switched_off()
+    {
+        Directory.CreateDirectory(_dir);
+        var paths = new DataPathOptions(_dir);
+        await File.WriteAllTextAsync(paths.McpPermissionsJson, """
+            {"ApiKeys":[
+               {"Id":"k1","Name":"upper","KeyHash":"00","KeyHint":"","PermissionLevel":"Admin","Enabled":true},
+               {"Id":"k2","Name":"spaced","KeyHash":"01","KeyHint":"","PermissionLevel":" write","Enabled":true}],
+             "Tools":{
+               "list_servers":{"Enabled":true,"RequiredLevel":"Admin","Category":"Server"},
+               "retired_tool":{"Enabled":true,"RequiredLevel":" write","Category":"Other"}}}
+            """);
+
+        var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
+        await svc.InitializeAsync();
+
+        var data = svc.GetPermissionData();
+        Assert.All(data.ApiKeys, k => Assert.True(k.Enabled, k.Name));
+        Assert.Equal(McpPermissionLevels.Admin, data.ApiKeys.Single(k => k.Id == "k1").PermissionLevel);
+        Assert.Equal(McpPermissionLevels.Write, data.ApiKeys.Single(k => k.Id == "k2").PermissionLevel);
+        Assert.Equal(McpPermissionLevels.Admin, data.Tools["list_servers"].RequiredLevel);   // read floor: admin kept
+        Assert.Equal(McpPermissionLevels.Write, data.Tools["retired_tool"].RequiredLevel);
+        var file = await File.ReadAllTextAsync(paths.McpPermissionsJson);
+        Assert.DoesNotMatch("\"(PermissionLevel|RequiredLevel)\":\\s*\"(Admin| write)\"", file);   // written back exactly
+        Assert.Matches("\"PermissionLevel\":\\s*\"admin\"", file);
     }
 
     private sealed class ListLogger<T> : ILogger<T>

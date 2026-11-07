@@ -44,8 +44,9 @@ public static class McpPermissionLevels
     /// <item>The Mutation Gateway refuses a principal at this level, in any case, for every capability, before any
     /// other check (<see cref="IsNone"/>); it is never normalised to read there.</item>
     /// <item><c>McpPermissionService</c> never stores it: adding or saving a key or a tool at a level other than
-    /// read / write / admin is rejected, and a file holding one is made fail-closed on load (the key switched off,
-    /// the tool raised to admin).</item>
+    /// read / write / admin is rejected; on load another spelling of one of them is rewritten to its exact form, and
+    /// a value still unknown — <c>none</c> included — is made fail-closed (the key switched off, the tool raised to
+    /// admin).</item>
     /// </list>
     /// Elsewhere — <see cref="Normalize"/>, <see cref="GetRank"/> — it reads as any unknown level.</summary>
     public const string None = "none";
