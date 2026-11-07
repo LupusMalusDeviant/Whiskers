@@ -557,6 +557,15 @@ public sealed class WebhookReplayTests : IDisposable
     /// <summary>What a worker's read of a webhook contains.</summary>
     private const string WebhookReads = "FROM \"Webhooks\"";
 
+    /// <summary>How long a test waits for a page Test's answer while it holds the database's lock or a blocked action:
+    /// a guard against a hang only, never what the test proves. While a lock is held, SQLite busy-waits on pool
+    /// threads (a start, a give-up's record, a pruning pass), so on a loaded runner the answer can take seconds to be
+    /// scheduled; the tests prove "came back before the database (or the action) did" by order, not by time: the
+    /// locked command waits without a timeout until the test unlocks it, and a blocked action until it is unblocked.
+    /// Longer than SQLite's 30 s busy timeout of the other commands waiting meanwhile, after which their threads are
+    /// free again.</summary>
+    private static readonly TimeSpan HangGuard = TimeSpan.FromSeconds(60);
+
     private static async Task Until(Func<bool> condition)
     {
         var until = DateTime.UtcNow.AddSeconds(10);
@@ -707,7 +716,10 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service();
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
-        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(TimeSpan.FromSeconds(5));
+        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(HangGuard);
+        // Answered while its start still waited for the lock: the start lands only after the deadline.
+        Assert.Equal(1, _faults.Tripped);
+        Assert.False(_faults.LockedCommandEnded);
         Assert.False(success);
         _faults.Unlock();
         string runId;
@@ -1494,10 +1506,13 @@ public sealed class WebhookReplayTests : IDisposable
         // its own 30 s timeout) and does not cancel.
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
-        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(TimeSpan.FromSeconds(5));
+        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(HangGuard);
 
-        // The worker came back within the deadline, not the database's timeout; once the lock is gone the start
-        // that landed late is recorded as failed — the run never ran.
+        // The worker came back within the deadline, not the database's timeout — proven by order: its start was still
+        // waiting for the lock when it answered. Once the lock is gone the start that landed late is recorded as
+        // failed — the run never ran.
+        Assert.Equal(1, _faults.Tripped);
+        Assert.False(_faults.LockedCommandEnded);
         Assert.False(success);
         _faults.Unlock();
         string runId;
@@ -1517,8 +1532,9 @@ public sealed class WebhookReplayTests : IDisposable
         _runner.BlockSynchronously = true;
 
         // The run is past its time while its owner's authority is still being looked up: it is handed over (it
-        // keeps its server) and the worker comes back.
-        var (success, output) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(TimeSpan.FromSeconds(5));
+        // keeps its server) and the worker comes back — by order: the action is still blocked (it is unblocked only
+        // below), so an answer at all, and "overdue", shows the worker did not wait for it.
+        var (success, output) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(HangGuard);
 
         Assert.False(success);
         Assert.Equal("[Webhook_Run_Overdue]", output);
@@ -1832,6 +1848,39 @@ public sealed class WebhookReplayTests : IDisposable
             _runWrites.Count(c => fragments.All(f => c.Contains(f, StringComparison.Ordinal)));
 
         private Microsoft.Data.Sqlite.SqliteConnection? _locker;
+        private DbCommand? _locked;
+        private int _lockedEnded;
+
+        /// <summary>Whether the command a <see cref="Fault.LockDatabase"/> lock was taken for has ended (executed or
+        /// failed). It waits without a timeout while the lock is held — so a run that was answered while this is false
+        /// came back before the database did, whatever the time it took.</summary>
+        public bool LockedCommandEnded => Volatile.Read(ref _lockedEnded) == 1;
+
+        private void Ended(DbCommand command)
+        {
+            if (ReferenceEquals(command, Volatile.Read(ref _locked))) Volatile.Write(ref _lockedEnded, 1);
+        }
+
+        public override ValueTask<int> NonQueryExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            int result, CancellationToken ct = default)
+        {
+            Ended(command);
+            return ValueTask.FromResult(result);
+        }
+
+        public override int NonQueryExecuted(DbCommand command, CommandExecutedEventData eventData, int result)
+        {
+            Ended(command);
+            return result;
+        }
+
+        public override Task CommandFailedAsync(DbCommand command, CommandErrorEventData eventData, CancellationToken ct = default)
+        {
+            Ended(command);
+            return Task.CompletedTask;
+        }
+
+        public override void CommandFailed(DbCommand command, CommandErrorEventData eventData) => Ended(command);
 
         /// <summary>Ends a <see cref="Fault.LockDatabase"/> lock (closing the connection rolls it back).</summary>
         public void Unlock() => Interlocked.Exchange(ref _locker, null)?.Dispose();
@@ -1922,6 +1971,10 @@ public sealed class WebhookReplayTests : IDisposable
                         begin.ExecuteNonQuery();
                     }
                     _locker = locker;
+                    Volatile.Write(ref _locked, command);
+                    // This command waits for the lock until the test lets it go — not SQLite's 30 s: "answered before
+                    // the database did" then holds however slowly a loaded runner schedules the answer.
+                    command.CommandTimeout = 0;
                     break;
                 }
                 case Fault.Steal:
