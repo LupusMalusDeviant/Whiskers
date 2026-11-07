@@ -38,7 +38,7 @@ Highest invariant ID: INV-62
 |---|---|---|---|---|
 | INV-01 | ⚠️ | R1-03 | webhook and system principals come with their packages; humans are keyed by the account handle, not the credential | — |
 | INV-13 | ⚠️ | R1-05 | some pages still hard-code their role instead of taking it from the capability table | — |
-| INV-17 | ⚠️ | WP10 | no handler-level test pins the Servers pause/resume page (U-22) and the firewall dialog (U-15) | — |
+| INV-17 | ⚠️ | WP10 | U-15/U-22 are pinned; clearing the notification log and the manual CVE scan mutate shared state without a role check of their own (required role = the open INV-18 decision) | — |
 | INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |
 | INV-19 | ⚠️ | WP2 | root-equivalent capabilities are Admin, not yet proven for every surface | — |
 | INV-21 | ⚠️ | WP6 | the kill-switch wire test `ReadOnlyKillSwitchWireTests` is still owed | — |

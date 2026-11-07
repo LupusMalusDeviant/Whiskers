@@ -6,6 +6,9 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Tests: the Servers pause/resume handlers and the firewall rule dialog are pinned at handler level (INV-17).** A role
+  below the catalog level is refused at the click, recorded as Denied and never reaches the service. INV-17 stays ⚠️:
+  clearing the notification log and the manual CVE scan have no role check of their own (open INV-18 decision).
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,
