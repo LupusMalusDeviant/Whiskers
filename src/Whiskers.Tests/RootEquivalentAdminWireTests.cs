@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Whiskers.Models;
 using Whiskers.Models.Agent;
 using Whiskers.Services.Agent;
+using Whiskers.Services.Agent.Triggers;
 using Whiskers.Services.Guardrails;
 using Whiskers.Services.Mcp;
 using Whiskers.Services.Mutations;
@@ -120,12 +121,22 @@ public class RootEquivalentAdminWireTests
         // (instruct_agent) and an AI trigger — are held to the same level: at Write every member is refused by it.
         var permissions = host.Factory.Services.GetRequiredService<IMcpPermissionService>();
         var writeKey = await GatewayArrange.RunAsync("mcp.key_create", () => permissions.AddApiKeyAsync("agent-write-key", McpPermissionLevels.Write));
+        // Review NIT5: the trigger's level is the one BeginRunAsync hands a stored-shape trigger owned by the Admin key
+        // with a Write grant: the grant's cap, not the owner's Admin level, is what reaches the gateway.
+        var trigger = new AiTrigger
+        {
+            Id = "trigger-nightly", Name = "nightly", OwnerId = PrincipalIds.Key(host.ApiKeyId),
+            WriteCapabilities = ["container.restart"], WriteTargets = ["*"],
+        };
+        var run = await host.Factory.Services.GetRequiredService<IAiTriggerAuthority>().BeginRunAsync(trigger);
+        Assert.Null(run.Refusal);
+        Assert.Equal(McpPermissionLevels.Write, run.Level);
         var others = new[]
         {
             new AgentContext("s-key", new AgentPrincipal(AgentPrincipalKind.McpKey, "agent-write-key", McpPermissionLevels.Write,
                 null, McpKeyId: writeKey.Id), AgentOrigin.McpTool, guardrails.Current),
             new AgentContext("s-trigger", new AgentPrincipal(AgentPrincipalKind.Trigger, "AI trigger 'nightly'",
-                McpPermissionLevels.Write, null, TriggerId: "trigger-1"), AgentOrigin.Trigger, guardrails.Current),
+                run.Level, null, TriggerId: trigger.Id), AgentOrigin.Trigger, guardrails.Current),
         };
         foreach (var context in others)
             foreach (var tool in tools)
@@ -307,6 +318,11 @@ public class RootEquivalentAdminWireTests
                 .Where(r => r.Action == "host.exec" && r.PrincipalId == "task:" + task.TaskId).ToList());
             Assert.Equal(nameof(MutationSurface.Automation), row.Surface);
             AssertDecided(row, decisions, level, $"stored command task owned by a {level} key");
+            // An owner below Admin lost the authority for it: the task is suspended (PC-D6). The Admin-owned one was
+            // refused by policy (the kill switch), which suspends nothing.
+            var stored = db.Context.ScheduledTasks.Single(t => t.TaskId == task.TaskId);
+            Assert.True(stored.Enabled == (level == McpPermissionLevels.Admin),
+                $"the {level}-owned task is {(stored.Enabled ? "enabled" : "suspended")}");
         }
     }
 
@@ -367,11 +383,17 @@ public class RootEquivalentAdminWireTests
         var task = new ScheduledTaskEntity
         {
             Name = "nightly command", CronExpression = "0 2 * * *", TaskType = ScheduledTaskType.CustomCommand,
-            // Off, so the hosted scheduler never fires it itself if a run spans 02:00 UTC (review m4); the paths under test
-            // (the tools, "Run now", the executor) read the stored task whatever its switch says.
-            Enabled = false, ServerId = "local", Config = "{\"command\":\"id\"}", CreatedBy = owner, CreatedVia = owner,
+            ServerId = "local", Config = "{\"command\":\"id\"}", CreatedBy = owner, CreatedVia = owner,
         };
         await GatewayArrange.RunAsync("scheduler.create", () => scheduler.CreateTaskAsync(task));
+        // Enabled, but due only in the far future: the hosted scheduler never fires it itself (a run spanning 02:00 UTC
+        // would add a second run), and a refused run still takes the real suspension path (review round 2).
+        using (var db = host.Db())
+        {
+            var stored = db.Context.ScheduledTasks.Single(t => t.TaskId == task.TaskId);
+            stored.NextRun = new DateTime(9999, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            await db.Context.SaveChangesAsync();
+        }
         return task.TaskId;
     }
 

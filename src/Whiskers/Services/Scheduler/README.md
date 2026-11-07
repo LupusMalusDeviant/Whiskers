@@ -14,7 +14,7 @@ Cron-style **scheduled tasks**. A background scheduler fires due tasks, and an e
 ## Security & retention notes
 
 - **`CustomCommand` requires Admin.** A `CustomCommand` task runs an arbitrary command through the same host executor as `execute_command` (root on the host for `serverId=local`). Creating or manually running such a task via MCP therefore requires the `execute_command` (Admin) permission, not just the `Write`-level scheduler permission — otherwise the Admin gate on `execute_command` could be bypassed.
-- **Backup retention** deletes are scoped to the task's own server (`ServerId ?? "local"`) so a same-named volume on another host is never affected. `DbBackup` retention prunes host dump files `{db}_{timestamp}.sql*` in `/app/data/backups`; the DB name is charset-validated before it enters the shell.
+- **Backup retention** deletes are scoped to the task's own server (`ServerId ?? "local"`) so a same-named volume on another host is never affected. `DbBackup` retention prunes the host dump files of exactly that database (`DbDumpFiles`: `{db}_{yyyyMMdd}_{HHmmss}.sql[.gz]`, never a prefix match, so `app` leaves `app_db`'s dumps alone) in `/app/data/backups`: it lists the directory and removes the chosen names quoted; the DB name passes `CommandOperands.IsSafeDatabaseName` first, the same set its verifier accepts.
 
 ## Wiring
 

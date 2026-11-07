@@ -185,7 +185,7 @@ public class RootEquivalentAdminTests
         string[] fixedCommands =
         [
             "host.prune",         // TaskExecutor.CleanupCommandFor: docker rm of listed ids (quoted), image / builder prune
-            "db.backup_delete",   // TaskExecutor.ApplyRetention: ls | tail | rm of dumps, name checked against SafeDbName
+            "db.backup_delete",   // TaskExecutor.ApplyRetention: ls of the backup dir, rm of exactly that database's quoted dump names (DbDumpFiles)
         ];
         var outside = MutationCompositions.RawHostCommands.Where(c => !CapabilityCatalog.RootEquivalent.Contains(c))
             .Order(StringComparer.Ordinal).ToArray();

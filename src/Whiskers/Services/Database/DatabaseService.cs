@@ -241,13 +241,13 @@ public class DatabaseService : IDatabaseService
         _ => new[] { "echo", "Unsupported database type" }
     };
 
-    /// <summary>POSIX single-quote escaping for values interpolated into a <c>sh -c</c> string.</summary>
     /// <summary>INV-19: the one check for a database name before it becomes a client operand or part of a host file
     /// name (<see cref="CommandOperands.RequireDatabaseName"/>; for MongoDB without '.'). Throws
     /// <see cref="UnsafeOperandException"/>; nothing has run then.</summary>
     public static string CheckDatabaseName(string? database, DatabaseType dbType) =>
         CommandOperands.RequireDatabaseName(database, mongo: dbType == DatabaseType.MongoDB);
 
+    /// <summary>POSIX single-quote escaping for values interpolated into a <c>sh -c</c> string.</summary>
     private static string Sq(string? s) => "'" + (s ?? "").Replace("'", "'\\''") + "'";
 
     private static string[] BuildMysqlCmd(DatabaseCredentials creds, params string[] extraArgs)

@@ -684,8 +684,10 @@ public class ReadBackVerificationTests
     }
 
     [Theory]
-    [InlineData(0, "app_1.sql.gz\napp_2.sql.gz\nother_1.sql.gz\napp-old.txt\n", true, false)]
-    [InlineData(0, "app_1.sql.gz\napp_2.sql.gz\napp_3.sql\n", false, false)]
+    [InlineData(0, "app_20261107_010101.sql.gz\napp_20261106_010101.sql.gz\nother_20261105_010101.sql.gz\napp-old.txt\n", true, false)]
+    // another database whose name starts with the task's is not counted (nor pruned: DbDumpFilesTests)
+    [InlineData(0, "app_20261107_010101.sql\napp_20261106_010101.sql\napp_db_20261105_010101.sql\napp_db_20261104_010101.sql\n", true, false)]
+    [InlineData(0, "app_20261107_010101.sql.gz\napp_20261106_010101.sql.gz\napp_20261105_010101.sql\n", false, false)]
     [InlineData(2, "", false, true)]   // the directory could not be listed: never "nothing left"
     public async Task A_dump_retention_must_leave_no_more_than_it_keeps(int exit, string listing, bool verified, bool stateUnknown)
     {

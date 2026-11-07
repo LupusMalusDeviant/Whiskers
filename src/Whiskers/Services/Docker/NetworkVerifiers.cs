@@ -131,7 +131,7 @@ public sealed partial class ComposeDeployVerifier(IServiceProvider services) : S
     private const string ServiceLabel = "com.docker.compose.service";
 
     // Compose project names: letters (compose lower-cases them), digits, dash and underscore, starting with a letter or digit.
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9_-]*$")]
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_-]*\z")]
     private static partial Regex ComposeProjectName();
 
     private static bool Up(ContainerInfo c) =>

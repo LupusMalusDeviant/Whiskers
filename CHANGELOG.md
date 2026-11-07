@@ -15,7 +15,9 @@ All notable changes to Whiskers are documented here. The format follows
   the container, and in a backup (Admin) it could be a dump-tool option or put the dump, written as root, outside the
   backup directory. Every database path (listings, query, backup, import, the scheduled DB backup) now requires a name
   that starts with a letter or digit and uses only letters, digits and `_ . -` (for MongoDB no `.`). Name checks of
-  volumes, services, certificates, sites and compose projects no longer accept a trailing line break. The AI
+  volumes, services, certificates, sites, compose projects, networks and autopatch containers no longer accept a trailing
+  line break. The DB-backup retention removed the oldest dumps of every database whose name starts with the task's
+  (`app` also pruned `app_db`); it now matches the exact database name. The AI
   Operations page saves a preset as the signed-in user's own level instead of a fixed Admin.
 - **Pages take their role from the capability catalog (INV-13, R1-05).** Every role check in front of a capability
   asks `CapabilityCatalog.RoleOf` instead of naming a role; no page helper takes a role any more, the three reads a

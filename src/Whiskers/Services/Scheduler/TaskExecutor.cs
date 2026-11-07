@@ -240,6 +240,13 @@ public class TaskExecutor : ITaskExecutor
         return (result.Success, result.Success ? $"Cleanup done:\n{result.Output}" : result.Error);
     }
 
+    /// <summary>What a DB-backup retention runs: <c>rm -f</c> of exactly the listed dump files in the backup directory,
+    /// each quoted; <c>true</c> when none is due.</summary>
+    public static string RetentionCommandFor(string backupDir, IReadOnlyList<string> dumps) =>
+        dumps.Count == 0
+            ? "true"
+            : "rm -f -- " + string.Join(' ', dumps.Select(f => Whiskers.Utils.ShellUtils.Quote(backupDir + "/" + f)));
+
     /// <summary>What a cleanup task runs: the decided stopped containers by id (<c>docker rm</c> without force: one
     /// that runs again is not removed), dangling images, build cache — no networks, no volumes.</summary>
     public static string CleanupCommandFor(IReadOnlyList<string> containerIds)
@@ -317,20 +324,27 @@ public class TaskExecutor : ITaskExecutor
             }
             else if (task.TaskType == ScheduledTaskType.DbBackup && !string.IsNullOrWhiteSpace(dbName))
             {
-                // DB dumps are host files named "{db}_{timestamp}.sql[.gz]" and are not tracked in the DB,
-                // so prune them on the host. Validate the DB name to a safe charset before it enters the shell.
-                if (!SafeDbName.IsMatch(dbName))
+                // DB dumps are host files named "{db}_{timestamp}.sql[.gz]" and are not tracked in the DB, so they are
+                // pruned on the host — exactly this database's (DbDumpFiles.IsDumpOf), never another one whose name
+                // starts the same ("app" vs "app_db"). The name is checked like every database name (INV-19).
+                if (!Whiskers.Utils.CommandOperands.IsSafeDatabaseName(dbName))
                 {
                     _logger.LogWarning("DB-backup retention skipped for task {Name}: unsafe database name '{Db}'", task.Name, dbName);
                     return;
                 }
                 var sid = ScheduledTaskServer.Of(task);
-                var glob = $"{_hostBackupDir}/{dbName}_*.sql*";
-                var script = $"ls -1t {glob} 2>/dev/null | tail -n +{maxBackups + 1} | xargs -r rm -f";
                 // Deleting dumps is its own decision, taken now: the owner may have lost the right since the backup.
                 var outcome = await _automation.RunAsync(ActorOf(task), "db.backup_delete",
                     new { containerId = task.TargetId, database = dbName, keep = maxBackups, serverId = ScheduledTaskServer.Of(task) },
-                    _ => _executor.ExecuteMutationAsync(sid, script, TimeSpan.FromSeconds(15)));
+                    async _ =>
+                    {
+                        var listing = await _executor.ExecuteMutationAsync(sid,
+                            $"ls -1t -- {Whiskers.Utils.ShellUtils.Quote(_hostBackupDir)} 2>/dev/null || true", TimeSpan.FromSeconds(15));
+                        if (!listing.Success) return listing;
+                        return await _executor.ExecuteMutationAsync(sid,
+                            RetentionCommandFor(_hostBackupDir, DbDumpFiles.ToPrune(listing.Output, dbName, maxBackups)),
+                            TimeSpan.FromSeconds(15));
+                    });
                 if (Problem(outcome, "db.backup_delete") is { } problem)
                     _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);
             }
@@ -457,11 +471,6 @@ public class TaskExecutor : ITaskExecutor
             _logger.LogWarning(ex, "Notification for refused task {Name} failed", task.Name);
         }
     }
-
-    // DB name embedded into a host shell glob for retention pruning: alphanumeric start, then
-    // alphanumerics plus _ . - only. Anything else is rejected (no pruning) rather than risking injection.
-    private static readonly System.Text.RegularExpressions.Regex SafeDbName =
-        new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*\z", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     /// <summary>The command of a custom-command task, or <c>null</c>.</summary>
     public static string? CommandOf(ScheduledTaskEntity task) =>

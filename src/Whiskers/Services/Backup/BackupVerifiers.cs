@@ -140,23 +140,18 @@ public sealed partial class DbBackupDeleteVerifier(IServiceProvider services) : 
         var database = VerifierSupport.Arg(context, "database");
         var keep = VerifierSupport.LongArg(context, "keep");
         if (database is null || keep is null) throw new MutationNotVerifiableException(BackupReadBack.RunNow);
-        if (!SafeDb().IsMatch(database))
+        if (!Whiskers.Utils.CommandOperands.IsSafeDatabaseName(database))
             throw new MutationNotVerifiableException("the call named no valid database to read back.");
         var dir = Services.GetRequiredService<DataPathOptions>().BackupsDir;
-        // The directory is listed as a whole (a glob that matches nothing is no error, an unreadable directory is) and
-        // filtered like the retention's glob {database}_*.sql*. A backup taken meanwhile can make a legitimate
+        // The directory is listed as a whole (an unreadable directory is an error) and filtered as the retention
+        // filters it: exactly this database's dumps (DbDumpFiles.IsDumpOf). A backup taken meanwhile can make a legitimate
         // retention look short; that race is accepted: it fails towards "check again", never towards success.
         var listing = await VerifierSupport.HostOutputAsync(Services, RequireServer(context), $"ls -1 {ShellUtils.Quote(dir)}", ct);
         var left = listing.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Count(f => f.StartsWith(database + "_", StringComparison.Ordinal)
-                        && f.IndexOf(".sql", database.Length + 1, StringComparison.Ordinal) >= 0);
+            .Count(f => Whiskers.Services.Database.DbDumpFiles.IsDumpOf(f, database));
         if (left > keep)
             throw new MutationVerificationFailedException($"{left} dumps of '{database}' remain, more than the {keep} kept.");
     }
-
-    // The same charset the retention itself accepts before the name enters a shell glob.
-    [GeneratedRegex(@"^[A-Za-z0-9_-]+\z")]
-    private static partial Regex SafeDb();
 }
 
 /// <summary>volume.backup: the archive is recorded and on the host, not empty.</summary>
