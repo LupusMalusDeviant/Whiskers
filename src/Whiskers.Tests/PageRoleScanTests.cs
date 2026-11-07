@@ -31,7 +31,8 @@ namespace Whiskers.Tests;
 /// injected one;</item>
 /// <item>every <c>Require…Async</c> helper asks <c>CapabilityCatalog.RoleOf(capabilityId)</c> (Scheduled tasks'
 /// <c>RequireRoleAsync</c> aside), so a name alone never counts as a check; a <c>Require…Async</c> call that is
-/// qualified or does not name such a method of the file (a delegate field) is a finding;</item>
+/// qualified (also through <c>?.</c> or <c>!.</c>) or does not name such a method of the file (a delegate field) is a
+/// finding;</item>
 /// <item>a member that runs a capability neither holds a listed line nor reaches, over the graph, a member holding one
 /// (except over the pinned <see cref="ReachListed"/> lines; data defaults in <see cref="ListedData"/> are not
 /// followed), a read role or a role-taking display helper;</item>
@@ -39,11 +40,13 @@ namespace Whiskers.Tests;
 /// default over the whole code region: outside their assignment and declaration they appear only on listed lines in
 /// members that run no capability, or — for a gate decided for a catalog id — as <c>if (!gate)</c> in a handler;</item>
 /// <item>a handler's literal catalog check (<c>RequireAsync("id")</c>, <c>RoleOf("id")</c> in a comparison or
-/// <c>HasRoleAsync</c>, such a gate — in its own body or in members it branches on, <c>if (!X)</c> / <c>if (X …)</c>,
-/// that run nothing; a member it merely calls, a reload after the run, is not its check) is at least the
-/// strictest literal capability id it runs, through same-file helpers and known helpers of other files;</item>
-/// <item>a role-typed <c>[Parameter]</c> / <c>[CascadingParameter]</c> is a listed line, the attribute on the same
-/// line or its own;</item>
+/// <c>HasRoleAsync</c>, such a gate — in its own body or in members that run nothing and that it names in the condition
+/// of an <c>if</c> / <c>while</c>, and from those on only members they in turn name in such a condition or return; a
+/// member it merely calls, a reload after the run, is not its check) is at least the strictest literal capability id
+/// it runs, through same-file helpers and known helpers of other files;</item>
+/// <item>a role-typed <c>[Parameter]</c> / <c>[CascadingParameter]</c> (qualified, with or without
+/// <c>Attribute</c>, anywhere in the attribute list; the type qualified or <c>global::</c>) is a listed line, the
+/// attribute on the same line or its own;</item>
 /// <item>the capability argument of every runner call (<c>RunAsync</c> and each <c>IUiMutationRunner</c> extension
 /// with a <c>capabilityId</c>) is a literal id, follows <c>RequireAsync(x, …)</c> / <c>RoleOf(x)</c> of that very
 /// expression earlier in the same member, comes through a hand-off parameter every caller (markup included) fills
@@ -286,6 +289,7 @@ public class PageRoleScanTests
     [InlineData("private Whiskers.Services.Mutations.IUiMutationRunner _runner = null!;")]
     [InlineData("private Task Go(IUiMutationRunner runner) => Task.CompletedTask;")]
     [InlineData("@inject IUiMutationRunner Runner")]
+    [InlineData("[Parameter] public IUiMutationRunner Mutations { get; set; }")]
     public void The_runner_declaration_scan_sees_a_second_runner(string code) => Assert.NotEmpty(RunnerDeclarations(code));
 
     [Fact]
@@ -499,7 +503,13 @@ public class PageRoleScanTests
     [InlineData("a weak own check behind a stronger one in a reload", "    private bool _mayRemove;\n    private async Task Remove()\n    {\n        if (_role < CapabilityCatalog.RoleOf(\"container.start\")) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n        await LoadAsync();\n    }\n    private async Task LoadAsync()\n    {\n        _mayRemove = await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf(\"container.remove\"));\n    }\n")]
     [InlineData("a computed id behind a tuple generic", "    private async Task Go()\n    {\n        var id = Pick();\n        await Mutations.RunAsync<(bool, string)>(id, new { }, _ => Task.FromResult((true, \"\")));\n    }\n")]
     [InlineData("the runner as a method group", "    private async Task Go()\n    {\n        Func<string, object, Func<CancellationToken, Task<bool>>, Task<bool>> f = Mutations.RunAsync<bool>;\n        await f(Pick(), new { }, _ => Task.FromResult(true));\n    }\n")]
-    [InlineData("a qualified Require…Async", "    private async Task Remove()\n    {\n        if (!await Helper.RequireConfirmAsync(\"container.remove\", new { })) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a weaker delegated check behind another operand", "    private bool _busy;\n    private bool MayRemove => _role >= CapabilityCatalog.RoleOf(\"container.start\");\n    private async Task Remove()\n    {\n        if (_busy || !MayRemove) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a weaker delegated check in parentheses", "    private async Task<bool> MayRemoveAsync() => await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf(\"container.start\"));\n    private async Task Remove()\n    {\n        if (!(await MayRemoveAsync())) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a role parameter with a qualified attribute and type", "    [Microsoft.AspNetCore.Components.ParameterAttribute]\n    public global::Whiskers.Models.AppRole Needed { get; set; }\n")]
+    [InlineData("a role parameter second in the attribute list", "    [EditorRequired, Parameter] public AppRole Needed { get; set; }\n")]
+    [InlineData("a null-conditional Require…Async", "    private async Task Remove()\n    {\n        if (!await Helper?.RequireConfirmAsync(\"container.remove\", new { })) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a null-forgiving Require…Async", "    private async Task Remove()\n    {\n        if (!await Helper!.RequireConfirmAsync(\"container.remove\", new { })) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
+    [InlineData("a qualified Require…Async","    private async Task Remove()\n    {\n        if (!await Helper.RequireConfirmAsync(\"container.remove\", new { })) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
     [InlineData("a delegate field named Require…Async", "    private Func<string, Task<bool>> RequireConfirmAsync = _ => Task.FromResult(true);\n    private async Task Remove()\n    {\n        if (!await RequireConfirmAsync(\"container.remove\")) return;\n        await Mutations.RunAsync(\"container.remove\", new { }, _ => Task.CompletedTask);\n    }\n")]
     public void The_scan_catches_a_way_around_the_catalog(string what, string code)
     {
@@ -837,7 +847,7 @@ public class PageRoleScanTests
             // A role handed in from markup is a role the page did not take from the catalog: listed, each one — with the
             // attribute on the declaration's line or on lines of its own before it.
             foreach (Match p in Regex.Matches(region.Code,
-                         @"\[\s*(?:Parameter|CascadingParameter)\b[^\]]*\]\s*(?:\[[^\]]*\]\s*)*(?:(?:public|private|protected|internal|virtual|override|required|new)\s+)*(?<type>(?:Whiskers\.Models\.)?AppRole\??)\s+\w+\s*\{"))
+                         @"\[[^\]]*?(?<![\w])(?:Parameter|CascadingParameter)(?:Attribute)?(?![\w])[^\]]*\]\s*(?:\[[^\]]*\]\s*)*(?:(?:public|private|protected|internal|virtual|override|required|new)\s+)*(?<type>(?:global::)?(?:\w+\.)*AppRole\??)\s+\w+\s*\{"))
             {
                 var at = p.Groups["type"].Index;
                 if (!allowed.Contains((NameAt(at), LineAt(at))))
@@ -846,7 +856,7 @@ public class PageRoleScanTests
 
             // Qualified or delegate `Require…Async` calls would count as a catalog check by their name alone: a check
             // helper is a member of this file.
-            foreach (Match q in Regex.Matches(region.Code, @"(?<qualifier>[\w)\]]\s*\.\s*)?(?<![\w])(?<name>Require\w*Async)\s*" + Generic + @"\s*\("))
+            foreach (Match q in Regex.Matches(region.Code, @"(?<qualifier>[\w)\]]\s*[?!]?\s*\.\s*)?(?<![\w])(?<name>Require\w*Async)\s*" + Generic + @"\s*\("))
                 if (q.Groups["qualifier"].Success || !members.Any(m => m.Name == q.Groups["name"].Value && !m.Property))
                     findings.Add($"{file}:{NameAt(q.Index)}: '{LineAt(q.Index)}' — {q.Groups["name"].Value} is not a check helper of this file");
 
@@ -973,11 +983,13 @@ public class PageRoleScanTests
                 // The literal check covers what the handler runs (literal ids, through same-file helpers too).
                 if (!running) continue;
                 // Its own body, and the members it branches on that run nothing themselves (a check delegated to a
-                // `May…` property or method of the same file: `if (!MayX)`, `if (!await MayXAsync())`), with what those
-                // reach. A member it merely calls (a reload after the run) is not its check.
+                // `May…` property or method of the same file, named anywhere in the condition of an `if` / `while`:
+                // `if (!MayX)`, `if (_busy || !MayX)`, `if (!(await MayXAsync()))`). From there, a further hop counts
+                // only a member the branched-on member itself branches on or returns. A member the handler merely
+                // calls (a reload after the run) is not its check.
                 var checkedIn = new List<Member> { member };
-                var pending = new Queue<string>(calls[member].Where(n => !runs.Contains(n)
-                    && Regex.IsMatch(member.Body, $@"\bif\s*\(\s*!?\s*(?:await\s+)?{Regex.Escape(n)}\b")));
+                var branched = ConditionNames(member.Body);
+                var pending = new Queue<string>(calls[member].Where(n => !runs.Contains(n) && branched.Contains(n)));
                 var visited = new HashSet<string>();
                 while (pending.TryDequeue(out var next))
                 {
@@ -985,7 +997,9 @@ public class PageRoleScanTests
                     foreach (var m in members.Where(mb => mb.Name == next))
                     {
                         checkedIn.Add(m);
-                        foreach (var n in calls[m].Where(n => !runs.Contains(n))) pending.Enqueue(n);
+                        var decides = ConditionNames(m.Body);
+                        decides.UnionWith(ReturnedNames(m));
+                        foreach (var n in calls[m].Where(n => !runs.Contains(n) && decides.Contains(n))) pending.Enqueue(n);
                     }
                 }
                 var guards = checkedIn.SelectMany(c => LiteralCheck.Matches(c.Body).Select(g => g.Groups["id"].Value)
@@ -1009,6 +1023,36 @@ public class PageRoleScanTests
         return findings;
     }
 
+    /// <summary>Every name inside the condition of an <c>if</c> or <c>while</c> in <paramref name="body"/> (the span from
+    /// its opening parenthesis to the matching one, strings blanked).</summary>
+    private static HashSet<string> ConditionNames(string body)
+    {
+        var skeleton = Skeleton(body);
+        var names = new HashSet<string>();
+        foreach (Match k in Regex.Matches(skeleton, @"\b(?:if|while)\s*\("))
+        {
+            var open = k.Index + k.Length - 1;
+            var close = open;
+            for (var depth = 0; close < skeleton.Length; close++)
+            {
+                if (skeleton[close] == '(') depth++;
+                else if (skeleton[close] == ')' && --depth == 0) break;
+            }
+            foreach (Match w in Regex.Matches(skeleton[open..Math.Min(close + 1, skeleton.Length)], @"(?<![\w.])\w+"))
+                names.Add(w.Value);
+        }
+        return names;
+    }
+
+    /// <summary>Every name a member returns: its whole expression body, or the expressions of its <c>return</c>
+    /// statements.</summary>
+    private static HashSet<string> ReturnedNames(Member m)
+    {
+        var skeleton = Skeleton(m.Body);
+        IEnumerable<string> parts = m.Expression ? new[] { skeleton } : Regex.Matches(skeleton, @"\breturn\b([^;]*);").Select(r => r.Groups[1].Value);
+        return parts.SelectMany(p => Regex.Matches(p, @"(?<![\w.])\w+").Select(w => w.Value)).ToHashSet();
+    }
+
     /// <summary>The name of the call whose argument list holds <paramref name="index"/> (null outside any call).</summary>
     private static string? EnclosingCall(string code, int index)
     {
@@ -1017,7 +1061,7 @@ public class PageRoleScanTests
         {
             if (skeleton[i] == ')') depth++;
             else if (skeleton[i] == '(' && depth-- == 0)
-                return Regex.Match(skeleton[..i], @"(\w+)\s*(?:<[^<>()]*>)?\s*$") is { Success: true } m ? m.Groups[1].Value : null;
+                return Regex.Match(skeleton[..i], @"(\w+)\s*" + Generic + @"\s*$") is { Success: true } m ? m.Groups[1].Value : null;
         }
         return null;
     }
@@ -1047,7 +1091,7 @@ public class PageRoleScanTests
     /// (markup included), the declaration left out.</summary>
     private static IEnumerable<string> HandOffArguments(string source, string member, int position)
     {
-        foreach (Match c in Regex.Matches(source, $@"(?<![\w.]){Regex.Escape(member)}\s*\("))
+        foreach (Match c in Regex.Matches(source, $@"(?<![\w.]){Regex.Escape(member)}\s*{Generic}\s*\("))
         {
             var open = c.Index + c.Length - 1;
             var depth = 0;
