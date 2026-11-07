@@ -82,6 +82,11 @@ built in).
   identical call (same caller, tool and arguments) runs exactly once within 10 minutes. Approving requires
   at least the level the action needs. The guardrail engine and approvals are core: they also govern
   direct MCP calls when the agent module is switched off.
+- **Read-only kill switch:** while it is on, every mutation on every path is refused and no terminal opens. The
+  exceptions are fixed in code and listed on the *Guardrails* page (contract 0009): switching it off (an Admin in the
+  UI, audited), the first-run setup while no Admin exists and the host CLIs always; a user's own password change,
+  recovery-code redemption and binding a verified Google/OIDC identity at a first sign-in unless an Admin blocked them
+  beforehand. None can be added; while the guardrail policy is fail-closed the last three are blocked.
 - **MCP API keys** are created in the web UI (*Settings → MCP*) with an explicit scope and can be disabled
   or deleted there. A key is 256 bits from a CSPRNG, shown once at creation, and **stored only as its
   SHA-256 hash**; presented keys are hashed and compared in constant time. The ServerWatch-era flat key file

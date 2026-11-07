@@ -421,8 +421,10 @@
         StateHasChanged();
     }
 
-    /// <summary>The global emergency stop (Plan-0005 WP2.4). Admin-only, and it says out loud how many
-    /// servers it just made unwatched — the number is the point, not the confirmation.</summary>
+    /// <summary>The global emergency stop (Plan-0005 WP2.4). It says out loud how many servers it just made
+    /// unwatched — the number is the point, not the confirmation. The menu is shown to Admins only, but that is
+    /// presentation: each server's pause is <c>checks.pause</c>, decided by the gateway at its catalog level (write,
+    /// PRODUCT_CONTRACT U-22, INV-17).</summary>
     private async Task PauseAll(PauseOption option)
     {
         var until = option.Duration is { } d ? DateTime.UtcNow + d : (DateTime?)null;

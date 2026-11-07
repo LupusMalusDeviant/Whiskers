@@ -87,7 +87,40 @@ public class CveModuleTests
     {
         Assert.Empty(new NoopCveFindingsStore().GetAll());
         Assert.Empty(await new NoopCveAgeStore().GetFirstSeenAsync());
-        await new NoopCveMonitorService().RunOneCycleAsync(); // completes without error
+        // Nothing is scanned with the module off: never reported as a scan that ran, and "started" is never said.
+        var started = false;
+        Assert.False(await new NoopCveMonitorService().RunOneCycleAsync(started: () => started = true));
+        Assert.False(started);
+    }
+
+    [Fact]
+    public async Task A_manual_cycle_that_finds_the_scan_gate_taken_does_nothing_and_never_says_started()
+    {
+        // The real monitor, with its scan gate already held (as by the loop's own cycle): the manual cycle returns false,
+        // never calls "started" and leaves the gate to its holder.
+        static T Null<T>() where T : class => NullProxy<T>.Create();
+        var monitor = new CveMonitorService(Null<ICveFindingsStore>(),
+            new StaticOptionsMonitor<Whiskers.Configuration.CveMonitorSettings>(new Whiskers.Configuration.CveMonitorSettings()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CveMonitorService>.Instance,
+            Null<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>(), Null<Whiskers.Services.ServerConfig.IServerConfigService>(),
+            Null<Whiskers.Services.Docker.IDockerService>(), Null<IOsCveScanner>(), Null<ITrivyScanner>(),
+            Null<Whiskers.Services.Notifications.INotificationService>(), Null<ICveAgeStore>(),
+            Null<Microsoft.AspNetCore.SignalR.IHubContext<Whiskers.Hubs.ContainerHub>>(), Null<Whiskers.Services.Metrics.IMetricsSource>());
+        var gate = typeof(CveMonitorService).GetField("_scanning",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        gate.SetValue(monitor, 1);
+        var started = false;
+
+        // Inside the person's cve.scan decision, as the pages run it: the skip is the operation's failed result.
+        using var scope = Whiskers.Services.Mutations.MutationScope.Begin("cve.scan", "op-manual-scan");
+        Assert.False(await monitor.RunOneCycleAsync(started: () => started = true));
+        Assert.False(started);
+        Assert.Equal(1, gate.GetValue(monitor));   // still held by its holder, not released by the refused call
+        var noted = Assert.Single(scope.Results);
+        Assert.False(noted.Success);
+        Assert.Equal("cve.scan", noted.Action);
+        Assert.Contains("already running", noted.Details);
+        Assert.Contains("already running", scope.FailureReason);
     }
 
     // --- Enable/disable gate -----------------------------------------------------------------------------

@@ -92,6 +92,9 @@ public class PageRoleScanTests
         ("MetricRetentionPanel.razor", "OnInitializedAsync", "if (_isAdmin) Load();"),
         ("OutboundExceptionsPanel.razor", "OnInitializedAsync", "if (!_isAdmin) return;"),
         ("QuietHoursPanel.razor", "OnInitializedAsync", "if (_isAdmin) Load();"),
+        // Settings' test-notification buttons: they change no Whiskers state and are no capability (INV-17/18, #157);
+        // the handlers ask for Admin at the click.
+        ("Settings.razor", "CanSendTestNotificationsAsync", "if (await CurrentUser.HasRoleAsync(AppRole.Admin)) return true;"),
         // Settings holds secrets: an admin-only load gate.
         ("Settings.razor", "OnInitializedAsync", "if (_role < AppRole.Admin) return;"),
         // What is shown: tabs, the first-server card, the add dialog opened from a link, masked check targets.

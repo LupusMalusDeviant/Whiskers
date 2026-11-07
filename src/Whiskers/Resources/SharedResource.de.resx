@@ -4715,6 +4715,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Cves_Snackbar_ScanFinished" xml:space="preserve">
     <value>CVE-Scan abgeschlossen.</value>
   </data>
+  <data name="Cves_Snackbar_ScanNotStarted" xml:space="preserve">
+    <value>Kein CVE-Scan gestartet: Es läuft bereits einer, oder das CVE-Modul ist ausgeschaltet.</value>
+  </data>
   <data name="Cves_Snackbar_ScanFailed" xml:space="preserve">
     <value>CVE-Scan fehlgeschlagen: {0}</value>
   </data>
@@ -5977,5 +5980,62 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Checks_Snackbar_Deleted" xml:space="preserve">
     <value>Endpunkt-Check gelöscht.</value>
+  </data>
+  <data name="KillSwitch_Blocked_Message" xml:space="preserve">
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
+  </data>
+  <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
+  </data>
+  <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
+    <value>Preset „{0}“: „{1}“ ist keine sperrbare Ausnahme des Kill-Switch. Nichts wurde gespeichert.</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Title" xml:space="preserve">
+    <value>Bei eingeschaltetem Kill-Switch weiter erlaubt</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Intro" xml:space="preserve">
+    <value>Diese Ausnahmen stehen fest im Code; keine kann hinzugefügt werden. Die letzten drei lassen sich hier vorab sperren — solange der Kill-Switch an ist, lehnt er dieses Speichern ab.</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Fixed" xml:space="preserve">
+    <value>Immer erlaubt</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Block_Label" xml:space="preserve">
+    <value>Bei eingeschaltetem Kill-Switch ebenfalls sperren</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E1_Name" xml:space="preserve">
+    <value>Kill-Switch ausschalten</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E1_Reason" xml:space="preserve">
+    <value>Der Weg aus dem Kill-Switch: ein Admin in der Oberfläche, protokolliert.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E2_Name" xml:space="preserve">
+    <value>Ersteinrichtung</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E2_Reason" xml:space="preserve">
+    <value>Läuft nur, solange es noch keinen Admin gibt; es gibt also noch nichts zu schützen.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E3_Name" xml:space="preserve">
+    <value>Kommandozeilen-Werkzeuge auf dem Host</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
+    <value>Brauchen eine Shell im Container (root-gleich). Solange Wiederherstellungscodes gesperrt sind, verlangt die Wiederherstellungs-CLI --force: stattdessen guardrails.json auf dem Host reparieren.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
+    <value>Eigenes Passwort ändern</value>
+  </data>
+  <data name="GuardrailsView_Exemption_password_change_Reason" xml:space="preserve">
+    <value>Eine Person ändert ihren eigenen Zugang; das aktuelle Passwort ist nötig.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_recovery_code_Name" xml:space="preserve">
+    <value>Wiederherstellungscode einlösen</value>
+  </data>
+  <data name="GuardrailsView_Exemption_recovery_code_Reason" xml:space="preserve">
+    <value>Stellt den eigenen Zugang einer Person mit einem Einmalcode wieder her.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_federated_binding_at_sign_in_Name" xml:space="preserve">
+    <value>Föderierte Identität bei der Anmeldung binden</value>
+  </data>
+  <data name="GuardrailsView_Exemption_federated_binding_at_sign_in_Reason" xml:space="preserve">
+    <value>Bindet eine bestätigte Google-/OIDC-Identität bei ihrer ersten Anmeldung an ein eingetragenes Konto.</value>
   </data>
 </root>

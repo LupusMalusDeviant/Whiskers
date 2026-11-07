@@ -124,6 +124,8 @@ public static class IdentityBindingErrors
     public const string AuditUnavailable = "audit_unavailable";
     public const string Conflict = "conflict";
     public const string AuthDisabled = "auth_disabled";
+    /// <summary>Contract 0009 (E6): blocked while the kill switch is on.</summary>
+    public const string KillSwitch = "kill_switch";
 }
 
 /// <summary>How a binding came about (<c>method</c> in the file).</summary>

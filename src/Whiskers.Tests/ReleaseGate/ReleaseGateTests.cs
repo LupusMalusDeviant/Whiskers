@@ -23,6 +23,17 @@ public class ReleaseGateTests
     private static readonly Lazy<GateInputs> RealInputs = new(GateFiles.Inputs);
     private static GateInputs Real => RealInputs.Value;
 
+    /// <summary>The real records with INV-18 as it stood before it was closed: ❌, counted in §11 and listed as open. The
+    /// checks that need a ❌ (R1, R2, R11, R17) use it now that the real table has none.</summary>
+    private static readonly Lazy<GateInputs> ViolatedInputs = new(() => Real with
+    {
+        Invariants = Mutate(Mutate(SetCell(Real.Invariants, "| INV-18 |", 2, "❌"),
+            "| ✅ | 53 |", "| ✅ | 52 |"), "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
+        ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-01 |",
+            "| INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |"),
+    });
+    private static GateInputs Violated => ViolatedInputs.Value;
+
     // ---- the real repository -----------------------------------------------------------------------------------
 
     [Fact]
@@ -87,12 +98,12 @@ public class ReleaseGateTests
     public void A_non_green_invariant_fails_the_release()
     {
         // Today's records in a 1.0.0 release run: every ⚠️ and the ❌ are refused.
-        var release = Evaluate(Real, GateMode.Release, V100);
+        var release = Evaluate(Violated, GateMode.Release, V100);
         Assert.Contains(release, f => f.Rule == "R1" && f.Subject == "INV-01");
         Assert.Contains(release, f => f.Rule == "R1" && f.Subject == "INV-18");
 
         // ⚠️ with a complete, accepted exception passes; ❌ fails even with a complete exception row.
-        var excepted = WithException(Real, "INV-01", "RG-1") with { };
+        var excepted = WithException(Violated, "INV-01", "RG-1") with { };
         excepted = WithException(excepted, "INV-18", "RG-2", status: "❌");
         var findings = Evaluate(excepted, GateMode.Release, V100);
         Assert.DoesNotContain(findings, f => f.Rule == "R1" && f.Subject == "INV-01");
@@ -100,9 +111,9 @@ public class ReleaseGateTests
         Assert.Contains(findings, f => f.Rule == "R11" && f.Subject == "INV-18" && f.Message.Contains("never accepted"));
 
         // ❌ with a valid known-violation record passes in a patch release (D15 c) — and never at X.Y.0.
-        Assert.DoesNotContain(Evaluate(WithKnownViolation(Real, "INV-18", "RG-1", "1.0.1"), GateMode.Release, V101),
+        Assert.DoesNotContain(Evaluate(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1"), GateMode.Release, V101),
             f => f.Rule == "R1" && f.Subject == "INV-18");
-        Assert.Contains(Evaluate(WithKnownViolation(Real, "INV-18", "RG-1", "1.0.0"), GateMode.Release, V100),
+        Assert.Contains(Evaluate(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.0"), GateMode.Release, V100),
             f => f.Rule == "R1" && f.Subject == "INV-18");
     }
 
@@ -122,7 +133,7 @@ public class ReleaseGateTests
         var stale = Real with { ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-01 |", "| INV-02 | ✅ | WP6 | done | — |") };
         Assert.Contains(Evaluate(stale, GateMode.Development, Dev), f => f.Rule == "R2" && f.Subject == "INV-02" && f.Message.Contains("✅ now"));
 
-        var wrongStatus = Real with { ReleaseGate = SetCell(Real.ReleaseGate, "| INV-18 |", 1, "⚠️") };
+        var wrongStatus = Violated with { ReleaseGate = SetCell(Violated.ReleaseGate, "| INV-18 |", 1, "⚠️") };
         Assert.Contains(Evaluate(wrongStatus, GateMode.Development, Dev), f => f.Rule == "R2" && f.Subject == "INV-18");
     }
 
@@ -130,18 +141,18 @@ public class ReleaseGateTests
     public void A_new_violation_is_mergeable_after_1_0_only_with_a_reference()
     {
         // Without a reference every open row fails in Line mode.
-        Assert.Contains(Evaluate(Real, GateMode.Line, V100), f => f.Rule == "R2" && f.Subject == "INV-18" && f.Message.Contains("reference"));
+        Assert.Contains(Evaluate(Violated, GateMode.Line, V100), f => f.Rule == "R2" && f.Subject == "INV-18" && f.Message.Contains("reference"));
 
         foreach (var reference in new[] { "GHSA-2c4m-59x8-f3xq", "https://github.com/LupusMalusDeviant/Whiskers/issues/123" })
         {
-            var referenced = Real with { ReleaseGate = SetCell(Real.ReleaseGate, "| INV-18 |", 4, reference) };
+            var referenced = Violated with { ReleaseGate = SetCell(Violated.ReleaseGate, "| INV-18 |", 4, reference) };
             Assert.DoesNotContain(Evaluate(referenced, GateMode.Line, V100), f => f.Rule == "R2" && f.Subject == "INV-18");
             // The same files cannot be released.
             Assert.Contains(Evaluate(referenced, GateMode.Release, V100), f => f.Rule == "R1" && f.Subject == "INV-18");
         }
         foreach (var bad in new[] { "#123", "GHSA-1234-5678-9abc", "https://github.com/someone/else/issues/1", "see the advisory" })
         {
-            var malformed = Real with { ReleaseGate = SetCell(Real.ReleaseGate, "| INV-18 |", 4, bad) };
+            var malformed = Violated with { ReleaseGate = SetCell(Violated.ReleaseGate, "| INV-18 |", 4, bad) };
             Assert.Contains(Evaluate(malformed, GateMode.Line, V100), f => f.Rule == "R2" && f.Subject == "INV-18");
         }
     }
@@ -180,8 +191,8 @@ public class ReleaseGateTests
         var example = Real with { Invariants = Mutate(Real.Invariants, "## 11.", "```\n| INV-63 | example |\n```\n\n## 11.") };
         Assert.DoesNotContain(Evaluate(example, GateMode.Development, Dev), f => f.Subject == "INV-63");
 
-        var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 50 |", "| ✅ | 51 |") };
-        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 51, the table has 50"));
+        var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 53 |", "| ✅ | 54 |") };
+        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 54, the table has 53"));
 
         var pipe = Real with { Invariants = Mutate(Real.Invariants, "`docker system\\|container", "`docker system|container") };
         Assert.Contains(Evaluate(pipe, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("cells"));
@@ -192,7 +203,7 @@ public class ReleaseGateTests
     {
         var deleted = Real with
         {
-            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 50 |", "| ✅ | 49 |"), "| **Total** | **62** |", "| **Total** | **61** |"),
+            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 53 |", "| ✅ | 52 |"), "| **Total** | **62** |", "| **Total** | **61** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
@@ -255,18 +266,28 @@ public class ReleaseGateTests
     [Fact]
     public void A_planned_marker_must_name_the_owed_test()
     {
-        var existingClass = Real with { Invariants = Mutate(Real.Invariants, "`ReadOnlyKillSwitchWireTests` *(planned", "`KillSwitchTests` *(planned") };
-        Assert.Contains(Evaluate(existingClass, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-21");
+        // On a ⚠️ row (INV-01). INV-21's marker, the first of this kind, was paid with ReadOnlyKillSwitchWireTests.
+        var existingClass = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |", "`KillSwitchTests` *(planned, WP6)*") };
+        Assert.Contains(Evaluate(existingClass, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-01");
 
-        var existingMethod = Real with { Invariants = Mutate(Real.Invariants, "`ReadOnlyKillSwitchWireTests` *(planned",
-            "`UiMutationRunnerTests.The_kill_switch_stops_a_human_too` *(planned") };
-        Assert.Contains(Evaluate(existingMethod, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-21");
+        var existingMethod = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |",
+            "`UiMutationRunnerTests.The_kill_switch_stops_a_human_too` *(planned, WP6)*") };
+        Assert.Contains(Evaluate(existingMethod, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-01");
 
-        var nameless = Real with { Invariants = Mutate(Real.Invariants, "`ReadOnlyKillSwitchWireTests` *(planned", "a wire test *(planned") };
-        Assert.Contains(Evaluate(nameless, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-21" && f.Message.Contains("only on a ❌ or ❓ row"));
+        var nameless = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |", "a wire test *(planned, WP6)*") };
+        Assert.Contains(Evaluate(nameless, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-01" && f.Message.Contains("only on a ❌ or ❓ row"));
 
-        // Today's forms pass: the owed class does not exist, and INV-18 (❌) may name none.
+        // The owed form passes: a class that does not exist yet, named; and today's table passes.
+        var owed = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |", "`PrincipalKeyWireTests` *(planned, R1-03)*") };
+        Assert.DoesNotContain(Evaluate(owed, GateMode.Development, Dev), f => f.Rule == "R6");
         Assert.DoesNotContain(Evaluate(Real, GateMode.Development, Dev), f => f.Rule == "R6");
+
+        // A ❌ row may name its owed test without a class: INV-18 as it stood before it was closed.
+        var namelessOnViolated = Violated with
+        {
+            Invariants = SetCell(Violated.Invariants, "| INV-18 |", 4, "the in-handler checks of these actions *(planned, WP10)*"),
+        };
+        Assert.DoesNotContain(Evaluate(namelessOnViolated, GateMode.Development, Dev), f => f.Rule == "R6");
     }
 
     // ---- R7, R8, R9 --------------------------------------------------------------------------------------------
@@ -413,7 +434,7 @@ public class ReleaseGateTests
         Fails(WithException(Real, "INV-01", "RG-1", link: LimitsDoc + "#no-such-heading"), "has no heading");
         Fails(WithException(Real, "INV-01", "RG-1", limitationText: "Principals are typed."), "does not name INV-01");
         Fails(WithException(Real, "INV-01", "RG-1", link: "docs/v1/WORK_PACKAGES.md#r1-51"), "must be in README.md");
-        Fails(WithException(Real, "INV-18", "RG-1", status: "❌"), "never accepted");
+        Fails(WithException(Violated, "INV-18", "RG-1", status: "❌"), "never accepted");
         Fails(WithException(Real, "INV-02", "RG-1", status: "✅"), "stale");
         Fails(WithException(Real, "INV-01", "RG-1", reviewBy: "0.15.0"), "is due");                 // in Development mode too
         Fails(WithException(Real, "INV-01", "RG-1", reviewBy: "1.0.0"), "is due", V100);
@@ -424,7 +445,7 @@ public class ReleaseGateTests
     [Fact]
     public void A_known_violation_covers_exactly_one_release()
     {
-        var record = WithKnownViolation(Real, "INV-18", "RG-1", "1.0.1");
+        var record = WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1");
         Assert.DoesNotContain(Evaluate(record, GateMode.Release, V101), f => f.Rule is "R1" or "R17" && f.Subject == "INV-18");
 
         void Fails(GateInputs inputs, GateVersion version, string because)
@@ -433,22 +454,22 @@ public class ReleaseGateTests
         Fails(record, V102, "not the current version");                                                         // after the bump, in every mode
         Assert.Contains(Evaluate(record, GateMode.Development, V102), f => f.Rule == "R17");
         Assert.Contains(Evaluate(record, GateMode.Line, V102), f => f.Rule == "R17");
-        Fails(WithKnownViolation(Real, "INV-18", "RG-1", "1.0.1", decisionRelease: "1.0.2"), V101, "covers release '1.0.2'");
-        Fails(WithKnownViolation(Real, "INV-18", "RG-1", "1.0.1", reviewBy: "1.1.0"), V101, "next patch");
+        Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1", decisionRelease: "1.0.2"), V101, "covers release '1.0.2'");
+        Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1", reviewBy: "1.1.0"), V101, "next patch");
         // A renewal at 1.0.2 that changes only 'Review by': the record still covers 1.0.1, and so does its decision.
-        var renewed = WithKnownViolation(Real, "INV-18", "RG-1", "1.0.1", reviewBy: "1.0.3");
+        var renewed = WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1", reviewBy: "1.0.3");
         Fails(renewed, V102, "not the current version");
         Assert.Contains(Evaluate(renewed, GateMode.Release, V102), f => f.Rule == "R1" && f.Subject == "INV-18");
         // Changing 'Release' too does not help: the accepted decision still says 1.0.1 (and cannot be edited, R18).
-        Fails(WithKnownViolation(Real, "INV-18", "RG-1", "1.0.2", decisionRelease: "1.0.1"), V102, "covers release '1.0.1'");
-        Fails(WithKnownViolation(Real, "INV-18", "RG-1", "1.1.0"), new GateVersion(1, 1, 0), "not a patch release");   // X.Y.0
-        Fails(WithKnownViolation(Real, "INV-18", "RG-1", "1.0.0"), V100, "not a patch release");
-        Fails(WithKnownViolation(Real, "INV-18", "RG-1", "1.0.1", limitationText: "No limitation is named here."), V101, "does not name INV-18");
-        Fails(WithKnownViolation(Real, "INV-18", "RG-1", "1.0.1", advisory: "CVE-2026-1234"), V101, "is not GHSA");
-        Fails(WithKnownViolation(Real, "INV-18", "RG-1", "1.0.1", decisionKind: "exception"), V101, "not 'known violation'");
-        Assert.Contains(Evaluate(WithKnownViolation(Real, "INV-01", "RG-1", "1.0.1", status: "⚠️"), GateMode.Release, V101),
+        Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.2", decisionRelease: "1.0.1"), V102, "covers release '1.0.1'");
+        Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.1.0"), new GateVersion(1, 1, 0), "not a patch release");   // X.Y.0
+        Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.0"), V100, "not a patch release");
+        Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1", limitationText: "No limitation is named here."), V101, "does not name INV-18");
+        Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1", advisory: "CVE-2026-1234"), V101, "is not GHSA");
+        Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1", decisionKind: "exception"), V101, "not 'known violation'");
+        Assert.Contains(Evaluate(WithKnownViolation(Violated, "INV-01", "RG-1", "1.0.1", status: "⚠️"), GateMode.Release, V101),
             f => f.Rule == "R17" && f.Subject == "INV-01" && f.Message.Contains("❌ or ❓ only"));
-        Assert.Contains(Evaluate(WithKnownViolation(Real, "INV-02", "RG-1", "1.0.1", status: "✅"), GateMode.Release, V101),
+        Assert.Contains(Evaluate(WithKnownViolation(Violated, "INV-02", "RG-1", "1.0.1", status: "✅"), GateMode.Release, V101),
             f => f.Rule == "R17" && f.Subject == "INV-02");
     }
 
@@ -633,7 +654,7 @@ public class ReleaseGateTests
     public void The_totals_match_the_rows()
     {
         Assert.DoesNotContain(Evaluate(Real, GateMode.Development, Dev), f => f.Rule == "R15");
-        var count = Real with { Contract = Mutate(Real.Contract, "| UI handler groups (U) | 38 |", "| UI handler groups (U) | 37 |") };
+        var count = Real with { Contract = Mutate(Real.Contract, "| UI handler groups (U) | 40 |", "| UI handler groups (U) | 39 |") };
         Assert.Contains(Evaluate(count, GateMode.Development, Dev), f => f.Rule == "R15" && f.Subject.Contains("(U)"));
         var row = Real with { Contract = RemoveLine(Real.Contract, "| T-03 |") };
         var findings = Evaluate(row, GateMode.Development, Dev);

@@ -113,4 +113,7 @@ public static class LocalAccountErrors
     /// synthetic Admin then; fail closed).</summary>
     public const string AuthDisabled = "auth_disabled";
     public const string Conflict = "conflict";
+    /// <summary>Contract 0009: blocked while the kill switch is on (an Admin blocked this exemption beforehand, or the
+    /// guardrail policy could not be loaded).</summary>
+    public const string KillSwitch = "kill_switch";
 }

@@ -10,6 +10,8 @@ public enum GuardrailConfigProblemKind
     MissingValue,
     ActivePresetMissing,
     InvalidPattern,
+    /// <summary>Contract 0009: an id in KillSwitchBlockedExemptions that is not a blockable exemption.</summary>
+    UnknownKillSwitchExemption,
 }
 
 /// <summary>One reason a configuration is refused. <paramref name="Preset"/> names the preset it concerns,
@@ -26,6 +28,7 @@ public sealed record GuardrailConfigProblem(GuardrailConfigProblemKind Kind, str
         GuardrailConfigProblemKind.MissingValue => $"Preset '{Preset}': '{Value}' is missing or holds an empty entry.",
         GuardrailConfigProblemKind.ActivePresetMissing => $"The active preset '{Preset}' does not exist.",
         GuardrailConfigProblemKind.InvalidPattern => $"Preset '{Preset}': '{Value}' is not a valid regex.",
+        GuardrailConfigProblemKind.UnknownKillSwitchExemption => $"Preset '{Preset}': '{Value}' is not a kill-switch exemption that can be blocked.",
         _ => Kind.ToString(),
     };
 }
@@ -102,6 +105,12 @@ public class GuardrailConfig
             {
                 try { _ = new System.Text.RegularExpressions.Regex(pattern); }
                 catch (ArgumentException) { return new(GuardrailConfigProblemKind.InvalidPattern, preset.Name, pattern); }
+            }
+            // Contract 0009 (D3): only the blockable exemptions can be named; anything else is not guessed at.
+            foreach (var exemption in preset.Policy.KillSwitchBlockedExemptions ?? [])
+            {
+                if (exemption is null || !KillSwitchExemptions.Blockable.Contains(exemption, StringComparer.Ordinal))
+                    return new(GuardrailConfigProblemKind.UnknownKillSwitchExemption, preset.Name, exemption ?? "(empty)");
             }
         }
         return null;

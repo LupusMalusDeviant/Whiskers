@@ -95,7 +95,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                         _logger.LogInformation("CVE scan not due yet (last {Last:u}, every {H}h) — using persisted results",
                             last, interval.TotalHours);
                     else
-                        await RunOneCycleAsync(ct);
+                        await RunCycleAsync(ct);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
@@ -125,18 +125,30 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
     // overlapping full scans; the bool _store.IsScanning is kept only as the UI indicator.
     private int _scanning;
 
-    /// <summary>Run a single scan cycle across all enabled servers. Public for manual triggers.</summary>
-    public async Task RunOneCycleAsync(CancellationToken ct = default)
+    /// <summary>A manual scan cycle (<c>cve.scan</c>): a page runs it inside its gateway decision. <c>false</c> when
+    /// another cycle was already running and this one did nothing — the gateway then records a reported failure, not
+    /// a scan that ran.</summary>
+    public async Task<bool> RunOneCycleAsync(CancellationToken ct = default, Action? started = null)
+    {
+        if (await RunCycleAsync(ct, started)) return true;
+        Whiskers.Services.Mutations.MutationScope.Note("Skipped: a CVE scan cycle was already running.", success: false);
+        return false;
+    }
+
+    /// <summary>Run a single scan cycle across all enabled servers: the loop's own unattended cycle (S-06) and the
+    /// body of a manual one.</summary>
+    private async Task<bool> RunCycleAsync(CancellationToken ct, Action? started = null)
     {
         if (Interlocked.CompareExchange(ref _scanning, 1, 0) != 0)
         {
             _logger.LogInformation("CVE scan cycle already in progress — skipping");
-            return;
+            return false;
         }
         _store.IsScanning = true;
         var settings = _settings.CurrentValue;
         try
         {
+            started?.Invoke();   // the gate is ours: only now is this a scan that started (inside try: the gate is released)
             var serverNames = _serverConfig.GetServers().ToDictionary(s => s.Id, s => s.Name);
 
             // Real host OS per server (so OS findings carry the actual OS they apply to).
@@ -342,6 +354,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
             _store.IsScanning = false;
             Interlocked.Exchange(ref _scanning, 0);
         }
+        return true;
     }
 
     private async Task TrySendAggregateNotificationAsync(

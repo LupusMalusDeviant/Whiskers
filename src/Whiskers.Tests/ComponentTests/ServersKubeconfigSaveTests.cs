@@ -248,24 +248,11 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
             NullLogger<Whiskers.Services.Certificates.MtlsClientCredentialStore>.Instance,
             new DataPathOptions(Path.Combine(Path.GetTempPath(), "whiskers-empty-" + Guid.NewGuid().ToString("N"))));
 
-    public class NullProxy<T> : DispatchProxy where T : class
+    /// <summary>The shared <see cref="Whiskers.Tests.NullProxy{T}"/>, kept under this name for the tests that still
+    /// reach it here.</summary>
+    public class NullProxy<T> : Whiskers.Tests.NullProxy<T> where T : class
     {
-        public static T Create() => DispatchProxy.Create<T, NullProxy<T>>();
-
-        protected override object? Invoke(MethodInfo? method, object?[]? args)
-        {
-            var type = method!.ReturnType;
-            if (type == typeof(void)) return null;
-            if (type == typeof(Task)) return Task.CompletedTask;
-            if (type == typeof(ValueTask)) return ValueTask.CompletedTask;
-            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Task<>))
-            {
-                var inner = type.GetGenericArguments()[0];
-                var value = inner.IsValueType ? Activator.CreateInstance(inner) : null;
-                return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(inner).Invoke(null, [value]);
-            }
-            return type.IsValueType ? Activator.CreateInstance(type) : null;
-        }
+        public static new T Create() => DispatchProxy.Create<T, NullProxy<T>>();
     }
 
     private sealed class AdminUser : ICurrentUserService

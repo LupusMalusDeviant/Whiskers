@@ -74,13 +74,24 @@ public sealed class PrincipalCeilingRule : IGuardrailRule
 /// <summary>Kill switch: in ReadOnlyMode everything above read is an immediate Deny.</summary>
 public sealed class ReadOnlyModeRule : IGuardrailRule
 {
-    public string Id => "read-only-mode";
+    public string Id => Whiskers.Configuration.KillSwitchExemptions.RuleId;
+
+    /// <summary>The capability of exemption E4 (contract 0009).</summary>
+    public const string PasswordChangeCapability = "account.password_change";
 
     public GuardrailVerdict Evaluate(GuardrailRequest request, out string reason)
     {
         if (request.Context.Policy.ReadOnlyMode && request.RequiredLevel != McpPermissionLevels.Read)
         {
             reason = $"Read-only mode active: '{request.ToolName}' ({request.RequiredLevel}) is blocked.";
+            return GuardrailVerdict.Deny;
+        }
+        // Contract 0009 (D5): the one read-level capability the kill switch lets through, a user's own password change
+        // (E4), unless an Admin blocked it beforehand — and always while the policy store is fail-closed (D4).
+        if (request.ToolName == PasswordChangeCapability
+            && request.Context.Policy.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.PasswordChange))
+        {
+            reason = "Read-only mode active: own password changes are blocked while the kill switch is on.";
             return GuardrailVerdict.Deny;
         }
         reason = "";

@@ -254,6 +254,17 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
         if (fileLock is null) return IdentityBindingResult.Refused(IdentityBindingErrors.StoreUnavailable);
         if (TryLoadForWrite() is not { } data) return IdentityBindingResult.Refused(IdentityBindingErrors.StoreUnavailable);
 
+        // Contract 0009 (D5, E6): while the kill switch is on and an Admin blocked this exemption beforehand — or the
+        // policy store is fail-closed (D4) — nothing is written; one refusal names the kill switch's rule.
+        if (Guardrails.Current.KillSwitchBlocks(KillSwitchExemptions.FederatedBindingAtSignIn))
+        {
+            await _audit.TryLogAsync(account, "web", AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, account, account,
+                $"provider={claims.Provider}; issuer={claims.Issuer}; fingerprint={AccessEntries.Fingerprint(claims.Issuer, claims.Subject)}; " +
+                $"refused: blocked while the kill switch is on; rule={KillSwitchExemptions.RuleId}", success: false);
+            _logger?.LogWarning("A {Provider} sign-in binding was refused: blocked while the kill switch is on", claims.Provider);
+            return IdentityBindingResult.Refused(IdentityBindingErrors.KillSwitch);
+        }
+
         // Contract 0003, rule 1.7: everything the admission decided is decided again under the gate, on what is in force
         // now — a configured instance, an entry the whitelist still admits, a standard and verified address from a trusted
         // provider, an unbound subject and an account without a binding.
@@ -849,6 +860,10 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
 
     private IRoleService Roles => _services.GetRequiredService<IRoleService>();
     private IWhitelistService Whitelist => _services.GetRequiredService<IWhitelistService>();
+
+    /// <summary>Contract 0009 (E6): the guardrail policy, registered in the app (Core). Required: a provider
+    /// without it makes binding at sign-in throw (fail closed) instead of skipping the check.</summary>
+    private Whiskers.Services.Guardrails.IGuardrailStore Guardrails => _services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
 
     private string? EntryOf(string account) => AccessEntries.EntryOf(Roles.GetRoleData(), Whitelist.GetWhitelist(), account);
 

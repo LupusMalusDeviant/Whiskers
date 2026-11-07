@@ -65,10 +65,15 @@ Both are anonymous and answer only a status word.
 ## Actions are refused
 
 - **"read-only" / kill switch:** the guardrails' read-only kill switch is on; every mutation is refused and no
-  terminal opens. An Admin switches it off on the *Guardrails* page (audited).
+  terminal opens. An Admin switches it off on the *Guardrails* page (audited). The exceptions are listed there
+  (contract 0009): switching it off, the first-run setup and the host CLIs always; the own password change, the
+  recovery page and binding a Google/OIDC identity at a first sign-in unless an Admin blocked them beforehand. A
+  blocked one says "Blocked while the kill switch is on". With the guardrails fail-closed (next item) these three are
+  blocked too; `--recover-local-account` then refuses without `--force`, because the code could not be redeemed.
 - **Everything is refused and the guardrails page cannot save:** `guardrails.json` is unreadable or invalid, so the
-  policy is fail-closed (kill switch, everything protected). Repair the file on the host (or remove it together with
-  `guardrails.json.bak`) and restart.
+  policy is fail-closed (kill switch, everything protected, own password changes, recovery codes and sign-in bindings
+  blocked). Repair the file on the host (or remove it together with `guardrails.json.bak`) and restart: that is the way
+  back in, not the recovery CLI.
 - **"protected" / needs an Admin approval:** the target is a protected resource or Whiskers' own control plane.
   An Admin decides it under *Approvals* (whether the requester may approve their own request follows the approval rules, PC-D4).
 - **An audit intent could not be written; operation refused:** the database cannot take the audit row. Check disk
