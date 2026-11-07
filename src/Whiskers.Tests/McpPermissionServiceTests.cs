@@ -240,9 +240,8 @@ public sealed class McpPermissionServiceTests : IDisposable
             """);
 
         var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
-        // Before: the key is refused — nothing loaded yet, and the level as stored ("Write") ranks 0, which is what
-        // the /mcp check of the old code compared, so no tool was granted to it.
-        Assert.False(svc.IsToolAllowed(plaintext, "list_containers"));
+        // Before: the level as stored ("Write") ranks 0, which is what the /mcp check of the old code compared, so no
+        // tool was granted to it. Only the Grants line pins that old result; the service has loaded nothing yet.
         Assert.False(McpPermissionLevels.Grants("Write", McpPermissionLevels.Read));
         Assert.True(McpPermissionLevels.HasAccess(McpPermissionLevels.Read, "Admin"));   // old runtime check: any caller
 

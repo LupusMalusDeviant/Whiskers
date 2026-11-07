@@ -295,7 +295,8 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         {
             if (Canonical(key.PermissionLevel) is { } level)
             {
-                _logger.LogInformation("MCP key {Name}: stored level {Stored} rewritten as {Level}", key.Name,
+                // A warning: the rewrite can give this key MCP tools the old exact-spelling check refused it.
+                _logger.LogWarning("MCP key {Name}: stored level {Stored} rewritten as {Level}", key.Name,
                     key.PermissionLevel, level);
                 key.PermissionLevel = level;
                 changed = true;
