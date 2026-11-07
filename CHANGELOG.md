@@ -12,8 +12,8 @@ All notable changes to Whiskers are documented here. The format follows
   have. Refusals that were made before the gateway and left no event — an AutoPatch night without an owner or with an
   unreadable owner entry, an AutoUpdate with a blocked owner entry, an endpoint-check run the monitor refused, a
   webhook delivery that ended before its decision or was given up after its start, a scheduled task refused before
-  the gateway (no target or command, a missing database container, a protected stopped container) — are now recorded
-  as denied events. An endpoint check whose suspension cannot be saved is refused again at its interval, not every
+  the gateway (no target or command, a missing database container, a database name the INV-19 check refuses, a
+  protected stopped container) — are now recorded as denied events. An endpoint check whose suspension cannot be saved is refused again at its interval, not every
   15 seconds. A call cancelled after it asked the gateway and before it ran (the caller gone, a run's deadline
   passed while the target resolved) is one denied event, and an accepted webhook delivery its worker gives up before
   it started now ends failed and final, on record once (also in the webhook log, with an `automation_refused`

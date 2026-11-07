@@ -949,6 +949,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         public FakeDocker Docker { get; } = new(
             new ContainerInfo { Id = "web-1", Name = "web", Image = "nginx:1", State = "running" },
             new ContainerInfo { Id = "db-1", Name = "db", Image = "postgres:16", State = "running" },
+            new ContainerInfo { Id = "mongo-1", Name = "mongo", Image = "mongo:7", State = "running" },
             new ContainerInfo { Id = "old-1", Name = "old", Image = "busybox:1", State = "exited" })
         {
             Env = [new("POSTGRES_USER", "app"), new("POSTGRES_PASSWORD", Probe), new("POSTGRES_DB", "app")],
@@ -1036,6 +1037,12 @@ public sealed class AuditPathMatrixTests : IDisposable
                 yield return ("not a database", (t, _, _) => t.TargetId = "web-1", "web-1");
                 yield return ("listing throws", (_, w, _) => w.Docker.ListContainersThrows = true, "db-1");
                 yield return ("environment throws", (_, w, _) => w.Docker.Env = null, "db-1");
+                // INV-19's name check (review round 10, BLOCKER-1): refused before the gateway, never without an event.
+                yield return ("unsafe database name", (t, _, _) => t.Config = "{\"database\":\"-x\"}", "db-1");
+                yield return ("unsafe default name from the container",
+                    (_, w, _) => w.Docker.Env = [new("POSTGRES_USER", "app"), new("POSTGRES_DB", "-x")], "db-1");
+                yield return ("dotted MongoDB name",
+                    (t, _, _) => { t.TargetId = "mongo-1"; t.TargetName = "mongo"; t.Config = "{\"database\":\"app.x\"}"; }, "mongo-1");
                 break;
             case ScheduledTaskType.VolumeBackup:
                 yield return ("no volume", (t, _, _) => t.TargetId = null, "");
@@ -1060,7 +1067,7 @@ public sealed class AuditPathMatrixTests : IDisposable
     /// <summary>S-01: every task type's run is one event on its owner's authority — executed, failed, refused by the
     /// kill switch, refused because the owner lost the role, refused because it has no owner — and every way the
     /// executor refuses a run before it asks the gateway (no target or command, a database container that is missing,
-    /// is none or cannot be read, a protected stopped container in a cleanup, a listing that fails) is the gateway's
+    /// is none or cannot be read, a database name INV-19 refuses, a protected stopped container in a cleanup, a listing that fails) is the gateway's
     /// Denied event of that capability, without a decision. Found by this matrix (INV-45): those refusals wrote no
     /// event.</summary>
     [Theory]

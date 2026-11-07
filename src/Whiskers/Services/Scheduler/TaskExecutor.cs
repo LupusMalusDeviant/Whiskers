@@ -156,18 +156,20 @@ public class TaskExecutor : ITaskExecutor
         }
         var creds = DatabaseDetector.ExtractCredentials(env, container.DatabaseType);
         if (string.IsNullOrEmpty(database)) database = creds.Database;
-        // INV-19: the name becomes a dump-tool operand and part of a host file name; a stored task is no exception.
+        var resolved = new { containerId = container.Id, name = container.Name, serverId = ScheduledTaskServer.Of(task), database };
+        // INV-19: the name becomes a dump-tool operand and part of a host file name; a stored task is no exception —
+        // nor a default name from the container's environment. Refused before the decision, on record as the gateway's
+        // Denied event under the resolved name (INV-45).
         try
         {
             DatabaseService.CheckDatabaseName(database, container.DatabaseType);
         }
         catch (Whiskers.Utils.UnsafeOperandException ex)
         {
-            return (false, ex.Message);
+            return await RefusedAsync(task, "db.backup", resolved, ex.Message);
         }
 
-        var outcome = await _automation.RunAsync(ActorOf(task), "db.backup",
-            new { containerId = container.Id, name = container.Name, serverId = ScheduledTaskServer.Of(task), database },
+        var outcome = await _automation.RunAsync(ActorOf(task), "db.backup", resolved,
             _ => _dbService.BackupDatabaseAsync(container.Id, database, container.DatabaseType, creds, ScheduledTaskServer.Of(task), container.Name));
         if (Problem(outcome, "db.backup") is { } problem) return (false, problem);
         var (success, filePath, sizeBytes, error) = outcome.Value;
@@ -363,14 +365,19 @@ public class TaskExecutor : ITaskExecutor
                 // database, never a same-named database's in another container, never "app_db" for "app". Dumps in the
                 // format before ("{db}_{timestamp}.sql") name no container: they are neither counted nor deleted.
                 // Both names are checked like every operand (INV-19).
+                var sid = ScheduledTaskServer.Of(task);
                 if (!Whiskers.Utils.CommandOperands.IsSafeDatabaseName(dbName)
                     || !Whiskers.Utils.CommandOperands.IsSafeContainerRef(containerKey))
                 {
+                    // Not reached after the backup's own name check today; should it ever be, the skipped deletion is
+                    // an attempt refused before its decision — the gateway's Denied event, never none (INV-45).
                     _logger.LogWarning("DB-backup retention skipped for task {Name}: unsafe database '{Db}' or container '{Container}'",
                         task.Name, dbName, containerKey);
+                    await _automation.RefuseAsync(ActorOf(task), "db.backup_delete",
+                        new { containerId = task.TargetId, dumpContainer = containerKey, database = dbName, keep = maxBackups, serverId = sid },
+                        "Unsafe database or container name: retention skipped.");
                     return;
                 }
-                var sid = ScheduledTaskServer.Of(task);
                 // Deleting dumps is its own decision, taken now: the owner may have lost the right since the backup.
                 var outcome = await _automation.RunAsync(ActorOf(task), "db.backup_delete",
                     new { containerId = task.TargetId, dumpContainer = containerKey, database = dbName, keep = maxBackups, serverId = sid },
