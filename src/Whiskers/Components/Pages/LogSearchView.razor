@@ -171,8 +171,10 @@ else
 
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
         if (Require(required)) return true;
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
@@ -216,7 +218,7 @@ else
 
     private async Task CreateRule()
     {
-        if (!await RequireAsync(AppRole.Operator, "logalert.create", new { name = _ruleName, containerName = _ruleContainer })) return;
+        if (!await RequireAsync("logalert.create", new { name = _ruleName, containerName = _ruleContainer })) return;
         try
         {
             var rule = new Whiskers.Models.LogAlertRuleEntity
@@ -244,7 +246,7 @@ else
 
     private async Task ToggleRule(Whiskers.Models.LogAlertRuleEntity rule, bool enabled)
     {
-        if (!await RequireAsync(AppRole.Operator, "logalert.toggle",
+        if (!await RequireAsync("logalert.toggle",
                 new { name = rule.Name, ruleId = rule.RuleId, containerName = rule.ContainerName, enabled })) return;
         try
         {
@@ -263,7 +265,7 @@ else
 
     private async Task DeleteRule(Whiskers.Models.LogAlertRuleEntity rule)
     {
-        if (!await RequireAsync(AppRole.Operator, "logalert.delete",
+        if (!await RequireAsync("logalert.delete",
                 new { name = rule.Name, ruleId = rule.RuleId, containerName = rule.ContainerName })) return;
         try
         {

@@ -111,8 +111,10 @@
 
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
         if (Require(required)) return true;
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
@@ -134,7 +136,7 @@
 
     private async Task Act(CloudServerInfo s, string action)
     {
-        if (!await RequireAsync(AppRole.Admin, CloudCapabilityOf(action), new { server = s.WhiskersId })) return;
+        if (!await RequireAsync(CloudCapabilityOf(action), new { server = s.WhiskersId })) return;
 
         // Confirm out-of-band power actions that interrupt the running server.
         var confirmPrompt = action switch

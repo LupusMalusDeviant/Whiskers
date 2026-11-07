@@ -58,6 +58,16 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         .Where(c => c.McpTool is not null)
         .ToDictionary(c => c.McpTool!, c => c.RequiredLevel, StringComparer.Ordinal);
 
+    // After Short / Normal / Long: static fields initialise in order, and the definitions read them.
+    private static readonly IReadOnlyDictionary<string, string> LevelById = Definitions()
+        .ToDictionary(c => c.Id, c => c.RequiredLevel, StringComparer.Ordinal);
+
+    /// <summary>The UI role a page requires before it runs <paramref name="capabilityId"/>, straight from the table
+    /// below through <see cref="RoleFor"/> (INV-13): no page states its own role for a capability. An unknown id is
+    /// held to Admin — fail closed; the gateway refuses it in any case.</summary>
+    public static AppRole RoleOf(string capabilityId) =>
+        RoleFor(capabilityId is not null && LevelById.TryGetValue(capabilityId, out var level) ? level : McpPermissionLevels.Admin);
+
     private static Capability Tool(string id, string tool, string level, string target, CapabilityRisk risk, TimeSpan deadline) =>
         new(id, level, target, risk, tool, deadline);
 

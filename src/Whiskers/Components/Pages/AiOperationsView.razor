@@ -126,6 +126,8 @@ else
 
 @code {
     private bool _isAdmin;
+    // Whether the signed-in user holds the catalog role of each action here (INV-13), decided once like _isAdmin.
+    private bool _mayCreateKey, _maySavePreset;
     private bool _busy;
     private string? _mcpKey;
     private string? _activePreset;
@@ -135,6 +137,8 @@ else
     protected override async Task OnInitializedAsync()
     {
         _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
+        _mayCreateKey = await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf("mcp.key_create"));
+        _maySavePreset = await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf("guardrails.save"));
         _activePreset = GuardrailStore.Config.ActivePreset;
         _presetCards = new[]
         {
@@ -146,7 +150,7 @@ else
 
     private async Task CreateKey()
     {
-        if (!_isAdmin)
+        if (!_mayCreateKey)
         {
             // The refused attempt is the gateway's Denied event (R1-22).
             await Mutations.RefuseAsync("mcp.key_create", new { section = "mcp-api-keys", level = McpPermissionLevels.Read },
@@ -169,7 +173,7 @@ else
 
     private async Task ActivatePreset(string name)
     {
-        if (!_isAdmin)
+        if (!_maySavePreset)
         {
             await Mutations.RefuseAsync("guardrails.save", new { section = "guardrails", preset = name }, "Requires the Admin role.");
             return;

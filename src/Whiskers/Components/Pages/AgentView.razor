@@ -254,6 +254,8 @@
     private bool _running;
     private bool _clearing;
     private bool _isAdmin;
+    // Whether the signed-in user holds the catalog role of config.agent (INV-13), decided once like _isAdmin.
+    private bool _mayConfigureAgent;
 
     private sealed record Attachment(string Name, string Content);
     private readonly List<Attachment> _attachments = new();
@@ -327,6 +329,7 @@
     protected override async Task OnInitializedAsync()
     {
         _isAdmin = await CurrentUser.HasRoleAsync(AppRole.Admin);
+        _mayConfigureAgent = await CurrentUser.HasRoleAsync(CapabilityCatalog.RoleOf("config.agent"));
 
         var cfg = Settings.CurrentValue;
         _llmEnabled = cfg.Enabled;
@@ -551,7 +554,7 @@
 
     private async Task SaveLlm()
     {
-        if (!_isAdmin)
+        if (!_mayConfigureAgent)
         {
             Snackbar.Add(L["AgentView_Snackbar_AdminOnly"].Value, Severity.Error);
             // The refused attempt is the gateway's Denied event (R1-22).

@@ -6,6 +6,10 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Pages take their role from the capability catalog (INV-13, R1-05).** Every role check in front of a capability
+  asks `CapabilityCatalog.RoleOf` instead of naming a role, and a source test forbids a literal role there; no level
+  changed. The webhook test's Operator check (the catalog says Admin for deploy and Git-deploy webhooks) is left
+  as it is until decided.
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,

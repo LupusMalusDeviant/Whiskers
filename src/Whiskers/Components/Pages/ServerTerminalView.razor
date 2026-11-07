@@ -46,7 +46,8 @@
         if (!firstRender || _initialized) return;
         _initialized = true;
 
-        if (await CurrentUser.GetRoleAsync() < AppRole.Admin)
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        if (await CurrentUser.GetRoleAsync() < CapabilityCatalog.RoleOf("terminal.host_open"))
         {
             _error = L["ServerTerminalView_Error_AdminRequired"].Value;
             StateHasChanged();

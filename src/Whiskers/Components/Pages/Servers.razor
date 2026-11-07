@@ -466,8 +466,10 @@
 
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
         if (Require(required)) return true;
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
@@ -749,7 +751,7 @@
 
     private async Task SaveServer()
     {
-        if (!await RequireAsync(AppRole.Admin, "server.save", SaveArguments())) return;
+        if (!await RequireAsync("server.save", SaveArguments())) return;
         _saving = true;
         _connectError = null;
         StateHasChanged();
@@ -790,7 +792,7 @@
     // just entered. The bootstrap credentials are auto-deleted on success.
     private async Task SaveAndOnboard()
     {
-        if (!await RequireAsync(AppRole.Admin, "server.save", SaveArguments())) return;
+        if (!await RequireAsync("server.save", SaveArguments())) return;
         // Ask the Tailscale question BEFORE saving/closing anything — cancelling leaves the form open
         // so the user can simply hit "Speichern" for the classic (no-mesh) path instead.
         if (!await ConfirmTailscalePreflight()) return;
@@ -844,7 +846,7 @@
 
     private async Task DeleteServer(Whiskers.Models.ServerConfig server)
     {
-        if (!await RequireAsync(AppRole.Admin, "server.remove", new { serverId = server.Id, name = server.Name })) return;
+        if (!await RequireAsync("server.remove", new { serverId = server.Id, name = server.Name })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["Servers_Dialog_DeleteTitle"].Value,
             L["Servers_Dialog_DeleteMessage", server.Name].Value,
@@ -920,7 +922,7 @@
 
     private async Task StartOnboarding(Whiskers.Models.ServerConfig server, bool skipPreflight = false)
     {
-        if (!await RequireAsync(AppRole.Admin, "server.onboard", new { serverId = server.Id, name = server.Name })) return;
+        if (!await RequireAsync("server.onboard", new { serverId = server.Id, name = server.Name })) return;
         if (!skipPreflight && !await ConfirmTailscalePreflight()) return;
         _onboardingServer = server;
         _onboardLog = new();
@@ -1008,7 +1010,7 @@
 
     private async Task MigrateClientCredential(Whiskers.Models.ServerConfig server)
     {
-        if (!await RequireAsync(AppRole.Admin, "mtls.client_migrate", new { serverId = server.Id })) return;
+        if (!await RequireAsync("mtls.client_migrate", new { serverId = server.Id })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["Servers_Mtls_MigrateTitle", server.Name].Value,
             L["Servers_Mtls_MigrateMessage"].Value,
@@ -1043,7 +1045,7 @@
 
     private async Task RetireSharedClient()
     {
-        if (!await RequireAsync(AppRole.Admin, "mtls.shared_client_retire", new { section = "mtls" })) return;
+        if (!await RequireAsync("mtls.shared_client_retire", new { section = "mtls" })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["Servers_Mtls_RetireTitle"].Value, L["Servers_Mtls_RetireMessage"].Value,
             yesText: L["Servers_Mtls_Retire"].Value, cancelText: L["Servers_Button_Cancel"].Value);

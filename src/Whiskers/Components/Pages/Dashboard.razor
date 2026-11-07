@@ -621,8 +621,10 @@
 
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
         if (Require(required)) return true;
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
@@ -866,7 +868,7 @@
     private async Task StartContainer(ContainerInfo container)
     {
         var (capability, arguments) = RowAction(container, "start");
-        if (!await RequireAsync(AppRole.Operator, capability, arguments)) return;
+        if (!await RequireAsync(capability, arguments)) return;
         try
         {
             // K8s rows route through the workload seam (start = scale the controller back up).
@@ -892,7 +894,7 @@
     private async Task StopContainer(ContainerInfo container)
     {
         var (capability, arguments) = RowAction(container, "stop");
-        if (!await RequireAsync(AppRole.Operator, capability, arguments)) return;
+        if (!await RequireAsync(capability, arguments)) return;
         try
         {
             // K8s rows route through the workload seam (stop = scale the controller to 0).
@@ -918,7 +920,7 @@
     private async Task RestartContainer(ContainerInfo container)
     {
         var (capability, arguments) = RowAction(container, "restart");
-        if (!await RequireAsync(AppRole.Operator, capability, arguments)) return;
+        if (!await RequireAsync(capability, arguments)) return;
         try
         {
             // K8s rows route through the workload seam (restart = rollout-restart of the controller).
@@ -943,7 +945,7 @@
 
     private async Task RemoveContainer(ContainerInfo container)
     {
-        if (!await RequireAsync(AppRole.Admin, "container.remove",
+        if (!await RequireAsync("container.remove",
                 new { containerId = container.Id, name = container.Name, serverId = container.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["Dashboard_Dialog_RemoveTitle"].Value,
@@ -981,7 +983,7 @@
 
     private async Task UpdateContainer(ContainerInfo container)
     {
-        if (!await RequireAsync(AppRole.Operator, "container.update",
+        if (!await RequireAsync("container.update",
                 new { containerId = container.Id, name = container.Name, serverId = container.ServerId })) return;
         try
         {
@@ -1023,7 +1025,7 @@
 
     private async Task RollbackContainer(ContainerInfo container)
     {
-        if (!await RequireAsync(AppRole.Operator, "container.rollback",
+        if (!await RequireAsync("container.rollback",
                 new { containerId = container.Id, name = container.Name, serverId = container.ServerId })) return;
         if (!_rollbacks.TryGetValue($"{container.ServerId}|{container.Name}", out var snap)) return;
 

@@ -151,6 +151,7 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 - [ ] `CapabilityTableConsistencyTests` enumerates every mutating capability and checks cross-surface equivalence.
 - [ ] `ApprovalSeparationOfDutyTests.Custom_command_requires_an_admin_approver` checks create and run; includes retention/self-backup requirements.
 - [ ] Firewall, nginx, systemd, network, cloud and Hetzner disagreements are resolved consistently and documented.
+- [ ] Pages take their role in front of a capability from the catalog (`CapabilityCatalog.RoleOf`); `CapabilityTableConsistencyTests.No_page_states_its_own_role_in_front_of_a_capability` forbids a literal role there. Done except the webhook test (`WebhooksView` `TestWebhook`: Operator on the page, Admin in the catalog for deploy, Git deploy and other actions), which awaits a decision (INV-13).
 
 **Out of scope:** Approval persistence.
 

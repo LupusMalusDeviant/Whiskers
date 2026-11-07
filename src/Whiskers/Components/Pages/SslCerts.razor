@@ -96,8 +96,10 @@ else
 
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
         if (Require(required)) return true;
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
@@ -121,7 +123,7 @@ else
 
     private async Task RenewCert(string certName)
     {
-        if (!await RequireAsync(AppRole.Admin, "ssl.renew", new { serverId = ServerId, certName })) return;
+        if (!await RequireAsync("ssl.renew", new { serverId = ServerId, certName })) return;
 
         _renewing = true;
         try
@@ -140,7 +142,7 @@ else
 
     private async Task RenewAll()
     {
-        if (!await RequireAsync(AppRole.Admin, "ssl.renew", new { serverId = ServerId })) return;
+        if (!await RequireAsync("ssl.renew", new { serverId = ServerId })) return;
 
         _renewing = true;
         try

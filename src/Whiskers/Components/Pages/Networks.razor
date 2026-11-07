@@ -138,8 +138,10 @@ else
 
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
         if (Require(required)) return true;
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
@@ -176,7 +178,7 @@ else
 
     private async Task CreateNetwork()
     {
-        if (!await RequireAsync(AppRole.Admin, "network.create", new { name = _newNetworkName, driver = _newNetworkDriver, serverId = _newNetworkServerId })) return;
+        if (!await RequireAsync("network.create", new { name = _newNetworkName, driver = _newNetworkDriver, serverId = _newNetworkServerId })) return;
         var sid = _newNetworkServerId;
         try
         {
@@ -206,7 +208,7 @@ else
 
     private async Task DeleteNetwork(Whiskers.Models.NetworkInfo network)
     {
-        if (!await RequireAsync(AppRole.Admin, "network.remove", new { networkId = network.Id, name = network.Name, serverId = network.ServerId })) return;
+        if (!await RequireAsync("network.remove", new { networkId = network.Id, name = network.Name, serverId = network.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["Networks_Dialog_DeleteTitle"].Value,
             L["Networks_Dialog_DeleteMessage", network.Name].Value,

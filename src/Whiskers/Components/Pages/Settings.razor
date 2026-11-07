@@ -1222,13 +1222,14 @@ else
         catch (Exception ex) { Snackbar.Add(L["Settings_Snackbar_TestPartialFail", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Warning); }
     }
 
-    /// <summary>The Admin check in front of a write: a refusal is also the gateway's Denied event for
-    /// <paramref name="capabilityId"/>, so the attempt is on record once (R1-22).</summary>
-    private async Task<bool> RequireAdminAsync(string capabilityId, object arguments)
+    /// <summary>The role check in front of a write, with the role from the capability catalog (INV-13): a refusal is
+    /// also the gateway's Denied event for <paramref name="capabilityId"/>, so the attempt is on record once (R1-22).</summary>
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (await CurrentUser.HasRoleAsync(AppRole.Admin)) return true;
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (await CurrentUser.HasRoleAsync(required)) return true;
         Snackbar.Add(L["Settings_Snackbar_NoPermission"].Value, Severity.Error);
-        await Mutations.RefuseAsync(capabilityId, arguments, "Requires the Admin role.");
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
 
@@ -1264,7 +1265,7 @@ else
 
     private async Task AddApiKey()
     {
-        if (!await RequireAdminAsync("mcp.key_create", new { section = "mcp-api-keys", name = _newKeyName?.Trim(), level = _newKeyLevel })) return;
+        if (!await RequireAsync("mcp.key_create", new { section = "mcp-api-keys", name = _newKeyName?.Trim(), level = _newKeyLevel })) return;
         if (string.IsNullOrWhiteSpace(_newKeyName)) return;
         Whiskers.Models.McpApiKeyConfig newKey;
         try
@@ -1284,7 +1285,7 @@ else
     {
         // Same guard as every other write on this page — hiding the page is not authorization.
         var name = _mcpApiKeys.FirstOrDefault(k => k.Id == id)?.Name ?? id;
-        if (!await RequireAdminAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name })) return;
+        if (!await RequireAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name })) return;
         try
         {
             await Mutations.RunAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name },
@@ -1352,7 +1353,7 @@ else
 
     private async Task SaveWhitelist()
     {
-        if (!await RequireAdminAsync("config.whitelist", new { section = "whitelist" })) return;
+        if (!await RequireAsync("config.whitelist", new { section = "whitelist" })) return;
         // An enabled whitelist with zero entries denies everyone (fail-closed) — refuse to save that state
         // so an admin can't accidentally lock the whole instance (including themselves) out.
         if (_whitelistEnabled && _whitelistEmails.Count == 0)
@@ -1434,7 +1435,7 @@ else
 
     private async Task SaveRoles()
     {
-        if (!await RequireAdminAsync("config.roles", new { section = "roles" })) return;
+        if (!await RequireAsync("config.roles", new { section = "roles" })) return;
         // DefaultRole travels along: without it every role change reset a configured default to Viewer.
         try
         {
@@ -1475,7 +1476,7 @@ else
 
     private async Task DeleteVaultSecret(string key)
     {
-        if (!await RequireAdminAsync("vault.secret_delete", new { section = "vault", key })) return;
+        if (!await RequireAsync("vault.secret_delete", new { section = "vault", key })) return;
         try
         {
             await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key },
@@ -1487,7 +1488,7 @@ else
 
     private async Task AddVaultSecret()
     {
-        if (!await RequireAdminAsync("vault.secret_set", new { section = "vault", key = _newVaultKey?.Trim() })) return;
+        if (!await RequireAsync("vault.secret_set", new { section = "vault", key = _newVaultKey?.Trim() })) return;
         if (string.IsNullOrWhiteSpace(_newVaultKey) || string.IsNullOrWhiteSpace(_newVaultValue)) return;
         var key = _newVaultKey.Trim();
         try
