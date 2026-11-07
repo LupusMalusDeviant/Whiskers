@@ -256,7 +256,7 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
 
         // Contract 0009 (D5, E6): while the kill switch is on and an Admin blocked this exemption beforehand — or the
         // policy store is fail-closed (D4) — nothing is written; one refusal names the kill switch's rule.
-        if (Guardrails?.Current.KillSwitchBlocks(KillSwitchExemptions.FederatedBindingAtSignIn) == true)
+        if (Guardrails.Current.KillSwitchBlocks(KillSwitchExemptions.FederatedBindingAtSignIn))
         {
             await _audit.TryLogAsync(account, "web", AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, account, account,
                 $"provider={claims.Provider}; issuer={claims.Issuer}; fingerprint={AccessEntries.Fingerprint(claims.Issuer, claims.Subject)}; " +
@@ -861,9 +861,9 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
     private IRoleService Roles => _services.GetRequiredService<IRoleService>();
     private IWhitelistService Whitelist => _services.GetRequiredService<IWhitelistService>();
 
-    /// <summary>Contract 0009 (E6): the guardrail policy, registered in the app (Core); a host CLI's provider has none and
-    /// never binds at sign-in.</summary>
-    private Whiskers.Services.Guardrails.IGuardrailStore? Guardrails => _services.GetService<Whiskers.Services.Guardrails.IGuardrailStore>();
+    /// <summary>Contract 0009 (E6): the guardrail policy, registered in the app (Core). Required: a provider
+    /// without it makes binding at sign-in throw (fail closed) instead of skipping the check.</summary>
+    private Whiskers.Services.Guardrails.IGuardrailStore Guardrails => _services.GetRequiredService<Whiskers.Services.Guardrails.IGuardrailStore>();
 
     private string? EntryOf(string account) => AccessEntries.EntryOf(Roles.GetRoleData(), Whitelist.GetWhitelist(), account);
 

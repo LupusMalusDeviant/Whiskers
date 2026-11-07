@@ -6,7 +6,6 @@
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IStringLocalizer<SharedResource> L
-@inject Whiskers.Services.Guardrails.IGuardrailStore GuardrailStore
 
 @* R1-49: the signed-in user's own account. A local account changes its password here (the current one is required;
    a wrong one counts towards the lockout); the change ends every session of the account, this one included, so the
@@ -103,8 +102,9 @@
         }
         catch (MutationRefusedException ex)
         {
-            // Contract 0009 (E4): blocked while the kill switch is on, said in the user's language.
-            _error = GuardrailStore.Current.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.PasswordChange)
+            // Contract 0009 (E4): refused by the kill switch's rule, said in the user's language. The refusal itself
+            // says so, not the policy as it is now (it may have changed since).
+            _error = ex.MatchedRules.Contains(Whiskers.Configuration.KillSwitchExemptions.RuleId, StringComparer.Ordinal)
                 ? L["KillSwitch_Blocked_Message"].Value
                 : ex.Message;
         }

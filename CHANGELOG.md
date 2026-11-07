@@ -15,8 +15,11 @@ All notable changes to Whiskers are documented here. The format follows
   password change, recovery-code redemption and binding a Google/OIDC identity at a first sign-in pass unless an Admin
   blocked them beforehand (new optional policy field `KillSwitchBlockedExemptions`, left out of the policy version while
   empty; an unknown id fails the guardrails closed). **Behaviour change:** while `guardrails.json` is fail-closed these
-  three are refused too (the host CLIs are the way back in); a refused one says "Blocked while the kill switch is on",
-  a refused sign-in binding goes to `/login?error=kill_switch`.
+  three are refused too, and `--recover-local-account` refuses without `--force` while a code could not be redeemed
+  (new exit code 4); the way back is repairing or removing `guardrails.json` on the host (or turning off `ReadOnlyMode`
+  or the block in it) and restarting. A refused one says "Blocked while the kill switch is on" and names that way back;
+  a refused sign-in binding goes to `/login?error=kill_switch`. Pending sign-in requests, the last sign-in day, lockout
+  counters and the audit keep being recorded under the kill switch; they are records, not mutations (amendment A1.1).
 - **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
   settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
   `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,

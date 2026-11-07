@@ -18,13 +18,13 @@ namespace Whiskers.Tests;
 /// <summary>
 /// INV-21 on the booted application (WP6): with the read-only kill switch on, every mutating MCP tool sent over the real
 /// <c>/mcp</c> endpoint and every mutating UI capability run through the host's own UI runner is denied before it runs,
-/// recorded as Denied with the kill switch as the deciding rule, and no terminal session opens. The one exception is
-/// switching the kill switch off: a person in the UI with Admin, audited — not an Operator, not an Admin API key.
+/// recorded as Denied with the kill switch as the deciding rule, and no terminal session opens. The exceptions are the
+/// ones contract 0009 lists: E1 is switching the kill switch off — a person in the UI with Admin, audited, not an
+/// Operator, not an Admin API key; E2 (first-run setup) and the blockable E4–E6 are pinned here on the booted app,
+/// the rest in <see cref="KillSwitchExemptionTests"/>.
 /// <para>The whole host is the production DI graph (gateway, policy, guardrail store, audit, terminal manager, SQLite);
 /// only Docker, the server registry, the signed-in person and the terminal launcher are doubles, so a call that got
 /// through would be seen, and no real shell could start.</para>
-/// <para>Read-level capabilities are outside the kill switch by decision: the own password change (contract 0002,
-/// decision 4) keeps a person's own access, as recovery codes and the host CLI do (decision 8).</para>
 /// </summary>
 [Collection("WebAppBoot")] // serialized: the boot needs the process-wide WHISKERS_DATA_DIR env var
 public class ReadOnlyKillSwitchWireTests
@@ -416,6 +416,7 @@ public class ReadOnlyKillSwitchWireTests
             await host.AddLocalAdminAsync(AdminEmail);
             var refused = await Assert.ThrowsAsync<MutationRefusedException>(host.ChangeOwnPasswordAsync);
             Assert.Equal(MutationStatus.Denied, refused.Status);
+            Assert.Equal([KillSwitchExemptions.RuleId], refused.MatchedRules);   // what the Account page reads (its message)
             Assert.True(await host.PasswordWorksAsync(AdminEmail, KillSwitchHost.LocalPassword));
             using var db = host.Db();
             var row = Assert.Single(db.Context.AuditLog.Where(r => r.Action == "account.password_change").ToList());
@@ -445,6 +446,51 @@ public class ReadOnlyKillSwitchWireTests
         using var db = host.Db();
         var row = Assert.Single(db.Context.AuditLog.Where(r => r.Action == "guardrails.save").ToList());
         Assert.Contains("read-only-mode", db.Context.PolicyDecisions.Single(d => d.Id == row.DecisionId).MatchedRules);
+    }
+
+    [Fact]
+    public async Task E5_E6_blocked_on_the_booted_app_redemption_and_binding_at_sign_in_are_refused_by_the_kill_switch()
+    {
+        // The production DI graph: the account service and the binding store read the app's guardrail store.
+        await using var host = await KillSwitchHost.StartAsync(
+            blocked: [KillSwitchExemptions.RecoveryCode, KillSwitchExemptions.FederatedBindingAtSignIn]);
+        await host.AddLocalAdminAsync(AdminEmail);
+
+        // E3 + E5: without --force the recovery CLI refuses (A1.2); with it the code is issued but cannot be redeemed.
+        var refusedCli = new StringWriter();
+        Assert.Equal(4, await LocalAccountRecoveryCli.RunAsync(host.Factory.Services, [AdminEmail], refusedCli));
+        Assert.True(await host.PasswordWorksAsync(AdminEmail, KillSwitchHost.LocalPassword));
+        var forced = new StringWriter();
+        Assert.Equal(0, await LocalAccountRecoveryCli.RunAsync(host.Factory.Services,
+            [AdminEmail, LocalAccountRecoveryCli.ForceFlag], forced));
+        var code = System.Text.RegularExpressions.Regex.Match(forced.ToString(), "([2-9A-HJ-NP-Z]{4}-){5}[2-9A-HJ-NP-Z]{4}").Value;
+        Assert.False(string.IsNullOrEmpty(code));
+        await using (var scope = host.Factory.Services.CreateAsyncScope())
+        {
+            var accounts = scope.ServiceProvider.GetRequiredService<ILocalAccountService>();
+            var refused = await accounts.RedeemRecoveryCodeAsync(AdminEmail, code, "Battery-Staple-34");
+            Assert.Equal(LocalAccountErrors.KillSwitch, refused.Error);
+        }
+        Assert.False(await host.PasswordWorksAsync(AdminEmail, "Battery-Staple-34"));
+        using (var db = host.Db())
+            Assert.Contains("rule=read-only-mode",
+                Assert.Single(db.Context.AuditLog.Where(r => r.Action == LocalAccountService.RecoveryRefusedAction).ToList()).Details);
+
+        // E6: a trusted provider's first sign-in of a configured address is refused and binds nothing.
+        const string person = "ops@example.com";
+        var roles = host.Factory.Services.GetRequiredService<IRoleService>();
+        await GatewayArrange.RunAsync("config.roles", () => roles.SetRoleAsync(person, AppRole.Operator));
+        var admission = host.Factory.Services.GetRequiredService<IFederatedAdmission>();
+        var decision = await admission.AdmitAsync(new FederatedSignInClaims("google", AuthConstants.GoogleIssuer, "g-ops", person,
+            "true", EmailIsStandardClaim: true));
+        Assert.False(decision.Admitted);
+        Assert.Equal(AuthAuditReasons.KillSwitch, decision.Reason);
+        Assert.Empty(host.Factory.Services.GetRequiredService<IIdentityBindingStore>().Snapshot().Bindings);
+        using (var db = host.Db())
+        {
+            var row = Assert.Single(db.Context.AuditLog.Where(r => r.Action == AuthAuditLog.IdentityBoundAction).ToList());
+            Assert.Contains("rule=read-only-mode", row.Details);
+        }
     }
 
     /// <summary>Arguments for the UI sweep: the keys the capability table reads a target from, each naming something

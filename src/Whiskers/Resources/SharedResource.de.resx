@@ -5979,10 +5979,10 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Endpunkt-Check gelöscht.</value>
   </data>
   <data name="KillSwitch_Blocked_Message" xml:space="preserve">
-    <value>Gesperrt, solange der Kill-Switch an ist.</value>
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
   </data>
   <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
-    <value>Gesperrt, solange der Kill-Switch an ist.</value>
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
   </data>
   <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
     <value>Preset „{0}“: „{1}“ ist keine sperrbare Ausnahme des Kill-Switch. Nichts wurde gespeichert.</value>
@@ -6015,7 +6015,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Kommandozeilen-Werkzeuge auf dem Host</value>
   </data>
   <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
-    <value>Brauchen eine Shell im Container (root-gleich); der letzte Weg zurück.</value>
+    <value>Brauchen eine Shell im Container (root-gleich). Solange Wiederherstellungscodes gesperrt sind, verlangt die Wiederherstellungs-CLI --force: stattdessen guardrails.json auf dem Host reparieren.</value>
   </data>
   <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
     <value>Eigenes Passwort ändern</value>

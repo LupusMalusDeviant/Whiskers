@@ -1073,6 +1073,9 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
             .AddEntityFrameworkStores<WhiskersIdentityDbContext>();
         services.AddSingleton<IAuditLogService>(audit);
         if (time is not null) services.AddSingleton(time);
+        // Contract 0009: the guardrail policy the account service, the binding store and the recovery CLI read (Core).
+        guardrails ??= new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
+        services.AddSingleton(guardrails);
         var sp = services.BuildServiceProvider();
         using (var scope = sp.CreateScope())
             await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.EnsureCreatedAsync();
@@ -1150,8 +1153,8 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         var user = new SessionUser(Validator, principal);
         var accounts = new LocalAccountService(
             users?.Invoke(scope.ServiceProvider) ?? scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
-            scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, _time,
-            scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings, Guardrails);
+            scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, Guardrails,
+            _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings);
         return new Acting(scope, accounts, new UiMutationRunner(Gateway, new CapabilityCatalog(), user), user);
     }
 

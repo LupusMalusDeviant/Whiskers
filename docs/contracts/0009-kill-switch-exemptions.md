@@ -1,7 +1,8 @@
 # Contract 0009 — Kill-switch exemptions (INV-21)
 
 Status: **Accepted** · 7 November 2026 by the maintainer, with the decisions D1–D6 as written. The acceptance is also the
-maintainer's explicit approval for the change to the sign-in flow named in D5.
+maintainer's explicit approval for the change to the sign-in flow named in D5. **Amendment 1** (implementation review)
+was accepted on 7 November 2026.
 
 ## Purpose
 
@@ -79,6 +80,30 @@ Maintainer decision, 7 November 2026: "fixed in code, shown in the UI, configura
 - An unknown exemption id fails the store closed.
 - Saving the setting is refused while the switch is on.
 - The policy hash is unchanged while the list is empty.
+
+## Amendment 1 (implementation review, 7 November 2026) — Accepted by the maintainer on 7 November 2026
+
+**A1.1 Records are not mutations.** INV-21's "every mutation" does not cover writes that only record or remove access,
+and these keep running while the switch is on:
+- the gateway's own records: audit events, decision records, the operation journal;
+- sign-in bookkeeping: a pending identity-binding request (`IdentityBindingStore.RecordPendingAsync`), the last sign-in
+  day (`RecordSignInAsync`), lockout counters and the authentication audit. A pending request grants nothing. It takes
+  effect only through E3 (`--confirm-identity-binding`) or a gateway confirmation, and that confirmation is refused
+  while the switch is on;
+- start-up housekeeping that grants nothing or only removes access: the orphan prune (`PruneOrphansAsync`), the start-up
+  backup and the credential migrations listed in `MutationGatewayCoverageTests.WriteNamedButNotGated`.
+
+Tests pin the first two groups: a pending request recorded under the switch grants no access until it is confirmed.
+INV-21's evidence cell gets one sentence naming A1.1.
+
+**A1.2 The way back when E5 is blocked.** While the guardrail store is fail-closed, or `recovery_code` is blocked under
+the switch, a recovery code cannot be redeemed (D2, D4). `--recover-local-account` would clear the password and leave a
+code that cannot be used. So:
+- the recovery CLI refuses to run in that state unless `--force` is given, and says why;
+- the documentation and the UI name the real way back: repair or remove `guardrails.json` on the host, or turn off
+  `ReadOnlyMode` or the block in it, then restart. The binding CLI only helps for an existing pending request.
+
+E3 stays unblockable (D1). The CLI asks for an explicit `--force`; it does not refuse outright.
 
 ## Not in scope
 

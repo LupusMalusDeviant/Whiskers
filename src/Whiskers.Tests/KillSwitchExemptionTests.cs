@@ -192,7 +192,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
         await using (var world = await LocalAccountWorld.CreateAsync(policy: blocked))
         {
             await world.AddUserAsync(LocalOps, AppRole.Admin);
-            var code = await IssueAsync(world, LocalOps);
+            var code = await IssueAsync(world, LocalOps, force: true);
             var rowsBefore = world.Audit.Rows.Count;
             using var anonymous = world.As(LocalAccountWorld.Anonymous);
 
@@ -216,7 +216,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
     {
         await using var world = await LocalAccountWorld.CreateAsync(guardrails: await FailClosedStoreAsync());
         await world.AddUserAsync(LocalOps, AppRole.Admin);
-        var code = await IssueAsync(world, LocalOps);
+        var code = await IssueAsync(world, LocalOps, force: true);
         using var anonymous = world.As(LocalAccountWorld.Anonymous);
 
         var refused = await anonymous.Accounts.RedeemRecoveryCodeAsync(LocalOps, code, LocalAccountWorld.NewPassword);
@@ -227,11 +227,65 @@ public sealed class KillSwitchExemptionTests : IDisposable
                                              && r.Details!.Contains("rule=read-only-mode"));
     }
 
-    /// <summary>The host CLI (E3) issues a recovery code for <paramref name="account"/> and prints it.</summary>
-    private static async Task<string> IssueAsync(LocalAccountWorld world, string account)
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task E3_while_redeeming_is_blocked_the_recovery_cli_refuses_without_force_and_names_the_way_back(bool failClosed)
+    {
+        // Contract 0009 A1.2: issuing would clear the password and leave a code that cannot be redeemed.
+        await using var world = failClosed
+            ? await LocalAccountWorld.CreateAsync(guardrails: await FailClosedStoreAsync())
+            : await LocalAccountWorld.CreateAsync(policy: Killed(KillSwitchExemptions.RecoveryCode));
+        await world.AddUserAsync(LocalOps, AppRole.Admin);
+        var rowsBefore = world.Audit.Rows.Count;
+
+        var output = new StringWriter();
+        Assert.Equal(4, await LocalAccountRecoveryCli.RunAsync(world.Services, [LocalOps], output));
+
+        // Nothing changed: the password works, no row was written, and the message says why and what helps.
+        Assert.True(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
+        Assert.Equal(rowsBefore, world.Audit.Rows.Count);
+        var text = output.ToString();
+        Assert.Contains("could not be redeemed", text);
+        Assert.Contains(failClosed ? "cannot be read" : "kill switch is on", text);
+        Assert.Contains("repair or remove guardrails.json", text);
+        Assert.Contains("ReadOnlyMode or the recovery_code block", text);
+        Assert.Contains(LocalAccountRecoveryCli.ForceFlag, text);
+        Assert.DoesNotMatch("([2-9A-HJ-NP-Z]{4}-){5}[2-9A-HJ-NP-Z]{4}", text);
+
+        // With --force it issues (E3 stays usable, D1), warns, and the password is gone.
+        var forced = new StringWriter();
+        Assert.Equal(0, await LocalAccountRecoveryCli.RunAsync(world.Services, [LocalOps, LocalAccountRecoveryCli.ForceFlag], forced));
+        Assert.Contains("Warning (--force)", forced.ToString());
+        Assert.Contains("repair or remove guardrails.json", forced.ToString());
+        Assert.Matches("([2-9A-HJ-NP-Z]{4}-){5}[2-9A-HJ-NP-Z]{4}", forced.ToString());
+        Assert.False(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
+    }
+
+    [Fact]
+    public async Task E3_the_recovery_cli_needs_no_force_while_redeeming_works_and_rejects_unknown_arguments()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync(policy: Killed());
+        await world.AddUserAsync(LocalOps, AppRole.Admin);
+        var output = new StringWriter();
+        Assert.Equal(2, await LocalAccountRecoveryCli.RunAsync(world.Services, [LocalOps, "--forced"], output));
+        Assert.True(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
+        Assert.DoesNotContain("Warning", (await IssueOutputAsync(world, LocalOps)));
+    }
+
+    private static async Task<string> IssueOutputAsync(LocalAccountWorld world, string account)
     {
         var output = new StringWriter();
         Assert.Equal(0, await LocalAccountRecoveryCli.RunAsync(world.Services, [account], output));
+        return output.ToString();
+    }
+
+    /// <summary>The host CLI (E3) issues a recovery code for <paramref name="account"/> and prints it.</summary>
+    private static async Task<string> IssueAsync(LocalAccountWorld world, string account, bool force = false)
+    {
+        var output = new StringWriter();
+        Assert.Equal(0, await LocalAccountRecoveryCli.RunAsync(world.Services,
+            force ? [account, LocalAccountRecoveryCli.ForceFlag] : [account], output));
         var code = Regex.Match(output.ToString(), "([2-9A-HJ-NP-Z]{4}-){5}[2-9A-HJ-NP-Z]{4}").Value;
         Assert.False(string.IsNullOrEmpty(code));
         return code;
@@ -282,6 +336,9 @@ public sealed class KillSwitchExemptionTests : IDisposable
         var refused = await world.Admission.AdmitAsync(OidcIdentityBindingTests.Google("g-ops", Ops));
         Assert.Equal(AuthAuditReasons.KillSwitch, refused.Reason);
         Assert.Empty(world.Store.Snapshot().Bindings);
+        var row = Assert.Single(world.Audit.Rows, r => r.Action == AuthAuditLog.IdentityBoundAction);
+        Assert.False(row.Success);
+        Assert.Contains("rule=read-only-mode", row.Details);
 
         // An untrusted provider's sign-in waits for a person; the host CLI (E3) confirms it.
         await world.Admission.AdmitAsync(OidcIdentityBindingTests.Oidc("o-ops", Ops));
@@ -289,5 +346,47 @@ public sealed class KillSwitchExemptionTests : IDisposable
         var bound = world.Store.Find(OidcIdentityBindingTests.OidcIssuer, "o-ops");
         Assert.NotNull(bound);
         Assert.Equal(IdentityBindingMethods.HostCli, bound.Method);
+    }
+    // ------------------------------------------------------------------------------------------------ A1.1 records
+
+    [Fact]
+    public async Task A1_1_a_pending_request_recorded_under_the_kill_switch_grants_nothing_until_it_is_confirmed()
+    {
+        // Contract 0009 A1.1: sign-in bookkeeping is a record, not a mutation, and keeps running under the switch. A
+        // pending request takes effect only through E3 or a gateway confirmation, and the latter is refused.
+        var policy = Killed();
+        await using var world = await LocalAccountWorld.CreateAsync(policy: policy);
+        const string person = "person@local.test";
+        await world.Roles.SetRoleAsync(person, AppRole.Operator);
+        var admission = new FederatedAdmission(world.Bindings, world.Roles, world.Whitelist, world.Configuration);
+        var claims = new FederatedSignInClaims("oidc", "https://idp.local.test/", "o-person", person, "true",
+            EmailIsStandardClaim: true);   // OIDC is not trusted by default: pending
+
+        var first = await admission.AdmitAsync(claims);
+        Assert.False(first.Admitted);
+        Assert.Equal(AuthAuditReasons.PendingConfirmation, first.Reason);
+        Assert.Single(world.Bindings.Snapshot().Pending);                    // recorded while the switch is on
+        Assert.False((await admission.AdmitAsync(claims)).Admitted);         // and it grants nothing
+        var request = Assert.Single(world.Bindings.Snapshot().Pending).Id;   // a new sign-in renews the request
+        Assert.Empty(world.Bindings.Snapshot().Bindings);
+
+        // An Admin's confirmation is a mutation: the kill switch refuses it, and nothing is bound.
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        var refused = await Assert.ThrowsAsync<MutationRefusedException>(() => admin.Mutations.RunAsync(
+            "identity.binding_confirm", new { binding = request }, ct => world.Bindings.ConfirmAsync(request, ct)));
+        Assert.Equal(MutationStatus.Denied, refused.Status);
+        Assert.Contains("denied:identity.binding_confirm:Denied", world.Sink.Events);
+        Assert.Empty(world.Bindings.Snapshot().Bindings);
+        Assert.Equal(request, Assert.Single(world.Bindings.Snapshot().Pending).Id);
+        Assert.False((await admission.AdmitAsync(claims)).Admitted);
+        request = Assert.Single(world.Bindings.Snapshot().Pending).Id;
+
+        // Confirmed with the switch off, the binding signs in under the switch again and its sign-in day is recorded.
+        policy.ReadOnlyMode = false;
+        Assert.True((await admin.Mutations.RunAsync("identity.binding_confirm", new { binding = request },
+            ct => world.Bindings.ConfirmAsync(request, ct))).Success);
+        policy.ReadOnlyMode = true;
+        Assert.True((await admission.AdmitAsync(claims)).Admitted);
+        Assert.NotNull(Assert.Single(world.Bindings.Snapshot().Bindings).LastSignInDay);
     }
 }

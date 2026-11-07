@@ -100,7 +100,10 @@ or address stops the start, naming the reason (for example host bits set in `172
 The host CLI is never stopped by the kill switch, and the recovery page is not stopped by default (a person recovering
 their own access is not a write to managed infrastructure). An Admin can block the recovery page — and the own password
 change and the Google/OIDC binding at a first sign-in — under the kill switch beforehand on the *Guardrails* page
-(contract 0009); while the guardrail policy is fail-closed they are blocked, and the host CLI is the way back in. Adding, resetting and deleting accounts — and redeeming a code — are refused while
+(contract 0009); while the guardrail policy is fail-closed they are blocked. The way back then is on the host: repair or remove
+`guardrails.json` in the data directory, or turn off `ReadOnlyMode` or the block in it, then restart Whiskers. The binding
+CLI only helps for an existing pending request, and the recovery CLI refuses while a code could not be redeemed (see
+below). Adding, resetting and deleting accounts — and redeeming a code — are refused while
 `AUTH_DISABLED` is set: every client is the synthetic Admin then, and there is no local sign-in to recover. A code
 issued on the host meanwhile can be redeemed once authentication is on again (within its 24 hours).
 
@@ -130,8 +133,14 @@ staged restore. The account's password is removed and its sessions end; set a ne
   in [configuration.md](../configuration.md).
 - The audit row (`auth.recovery_issued`, actor `cli (--recover-local-account)`) is written **before** anything changes;
   if it cannot be written, nothing changes (exit code 1).
-- Exit codes: `0` code issued, `2` usage, `3` no local account with that email, `1` nothing changed (audit or store
-  unavailable, or the account changed at the same moment — run it again).
+- While a code could not be redeemed — the guardrail policy is fail-closed (`guardrails.json` unreadable), or the kill
+  switch is on and an Admin blocked recovery codes — the command refuses (exit code `4`, nothing changed): issuing would
+  remove the password and leave a code nobody can use. Fix that first: repair or remove `guardrails.json` in the data
+  directory, or turn off `ReadOnlyMode` or the `recovery_code` block in it, then restart Whiskers. `--force` issues the
+  code anyway (contract 0009, amendment A1.2).
+- Exit codes: `0` code issued, `2` usage, `3` no local account with that email, `4` refused because the code could not
+  be redeemed now, `1` nothing changed (audit or store unavailable, or the account changed at the same moment — run it
+  again).
 
 Why this is safe: anyone who can run a command in the Whiskers container already holds its database, data directory and
 keys (PRODUCT_CONTRACT §5.2). The command gives that person nothing new; it only spares them editing the database.

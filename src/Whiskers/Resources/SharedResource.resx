@@ -5979,10 +5979,10 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Endpoint check deleted.</value>
   </data>
   <data name="KillSwitch_Blocked_Message" xml:space="preserve">
-    <value>Blocked while the kill switch is on.</value>
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
   </data>
   <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
-    <value>Blocked while the kill switch is on.</value>
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
   </data>
   <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
     <value>Preset '{0}': '{1}' is not a kill-switch exemption that can be blocked. Nothing was saved.</value>
@@ -6015,7 +6015,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Host command-line tools</value>
   </data>
   <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
-    <value>Need a shell in the container (root-equivalent); the last way back in.</value>
+    <value>Need a shell in the container (root-equivalent). While recovery codes are blocked, the recovery CLI asks for --force: repair guardrails.json on the host instead.</value>
   </data>
   <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
     <value>Own password change</value>

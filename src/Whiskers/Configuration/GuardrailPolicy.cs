@@ -135,7 +135,7 @@ public class GuardrailPolicy
 
     /// <summary>What applies while no valid policy could be loaded (INV-25): every mutation refused (kill switch),
     /// no tool allowed for agents and MCP clients, every resource protected, and every blockable kill-switch exemption
-    /// blocked (contract 0009, D4: the host CLIs stay the way back in).</summary>
+    /// blocked (contract 0009, D4: the host CLIs stay usable; the way back is repairing guardrails.json, A1.2).</summary>
     public static GuardrailPolicy FailClosed() => new()
     {
         MaxAutonomousLevel = "read",

@@ -1254,7 +1254,7 @@ internal sealed class BindingWorld : IAsyncDisposable
         services.AddSingleton<IAuditLogService>(Audit);
         services.AddSingleton(configuration);
         // Contract 0009: the guardrail policy the sign-in binding reads, as the app registers it (Core).
-        if (guardrails is not null) services.AddSingleton(guardrails);
+        services.AddSingleton(guardrails ?? new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault()));
         _sp = services.BuildServiceProvider();
         _loggers = _sp.GetRequiredService<ILoggerFactory>();
     }
