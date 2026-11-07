@@ -12,8 +12,12 @@ public class InvariantTableParserTests
         Assert.Equal(rows.Count, rows.Select(r => r.Id).Distinct().Count());
         Assert.All(rows, r => Assert.NotNull(r.Status));
         var inv18 = rows.Single(r => r.Id == "INV-18");
-        Assert.Equal(InvariantStatus.Violated, inv18.Status);
-        Assert.Contains(inv18.Tests, t => t.Planned && t.Class is null);
+        Assert.Equal(InvariantStatus.Holds, inv18.Status);
+        Assert.Contains(inv18.Tests, t => t is { Planned: false, Class: "NotificationsRoleTests", Method: null });
+        // A planned entry may name no class (only on a ❌ or ❓ row, R6): INV-18 as it stood before it was closed.
+        var planned = InvariantTableParser.Parse(ReleaseGateTests.SetCell(GateFiles.Require(GateFiles.Invariants), "| INV-18 |", 4,
+            "the in-handler checks of these actions *(planned, WP10)*")).Single(r => r.Id == "INV-18");
+        Assert.Contains(planned.Tests, t => t.Planned && t.Class is null);
         var inv21 = rows.Single(r => r.Id == "INV-21");
         Assert.Contains(inv21.Tests, t => t is { Planned: false, Class: "ReadOnlyKillSwitchWireTests", Method: null });
         Assert.Contains(inv21.Tests, t => t is { Planned: false, Class: "UiMutationRunnerTests", Method: "The_kill_switch_stops_a_human_too" });
@@ -170,8 +174,8 @@ public class ReleaseGateDocumentTests
         var gate = ReleaseGateDocument.Parse(GateFiles.Require(GateFiles.ReleaseGateDoc));
         Assert.Empty(gate.Problems);
         Assert.Equal("INV-62", gate.Pin);
-        Assert.Equal(12, gate.Open.Count);
-        Assert.Contains(gate.Open, o => o is { Id: "INV-18", Status: InvariantStatus.Violated, Package: "WP10" });
+        Assert.Equal(10, gate.Open.Count);
+        Assert.Contains(gate.Open, o => o is { Id: "INV-13", Status: InvariantStatus.Partial, Package: "R1-05" });
         Assert.Contains(gate.Open, o => o is { Id: "INV-58", Status: InvariantStatus.Partial });
         Assert.Empty(gate.Exceptions);
         Assert.Empty(gate.Known);
@@ -187,7 +191,7 @@ public class ReleaseGateDocumentTests
         Assert.Contains(ReleaseGateDocument.Parse(text.Replace("## Platform skips", "## Skips")).Problems, p => p.Contains("Platform skips"));
         Assert.Contains(ReleaseGateDocument.Parse(text + "\nHighest invariant ID: INV-63\n").Problems, p => p.Contains("2 times"));
         Assert.Contains(ReleaseGateDocument.Parse(text.Replace("Highest invariant ID: INV-62", "Highest ID INV-62")).Problems, p => p.Contains("no line"));
-        Assert.Contains(ReleaseGateDocument.Parse(ReleaseGateTests.InsertAfter(text, "| INV-18 |", "| INV-99 | ❌ | WP1 |")).Problems, p => p.Contains("cells"));
+        Assert.Contains(ReleaseGateDocument.Parse(ReleaseGateTests.InsertAfter(text, "| INV-13 |", "| INV-99 | ❌ | WP1 |")).Problems, p => p.Contains("cells"));
     }
 
     [Fact]

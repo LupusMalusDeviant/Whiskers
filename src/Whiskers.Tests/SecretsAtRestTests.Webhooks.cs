@@ -164,15 +164,41 @@ public partial class SecretsAtRestTests
             await ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), await Vault(), NullLogger.Instance);
 
         // Read while the connection pool is still alive: closing it would fold the log back on its own.
-        foreach (var file in Directory.EnumerateFiles(_root, "metrics.db*"))
-        {
-            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var copy = new MemoryStream();
-            stream.CopyTo(copy);
-            Assert.False(System.Text.Encoding.UTF8.GetString(copy.ToArray()).Contains(secret, StringComparison.Ordinal),
-                $"{Path.GetFileName(file)} still holds the replaced secret");
-        }
+        // SQLite deletes -wal/-shm only when the last connection to the database closes — never on a checkpoint. A file
+        // that vanishes mid-read therefore means something closed this test's pool (a global pool clear in a parallel
+        // test did that). The test's premise is WAL mode with the pool open, so the log must exist and be read: a missing
+        // or vanished log fails instead of passing without the log ever being inspected.
+        var read = ReadsAllDatabaseFiles(secret);
+        Assert.Contains("metrics.db-wal", read);
         TestSqlite.ClearPools(_root);
+    }
+
+    /// <summary>Reads every <c>metrics.db*</c> file and asserts none holds <paramref name="secret"/>; returns the names of
+    /// the files it read. A file that disappears between the listing and the read fails the test with its cause.</summary>
+    private List<string> ReadsAllDatabaseFiles(string secret)
+    {
+        var read = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(_root, "metrics.db*").ToList())
+        {
+            byte[] bytes;
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var copy = new MemoryStream();
+                stream.CopyTo(copy);
+                bytes = copy.ToArray();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Assert.Fail($"{Path.GetFileName(file)} could not be read ({ex.GetType().Name}: {ex.Message}); "
+                    + "if it vanished, something closed this test's connection pool, so the log could not be inspected");
+                throw;
+            }
+            Assert.False(System.Text.Encoding.UTF8.GetString(bytes).Contains(secret, StringComparison.Ordinal),
+                $"{Path.GetFileName(file)} still holds the replaced secret");
+            read.Add(Path.GetFileName(file));
+        }
+        return read;
     }
 
     [Fact]

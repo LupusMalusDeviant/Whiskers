@@ -4715,6 +4715,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Cves_Snackbar_ScanFinished" xml:space="preserve">
     <value>CVE-Scan abgeschlossen.</value>
   </data>
+  <data name="Cves_Snackbar_ScanNotStarted" xml:space="preserve">
+    <value>Kein CVE-Scan gestartet: Es läuft bereits einer, oder das CVE-Modul ist ausgeschaltet.</value>
+  </data>
   <data name="Cves_Snackbar_ScanFailed" xml:space="preserve">
     <value>CVE-Scan fehlgeschlagen: {0}</value>
   </data>

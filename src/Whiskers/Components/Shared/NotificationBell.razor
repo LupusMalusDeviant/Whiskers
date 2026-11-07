@@ -2,6 +2,8 @@
 @implements IDisposable
 @inject Whiskers.Services.Notifications.IInAppNotificationStore Store
 @inject ISnackbar Snackbar
+@inject IUiMutationRunner Mutations
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject NavigationManager Nav
 @inject IStringLocalizer<SharedResource> L
 
@@ -22,7 +24,8 @@
             <div style="display:flex; align-items:center; padding:8px 12px;">
                 <MudText Typo="Typo.subtitle2">@L["NotificationBell_Title"]</MudText>
                 <MudSpacer />
-                @if (recent.Count > 0)
+                @* Shown from Operator on: presentation only — the gateway decides notifications.clear (INV-18). *@
+                @if (recent.Count > 0 && _role >= AppRole.Operator)
                 {
                     <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="Clear">@L["NotificationBell_Clear"]</MudButton>
                 }
@@ -75,10 +78,13 @@
 </MudBadge>
 
 @code {
-    protected override void OnInitialized()
+    private AppRole _role = AppRole.Viewer;
+
+    protected override async Task OnInitializedAsync()
     {
         Store.Changed += OnChanged;
         Store.Added += OnAdded;
+        _role = await CurrentUser.GetRoleAsync();
     }
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
@@ -95,10 +101,23 @@
 
     private bool _open;
 
-    private void OnOpenChanged(bool open)
+    // INV-18 (user decision 2026-11-07): the log is shared, so marking it read and clearing it are Operator writes
+    // decided by the gateway. Opening the bell attempts the write only for an Operator and only when something is
+    // unread (a Viewer's attempt would only be refused, and an empty mark would still be an audited write, on every
+    // open); whenever it is attempted, the gateway decides. A refusal of this automatic mark (the kill switch, a
+    // demotion) is recorded by the gateway but not shown: nobody clicked anything.
+    private async Task OnOpenChanged(bool open)
     {
         _open = open;
-        if (open) Store.MarkAllRead();
+        if (open && _role >= AppRole.Operator && Store.UnreadCount > 0)
+        {
+            try
+            {
+                await Mutations.RunAsync("notifications.mark_read", new { },
+                    _ => { Store.MarkAllRead(); return Task.CompletedTask; });
+            }
+            catch (MutationRefusedException) { /* recorded as Denied; the list stays unread */ }
+        }
     }
 
     private void OnRowClick(InAppNotification n)
@@ -107,7 +126,15 @@
         Nav.NavigateTo(n.Link);       // MudMenuItem auto-closes the menu
     }
 
-    private void Clear() => Store.Clear();
+    private async Task Clear()
+    {
+        try
+        {
+            await Mutations.RunAsync("notifications.clear", new { },
+                _ => { Store.Clear(); return Task.CompletedTask; });
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+    }
 
     public void Dispose()
     {

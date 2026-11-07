@@ -281,8 +281,9 @@ public sealed class UiAuditCompletenessTests : IDisposable
         {
             ["Pages/ContainerDatabasePanel.razor"] = ["CheckMigrationStatus"],
             ["Pages/NginxManager.razor"] = ["TestConfig"],
-            // Skips loading the admin-only settings into the circuit; changes nothing.
-            ["Pages/Settings.razor"] = ["OnInitializedAsync"],
+            // Skips loading the admin-only settings into the circuit; changes nothing. A test notification (INV-17 review)
+            // goes to the team's channels and changes no Whiskers state: no capability, so no gateway event to record.
+            ["Pages/Settings.razor"] = ["OnInitializedAsync", "RequireAdminToSendTestAsync"],
         }.GetValueOrDefault(page, []);
         // Every plain Require( call — whatever its argument and wherever it sits in the handler — must be in a read.
         var handlers = System.Text.RegularExpressions.Regex.Matches(source, @"(?:private|protected|public)[^\n(]*?\s(\w+)\(");
