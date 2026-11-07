@@ -14,7 +14,9 @@ namespace Whiskers.Tests;
 /// within the deadline — also while the server withholds its final answer — and the send has really ended when the
 /// channel returns; a server that takes some recipients and refuses others never gets the message twice for the ones it
 /// took, neither on the composite's retry nor on a redelivery after a restart.
+/// <para>Runs alone (<see cref="WallClockTimingCollection"/>): the stop tests measure real elapsed time.</para>
 /// </summary>
+[Collection(WallClockTimingCollection.Name)]
 public sealed class NotificationSmtpTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"sw-smtp-{Guid.NewGuid():N}");
@@ -185,7 +187,9 @@ public sealed class NotificationSmtpTests : IDisposable
 
         await Assert.ThrowsAnyAsync<Exception>(() => email.DeliverAsync(Failed(), stop.Token).WaitAsync(TimeSpan.FromSeconds(15)));
 
-        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(5));
+        // Far below the 60 s SMTP deadline and below the 15 s WaitAsync above, so a send the stop did not end still
+        // fails here; the margin over the 300 ms stop absorbs a loaded CI runner (a run once took 6 s).
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(10));
     }
 
     /// <summary>A minimal SMTP server: takes or refuses each recipient by <see cref="Refuse"/>, records what reached
