@@ -53,8 +53,6 @@ public class WebhookService : IWebhookService
 
     private sealed record QueuedRun(string WebhookId, string RunId, string Claim, string? SourceIp);
 
-    /// <summary>The time a run's own bookkeeping (its state and log row) gets once its deadline has passed.</summary>
-    private static readonly TimeSpan BookkeepingTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>Request-rate buckets per webhook id: the id as sent, valid or not, so the limit says nothing about
     /// whether a webhook exists — and the table stays bounded whatever ids are sent.</summary>
@@ -83,6 +81,9 @@ public class WebhookService : IWebhookService
         _slots = new SemaphoreSlim(Math.Max(1, _options.QueueCapacity));
         _overdue = new SemaphoreSlim(Math.Max(1, _options.MaxConcurrentRuns));
         _rates = new RateWindow(_time);
+        // At a stop, the runs no worker has taken are taken out of the queue and their waiting Tests told at once, also
+        // while every worker is busy (review round 7, MINOR-1).
+        _stopping.Register(TellWaitingAtStop);
     }
 
     public async Task<List<WebhookEntity>> GetWebhooksAsync()
@@ -278,14 +279,22 @@ public class WebhookService : IWebhookService
     private async Task<WebhookAcceptance> QueueAsync(WebhookEntity webhook, string key, string? sourceIp,
         TaskCompletionSource<RunEnd>? completion, CancellationToken ct)
     {
-        if (!_slots.Wait(0))
+        // Stopping (review round 8, NIT-1): no worker takes a run any more, so a new delivery is not recorded at all —
+        // answered busy like a full queue, the provider may deliver it again to the next start. No slot is taken.
+        var stopping = _stopping.IsCancellationRequested;
+        if (stopping || !_slots.Wait(0))
         {
             // Full. A delivery seen before still gets its run; a new one is not recorded — the provider may retry.
-            // One a stopped process left queued runs only if a delivery takes it over, which needs a slot: busy too.
+            // One left unaccepted (or accepted here, its answer lost) runs only if a delivery takes it over, which needs
+            // a slot; one an earlier process accepted waits for the reconciliation: busy too.
             var known = await _deliveries.FindAsync(webhook.WebhookId, key, ct);
-            if (known is not null && !_deliveries.Orphaned(known) && !_deliveries.Admitting(known))
+            if (known is not null && !_deliveries.Orphaned(known) && !_deliveries.Admitting(known)
+                && !_deliveries.AwaitingReconcile(known))
                 return Repeat(webhook, known);
-            _logger.LogWarning("Webhook {Name}: the delivery queue is full; refused as busy", webhook.Name);
+            if (stopping)
+                _logger.LogWarning("Webhook {Name}: Whiskers is stopping; the delivery is refused as busy", webhook.Name);
+            else
+                _logger.LogWarning("Webhook {Name}: the delivery queue is full; refused as busy", webhook.Name);
             return new WebhookAcceptance(WebhookReply.Busy);
         }
 
@@ -310,14 +319,35 @@ public class WebhookService : IWebhookService
         if (!fresh)
         {
             _slots.Release();
-            // Still being recorded by a concurrent delivery that may yet fail, or queued with nothing holding it (a
+            // Still being recorded by a concurrent delivery that may yet fail, or never accepted and held by nothing (a
             // concurrent takeover that won and then failed): not "queued" — busy, and the next delivery takes it over.
-            if (_deliveries.Admitting(row) || _deliveries.Orphaned(row))
+            if (_deliveries.Admitting(row) || _deliveries.Orphaned(row) || _deliveries.AwaitingReconcile(row))
             {
-                _logger.LogInformation("Webhook {Name}: a repeat of a delivery still being recorded; refused as busy", webhook.Name);
+                // An earlier process's accepted delivery is settled by the reconciliation, never taken over (INV-45):
+                // busy until then, a duplicate after.
+                if (_deliveries.AwaitingReconcile(row)) RequestReconcile();
+                _logger.LogInformation("Webhook {Name}: a repeat of a delivery still being recorded or settled; refused as busy",
+                    webhook.Name);
                 return new WebhookAcceptance(WebhookReply.Busy);
             }
             return Repeat(webhook, row);
+        }
+
+        // INV-45 (review round 4): the acceptance is on record before the caller hears it — a row an earlier process
+        // left is then known to be accepted (queued) or not (recording). Its own bounded time, not the request's
+        // (review round 5, MINOR-3): a client that hangs up does not cut the acceptance off halfway — the delivery is
+        // then queued and runs, its answer simply not heard (a redelivery is its duplicate).
+        try
+        {
+            using var acceptTime = new CancellationTokenSource(BookkeepingTimeout);
+            await _deliveries.AcceptAsync(row.RunId, row.Instance, acceptTime.Token);
+        }
+        catch (Exception ex)
+        {
+            _deliveries.Release(row.Instance);
+            _slots.Release();
+            _logger.LogError(ex, "Webhook {Name}: the delivery's acceptance could not be recorded; refused as busy", webhook.Name);
+            return new WebhookAcceptance(WebhookReply.Busy);
         }
 
         if (completion is not null) _waiting[row.RunId] = completion;
@@ -325,6 +355,10 @@ public class WebhookService : IWebhookService
         // Unbounded channel, bounded by the slot taken above: the write cannot fail.
         _queue.Writer.TryWrite(new QueuedRun(webhook.WebhookId, row.RunId, row.Instance, sourceIp));
         _deliveries.Enqueued(row.Instance);
+        RunEnqueued?.Invoke(row.RunId);
+        // Queued while Whiskers began to stop (after the check above): no worker takes it any more; a Test waiting for
+        // it is told now.
+        if (_stopping.IsCancellationRequested) TellWaitingAtStop();
         _logger.LogInformation("Webhook {Name}: delivery accepted as run {RunId}", webhook.Name, row.RunId);
         return new WebhookAcceptance(WebhookReply.Accepted, row.RunId, "queued");
     }
@@ -360,6 +394,17 @@ public class WebhookService : IWebhookService
             await foreach (var run in _queue.Reader.ReadAllAsync(_stopping))
             {
                 _slots.Release();
+                // ReadAllAsync checks the token only while it waits: a worker that was busy at the stop would take the
+                // next item. It is left queued under its live claim — the next start reconciles it (review round 5).
+                if (_stopping.IsCancellationRequested)
+                {
+                    // A page's Test waiting for it — or for any run still in the queue — is told now, not at its own
+                    // timeout (review rounds 6 and 7).
+                    if (_waiting.TryRemove(run.RunId, out var waiting))
+                        waiting.TrySetResult(new RunEnd(false, Stopping, StoppingMessage));
+                    TellWaitingAtStop();
+                    break;
+                }
                 try
                 {
                     await ExecuteRunAsync(run);
@@ -372,7 +417,27 @@ public class WebhookService : IWebhookService
         }
         catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
         {
-            // Shutting down: a queued run of this process is taken over by its next delivery after the restart.
+            // Shutting down: a run still queued keeps its live claim (a repeat is its duplicate); the next start
+            // records it once as not run and settles it (ReconcileAsync, INV-45). An idle worker tells the Tests
+            // waiting for the runs left in the queue.
+            TellWaitingAtStop();
+        }
+    }
+
+    /// <summary>Raised with the run id once a run is in the queue — a signal for tests, nothing acts on it.</summary>
+    internal event Action<string>? RunEnqueued;
+
+    /// <summary>At a stop (review round 7, MINOR-1): takes every run still in the queue out of it — no worker will take
+    /// it; it stays queued in the database under its live claim and the next start reconciles it — and tells a page's
+    /// Test waiting for it that Whiskers is stopping. A run is in the queue or taken by a worker, never both, so every
+    /// waiting Test is told once: by the worker that took its run, or here. The drained runs keep their queue slots
+    /// (review round 8, NIT-1): the drain does not lift the queue limit.</summary>
+    private void TellWaitingAtStop()
+    {
+        while (_queue.Reader.TryRead(out var left))
+        {
+            if (_waiting.TryRemove(left.RunId, out var waiting))
+                waiting.TrySetResult(new RunEnd(false, Stopping, StoppingMessage));
         }
     }
 
@@ -391,9 +456,13 @@ public class WebhookService : IWebhookService
         var ct = deadline.Token;
         ResourceLocks.Lease? gate = null;
         var handedOver = false;
+        WebhookEntity? queued = null;
+        // Whether the delivery's event is written by now (by the gateway, or as not run).
+        var decided = false;
+        var abandoning = false;
         try
         {
-            var queued = await ReadWebhookAsync(run.WebhookId, ct);
+            queued = await ReadWebhookAsync(run.WebhookId, ct);
             var target = queued is null ? new RunTarget("missing:" + run.WebhookId) : await TargetAsync(queued, ct);
             while (true)
             {
@@ -405,14 +474,13 @@ public class WebhookService : IWebhookService
                 {
                     message = new("Webhook_Run_NoTurn", "Failed: the delivery did not get its turn on its target in time.", []);
                     result = (false, message.English);
-                    var noTurn = result;
-                    using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
-                    await Bounded(async t =>
-                    {
-                        if (await _deliveries.StartAsync(run.RunId, run.Claim, t))
-                            await FinishAsync(run, queued, noTurn, WebhookDeliveryStore.Failed);
-                        return true;
-                    }, bookkeeping.Token);
+                    // INV-45: the delivery ends before its decision; its action did not run. It is recorded and settled
+                    // beside the worker, once (GiveUpAsync) — also for a webhook removed before the worker read it:
+                    // then by its id, unowned. Owned by this branch from here on: nothing else records it.
+                    decided = true;
+                    abandoning = true;
+                    var noTurnWebhook = queued;
+                    _ = Task.Run(() => GiveUpAsync(run, noTurnWebhook, message.English, record: true));
                     return;
                 }
                 // What the run acts on is resolved again while its lock is held — a run before may have rebuilt the
@@ -433,12 +501,17 @@ public class WebhookService : IWebhookService
             // The work this run starts holds its lock: a Git deployment it starts does not wait for its own server.
             _locks.Holding(target.Key);
             if (!await StartAsync(run, ct)) return;
+            // Started: from here on the delivery ends — run, refused or failed — and is on record (INV-45).
             var webhook = await ReadWebhookAsync(run.WebhookId, ct);
             if (webhook is null || !webhook.Enabled || queued is null || !SameTarget(queued, webhook))
             {
                 // Removed, switched off or pointed elsewhere while it waited: it does not run.
                 message = new("Webhook_Run_Changed",
                     "Refused: the webhook was removed, switched off or changed before the delivery ran.", []);
+                // INV-45: the accepted delivery is refused before its decision — on record as the delivery it was
+                // (by its id, unowned, when the webhook was gone before the worker read it).
+                decided = true;
+                await RecordNotRunAsync(queued ?? webhook, run.WebhookId, run.RunId, message.English, refused: true);
                 result = await FinishAsync(run, webhook, (false, message.English), WebhookDeliveryStore.Refused);
                 return;
             }
@@ -447,6 +520,8 @@ public class WebhookService : IWebhookService
                 webhook.Name, webhook.Action, webhook.TargetId, run.RunId);
             // Started on the thread pool: the owner's authority and the gateway may do synchronous work (an
             // account lookup in SQLite) before they return a task — the deadline must already be watching then.
+            // From here the gateway (or RunAsOwnerAsync's own refusal) records the delivery.
+            decided = true;
             var work = Task.Run(() => RunAsOwnerAsync(webhook, run.RunId, target, ct), CancellationToken.None);
             if (!await Finished(work, ct))
             {
@@ -494,17 +569,22 @@ public class WebhookService : IWebhookService
         }
         catch (Exception ex) when (!handedOver)
         {
-            // Given up: running, it failed; queued, the next delivery takes it over once the claim is released
-            // below. Recorded beside the worker — the database may be what failed — and fenced by the claim.
+            // Given up: it failed, and it is final. Recorded beside the worker — the database may be what failed — and
+            // fenced by the claim. An accepted run nothing recorded yet (it failed before or at its start, or after it
+            // and before its decision) is on record once, as a delivery that did not run (INV-45).
             _logger.LogError(ex, "Webhook run {RunId} failed outside its action", run.RunId);
-            _ = Task.Run(() => AbandonAsync(run));
+            var unrecorded = !decided;
+            // The claim stays held until the run is settled: no later delivery takes over a run being given up.
+            abandoning = true;
+            var givenUp = queued;
+            _ = Task.Run(() => GiveUpAsync(run, givenUp, GivenUp, unrecorded));
         }
         finally
         {
             if (!handedOver)
             {
                 gate?.Dispose();
-                _deliveries.Release(run.Claim);
+                if (!abandoning) _deliveries.Release(run.Claim);
             }
             completion?.TrySetResult(new RunEnd(result.Success, result.Output, message));
             // Not on the worker: pruning has its own time and never holds a run's worker (SQLite runs its commands
@@ -561,21 +641,12 @@ public class WebhookService : IWebhookService
             : (false, work.Exception?.GetBaseException().Message ?? Cancelled);
 
     /// <summary>Starts the run within its deadline. The database may not answer in time (SQLite runs its commands
-    /// synchronously and does not cancel them): the worker goes on, and a start that still lands later is recorded
-    /// as failed — the run never runs.</summary>
+    /// synchronously and does not cancel them): the worker gives the run up (<see cref="GiveUpAsync"/>), which
+    /// settles it whether this start lands before, after or never — the run never runs.</summary>
     private async Task<bool> StartAsync(QueuedRun run, CancellationToken ct)
     {
         var start = Task.Run(() => _deliveries.StartAsync(run.RunId, run.Claim, ct), CancellationToken.None);
-        try
-        {
-            return await start.WaitAsync(ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested && !start.IsCompleted)
-        {
-            _ = start.ContinueWith(t => t.IsCompletedSuccessfully && t.Result ? AbandonAsync(run) : Task.CompletedTask,
-                CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
-            throw;
-        }
+        return await start.WaitAsync(ct);
     }
 
     /// <summary>
@@ -592,22 +663,388 @@ public class WebhookService : IWebhookService
         return task.WaitAsync(ct);
     }
 
-    /// <summary>A run its worker gave up: running, it failed (a queued one is taken over by its next delivery).</summary>
-    private async Task AbandonAsync(QueuedRun run)
+    /// <summary>What a page's Test waiting for a run hears when Whiskers stops before the run started.</summary>
+    internal const string Stopping =
+        "Whiskers is stopping: the delivery is queued and is settled at the next start; its action did not run.";
+
+    /// <summary><see cref="Stopping"/> in the person's language (review round 9, NIT-4).</summary>
+    private static readonly RunMessage StoppingMessage = new("Webhook_Test_Stopping", Stopping, []);
+
+    /// <summary>What a page's Test hears when it is answered busy while Whiskers stops: as a rule nothing is recorded
+    /// and nothing runs (review round 8, NIT-1); in the rare case that the acceptance landed but its answer was lost,
+    /// the next start records it as not run — hence "may not" (review round 9, NIT-2).</summary>
+    internal const string StoppingNotAccepted =
+        "Whiskers is stopping: the test delivery may not have been accepted and has not run; try again after the restart.";
+
+    /// <summary>Raised with the run id when a give-up returns unsettled because Whiskers is stopping (its claim stays
+    /// held) — a signal for tests, nothing acts on it.</summary>
+    internal event Action<string>? StoppedUnsettled;
+
+    /// <summary>The reason of an accepted delivery its worker gave up before its decision (INV-45).</summary>
+    internal const string GivenUp = "Failed: the delivery was given up before its decision (see the log); its action did not run.";
+
+    /// <summary>The reason of an accepted delivery that a stop, a crash or a database outage left unsettled, found
+    /// at the next start (INV-45).</summary>
+    internal const string NotSettled =
+        "Failed: the delivery was accepted but not settled before Whiskers stopped (or while its database was unavailable); its action did not run.";
+
+    /// <summary>How long one bookkeeping step of a run (its state, its log row, a settlement) may take; internal so
+    /// tests can stall it past this.</summary>
+    internal TimeSpan BookkeepingTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>How long a settlement that failed waits before it tries again.</summary>
+    internal TimeSpan SettleRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>The longest pause between two settlement attempts (the pause doubles up to this).</summary>
+    internal static readonly TimeSpan MaxSettleRetryDelay = TimeSpan.FromMinutes(5);
+
+    private readonly ConcurrentDictionary<string, byte> _givingUp = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A run its worker gave up — no turn on its target, a failure before its decision, or (<paramref name="record"/>
+    /// false) a failure after the gateway recorded it. INV-45 (review round 3):
+    /// <list type="number">
+    /// <item>With <paramref name="record"/>, the delivery is recorded first, once: the gateway's Denied event under its
+    /// run id, which survives a database outage in the audit outbox.</item>
+    /// <item>It is then settled — failed, final — in one claim-fenced update, tried again until it lands or Whiskers
+    /// stops; the claim is held all that time, so no repeat takes it over. A delivery the provider was told is accepted
+    /// is not left queued for a redelivery that may never come; it needs a new delivery (a new delivery id, or for
+    /// GitHub a new push).</item>
+    /// <item>A stop before it is settled leaves it to <see cref="ReconcileAsync"/> at the next start, which finds its
+    /// event and only settles and logs it; the claim stays held for the rest of the process, so no repeat takes it over
+    /// (review round 5, MAJOR-1).</item>
+    /// </list>
+    /// Its event has a key of its own (<see cref="NotRunEventKey"/>): however the give-up, the reconciliation and the
+    /// audit outbox interleave, it is one row.
+    /// A recorded one is also in the webhook's log and sends an <c>automation_refused</c> notification.
+    /// </summary>
+    private async Task GiveUpAsync(QueuedRun run, WebhookEntity? queued, string reason, bool record)
+    {
+        if (!_givingUp.TryAdd(run.RunId, 0)) return;   // once per run, whatever calls it
+        var stopped = false;
+        try
+        {
+            WebhookEntity? webhook = queued;
+            if (record)
+            {
+                // The webhook as the worker read it, or — the read is what failed — as it reads now.
+                webhook ??= await ReadForRecordAsync(run.WebhookId);
+                await RecordNotRunAsync(webhook, run.WebhookId, run.RunId, reason);
+            }
+
+            // Tried again with a growing pause (review round 4, MINOR-4) — and never a second attempt while one that
+            // stalled (SQLite does not cancel) is still running: that one is waited for again instead.
+            Task<bool>? attempt = null;
+            CancellationTokenSource? attemptTime = null;
+            var delay = SettleRetryDelay;
+            for (var failures = 0; ; failures++)
+            {
+                try
+                {
+                    if (attempt is null)
+                    {
+                        attemptTime = new CancellationTokenSource(BookkeepingTimeout);
+                        var token = attemptTime.Token;
+                        attempt = Task.Run(() => _deliveries.SettleAsync(run.RunId, run.Claim, token), CancellationToken.None);
+                    }
+                    await attempt.WaitAsync(BookkeepingTimeout);
+                    attemptTime?.Dispose();
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    if (attempt is { IsCompleted: true })
+                    {
+                        // Failed: the next try is a new one.
+                        attempt = null;
+                        attemptTime?.Dispose();
+                    }
+                    // The first failure, then every power of two: an outage is visible without a log flood.
+                    if ((failures & (failures + 1)) == 0)
+                        _logger.LogError(ex, "Webhook run {RunId} could not be settled ({Failures} attempts); trying again",
+                            run.RunId, failures + 1);
+                    try
+                    {
+                        await Task.Delay(delay, _stopping);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Stopping: the next start settles it (ReconcileAsync); its event is already on record. The
+                        // claim stays held until the process ends (review round 5, MAJOR-1): released, the row would
+                        // read as this process's own accepted-and-lost delivery, and a repeat arriving before Kestrel
+                        // stops would take over a run id that already says "did not run".
+                        stopped = true;
+                        return;
+                    }
+                    delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxSettleRetryDelay.Ticks));
+                }
+            }
+
+            if (record && webhook is not null)
+            {
+                using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
+                try
+                {
+                    await Bounded(t => RecordOutcomeAsync(run, webhook, (false, reason), WebhookDeliveryStore.Failed, t),
+                        bookkeeping.Token);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Webhook run {RunId}: its log entry could not be written", run.RunId);
+                }
+                using var scope = _scopeFactory.CreateScope();
+                await NotifyAsync(scope, NotificationEventTypes.AutomationRefused, webhook,
+                    $"Webhook \"{webhook.Name}\" was called, but its delivery was given up and its action did not run. " +
+                    $"{reason} It needs a new delivery (a new delivery id, or for GitHub a new push).");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Webhook run {RunId}: giving it up failed", run.RunId);
+        }
+        finally
+        {
+            // Settled: the claim, which the worker kept for this, is let go (work still in flight stays fenced by it in
+            // the database). Stopping unsettled: both stay held for the rest of the process, so neither a repeat nor a
+            // second give-up touches the run before the next start reconciles it.
+            if (!stopped)
+            {
+                _givingUp.TryRemove(run.RunId, out _);
+                _deliveries.Release(run.Claim);
+            }
+            else StoppedUnsettled?.Invoke(run.RunId);   // after the claim was (not) let go
+        }
+    }
+
+    private async Task<WebhookEntity?> ReadForRecordAsync(string webhookId)
     {
         try
         {
             using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
-            await Bounded(async t =>
-            {
-                await _deliveries.FinishAsync(run.RunId, run.Claim, WebhookDeliveryStore.Failed, t);
-                return true;
-            }, bookkeeping.Token);
+            return await ReadWebhookAsync(webhookId, bookkeeping.Token);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Webhook run {RunId}: its failure could not be recorded", run.RunId);
+            _logger.LogWarning(ex, "Webhook {WebhookId} could not be read for the record of its delivery", webhookId);
+            return null;
         }
+    }
+
+    /// <summary>
+    /// INV-45 (review rounds 3 to 5): settles the deliveries an earlier process accepted and left queued or running —
+    /// it stopped or crashed with runs still waiting, or could not settle a give-up (its database was unavailable).
+    /// Only accepted rows: one whose acceptance never reached the database is left recording, and a repeat takes it
+    /// over. Each row is taken over for this, fenced (no delivery takes over an earlier process's queued row — it is
+    /// answered busy until this settled it, then as a duplicate), and judged by the events under its run id, in the
+    /// audit log and the audit outbox:
+    /// <list type="bullet">
+    /// <item>none: recorded once as not run (the keyed event, <see cref="NotRunEventKey"/>), settled failed, written to
+    /// the webhook's log;</item>
+    /// <item>its "did not run" event (a give-up recorded before the stop, or an earlier pass): settled failed and
+    /// written to the webhook's log — no second event;</item>
+    /// <item>only the gateway's refusal (its run's own bookkeeping did the rest): settled refused, nothing else;</item>
+    /// <item>an intent or an outcome (cut off while it ran): a queued row is settled failed, a running one stays as it
+    /// is ("interrupted").</item>
+    /// </list>
+    /// The webhook is read strictly: a read that fails skips the row (a later pass records it with the right owner,
+    /// capability and target); only a webhook that is gone is recorded as removed.
+    /// The admins get one <c>automation_refused</c> notification per pass naming the webhooks. A row that fails is
+    /// skipped and the pass is tried again (with a growing pause) until one completes; the Webhooks module runs the
+    /// first pass at start, before Kestrel listens. Assumes one Whiskers process per database (the documented
+    /// single-instance limit): a second, live process's running row would be judged as left behind. Returns how many it
+    /// recorded.
+    /// </summary>
+    public async Task<int> ReconcileAsync(CancellationToken ct = default)
+    {
+        var (recorded, complete) = await ReconcilePassAsync(ct);
+        if (!complete) RequestReconcile();
+        return recorded;
+    }
+
+    /// <summary>How long a failed reconciliation pass waits before the next (doubling up to 5 minutes).</summary>
+    internal TimeSpan ReconcileRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    private int _reconcileRetrying;
+
+    /// <summary>Runs passes in the background until one completes cleanly, or Whiskers stops.</summary>
+    private void RequestReconcile()
+    {
+        if (Interlocked.Exchange(ref _reconcileRetrying, 1) == 1) return;
+        // Its passes decide for themselves (each record is a decision of its own): no caller's scope flows into them.
+        using var noFlow = ExecutionContext.SuppressFlow();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var delay = ReconcileRetryDelay;
+                while (!_stopping.IsCancellationRequested)
+                {
+                    await Task.Delay(delay, _stopping);
+                    if ((await ReconcilePassAsync(CancellationToken.None)).Complete) return;
+                    delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxSettleRetryDelay.Ticks));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Stopping: the next start reconciles.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Webhook delivery reconciliation stopped retrying");
+            }
+            finally
+            {
+                Volatile.Write(ref _reconcileRetrying, 0);
+            }
+        });
+    }
+
+    private async Task<(int Recorded, bool Complete)> ReconcilePassAsync(CancellationToken ct)
+    {
+        await _reconcile.WaitAsync(ct);
+        try
+        {
+            List<WebhookDeliveryEntity> rows;
+            Dictionary<string, List<RunEvent>> events;
+            try
+            {
+                rows = await _deliveries.UnsettledOfOthersAsync(ct);
+                events = await EventsOfAsync(rows.Select(r => r.RunId).ToList(), ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "Unsettled webhook deliveries could not be read; reconciliation is tried again");
+                return (0, false);
+            }
+
+            var recorded = 0;
+            var complete = true;
+            var told = new List<WebhookEntity>();
+            foreach (var row in rows)
+            {
+                string? claim = null;
+                try
+                {
+                    claim = await _deliveries.AdoptAsync(row, ct);
+                    if (claim is null) continue;   // changed since it was read: a pass after it judges it
+                    var seen = events.GetValueOrDefault(row.RunId) ?? [];
+                    // Its "did not run" event (a give-up, or an earlier pass) — the one event it may get from here.
+                    var notRun = seen.Any(e => e.EventId == NotRunEventId(row.RunId));
+                    var refusedOnly = seen.Count > 0 && seen.All(e =>
+                        e.Phase == "outcome" && e.Outcome is nameof(MutationStatus.Denied) or nameof(MutationStatus.PendingApproval));
+                    WebhookEntity? webhook = null;
+                    if (seen.Count == 0 || notRun)
+                    {
+                        // Read strictly (review round 5, MINOR-2): only a webhook that is gone is recorded as removed; a
+                        // read that fails skips the row, and a later pass records it with its owner, capability and target.
+                        using (var read = new CancellationTokenSource(BookkeepingTimeout))
+                            webhook = await ReadWebhookAsync(row.WebhookId, read.Token);
+                        if (seen.Count == 0)
+                        {
+                            // Keyed (NotRunEventKey): a copy still on its way from the audit outbox, or one an earlier
+                            // pass wrote, is the same row — never a second event.
+                            await RecordNotRunAsync(webhook, row.WebhookId, row.RunId, NotSettled);
+                            // Settled only once its event provably exists, in the log or the outbox (review round 6,
+                            // NIT-2): with both unavailable the row stays unsettled and a later pass writes it.
+                            if (!await EventOnRecordAsync(NotRunEventId(row.RunId), ct))
+                                throw new InvalidOperationException("The delivery's event is not on record yet.");
+                            recorded++;
+                        }
+                    }
+                    // Not run → failed, and on its way to the webhook's log. Refused by the gateway (its own bookkeeping
+                    // done or not: the run wrote its log entry even when its state update failed) → refused, nothing
+                    // more (review round 5, MINOR-4). Cut off with its intent on record: a running one stays
+                    // "interrupted", a queued one is failed.
+                    if (seen.Count == 0 || notRun)
+                        await _deliveries.SettleAsync(row.RunId, claim, ct);
+                    else if (refusedOnly)
+                        await _deliveries.SettleAsync(row.RunId, claim, ct, WebhookDeliveryStore.Refused);
+                    else if (row.State == WebhookDeliveryStore.Queued)
+                        await _deliveries.SettleAsync(row.RunId, claim, ct);
+                    if (webhook is not null)
+                    {
+                        // Shown where a given-up delivery is: the webhook's log — written only after its settlement
+                        // (a give-up writes it after its own), so once per delivery.
+                        await RecordOutcomeAsync(new QueuedRun(row.WebhookId, row.RunId, claim, null), webhook,
+                            (false, NotSettled), WebhookDeliveryStore.Failed, ct);
+                        told.Add(webhook);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    // Skipped, not lost: it stays unsettled and is never taken over; the next pass judges it again by
+                    // its events (a record written before the failure is found then, not written twice).
+                    complete = false;
+                    _logger.LogError(ex, "Webhook delivery {RunId} could not be reconciled; tried again", row.RunId);
+                }
+                finally
+                {
+                    if (claim is not null) _deliveries.Release(claim);
+                }
+            }
+
+            if (told.Count > 0)
+            {
+                _logger.LogWarning("{Count} accepted webhook deliveries left unsettled by an earlier process were settled as not run",
+                    told.Count);
+                using var scope = _scopeFactory.CreateScope();
+                var names = string.Join(", ", told.Select(w => $"\"{w.Name}\"").Distinct(StringComparer.Ordinal));
+                await NotifyAsync(scope, NotificationEventTypes.AutomationRefused, told[0],
+                    $"{told.Count} webhook deliveries accepted before Whiskers stopped did not run ({names}). " +
+                    "Each needs a new delivery (a new delivery id, or for GitHub a new push).");
+            }
+            return (recorded, complete);
+        }
+        finally
+        {
+            _reconcile.Release();
+        }
+    }
+
+    private readonly SemaphoreSlim _reconcile = new(1, 1);
+
+    private sealed record RunEvent(string? EventId, string? Phase, string? Outcome);
+
+    /// <summary>Whether the event with this id is in the audit outbox or the audit log.</summary>
+    private async Task<bool> EventOnRecordAsync(string eventId, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        if (scope.ServiceProvider.GetService<Whiskers.Services.Mutations.AuditOutbox>() is { } outbox
+            && outbox.Load().Any(k => k.Row?.EventId == eventId))
+            return true;
+        return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking()
+            .AnyAsync(a => a.EventId == eventId, ct);
+    }
+
+    /// <summary>The events under each run id — kept in the outbox to be written, and in the audit log — read once per
+    /// pass (review round 4, NIT-2). The outbox first (review round 5, MINOR-1): the drain inserts before it deletes, so
+    /// an event it moves meanwhile is in one of the two reads. (A miss would still not be a second event: the "did not
+    /// run" event is keyed.) An event in both is listed twice; only which kinds there are matters.</summary>
+    private async Task<Dictionary<string, List<RunEvent>>> EventsOfAsync(List<string> runIds, CancellationToken ct)
+    {
+        var events = new Dictionary<string, List<RunEvent>>(StringComparer.Ordinal);
+        if (runIds.Count == 0) return events;
+        void Add(string? runId, RunEvent e)
+        {
+            if (runId is null) return;
+            if (!events.TryGetValue(runId, out var list)) events[runId] = list = [];
+            list.Add(e);
+        }
+        using var scope = _scopeFactory.CreateScope();
+        if (scope.ServiceProvider.GetService<Whiskers.Services.Mutations.AuditOutbox>() is { } outbox)
+        {
+            var wanted = runIds.ToHashSet(StringComparer.Ordinal);
+            foreach (var (_, kept) in outbox.Load())
+                if (kept?.OperationId is { } id && wanted.Contains(id))
+                    Add(id, new RunEvent(kept.EventId, kept.Phase, kept.Outcome));
+        }
+        foreach (var chunk in runIds.Chunk(500))
+            foreach (var e in await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking()
+                         .Where(a => a.OperationId != null && chunk.Contains(a.OperationId))
+                         .Select(a => new { a.OperationId, a.EventId, a.Phase, a.Outcome })
+                         .ToListAsync(ct))
+                Add(e.OperationId, new RunEvent(e.EventId, e.Phase, e.Outcome));
+        return events;
     }
 
     private static string StateOf(Task<(bool Success, string Output, bool Refused)> work) =>
@@ -869,7 +1306,13 @@ public class WebhookService : IWebhookService
                 break;
             }
             default:
-                return (false, $"Unknown action: {webhook.Action}", true);
+            {
+                // INV-45: a stored action none of the four is refused before any decision — on record all the same,
+                // under its raw name, which the gateway refuses as no capability.
+                var unknown = $"Unknown action: {webhook.Action}";
+                await RecordNotRunAsync(webhook, webhook.WebhookId, runId, unknown, refused: true);
+                return (false, unknown, true);
+            }
         }
 
         var refused = outcome.Error as MutationRefusedException;
@@ -898,6 +1341,90 @@ public class WebhookService : IWebhookService
         await NotifyAsync(scope, NotificationEventTypes.AutomationRefused, webhook,
             $"Webhook \"{webhook.Name}\" was called, but its action did not run. {reason}");
         return (false, $"Refused: {reason}", true);
+    }
+
+    /// <summary>The capability a webhook action is decided as; <c>null</c> for an action that is none of the four.</summary>
+    internal static string? CapabilityOf(string? action) => action switch
+    {
+        "restart" => "container.restart",
+        "rebuild" => "container.update",
+        "deploy" => "compose.deploy",
+        "git-deploy" => "gitdeploy.deploy",
+        _ => null,
+    };
+
+    /// <summary>The capability a delivery is recorded under when its webhook was removed before the worker read it:
+    /// what it would have done is unknown, so it names no capability (the gateway refuses it as such).</summary>
+    internal const string RemovedWebhook = "(removed webhook)";
+
+    /// <summary>INV-45 (review round 5): the key of a delivery's "did not run" event. Every path that records it — the
+    /// worker's give-up, the start reconciliation, the audit outbox's later insert — writes the same event id
+    /// (<see cref="AuditLogMutationSink.KeyedEventId"/>), so however they interleave it is one row.</summary>
+    internal static string NotRunEventKey(string runId) => "webhook-not-run/" + runId;
+
+    /// <summary>The event id of <see cref="NotRunEventKey"/>.</summary>
+    internal static string NotRunEventId(string runId) => AuditLogMutationSink.KeyedEventId(NotRunEventKey(runId));
+
+    /// <summary>INV-45 (review round 6, MINOR-1): the key of a delivery the worker refused itself before the gateway —
+    /// its webhook changed while it waited, or an action none of the four. A kind of its own: the run settles it as
+    /// refused and writes its log entry, so the start reconciliation treats it like any refusal (refused, not logged
+    /// again), never as a delivery that did not run.</summary>
+    internal static string RefusedEventKey(string runId) => "webhook-refused/" + runId;
+
+    private static string KeyOf(string runId, bool refused) => refused ? RefusedEventKey(runId) : NotRunEventKey(runId);
+
+    /// <summary>
+    /// INV-45: an accepted delivery that ends before its decision — its webhook changed, switched off or removed while
+    /// it waited, no turn on its target in time, an action none of the four, a run its worker gave up before or after its
+    /// start — is
+    /// recorded as the gateway's Denied event of the delivery's operation (its run id), on the webhook owner's
+    /// authority as for a run, so every accepted delivery is exactly one event. Its action did not run. A webhook that
+    /// was gone before the worker read it (<paramref name="webhook"/> null) is recorded by its id, unowned, under
+    /// <see cref="RemovedWebhook"/>. Written within its own bookkeeping time, never the run's deadline: a run that
+    /// ends at its deadline is still on record.
+    /// <para>Not accepted, so no attempt and no event: a delivery refused at acceptance — unknown id, switched off, an
+    /// unreadable secret, a signature that does not verify, a stale timestamp outside the tolerance — or answered
+    /// <c>Busy</c> (the queue full, the delivery not recordable or not accepted, a repeat still being recorded or
+    /// awaiting the start reconciliation): nothing was queued, and the provider may deliver it again. A
+    /// <c>Duplicate</c> names the run it repeats, whose event is the one.</para>
+    /// <para>One residual (review rounds 4 and 5, MINOR-1/MINOR-3): the acceptance runs on its own bounded time, not the
+    /// request's; if its update landed but both the answer and the
+    /// read-back failed or ran out of that time, a delivery is answered <c>Busy</c> although its row is accepted. It is still one attempt: in
+    /// this process its next delivery takes it over and runs it (nothing was recorded for it yet); otherwise the start
+    /// reconciliation records it once as not run, and a repeat is a duplicate of that run.</para>
+    /// </summary>
+    private async Task RecordNotRunAsync(WebhookEntity? webhook, string webhookId, string runId, string reason,
+        bool refused = false)
+    {
+        using var bookkeeping = new CancellationTokenSource(BookkeepingTimeout);
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            if (scope.ServiceProvider.GetService<IAutomationMutationRunner>() is not { } automation) return;
+            if (webhook is null)
+            {
+                await automation.RefuseAsync(
+                    new AutomationActor("webhook:" + webhookId, $"Webhook {webhookId} (removed)", null)
+                        { OperationId = runId, EventKey = KeyOf(runId, refused) },
+                    RemovedWebhook, new { webhookId }, reason, bookkeeping.Token);
+                return;
+            }
+            var sid = WebhookTargets.ServerOf(webhook);
+            object arguments = webhook.Action switch
+            {
+                "deploy" => new { projectDir = webhook.TargetId, serverId = sid },
+                "git-deploy" => new { appId = webhook.TargetId, serverId = sid },
+                _ => new { containerId = webhook.TargetId, name = webhook.TargetId, serverId = sid },
+            };
+            await automation.RefuseAsync(ActorOf(webhook) with { OperationId = runId, EventKey = KeyOf(runId, refused) },
+                CapabilityOf(webhook.Action) ?? (string.IsNullOrWhiteSpace(webhook.Action) ? "(no action)" : webhook.Action),
+                arguments, reason, bookkeeping.Token);
+        }
+        catch (Exception ex)
+        {
+            // The delivery stays refused; the audit trail's own failure is reported by the gateway.
+            _logger.LogWarning(ex, "Webhook {WebhookId}: the delivery that did not run could not be recorded", webhookId);
+        }
     }
 
     /// <summary>What the action acts on, looked up before the decision. A lookup that throws (a removed server, an
@@ -1067,6 +1594,8 @@ public class WebhookService : IWebhookService
         if (key is null) return (false, Text("Webhook_Test_Invalid", "The test delivery was not valid: {0}", problem!));
         var completion = new TaskCompletionSource<RunEnd>(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepted = await QueueAsync(webhook, key, request.SourceIp, completion, CancellationToken.None);
+        if (accepted.Reply == WebhookReply.Busy && _stopping.IsCancellationRequested)
+            return (false, Text("Webhook_Test_StoppingNotAccepted", StoppingNotAccepted));
         if (accepted.Reply != WebhookReply.Accepted)
             return (false, accepted.Reply == WebhookReply.Busy
                 ? Text("Webhook_Test_Busy", "The delivery queue is full; try again shortly.")

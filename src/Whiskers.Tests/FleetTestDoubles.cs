@@ -178,13 +178,29 @@ internal sealed class FakeDocker : IDockerService
     /// <summary>Whether listing one server's containers throws, as the real service does when the host is unreachable.</summary>
     public bool ListContainersThrows { get; set; }
 
-    public Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default)
-        => ListContainersThrows
-            ? Task.FromException<IList<ContainerInfo>>(new InvalidOperationException("The host is unreachable."))
-            : Task.FromResult<IList<ContainerInfo>>(
-                // Like the real service, an id in another case names the same server.
-                _containers.Where(c => string.Equals(c.ServerId, serverId ?? DefaultServerId,
-                    StringComparison.OrdinalIgnoreCase)).ToList());
+    /// <summary>When set, listing containers throws exactly this — e.g. a <see cref="TaskCanceledException"/>, as the
+    /// Docker client's timeout surfaces.</summary>
+    public Exception? ListContainersException { get; set; }
+
+    /// <summary>Whether listing containers hangs until its token is cancelled, as a host that does not answer does;
+    /// <see cref="ListingStarted"/> completes once a listing waits.</summary>
+    public bool ListContainersHangs { get; set; }
+
+    public TaskCompletionSource ListingStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default)
+    {
+        if (ListContainersHangs)
+        {
+            ListingStarted.TrySetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+        }
+        if (ListContainersThrows) throw new InvalidOperationException("The host is unreachable.");
+        if (ListContainersException is { } thrown) throw thrown;
+        // Like the real service, an id in another case names the same server.
+        return _containers.Where(c => string.Equals(c.ServerId, serverId ?? DefaultServerId,
+            StringComparison.OrdinalIgnoreCase)).ToList();
+    }
 
     /// <summary>How long a log fetch takes. Zero (the default) keeps every existing test synchronous; a value
     /// longer than the monitor's fetch timeout reproduces the wedged host from the 2026-08-26 incident.</summary>
@@ -305,7 +321,10 @@ internal sealed class FakeDocker : IDockerService
     public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null) =>
         Act("recreate", containerId, serverId, Task.FromResult("recreated-" + containerId));
-    public Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
+    /// <summary>The environment every container answers with; unset, reading it throws.</summary>
+    public List<KeyValuePair<string, string>>? Env { get; set; }
+    public Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null) =>
+        Env is { } env ? Task.FromResult(env) : throw new NotSupportedException();
     public Task<(string ImageId, string ConfigJson)> CaptureRollbackSnapshotAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
     public Task<string> RollbackContainerAsync(string containerName, string imageId, string configJson, string? serverId = null, IProgress<string>? progress = null) => throw new NotSupportedException();
     /// <summary>Networks served by <see cref="ListNetworksAsync"/>, per their <c>ServerId</c>.</summary>

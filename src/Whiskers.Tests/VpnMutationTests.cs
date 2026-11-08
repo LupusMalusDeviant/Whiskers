@@ -119,8 +119,10 @@ public class VpnMutationTests
         FakeProvider Provider, VpnBootstrapState State, AutomationMutationRunnerTests.Roles Roles,
         AutomationMutationRunnerTests.Whitelist Whitelist, VpnSecretHandlingTests.ListLogger<VpnBootstrapHostedService> Log);
 
+    /// <param name="trail">INV-45: when set, the gateway writes its events as <c>AuditLog</c> rows into that database
+    /// instead of <see cref="Fixture.Audit"/>.</param>
     private static Fixture Build(string provider = "tailscale", bool requireOwner = true, GuardrailPolicy? policy = null,
-        Action<VpnSettings>? configure = null)
+        Action<VpnSettings>? configure = null, Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? trail = null)
     {
         var roles = new AutomationMutationRunnerTests.Roles();
         var whitelist = new AutomationMutationRunnerTests.Whitelist();
@@ -131,8 +133,10 @@ public class VpnMutationTests
 
         var audit = new RecordingAudit();
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
-        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+        var gateway = trail is not null
+            ? AuditTrail.Gateway(trail, store)
+            : new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
+                NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
         var runner = new AutomationMutationRunner(gateway, new CapabilityCatalog(),
             new AutomationOwnerResolver(roles, whitelist, new AutomationMutationRunnerTests.Keys(),
                 new AutomationMutationRunnerTests.Accounts()),
@@ -292,6 +296,46 @@ public class VpnMutationTests
         Assert.Equal("Denied", Assert.Single(f.Audit.Events).Outcome);
         Assert.Equal(VpnBootstrapStatus.Refused, f.State.Last.Status);
         Assert.Empty(f.Owners.Suspensions);   // a policy refusal is not a lost authority
+    }
+
+    // ---- INV-45: the real audit trail -------------------------------------------------------------------------------
+
+    /// <summary>INV-45, S-07: each start's bring-up is one complete <c>vpn.bootstrap</c> event in the real
+    /// <c>AuditLog</c> — executed, failed, refused by the kill switch, refused by the owner's level, refused before the
+    /// gateway for having no owner or a blocked owner entry.</summary>
+    [Fact]
+    [AuditPath("S-07", AuditTrail.Executed, AuditTrail.Denied, AuditTrail.Failed)]
+    public async Task Each_start_is_one_complete_event_in_the_audit_log()
+    {
+        using var db = new ApprovalDatabase();
+        async Task<List<AuditLogEntity>> StartAsync(Fixture f) =>
+            await AuditTrail.AttemptAsync(db.Scopes, () => f.Service.StartAsync(CancellationToken.None));
+        async Task<Fixture> OwnedAsync(string owner, GuardrailPolicy? policy = null)
+        {
+            var f = Build(policy: policy, trail: db.Scopes);
+            await f.Owners.SetAsync(IAutomationOwnerStore.VpnBootstrap, owner);
+            return f;
+        }
+
+        var row = AuditTrail.One(await StartAsync(await OwnedAsync(AdminId)), AuditTrail.Executed, "vpn.bootstrap", "Automation");
+        Assert.Equal("vpn-bootstrap", row.PrincipalId);
+        Assert.Equal(AdminId, row.OnBehalfOfId);
+        Assert.DoesNotContain(VpnSecretHandlingTests.TailscaleKey, row.Arguments);
+        Assert.DoesNotContain(VpnSecretHandlingTests.TailscaleKey, row.Details);
+
+        var failing = await OwnedAsync(AdminId);
+        failing.Provider.Result = new VpnBringUpResult(VpnBringUpState.Failed, "tailscale up failed (exit code 1): denied");
+        AuditTrail.One(await StartAsync(failing), AuditTrail.Failed, "vpn.bootstrap", "Automation");
+
+        var killSwitch = GuardrailPolicy.SafeDefault();
+        killSwitch.ReadOnlyMode = true;
+        AuditTrail.One(await StartAsync(await OwnedAsync(AdminId, killSwitch)), AuditTrail.Denied, "vpn.bootstrap", "Automation");
+        AuditTrail.One(await StartAsync(await OwnedAsync(OpsId)), AuditTrail.Denied, "vpn.bootstrap", "Automation", decided: false);
+
+        AuditTrail.One(await StartAsync(Build(trail: db.Scopes)), AuditTrail.Denied, "vpn.bootstrap", "Automation", owned: false, decided: false);
+        var blocked = Build(trail: db.Scopes);
+        blocked.Owners.Block(IAutomationOwnerStore.VpnBootstrap);
+        AuditTrail.One(await StartAsync(blocked), AuditTrail.Denied, "vpn.bootstrap", "Automation", owned: false, decided: false);
     }
 
     // ---- Failure is explicit ---------------------------------------------------------------------------------------

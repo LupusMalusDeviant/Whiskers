@@ -40,6 +40,17 @@ public sealed class WebhooksModule : IWhiskersModule
     /// re-enable) and the admin is notified once. Runs after the DB migration (see RunWhiskersStartupAsync).</summary>
     public async Task InitializeAsync(IServiceProvider sp, CancellationToken ct)
     {
+        // INV-45: deliveries the last process accepted and left unsettled (a stop, a crash, a database outage) are
+        // recorded once and settled before new ones arrive. A failure here is logged; it never stops the start.
+        try
+        {
+            if (sp.GetService<IWebhookService>() is { } webhooks) await webhooks.ReconcileAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            sp.GetService<ILogger<WebhooksModule>>()?.LogError(ex, "Unsettled webhook deliveries could not be reconciled");
+        }
+
         using var scope = sp.GetRequiredService<IServiceScopeFactory>().CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
 

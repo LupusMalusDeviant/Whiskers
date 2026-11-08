@@ -174,7 +174,7 @@ public class ReleaseGateDocumentTests
         var gate = ReleaseGateDocument.Parse(GateFiles.Require(GateFiles.ReleaseGateDoc));
         Assert.Empty(gate.Problems);
         Assert.Equal("INV-62", gate.Pin);
-        Assert.Equal(8, gate.Open.Count);
+        Assert.Equal(7, gate.Open.Count);
         Assert.Contains(gate.Open, o => o is { Id: "INV-57", Status: InvariantStatus.Partial, Package: "WP2" });
         Assert.Contains(gate.Open, o => o is { Id: "INV-58", Status: InvariantStatus.Partial });
         Assert.Empty(gate.Exceptions);

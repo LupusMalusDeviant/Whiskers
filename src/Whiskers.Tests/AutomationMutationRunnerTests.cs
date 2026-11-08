@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
 using Whiskers.Models;
@@ -93,13 +94,22 @@ public class AutomationMutationRunnerTests
         public HashSet<string> Deleted { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> Unverified { get; } = new(StringComparer.OrdinalIgnoreCase);
         public bool Exists(string email) => StateOf(email) == OwnerAccountState.Present;
+        /// <summary>The account store cannot be read: every lookup throws.</summary>
+        public bool Unreadable { get; set; }
         public OwnerAccountState StateOf(string email) =>
-            Deleted.Contains(email) ? OwnerAccountState.Deleted
+            Unreadable ? throw new InvalidOperationException("The account store could not be read.")
+            : Deleted.Contains(email) ? OwnerAccountState.Deleted
             : Unverified.Contains(email) ? OwnerAccountState.Unverified
             : OwnerAccountState.Present;
     }
 
-    internal static Fixture Build(bool requireOwner = false, GuardrailPolicy? policy = null)
+    /// <param name="trail">INV-45: when set, the gateway writes its events as <c>AuditLog</c> rows into that database
+    /// (<see cref="AuditTrail.Gateway"/>) instead of <see cref="Fixture.Audit"/>.</param>
+    /// <param name="gateway">A gateway to run on instead (the one an agent's tool calls go through, so a nested
+    /// automation run shares its trigger checks); <paramref name="policy"/> and <paramref name="trail"/> are then unused.</param>
+    internal static Fixture Build(bool requireOwner = false, GuardrailPolicy? policy = null,
+        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? trail = null, IMutationGateway? gateway = null,
+        Microsoft.Extensions.Logging.ILogger<AutomationMutationRunner>? logger = null)
     {
         var roles = new Roles();
         var whitelist = new Whitelist();
@@ -109,10 +119,13 @@ public class AutomationMutationRunnerTests
         var audit = new PrincipalAudit();
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var approvals = new ApprovalStore();
-        var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals, store));
+        gateway ??= trail is not null
+            ? AuditTrail.Gateway(trail, store, approvals)
+            : new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
+                NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals, store));
         var runner = new AutomationMutationRunner(gateway, new CapabilityCatalog(),
-            new AutomationOwnerResolver(roles, whitelist, keys, accounts), new StaticOptionsMonitor<AutomationOptions>(options));
+            new AutomationOwnerResolver(roles, whitelist, keys, accounts), new StaticOptionsMonitor<AutomationOptions>(options),
+            logger: logger);
         return new Fixture(runner, audit, roles, whitelist, keys, options, approvals, accounts);
     }
 
@@ -666,6 +679,95 @@ public class AutomationMutationRunnerTests
         });
         var keyTask = new AutomationActor("task:t3", "ci", PrincipalIds.Key("k1"), PrincipalIds.Key("k1"));
         Assert.Contains("may no longer use", f.Runner.LostAuthority(keyTask, "container.restart"));
+    }
+
+    /// <summary>INV-45 (review round 13, MINOR-1): an owner whose authority cannot be read — the account store throws
+    /// on every lookup — makes the automation a principal without authority (<c>none</c>, owner named, marked
+    /// "owner unreadable"). The gateway refuses it for every capability in the catalog, whatever its level, through a
+    /// run and through a refusal; nothing runs, nothing is executed. Its suspension is not decided on a store that
+    /// failed.</summary>
+    [Fact]
+    public async Task An_owner_that_cannot_be_read_is_refused_for_every_capability()
+    {
+        var log = new ListLogger();
+        var f = Build(requireOwner: true, logger: log);
+        f.Whitelist.Allowed.Add(Ops);
+        f.Roles.Map[Ops] = AppRole.Operator;
+        f.Accounts.Unreadable = true;
+        var ran = 0;
+        var capabilities = new CapabilityCatalog().All.ToList();
+        Assert.Contains(capabilities, c => c.RequiredLevel == McpPermissionLevels.Read);   // not merely "below read"
+
+        foreach (var capability in capabilities)
+        {
+            var run = await f.Runner.RunAsync(Task1, capability.Id, new { }, _ =>
+            {
+                Interlocked.Increment(ref ran);
+                return Task.FromResult(true);
+            });
+            Assert.True(run.Status == MutationStatus.Denied, $"{capability.Id}: {run.Status}");
+            Assert.Contains("holds no authority", run.Reason);
+            var refused = await f.Runner.RefuseAsync(Task1, capability.Id, new { }, "refused before the gateway");
+            Assert.True(refused.Status == MutationStatus.Denied, $"{capability.Id}: {refused.Status}");
+        }
+
+        Assert.Equal(0, ran);
+        Assert.All(f.Audit.Events, e => Assert.StartsWith("denied:", e));   // no intent, nothing begun
+        Assert.All(f.Audit.Principals, p =>
+        {
+            Assert.Equal(McpPermissionLevels.None, p.PermissionLevel);
+            Assert.Contains("owner unreadable", p.DisplayName);
+            Assert.Equal(OpsId, p.OnBehalfOf?.Id);
+            Assert.Equal(McpPermissionLevels.None, p.OnBehalfOf?.PermissionLevel);
+        });
+        Assert.Equal(2 * capabilities.Count, f.Audit.Principals.Count);
+        Assert.Null(f.Runner.LostAuthority(Task1, "container.restart"));
+        // The cause stays visible (review round 14): one error per refused run or refusal, a warning for the
+        // suspension question — each with the exception, the owner and the runner.
+        Assert.Equal(2 * capabilities.Count, log.Entries.Count(e => e.Level == LogLevel.Error));
+        Assert.Single(log.Entries, e => e.Level == LogLevel.Warning);
+        Assert.All(log.Entries, e =>
+        {
+            Assert.IsType<InvalidOperationException>(e.Exception);
+            Assert.Contains(Ops, e.Message);
+            Assert.Contains("task:t1", e.Message);
+        });
+    }
+
+    /// <summary>Keeps every log entry: its level, its rendered message and its exception.</summary>
+    private sealed class ListLogger : ILogger<AutomationMutationRunner>
+    {
+        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            lock (Entries) Entries.Add((logLevel, formatter(state, exception), exception));
+        }
+    }
+
+    /// <summary>INV-45 (review round 7, NIT-1): an event key is honoured only on a refusal. A request that is decided or
+    /// executed with one is rejected before anything is decided or written, so two attempts never share a row.</summary>
+    [Fact]
+    public async Task An_event_key_is_rejected_on_a_decided_or_executed_request()
+    {
+        var gateway = new MutationGateway(new CapabilityCatalog(),
+            AgentToolTestHelpers.Policy(new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault())),
+            new PrincipalAudit(), [], NullLogger<MutationGateway>.Instance);
+        var keyed = new MutationRequest("container.restart",
+            new MutationPrincipal(MutationPrincipalKind.Automation, "webhook:w1", "Webhook", McpPermissionLevels.Write),
+            MutationSurface.Automation, new MutationTarget("container", "web-1"),
+            new Dictionary<string, System.Text.Json.JsonElement>(), OperationId: "run-1") { EventKey = "webhook-not-run/run-1" };
+        var ran = false;
+
+        await Assert.ThrowsAsync<ArgumentException>(() => gateway.ExecuteAsync(keyed, (_, _) =>
+        {
+            ran = true;
+            return Task.FromResult(true);
+        }));
+        await Assert.ThrowsAsync<ArgumentException>(() => gateway.DecideAsync(keyed));
+        Assert.False(ran);
     }
 
     private sealed class RaisedTo(string level) : ICapabilityOverrides

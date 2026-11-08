@@ -345,11 +345,15 @@ public sealed class AuditCompletenessTests : IDisposable
     public static TheoryData<string> MutatingMcpTools()
     {
         var data = new TheoryData<string>();
-        foreach (var tool in McpPermissionLevels.DefaultToolLevels
-                     .Where(t => t.Value != McpPermissionLevels.Read).Select(t => t.Key).Order(StringComparer.Ordinal))
+        foreach (var tool in MutatingMcpToolNames())
             data.Add(tool);
         return data;
     }
+
+    /// <summary>The tools <see cref="MutatingMcpTools"/> drives (INV-45: the path matrix checks every M row against it).</summary>
+    internal static IEnumerable<string> MutatingMcpToolNames() =>
+        McpPermissionLevels.DefaultToolLevels
+            .Where(t => t.Value != McpPermissionLevels.Read).Select(t => t.Key).Order(StringComparer.Ordinal);
 
     /// <summary>R1-20: a direct MCP call of any mutating tool is one authoritative event, the gateway's; what the tool
     /// reports about its own work enriches that event instead of becoming a second row.</summary>

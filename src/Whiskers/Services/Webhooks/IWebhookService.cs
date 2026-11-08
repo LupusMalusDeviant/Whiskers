@@ -12,6 +12,11 @@ public interface IWebhookService
 {
     Task<List<WebhookEntity>> GetWebhooksAsync();
 
+    /// <summary>INV-45: records and settles the deliveries an earlier process accepted and left unsettled (run at
+    /// start). It runs no action — it only refuses, through the gateway, what never ran — so it needs no decision of
+    /// its own. Returns how many it recorded.</summary>
+    Task<int> ReconcileAsync(CancellationToken ct = default) => Task.FromResult(0);
+
     /// <summary>One stored webhook, or <c>null</c>.</summary>
     Task<WebhookEntity?> GetWebhookAsync(string webhookId);
 

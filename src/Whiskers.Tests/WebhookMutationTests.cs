@@ -55,6 +55,11 @@ public sealed partial class WebhookMutationTests : IDisposable
     private bool _requireOwner = true;
     private bool _dockerThrows;
     private bool _dockerTimesOut;
+    private bool _trail;
+    /// <summary>The run deadline of the service (its default when null).</summary>
+    private TimeSpan? _runTimeout;
+    /// <summary>The Docker host the gateway's target resolver asks, when it is not the webhook's own.</summary>
+    private FakeDocker? _resolverDocker;
 
     private readonly McpCallOutcomeTests.RecordingAuditLog _rows = new();
 
@@ -908,7 +913,11 @@ public sealed partial class WebhookMutationTests : IDisposable
         // The Docker service of the webhook (lookup and planning) starts failing whenever a test says so.
         var docker = ThrowingDocker.Wrap(_docker, () => _dockerThrows, () => _dockerTimesOut);
         return new(_sp.GetRequiredService<IServiceScopeFactory>(), docker, _host, new ComposePlanner(docker, _host),
-            NullLogger<WebhookService>.Instance, locks: _locks, vault: TestVault.Usable, composeRunner: _composeRunner);
+            NullLogger<WebhookService>.Instance,
+            options: _runTimeout is { } timeout
+                ? Microsoft.Extensions.Options.Options.Create(new WebhookOptions { RunTimeout = timeout })
+                : null,
+            locks: _locks, vault: TestVault.Usable, composeRunner: _composeRunner);
     }
 
     /// <summary>A Docker service whose container listing fails, as for a server that is no longer registered.</summary>
@@ -1002,9 +1011,12 @@ public sealed partial class WebhookMutationTests : IDisposable
         policy.ReadOnlyMode = _readOnly;
         policy.ProtectedResources = _protect is null ? [] : [_protect];
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
+        var targets = new MutationTargetResolver(new TestServices(_resolverDocker ?? _docker, _servers, _git, Service()));
+        // INV-45: with a trail, the gateway writes its events as AuditLog rows into this fixture's database.
+        if (_trail) return AuditTrail.Gateway(_sp.GetRequiredService<IServiceScopeFactory>(), store, targets: targets);
         return new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
             NullLogger<MutationGateway>.Instance,
-            targets: new MutationTargetResolver(new TestServices(_docker, _servers, _git, Service())),
+            targets: targets,
             approvals: new ApprovalGate(new ApprovalStore(), store));
     }
 
@@ -1040,6 +1052,10 @@ public sealed partial class WebhookMutationTests : IDisposable
 
         public string? LostAuthority(AutomationActor actor, string capabilityId) =>
             build().LostAuthority(actor, capabilityId);
+
+        public Task<MutationOutcome<object?>> RefuseAsync(AutomationActor actor, string capabilityId, object arguments,
+            string reason, CancellationToken ct = default) =>
+            build().RefuseAsync(actor, capabilityId, arguments, reason, ct);
     }
 
     /// <summary>Remembers every request the gateway audits; <see cref="Fail"/> makes the intent unwritable.</summary>

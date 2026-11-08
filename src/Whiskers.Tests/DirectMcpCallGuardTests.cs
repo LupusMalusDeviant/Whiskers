@@ -173,6 +173,30 @@ public class DirectMcpCallGuardWireTests
             var after = await CallAsync(client, session, 12, "restart_container", """{"containerId":"web-1"}""");
             Assert.DoesNotContain("Human approval required", after);
             Assert.DoesNotContain("Blocked by guardrails", after);
+
+            // INV-45 over the real wire: the filter's request has its services and HTTP context, so each of the three
+            // calls is exactly one gateway event — denied, waiting, then the run after the approval.
+            using (var scope = factory.Services.CreateScope())
+            {
+                var rows = scope.ServiceProvider.GetRequiredService<Whiskers.Services.Persistence.MetricsDbContext>().AuditLog
+                    .Where(a => a.Action == "container.restart" && a.Surface == "Mcp").OrderBy(a => a.Id).ToList();
+                Assert.Equal(3, rows.Count);
+                Assert.Equal(["Denied", "PendingApproval"], rows.Take(2).Select(r => r.Outcome));
+                Assert.Contains(rows[2].Outcome, new[] { "Executed", "Failed" });
+                Assert.All(rows, r => Assert.Equal("outcome", r.Phase));
+            }
+
+            // A tools/call without parameters names no tool: the filter passes it on, the server answers with an
+            // error, and nothing is decided or run (no event).
+            using (var bare = await McpServedSurfaceTests.PostAsync(client, session,
+                       """{"jsonrpc":"2.0","id":13,"method":"tools/call"}"""))
+            {
+                var answer = await bare.Content.ReadAsStringAsync();
+                Assert.Contains("\"error\"", answer);
+            }
+            using (var scope = factory.Services.CreateScope())
+                Assert.Equal(3, scope.ServiceProvider.GetRequiredService<Whiskers.Services.Persistence.MetricsDbContext>()
+                    .AuditLog.Count(a => a.Surface == "Mcp"));
         }
         finally
         {

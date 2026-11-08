@@ -44,6 +44,13 @@ paths = ['''^src/Whiskers\.Tests/SinkRedactionTests\.cs$''']
 regexes = ['''^deploy:\{Canary\}\{new$''']
 
 [[allowlists]]
+description = "Fake basic-auth probe in a curl command (audit path matrix test: the event keeps none of it)"
+targetRules = ["curl-auth-user"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/AuditPathMatrixTests\.cs$''']
+regexes = ['''^admin:\{Probe\}$''']
+
+[[allowlists]]
 description = "Fake API key (automation mutation runner test)"
 targetRules = ["generic-api-key"]
 condition = "AND"

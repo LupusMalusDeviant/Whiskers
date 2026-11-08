@@ -1286,6 +1286,13 @@ else
                 _ => McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
+        catch (Exception ex)
+        {
+            // A failed creation (an invalid level, a store that cannot be written) is the gateway's Failed event;
+            // the page shows it instead of losing the circuit.
+            Snackbar.Add(L["Settings_Snackbar_SaveError", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Error);
+            return;
+        }
         ReloadApiKeysKeepingPendingToggles();
         _freshKey = (newKey.Id, newKey.Key!); // shown now, never again
         _newKeyName = "";

@@ -359,10 +359,31 @@ Unless explicitly identified below, the scope does **not** involve a protected a
 
 **Acceptance criteria:**
 
-- [ ] `AuditCompletenessTests` checks every required field for allowed, denied, pending and failed attempts.
+- [x] `AuditCompletenessTests` checks every required field for allowed, denied, pending and failed attempts.
 - [ ] `AuditFailClosedTests` proves no execution or configuration publication without durable intent.
 - [ ] Required security fields cannot disappear through string truncation.
 - [ ] Outcome-write failure leaves a recoverable incomplete operation and a visible health condition.
+
+> INV-45 ✅ (WP5 path matrix): `AuditPathMatrixTests` reads every row of `PRODUCT_CONTRACT.md` §7 and requires a
+> test that drives it against a real `AuditLog` for each outcome it can have (one complete event per attempt, every
+> field checked: decision id exactly when the policy step was reached, resolved target, redacted arguments), or an
+> exemption pinned by named test methods; the outcomes a row must prove are derived from §7. Paths that refused
+> themselves before the gateway wrote no event — AutoPatch nights without an owner, AutoUpdate with a blocked owner
+> entry, endpoint-check runs the monitor refused, webhook deliveries that ended before their decision (also with the
+> webhook gone, or given up after the start), scheduled tasks refused before the gateway (no target or command, a
+> missing or unreadable database container, a protected stopped container, an unknown type) — and now record the
+> gateway's Denied event. User decision 2026-11-07: an attempt begins when the handler requests the capability from
+> the gateway; a page returning before that (validation, a cancelled confirmation, not found) changes nothing and is no
+> attempt — backed by a static check that no page writes state itself and by the scope-guard tests. The fail-closed
+> exits for a missing service cannot occur: the boot matrix resolves every service of the boundary. A call cancelled
+> after it asked the gateway and before its intent is one Denied event (also at a webhook run's deadline during target
+> resolution); an accepted webhook delivery its worker gives up is recorded once, then settled failed and final
+> (claim-fenced, retried with back-off); what a stop or crash leaves unsettled is recorded and settled at the next
+> start — the acceptance is persisted before the answer, a row an earlier process accepted is never taken over (a
+> repeat is busy until it is settled), and a reconciliation pass that cannot settle every row is retried until one
+> completes. The "did not run" event is keyed by the run id (one row whichever path writes it, the outbox included),
+> and a give-up cut off by a stop keeps its claim, so it is never taken over. The worker's own refusals have a key
+> kind of their own and are reconciled as refused; only a refusal honours an event key.
 
 **Out of scope:** Hash-chain construction and all caller migrations.
 

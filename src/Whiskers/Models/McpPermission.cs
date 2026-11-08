@@ -38,6 +38,25 @@ public static class McpPermissionLevels
     public const string Write = "write";
     public const string Admin = "admin";
 
+    /// <summary>No authority at all. Only <c>AutomationMutationRunner</c> produces it, for an automation whose owner
+    /// store failed. What enforces it:
+    /// <list type="bullet">
+    /// <item>The Mutation Gateway refuses a principal at this level, in any case, for every capability, before any
+    /// other check (<see cref="IsNone"/>); it is never normalised to read there.</item>
+    /// <item><c>McpPermissionService</c> never stores it: adding or saving a key or a tool at a level other than
+    /// read / write / admin is rejected; on load another spelling of one of them is rewritten to its exact form, and
+    /// a value still unknown — <c>none</c> included — is made fail-closed (the key switched off, the tool raised to
+    /// admin).</item>
+    /// </list>
+    /// Elsewhere — <see cref="Normalize"/>, <see cref="GetRank"/> — it reads as any unknown level.</summary>
+    public const string None = "none";
+
+    /// <summary>Whether <paramref name="level"/> is exactly one of read / write / admin.</summary>
+    public static bool IsKnown(string? level) => level is Read or Write or Admin;
+
+    /// <summary>Whether <paramref name="level"/> is <see cref="None"/>, ignoring case and surrounding spaces.</summary>
+    public static bool IsNone(string? level) => string.Equals(level?.Trim(), None, StringComparison.OrdinalIgnoreCase);
+
     public static int GetRank(string level) => level switch
     {
         Read => 1,
@@ -48,6 +67,12 @@ public static class McpPermissionLevels
 
     public static bool HasAccess(string keyLevel, string requiredLevel)
         => GetRank(keyLevel) >= GetRank(requiredLevel);
+
+    /// <summary>Whether a key at <paramref name="keyLevel"/> may use something that requires
+    /// <paramref name="requiredLevel"/> — fail-closed: a required level that is not read / write / admin grants
+    /// nothing to anyone (<see cref="HasAccess"/> ranks it 0, which every key would meet).</summary>
+    public static bool Grants(string keyLevel, string requiredLevel)
+        => IsKnown(requiredLevel) && HasAccess(keyLevel, requiredLevel);
 
     /// <summary>Coerces arbitrary (config-supplied) level text to a known level. Unknown/empty values
     /// fail safe to the least privilege (read), so a malformed ceiling can never widen access.</summary>

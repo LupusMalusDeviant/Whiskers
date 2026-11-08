@@ -184,9 +184,9 @@ public sealed class EndpointCheckGatingTests : IDisposable
     // ------------------------------------------------------------------------------------------------ run
 
     private (EndpointCheckRunner Runner, Host Host, AutomationMutationRunnerTests.Fixture Fixture) RunFixture(
-        GuardrailPolicy? policy = null)
+        GuardrailPolicy? policy = null, IServiceScopeFactory? trail = null)
     {
-        var fixture = AutomationMutationRunnerTests.Build(policy: policy);
+        var fixture = AutomationMutationRunnerTests.Build(policy: policy, trail: trail);
         fixture.Whitelist.Allowed.Add(Admin);
         fixture.Roles.Map[Admin] = AppRole.Admin;
         var host = new Host().Answering(Getent("93.184.215.14"), "__rc=0\n");
@@ -498,6 +498,116 @@ public sealed class EndpointCheckGatingTests : IDisposable
         Assert.Equal(EndpointCheckOutcome.Passed, result.Outcome);
         Assert.False(string.IsNullOrEmpty(result.OperationId));
         Assert.All(host.Calls, c => Assert.Equal(result.OperationId, c.OperationId));
+    }
+
+    // ------------------------------------------------------------------------------------------------ INV-45
+
+    /// <summary>INV-45, S-16: each due run is one complete <c>endpointcheck.run</c> event in the real <c>AuditLog</c> —
+    /// executed (a failing target included: that is the run's answer), failed (the host command threw), refused by the
+    /// kill switch, refused before the gateway (no owner, a definition that no longer validates), and refused by the
+    /// monitor for an owner who lost Admin or a check without an owner (found by the path matrix: the monitor
+    /// suspended those without an event).</summary>
+    [Fact]
+    [AuditPath("S-16", AuditTrail.Executed, AuditTrail.Denied, AuditTrail.Failed)]
+    public async Task Each_due_run_is_one_complete_event_in_the_audit_log()
+    {
+        var trail = _db.Scopes;
+        Task<List<AuditLogEntity>> RunAsync(EndpointCheckRunner runner, EndpointCheckDefinition check) =>
+            AuditTrail.AttemptAsync(trail, () => runner.RunAsync(check, CancellationToken.None));
+        var tcp = Definition(EndpointCheckKind.Tcp, "example.com", 443);
+
+        var (runner, host, fixture) = RunFixture(trail: trail);
+        var row = AuditTrail.One(await RunAsync(runner, tcp), AuditTrail.Executed, "endpointcheck.run", "Automation");
+        Assert.Equal(AdminId, row.OnBehalfOfId);
+
+        host.Answer = (_, _, _) => throw new InvalidOperationException("the SSH connection dropped");
+        AuditTrail.One(await RunAsync(runner, tcp), AuditTrail.Failed, "endpointcheck.run", "Automation");
+
+        var (killed, _, _) = RunFixture(KillSwitch(), trail);
+        AuditTrail.One(await RunAsync(killed, tcp), AuditTrail.Denied, "endpointcheck.run", "Automation");
+
+        AuditTrail.One(await RunAsync(runner, Definition(EndpointCheckKind.Tcp, "example.com", 443, serverId: "k8s")),
+            AuditTrail.Denied, "endpointcheck.run", "Automation", decided: false);
+        AuditTrail.One(await RunAsync(runner, Definition(EndpointCheckKind.Tcp, "example.com", 443, ownerId: "")),
+            AuditTrail.Denied, "endpointcheck.run", "Automation", owned: false, decided: false);
+
+        // The monitor: an owner who lost Admin, and a check without an owner, are refused, recorded and suspended.
+        var (monitorRunner, monitorHost, monitorFixture) = RunFixture(trail: trail);
+        var demoted = await Save(Ui(), Store(), Draft(EndpointCheckKind.Tcp, "example.com", 443));
+        var monitor = new EndpointCheckMonitor(RawStore(), monitorRunner, monitorFixture.Runner, _servers, new FakeNotifications(),
+            NullLogger<EndpointCheckMonitor>.Instance, new EndpointCheckSlots());
+        monitorFixture.Roles.Map[Admin] = AppRole.Operator;
+        var lost = await AuditTrail.AttemptAsync(trail, async () =>
+        {
+            await monitor.CycleAsync(CancellationToken.None);
+            await SettleAsync(monitor);
+        });
+        AuditTrail.One(lost, AuditTrail.Denied, "endpointcheck.run", "Automation", decided: false);
+        Assert.False(RawStore().Get(demoted.Id)!.Enabled);
+
+        monitorFixture.Roles.Map[Admin] = AppRole.Admin;
+        var unowned = await Save(Ui(), Store(), Draft(EndpointCheckKind.Tcp, "example.com", 444));
+        using (var scope = _db.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<Whiskers.Services.Persistence.MetricsDbContext>().EndpointChecks
+                .Where(c => c.Id == unowned.Id).ExecuteUpdateAsync(s => s.SetProperty(c => c.OwnerId, ""));
+        var none = await AuditTrail.AttemptAsync(trail, async () =>
+        {
+            await monitor.CycleAsync(CancellationToken.None);
+            await SettleAsync(monitor);
+        });
+        AuditTrail.One(none, AuditTrail.Denied, "endpointcheck.run", "Automation", owned: false, decided: false);
+        Assert.False(RawStore().Get(unowned.Id)!.Enabled);
+        Assert.Empty(monitorHost.Calls);
+    }
+
+    /// <summary>The store with a suspension that cannot be saved.</summary>
+    private sealed class UnsuspendableStore(IEndpointCheckStore inner) : IEndpointCheckStore
+    {
+        public IReadOnlyList<EndpointCheckDefinition> List(string? serverId = null) => inner.List(serverId);
+        public EndpointCheckDefinition? Get(string id) => inner.Get(id);
+        public Task<EndpointCheckDefinition> SaveAsync(EndpointCheckDraft draft, string editorId, CancellationToken ct) =>
+            inner.SaveAsync(draft, editorId, ct);
+        public Task DeleteAsync(string id, CancellationToken ct) => inner.DeleteAsync(id, ct);
+        public Task<bool> SuspendAsync(string id, string expectedOwnerId, string reason, CancellationToken ct = default) =>
+            throw new IOException("the database is locked");
+        public Task RecordAsync(EndpointCheckRun run, CancellationToken ct = default) => inner.RecordAsync(run, ct);
+        public IReadOnlyList<EndpointCheckResultEntity> Results(string checkId, int take = 50) => inner.Results(checkId, take);
+        public IReadOnlyDictionary<string, EndpointCheckResultEntity> LastResults() => inner.LastResults();
+        public Task<int> PruneAsync(DateTime cutoffUtc, CancellationToken ct = default) => inner.PruneAsync(cutoffUtc, ct);
+    }
+
+    /// <summary>INV-45 review (MINOR 4): a check whose owner lost the authority and whose suspension cannot be saved
+    /// stays on — each refused run is still one event, but at the check's interval, not every 15-second tick.</summary>
+    [Fact]
+    public async Task A_refused_check_that_cannot_be_suspended_is_refused_once_per_interval_not_every_tick()
+    {
+        var (runner, host, fixture) = RunFixture(trail: _db.Scopes);
+        await Save(Ui(), Store(), Draft(EndpointCheckKind.Tcp, "example.com", 443));
+        var clock = new ManualTime();
+        var monitor = new EndpointCheckMonitor(new UnsuspendableStore(RawStore()), runner, fixture.Runner, _servers,
+            new FakeNotifications(), NullLogger<EndpointCheckMonitor>.Instance, new EndpointCheckSlots(), time: clock);
+        fixture.Roles.Map[Admin] = AppRole.Operator;
+        async Task<List<AuditLogEntity>> TickAsync() => await AuditTrail.AttemptAsync(_db.Scopes, async () =>
+        {
+            await monitor.CycleAsync(CancellationToken.None);
+            await SettleAsync(monitor);
+        });
+
+        AuditTrail.One(await TickAsync(), AuditTrail.Denied, "endpointcheck.run", "Automation", decided: false);
+        clock.Advance(EndpointCheckMonitor.Tick);
+        Assert.Empty(await TickAsync());                   // the next tick: not due yet, no second event
+
+        clock.Advance(TimeSpan.FromHours(1));              // past the interval: refused again, one event
+        AuditTrail.One(await TickAsync(), AuditTrail.Denied, "endpointcheck.run", "Automation", decided: false);
+        Assert.Empty(host.Calls);
+
+        // Review NIT-1: saved since (an Admin who holds the role took it over) it is a new definition — due at once, not
+        // an interval after the refusal; it runs, and the refusal no longer holds it back.
+        fixture.Roles.Map[Admin] = AppRole.Admin;
+        await RawStore().SaveAsync(RawStore().List().Single().ToDraft(), AdminId, CancellationToken.None);
+        clock.Advance(EndpointCheckMonitor.Tick);
+        Assert.Single(await TickAsync());
+        Assert.NotEmpty(host.Calls);
     }
 
     private sealed class MutableUser(AppRole role) : ICurrentUserService

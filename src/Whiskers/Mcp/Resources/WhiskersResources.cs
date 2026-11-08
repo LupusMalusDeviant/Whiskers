@@ -64,7 +64,7 @@ public sealed class WhiskersResources
             who = "signed-in user";
             level = McpPermissionCheck.WebUserLevel(ctx);
             allowed = permissions.GetPermissionData().Tools
-                .Where(t => t.Value.Enabled && McpPermissionLevels.HasAccess(level, t.Value.RequiredLevel))
+                .Where(t => t.Value.Enabled && McpPermissionLevels.Grants(level, t.Value.RequiredLevel))
                 .Select(t => t.Key)
                 .ToHashSet();
         }

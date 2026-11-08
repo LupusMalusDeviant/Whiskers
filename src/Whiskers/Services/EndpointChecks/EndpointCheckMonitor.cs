@@ -34,6 +34,9 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
     private readonly BreachTracker _tracker = new(new HostLoadThresholds());
     private readonly IEndpointCheckSlots _slots;   // shared with "Run now" (review m1)
     private readonly ConcurrentDictionary<string, Task> _inFlight = new(StringComparer.Ordinal);
+    /// <summary>When each check's run was last refused before the gateway, and the definition it was refused as (its
+    /// <c>UpdatedUtc</c>) — in memory: a restart may refuse once more.</summary>
+    private readonly ConcurrentDictionary<string, (DateTime At, DateTime Saved)> _refusedAt = new(StringComparer.Ordinal);
     private DateTime _lastPrune = DateTime.MinValue;
     private bool _restored;
     private readonly SemaphoreSlim _saveLock = new(1, 1);
@@ -101,6 +104,15 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         foreach (var done in _inFlight.Where(kv => kv.Value.IsCompleted).ToList()) _inFlight.TryRemove(done);
         var checks = _store.List();
         await CloseDroppedAsync(checks, now, ct);
+        // A run refused before the gateway counts as a run for the interval: a check whose suspension could not be
+        // saved stays on and is refused again at its interval, not every tick (each refusal is an audit event). A check
+        // saved since its refusal (taken over, given an owner) is a new definition: the refusal no longer holds it back.
+        foreach (var c in checks)
+            if (_refusedAt.TryGetValue(c.Id, out var refused) && c.UpdatedUtc != refused.Saved)
+                _refusedAt.TryRemove(new KeyValuePair<string, (DateTime, DateTime)>(c.Id, refused));
+        checks = checks.Select(c => _refusedAt.TryGetValue(c.Id, out var r) && r.At is var at && (c.LastRunUtc is not { } last || last < at)
+            ? c with { LastRunUtc = at }
+            : c).ToList();
 
         foreach (var check in Due(checks, now, _slots.Running))
         {
@@ -145,6 +157,7 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
             // own level (Admin, root-equivalent). Only a row written past the store can have none.
             if (string.IsNullOrWhiteSpace(check.OwnerId))
             {
+                await RefuseRunAsync(check, "The check has no owner; an Admin must save it again before it runs.", ct);
                 await SuspendAsync(check, "it has no owner", ct);
                 return;
             }
@@ -152,10 +165,13 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
             // INV-04: an owner who lost the authority suspends the check instead of running it.
             if (_automation.LostAuthority(EndpointCheckRunner.ActorOf(check), "endpointcheck.run") is { } lost)
             {
+                await RefuseRunAsync(check, $"Refused: {lost}.", ct);
                 await SuspendAsync(check, lost, ct);
                 return;
             }
 
+            // It runs: a refusal before no longer stands in for its last run (review NIT-1).
+            _refusedAt.TryRemove(check.Id, out _);
             var run = await _runner.RunAsync(check, ct);
             await _store.RecordAsync(run, ct);
             await ConsiderAsync(check, run, ct);
@@ -178,6 +194,24 @@ public sealed class EndpointCheckMonitor : FleetBackgroundService
         finally
         {
             _slots.Release(check.Id);
+        }
+    }
+
+    /// <summary>A due run the monitor refuses before the gateway — no owner, an owner who lost the authority — is
+    /// recorded as the gateway's Denied event for <c>endpointcheck.run</c>, so the attempt is on record exactly once
+    /// (INV-45, as the VPN bring-up does, R1-43). Nothing runs.</summary>
+    private async Task RefuseRunAsync(EndpointCheckDefinition check, string reason, CancellationToken ct)
+    {
+        _refusedAt[check.Id] = (_time.GetUtcNow().UtcDateTime, check.UpdatedUtc);
+        try
+        {
+            await _automation.RefuseAsync(EndpointCheckRunner.ActorOf(check), "endpointcheck.run",
+                new { serverId = check.ServerId, checkId = check.Id }, reason, ct);
+        }
+        catch (Exception ex) when (!IsHostStopping(ex, ct))
+        {
+            // The refusal stands either way; the audit trail's own failure is reported by the gateway.
+            _logger.LogError(ex, "The refused run of endpoint check {Check} could not be recorded", check.Name);
         }
     }
 
