@@ -1,0 +1,241 @@
+# Contract 0012 — Resolved target objects (INV-57)
+
+Status: **Accepted** · 8 November 2026 by the maintainer, with the decisions D1–D15 as written and every question
+Q1–Q7 answered as recommended (see *Answered*).
+
+## Purpose
+
+INV-57: *every mutation acts on exactly one resolved target (server + resource) that exists in the inventory; an
+ambiguous or unknown target is refused before policy evaluation.* Since R1-06 the gateway **decides** on a resolved
+target, but several executions still **act** on something else: an id from the page's own listing, a webhook's stored
+name looked up again, a pod's controller derived again at execution, a volume or log-alert rule the gateway never
+resolved. This contract makes the decided object the only thing an execution can act on, and proves it mechanically.
+
+Maintainer decision, 8 November 2026 ("Vollständig"): the gateway also resolves volumes and log alerts; every delegate
+(UI, automation, webhooks, workloads) receives the resolved target object from the decision and does not look it up
+again. Afterwards INV-57 is ✅ without a limitation.
+
+## Current state (verified at `9a12f7a3`)
+
+- `MutationTargetResolver` (`Services/Mutations/MutationTargets.cs:115`) resolves `container`, `host`, `server`,
+  `network`, `cloud-server`, `scheduled-task`, `dns-zone`, `workload`, `git-deploy-app`, `webhook`. Everything else falls
+  into `Pass` (`:149`) with `Resolved = false`: `volume` (3 capabilities), `log-alert` (3), and the Whiskers-wide kinds
+  `config` (13), `account` (3), `identity` (2), `whiskers` (9), `fleet` (4).
+- The decided target reaches the delegate only as `MutationContext.Request.Target` (`MutationModels.cs:243`). The two
+  runners drop it: `IUiMutationRunner.RunAsync` and `IAutomationMutationRunner.RunAsync` take
+  `Func<CancellationToken, Task<T>>` (`UiMutationRunner.cs:24`, `AutomationMutationRunner.cs:205`), so every lambda acts
+  on the ids it captured from its caller.
+- MCP and agent tools act on `MutationTargets.CanonicalArguments` (`:43`): the resolved id and server written back into
+  the arguments. That path already acts on the decided identity.
+- The scope guard binds the call to the decision only where an operation marks its object with `[MutationTarget]`
+  (16 of 165 `[MutatingOperation]` methods), and then also accepts "an argument value policy saw"
+  (`MutationScope.AuthorizesTarget`, `:262`).
+- Re-lookups at execution: `WebhookService.TargetAsync` / `RunAsOwnerAsync` (`:1130`, `:1213`) resolve the container
+  (`WebhookTargets.ContainerAsync`), the compose plan and the Git app themselves and hand the gateway their own result;
+  `KubernetesWorkloadProvider.ScaleAsync` / `RestartAsync` (`:88`, `:143`) read the pod and derive its controller again
+  (`ResolveOwner`); `TaskExecutor` `db.backup` looks the container up with `FirstOrDefault` on id **or** name (`:206`);
+  `VolumeBackupsView` passes a possibly empty `serverId` that the service reads as `local` (`OmittedServer.Local`) while
+  the gateway reads empty as the default server.
+
+## Decisions (D1–D15, recommendation first)
+
+### Model
+
+- **D1 — `ResolvedTarget`, one type per kind.** An abstract record `ResolvedTarget` (`Kind`, `ServerId` — canonical,
+  `null` only for Whiskers-wide kinds —, stable `Id`, `Name`, `Aliases`, `Related`, `Fingerprint`) with one sealed
+  record per kind: `ResolvedServer`, `ResolvedHostObject` (server + optional named sub-object, D11), `ResolvedContainer`
+  (full container id, name, server, compose project), `ResolvedNetwork`, `ResolvedVolume`, `ResolvedVolumeBackup`,
+  `ResolvedLogAlertRule`, `ResolvedWorkload`, `ResolvedCloudServer`, `ResolvedScheduledTask`, `ResolvedDnsZone`,
+  `ResolvedGitApp` (with `Revision`), `ResolvedWebhook` (with its resolved action target, D7), `ResolvedRecord`
+  (Whiskers-wide records, D12) and `ResolvedNew` (an operation that creates its object: only the server and the name it
+  will have). `MutationTarget` stays the recorded form (decision record, audit, approval subject); `ResolvedTarget.Record`
+  produces it, so INV-22/INV-45 rows are unchanged.
+- **D2 — Every capability declares how its target resolves.** `Capability` gains `Resolution`
+  (`Object` / `Server` / `Creates` / `Singleton`) and the CLR type of its `ResolvedTarget`. The resolver has a branch for
+  every kind; `Pass` remains only for `Creates`. A catalog test refuses a capability without a resolver branch or with a
+  type that does not match its kind. Stable identities per kind: container → full container id; network → network id;
+  volume → (server, volume name, driver); volume backup → backup id; log alert → rule id; workload → (server, namespace,
+  controller kind, controller name, controller UID; the pod id for a bare pod); webhook → webhook id; Git app → app id +
+  revision; task → task id; cloud server → Whiskers server id; DNS zone → normalised zone; records → their store id.
+- **D3 — Runner signatures carry the object.** Both runners and `TaskExecutor.RunGatedAsync` get
+  `RunAsync<TTarget, T>(…, Func<TTarget, CancellationToken, Task<T>> action, …) where TTarget : ResolvedTarget`
+  (plus the `Task` variant), still `[MutationEntryPoint]`. The page writes the type in the lambda
+  (`(ResolvedContainer c, ct) => Docker.StartContainerAsync(c.Id, c.ServerId)`); the runner refuses a `TTarget` that is
+  not the capability's type before the gateway is asked (recorded via `RefuseAsync`, INV-45). `MutationContext` gains
+  `Target`. `ComposeImpact.RunForEachAsync` hands each nested decision its `ResolvedContainer`. The old
+  `Func<CancellationToken, …>` overloads are marked `[Obsolete]` during the migration and **deleted** in the last step
+  (no compatibility shim).
+
+### "Cannot obtain a different object"
+
+- **D4 — Three locks.** (a) Only the resolver constructs a `ResolvedTarget`: the constructors take a `ResolverToken`
+  whose only instance is private to `MutationTargetResolver` (pages share the assembly, so `internal` is not enough).
+  (b) Every `[MutatingOperation]` that acts on one object marks it `[MutationTarget]` (today 16; after this contract every
+  object-acting operation, the rest listed with a reason). `AuthorizesTarget` then accepts only the decided `Id` / name /
+  aliases on the decided server, and `Related` only for capabilities that compose (`MutationCompositions`) or plan
+  (compose); the "argument value policy saw" fallback is removed. (c) The IL scan of D10.
+- **D5 — Volumes.** `volume.backup`: the server first (empty = default server, decided once, R1-06), then the volume on
+  it from a new read `IVolumeBackupService.ListVolumeInfoAsync(serverId)` (`docker volume ls --format json`: name,
+  driver, labels). Exact name only (Docker volume names are unique per host; no prefix). Unknown → `TargetUnknown`
+  before policy. `containerName` stays a label of the backup, not a target. `volume.restore` / `volume.backup_delete`:
+  the backup record by its id, its stored server resolved (a removed server → refused), `Name` = the volume,
+  `Aliases` = file name. A restore into an existing volume adds that volume as `Related`; into a new name it is
+  `Creates` for that volume (Q4). The retention delete of a scheduled task decides the exact list of backup ids it will
+  remove (like `host.prune`'s named containers) and deletes only those.
+- **D6 — Log alerts.** Whiskers-wide (`ServerId = null`). `logalert.toggle` / `logalert.delete`: the rule by `ruleId`
+  from `ILogMonitorService.GetRulesAsync`; a call with only a name matches names exactly, more than one →
+  `TargetAmbiguous`. `logalert.create` is `Creates`. The rule's container filter is a filter by design (it outlives a
+  recreated container) and is recorded, not resolved (Q5).
+- **D7 — Webhooks.** A delivery decides on the **stored** webhook, never on its own lookup: the run passes `webhookId`
+  and the stored `TargetId`/server, the gateway resolves the action target (container, compose plan, Git app at its
+  revision) and the delegate receives a `ResolvedWebhook` whose `Action` target it acts on. The pre-lock read in
+  `TargetAsync` stays only to choose the lock key; its result is passed as `MutationRequest.ExpectedTarget` (new,
+  optional), and a resolution that differs is refused before policy as `TargetChanged` under the run's `EventKey`
+  (one event, INV-45). `WebhookTargets.ContainerAsync` is deleted; `ComposePlanAsync` runs only in the resolver. The
+  page's "Test" and the delivery share the same path.
+- **D8 — Workloads.** `IWorkloadProvider.StartAsync/StopAsync/RestartAsync` take a `ResolvedWorkload` instead of a pod
+  id. The Kubernetes provider patches exactly the decided controller (kind, name, namespace) with its UID as a
+  precondition; a bare pod is deleted with the decided pod UID as `DeleteOptions.Preconditions`. No `ReadNamespacedPod`
+  / `ResolveOwner` at execution. A UID mismatch (the controller was replaced meanwhile) surfaces as `TargetChanged`
+  (D9). The Docker provider acts on the decided container id.
+
+### Between decision and execution
+
+- **D9 — Confirmed before it runs.** For `Object` capabilities the gateway calls
+  `IMutationTargetResolver.ConfirmAsync(ResolvedTarget, ct)` after the intent and the operation claim and **before** the
+  approval is consumed and the delegate starts — the same place as the approval-lapse refusal (`MutationGateway.cs:645`).
+  `ConfirmAsync` reads the object by its stable id and compares the `Fingerprint` (container: id + created; workload:
+  controller UID; webhook: hash of action, target, server, owner, enabled; Git app: revision; volume: name + driver;
+  backup / rule / record: existence of the id). Vanished → `TargetUnknown`, changed → `TargetChanged`: the intent row
+  ends as `Denied`, the claim is released, the approval stays usable, nothing runs — **one** event per attempt
+  (INV-45). A read that fails refuses (fail closed). A change *during* the delegate is the operation's own failure (the
+  Kubernetes precondition, Docker "no such container"), recorded as the outcome of the same event.
+
+### Coverage and proof
+
+- **D10 — Mechanical test `ResolvedTargetFlowTests`** (IL, next to `MutationCallScanner`, which already maps lambdas
+  and async state machines):
+  1. In every lambda handed to a `[MutationEntryPoint]` method, and in every helper it inherits its context from, the
+     argument passed to a `[MutationTarget]` parameter and to a `serverId` parameter of a `[MutatingOperation]` must
+     come from the lambda's `ResolvedTarget` parameter (a property chain on it); a captured local, a field, a literal or
+     a method result is a finding.
+  2. No call to a method marked `[InventoryLookup]` (new attribute on `ListContainersAsync`, `GetWorkloadAsync`,
+     `GetWebhookAsync`, `GetAppAsync`, `GetTasksAsync`, `GetRulesAsync`, `ListBackupsAsync`, `ListVolumeInfoAsync`,
+     `CloudServers`, `GetServers`, …) inside such a lambda or helper. Named exceptions with a reason, pinned by the
+     test: the compose re-check (`ComposePlan.EnsureDecided`, contract 0006) and verifiers' read-back (R1-37).
+  3. Every `[MutatingOperation]` whose capability is `Object` has exactly one `[MutationTarget]` parameter, or is in a
+     pinned list with a reason.
+  4. Fixtures (negative cases compiled into the test assembly): captured page id, re-lookup in the delegate, literal
+     server, `ResolvedTarget` built outside the resolver (does not compile → checked by reflection on the constructors).
+- **D11 — Host objects.** nginx sites (`nginx.update`, `site_enable`, `site_disable`), systemd units (`systemd.manage`)
+  and a removed firewall rule (`firewall.rule_remove`) are resolved on their server against the host's own listing
+  (sites-available, `systemctl list-unit-files`, the numbered rule list); unknown → refused before policy. Host-wide
+  operations (`host.exec`, `compose.deploy`, `app.deploy`, `firewall.set_status`, `ssl.renew`, …) keep the server as their
+  object. This is wider than the maintainer's sentence and therefore Q1.
+- **D12 — Whiskers-wide records.** Kinds `config`, `account`, `identity`, `whiskers`, `fleet` and the `server`-kind
+  endpoint checks resolve their record against its store (`ResolvedRecord`): config sections against the closed list of
+  sections, accounts by handle, identity bindings, MCP keys, registries, vault secrets, self-backups, endpoint checks by
+  id; `Creates` for new ones; `Singleton` for the kill switch, notifications and fleet-wide runs (the object is Whiskers
+  itself, `ServerId = null`). Unknown → refused before policy.
+- **D13 — MCP and agent unchanged.** They keep acting on `CanonicalArguments`; volumes, log alerts, host objects and
+  records gain their canonical keys there. D4 (b) binds their calls too.
+- **D14 — No schema change.** The fingerprint lives in memory between resolution and `ConfirmAsync` (one process, one
+  call); an approve-then-retry resolves again. Decision record, audit and journal columns stay; the reason codes
+  `TargetUnknown`, `TargetAmbiguous`, `TargetChanged` exist (`MutationModels.cs:193–202`), `ExpectedTarget` is a request
+  field, not stored. No migration.
+- **D15 — Gate.** INV-57 → ✅ with the wording below, its *Open invariants* row in `RELEASE_GATE.md` removed (INV-57
+  then has no row at all), `GateParserTests` (which asserts INV-57 as Partial, `:178`) moved to another open invariant,
+  and the tests of the next section named in `.github/required-tests/in-process.txt`.
+
+## INV-57, new wording (replaces the evidence column)
+
+✅ — Every capability declares its resolution (object, server, created, singleton) and the gateway resolves every kind
+against its inventory before policy: servers, containers, networks, volumes and volume backups, log-alert rules,
+Kubernetes workloads (controller and UID), cloud servers, tasks, DNS zones, Git apps, webhooks with their action
+target, host objects (nginx sites, systemd units, firewall rules) and Whiskers' own records; unknown or ambiguous is
+refused before policy. Every execution receives the resolved object (`ResolvedTarget`) from the decision — UI and
+automation through the runners, webhooks and workloads included — and the object is confirmed right before it runs
+(vanished or changed → refused, one event). `ResolvedTargetFlowTests` proves no delegate acts on an id of its own or
+looks its target up again. Tests: `TargetResolutionTests`, `ResolvedTargetFlowTests`, `TargetConfirmationTests`,
+`ToolAuthorizationTests`.
+
+## Affected paths
+
+| Surface | Where | Sites | Change |
+|---|---|---|---|
+| UI pages | 37 Razor files (`Components/Pages`, `Components/Shared`) | 131 calls of `Mutations.RunAsync` / `RunForEachAsync` (128 with a literal capability, 3 with a variable: `ContainerDatabasePanel`, `ScheduledTasksView`, `WebhooksView`) | lambda takes the typed object (D3) |
+| UI helpers | `ComposeImpact` (`RunForEachAsync`, env-file save), `VaultBackedSettingsSave` | 3 helpers, 4 calls | same |
+| Automation | `TaskExecutor` (`RunGatedAsync`, 9 capabilities), `AutoUpdateService` 2, `AutoPatchService` 2, `GitDeployOwners` 1, `EndpointCheckRunner` 1, `VpnBootstrapHostedService` 1 | 16 calls | same; `db.backup` loses its own `FirstOrDefault` lookup |
+| Webhooks | `WebhookService` delivery (4 actions), page test, `WebhookTargets` | 4 + 2 | D7 |
+| Workloads | `IWorkloadProvider` (3 operations), Kubernetes and Docker providers, `Dashboard.razor` (3 calls) | 3 + 2 + 3 | D8 |
+| Resolver | new branches: volume, volume backup, log alert, host objects, records | 5 kinds, 45 capabilities | D5, D6, D11, D12 |
+| Gateway | `ConfirmAsync`, `ExpectedTarget`, runner type check | — | D9, D7, D3 |
+| MCP / agent | `CanonicalArguments` keys for the new kinds | 1 tool (`create_log_alert`) + host-object tools | D13 |
+
+**In total ≈ 176 call sites** (131 + 4 + 16 + 6 + 8 + `create_log_alert` and host-object tools ≈ 11) plus the 165
+`[MutatingOperation]` methods that D10 (3) checks for `[MutationTarget]`. The authoritative list is produced by
+`ResolvedTargetFlowTests` itself: step 2 adds it as a pinned *pending* list that may only shrink, step 7 requires it
+empty.
+
+## Tests (acceptance)
+
+- `TargetResolutionTests` (extended): per new kind — known, unknown, ambiguous, refused before policy (the policy is
+  never called); volume on the default server when `serverId` is empty; backup on a removed server; log rule by name
+  ambiguous; nginx site / systemd unit unknown; every catalog capability has a resolver branch and the declared type.
+- `TargetConfirmationTests` (new): object vanished / changed between decision and run → `Denied` with
+  `TargetUnknown` / `TargetChanged`, exactly one audit event, claim released, approval still usable, delegate not
+  called; a failing confirmation read refuses.
+- `ResolvedTargetFlowTests` (new, D10 items 1–4) with negative fixtures.
+- `WebhookMutationTests` (extended): a container renamed / replaced after the lock → `TargetChanged`, one event under the
+  run's `EventKey`; the delegate acts on the resolved id; Git app saved meanwhile → refused (existing behaviour kept).
+- `KubernetesWorkloadProviderTests` (extended, fake client): the patch names the decided controller and carries its UID;
+  no pod read at execution; bare pod delete with UID precondition.
+- `UiMutationRunnerTests` / `AutomationMutationRunnerTests`: wrong `TTarget` refused and recorded; the delegate receives
+  the object the gateway decided, with the canonical server (also when the caller passed none).
+- `MutationBypassArchitectureTests`: entry-point list unchanged in names (new overloads), old overloads gone (step 7).
+
+## Documentation
+
+`SECURITY_INVARIANTS.md` (INV-57 row), `RELEASE_GATE.md`, `PRODUCT_CONTRACT.md` §7 common lines of M and U rows
+("containers resolved … other kinds pass through", "container target resolved"), `CAPABILITY_INVENTORY.md` (generated:
+new column *Target*), ADR-0005 step 1 (resolution covers every kind), READMEs of `Services/Mutations`,
+`Services/Webhooks`, `Services/Workloads`, `Services/Workloads/Kubernetes`, `Services/Backup`, `Services/LogMonitor`,
+and the codebase map. Each PR updates the documents of what it changes.
+
+## Work split (PR-sized)
+
+| Step | Content | Triage |
+|---|---|---|
+| 1 | `ResolvedTarget` types + token, catalog `Resolution`, resolver branches for volume, backup, log alert, records (D1, D2, D5, D6, D12); catalog test | [Claude-prüfbar] |
+| 2 | Gateway `ConfirmAsync`, `ExpectedTarget`, `MutationContext.Target`; new runner overloads (old ones `[Obsolete]`); `ResolvedTargetFlowTests` with the pending list (D3, D9, D10) | [Claude-prüfbar] |
+| 3 | Automation: `TaskExecutor`, AutoUpdate, AutoPatch, GitDeployOwners, endpoint checks, VPN | [Claude-prüfbar] |
+| 4 | Webhooks (D7) | [Claude-prüfbar] |
+| 5 | Workloads (D8) | [Claude-prüfbar]; live check [braucht Nutzer/Hardware: k3s-Cluster] |
+| 6 | UI part 1: containers, networks, volumes, databases, workloads, deploy, terminals, host pages (incl. D11 host objects) | [Claude-prüfbar]; host listings live [braucht Nutzer/Hardware] |
+| 7 | UI part 2: Whiskers-wide pages (settings, accounts, keys, notifications, triggers, guardrails, schedules, webhooks page); delete the old overloads; `[MutationTarget]` tightening (D4 b); pending list empty; gate and docs flip (D15) | [Claude-prüfbar] |
+
+Steps 3–6 are independent of each other after step 2. The pending list makes every intermediate main state green and
+honest: INV-57 stays ⚠️ until step 7.
+
+## Answered (maintainer, 8 November 2026)
+
+Every question was answered as recommended; the answers are decisions of this contract.
+
+- **Q1 — Host objects (D11) are in scope.** nginx sites, systemd units and removed firewall rules are resolved against
+  the host's own listing (step 6); INV-57 needs no limitation for them.
+- **Q2 — Confirmed before every run (D9), UI included.** For `Object` capabilities `ConfirmAsync` runs before every
+  execution, from every surface; skipped for `Server` / `Singleton` / `Creates`.
+- **Q3 — Webhook lock key (D7):** the pre-lock read stays and chooses the lock key; its result is compared as
+  `ExpectedTarget`, a different resolution is refused as `TargetChanged`.
+- **Q4 — Volume restore into a name that does not exist** stays allowed, as `Creates` for that volume (today's
+  behaviour).
+- **Q5 — The log-alert container filter stays a name**, recorded, not resolved: it is a filter that must outlive a
+  recreated container, not a target.
+- **Q6 — The old runner overloads are deleted in the last step, without a shim.**
+- **Q7 — Kubernetes UID preconditions** are tested with a fake client in CI plus one manual check on a k3s cluster
+  (numbered checklist item, [braucht Nutzer/Hardware]) before INV-57 is set to ✅.
+
+## Not in scope
+
+The compose re-check after `up` (contract 0006) and verifiers' read-back stay reads by design (D10 exceptions). Per-host
+credentials (INV-58) and Whiskers' self-protection (INV-59) are unchanged.
