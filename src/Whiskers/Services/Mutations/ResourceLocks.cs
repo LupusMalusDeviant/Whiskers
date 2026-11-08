@@ -62,6 +62,12 @@ public sealed class ResourceLocks(IServerConfigService? servers = null)
         });
     }
 
+    /// <summary>How many hold or await <paramref name="key"/> now (tests wait on it instead of a pause).</summary>
+    internal int Users(string key)
+    {
+        lock (_entries) return _entries.TryGetValue(key, out var entry) ? entry.Users : 0;
+    }
+
     /// <summary>How many resources are locked or awaited now.</summary>
     internal int Count
     {
