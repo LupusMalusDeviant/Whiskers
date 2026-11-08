@@ -78,6 +78,20 @@ localized (`Webhook_Test_*`). The run's operation id (R1-18) is its run id (`Aut
 verification and audit carry it; nested decisions get ids of their own. The page's Test goes through the same path and
 waits for its run (`TestRunTimeout`).
 
+## Known limitation: a locked database pins pool threads
+
+`Microsoft.Data.Sqlite` waits for a locked database synchronously (`Thread.Sleep` in its busy loop, up to its 30 s
+command timeout) and does not cancel a command under way. A run's database work is started on the thread pool so the
+worker can leave at its deadline (`StartAsync`, `Bounded`, the give-up's settlement, pruning) — but each such command
+still holds a pool thread while it waits. During a real lock (a long write, a backup) up to `MaxConcurrentRuns` runs,
+the runs handed over as overdue, a give-up's record and settlement and a pruning pass can each hold one for up to 30 s.
+On a small host that can starve the pool for the whole process (sign-in, MCP, the UI), and the page Test's answer —
+due at the run's deadline — then arrives only once a thread is free. INV-45 is unaffected (still one event per
+attempt). Mitigation, not done yet: run blocking run bookkeeping on dedicated threads (a small dedicated scheduler or
+`TaskCreationOptions.LongRunning`), or give it a shorter busy timeout. The same applies wherever Whiskers writes to
+SQLite while it is locked (the gateway's audit writes, the scheduler's run bookkeeping); webhooks are where it shows
+first because their runs wait for the database in parallel.
+
 ## Wiring
 
 This is the opt-in **Webhooks module** ([`../../Modules/Webhooks/`](../../Modules/Webhooks/), toggle

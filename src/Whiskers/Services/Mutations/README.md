@@ -218,6 +218,12 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 
 ## Known gaps after step 2.3
 
+- **A locked database pins pool threads.** An audit write (an intent, a refusal) that meets a locked SQLite database
+  busy-waits synchronously on its thread; `RefusalWriteTimeout` (20 s) bounds how long the caller waits for a
+  refusal — it then goes to the audit outbox — but the abandoned command keeps its thread until SQLite's own 30 s
+  timeout. See [`../Webhooks/README.md`](../Webhooks/README.md#known-limitation-a-locked-database-pins-pool-threads)
+  for the effect and the mitigation; not done yet.
+
 - **Grace period (opt-in).** With `Automation:RequireOwner=false`, ownerless tasks and an ownerless AutoUpdate run
   with the level of the capability they run until an Admin takes them over. The default is `true` since R1-04.
 - **Self-backup and retention** (R1-48): `IBackupService` create / delete / prune / restore are marked

@@ -16,6 +16,13 @@ Cron-style **scheduled tasks**. A background scheduler fires due tasks, and an e
 - **`CustomCommand` requires Admin.** A `CustomCommand` task runs an arbitrary command through the same host executor as `execute_command` (root on the host for `serverId=local`). Creating or manually running such a task via MCP therefore requires the `execute_command` (Admin) permission, not just the `Write`-level scheduler permission — otherwise the Admin gate on `execute_command` could be bypassed.
 - **Backup retention** deletes are scoped to the task's own server (`ServerId ?? "local"`) so a same-named volume on another host is never affected. `DbBackup` retention prunes the host dump files of exactly that container's database (`DbDumpFiles`: `{container}@{db}_{yyyyMMdd}_{HHmmssfff}_{8 hex}.sql[.gz]`), never a same-named database's in another container and never `app_db`'s for `app`, in `/app/data/backups`: it reads the directory with `ls -1Aq` (a read, `ExecuteAsync`; a truncated listing prunes nothing, logs a warning and fails the decision) and removes the chosen names quoted on the primitive; container and DB name pass their allow-lists first, the same ones its verifier uses. Dumps in the format before (`{db}_{timestamp}.sql`, no container), and older dumps of a renamed or re-created `id-`-keyed container, are neither counted toward `maxBackups` nor deleted.
 
+## Known limitation
+
+- **A locked database pins pool threads.** The scheduler's run bookkeeping writes SQLite from thread-pool threads; while
+  the database is locked, `Microsoft.Data.Sqlite` busy-waits synchronously for up to 30 s per command, holding the
+  thread. See [`../Webhooks/README.md`](../Webhooks/README.md#known-limitation-a-locked-database-pins-pool-threads) for
+  the effect and the mitigation (dedicated threads or a shorter busy timeout); not done yet.
+
 ## Wiring
 
 The scheduler is the opt-in **Scheduler module** ([`../../Modules/Scheduler/`](../../Modules/Scheduler/),
