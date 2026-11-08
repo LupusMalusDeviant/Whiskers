@@ -562,9 +562,9 @@ public sealed class WebhookReplayTests : IDisposable
     /// loaded runner the answer can take seconds to be scheduled — hence not the former 5 s.
     /// <para>What it proves, with <see cref="AssertAnsweredBeforeTheDatabase"/>: the locked start waits without a
     /// timeout until the test unlocks it, so an answer while it still waits did not wait for it (by order). Every
-    /// other wait that meets the lock gives up only after a bound of its own — the gateway's refusal write after
-    /// 20 s (<c>MutationGateway.RefusalWriteTimeout</c>, which abandons the write without the command ending, so no
-    /// command event shows it), SQLite's busy timeout after 30 s — so an answer that waited for one of them comes
+    /// other wait that meets the lock gives up only after a bound of its own — a refusal queued behind the audit chain's
+    /// lock after 20 s (<c>MutationGateway.RefusalWriteTimeout</c>, dropped without a command event), a write already in
+    /// SQLite's busy loop after SQLite's 30 s busy timeout — so an answer that waited for one of them comes
     /// after 20 s at the earliest: this guard, below every such bound, catches it (checked by awaiting the give-up's
     /// record before the answer: red). It does not prove more than that, and a runner that cannot schedule the
     /// answer within 15 s fails it.</para>
@@ -1525,8 +1525,8 @@ public sealed class WebhookReplayTests : IDisposable
         _options.RunTimeout = LockTestRunTimeout;
         var wh = Seed(WebhookSignatures.Whiskers);
         var service = Service();
-        // Another connection holds SQLite's write lock when the run starts; SQLite waits for it synchronously (up to
-        // its own 30 s timeout) and does not cancel.
+        // Another connection holds SQLite's write lock when the run starts; the fault lets the start wait for it without
+        // a timeout (until the test unlocks it), as SQLite waits synchronously and does not cancel a command under way.
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
         var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(HangGuard);
@@ -1881,8 +1881,8 @@ public sealed class WebhookReplayTests : IDisposable
 
         private readonly TaskCompletionSource _lockTaken = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        /// <summary>Completes once a <see cref="Fault.LockDatabase"/> fault holds the lock and its command goes on to
-        /// SQLite (without a timeout) — the premise of the lock tests.</summary>
+        /// <summary>Completes once a <see cref="Fault.LockDatabase"/> fault holds the lock and its command, its token
+        /// not yet cancelled, is about to go on to SQLite (without a timeout) — the premise of the lock tests.</summary>
         public Task LockTaken => _lockTaken.Task;
 
         private int _endedBadly;
@@ -2027,9 +2027,10 @@ public sealed class WebhookReplayTests : IDisposable
                     // This command waits for the lock until the test lets it go — not SQLite's 30 s: "answered before
                     // the database did" then holds however slowly a loaded runner schedules the answer.
                     command.CommandTimeout = 0;
-                    // A token already cancelled ends it at once instead (CommandCanceled → LockedCommandEnded): the
-                    // lock tests assert it is still waiting when the answer comes.
-                    _lockTaken.TrySetResult();
+                    // A token already cancelled ends it at once instead (CommandCanceled → LockedCommandEnded): then
+                    // the run reached the lock only after its deadline, a runner problem — the premise stays unmet, so
+                    // the lock tests fail on the premise, not on "ended before the answer".
+                    if (!ct.IsCancellationRequested) _lockTaken.TrySetResult();
                     break;
                 }
                 case Fault.Steal:
