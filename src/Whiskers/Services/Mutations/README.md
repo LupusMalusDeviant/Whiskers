@@ -219,9 +219,10 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
 ## Known gaps after step 2.3
 
 - **A locked database pins pool threads.** An audit write (an intent, a refusal) that meets a locked SQLite database
-  busy-waits synchronously on its caller's thread. `RefusalWriteTimeout` (20 s) bounds only a refusal still waiting
-  for the audit chain's lock; one whose INSERT is already in SQLite's busy loop holds its caller's thread until
-  SQLite's own 30 s timeout, then fails and goes to the audit outbox. See [`../Webhooks/README.md`](../Webhooks/README.md#known-limitation-a-locked-database-pins-pool-threads)
+  busy-waits synchronously on its caller's thread. `RefusalWriteTimeout` (20 s) bounds only an audit write (an intent or a
+  refusal) still waiting for the audit chain's lock; it then goes to the audit outbox (an intent as its refusal). One
+  already waiting in SQLite (its transaction's `BEGIN`) holds its caller's thread until the lock frees or SQLite's own
+  30 s timeout; if its 20 s have run out by then, it fails and goes to the audit outbox. See [`../Webhooks/README.md`](../Webhooks/README.md#known-limitation-a-locked-database-pins-pool-threads)
   for the effect and the mitigation; not done yet.
 
 - **Grace period (opt-in).** With `Automation:RequireOwner=false`, ownerless tasks and an ownerless AutoUpdate run

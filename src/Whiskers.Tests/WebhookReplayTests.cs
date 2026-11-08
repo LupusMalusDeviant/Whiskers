@@ -562,9 +562,9 @@ public sealed class WebhookReplayTests : IDisposable
     /// loaded runner the answer can take seconds to be scheduled — hence not the former 5 s.
     /// <para>What it proves, with <see cref="AssertAnsweredBeforeTheDatabase"/>: the locked start waits without a
     /// timeout until the test unlocks it, so an answer while it still waits did not wait for it (by order). Every
-    /// other wait that meets the lock gives up only after a bound of its own — a refusal queued behind the audit chain's
-    /// lock after 20 s (<c>MutationGateway.RefusalWriteTimeout</c>, dropped without a command event), a write already in
-    /// SQLite's busy loop after SQLite's 30 s busy timeout — so an answer that waited for one of them comes
+    /// other wait that meets the lock gives up only after a bound of its own — an audit write queued behind the audit
+    /// chain's lock after 20 s (<c>MutationGateway.RefusalWriteTimeout</c>, given up without a command event; the event
+    /// goes to the outbox), a write already waiting in SQLite after SQLite's 30 s busy timeout — so an answer that waited for one of them comes
     /// after 20 s at the earliest: this guard, below every such bound, catches it (checked by awaiting the give-up's
     /// record before the answer: red). It does not prove more than that, and a runner that cannot schedule the
     /// answer within 15 s fails it.</para>
@@ -2029,7 +2029,8 @@ public sealed class WebhookReplayTests : IDisposable
                     command.CommandTimeout = 0;
                     // A token already cancelled ends it at once instead (CommandCanceled → LockedCommandEnded): then
                     // the run reached the lock only after its deadline, a runner problem — the premise stays unmet, so
-                    // the lock tests fail on the premise, not on "ended before the answer".
+                    // the lock tests almost always fail on the premise (a deadline that fires between this check and
+                    // the execute still ends the command, and they fail on "ended before the answer").
                     if (!ct.IsCancellationRequested) _lockTaken.TrySetResult();
                     break;
                 }
