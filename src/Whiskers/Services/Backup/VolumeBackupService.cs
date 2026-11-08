@@ -186,4 +186,38 @@ public class VolumeBackupService : IVolumeBackupService
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToList();
     }
+
+    public async Task<IReadOnlyList<VolumeInfo>> ListVolumeInfoAsync(string? serverId, CancellationToken ct = default)
+    {
+        var sid = OmittedServer.For<IVolumeBackupService>(serverId);
+        ct.ThrowIfCancellationRequested();
+        var result = await _executor.ExecuteAsync(sid, "docker volume ls --format json", TimeSpan.FromSeconds(10));
+        if (!result.Success)
+            throw new InvalidOperationException($"The volumes of '{sid}' could not be listed.");
+        return ParseVolumeList(result.Output);
+    }
+
+    /// <summary>One JSON object per line (<c>Name</c>, <c>Driver</c>, <c>Labels</c> as <c>k=v,k2=v2</c>). A line that is
+    /// not such an object fails the whole listing: a half-read inventory is no inventory.</summary>
+    internal static IReadOnlyList<VolumeInfo> ParseVolumeList(string output)
+    {
+        var volumes = new List<VolumeInfo>();
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            var name = root.GetProperty("Name").GetString();
+            if (string.IsNullOrEmpty(name)) throw new FormatException("A volume without a name was listed.");
+            var driver = root.TryGetProperty("Driver", out var d) ? d.GetString() ?? "" : "";
+            var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (root.TryGetProperty("Labels", out var l) && l.ValueKind == System.Text.Json.JsonValueKind.String)
+                foreach (var pair in (l.GetString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var eq = pair.IndexOf('=');
+                    if (eq > 0) labels[pair[..eq]] = pair[(eq + 1)..];
+                }
+            volumes.Add(new VolumeInfo(name, driver, labels));
+        }
+        return volumes;
+    }
 }

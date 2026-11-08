@@ -27,7 +27,17 @@ public sealed record Capability(
     string TargetKind,
     CapabilityRisk Risk,
     string? McpTool,
-    TimeSpan Deadline);
+    TimeSpan Deadline)
+{
+    /// <summary>How its target resolves (contract 0012, D2). The catalog declares it for every capability; a capability
+    /// made elsewhere (a test double) is an <see cref="TargetResolutionKind.Object"/>.</summary>
+    public TargetResolutionKind Resolution { get; init; } = TargetResolutionKind.Object;
+
+    /// <summary>The <see cref="ResolvedTarget"/> type its execution receives (D2, D3): the runners refuse a delegate
+    /// typed for anything else. <see cref="ResolvedTarget"/> itself only for a capability that saves an object which may
+    /// not exist yet (<see cref="CapabilityCatalog.Upserts"/>) and for test doubles.</summary>
+    public Type TargetType { get; init; } = typeof(ResolvedTarget);
+}
 
 /// <summary>Who acts (INV-01). Ids follow <see cref="PrincipalIds"/>.</summary>
 public enum MutationPrincipalKind { Human, ApiKey, Agent, Automation, Webhook, System }
@@ -242,6 +252,7 @@ public static class MutationReasonCodes
 /// <summary>Handed to the execution delegate: the decided request (with its resolved target) and its capability.</summary>
 public sealed record MutationContext(string OperationId, MutationRequest Request, Capability Capability)
 {
+
     /// <summary>R1-37: what the call reported for its read-back (<see cref="MutationScope.ReadBack"/>).</summary>
     public IReadOnlyDictionary<string, string> ReadBackFacts { get; init; } = new Dictionary<string, string>();
 }

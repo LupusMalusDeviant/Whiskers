@@ -750,10 +750,15 @@ public class ReadOnlyKillSwitchWireTests
         var fallbacks = host.Resolver!.Fallbacks.ToList();
         Assert.NotEmpty(fallbacks);   // the sweep did meet unknown targets: the decorator is not idle
         string[] composePlanned = ["container.env_set", "compose.deploy", "container.env_file_save"];
+        // Contract 0012 (D12): records inside a held kind — an MCP key, a vault secret, a registry, an endpoint check —
+        // are resolved against stores the sweep does not fill.
+        string[] recordsNotHeld = ["mcp.key_delete", "vault.secret_set", "vault.secret_delete", "registry.delete",
+            "endpointcheck.delete", "endpointcheck.run"];
         string[] held = ["container.restart", "container.stop", "container.start", "container.update", "container.remove",
             "container.exec", "terminal.host_open", "terminal.container_open", "host.exec", "config.save", "guardrails.save"];
         Assert.All(fallbacks, f => Assert.True(
-            !EveryTargetKnown.HeldKinds.Contains(f.Kind) || composePlanned.Contains(f.Capability),
+            !EveryTargetKnown.HeldKinds.Contains(f.Kind) || composePlanned.Contains(f.Capability)
+                || recordsNotHeld.Contains(f.Capability),
             $"{f.Capability} ({f.Kind}) fell back although the doubles hold its target: {f.Error}"));
         Assert.DoesNotContain(fallbacks, f => held.Contains(f.Capability));
     }

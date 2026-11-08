@@ -30,8 +30,9 @@ public static class CapabilityInventoryRenderer
         var levels = all.GroupBy(c => c.RequiredLevel).OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{g.Key} {g.Count()}");
         sb.Append($"{all.Count} capabilities, {all.Count(c => c.McpTool is not null)} of them with an MCP tool; by level: {string.Join(", ", levels)}.\n\n");
 
-        sb.Append("| Capability | Level | Target | Risk | MCP tool | Verification | Surfaces | Composes | Composed by | §7 rows |\n");
-        sb.Append("|---|---|---|---|---|---|---|---|---|---|\n");
+        sb.Append("The column *Resolution* is how the target resolves and the object the execution receives (contract 0012, D2).\n\n");
+        sb.Append("| Capability | Level | Target | Resolution | Risk | MCP tool | Verification | Surfaces | Composes | Composed by | §7 rows |\n");
+        sb.Append("|---|---|---|---|---|---|---|---|---|---|---|\n");
         foreach (var c in all)
         {
             var verification = VerificationContracts.Find(c.Id) is { } v
@@ -44,6 +45,7 @@ public static class CapabilityInventoryRenderer
             var named = rows.Where(r => r.McpTool is not null ? r.McpTool == c.McpTool : r.Capabilities.Contains(c.Id))
                 .Select(r => r.Id).Distinct().OrderBy(RowOrder).ThenBy(r => r, StringComparer.Ordinal);
             sb.Append("| `").Append(c.Id).Append("` | ").Append(c.RequiredLevel).Append(" | ").Append(c.TargetKind)
+              .Append(" | ").Append(c.Resolution).Append(" `").Append(c.TargetType.Name).Append('`')
               .Append(" | ").Append(c.Risk).Append(" | ").Append(c.McpTool is null ? "—" : $"`{c.McpTool}`")
               .Append(" | ").Append(Cell(verification))
               .Append(" | ").Append(List(onSurfaces)).Append(" | ").Append(List(composes, code: true))

@@ -598,6 +598,8 @@ public class MutationScopeGuardTests
         public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => Task.CompletedTask;
         public Task<List<Whiskers.Models.VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null) => Task.FromResult(new List<Whiskers.Models.VolumeBackupEntity>());
         public Task DeleteBackupAsync(string backupId) => Task.CompletedTask;
+        public Task<IReadOnlyList<Whiskers.Services.Backup.VolumeInfo>> ListVolumeInfoAsync(string? serverId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Whiskers.Services.Backup.VolumeInfo>>([]);
         public Task<List<string>> ListVolumesAsync(string? serverId = null) => Task.FromResult(new List<string>());
     }
 

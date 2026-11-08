@@ -178,8 +178,8 @@ INV-48 (audit after the fact, fail-open — since R1-19 the gateway refuses with
 
 Common to all M rows since WP2 step 2.1: Actor = API key or web user · AuthN ✅ (Bearer / cookie) · AuthZ ✅ in the
 Mutation Gateway: catalog level, tool switch and stricter stored level for every principal (INV-15), `AllowedTools`
-cannot widen (INV-16); the scope check inside the tool still runs · Target: containers resolved before policy
-(INV-57 ⚠️, other kinds pass through) · Policy ✅ core guardrails (INV-26); protected resources and the built-in
+cannot widen (INV-16); the scope check inside the tool still runs · Target: every kind resolved before policy
+(INV-57 ⚠️; the tool runs on the resolved identity, contract 0012) · Policy ✅ core guardrails (INV-26); protected resources and the built-in
 control plane are matched against the resolved target and the words of free text (INV-24/59 ✅ since R1-16) · Approval ✅ approve-then-retry bound to principal, credential, capability, normalized
 arguments, resolved target and policy version, single use, persisted (INV-30/31/35 ✅ since R1-14); never decided by
 its requester, expiry and approver level checked at decision time (INV-32–34/37 ✅ since R1-15) · Execution = inside the gateway scope with a deadline · Audit: exactly one gateway AuditLog event (decision,
@@ -288,7 +288,7 @@ reach a model. Every error of the five, the gateway's refusals and a pending app
 Common to all U rows: Actor = Human (cookie) · AuthN ✅ · AuthZ = `Require(role)` in the handler, role cached per
 circuit (INV-09; since R1-26 the circuit re-checks its session every 30 s and every UI mutation re-checks it, so a
 cached role never authorizes a mutation), **and** since WP2 step 2.2 the Mutation Gateway for every marked capability (`IUiMutationRunner`):
-catalog level, tool switch and stricter stored level (INV-15), container target resolved (INV-57) · Policy ✅ for
+catalog level, tool switch and stricter stored level (INV-15), every target kind resolved before policy (INV-57 ⚠️: the delegate does not yet receive the resolved object, contract 0012) · Policy ✅ for
 humans under PC-D1: kill switch and protected resources (INV-21, 24) — tool lists, argument patterns and
 confirmation are agent rules and do not apply · Approval n/a for humans under PC-D1, except an Admin's action on a
 protected resource or Whiskers' control plane, which needs an Admin approval (INV-59, R1-16) · Execution = inside the gateway

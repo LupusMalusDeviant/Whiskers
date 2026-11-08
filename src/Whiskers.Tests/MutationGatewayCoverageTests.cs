@@ -278,6 +278,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Components.Pages.ContainerDatabasePanel", "ReadMigrationStatusAsync", "artisan migrate:status, a fixed command; the writes go through ExecInContainerViaHost and the primitive"),
         ("Whiskers.Components.Pages.ContainerDetail", "LoadEnvVars", "finds the compose directory and reads its .env"),
         ("Whiskers.Mcp.Tools.MonitoringTools", "GetServerLogs", "journalctl / log tail"),
+        ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumeInfoAsync", "docker volume ls --format json: the inventory a volume target is resolved against (contract 0012)"),
         ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumesAsync", "docker volume ls"),
         ("Whiskers.Services.Cve.OsCveScanner", "GetCveIdsFromChangelogAsync", "apt changelog of an installed package"),
         ("Whiskers.Services.LogMonitor.Hygiene.LogInventory", "FreeDiskBytesAsync", "df"),
@@ -735,6 +736,7 @@ public class MutationGatewayCoverageTests
         var users = MutationScanner_Callers(m => m.DeclaringType == typeof(OmittedServer) && m.Name == nameof(OmittedServer.For));
         Assert.Equal([
                 "Whiskers.Services.Backup.VolumeBackupService.BackupVolumeAsync",
+                "Whiskers.Services.Backup.VolumeBackupService.ListVolumeInfoAsync",
                 "Whiskers.Services.Backup.VolumeBackupService.ListVolumesAsync",
                 "Whiskers.Services.Database.DatabaseService.BackupDatabaseAsync",
                 "Whiskers.Services.Database.DatabaseService.ExecInContainer"],

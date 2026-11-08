@@ -26,7 +26,7 @@ namespace Whiskers.Tests;
 /// controller — unknown or ambiguous ones are refused, and execution runs on the resolved identity. "local" and a
 /// remote default server stand side by side throughout: decision and execution always pick the same one.
 /// </summary>
-public sealed class TargetResolutionTests : IDisposable
+public sealed partial class TargetResolutionTests : IDisposable
 {
     private static readonly MutationPrincipal Admin =
         new(MutationPrincipalKind.Human, "admin@example.com", "admin@example.com", McpPermissionLevels.Admin);

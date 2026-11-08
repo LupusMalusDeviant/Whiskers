@@ -282,6 +282,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, Whiskers.Services.Auth.CurrentUserService>();
         // R1-49: local-account lifecycle (own password, Admin add/reset/delete, recovery codes) on ASP.NET Identity.
         builder.Services.AddScoped<Whiskers.Services.Auth.ILocalAccountService, Whiskers.Services.Auth.LocalAccountService>();
+        // Contract 0012 (D12): which local accounts exist, for the gateway's target resolution (a singleton read).
+        builder.Services.AddSingleton<Whiskers.Services.Auth.ILocalAccountDirectory, Whiskers.Services.Auth.LocalAccountDirectory>();
         // The recovery page runs in a circuit, outside the sign-in's HTTP rate limiter: the service limits per client
         // address (read once per circuit) and per account.
         builder.Services.AddSingleton<Whiskers.Services.Auth.IRecoveryAttemptLimiter, Whiskers.Services.Auth.RecoveryAttemptLimiter>();

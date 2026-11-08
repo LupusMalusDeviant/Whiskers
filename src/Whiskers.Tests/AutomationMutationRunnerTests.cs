@@ -440,6 +440,8 @@ public class AutomationMutationRunnerTests
             }).ToList());
         public Task DeleteBackupAsync(string backupId) { Deleted.Add(backupId); return Task.CompletedTask; }
         public Task<List<string>> ListVolumesAsync(string? serverId = null) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Whiskers.Services.Backup.VolumeInfo>> ListVolumeInfoAsync(string? serverId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     [Fact]

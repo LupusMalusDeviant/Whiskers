@@ -44,6 +44,32 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         _ => McpPermissionLevels.Read,
     };
 
+    /// <summary>Capabilities that create their object: the execution receives a <see cref="ResolvedNew"/>.</summary>
+    public static IReadOnlySet<string> Creates { get; } = new[]
+    {
+        "network.create", "scheduler.create", "container.create", "logalert.create", "mcp.key_create", "account.create",
+        "selfbackup.create",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>Capabilities that save an object which may exist or not (an upsert): declared
+    /// <see cref="TargetResolutionKind.Creates"/> with <see cref="ResolvedTarget"/> as their type — the execution receives
+    /// the existing object (confirmed before it runs) or a <see cref="ResolvedNew"/>.</summary>
+    public static IReadOnlySet<string> Upserts { get; } = new[]
+    {
+        "server.onboard", "server.save", "gitdeploy.save", "webhook.save", "vault.secret_set", "registry.save",
+        "endpointcheck.save",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>Capabilities whose object is Whiskers itself or the whole fleet (D12): the kill switch, notifications,
+    /// the AI-trigger list, fleet-wide runs, a restore or the retention of Whiskers' own data, the shared mTLS client and
+    /// the VPN bring-up.</summary>
+    public static IReadOnlySet<string> Singletons { get; } = new[]
+    {
+        "guardrails.kill_switch_off", "notifications.mark_read", "notifications.clear", "cve.scan", "autopatch.preview",
+        "autopatch.run", "vpn.bootstrap", "mtls.shared_client_retire", "selfbackup.prune", "selfbackup.restore",
+        "aitrigger.save",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
     private static readonly TimeSpan Short = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan Normal = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan Long = TimeSpan.FromMinutes(30);
@@ -105,10 +131,56 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         new[] { "scheduler.create", "scheduler.run" }.ToFrozenSet(StringComparer.Ordinal);
 
     private static Capability Tool(string id, string tool, string level, string target, CapabilityRisk risk, TimeSpan deadline) =>
-        new(id, level, target, risk, tool, deadline);
+        Declare(new(id, level, target, risk, tool, deadline));
 
     private static Capability Ui(string id, string level, string target, CapabilityRisk risk, TimeSpan deadline) =>
-        new(id, level, target, risk, null, deadline);
+        Declare(new(id, level, target, risk, null, deadline));
+
+    /// <summary>Contract 0012 (D2): how each capability's target resolves and the <see cref="ResolvedTarget"/> type its
+    /// execution receives. <c>CapabilityCatalogResolutionTests</c> checks every row against the resolver.</summary>
+    private static Capability Declare(Capability capability)
+    {
+        var resolution = ResolutionOf(capability.Id, capability.TargetKind);
+        return capability with
+        {
+            Resolution = resolution,
+            TargetType = TargetTypeOf(capability.Id, capability.TargetKind, resolution),
+        };
+    }
+
+    private static TargetResolutionKind ResolutionOf(string id, string kind) =>
+        Creates.Contains(id) || Upserts.Contains(id) ? TargetResolutionKind.Creates
+        : Singletons.Contains(id) ? TargetResolutionKind.Singleton
+        // A host-level operation acts on its server; nginx sites, systemd units and firewall rules become objects on
+        // it with contract 0012 step 6 (D11).
+        : kind == "host" ? TargetResolutionKind.Server
+        : TargetResolutionKind.Object;
+
+    private static Type TargetTypeOf(string id, string kind, TargetResolutionKind resolution)
+    {
+        if (Upserts.Contains(id)) return typeof(ResolvedTarget);
+        if (resolution == TargetResolutionKind.Creates) return typeof(ResolvedNew);
+        if (resolution == TargetResolutionKind.Singleton) return typeof(ResolvedRecord);
+        return kind switch
+        {
+            "container" => typeof(ResolvedContainer),
+            "workload" => typeof(ResolvedWorkload),
+            "network" => typeof(ResolvedNetwork),
+            "host" => typeof(ResolvedHostObject),
+            // Endpoint checks are bound to a server and resolved as their own record (D12).
+            "server" => id.StartsWith("endpointcheck.", StringComparison.Ordinal) ? typeof(ResolvedRecord) : typeof(ResolvedServer),
+            "cloud-server" => typeof(ResolvedCloudServer),
+            "scheduled-task" => typeof(ResolvedScheduledTask),
+            "dns-zone" => typeof(ResolvedDnsZone),
+            "git-deploy-app" => typeof(ResolvedGitApp),
+            "webhook" => typeof(ResolvedWebhook),
+            "volume" => id == "volume.backup" ? typeof(ResolvedVolume) : typeof(ResolvedVolumeBackup),
+            "log-alert" => typeof(ResolvedLogAlertRule),
+            "config" or "account" or "identity" or "whiskers" or "fleet" => typeof(ResolvedRecord),
+            // An unknown kind has no type: the catalog test refuses it.
+            _ => typeof(ResolvedTarget),
+        };
+    }
 
     private static IEnumerable<Capability> Definitions()
     {

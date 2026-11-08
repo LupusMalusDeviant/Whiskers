@@ -336,7 +336,7 @@ public sealed class AuditPathMatrixTests : IDisposable
     private static object ArgumentsFor() => new
     {
         serverId = "local", containerId = "web", name = "web", networkId = "net-1", zone = "example.com", server = "cx-1",
-        taskId = "task-1", volumeName = "vol-1", workloadId = "wl-1", appId = "app-1", webhookId = "wh-1",
+        taskId = "task-1", volumeName = "vol-1", backupId = "bk-1", ruleId = "rule-1", workloadId = "wl-1", appId = "app-1", webhookId = "wh-1",
         section = "general", account = "someone@example.com", binding = "binding-1", checkId = "check-1",
         // Payloads that must never reach an event (redaction, INV-51).
         password = Probe, token = Probe,
