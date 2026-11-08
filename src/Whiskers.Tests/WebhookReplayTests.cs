@@ -564,8 +564,9 @@ public sealed class WebhookReplayTests : IDisposable
     /// timeout until the test unlocks it, so an answer while it still waits did not wait for it (by order). Every
     /// other wait that meets the lock gives up only after a bound of its own — an audit write queued behind the audit
     /// chain's lock after 20 s (<c>MutationGateway.RefusalWriteTimeout</c>, given up without a command event; in
-    /// production its event goes to the audit outbox, this test's gateway sink (<c>AuditTrail.Gateway</c>) has none and
-    /// only logs it), a write already waiting in SQLite after SQLite's 30 s busy timeout — so an answer that waited for one of them comes
+    /// production the sink keeps its event in the audit outbox, the sink of this test's gateway
+    /// (<c>AuditTrail.Gateway</c>) has no outbox, so the event is dropped — the gateway only logs the failure, here to a
+    /// <c>NullLogger</c>), a write already waiting in SQLite after SQLite's 30 s busy timeout — so an answer that waited for one of them comes
     /// after 20 s at the earliest: this guard, below every such bound, catches it (checked by awaiting the give-up's
     /// record before the answer: red). It does not prove more than that, and a runner that cannot schedule the
     /// answer within 15 s fails it.</para>
