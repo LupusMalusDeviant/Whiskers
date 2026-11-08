@@ -29,6 +29,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `deploy_compose` | admin | Deploy an application using a docker-compose.yml content string. Creates and starts all services defined in the compose file. |
 | `detect_database` | read | Detect the database type of a container. Returns the database engine (PostgreSQL, MySQL, MongoDB, Redis, Neo4j) or 'None'. |
 | `disconnect_container_from_network` | admin | Disconnect a container from a Docker network. |
+| `endpoint_checks_list` | read | List the endpoint checks (HTTP status, TCP connect, TLS certificate expiry) that run from the managed hosts, with each check's last result. Use it to see which services a host cannot reach or whose certificate is about to expire. Read-only; checks are defined by an Admin in the UI. |
 | `execute_command` | admin | Execute a shell command on a server. Use with caution. |
 | `execute_query` | admin | Execute a SQL query or database command and return the results. |
 | `get_action_outcomes` | read | Report whether Whiskers' automatic actions actually worked: per action kind, how many were effective, how many changed nothing, and how many could not be measured at all. Read this before repeating an action — a kind with a poor hit rate is one where the cause probably lies elsewhere. A high 'not measurable' count means the checking itself has broken down, which is NOT the same as things being fine. Read-only. |
@@ -56,10 +57,12 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `list_systemd_services` | read | List systemd services on a server. |
 | `list_tables` | read | List tables in a database with row counts and sizes. |
 | `manage_systemd_service` | admin | Manage a systemd service (start, stop, restart, enable, disable). |
+| `migrate_mtls_client_credential` | admin | Move one server from the fleet's shared mTLS client credential to its own (per-host identity whiskers-client-<id>-g<n>). Issues the credential, lets the host's proxy admit it besides the old one, switches Whiskers to it, then narrows the proxy to the new identity after proving the shared one is refused. Every host step rolls back by itself after 3 minutes unless confirmed through the new credential; a second call resumes. One server per call. Admin only. |
 | `pause_server_checks` | write | Pause Whiskers' own background checks (health, logs, metrics, CVE, image updates) for one server, for a bounded number of minutes. Use this when Whiskers itself is the load on a host. Interactive access keeps working, so the server can still be inspected. The pause is announced, expires by itself, and is reminded about if it outlives its reason. This does NOT stop the containers on that server and does NOT block anything running there. |
 | `remove_firewall_rule` | admin | Remove a firewall rule by its number. |
 | `remove_network` | admin | Remove a Docker network by name or ID. |
 | `renew_mtls_certificate` | admin | Renew the mTLS certificate of a server's Docker proxy (ghostunnel). A new key is generated on the host, step-ca signs it, and the proxy restarts with it. If Whiskers cannot reach the host with the new certificate, the host restores the previous one by itself after 3 minutes. Admin only. |
+| `renew_mtls_client_credential` | admin | Renew a migrated server's own mTLS client certificate. rotate=false: a new key and certificate under the same identity, the host is unchanged. rotate=true: the next generation; the host's proxy is widened, Whiskers switches, and the proxy is narrowed so the old certificate is refused there. Guarded like the migration. Admin only. |
 | `renew_ssl_certificate` | admin | Renew an SSL certificate using certbot. |
 | `restart_container` | write | Restart a Docker container. |
 | `resume_server_checks` | write | Resume Whiskers' background checks for a server that was paused. Safe to call even if it is not paused. Turning monitoring back on is never the dangerous direction, so this has no time limit. |
@@ -161,7 +164,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 
 | Level | Tools |
 |---|---|
-| read | 46 |
+| read | 47 |
 | write | 14 |
-| admin | 31 |
-| **total** | **91** |
+| admin | 33 |
+| **total** | **94** |

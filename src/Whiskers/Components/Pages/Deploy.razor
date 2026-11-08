@@ -205,21 +205,14 @@
     private List<Whiskers.Models.ServerConfig> _servers = new();
     private string _serverId = "local";
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["Deploy_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required) return true;
+        Snackbar.Add(L["Deploy_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -236,7 +229,7 @@
     private async Task DeployFromForm()
     {
         // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
-        if (!await RequireAsync(AppRole.Admin, "app.deploy", new { serverId = _serverId, image = _formRequest.Image })) return;
+        if (!await RequireAsync("app.deploy", new { serverId = _serverId, image = _formRequest.Image })) return;
         if (string.IsNullOrWhiteSpace(_formRequest.Image))
         {
             Snackbar.Add(L["Deploy_Snackbar_ImageRequired"].Value, Severity.Warning);
@@ -305,7 +298,7 @@
     private async Task DeployFromCompose()
     {
         // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
-        if (!await RequireAsync(AppRole.Admin, "compose.deploy", new { serverId = _serverId })) return;
+        if (!await RequireAsync("compose.deploy", new { serverId = _serverId })) return;
         _deploying = true;
         _deployProgress = "";
         try

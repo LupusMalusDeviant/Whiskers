@@ -49,6 +49,18 @@ missing preset.
 **Summary (R1-25).** What the run reports — the model's text, provider errors, refused calls — is redacted whole and
 then cut at a complete word (1500 characters) before it is sent as the `agent_action` notification.
 
+**Lane and flow.** A run starts on the flow of the event that fired it and keeps it: its budget lane, its correlation id. A
+run fired by a background loop's event (health monitor, log monitor, the CVE monitor's own cycle, image updates) stays in
+the **background lane** (`ServerBudget`): it does not take the interactive slots kept for people, its duplicate calls are
+dropped, and a server paused with `checks.pause` (U-22) refuses its Docker calls (`ServerSuspendedException`). A run fired
+from an interactive flow (a person's action whose notification matches) stays interactive, as before. The one thing it
+does **not** take along is the open gateway decision (`MutationScope.Detach`): an event raised inside a person's operation
+(a manual CVE scan, `cve.scan`, U-40) does not make the run's own decisions children of that operation. Other ambient
+state flows as it did before this change, in particular the set of resource locks the flow holds (`ResourceLocks`): a
+run fired from inside a held lock would be treated as holding it too. No trigger event is raised under a lock today
+(none of `AiTriggerEvents.All` comes from a lock-holding flow); a new one that is would first need a way to drop the
+held locks for the run — `MutationScope.Detach` does not.
+
 Safety: recursion guard (ignores its own `agent_action` events), per-container cooldown, and a
 concurrency cap. Runs only when the agent is enabled.
 
@@ -63,7 +75,7 @@ concurrency cap. Runs only when the agent is enabled.
 ## Related
 
 - Model + event catalog: [`../../../Models/AiTrigger.cs`](../../../Models/AiTrigger.cs)
-- Guardrail presets that bound each run: [`../Guardrails/`](../Guardrails/)
+- Guardrail presets that bound each run: [`../../Guardrails/`](../../Guardrails/)
 - Event source / hook: [`../../Notifications/`](../../Notifications/)
 - Metric-threshold events (`high_cpu` / `high_memory` / `metric_anomaly`): [`../../Metrics/MetricsCollectorService.cs`](../../Metrics/MetricsCollectorService.cs)
 - UI: [`../../../Components/Pages/AiTriggers.razor`](../../../Components/Pages/AiTriggers.razor)

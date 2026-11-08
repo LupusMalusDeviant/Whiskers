@@ -44,11 +44,25 @@ paths = ['''^src/Whiskers\.Tests/SinkRedactionTests\.cs$''']
 regexes = ['''^deploy:\{Canary\}\{new$''']
 
 [[allowlists]]
+description = "Fake basic-auth probe in a curl command (audit path matrix test: the event keeps none of it)"
+targetRules = ["curl-auth-user"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/AuditPathMatrixTests\.cs$''']
+regexes = ['''^admin:\{Probe\}$''']
+
+[[allowlists]]
 description = "Fake API key (automation mutation runner test)"
 targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''^src/Whiskers\.Tests/AutomationMutationRunnerTests\.cs$''']
 regexes = ['''^Violet47Lantern$''']
+
+[[allowlists]]
+description = "SHA-256 of the committed PostgreSQL (PGDG) public key file, a pin, not a secret (history: the constant was first named PgdgKeySha256)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/BuildReproducibilityTests\.cs$''']
+regexes = ['''^0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76$''']
 
 [[allowlists]]
 description = "Fake short key (audit logging configuration test)"

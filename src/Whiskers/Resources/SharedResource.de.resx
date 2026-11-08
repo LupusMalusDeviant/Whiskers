@@ -62,7 +62,7 @@
     <value>Container-Verwaltung</value>
   </data>
   <data name="Login_Error_Unauthorized" xml:space="preserve">
-    <value>Ihre E-Mail ist nicht autorisiert, auf diese Anwendung zuzugreifen.</value>
+    <value>Ihre E-Mail ist nicht autorisiert, auf diese Anwendung zuzugreifen. Wenn Sie Zugang erwartet haben, kann ein Administrator Ihre Anmeldung unter Einstellungen → Anmelde-Identitäten bestätigen.</value>
   </data>
   <data name="Login_Button_Google" xml:space="preserve">
     <value>Mit Google anmelden</value>
@@ -1224,6 +1224,9 @@ Projekt: {4}</value>
   <data name="Dashboard_Chart_UsageHistoryTitle" xml:space="preserve">
     <value>Auslastungsverlauf</value>
   </data>
+  <data name="Dashboard_FailingChecks" xml:space="preserve">
+    <value>{0} Check(s) schlagen fehl</value>
+  </data>
   <data name="Dashboard_Cve_Tooltip" xml:space="preserve">
     <value>{0} Critical, {1} High, {2} Medium, {3} Low — klick zu /cves</value>
   </data>
@@ -1684,6 +1687,42 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Servers_Action_TestConnection" xml:space="preserve">
     <value>Verbindung testen</value>
+  </data>
+  <data name="Servers_Mtls_Shared" xml:space="preserve">
+    <value>Gemeinsame Client-Identität (gültig bis {0}) — nicht isoliert</value>
+  </data>
+  <data name="Servers_Mtls_Own" xml:space="preserve">
+    <value>Eigene Client-Identität (Generation {0}), gültig bis {1}</value>
+  </data>
+  <data name="Servers_Mtls_OwnUnfinished" xml:space="preserve">
+    <value>Eigene Client-Identität (Generation {0}), Umstellung nicht abgeschlossen (Phase {1} von 5)</value>
+  </data>
+  <data name="Servers_Mtls_Operator" xml:space="preserve">
+    <value>Vom Betreiber gesetzte Client-Identität (gültig bis {0})</value>
+  </data>
+  <data name="Servers_Mtls_Migrate" xml:space="preserve">
+    <value>Auf eigene Client-Identität umstellen</value>
+  </data>
+  <data name="Servers_Mtls_MigrateTitle" xml:space="preserve">
+    <value>{0} auf eine eigene Client-Identität umstellen?</value>
+  </data>
+  <data name="Servers_Mtls_MigrateMessage" xml:space="preserve">
+    <value>Whiskers stellt diesem Host ein eigenes Client-Zertifikat aus, lässt den Proxy des Hosts es neben dem gemeinsamen zu, stellt um und engt den Proxy danach auf die neue Identität ein, sobald die gemeinsame nachweislich abgelehnt wird. Jeder Schritt auf dem Host nimmt sich nach 3 Minuten selbst zurück, wenn er nicht bestätigt wird. Das dauert einige Minuten.</value>
+  </data>
+  <data name="Servers_Mtls_Migrated" xml:space="preserve">
+    <value>{0} lässt nur noch die eigene Client-Identität {1} zu.</value>
+  </data>
+  <data name="Servers_Mtls_MigrateFailed" xml:space="preserve">
+    <value>Umstellung von {0} in Phase „{1}“ angehalten: {2} Ein erneuter Start setzt dort fort.</value>
+  </data>
+  <data name="Servers_Mtls_Retire" xml:space="preserve">
+    <value>Gemeinsamen Client-Schlüssel stilllegen</value>
+  </data>
+  <data name="Servers_Mtls_RetireTitle" xml:space="preserve">
+    <value>Gemeinsame Client-Identität stilllegen?</value>
+  </data>
+  <data name="Servers_Mtls_RetireMessage" xml:space="preserve">
+    <value>Löscht den gemeinsamen Client-Schlüssel und das Zertifikat. Whiskers verweigert das, solange ein Host sie noch nutzt oder zulässt. Rückgängig nur aus einem Backup.</value>
   </data>
   <data name="Servers_Button_Add" xml:space="preserve">
     <value>Server hinzufügen</value>
@@ -4676,6 +4715,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Cves_Snackbar_ScanFinished" xml:space="preserve">
     <value>CVE-Scan abgeschlossen.</value>
   </data>
+  <data name="Cves_Snackbar_ScanNotStarted" xml:space="preserve">
+    <value>Kein CVE-Scan gestartet: Es läuft bereits einer, oder das CVE-Modul ist ausgeschaltet.</value>
+  </data>
   <data name="Cves_Snackbar_ScanFailed" xml:space="preserve">
     <value>CVE-Scan fehlgeschlagen: {0}</value>
   </data>
@@ -5113,6 +5155,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Webhook_Test_Busy" xml:space="preserve">
     <value>Die Zustell-Warteschlange ist voll; bitte gleich noch einmal versuchen.</value>
+  </data>
+  <data name="Webhook_Test_Stopping" xml:space="preserve">
+    <value>Whiskers wird beendet: Die Zustellung steht in der Warteschlange und wird beim nächsten Start abgeschlossen; ihre Aktion ist nicht gelaufen.</value>
+  </data>
+  <data name="Webhook_Test_StoppingNotAccepted" xml:space="preserve">
+    <value>Whiskers wird beendet: Die Testzustellung wurde womöglich nicht angenommen und ist nicht gelaufen; bitte nach dem Neustart erneut versuchen.</value>
   </data>
   <data name="Webhook_Test_NotAccepted" xml:space="preserve">
     <value>Die Testzustellung wurde nicht angenommen ({0}).</value>
@@ -5602,5 +5650,398 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Recover_NoCode" xml:space="preserve">
     <value>Kein Code? Ein Admin setzt dein Passwort unter Einstellungen → Lokale Konten zurück; kann sich kein Admin mehr anmelden, stellt der Host-Betreiber mit --recover-local-account einen aus.</value>
+  </data>
+  <data name="IdentityBindings_Panel" xml:space="preserve">
+    <value>Anmelde-Identitäten</value>
+  </data>
+  <data name="IdentityBindings_Intro" xml:space="preserve">
+    <value>Eine Google- oder OIDC-Anmeldung wird über das Subjekt des Anbieters zugelassen, das einmal an eine eingerichtete Adresse (Rolleneintrag oder Whitelist-Eintrag) gebunden wird. Die erste Anmeldung bindet nur dann automatisch, wenn dem Anbieter die Prüfung von Adressen anvertraut ist (Google standardmäßig; OIDC nur mit Oidc:TrustEmailVerified) und die Adresse bestätigt ist; alles andere wartet hier auf Bestätigung.</value>
+  </data>
+  <data name="IdentityBindings_AuthDisabled" xml:space="preserve">
+    <value>Die Authentifizierung ist abgeschaltet (AUTH_DISABLED): es gibt keine Google/OIDC-Anmeldung, und Bindungen lassen sich hier weder bestätigen noch entfernen. Der Host-Befehl --confirm-identity-binding funktioniert weiterhin.</value>
+  </data>
+  <data name="IdentityBindings_Unavailable" xml:space="preserve">
+    <value>Die Identitätsbindungen (identity-bindings.json) sind nicht lesbar, oder ein Speichern ist fehlgeschlagen: jede Google/OIDC-Anmeldung und -Sitzung wird abgewiesen, bis sie wieder gelesen und gespeichert sind (Neuversuch alle 30 Sekunden) oder der Host-Betreiber die Datei repariert. Lokale Konten sind nicht betroffen.</value>
+  </data>
+  <data name="IdentityBindings_Pending_Heading" xml:space="preserve">
+    <value>Warten auf Bestätigung</value>
+  </data>
+  <data name="IdentityBindings_Bindings_Heading" xml:space="preserve">
+    <value>Gebundene Identitäten</value>
+  </data>
+  <data name="IdentityBindings_Th_Account" xml:space="preserve">
+    <value>Konto</value>
+  </data>
+  <data name="IdentityBindings_Th_Provider" xml:space="preserve">
+    <value>Anbieter</value>
+  </data>
+  <data name="IdentityBindings_Th_Issuer" xml:space="preserve">
+    <value>Aussteller</value>
+  </data>
+  <data name="IdentityBindings_Th_Fingerprint" xml:space="preserve">
+    <value>Fingerabdruck des Subjekts</value>
+  </data>
+  <data name="IdentityBindings_Th_Reason" xml:space="preserve">
+    <value>Warum es wartet</value>
+  </data>
+  <data name="IdentityBindings_Th_EmailVerified" xml:space="preserve">
+    <value>Adresse vom Anbieter bestätigt</value>
+  </data>
+  <data name="IdentityBindings_Th_Expires" xml:space="preserve">
+    <value>Läuft ab</value>
+  </data>
+  <data name="IdentityBindings_Th_Bound" xml:space="preserve">
+    <value>Gebunden</value>
+  </data>
+  <data name="IdentityBindings_Th_LastSignIn" xml:space="preserve">
+    <value>Letzte Anmeldung</value>
+  </data>
+  <data name="IdentityBindings_None_Pending" xml:space="preserve">
+    <value>Keine Anmeldung wartet auf Bestätigung.</value>
+  </data>
+  <data name="IdentityBindings_None_Bindings" xml:space="preserve">
+    <value>Noch keine Google/OIDC-Identität gebunden.</value>
+  </data>
+  <data name="IdentityBindings_Yes" xml:space="preserve">
+    <value>ja</value>
+  </data>
+  <data name="IdentityBindings_No" xml:space="preserve">
+    <value>nein</value>
+  </data>
+  <data name="IdentityBindings_Reason_email_unverified" xml:space="preserve">
+    <value>Adresse vom Anbieter nicht bestätigt</value>
+  </data>
+  <data name="IdentityBindings_Reason_provider_untrusted" xml:space="preserve">
+    <value>Anbieter nicht zur Adressprüfung vertraut</value>
+  </data>
+  <data name="IdentityBindings_Reason_second_issuer" xml:space="preserve">
+    <value>Zweiter Anbieter für ein gebundenes Konto</value>
+  </data>
+  <data name="IdentityBindings_Reason_subject_changed" xml:space="preserve">
+    <value>Neues Subjekt beim selben Anbieter</value>
+  </data>
+  <data name="IdentityBindings_Reason_nonstandard_email_claim" xml:space="preserve">
+    <value>Adresse aus einem nicht standardmäßigen Claim</value>
+  </data>
+  <data name="IdentityBindings_Method_verified_email" xml:space="preserve">
+    <value>bestätigte Adresse bei der Anmeldung</value>
+  </data>
+  <data name="IdentityBindings_Method_admin" xml:space="preserve">
+    <value>von einem Admin bestätigt</value>
+  </data>
+  <data name="IdentityBindings_Method_host_cli" xml:space="preserve">
+    <value>auf dem Host bestätigt</value>
+  </data>
+  <data name="IdentityBindings_Button_Confirm" xml:space="preserve">
+    <value>Bestätigen</value>
+  </data>
+  <data name="IdentityBindings_Button_Remove" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="IdentityBindings_Button_RemoveConfirm" xml:space="preserve">
+    <value>Bindung entfernen</value>
+  </data>
+  <data name="IdentityBindings_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="IdentityBindings_Confirm_Remove" xml:space="preserve">
+    <value>Die Google/OIDC-Sitzungen dieser Bindung enden. Das Entfernen einer Bindung nimmt den Zugang nicht weg: solange die Adresse eingerichtet ist (Rollen- oder Whitelist-Eintrag), bindet die nächste Anmeldung wieder — automatisch über einen vertrauenswürdigen Anbieter mit bestätigter Adresse, sonst nach einer Bestätigung hier. Um den Zugang wegzunehmen, die Adresse aus den Rollen und der Whitelist entfernen.</value>
+  </data>
+  <data name="IdentityBindings_Hint" xml:space="preserve">
+    <value>Nur eine erwartete Anfrage bestätigen: sie lässt dieses Subjekt des Anbieters als das Konto anmelden. Kann sich kein Admin anmelden, bestätigt der Host-Betreiber mit: dotnet Whiskers.dll --confirm-identity-binding &lt;Adresse&gt;.</value>
+  </data>
+  <data name="IdentityBindings_Snackbar_Confirmed" xml:space="preserve">
+    <value>Die Anmeldung ist gebunden; die Person kann sich jetzt anmelden.</value>
+  </data>
+  <data name="IdentityBindings_Snackbar_Removed" xml:space="preserve">
+    <value>Entfernt.</value>
+  </data>
+  <data name="IdentityBindings_Error_not_authorized" xml:space="preserve">
+    <value>Nur ein Admin darf Anmelde-Identitäten ändern.</value>
+  </data>
+  <data name="IdentityBindings_Error_session_invalid" xml:space="preserve">
+    <value>Deine Sitzung ist nicht mehr gültig; bitte neu anmelden.</value>
+  </data>
+  <data name="IdentityBindings_Error_not_found" xml:space="preserve">
+    <value>Die Anfrage oder Bindung gibt es nicht mehr, oder ihre Adresse ist nicht mehr eingerichtet.</value>
+  </data>
+  <data name="IdentityBindings_Error_last_admin" xml:space="preserve">
+    <value>Das ist der letzte Anmeldeweg des letzten Admins, der sich anmelden kann; er bleibt.</value>
+  </data>
+  <data name="IdentityBindings_Error_ambiguous" xml:space="preserve">
+    <value>Mehrere Anfragen passen; bitte eine wählen.</value>
+  </data>
+  <data name="IdentityBindings_Error_store_unavailable" xml:space="preserve">
+    <value>Die Identitätsbindungen konnten nicht gelesen oder gespeichert werden.</value>
+  </data>
+  <data name="IdentityBindings_Error_audit_unavailable" xml:space="preserve">
+    <value>Das Audit-Log konnte nicht geschrieben werden; nichts wurde geändert.</value>
+  </data>
+  <data name="IdentityBindings_Error_conflict" xml:space="preserve">
+    <value>Dieses Subjekt ist bereits an ein anderes Konto gebunden.</value>
+  </data>
+  <data name="IdentityBindings_Error_auth_disabled" xml:space="preserve">
+    <value>Die Authentifizierung ist abgeschaltet; Anmelde-Identitäten lassen sich hier nicht ändern.</value>
+  </data>
+  <data name="DiskHealth_Panel" xml:space="preserve">
+    <value>Datenträger-Zustand (SMART, RAID, ZFS)</value>
+  </data>
+  <data name="DiskHealth_Intro" xml:space="preserve">
+    <value>Liest alle 5 Minuten den Zustand von SMART, md-RAID und ZFS aus dem Metrik-Endpunkt jedes Hosts (node_exporter über VictoriaMetrics). Whiskers führt auf den Hosts nichts aus; für SMART braucht der Host einen Timer, der smartmon.prom schreibt. Ein Messwert, für den Whiskers nicht bürgen kann — fehlend, fehlerhaft oder älter als 2 Stunden —, wird als unbekannt angezeigt, nie als in Ordnung.</value>
+  </data>
+  <data name="DiskHealth_GuideLink" xml:space="preserve">
+    <value>Betriebsanleitung</value>
+  </data>
+  <data name="DiskHealth_Label_Enabled" xml:space="preserve">
+    <value>Datenträger-Zustand lesen (SMART, RAID, ZFS)</value>
+  </data>
+  <data name="DiskHealth_Snackbar_Saved" xml:space="preserve">
+    <value>Einstellung zum Datenträger-Zustand gespeichert.</value>
+  </data>
+  <data name="DiskHealth_Snackbar_SaveFailed" xml:space="preserve">
+    <value>Die Einstellung zum Datenträger-Zustand konnte nicht gespeichert werden: {0}</value>
+  </data>
+  <data name="DiskHealth_Block_Title" xml:space="preserve">
+    <value>Datenträger</value>
+  </data>
+  <data name="DiskHealth_Block_NotReadYet" xml:space="preserve">
+    <value>Noch nicht gelesen; der erste Messwert folgt innerhalb von 5 Minuten.</value>
+  </data>
+  <data name="DiskHealth_Block_Unsupported" xml:space="preserve">
+    <value>Für diesen Host gibt es keinen Datenträger-Zustand: Er hat keinen Metrik-Endpunkt, oder weder SMART noch md-RAID noch ZFS melden etwas.</value>
+  </data>
+  <data name="DiskHealth_Block_NoItems" xml:space="preserve">
+    <value>Es wird nichts mehr gemeldet.</value>
+  </data>
+  <data name="DiskHealth_Block_Age" xml:space="preserve">
+    <value>vor {0}</value>
+  </data>
+  <data name="DiskHealth_Block_ReadAgo" xml:space="preserve">
+    <value>gelesen vor {0}</value>
+  </data>
+  <data name="DiskHealth_Block_Stale" xml:space="preserve">
+    <value>Dieser Messwert ist älter als zwei Durchläufe: Whiskers hat den Host seitdem nicht gelesen, nichts hier gilt als in Ordnung.</value>
+  </data>
+  <data name="DiskHealth_Block_NotReadYetFailed" xml:space="preserve">
+    <value>Noch nicht gelesen: {0}</value>
+  </data>
+  <data name="DiskHealth_ReadOnly" xml:space="preserve">
+    <value>Festgelegt durch {0}; hier nicht änderbar.</value>
+  </data>
+  <data name="DiskHealth_State_Healthy" xml:space="preserve">
+    <value>In Ordnung</value>
+  </data>
+  <data name="DiskHealth_State_DegradedOrFailing" xml:space="preserve">
+    <value>Beeinträchtigt / fällt aus</value>
+  </data>
+  <data name="DiskHealth_State_Unknown" xml:space="preserve">
+    <value>Unbekannt</value>
+  </data>
+  <data name="DiskHealth_State_Unsupported" xml:space="preserve">
+    <value>Nicht unterstützt</value>
+  </data>
+  <data name="IdentityBindings_Error_failed" xml:space="preserve">
+    <value>Die Aktion ist fehlgeschlagen ({0}); siehe Log.</value>
+  </data>
+  <data name="Nav_EndpointChecks" xml:space="preserve">
+    <value>Endpunkt-Checks</value>
+  </data>
+  <data name="Checks_Title" xml:space="preserve">
+    <value>Endpunkt-Checks</value>
+  </data>
+  <data name="Checks_Subtitle" xml:space="preserve">
+    <value>HTTP-, TCP- und Zertifikats-Checks, ausgeführt von den verwalteten Hosts</value>
+  </data>
+  <data name="Checks_Intro" xml:space="preserve">
+    <value>Jeder Check läuft auf seinem Host (curl, nc, openssl, getent), nie von Whiskers selbst. Interne Adressen werden abgelehnt, solange kein Admin eine Ausnahme einträgt. Jeder Lauf steht im Audit-Log.</value>
+  </data>
+  <data name="Checks_Button_New" xml:space="preserve">
+    <value>Neuer Check</value>
+  </data>
+  <data name="Checks_Form_New" xml:space="preserve">
+    <value>Neuer Endpunkt-Check</value>
+  </data>
+  <data name="Checks_Form_Edit" xml:space="preserve">
+    <value>Endpunkt-Check bearbeiten</value>
+  </data>
+  <data name="Checks_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Checks_Field_Server" xml:space="preserve">
+    <value>Läuft auf Server</value>
+  </data>
+  <data name="Checks_Field_Kind" xml:space="preserve">
+    <value>Art</value>
+  </data>
+  <data name="Checks_Kind_Tls" xml:space="preserve">
+    <value>TLS-Ablauf</value>
+  </data>
+  <data name="Checks_Field_Url" xml:space="preserve">
+    <value>URL (http:// oder https://)</value>
+  </data>
+  <data name="Checks_Field_Host" xml:space="preserve">
+    <value>Hostname oder IP-Adresse</value>
+  </data>
+  <data name="Checks_Field_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="Checks_Field_Status" xml:space="preserve">
+    <value>Erwarteter Status (leer = jedes 2xx)</value>
+  </data>
+  <data name="Checks_Field_WarnDays" xml:space="preserve">
+    <value>Warntage (Standard 14)</value>
+  </data>
+  <data name="Checks_Field_Interval" xml:space="preserve">
+    <value>Intervall (s)</value>
+  </data>
+  <data name="Checks_Field_Timeout" xml:space="preserve">
+    <value>Timeout (s)</value>
+  </data>
+  <data name="Checks_Field_Exceptions" xml:space="preserve">
+    <value>Ausnahmen für interne Ziele</value>
+  </data>
+  <data name="Checks_Field_ExceptionsHelp" xml:space="preserve">
+    <value>Eine pro Zeile: „Host Port Adresse…“ (ein Hostname braucht seine genauen Adressen) oder „IP Port“.</value>
+  </data>
+  <data name="Checks_Field_Enabled" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="Checks_Button_Save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="Checks_Button_Cancel" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="Checks_Filter_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Checks_Filter_Outcome" xml:space="preserve">
+    <value>Ergebnis</value>
+  </data>
+  <data name="Checks_Filter_Latency" xml:space="preserve">
+    <value>Latenz ≥ ms</value>
+  </data>
+  <data name="Checks_Filter_Expiry" xml:space="preserve">
+    <value>Zertifikat läuft ab in (Tagen)</value>
+  </data>
+  <data name="Checks_Filter_Failing" xml:space="preserve">
+    <value>Nur fehlschlagende</value>
+  </data>
+  <data name="Checks_Empty" xml:space="preserve">
+    <value>Keine Endpunkt-Checks.</value>
+  </data>
+  <data name="Checks_Table_Name" xml:space="preserve">
+    <value>Check</value>
+  </data>
+  <data name="Checks_Table_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Checks_Table_Target" xml:space="preserve">
+    <value>Ziel</value>
+  </data>
+  <data name="Checks_Table_Last" xml:space="preserve">
+    <value>Letzter Lauf</value>
+  </data>
+  <data name="Checks_Table_Latency" xml:space="preserve">
+    <value>Latenz</value>
+  </data>
+  <data name="Checks_Table_Expiry" xml:space="preserve">
+    <value>Zertifikat läuft ab</value>
+  </data>
+  <data name="Checks_State_Off" xml:space="preserve">
+    <value>Aus</value>
+  </data>
+  <data name="Checks_State_Suspended" xml:space="preserve">
+    <value>Ausgesetzt</value>
+  </data>
+  <data name="Checks_State_NotRun" xml:space="preserve">
+    <value>Noch nicht gelaufen</value>
+  </data>
+  <data name="Checks_Button_RunNow" xml:space="preserve">
+    <value>Jetzt ausführen</value>
+  </data>
+  <data name="Checks_Button_Edit" xml:space="preserve">
+    <value>Bearbeiten</value>
+  </data>
+  <data name="Checks_Button_Delete" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="Checks_Outcome_Passed" xml:space="preserve">
+    <value>Bestanden</value>
+  </data>
+  <data name="Checks_Outcome_Failed" xml:space="preserve">
+    <value>Fehlgeschlagen</value>
+  </data>
+  <data name="Checks_Outcome_Refused" xml:space="preserve">
+    <value>Abgelehnt</value>
+  </data>
+  <data name="Checks_Snackbar_AdminOnly" xml:space="preserve">
+    <value>Nur ein Admin kann Endpunkt-Checks ändern oder ausführen.</value>
+  </data>
+  <data name="Checks_Snackbar_Busy" xml:space="preserve">
+    <value>Ein Lauf dieses Checks oder auf diesem Server ist im Gang. Bitte gleich noch einmal versuchen.</value>
+  </data>
+  <data name="Checks_Snackbar_Saved" xml:space="preserve">
+    <value>Endpunkt-Check gespeichert.</value>
+  </data>
+  <data name="Checks_Snackbar_Deleted" xml:space="preserve">
+    <value>Endpunkt-Check gelöscht.</value>
+  </data>
+  <data name="KillSwitch_Blocked_Message" xml:space="preserve">
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
+  </data>
+  <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
+  </data>
+  <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
+    <value>Preset „{0}“: „{1}“ ist keine sperrbare Ausnahme des Kill-Switch. Nichts wurde gespeichert.</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Title" xml:space="preserve">
+    <value>Bei eingeschaltetem Kill-Switch weiter erlaubt</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Intro" xml:space="preserve">
+    <value>Diese Ausnahmen stehen fest im Code; keine kann hinzugefügt werden. Die letzten drei lassen sich hier vorab sperren — solange der Kill-Switch an ist, lehnt er dieses Speichern ab.</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Fixed" xml:space="preserve">
+    <value>Immer erlaubt</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Block_Label" xml:space="preserve">
+    <value>Bei eingeschaltetem Kill-Switch ebenfalls sperren</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E1_Name" xml:space="preserve">
+    <value>Kill-Switch ausschalten</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E1_Reason" xml:space="preserve">
+    <value>Der Weg aus dem Kill-Switch: ein Admin in der Oberfläche, protokolliert.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E2_Name" xml:space="preserve">
+    <value>Ersteinrichtung</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E2_Reason" xml:space="preserve">
+    <value>Läuft nur, solange es noch keinen Admin gibt; es gibt also noch nichts zu schützen.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E3_Name" xml:space="preserve">
+    <value>Kommandozeilen-Werkzeuge auf dem Host</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
+    <value>Brauchen eine Shell im Container (root-gleich). Solange Wiederherstellungscodes gesperrt sind, verlangt die Wiederherstellungs-CLI --force: stattdessen guardrails.json auf dem Host reparieren.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
+    <value>Eigenes Passwort ändern</value>
+  </data>
+  <data name="GuardrailsView_Exemption_password_change_Reason" xml:space="preserve">
+    <value>Eine Person ändert ihren eigenen Zugang; das aktuelle Passwort ist nötig.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_recovery_code_Name" xml:space="preserve">
+    <value>Wiederherstellungscode einlösen</value>
+  </data>
+  <data name="GuardrailsView_Exemption_recovery_code_Reason" xml:space="preserve">
+    <value>Stellt den eigenen Zugang einer Person mit einem Einmalcode wieder her.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_federated_binding_at_sign_in_Name" xml:space="preserve">
+    <value>Föderierte Identität bei der Anmeldung binden</value>
+  </data>
+  <data name="GuardrailsView_Exemption_federated_binding_at_sign_in_Reason" xml:space="preserve">
+    <value>Bindet eine bestätigte Google-/OIDC-Identität bei ihrer ersten Anmeldung an ein eingetragenes Konto.</value>
   </data>
 </root>

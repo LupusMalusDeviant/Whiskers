@@ -22,7 +22,7 @@ namespace Whiskers.Tests;
 /// denial, the kill switch, a revoked owner and an unwritable audit each stop the action before anything runs; a
 /// revoked owner also switches the webhook off and tells an admin. No secret reaches the gateway's arguments.
 /// </summary>
-public sealed class WebhookMutationTests : IDisposable
+public sealed partial class WebhookMutationTests : IDisposable
 {
     private const string Admin = "admin@example.com";
     private static readonly string AdminId = PrincipalIds.User(Admin);
@@ -55,6 +55,11 @@ public sealed class WebhookMutationTests : IDisposable
     private bool _requireOwner = true;
     private bool _dockerThrows;
     private bool _dockerTimesOut;
+    private bool _trail;
+    /// <summary>The run deadline of the service (its default when null).</summary>
+    private TimeSpan? _runTimeout;
+    /// <summary>The Docker host the gateway's target resolver asks, when it is not the webhook's own.</summary>
+    private FakeDocker? _resolverDocker;
 
     private readonly McpCallOutcomeTests.RecordingAuditLog _rows = new();
 
@@ -69,7 +74,7 @@ public sealed class WebhookMutationTests : IDisposable
             "name: payments\nservices:\n  web:\n    image: nginx\n";
         _git = new GitDeployService(_host, new ProtectedResourceResolutionTests.NoVault(),
             new ComposePlanner(_docker, _host), NullLogger<GitDeployService>.Instance, Path.Combine(_root, "apps.json"),
-            locks: _locks);
+            locks: _locks, composeRunner: new ComposeRunner(_host, _docker));
         _git.SaveAppAsync(new GitDeployApp
         {
             Id = AppId, Name = "payments", RepoUrl = "https://example.org/p.git", ServerId = "local",
@@ -437,7 +442,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         Assert.False(Ran("git-deploy"));
 
         held.Dispose();
@@ -457,7 +462,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         Assert.False(Ran(action));
 
         held.Dispose();
@@ -476,7 +481,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = Service().TriggerSignedTestAsync(webhook.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         Assert.DoesNotContain(_host.Executed, c => c.Contains(workDir));   // no credentials, no fetch, no checkout
 
         held.Dispose();
@@ -499,7 +504,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = service.TriggerSignedTestAsync(webhook.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         Assert.False(test.IsCompleted, test.IsCompleted ? test.Result.Output : "");
         Assert.False(Ran(action));
 
@@ -533,7 +538,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = service.TriggerSignedTestAsync(webhook.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         Assert.False(test.IsCompleted, test.IsCompleted ? test.Result.Output : "");
         Assert.False(Ran("git-deploy"));
 
@@ -551,13 +556,13 @@ public sealed class WebhookMutationTests : IDisposable
         var other = await _locks.AcquireAsync(ResourceLocks.Server("other"));
 
         var test = service.TriggerSignedTestAsync(webhook.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         // Moved while the delivery waits for the old server; the new one is busy too.
         var app = (await _git.GetAppAsync(AppId))!;
         app.ServerId = "other";
         await _git.SaveAppAsync(app, token: null, AdminId);
         local.Dispose();
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("other"));
         Assert.False(test.IsCompleted);
 
         // Switched off while it waits for the new server: once it gets it, the webhook is read again.
@@ -586,7 +591,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync("git:" + AppId);
 
         var test = service.TriggerSignedTestAsync(webhook.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync("git:" + AppId);
         // Saved again meanwhile: the run holds no server for it.
         await _git.SaveAppAsync(new GitDeployApp
         {
@@ -622,7 +627,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var delete = _git.DeleteAppAsync(AppId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         Assert.False(delete.IsCompleted);
         Assert.DoesNotContain(_host.Executed, c => c.StartsWith("rm -rf"));
 
@@ -642,7 +647,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(_locks.ServerKey("local"));
 
         var test = service.TriggerSignedTestAsync(webhook.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(_locks.ServerKey("local"));
         using (var scope = _sp.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -670,7 +675,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = service.TriggerSignedTestAsync(compose.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         Assert.False(Ran("deploy"));
 
         held.Dispose();
@@ -688,7 +693,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = Service().TriggerSignedTestAsync(compose.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         Assert.False(Ran("deploy"));
 
         held.Dispose();
@@ -705,7 +710,7 @@ public sealed class WebhookMutationTests : IDisposable
         var decided = (await _git.GetAppAsync(AppId))!;
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
         var test = _git.DeployAsync(decided, (_, proceed) => proceed());
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
 
         // Saved again while the deployment waits: it is no longer the app the deployment was decided on.
         var app = (await _git.GetAppAsync(AppId))!;
@@ -727,7 +732,7 @@ public sealed class WebhookMutationTests : IDisposable
         var held = await _locks.AcquireAsync(ResourceLocks.Server("local"));
 
         var test = service.TriggerSignedTestAsync(compose.WebhookId);
-        await Task.Delay(500);
+        await UntilAwaitedAsync(ResourceLocks.Server("local"));
         Assert.False(Ran("deploy"));
 
         held.Dispose();
@@ -908,7 +913,11 @@ public sealed class WebhookMutationTests : IDisposable
         // The Docker service of the webhook (lookup and planning) starts failing whenever a test says so.
         var docker = ThrowingDocker.Wrap(_docker, () => _dockerThrows, () => _dockerTimesOut);
         return new(_sp.GetRequiredService<IServiceScopeFactory>(), docker, _host, new ComposePlanner(docker, _host),
-            NullLogger<WebhookService>.Instance, locks: _locks, vault: TestVault.Usable);
+            NullLogger<WebhookService>.Instance,
+            options: _runTimeout is { } timeout
+                ? Microsoft.Extensions.Options.Options.Create(new WebhookOptions { RunTimeout = timeout })
+                : null,
+            locks: _locks, vault: TestVault.Usable, composeRunner: _composeRunner);
     }
 
     /// <summary>A Docker service whose container listing fails, as for a server that is no longer registered.</summary>
@@ -933,6 +942,18 @@ public sealed class WebhookMutationTests : IDisposable
                 : _timeout()
                     ? throw new TaskCanceledException("The host deadline expired.")
                     : throw new InvalidOperationException("Cannot connect to the docker socket of 'edge-removed'");
+    }
+
+    /// <summary>Waits until something besides the test waits for <paramref name="key"/> — a signal instead of a
+    /// fixed pause, which a loaded runner can outlast before the run reaches the lock.</summary>
+    private async Task UntilAwaitedAsync(string key)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (_locks.Users(key) < 2)
+        {
+            Assert.True(DateTime.UtcNow < deadline, $"nothing waited for {key} within 30 s");
+            await Task.Delay(10);
+        }
     }
 
     private bool Ran(string action) => action switch
@@ -1002,15 +1023,18 @@ public sealed class WebhookMutationTests : IDisposable
         policy.ReadOnlyMode = _readOnly;
         policy.ProtectedResources = _protect is null ? [] : [_protect];
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
+        var targets = new MutationTargetResolver(new TestServices(_resolverDocker ?? _docker, _servers, _git, Service()));
+        // INV-45: with a trail, the gateway writes its events as AuditLog rows into this fixture's database.
+        if (_trail) return AuditTrail.Gateway(_sp.GetRequiredService<IServiceScopeFactory>(), store, targets: targets);
         return new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
             NullLogger<MutationGateway>.Instance,
-            targets: new MutationTargetResolver(new TestServices(_docker, _servers, _git, Service())),
+            targets: targets,
             approvals: new ApprovalGate(new ApprovalStore(), store));
     }
 
     // Built per call so the kill switch and protected names set by a test apply.
     private IAutomationMutationRunner Automation() => new LateRunner(() => new AutomationMutationRunner(Gateway(),
-        new CapabilityCatalog(), new AutomationOwnerResolver(_roles, _whitelist, new Keys(), new Accounts()),
+        new CapabilityCatalog(), new AutomationOwnerResolver(_roles, _whitelist, _keys, new Accounts()),
         new StaticOptionsMonitor<AutomationOptions>(new AutomationOptions { RequireOwner = _requireOwner })));
 
     private UiMutationRunner UiRunner(AppRole role, string email = Admin) =>
@@ -1040,6 +1064,10 @@ public sealed class WebhookMutationTests : IDisposable
 
         public string? LostAuthority(AutomationActor actor, string capabilityId) =>
             build().LostAuthority(actor, capabilityId);
+
+        public Task<MutationOutcome<object?>> RefuseAsync(AutomationActor actor, string capabilityId, object arguments,
+            string reason, CancellationToken ct = default) =>
+            build().RefuseAsync(actor, capabilityId, arguments, reason, ct);
     }
 
     /// <summary>Remembers every request the gateway audits; <see cref="Fail"/> makes the intent unwritable.</summary>

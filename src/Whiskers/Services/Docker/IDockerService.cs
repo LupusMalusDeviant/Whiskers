@@ -30,13 +30,18 @@ public interface IDockerService
     Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null);
     Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null);
     [MutatingOperation("container.start")]
-    Task StartContainerAsync(string containerId, string? serverId = null);
+    Task StartContainerAsync([MutationTarget] string containerId, string? serverId = null);
     [MutatingOperation("container.stop")]
-    Task StopContainerAsync(string containerId, string? serverId = null);
+    Task StopContainerAsync([MutationTarget] string containerId, string? serverId = null);
     [MutatingOperation("container.restart")]
-    Task RestartContainerAsync(string containerId, string? serverId = null);
+    Task RestartContainerAsync([MutationTarget] string containerId, string? serverId = null);
+
+    /// <summary>Contract 0006: <c>docker update --restart=no</c> — the first half of stopping a container whose exposure
+    /// was not decided; composed only by the compose paths that may stop what their run created.</summary>
+    [MutatingOperation("container.disable_restart")]
+    Task DisableRestartAsync([MutationTarget] string containerId, string? serverId = null);
     [MutatingOperation("container.remove")]
-    Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null);
+    Task RemoveContainerAsync([MutationTarget] string containerId, bool force = false, string? serverId = null);
     Task<string> GetContainerLogsAsync(string containerId, int tailLines = 100, string? serverId = null, DateTime? since = null, CancellationToken ct = default);
 
     /// <summary>R1-41: the log read with a server <paramref name="deadline"/> (bounds the request and the waits for a client

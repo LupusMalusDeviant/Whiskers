@@ -72,7 +72,13 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
             if (_lastRun.TryGetValue(key, out var last) && (now - last).TotalSeconds < t.CooldownSeconds) continue;
             _lastRun[key] = now;
 
-            _ = RunTriggerAsync(t, evt);   // fire-and-forget; bounded by the concurrency gate
+            // Fire-and-forget, bounded by the concurrency gate. The run keeps the caller's flow — its budget lane (a
+            // run fired by a background loop's event stays in the background lane, so a server paused with
+            // `checks.pause` refuses its calls) and its correlation id — but not the caller's gateway decision: an
+            // event raised inside a person's operation (a manual CVE scan, `cve.scan`) must not make the trigger's
+            // own decisions children of that person's operation.
+            using (MutationScope.Detach())
+                _ = RunTriggerAsync(t, evt);
         }
 
         // Bound _lastRun (keyed trigger|container, so recreated containers grow it): once it's large, drop

@@ -30,7 +30,7 @@ public sealed class AuthAuditBootTests
             await LoginAsync(client, token, Email, "wrong-password-1");
             var ok = await LoginAsync(client, token, Email, Password);
             Assert.Equal("/", ok.Headers.Location!.OriginalString);
-            await client.GetAsync("/logout");
+            await LogoutAsync(client);
 
             // Written in the background (a sign-in never waits for the audit): wait for all four.
             var rows = await RowsAsync(services, "auth.", expected: 4);
@@ -115,7 +115,7 @@ public sealed class AuthAuditBootTests
             // The background writer is now stuck inside the store's write: every answer below comes regardless.
             await ((StalledAudit)services.GetRequiredService<IAuditLogService>()).Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             var login = await LoginAsync(client, token, Email, Password);
-            var logout = await client.GetAsync("/logout");
+            var logout = await LogoutAsync(client);
             clock.Stop();
 
             Assert.Contains("error=invalid", refused.Headers.Location!.OriginalString);
@@ -225,13 +225,20 @@ public sealed class AuthAuditBootTests
         }
     }
 
-    private static async Task<string> AntiforgeryTokenAsync(HttpClient client)
+    private static async Task<string> AntiforgeryTokenAsync(HttpClient client, string page = "/login")
     {
-        var html = await (await client.GetAsync("/login")).Content.ReadAsStringAsync();
+        var html = await (await client.GetAsync(page)).Content.ReadAsStringAsync();
         var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
         Assert.False(string.IsNullOrEmpty(token));
-        return token;
+        return System.Net.WebUtility.HtmlDecode(token);
     }
+
+    /// <summary>R1-50: sign-out is the form's POST with the antiforgery token (a GET ends nothing).</summary>
+    private static async Task<HttpResponseMessage> LogoutAsync(HttpClient client) =>
+        await client.PostAsync("/logout", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = await AntiforgeryTokenAsync(client, "/logout"),
+        }));
 
     private static Task<HttpResponseMessage> LoginAsync(HttpClient client, string token, string email, string password) =>
         client.PostAsync("/login-local", new FormUrlEncodedContent(new Dictionary<string, string>

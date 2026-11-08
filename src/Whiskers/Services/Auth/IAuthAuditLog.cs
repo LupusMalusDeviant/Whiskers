@@ -34,4 +34,22 @@ public static class AuthAuditReasons
     public const string ProviderFailure = "provider_failure";
     /// <summary>The account had no security stamp and none could be stored, so no session could be tied to it (R1-26).</summary>
     public const string NoSecurityStamp = "no_security_stamp";
+
+    // R1-27: why a Google/OIDC sign-in was refused at its admission (IFederatedAdmission).
+    /// <summary>No explicit Admin exists yet: federated sign-in waits for the setup wizard.</summary>
+    public const string SetupIncomplete = "setup_incomplete";
+    /// <summary>The provider delivered no issuer or no subject.</summary>
+    public const string NoSubject = "no_subject";
+    /// <summary>An unbound subject without an email claim.</summary>
+    public const string NoEmail = "no_email";
+    public const string EmailUnverified = "email_unverified";
+    public const string ProviderUntrusted = "provider_untrusted";
+    /// <summary>A binding request was recorded; an Admin or the host operator confirms it.</summary>
+    public const string PendingConfirmation = "pending_confirmation";
+    /// <summary>The binding changed while it was being written (another subject or issuer got there first).</summary>
+    public const string SubjectConflict = "subject_conflict";
+    public const string StoreUnavailable = "store_unavailable";
+    public const string AuditUnavailable = "audit_unavailable";
+    /// <summary>Contract 0009 (E6): binding a new identity at sign-in is blocked while the kill switch is on.</summary>
+    public const string KillSwitch = "kill_switch";
 }

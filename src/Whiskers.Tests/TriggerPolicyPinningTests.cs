@@ -134,6 +134,89 @@ public class TriggerPolicyPinningTests
     }
 
     [Fact]
+    public async Task A_trigger_started_from_a_manual_scan_has_no_parent_operation()
+    {
+        // INV-18 review: a manual CVE scan runs inside the person's cve.scan decision and raises its findings there;
+        // the trigger run those findings start must not inherit that decision as its parent.
+        // The decision stays open until the run has started, as it does in production (the scan raises its findings
+        // inside the decision): a closed scope reads as null anyway and would prove nothing.
+        var (dispatcher, agents, _) = Dispatcher(Store(active: "Strict"), preset: "Repair");
+
+        using (MutationScope.Begin("cve.scan", "op-person-scan"))
+        {
+            await dispatcher.OnEventAsync(Event());
+            await agents.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal("op-person-scan", MutationScope.Current?.OperationId);   // the person's decision is untouched
+        }
+
+        Assert.True(agents.AtStart.HasValue);
+        Assert.Null(agents.AtStart.Value.Scope);
+    }
+
+    [Fact]
+    public async Task A_trigger_fired_by_a_background_loops_event_runs_in_the_background_lane_and_stops_at_a_paused_server()
+    {
+        // MAJOR-1 of the INV-17/18 review: only the decision is left behind. The run keeps the rest of the flow it was
+        // fired from — the background lane a loop entered (so the emergency stop `checks.pause` turns its Docker calls
+        // away, as it did before) and the correlation id.
+        var (docker, suspension, budget) = SuspendableDocker();
+        suspension.Suspend("srv1", DateTime.UtcNow.AddMinutes(30), "operator paused it");
+        var (dispatcher, agents, _) = Dispatcher(Store(active: "Strict"), preset: "Repair");
+        agents.Probe = () => docker.GetClientAsync("srv1");
+
+        using (budget.BackgroundScope())
+        using (Whiskers.Services.Observability.Correlation.RequestCorrelation.Enter("req-loop-1"))
+        using (MutationScope.Begin("cve.scan", "op-person-scan"))
+        {
+            await dispatcher.OnEventAsync(Event());
+            await agents.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        var start = agents.AtStart!.Value;
+        Assert.True(start.Background);
+        Assert.Equal("req-loop-1", start.Correlation);
+        Assert.Null(start.Scope);
+        var refused = await Assert.ThrowsAsync<Whiskers.Services.Observability.ServerSuspendedException>(() => start.Probe!);
+        Assert.Equal("srv1", refused.ServerId);
+    }
+
+    [Fact]
+    public async Task A_trigger_fired_from_an_interactive_flow_keeps_its_lane_as_before()
+    {
+        // Unchanged since before the review: the run inherits the lane of the flow that raised the event, it is not
+        // forced into either one.
+        var (dispatcher, agents, _) = Dispatcher(Store(active: "Strict"), preset: "Repair");
+
+        await dispatcher.OnEventAsync(Event());
+        await agents.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(agents.AtStart!.Value.Background);
+    }
+
+    private static (Whiskers.Services.Docker.DockerConnectionManager Docker, Whiskers.Services.Observability.ILoopSuspensionService Suspension,
+        Whiskers.Services.Docker.Budget.IServerBudget Budget) SuspendableDocker()
+    {
+        var servers = new FakeServerConfig(new ServerConfig
+        {
+            Id = "srv1", Name = "srv1", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local,
+        });
+        var suspension = new Whiskers.Services.Observability.LoopSuspensionService(new FakeNotifications(), servers,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Whiskers.Services.Observability.LoopSuspensionService>.Instance,
+            new NoOutcomes());
+        var budget = new Whiskers.Services.Docker.Budget.ServerBudget(
+            new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Whiskers.Services.Docker.Budget.ServerBudget>.Instance);
+        var docker = new Whiskers.Services.Docker.DockerConnectionManager(servers, sshTunnelManager: null!, budget,
+            new Whiskers.Services.Docker.Budget.ServerCircuitBreaker(
+                new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings()),
+                new ServiceCollection().BuildServiceProvider(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Whiskers.Services.Docker.Budget.ServerCircuitBreaker>.Instance),
+            suspension,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Whiskers.Services.Docker.DockerConnectionManager>.Instance);
+        return (docker, suspension, budget);
+    }
+
+    [Fact]
     public async Task A_run_starts_at_the_level_its_authority_returns()
     {
         var (dispatcher, agents, _) = Dispatcher(Store(active: "Strict"), preset: "Repair",
@@ -442,9 +525,23 @@ public class TriggerPolicyPinningTests
     {
         public TaskCompletionSource<AgentContext> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <summary>Reads the lane flag of the flow it is asked on (the flag is ambient, any instance reads it).</summary>
+        private static readonly Whiskers.Services.Docker.Budget.ServerBudget Lane = new(
+            new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Whiskers.Services.Docker.Budget.ServerBudget>.Instance);
+
+        /// <summary>Run on the run's own flow when it starts its session (a Docker call, say); its task is kept.</summary>
+        public Func<Task>? Probe { get; set; }
+
+        /// <summary>The run's flow when it started its session: the open gateway scope (none, for a run of its own),
+        /// whether it is in the background lane, its correlation id, and the probe's task.</summary>
+        public (string? Scope, bool Background, string? Correlation, Task? Probe)? AtStart { get; private set; }
+
         public Task<IAgentSession> StartSessionAsync(AgentContext context, IReadOnlyList<AgentMessage>? seedHistory = null,
             CancellationToken ct = default)
         {
+            AtStart = (MutationScope.Current?.OperationId, Lane.IsBackgroundCall,
+                Whiskers.Services.Observability.Correlation.RequestCorrelation.Current, Probe?.Invoke());
             Started.TrySetResult(context);
             throw new InvalidOperationException("no provider in this test");
         }

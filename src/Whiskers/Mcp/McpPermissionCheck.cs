@@ -62,11 +62,6 @@ public static class McpPermissionCheck
 
         var email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;
         var role = httpContext.RequestServices.GetService<IRoleService>()?.GetRole(email) ?? AppRole.Viewer;
-        return role switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        return Whiskers.Services.Mutations.CapabilityCatalog.LevelFor(role);
     }
 }

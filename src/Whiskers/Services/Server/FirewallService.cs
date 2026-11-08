@@ -33,7 +33,7 @@ public class FirewallService : IFirewallService
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // Matches port/protocol segment like: 22/tcp, 80, 443/udp
-    private static readonly Regex PortProtoRegex = new(@"^(\d+(?::\d+)?(?:/(?:tcp|udp))?)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex PortProtoRegex = new(@"^(\d+(?::\d+)?(?:/(?:tcp|udp))?)\z", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public FirewallService(IHostCommandExecutor executor, ILogger<FirewallService> logger)
     {

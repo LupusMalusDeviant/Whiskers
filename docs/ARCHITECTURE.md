@@ -53,8 +53,9 @@ Whiskers ──mTLS──▶ ghostunnel ──plaintext(local)──▶ docker-s
    (client cert)      (server cert, mesh-only :2376)     (HAProxy verb allow-list)
 ```
 
-- **ghostunnel** terminates mutual TLS: it requires a client certificate whose CN is the controller,
-  signed by the fleet CA. Bound to the mesh IP only.
+- **ghostunnel** terminates mutual TLS: it requires a client certificate signed by the fleet CA whose
+  CN is on its `--allow-cn` list — since R1-44 only that host's own client identity
+  `whiskers-client-{slug}-g{n}` (see *Blast radius* below). Bound to the mesh IP only.
 - **docker-socket-proxy** allows only the API sections Whiskers needs
   (`CONTAINERS`, `IMAGES`, `NETWORKS`, `VOLUMES`, `INFO`, `VERSION`, `POST`) and **denies the rest**
   (`EXEC=0`, `SWARM=0`, `SECRETS=0`, `CONFIGS=0`, ...). Container **exec-start** (`/exec/*`) is blocked,
@@ -87,11 +88,37 @@ same CA instead of a standing key, is a valid alternative; this design favours "
 ## PKI
 
 A small online CA (step-ca) issues:
-- one **client** certificate for Whiskers (CN = the controller),
+- one **client** certificate **per host** for Whiskers (R1-44, contract 0007): CN
+  `whiskers-client-{slug}-g{n}`, no SAN, extended key usage clientAuth. The key is generated in Whiskers'
+  process and never leaves its data directory (`{MtlsDir}/hosts/{serverId}/g{n}-s{k}/client.key`, 0600,
+  directories 0700); only the CSR goes to step-ca. Before R1-44 there was one shared client certificate
+  (`serverwatch-client`, `{MtlsDir}/client.*`), which stays until it is retired,
 - one **server** certificate per host (SAN = the host's mesh IP) for its ghostunnel,
 all chaining to a shared root + intermediate. Certs are leaf+intermediate bundles; the CA bundle
-(root+intermediate) is distributed to each ghostunnel so a leaf-only client still verifies. The same
-CA can later issue short-lived SSH certificates if an independent SSH break-glass is wanted.
+(root+intermediate, `{MtlsDir}/ca.crt`) is distributed to each ghostunnel so a leaf-only client still
+verifies. There is no second trust anchor per host. The same CA can later issue short-lived SSH
+certificates if an independent SSH break-glass is wanted.
+
+The server record is authoritative for the credential Whiskers connects with: renewals and rotations
+write a new slot and switch the record in one save; nothing overwrites the live key.
+
+## Blast radius
+
+What a stolen client credential opens:
+
+| Credential | Before R1-44 | After a host's migration |
+|---|---|---|
+| shared `serverwatch-client` | every host | no migrated host (each refuses it with a TLS alert — proven before the migration is recorded) |
+| a host's own `whiskers-client-{slug}-g{n}` | — | that one host, until the next rotation (g(n+1)); every other host refuses it |
+| the CA's intermediate key (step-ca) | every host | every host — unchanged; it can mint any name |
+
+The guarantee is **per host after migration** (INV-58): a host still on the shared name is exposed as
+before, and the readiness checklist names it. Migration, renewal and rotation run in phases (issue,
+widen, switch, narrow, record); each host step edits only the `--allow-cn` items of the ghostunnel
+compose file, is guarded by a dead-man timer that restores the previous file unless the step is
+confirmed through the new credential, and a second call resumes from what ghostunnel actually runs with.
+The procedure, its undo and the order of hosts are in
+[operations/per-host-mtls-migration.md](operations/per-host-mtls-migration.md).
 
 ## Onboarding a new server
 
@@ -108,8 +135,9 @@ The onboarding orchestrator then runs, end to end, with live progress in the UI:
 2. **ensure Docker is installed** (a fresh VPS often isn't, install via the official convenience
    script if `docker` is missing), since the following steps run `docker compose`;
 3. deploy `node_exporter` (mesh-only);
-4. issue a per-host server certificate from the CA;
-5. deploy `docker-socket-proxy` + `ghostunnel` (mTLS);
+4. issue a per-host server certificate from the CA, and the host's own client identity
+   `whiskers-client-{slug}-g1` (R1-44);
+5. deploy `docker-socket-proxy` + `ghostunnel` (mTLS), admitting only that client identity;
 6. add the host to the scrape config and reload the TSDB;
 7. switch the server to `TCP+mTLS` + Prometheus metrics and verify over mTLS.
 
@@ -203,8 +231,14 @@ Three areas carry most of the risk. Changes there get a dedicated review and tes
 (an ADR or the maintainer's sign-off on the pull request):
 
 - the authentication middleware and its order (forwarded headers first, fail-closed authorization, cookie
-  validation, the whitelist re-check); only the request-correlation middleware runs ahead of the forwarded headers —
+  validation, the whitelist re-check); the request-correlation middleware runs ahead of everything —
   it reads nothing but `X-Request-Id` and the current activity and decides nothing (user-approved 2026-11-03, R1-53);
+  R1-50 (user-approved 2026-11-05) adds two steps: right before the forwarded headers a marker that flags a request whose
+  `X-Forwarded-*` come from a peer outside `ForwardedHeaders:TrustedNetworks` (it must see the original peer; the
+  Auth:Disabled gate refuses such a request, the readiness check names the peer), and right after them the registration
+  of the response headers (nosniff, frame denial, referrer policy), before anything that can write a response; the trusted-proxy list (default loopback only) is
+  read once at startup and an unreadable entry, or `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` (the framework's
+  trust-all forwarded headers), stops the start;
   cookie validation re-checks the whole session on every request and fails closed (`SessionCookieValidation` →
   `ISessionValidator`: local account, security stamp, whitelist), and `/login-local` ties the cookie to the account's
   security stamp — the order and the whitelist logic are unchanged (user-approved 2026-11-03, R1-26);

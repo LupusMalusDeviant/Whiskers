@@ -15,12 +15,18 @@ using Whiskers.Services.Persistence;
 
 namespace Whiskers.Tests;
 
-/// <summary>R1-33: the self-backup of a PostgreSQL instance against a REAL PostgreSQL 17 (Testcontainers) with the real
-/// client tools — backup, change, restore (staged, dry-run, applied at the start), an off-volume restore into a fresh
-/// database and an empty data directory, the refusal of a files-only archive and the all-or-nothing restore. Skipped
+/// <summary>R1-33: the self-backup of a PostgreSQL instance against a REAL PostgreSQL 18, the overlay's version
+/// (Testcontainers), with the real client tools — backup, change, restore (staged, dry-run, applied at the start), an
+/// off-volume restore into a fresh database and an empty data directory, the refusal of a files-only archive and the all-or-nothing restore. Skipped
 /// without Docker; without the client tools skipped locally and failed on CI, which installs them.</summary>
 [Trait("Category", "RequiresDocker")]
-public class PostgresBackupRestoreTests() : PostgresBackupRestoreTestsBase("postgres:17-alpine");
+public class PostgresBackupRestoreTests() : PostgresBackupRestoreTestsBase("postgres:18-alpine");
+
+/// <summary>The same against PostgreSQL 17: installs that have not moved to 18 yet (docs/operations/postgres-18-upgrade.md)
+/// keep their backups. Backup and restore both run against the 17 server here; the 17 → 18 upgrade itself (dump on 17,
+/// restore on 18) is <see cref="PostgresUpgradeTests"/>.</summary>
+[Trait("Category", "RequiresDocker")]
+public class PostgresBackupRestorePg17Tests() : PostgresBackupRestoreTestsBase("postgres:17-alpine");
 
 /// <summary>The same against an older server line than the image's client tools: the script of the newer client must
 /// not use settings this server lacks.</summary>

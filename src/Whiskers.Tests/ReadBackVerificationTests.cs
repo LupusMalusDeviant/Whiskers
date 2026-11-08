@@ -684,20 +684,42 @@ public class ReadBackVerificationTests
     }
 
     [Theory]
-    [InlineData(0, "app_1.sql.gz\napp_2.sql.gz\nother_1.sql.gz\napp-old.txt\n", true, false)]
-    [InlineData(0, "app_1.sql.gz\napp_2.sql.gz\napp_3.sql\n", false, false)]
+    [InlineData(0, "db1@app_20261107_010101000_0a1b2c3d.sql.gz\ndb1@app_20261106_010101000_0a1b2c3d.sql.gz\ndb1@other_20261105_010101000_0a1b2c3d.sql.gz\napp-old.txt\n", true, false)]
+    // another database whose name starts with the task's, the same database in another container and legacy dumps
+    // (no container in the name, never pruned) are not counted: DbDumpFilesTests
+    [InlineData(0, "db1@app_20261107_010101000_0a1b2c3d.sql\ndb1@app_20261106_010101000_0a1b2c3d.sql\ndb1@app_db_20261105_010101000_0a1b2c3d.sql\ndb2@app_20261104_010101000_0a1b2c3d.sql\napp_20261103_010101.sql\napp_20261102_010101.sql\n", true, false)]
+    [InlineData(0, "db1@app_20261107_010101000_0a1b2c3d.sql.gz\ndb1@app_20261106_010101000_0a1b2c3d.sql.gz\ndb1@app_20261105_010101000_0a1b2c3d.sql\n", false, false)]
     [InlineData(2, "", false, true)]   // the directory could not be listed: never "nothing left"
     public async Task A_dump_retention_must_leave_no_more_than_it_keeps(int exit, string listing, bool verified, bool stateUnknown)
     {
         var gateway = Gateway(new ServiceCollection()
-            .AddSingleton(HostReads(($"ls -1 '{DataPathOptions.Default.BackupsDir}'", exit, listing)).GetRequiredService<IHostCommandExecutor>())
+            .AddSingleton(HostReads(($"ls -1Aq -- '{DataPathOptions.Default.BackupsDir}'", exit, listing)).GetRequiredService<IHostCommandExecutor>())
             .AddSingleton(DataPathOptions.Default).BuildServiceProvider());
 
-        var outcome = await gateway.ExecuteAsync(Request("db.backup_delete", new { serverId = "srv1", database = "app", keep = 2 },
+        var outcome = await gateway.ExecuteAsync(Request("db.backup_delete",
+                new { serverId = "srv1", dumpContainer = "db1", database = "app", keep = 2 },
             new MutationTarget("container", "c1", null, "srv1")), (_, _) => Task.FromResult("pruned"));
 
         if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);
         else AssertFailed(outcome, stateUnknown);
+    }
+
+    [Fact]
+    public async Task A_truncated_dump_listing_never_verifies_a_retention()
+    {
+        // INV-19 review round 4 (m1): a cut listing hides names, and "fewer than kept" must not read as success.
+        var (executor, script) = Scripted<IHostCommandExecutor>.Create();
+        script.On[nameof(IHostCommandExecutor.ExecuteAsync)] = args => Task.FromResult(
+            (string)args[1]! == $"ls -1Aq -- '{DataPathOptions.Default.BackupsDir}'"
+                ? new CommandResult { ExitCode = 0, Output = "db1@app_20261107_010101000_0a1b2c3d.sql\n", OutputTruncated = true }
+                : new CommandResult { ExitCode = -1, Error = "unscripted" });
+        var gateway = Gateway(new ServiceCollection().AddSingleton(executor).AddSingleton(DataPathOptions.Default).BuildServiceProvider());
+
+        var outcome = await gateway.ExecuteAsync(Request("db.backup_delete",
+                new { serverId = "srv1", dumpContainer = "db1", database = "app", keep = 2 },
+            new MutationTarget("container", "c1", null, "srv1")), (_, _) => Task.FromResult("pruned"));
+
+        AssertFailed(outcome, stateUnknown: true);
     }
 
     [Fact]

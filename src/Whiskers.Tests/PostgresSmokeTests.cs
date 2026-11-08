@@ -8,14 +8,14 @@ using Whiskers.Services.Persistence;
 
 namespace Whiskers.Tests;
 
-/// <summary>Smoke tests of the metrics database against a REAL PostgreSQL 17 (Testcontainers) — the automated
+/// <summary>Smoke tests of the metrics database against a REAL PostgreSQL 18 (Testcontainers) — the automated
 /// counterpart to the manual Docker-host proof (stableDB step 8). Marked <c>RequiresDocker</c>: skipped on a machine
 /// without a Docker daemon, mandatory on CI (R1-47, <see cref="DockerRequirement"/>); run them with Docker up
 /// (<c>dotnet test --filter Category=RequiresDocker</c>).</summary>
 [Trait("Category", DockerRequirement.Category)]
 public sealed class PostgresSmokeTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:18-alpine").Build();
     private bool _up;
     private Exception? _startFailure;
 
@@ -73,6 +73,65 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
             DateTime.UtcNow, "bob", DateTime.UtcNow.AddMinutes(10), stillDecidable: () => false));
         await using var check = Pg();
         Assert.Equal("Pending", (await check.Approvals.AsNoTracking().SingleAsync(a => a.Id == second.Id)).Status);
+    }
+
+    /// <summary>INV-45 (review round 6, MINOR-3): a keyed refusal written twice — the webhook's "did not run" event
+    /// from two paths — is one row on PostgreSQL too: the unique event id's violation rolls the second write back inside
+    /// the chain's transaction (retries on), it reads the first row back, and the chain stays intact.</summary>
+    [SkippableFact]
+    public async Task A_keyed_refusal_written_twice_is_one_row_on_real_postgres_with_retries_on()
+    {
+        SkipUnlessUp();
+        var dir = Path.Combine(Path.GetTempPath(), $"pg-keyed-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.EntityFrameworkServiceCollectionExtensions.AddDbContext<MetricsDbContext>(
+            services, o => o.UseNpgsql(_pg.GetConnectionString(), npg =>
+            {
+                npg.EnableRetryOnFailure(3);
+                npg.MigrationsAssembly("Whiskers.Migrations.Postgres");
+            }));
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<Whiskers.Services.AuditLog.IAuditChain>(
+            services, sp => new Whiskers.Services.AuditLog.AuditChain("pg-test-vault-key", Path.Combine(dir, "audit-checkpoint.json"),
+                scopes: Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                    .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(sp)));
+        await using var sp = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions
+            .BuildServiceProvider(services);
+        try
+        {
+            await using (var db = Pg()) await DatabaseInitializer.InitializeAsync(db, NullLogger.Instance);
+            var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(sp);
+            var chain = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>(sp);
+            var sink = new Whiskers.Services.Mutations.AuditLogMutationSink(scopes);
+            var request = new Whiskers.Services.Mutations.MutationRequest("container.restart",
+                new Whiskers.Services.Mutations.MutationPrincipal(Whiskers.Services.Mutations.MutationPrincipalKind.Automation,
+                    "webhook:pg", "Webhook pg", McpPermissionLevels.Write),
+                Whiskers.Services.Mutations.MutationSurface.Automation,
+                new Whiskers.Services.Mutations.MutationTarget("container", "web-1"),
+                new Dictionary<string, System.Text.Json.JsonElement>(), OperationId: "pg-run-1")
+            {
+                EventKey = Whiskers.Services.Webhooks.WebhookService.NotRunEventKey("pg-run-1"),
+            };
+
+            await sink.RecordDeniedAsync("pg-run-1", request, null, Whiskers.Services.Mutations.MutationStatus.Denied,
+                "given up", CancellationToken.None);
+            await sink.RecordDeniedAsync("pg-run-1", request, null, Whiskers.Services.Mutations.MutationStatus.Denied,
+                "reconciled", CancellationToken.None);
+
+            await using (var check = Pg())
+            {
+                var row = await check.AuditLog.AsNoTracking().SingleAsync(a => a.OperationId == "pg-run-1");
+                Assert.Equal(Whiskers.Services.Webhooks.WebhookService.NotRunEventId("pg-run-1"), row.EventId);
+            }
+            var verified = await chain.VerifyAsync();
+            Assert.True(verified.Intact, string.Join("; ", verified.Problems));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
     }
 
     [SkippableFact]

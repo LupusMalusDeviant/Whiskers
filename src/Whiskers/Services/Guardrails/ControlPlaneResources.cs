@@ -56,6 +56,9 @@ public static class ControlPlaneResources
     public static readonly IReadOnlySet<string> Capabilities = new HashSet<string>(StringComparer.Ordinal)
     {
         "certificate.renew_mtls", "renew_mtls_certificate", "certificate.issue_mtls", "selfbackup.restore",
+        // R1-44: which client a host's proxy admits, and the fleet's shared client key.
+        "mtls.client_migrate", "migrate_mtls_client_credential", "mtls.client_renew", "renew_mtls_client_credential",
+        "mtls.shared_client_retire",
     };
 
     /// <summary>Arguments that name a container, volume or network directly (the agent's own calls carry them raw).</summary>
@@ -83,12 +86,13 @@ public static class ControlPlaneResources
             ? k.GetString()
             : null;
         var targetIsResource = resolvedKind is not null && ResourceKinds.Contains(resolvedKind);
-        return key =>
+        // Contract 0006: exposure lists never name a resource (the matcher skips them as well).
+        return key => !ProtectedResourceMatcher.IsExposureArgument(key) && (
             IdentityArguments.Contains(key)
             || ProtectedResourceMatcher.FreeTextArguments.Contains(key)
             || ProtectedResourceMatcher.ReferenceArguments.Contains(key)
             || key.StartsWith(ProtectedResourceMatcher.ResolvedRelatedPrefix, StringComparison.Ordinal)
-            || (targetIsResource && key is "__resolvedTargetId" or "__resolvedTargetName");
+            || (targetIsResource && key is "__resolvedTargetId" or "__resolvedTargetName"));
     }
 
     private static IReadOnlyList<string> BuildNames()

@@ -52,7 +52,7 @@ public sealed class GitDeployMutationTests : IDisposable
         var (success, output) = await GitDeployOwners.DeployAsOwnerAsync(git, Automation(), AppId);
 
         Assert.True(success, output);
-        Assert.Contains(_host.Executed, c => c.Contains("-p 'payments'") && c.EndsWith("up -d --remove-orphans"));
+        Assert.Contains(_host.Executed, c => c.Contains("-p 'payments'") && c.EndsWith("up -d --remove-orphans --pull never --no-build 2>&1"));
     }
 
     [Fact]
@@ -250,7 +250,7 @@ public sealed class GitDeployMutationTests : IDisposable
             _ => git.DeployAsync(app, runner.GateFor("gitdeploy.deploy")));
 
         Assert.True(success, output);
-        Assert.Contains(_host.Executed, c => c.EndsWith("up -d --remove-orphans"));
+        Assert.Contains(_host.Executed, c => c.EndsWith("up -d --remove-orphans --pull never --no-build 2>&1"));
     }
 
     // ---------------------------------------------------------------- helpers
@@ -258,7 +258,8 @@ public sealed class GitDeployMutationTests : IDisposable
     private string StorePath => Path.Combine(_root, "apps.json");
 
     private GitDeployService Service() => new(_host, new ProtectedResourceResolutionTests.NoVault(),
-        new ComposePlanner(_docker, _host), NullLogger<GitDeployService>.Instance, StorePath);
+        new ComposePlanner(_docker, _host), NullLogger<GitDeployService>.Instance, StorePath,
+        composeRunner: new ComposeRunner(_host, _docker));
 
     private GitDeployService? _git;
 

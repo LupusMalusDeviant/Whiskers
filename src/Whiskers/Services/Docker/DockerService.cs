@@ -43,7 +43,7 @@ public class DockerService : IDockerService
         _images = new ImageOperations(connectionManager, logger, registryConfig);
         _lifecycle = new ContainerLifecycleOperations(connectionManager, _images, logger);
         _networks = new NetworkOperations(connectionManager, serverConfigService);
-        _hostShell = new HostShellOperations(connectionManager, statsCache);
+        _hostShell = new HostShellOperations(connectionManager, statsCache, logger);
         _systemInfo = new SystemInfoOperations(connectionManager, serverConfigService, prometheusMetrics, _containers, logger, statsCache, snapshots);
     }
 
@@ -87,6 +87,9 @@ public class DockerService : IDockerService
 
     public Task StopContainerAsync(string containerId, string? serverId = null)
         => _containers.StopContainerAsync(containerId, serverId);
+
+    public Task DisableRestartAsync(string containerId, string? serverId = null)
+        => _containers.DisableRestartAsync(containerId, serverId);
 
     public Task RestartContainerAsync(string containerId, string? serverId = null)
         => _containers.RestartContainerAsync(containerId, serverId);

@@ -40,6 +40,14 @@ public static class ApprovalBinding
             w.WriteStartArray("targetRelated");
             foreach (var related in target.Related.Order(StringComparer.Ordinal)) w.WriteStringValue(related);
             w.WriteEndArray();
+            // Contract 0006: an approval is bound to the exposures it was given for; a changed .env that alters them makes
+            // it unusable. Only hashed, never written.
+            if (target.Exposures.Count > 0)
+            {
+                w.WriteStartArray("targetExposures");
+                foreach (var exposure in target.Exposures.Order(StringComparer.Ordinal)) w.WriteStringValue(exposure);
+                w.WriteEndArray();
+            }
             w.WriteString("policy", policyVersion);
         });
     }

@@ -262,12 +262,7 @@
     {
         var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
         var role = await CurrentUser.GetRoleAsync();
-        var level = role switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        var level = CapabilityCatalog.LevelFor(role);
         return new Models.Agent.AgentPrincipal(Models.Agent.AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
     }
 

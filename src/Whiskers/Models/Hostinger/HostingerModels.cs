@@ -28,9 +28,3 @@ public class HostingerTemplate
     [JsonPropertyName("name")] public string? Name { get; set; }
     [JsonPropertyName("description")] public string? Description { get; set; }
 }
-
-public class HostingerSnapshot
-{
-    [JsonPropertyName("created_at")] public string? CreatedAt { get; set; }
-    [JsonPropertyName("expires_at")] public string? ExpiresAt { get; set; }
-}

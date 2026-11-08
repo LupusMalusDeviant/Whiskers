@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Whiskers.Models;
 
 namespace Whiskers.Services.Mutations;
@@ -22,12 +23,25 @@ public interface ICapabilityCatalog
 /// </summary>
 public sealed class CapabilityCatalog : ICapabilityCatalog
 {
-    /// <summary>The UI role that holds a catalog level, so pages take their requirement from this table (R1-05).</summary>
-    public static AppRole RoleFor(string level) => McpPermissionLevels.Normalize(level) switch
+    /// <summary>The UI role that holds a catalog level, so pages take their requirement from this table (R1-05). This
+    /// maps a <em>required</em> level: anything that is not read, write or admin is held to Admin (fail closed),
+    /// unlike <see cref="McpPermissionLevels.Normalize"/>, which reads an unknown <em>granted</em> level as read.</summary>
+    public static AppRole RoleFor(string level) => level?.Trim().ToLowerInvariant() switch
     {
-        McpPermissionLevels.Admin => AppRole.Admin,
+        McpPermissionLevels.Read => AppRole.Viewer,
         McpPermissionLevels.Write => AppRole.Operator,
-        _ => AppRole.Viewer,
+        _ => AppRole.Admin,
+    };
+
+    /// <summary>The one place the fixed rule turns a role into the level it holds (INV-13): Admin ↔ admin,
+    /// Operator ↔ write, Viewer (and anything else) ↔ read. Every surface that maps a signed-in person's role to a
+    /// level calls this; <c>PageRoleScanTests.The_role_level_rule_is_spelled_only_in_the_catalog</c> forbids a second
+    /// spelling.</summary>
+    public static string LevelFor(AppRole role) => role switch
+    {
+        AppRole.Admin => McpPermissionLevels.Admin,
+        AppRole.Operator => McpPermissionLevels.Write,
+        _ => McpPermissionLevels.Read,
     };
 
     private static readonly TimeSpan Short = TimeSpan.FromMinutes(2);
@@ -58,6 +72,38 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         .Where(c => c.McpTool is not null)
         .ToDictionary(c => c.McpTool!, c => c.RequiredLevel, StringComparer.Ordinal);
 
+    // After Short / Normal / Long: static fields initialise in order, and the definitions read them.
+    private static readonly IReadOnlyDictionary<string, string> LevelById = Definitions()
+        .ToDictionary(c => c.Id, c => c.RequiredLevel, StringComparer.Ordinal);
+
+    /// <summary>The UI role a page requires before it runs <paramref name="capabilityId"/>, straight from the table
+    /// below through <see cref="RoleFor"/> (INV-13): no page states its own role for a capability. An unknown id is
+    /// held to Admin — fail closed; the gateway refuses it in any case.</summary>
+    public static AppRole RoleOf(string capabilityId) =>
+        RoleFor(capabilityId is not null && LevelById.TryGetValue(capabilityId, out var level) ? level : McpPermissionLevels.Admin);
+
+    /// <summary>
+    /// INV-19: the root-equivalent capabilities — every row of the table below marked
+    /// <see cref="CapabilityRisk.RootEquivalent"/>: anything that runs a caller-chosen command on a host or in a
+    /// container, opens a host or container shell, deploys compose / apps / Git, writes a container's <c>.env</c> and
+    /// brings it up, runs arbitrary SQL, or decides who and what may do any of that. Each needs Admin on every
+    /// surface; <see cref="RootEquivalentPerCall"/> names the two whose level the gateway resolves per call.
+    /// <c>RootEquivalentAdminTests</c> pins the membership.
+    /// </summary>
+    public static IReadOnlySet<string> RootEquivalent { get; } = Definitions()
+        .Where(c => c.Risk == CapabilityRisk.RootEquivalent)
+        .Select(c => c.Id)
+        .ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The root-equivalent capabilities whose catalog level is below Admin because what they do depends on the task:
+    /// <c>scheduler.create</c> / <c>scheduler.run</c>. <see cref="SchedulerRequirementResolver"/> raises a call to
+    /// Admin when the task runs a custom command (<c>host.exec</c>) — before the caller check and before an approval
+    /// is requested — and an unrecognised task type or task id to Admin as well (fail closed).
+    /// </summary>
+    public static IReadOnlySet<string> RootEquivalentPerCall { get; } =
+        new[] { "scheduler.create", "scheduler.run" }.ToFrozenSet(StringComparer.Ordinal);
+
     private static Capability Tool(string id, string tool, string level, string target, CapabilityRisk risk, TimeSpan deadline) =>
         new(id, level, target, risk, tool, deadline);
 
@@ -75,6 +121,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("container.stop", "stop_container", W, "container", Dis, Normal);
         yield return Tool("container.restart", "restart_container", W, "container", Dis, Normal);
         yield return Tool("container.update", "update_container", W, "container", Dis, Long);
+        // Contract 0006: `docker update --restart=no` before a container whose exposure was not decided is stopped. Only
+        // composed (compose.deploy, gitdeploy.deploy, container.env_set), never decided on its own; not above them.
+        yield return Ui("container.disable_restart", W, "container", Dis, Short);
         // R1-05: writes the compose .env (any key: image, command, bind paths) and runs `docker compose up -d` — the
         // same as the container page's .env save, root-equivalent on the host.
         yield return Tool("container.env_set", "set_container_env", A, "container", Root, Normal);
@@ -130,7 +179,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("firewall.rule_add", "add_firewall_rule", A, "host", Dis, Short);
         yield return Tool("firewall.rule_remove", "remove_firewall_rule", A, "host", Dis, Short);
         yield return Ui("firewall.set_status", A, "host", Dis, Short);
-        yield return Tool("nginx.update", "update_nginx_config", A, "host", Dis, Short);
+        // INV-19: a site file with any content is loaded by the nginx master, which runs as root (a log or pid path
+        // writes any file on the host), so the write is root-equivalent; it was Admin already.
+        yield return Tool("nginx.update", "update_nginx_config", A, "host", Root, Short);
         yield return Ui("nginx.reload", A, "host", Dis, Short);
         yield return Ui("nginx.site_enable", A, "host", Dis, Short);
         yield return Ui("nginx.site_disable", A, "host", Dis, Short);
@@ -139,6 +190,12 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("ssl.renew", "renew_ssl_certificate", A, "host", Rev, Normal);
         yield return Tool("certificate.renew_mtls", "renew_mtls_certificate", A, "host", Root, Normal);
         yield return Ui("certificate.issue_mtls", A, "host", Root, Normal);
+        // R1-44 (contract 0007): per-host client credentials. Migration and renewal change which client a host's proxy
+        // admits (every command to that host passes through it); each guarded host step may wait for its 3-minute
+        // rollback, so the deadline is the long one. Retiring the shared key is UI-only and Admin.
+        yield return Tool("mtls.client_migrate", "migrate_mtls_client_credential", A, "host", Root, Long);
+        yield return Tool("mtls.client_renew", "renew_mtls_client_credential", A, "host", Root, Long);
+        yield return Ui("mtls.shared_client_retire", A, "whiskers", Des, Short);
 
         // Databases
         yield return Tool("db.query", "execute_query", A, "container", Root, Normal);
@@ -159,6 +216,11 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // Servers page: add / edit a server (host, credentials, SSH key, kubeconfig) or remove it.
         yield return Ui("server.save", A, "server", Root, Short);
         yield return Ui("server.remove", A, "server", Des, Short);
+        // R1-57 (contract 0004): endpoint checks run on the host they are bound to. A run executes fixed probe commands
+        // through the host executor as host.exec does, so it is RootEquivalent; the monitor runs it as the check's owner.
+        yield return Ui("endpointcheck.save", A, "server", Rev, Short);
+        yield return Ui("endpointcheck.delete", A, "server", Rev, Short);
+        yield return Ui("endpointcheck.run", A, "server", Root, Normal);
         // AI triggers page: which events start the agent and what it is told to do.
         yield return Ui("aitrigger.save", A, "whiskers", Root, Short);
         // Settings: restore Whiskers' own data from a self-backup (maintenance, staged swap, process restart).
@@ -188,6 +250,15 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("logalert.toggle", W, "log-alert", Rev, Short);
         yield return Tool("checks.pause", "pause_server_checks", W, "server", Rev, Short);
         yield return Tool("checks.resume", "resume_server_checks", W, "server", Rev, Short);
+        // INV-18 (user decision 2026-11-07): a manual CVE scan runs the scanners on every enabled host (apt index,
+        // Trivy image and cache), and the in-app notification log is shared by everyone — both Operator. The cycle
+        // scans one host after another, so it gets the fleet deadline. Risk: a scan changes caches only (package index,
+        // scanner image, findings that the next scan replaces) and stops no workload, so it is Reversible, not
+        // Disruptive; marking read loses no notification (the entries stay, only the unread badge goes), so it is
+        // Reversible too; clearing deletes the history, so it is Destructive.
+        yield return Ui("cve.scan", W, "fleet", Rev, TimeSpan.FromHours(4));
+        yield return Ui("notifications.mark_read", W, "whiskers", Rev, Short);
+        yield return Ui("notifications.clear", W, "whiskers", Des, Short);
         yield return Tool("autopatch.preview", "preview_auto_patch", W, "fleet", Rev, Long);
         // A cycle patches one container after another inside the nightly window; it must not be cut at 30 minutes.
         yield return Ui("autopatch.run", A, "fleet", Dis, TimeSpan.FromHours(4));
@@ -200,7 +271,9 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
 
         // Volume backups
         yield return Ui("volume.backup", W, "volume", Rev, Long);
-        yield return Ui("volume.restore", A, "volume", Des, Long);
+        // INV-19: restores any recorded archive into any named volume, also one a privileged container or Whiskers
+        // itself mounts, so it is root-equivalent (Admin already, no level changed).
+        yield return Ui("volume.restore", A, "volume", Root, Long);
         yield return Ui("volume.backup_delete", A, "volume", Des, Short);
 
         // Security configuration (R1-11): who may sign in, with which role, which keys and tools the MCP surface
@@ -229,5 +302,11 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Ui("account.create", A, "account", Root, Short);
         yield return Ui("account.password_reset", A, "account", Root, Short);
         yield return Ui("account.delete", A, "account", Des, Short);
+
+        // Google/OIDC identity bindings (R1-27, contract 0003); the target id is the binding or pending-request id.
+        // Confirming a request decides who signs in as a configured account: Admin and root-equivalent. Removing a
+        // binding or request only takes a way to sign in away (the last Admin's last way is refused by the store).
+        yield return Ui("identity.binding_confirm", A, "identity", Root, Short);
+        yield return Ui("identity.binding_remove", A, "identity", Dis, Short);
     }
 }

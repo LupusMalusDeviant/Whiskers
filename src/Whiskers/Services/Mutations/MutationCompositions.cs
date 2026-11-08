@@ -22,7 +22,12 @@ public static class MutationCompositions
     [
         // Deployments: a form deployment is pull + create; a compose file deploys each of its services as a form.
         ("app.deploy", ["image.pull", "container.create"]),
-        ("compose.deploy", ["app.deploy"]),
+        // Contract 0006: a compose run decided by the agent rule set stops a container it created whose exposure was not
+        // decided (no restart, then stop). The UI-only app.deploy and container.env_file_save are decided for persons
+        // only and never stop.
+        ("compose.deploy", ["app.deploy", "container.disable_restart", "container.stop"]),
+        ("gitdeploy.deploy", ["container.disable_restart", "container.stop"]),
+        ("container.env_set", ["container.disable_restart", "container.stop"]),
         // A volume restore takes a safety backup of the volume first.
         ("volume.restore", ["volume.backup"]),
         // A Git-deploy app's token and saved credentials live in the vault.
@@ -40,6 +45,10 @@ public static class MutationCompositions
         ("server.remove", ["vault.secret_delete"]),
         // Onboarding issues the server's mTLS client certificate and switches its record to the managed transport.
         ("server.onboard", ["certificate.issue_mtls", "server.save"]),
+        // R1-44: a client-credential migration issues the host's own credential and switches its record to it; a
+        // renewal or rotation issues the next certificate into a slot of its own and switches the record to it.
+        ("mtls.client_migrate", ["certificate.issue_mtls", "server.save"]),
+        ("mtls.client_renew", ["certificate.issue_mtls", "server.save"]),
         // On a Docker server a workload is a container.
         ("workload.start", ["container.start"]),
         ("workload.stop", ["container.stop"]),
@@ -73,6 +82,7 @@ public static class MutationCompositions
         "db.query",                  // container page: SQL file import through the container's client
         "compose.deploy",            // deploy_compose, UI compose deploys, webhook compose deploys
         "app.deploy",                // UI App Store deploys (a compose deployment planned per container)
+        "endpointcheck.run",         // R1-57: fixed probe commands of an endpoint check (resolve, curl, nc, openssl)
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>True when an execution decided as <paramref name="decided"/> may run a raw host command.</summary>

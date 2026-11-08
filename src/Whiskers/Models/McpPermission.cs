@@ -38,6 +38,25 @@ public static class McpPermissionLevels
     public const string Write = "write";
     public const string Admin = "admin";
 
+    /// <summary>No authority at all. Only <c>AutomationMutationRunner</c> produces it, for an automation whose owner
+    /// store failed. What enforces it:
+    /// <list type="bullet">
+    /// <item>The Mutation Gateway refuses a principal at this level, in any case, for every capability, before any
+    /// other check (<see cref="IsNone"/>); it is never normalised to read there.</item>
+    /// <item><c>McpPermissionService</c> never stores it: adding or saving a key or a tool at a level other than
+    /// read / write / admin is rejected; on load another spelling of one of them is rewritten to its exact form, and
+    /// a value still unknown — <c>none</c> included — is made fail-closed (the key switched off, the tool raised to
+    /// admin).</item>
+    /// </list>
+    /// Elsewhere — <see cref="Normalize"/>, <see cref="GetRank"/> — it reads as any unknown level.</summary>
+    public const string None = "none";
+
+    /// <summary>Whether <paramref name="level"/> is exactly one of read / write / admin.</summary>
+    public static bool IsKnown(string? level) => level is Read or Write or Admin;
+
+    /// <summary>Whether <paramref name="level"/> is <see cref="None"/>, ignoring case and surrounding spaces.</summary>
+    public static bool IsNone(string? level) => string.Equals(level?.Trim(), None, StringComparison.OrdinalIgnoreCase);
+
     public static int GetRank(string level) => level switch
     {
         Read => 1,
@@ -48,6 +67,12 @@ public static class McpPermissionLevels
 
     public static bool HasAccess(string keyLevel, string requiredLevel)
         => GetRank(keyLevel) >= GetRank(requiredLevel);
+
+    /// <summary>Whether a key at <paramref name="keyLevel"/> may use something that requires
+    /// <paramref name="requiredLevel"/> — fail-closed: a required level that is not read / write / admin grants
+    /// nothing to anyone (<see cref="HasAccess"/> ranks it 0, which every key would meet).</summary>
+    public static bool Grants(string keyLevel, string requiredLevel)
+        => IsKnown(requiredLevel) && HasAccess(keyLevel, requiredLevel);
 
     /// <summary>Coerces arbitrary (config-supplied) level text to a known level. Unknown/empty values
     /// fail safe to the least privilege (read), so a malformed ceiling can never widen access.</summary>
@@ -113,6 +138,9 @@ public static class McpPermissionLevels
         ["deploy_app"] = Admin,
         ["deploy_compose"] = Admin,
         ["renew_mtls_certificate"] = Admin,  // swaps the key of a proxy every command to that host passes through
+        // R1-44: change which client a host's proxy admits (per-host client credentials).
+        ["migrate_mtls_client_credential"] = Admin,
+        ["renew_mtls_client_credential"] = Admin,
         ["add_firewall_rule"] = Admin,
         ["remove_firewall_rule"] = Admin,
         ["update_nginx_config"] = Admin,
@@ -147,6 +175,7 @@ public static class McpPermissionLevels
         ["get_log_hygiene_report"] = Read,   // Plan-0007 WP-MCP — no write counterpart, by design
         ["get_action_outcomes"] = Read,       // Plan-0006 WP-MCP — no counterpart that clears the record
         ["get_host_load"] = Read,             // Plan-0004 WP-MCP — no threshold-setting counterpart, by design
+        ["endpoint_checks_list"] = Read,      // R1-57 — read only; checks are defined by an Admin in the UI
         ["get_whiskers_self_status"] = Read,   // Plan-0003 WP-MCP — no write counterpart: an agent that
         // could reset these counters could erase the evidence that something has been broken for a week
         ["list_paused_servers"] = Read,
@@ -243,6 +272,8 @@ public static class McpPermissionLevels
         ["deploy_app"] = "Deployment",
         ["deploy_compose"] = "Deployment",
         ["renew_mtls_certificate"] = "Server",
+        ["migrate_mtls_client_credential"] = "Server",
+        ["renew_mtls_client_credential"] = "Server",
         ["get_update_status"] = "Monitoring",
         ["get_auto_patch_status"] = "Monitoring",
         ["preview_auto_patch"] = "Container",
@@ -280,6 +311,7 @@ public static class McpPermissionLevels
         ["get_log_hygiene_report"] = "Logs",
         ["get_action_outcomes"] = "Überwachung",
         ["get_host_load"] = "Überwachung",
+        ["endpoint_checks_list"] = "Überwachung",
         ["get_whiskers_self_status"] = "Überwachung",
         ["list_paused_servers"] = "Überwachung",
         ["pause_server_checks"] = "Überwachung",

@@ -91,12 +91,13 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
 
         // Sign-in and session.
         ["GET /set-culture"] = new(Access.Public, Why: "language cookie, local redirect only"),
-        ["GET /login-google"] = new(Access.Public, Why: "starts the Google challenge",
-            KnownServerError: "R1-50: the challenge of a provider that is not configured throws (absent providers)"),
-        ["GET /login-oidc"] = new(Access.Public, Why: "starts the OIDC challenge",
-            KnownServerError: "R1-50: the challenge of a provider that is not configured throws (absent providers)"),
+        // R1-50: a provider that is not configured (as in this host) answers 404 from the handler, no longer a 500.
+        ["GET /login-google"] = new(Access.Public, Why: "starts the Google challenge; 404 when Google is not configured"),
+        ["GET /login-oidc"] = new(Access.Public, Why: "starts the OIDC challenge; 404 when OIDC is not configured"),
         ["POST /login-local"] = new(Access.PublicHandlerGated, Why: "antiforgery form + password check + rate limit"),
-        ["GET /logout"] = new(Access.Public, Why: "ends the caller's own cookie"),
+        // R1-50 (A-16): a GET only shows the sign-out form; the POST ends the caller's own cookie, with the antiforgery token.
+        ["GET /logout"] = new(Access.Public, Why: "sign-out form (ends nothing)"),
+        ["POST /logout"] = new(Access.PublicHandlerGated, Why: "ends the caller's own cookie; antiforgery token checked by the handler"),
 
         // Pages that must work before sign-in.
         ["GET,POST /login"] = new(Access.Public, Why: "sign-in page"),
@@ -111,11 +112,11 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
         // API clients.
         ["* /hubs/containers"] = new(Access.SignedIn, Challenge.Unauthorized, "container stats hub"),
         ["* /hubs/containers/negotiate"] = new(Access.SignedIn, Challenge.Unauthorized, "container stats hub negotiation"),
-        // MCP: an API key (Bearer) or a signed-in web user; per-tool levels inside (McpPermissionCheck). Without either the
-        // cookie scheme challenges with its sign-in redirect today; whether MCP clients get a bare 401 is R1-50's decision.
-        ["POST /mcp/"] = new(Access.SignedIn, Why: "MCP calls"),
-        ["GET /mcp/"] = new(Access.SignedIn, Why: "MCP stream"),
-        ["DELETE /mcp/"] = new(Access.SignedIn, Why: "MCP session end"),
+        // MCP: an API key (Bearer) or a signed-in web user; per-tool levels inside (McpPermissionCheck). Without either an
+        // MCP client gets 401 with a Bearer challenge, not a sign-in redirect (R1-50).
+        ["POST /mcp/"] = new(Access.SignedIn, Challenge.Unauthorized, "MCP calls"),
+        ["GET /mcp/"] = new(Access.SignedIn, Challenge.Unauthorized, "MCP stream"),
+        ["DELETE /mcp/"] = new(Access.SignedIn, Challenge.Unauthorized, "MCP session end"),
 
         // Admin-only downloads.
         ["GET /backups/self/{id}/download"] = new(Access.Admin, Why: "self-backup archive (secret-bearing)"),
@@ -151,6 +152,7 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
         ["GET,POST /nginx/{ServerId}"] = new(Access.SignedIn),
         ["GET,POST /notifications"] = new(Access.SignedIn),
         ["GET,POST /self-status"] = new(Access.SignedIn),
+        ["GET,POST /checks"] = new(Access.SignedIn),
         ["GET,POST /server-terminal/{ServerId}"] = new(Access.SignedIn),
         ["GET,POST /servers"] = new(Access.SignedIn),
         ["GET,POST /services/{ServerId}"] = new(Access.SignedIn),
@@ -161,8 +163,9 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
         ["GET,POST /webhooks"] = new(Access.SignedIn),
     };
 
-    /// <summary>Endpoints requested last for each caller: they end its session.</summary>
-    private static readonly HashSet<string> SessionEnding = new(StringComparer.Ordinal) { "GET /logout" };
+    /// <summary>Endpoints requested last for each caller: they could end its session. (The matrix posts no antiforgery
+    /// token, so <c>POST /logout</c> refuses and ends nothing; it stays last regardless.)</summary>
+    private static readonly HashSet<string> SessionEnding = new(StringComparer.Ordinal) { "POST /logout" };
 
     // ------------------------------------------------------------------------------------------------ the tests
 
@@ -431,11 +434,10 @@ public sealed class EndpointAuthMatrixTests(EndpointAuthMatrixTests.App app) : I
         }
         else
         {
-            // A signed-in caller without the role: refused (403, or the cookie handler's access-denied redirect) and
-            // never sent to sign in again.
-            var refused = result.Status == HttpStatusCode.Forbidden
-                || (result.Status == HttpStatusCode.Redirect && !result.Location.Contains("/login", StringComparison.Ordinal));
-            if (!refused) yield return $"{what}: expected a refusal, got HTTP {(int)result.Status} '{result.Location}'";
+            // A signed-in caller without the role: refused with 403 (R1-50: no redirect to an access-denied page that does
+            // not exist) and never sent to sign in again.
+            if (result.Status != HttpStatusCode.Forbidden)
+                yield return $"{what}: expected 403, got HTTP {(int)result.Status} '{result.Location}'";
         }
     }
 

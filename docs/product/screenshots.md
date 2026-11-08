@@ -2,7 +2,7 @@
 
 Canonical product screenshots, mapped to the three pillars of the positioning
 ([POSITIONING.md](POSITIONING.md)). All images live in [`screenshots/`](screenshots/) and are embedded
-in the top-level [README](../../README.md#screenshots) and on the project website.
+in [docs/screenshots.md](../screenshots.md) and on the project website.
 
 Capture conventions: **1440×900**, device-scale 1, **English UI** (the product default), dark theme,
 against the anonymized demo dataset from [demo-script.md](demo-script.md).

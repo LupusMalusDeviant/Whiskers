@@ -171,12 +171,18 @@ I read and checked: `Program.cs`, `Startup/WhiskersAuthenticationExtensions.cs`,
 - **Recommendation:** Fail closed whenever no admin exists: before setup, deny all federated logins except the wizard flow. Make the per-request re-check fail closed, or at least log the error.
 
 ### A-13 Missing security headers (frame-ancestors/X-Frame-Options, CSP, nosniff, Referrer-Policy) and no HSTS
+
+_R1-50: frame-ancestors, X-Frame-Options, nosniff and Referrer-Policy on every answer (`HttpSecurityTests`). A full CSP and HSTS are deliberately not set (see WORK_PACKAGES R1-50)._
+
 - **Severity:** Low · **Category:** Security · **v1-blocker:** no
 - **Evidence:** A grep for `X-Frame-Options`, `Content-Security-Policy`, `frame-ancestors` and `X-Content-Type-Options` finds nothing. Neither `UseHsts` nor `UseHttpsRedirection` is called.
 - **Impact:** The admin UI can be framed (clickjacking). The SameSite=Lax cookie blocks most cross-site framing in auth mode, but same-site sibling subdomains and AUTH_DISABLED deployments are fully exposed.
 - **Recommendation:** Add a header middleware (`frame-ancestors 'none'`, `nosniff`, `Referrer-Policy`, a baseline CSP compatible with Blazor), plus optional HSTS when `X-Forwarded-Proto=https`.
 
 ### A-14 Cookie hardening left at defaults
+
+_R1-50: flags stated (HttpOnly, Lax, Secure over HTTPS), `SaveTokens=false`, 403 instead of the missing access-denied page, readiness line for OIDC discovery over HTTP. `__Host-` and forced Secure stay out (plain-HTTP profile)._
+
 - **Severity:** Low · **Category:** Security · **v1-blocker:** no
 - **Evidence:** `Startup/WhiskersAuthenticationExtensions.cs:58-97`: no `Cookie.SecurePolicy`, `Cookie.Name`, `Cookie.SameSite`, `AccessDeniedPath` or `SlidingExpiration` setting. The defaults are HttpOnly=true, SameSite=Lax, Secure=SameAsRequest. The OIDC correlation and nonce cookies are explicitly made non-Secure when `RequireHttpsMetadata=false` (lines 132-139). `SaveTokens=true` (118) puts IdP tokens into the cookie.
 - **Impact:**
@@ -187,6 +193,9 @@ I read and checked: `Program.cs`, `Startup/WhiskersAuthenticationExtensions.cs`,
 - **Recommendation:** Set `SecurePolicy=Always` when served via HTTPS or a proxy (configurable), use the `__Host-` prefix, set `AccessDeniedPath`, set `SaveTokens=false` unless needed, and warn at startup when `RequireHttpsMetadata=false`.
 
 ### A-15 Forwarded headers trust all of RFC1918 by default
+
+_R1-50: fixed — loopback only by default, an unreadable entry stops the start, ignored forwarded headers are named in
+the readiness check (`ForwardedHeadersConfigTests`, `HttpSecurityTests`)._
 - **Severity:** Low · **Category:** Security · **v1-blocker:** no
 - **Evidence:** `Utils/ForwardedHeadersConfig` defaults include `10/8`, `172.16/12`, `192.168/16` and `100.64/10`, and `WhiskersPipelineExtensions.cs:40-47` applies them.
 - **Impact:** Any container on a Docker bridge network, and any LAN client NATed through docker-proxy (which appears as 172.x), can spoof `X-Forwarded-For`/`X-Forwarded-Proto`. Today that only corrupts the webhook `SourceIp` (the only IP consumer, line 298) and scheme detection. It will matter as soon as an IP-based rate limit or allowlist is added (see A-03).
@@ -195,6 +204,8 @@ I read and checked: `Program.cs`, `Startup/WhiskersAuthenticationExtensions.cs`,
 ### A-16 Minor HTTP-surface robustness issues
 
 _R1-41: the Prometheus part (label values interpolated unescaped in `/metrics`) is fixed — `PrometheusText.Label` escapes them, an error comment stays on one line. The other points below are tracked elsewhere (R1-50)._
+
+_R1-50: POST sign-out with antiforgery, 404 for unconfigured providers, local-only `/set-culture` redirect, 401 for `/mcp`. Still open: `ReturnUrl` after sign-in; the antiforgery/authentication order is kept (the sign-out validates after authentication in its handler)._
 - **Severity:** Low · **Category:** Reliability/UX · **v1-blocker:** no
 - **Evidence and impact:**
   - `GET /logout` is anonymous and uses GET (line 241), so a cross-site `<img>` can log the user out (CSRF logout).

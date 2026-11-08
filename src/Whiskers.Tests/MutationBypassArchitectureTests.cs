@@ -35,6 +35,88 @@ public class MutationBypassArchitectureTests
             "decided operation, list the pair in MutationCompositions:\n  " + string.Join("\n  ", bypasses));
     }
 
+    /// <summary>INV-45 review round 12 (MINOR-4): the scan above trusts every <see cref="MutationEntryPointAttribute"/>
+    /// method to run the lambda handed to it inside the gateway. Which methods carry it is pinned: the two runner
+    /// interfaces and the scheduler's forwarding wrapper. A new one is a deliberate change of this list.</summary>
+    [Fact]
+    public void The_mutation_entry_points_are_exactly_the_runners_and_the_schedulers_forwarding_wrapper()
+    {
+        const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static
+                                 | BindingFlags.DeclaredOnly;
+        Type[] types;
+        try { types = typeof(Program).Assembly.GetTypes(); }
+        catch (ReflectionTypeLoadException ex) { types = ex.Types.OfType<Type>().ToArray(); }
+        var entryPoints = types
+            .SelectMany(t => t.GetMethods(all))
+            .Where(m => m.IsDefined(typeof(MutationEntryPointAttribute), false))
+            .Select(m => $"{m.DeclaringType!.FullName}.{m.Name}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(
+        [
+            "Whiskers.Services.Mutations.IAutomationMutationRunner.RunAsync",
+            "Whiskers.Services.Mutations.IAutomationMutationRunner.RunAsync",
+            "Whiskers.Services.Mutations.IUiMutationRunner.RunAsync",
+            "Whiskers.Services.Mutations.IUiMutationRunner.RunAsync",
+            "Whiskers.Services.Scheduler.TaskExecutor.RunGatedAsync",
+            "Whiskers.Services.Scheduler.TaskExecutor.RunGatedAsync",
+        ], entryPoints);
+    }
+
+    /// <summary>INV-45 review round 12 (MINOR-4): the scheduler's wrapper is trusted only because it forwards — its body
+    /// is one call of <c>_automation.RunAsync</c> with its own <c>capabilityId</c>, <c>arguments</c> and
+    /// <c>action</c>, none of them reassigned; it calls nothing else (only <c>ActorOf(task)</c>), hands the action on
+    /// once and returns exactly the runner's task (rounds 12 and 13) — so a lambda handed to it is gated for the
+    /// capability written next to it.</summary>
+    [Fact]
+    public void The_schedulers_wrapper_forwards_its_own_capability_and_action_to_the_runner()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Whiskers.slnx"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+        var root = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(File.ReadAllText(
+            Path.Combine(dir.FullName, "src", "Whiskers", "Services", "Scheduler", "TaskExecutor.cs"))).GetRoot();
+        var wrappers = root.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>()
+            .Where(m => m.Identifier.Text == "RunGatedAsync").ToList();
+
+        Assert.Equal(2, wrappers.Count);
+        foreach (var wrapper in wrappers)
+        {
+            var calls = wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
+                .Where(i => i.Expression is Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax
+                {
+                    Name.Identifier.Text: "RunAsync",
+                } access && access.Expression.ToString() == "_automation")
+                .ToList();
+            var call = Assert.Single(calls);
+            Assert.Equal(["ActorOf(task)", "capabilityId", "arguments", "action"],
+                call.ArgumentList.Arguments.Select(a => a.ToString()));
+            Assert.Equal(["task", "capabilityId", "arguments", "action"],
+                wrapper.ParameterList.Parameters.Select(p => p.Identifier.Text));
+            // None of the forwarded parameters is written to in the body.
+            Assert.DoesNotContain(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.AssignmentExpressionSyntax>(),
+                a => a.Left.ToString() is "capabilityId" or "arguments" or "action" or "task");
+            // Nothing else is called — the wrapper never runs the action itself — and the action is handed on once.
+            Assert.Equal(["ActorOf(task)", call.ToString()],
+                wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
+                    .Select(i => i.ToString()).Order(StringComparer.Ordinal));
+            Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>(),
+                n => n.Identifier.Text == "action");
+            // What it returns is exactly the runner's task.
+            var returned = Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.ReturnStatementSyntax>());
+            var local = Assert.IsType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>(returned.Expression).Identifier.Text;
+            var declared = Assert.Single(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.VariableDeclaratorSyntax>(),
+                v => v.Identifier.Text == local);
+            Assert.Same(call, declared.Initializer?.Value);
+            // …and nothing replaces it before it is returned: no assignment, no ref/out use of the local (round 14).
+            Assert.DoesNotContain(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.AssignmentExpressionSyntax>(),
+                a => a.Left.ToString() == local);
+            Assert.DoesNotContain(wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.ArgumentSyntax>(),
+                a => a.RefKindKeyword.Text is "ref" or "out" && a.Expression.ToString() == local);
+        }
+    }
+
     [Fact]
     public void Every_capability_is_refused_at_run_time_outside_a_decision()
     {
@@ -495,6 +577,15 @@ internal static class MutationCallScanner
             .SelectMany(t => t.GetMethods(All).Cast<MethodBase>().Concat(t.GetConstructors(All)).Select(m => (Type: t, Method: m)))
             .Where(b => CalledMethods(b.Method).OfType<MethodInfo>().Any(match))
             .Select(b => (OwnerOf(b.Type), HandlerName(b.Type, b.Method)))
+            .Distinct()
+            .ToList();
+
+    /// <summary>The owners of every place in <paramref name="assembly"/> that constructs <paramref name="constructed"/>.</summary>
+    public static IReadOnlyList<Type> Constructors(Assembly assembly, Type constructed) =>
+        SafeTypes(assembly)
+            .SelectMany(t => t.GetMethods(All).Cast<MethodBase>().Concat(t.GetConstructors(All)).Select(m => (Type: t, Method: m)))
+            .Where(b => CalledMethods(b.Method).OfType<ConstructorInfo>().Any(c => c.DeclaringType == constructed))
+            .Select(b => OwnerOf(b.Type))
             .Distinct()
             .ToList();
 

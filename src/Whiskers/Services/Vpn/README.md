@@ -91,7 +91,7 @@ of a baked-in VPN daemon, which is a prerequisite for a future distroless/chisel
 - Gateway, owners and the automation runner: [`../Mutations/`](../Mutations/)
 - Mesh + mTLS onboarding: [`../Onboarding/`](../Onboarding/)
 - Host/Docker connectivity that rides the mesh: [`../Docker/`](../Docker/), [`../Server/`](../Server/)
-- Container VPN wiring: [`../../../docker-compose.yml`](../../../docker-compose.yml), [`../../../entrypoint.sh`](../../../entrypoint.sh)
+- Container VPN wiring: [`../../../../docker-compose.yml`](../../../../docker-compose.yml), [`../../../../entrypoint.sh`](../../../../entrypoint.sh)
 - Kubernetes: the Helm chart ([`../../../../deploy/helm/whiskers/`](../../../../deploy/helm/whiskers/)) sets
   `VPN_PROVIDER=none` and `Vpn__Provider=none` on every render (R1-46) — the "nobody" cell of the table above; the
   non-root, read-only pod cannot run the legacy bring-up, and the in-app providers are not offered there. Mesh access

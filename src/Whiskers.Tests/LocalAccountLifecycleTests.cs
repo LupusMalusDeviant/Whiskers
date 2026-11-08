@@ -223,7 +223,7 @@ public sealed class LocalAccountLifecycleTests
         // Admin still waiting for a recovery code.
         await world.Roles.SetRoleAsync("gone@local.test", AppRole.Admin);
         await world.AddUserAsync("pending@local.test", AppRole.Admin, password: null);
-        using var stranded = world.As(LocalAccountWorld.Federated("gone@local.test"));
+        using var stranded = world.As(await world.SessionOfAsync("pending@local.test"));
         Assert.Equal(AppRole.Admin, await stranded.User.GetRoleAsync());
 
         var refused = await stranded.Mutations.RunAsync("account.delete", new { account = LocalAccountWorld.Root },
@@ -238,12 +238,96 @@ public sealed class LocalAccountLifecycleTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => lone.Roles.SetRoleAsync(LocalAccountWorld.Root, AppRole.Operator));
         await Assert.ThrowsAsync<InvalidOperationException>(() => lone.Roles.RemoveRoleAsync(LocalAccountWorld.Root));
 
+        // R1-27 (contract 0003, rule 6): once the Google/OIDC Admin has an active identity binding there is another
+        // Admin who can sign in. A federated session alone (it always has a binding) is no longer "seen signing in".
+        await world.BoundFederatedAsync("gone@local.test");
+        Assert.True((await stranded.Accounts.DeleteAsync(LocalAccountWorld.Root)).Success);
+    }
+
+    [Fact]
+    public async Task A_binding_removal_and_a_local_deletion_at_the_same_moment_leave_an_admin_who_can_sign_in()
+    {
+        // R1-27 review: local Admin A (password) and federated-only Admin B (binding). A removes B's binding while B deletes
+        // A's account; each check alone sees the other's way in place. Forced interleaving: B's deletion runs while A's
+        // removal stands between its last-Admin check and its commit (given up to two seconds to finish there).
+        await using var world = await LocalAccountWorld.CreateAsync();
+        const string fed = "fed@local.test";
+        await world.Roles.SetRoleAsync(fed, AppRole.Admin);
+        var bSession = await world.BoundFederatedAsync(fed);
+        var bindingId = bSession.FindFirstValue(AuthConstants.BindingIdClaim)!;
+        using var b = world.As(bSession);
+        Task<LocalAccountResult>? deletion = null;
+        world.Bindings.BeforeRemoveCommitForTests = async () =>
+        {
+            using (ExecutionContext.SuppressFlow())
+                deletion = Task.Run(() => b.Accounts.DeleteAsync(LocalAccountWorld.Root));
+            await Task.WhenAny(deletion, Task.Delay(TimeSpan.FromSeconds(2)));
+        };
+
+        var principal = new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.User(LocalAccountWorld.Root),
+            LocalAccountWorld.Root, McpPermissionLevels.Admin);
+        IdentityBindingResult removed;
+        using (MutationScope.Begin("identity.binding_remove", "test-" + Guid.NewGuid().ToString("N"), principal))
+            removed = await world.Bindings.RemoveAsync(bindingId);
+        var deleted = await deletion!;
+
+        Assert.True(removed.Success, removed.ToString());
+        Assert.False(deleted.Success, deleted.ToString());
+        Assert.True(await world.PasswordWorksAsync(LocalAccountWorld.Root, LocalAccountWorld.Password));
+    }
+
+    [Fact]
+    public async Task Sign_in_identities_are_confirmed_and_removed_through_the_gateway_by_an_admin_only()
+    {
+        // R1-27: the panel's path end to end — the UI mutation runner, the gateway's decision, the store.
+        await using var world = await LocalAccountWorld.CreateAsync();
+        const string person = "person@local.test";
+        await world.Roles.SetRoleAsync(person, AppRole.Operator);
+        await world.AddUserAsync("op@local.test", AppRole.Operator);
+        var admission = new FederatedAdmission(world.Bindings, world.Roles, world.Whitelist, world.Configuration);
+        var pendingDecision = await admission.AdmitAsync(new FederatedSignInClaims("oidc", "https://idp.local.test/", "o-person",
+            person, "true", EmailIsStandardClaim: true));   // OIDC is not trusted by default: pending
+        Assert.Equal(AuthAuditReasons.PendingConfirmation, pendingDecision.Reason);
+        var request = Assert.Single(world.Bindings.Snapshot().Pending).Id;
+
+        using var operatorActing = world.As(await world.SessionOfAsync("op@local.test"));
+        await Assert.ThrowsAsync<MutationRefusedException>(() => operatorActing.Mutations.RunAsync("identity.binding_confirm",
+            new { binding = request }, ct => world.Bindings.ConfirmAsync(request, ct)));
+        Assert.Empty(world.Bindings.Snapshot().Bindings);
+
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+        var confirmed = await admin.Mutations.RunAsync("identity.binding_confirm", new { binding = request },
+            ct => world.Bindings.ConfirmAsync(request, ct));
+        Assert.True(confirmed.Success, confirmed.ToString());
+        var binding = Assert.Single(world.Bindings.Snapshot().Bindings);
+        Assert.Equal(PrincipalIds.User(LocalAccountWorld.Root), binding.BoundBy);
+        Assert.True((await admission.AdmitAsync(new FederatedSignInClaims("oidc", "https://idp.local.test/", "o-person",
+            person, null, EmailIsStandardClaim: true))).Admitted);
+
+        await Assert.ThrowsAsync<MutationRefusedException>(() => operatorActing.Mutations.RunAsync("identity.binding_remove",
+            new { binding = binding.Id }, ct => world.Bindings.RemoveAsync(binding.Id, ct)));
+        Assert.Single(world.Bindings.Snapshot().Bindings);
+        Assert.True((await admin.Mutations.RunAsync("identity.binding_remove", new { binding = binding.Id },
+            ct => world.Bindings.RemoveAsync(binding.Id, ct))).Success);
+        Assert.Empty(world.Bindings.Snapshot().Bindings);
+        Assert.Contains("complete:Executed", world.Sink.Events);
+    }
+
+    [Fact]
+    public async Task An_admin_with_a_password_but_no_binding_counts_too()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.AddUserAsync("pending@local.test", AppRole.Admin, password: null);
+        using var pending = world.As(await world.SessionOfAsync("pending@local.test"));
+        Assert.Equal(LocalAccountErrors.LastAdmin, (await pending.Accounts.DeleteAsync(LocalAccountWorld.Root)).Error);
+
         // Once the pending Admin has a password there is another Admin who can sign in.
         var code = (await world.As(await world.SessionOfAsync(LocalAccountWorld.Root)).Accounts
             .ResetPasswordAsync("pending@local.test")).RecoveryCode!;
         Assert.True((await world.As(LocalAccountWorld.Anonymous).Accounts
             .RedeemRecoveryCodeAsync("pending@local.test", code, LocalAccountWorld.NewPassword)).Success);
-        Assert.True((await stranded.Accounts.DeleteAsync(LocalAccountWorld.Root)).Success);
+        using var signedIn = world.As(await world.SessionOfAsync("pending@local.test"));   // the new stamp
+        Assert.True((await signedIn.Accounts.DeleteAsync(LocalAccountWorld.Root)).Success);
     }
 
     [Fact]
@@ -919,6 +1003,7 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     public RoleService Roles { get; }
     public WhitelistService Whitelist { get; }
     public SessionValidator Validator { get; }
+    public IdentityBindingStore Bindings { get; }
     public OwnerAccounts Owners { get; }
     public RecordingAuditLog Audit { get; }
     public RecordingSink Sink { get; } = new();
@@ -927,10 +1012,13 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     public IConfiguration Configuration { get; }
     public RecoveryAttemptLimiter Limiter { get; }
     public CountingHasher Hasher { get; }
+    /// <summary>The guardrail policy the gateway, the account service and the binding store read (contract 0009).</summary>
+    public IGuardrailStore Guardrails { get; }
 
     private LocalAccountWorld(string dir, ServiceProvider sp, RoleService roles, WhitelistService whitelist,
         IConfiguration configuration, DataPathOptions paths, RecordingAuditLog audit,
-        NotificationDeliveryTests.ListLoggerProvider logs, GuardrailPolicy policy, TimeProvider time, CountingHasher hasher)
+        NotificationDeliveryTests.ListLoggerProvider logs, GuardrailPolicy policy, TimeProvider time, CountingHasher hasher,
+        IGuardrailStore? guardrails = null)
     {
         Configuration = configuration;
         Hasher = hasher;
@@ -943,15 +1031,19 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         Audit = audit;
         Logs = logs;
         var scopes = sp.GetRequiredService<IServiceScopeFactory>();
-        Validator = new SessionValidator(scopes, whitelist, roles, configuration);
+        // R1-27: the identity bindings a federated session is checked against (roles and whitelist read lazily).
+        var store = guardrails ?? new AgentToolTestHelpers.FixedGuardrailStore(policy);
+        Guardrails = store;
+        Bindings = new IdentityBindingStore(new BindingServices(roles, whitelist, sp, store), audit, configuration,
+            dataPaths: paths);
+        Validator = new SessionValidator(scopes, whitelist, roles, configuration, bindings: Bindings);
         Owners = new OwnerAccounts(scopes, configuration, paths);
-        var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         Gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), Sink, [],
             NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
     }
 
     public static async Task<LocalAccountWorld> CreateAsync(bool seedRoot = true, GuardrailPolicy? policy = null,
-        TimeProvider? time = null, bool authDisabled = false)
+        TimeProvider? time = null, bool authDisabled = false, IGuardrailStore? guardrails = null)
     {
         var dir = Path.Combine(Path.GetTempPath(), $"sw-r149-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
@@ -981,6 +1073,15 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
             .AddEntityFrameworkStores<WhiskersIdentityDbContext>();
         services.AddSingleton<IAuditLogService>(audit);
         if (time is not null) services.AddSingleton(time);
+        // Contract 0009: the guardrail policy the account service, the binding store and the gateway read (the live
+        // instance's). The recovery CLI resolves IGuardrailStore from Services and, as in production, needs the real
+        // store and reads guardrails.json itself (A1.2): a real store the test hands in, or one over a file holding
+        // the policy, not yet loaded.
+        // Not for a fail-closed case: a FixedGuardrailStore holding GuardrailPolicy.FailClosed() would be written as a valid
+        // kill-switch policy (LoadError null). Hand in a real store over an unreadable file instead.
+        guardrails ??= new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
+        services.AddSingleton<IGuardrailStore>(guardrails as GuardrailStore
+                                               ?? await PolicyFileAsync(paths.GuardrailsJson, guardrails.Current));
         var sp = services.BuildServiceProvider();
         using (var scope = sp.CreateScope())
             await scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.EnsureCreatedAsync();
@@ -990,9 +1091,23 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         var whitelist = new WhitelistService(configuration, roles, NullLogger<WhitelistService>.Instance, paths);
         await whitelist.InitializeAsync();
         var world = new LocalAccountWorld(dir, sp, roles, whitelist, configuration, paths, audit, logs,
-            policy ?? GuardrailPolicy.SafeDefault(), time ?? TimeProvider.System, hasher);
+            policy ?? GuardrailPolicy.SafeDefault(), time ?? TimeProvider.System, hasher, guardrails);
         if (seedRoot) await world.AddUserAsync(Root, role: null);   // the seeded Admin (role from WHISKERS_ADMIN_EMAIL)
         return world;
+    }
+
+    /// <summary>A <c>guardrails.json</c> at <paramref name="path"/> holding <paramref name="policy"/>, and a store over it
+    /// that has not loaded it yet (what the recovery CLI's process holds).</summary>
+    private static async Task<GuardrailStore> PolicyFileAsync(string path, GuardrailPolicy policy)
+    {
+        var seed = new GuardrailStore(filePath: path);
+        await seed.InitializeAsync();
+        var config = seed.Config;
+        config.Presets.Single(p => p.Name == config.ActivePreset).Policy = policy.Clone();
+        var admin = new Whiskers.Models.Agent.AgentPrincipal(Whiskers.Models.Agent.AgentPrincipalKind.WebUser, Root,
+            McpPermissionLevels.Admin, null, UserEmail: Root);
+        await GatewayArrange.RunAsync("guardrails.save", () => seed.SaveConfigAsync(config, admin));
+        return new GuardrailStore(filePath: path);
     }
 
     /// <summary>A local account; <paramref name="password"/> <c>null</c> = none yet (waiting for a recovery code).</summary>
@@ -1024,9 +1139,32 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         ], AuthConstants.LocalPasswordScheme));
     }
 
-    /// <summary>A Google/OIDC cookie for <paramref name="email"/> (no local account behind it).</summary>
-    public static ClaimsPrincipal Federated(string email) => new(new ClaimsIdentity(
-        [new Claim(ClaimTypes.Email, email), new Claim(ClaimTypes.Name, email)], "Google"));
+    /// <summary>R1-27: a Google sign-in of <paramref name="email"/> (a configured entry) bound by the admission, and the
+    /// cookie principal the gate issues for it.</summary>
+    public async Task<ClaimsPrincipal> BoundFederatedAsync(string email)
+    {
+        var admission = new FederatedAdmission(Bindings, Roles, Whitelist, Configuration);
+        var decision = await admission.AdmitAsync(new FederatedSignInClaims("google", AuthConstants.GoogleIssuer,
+            "g-" + email, email, "true", EmailIsStandardClaim: true));
+        Assert.True(decision.Admitted, decision.Reason);
+        return new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.Email, decision.Account!), new Claim(ClaimTypes.Name, decision.Account!),
+            new Claim(AuthConstants.BindingIdClaim, decision.BindingId!),
+        ], AuthConstants.FederatedScheme));
+    }
+
+    /// <summary>The binding store sees the world's roles and whitelist; everything else (the account database's scopes)
+    /// comes from the world's provider.</summary>
+    private sealed class BindingServices(IRoleService roles, IWhitelistService whitelist, IServiceProvider app,
+        IGuardrailStore guardrails) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IGuardrailStore) ? guardrails
+            : serviceType == typeof(IRoleService) ? roles
+            : serviceType == typeof(IWhitelistService) ? whitelist
+            : app.GetService(serviceType);
+    }
 
     public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7",
         Func<IServiceProvider, UserManager<AppUser>>? users = null)
@@ -1035,8 +1173,8 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         var user = new SessionUser(Validator, principal);
         var accounts = new LocalAccountService(
             users?.Invoke(scope.ServiceProvider) ?? scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
-            scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, _time,
-            scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>());
+            scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, Guardrails,
+            _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings);
         return new Acting(scope, accounts, new UiMutationRunner(Gateway, new CapabilityCatalog(), user), user);
     }
 

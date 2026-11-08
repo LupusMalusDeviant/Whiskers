@@ -1,0 +1,391 @@
+@page "/checks"
+@attribute [Authorize]
+@using Whiskers.Services.EndpointChecks
+@using Whiskers.Configuration
+@inject IEndpointCheckStore Store
+@inject IEndpointCheckRunner Runner
+@inject IEndpointCheckSlots Slots
+@inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject IUiMutationRunner Mutations
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
+
+<PageTitle>@L["Checks_Title"] - Whiskers</PageTitle>
+
+@* R1-57 (contract 0004): endpoint checks run on the managed host they are bound to. Everyone signed in reads them;
+   only an Admin creates, edits, deletes or runs one (each a gateway decision), because a run is a command on the host. *@
+
+<div class="sw-page-header">
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <div class="sw-page-icon">
+            <MudIcon Icon="@Icons.Material.Filled.NetworkCheck" Size="Size.Large" />
+        </div>
+        <div>
+            <MudText Typo="Typo.h5">@L["Checks_Title"]</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Checks_Subtitle"]</MudText>
+        </div>
+        <MudSpacer />
+        @if (_role >= AppRole.Admin)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="NewCheck">@L["Checks_Button_New"]</MudButton>
+        }
+    </MudStack>
+</div>
+
+<MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">@L["Checks_Intro"]</MudAlert>
+
+@if (_editing is not null)
+{
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <MudText Typo="Typo.h6" Class="mb-2">@(_editing.Id is null ? L["Checks_Form_New"] : L["Checks_Form_Edit"])</MudText>
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_editing.Name" Label="@L["Checks_Field_Name"]" MaxLength="80" />
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudSelect T="string" @bind-Value="_editing.ServerId" Label="@L["Checks_Field_Server"]" Disabled="@(_editing.Id is not null)">
+                    @foreach (var s in _servers)
+                    {
+                        <MudSelectItem Value="@s.Id">@s.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudSelect T="EndpointCheckKind" @bind-Value="_editing.Kind" Label="@L["Checks_Field_Kind"]">
+                    <MudSelectItem Value="EndpointCheckKind.Http">HTTP</MudSelectItem>
+                    <MudSelectItem Value="EndpointCheckKind.Tcp">TCP</MudSelectItem>
+                    <MudSelectItem Value="EndpointCheckKind.TlsExpiry">@L["Checks_Kind_Tls"]</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_editing.Target" Label="@(_editing.Kind == EndpointCheckKind.Http ? L["Checks_Field_Url"] : L["Checks_Field_Host"])" />
+            </MudItem>
+            <MudItem xs="6" md="2">
+                <MudNumericField T="int?" @bind-Value="_editing.Port" Label="@L["Checks_Field_Port"]" Min="1" Max="65535" />
+            </MudItem>
+            @if (_editing.Kind == EndpointCheckKind.Http)
+            {
+                <MudItem xs="6" md="2">
+                    <MudNumericField T="int?" @bind-Value="_editing.ExpectedStatus" Label="@L["Checks_Field_Status"]" Min="100" Max="599" />
+                </MudItem>
+            }
+            @if (_editing.Kind == EndpointCheckKind.TlsExpiry)
+            {
+                <MudItem xs="6" md="2">
+                    <MudNumericField T="int?" @bind-Value="_editing.TlsWarnDays" Label="@L["Checks_Field_WarnDays"]" Min="1" Max="365" />
+                </MudItem>
+            }
+            <MudItem xs="6" md="2">
+                <MudNumericField T="int" @bind-Value="_editing.IntervalSeconds" Label="@L["Checks_Field_Interval"]" Min="60" Max="86400" />
+            </MudItem>
+            <MudItem xs="6" md="2">
+                <MudNumericField T="int" @bind-Value="_editing.TimeoutSeconds" Label="@L["Checks_Field_Timeout"]" Min="1" Max="30" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_editing.Exceptions" Label="@L["Checks_Field_Exceptions"]" Lines="3"
+                              HelperText="@L["Checks_Field_ExceptionsHelp"]" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudSwitch T="bool" @bind-Value="_editing.Enabled" Label="@L["Checks_Field_Enabled"]" Color="Color.Primary" />
+            </MudItem>
+        </MudGrid>
+        <MudStack Row="true" Class="mt-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_busy">@L["Checks_Button_Save"]</MudButton>
+            <MudButton Variant="Variant.Text" OnClick="() => _editing = null">@L["Checks_Button_Cancel"]</MudButton>
+        </MudStack>
+    </MudPaper>
+}
+
+<MudStack Row="true" Class="mb-2" AlignItems="AlignItems.Center">
+    <MudSelect T="string" @bind-Value="_filterServer" Label="@L["Checks_Filter_Server"]" Clearable="true" Style="max-width:240px">
+        @foreach (var s in _servers)
+        {
+            <MudSelectItem Value="@s.Id">@s.Name</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSwitch T="bool" @bind-Value="_failingOnly" Label="@L["Checks_Filter_Failing"]" Color="Color.Error" />
+    <MudSelect T="EndpointCheckOutcome?" @bind-Value="_filterOutcome" Label="@L["Checks_Filter_Outcome"]" Clearable="true" Style="max-width:180px">
+        <MudSelectItem T="EndpointCheckOutcome?" Value="@((EndpointCheckOutcome?)EndpointCheckOutcome.Passed)">@L["Checks_Outcome_Passed"]</MudSelectItem>
+        <MudSelectItem T="EndpointCheckOutcome?" Value="@((EndpointCheckOutcome?)EndpointCheckOutcome.Failed)">@L["Checks_Outcome_Failed"]</MudSelectItem>
+        <MudSelectItem T="EndpointCheckOutcome?" Value="@((EndpointCheckOutcome?)EndpointCheckOutcome.Refused)">@L["Checks_Outcome_Refused"]</MudSelectItem>
+    </MudSelect>
+    <MudNumericField T="int?" @bind-Value="_minLatencyMs" Label="@L["Checks_Filter_Latency"]" Min="0" Clearable="true" Style="max-width:180px" />
+    <MudNumericField T="int?" @bind-Value="_expiresWithinDays" Label="@L["Checks_Filter_Expiry"]" Min="0" Clearable="true" Style="max-width:200px" />
+</MudStack>
+
+@if (!Visible.Any())
+{
+    <MudAlert Severity="Severity.Info">@L["Checks_Empty"]</MudAlert>
+}
+else
+{
+    <MudTable Items="@Visible" Dense="true" Hover="true" Striped="true" Elevation="0">
+        <HeaderContent>
+            <MudTh>@L["Checks_Table_Name"]</MudTh>
+            <MudTh>@L["Checks_Table_Server"]</MudTh>
+            <MudTh>@L["Checks_Table_Target"]</MudTh>
+            <MudTh>@L["Checks_Table_Last"]</MudTh>
+            <MudTh>@L["Checks_Table_Latency"]</MudTh>
+            <MudTh>@L["Checks_Table_Expiry"]</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            @{ _last.TryGetValue(context.Id, out var result); }
+            <MudTd><strong>@context.Name</strong> <MudChip T="string" Size="Size.Small">@KindLabel(context.Kind)</MudChip></MudTd>
+            <MudTd>@ServerName(context.ServerId)</MudTd>
+            <MudTd><code>@DisplayTarget(context)</code></MudTd>
+            <MudTd>
+                @if (!context.Enabled)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@(context.SuspendedReason is null ? L["Checks_State_Off"] : L["Checks_State_Suspended"])</MudChip>
+                    @if (context.SuspendedReason is { } why && _role >= AppRole.Admin) { <MudText Typo="Typo.caption">@why</MudText> }
+                }
+                else if (result is null)
+                {
+                    <MudText Typo="Typo.caption">@L["Checks_State_NotRun"]</MudText>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Color="@OutcomeColor(result.Outcome)">@OutcomeLabel(result.Outcome)</MudChip>
+                    <MudText Typo="Typo.caption">@result.AtUtc.ToLocalTime().ToString("g") — @DisplayDetail(result.Detail, _role)</MudText>
+                }
+            </MudTd>
+            <MudTd>@(result?.LatencyMs is { } ms ? $"{ms} ms" : "—")</MudTd>
+            <MudTd>@(result?.TlsNotAfterUtc is { } exp ? exp.ToLocalTime().ToString("d") : "—")</MudTd>
+            <MudTd>
+                @if (_role >= AppRole.Admin)
+                {
+                    @* Review n1: a switched-off or suspended check has nothing to run. *@
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" title="@L["Checks_Button_RunNow"]"
+                                   Class="sw-check-run-now" Disabled="@(_busy || !context.Enabled)" OnClick="() => RunNowAsync(context)" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="@L["Checks_Button_Edit"]"
+                                   OnClick="() => Edit(context)" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" title="@L["Checks_Button_Delete"]"
+                                   Disabled="_busy" OnClick="() => DeleteAsync(context)" />
+                }
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    /// <summary>The form's state; turned into an <see cref="EndpointCheckDraft"/> on save.</summary>
+    private sealed class Form
+    {
+        public string? Id { get; set; }
+        public string Name { get; set; } = "";
+        public string ServerId { get; set; } = "";
+        public EndpointCheckKind Kind { get; set; } = EndpointCheckKind.Http;
+        public string Target { get; set; } = "";
+        public int? Port { get; set; }
+        public int? ExpectedStatus { get; set; }
+        public int? TlsWarnDays { get; set; }
+        public int IntervalSeconds { get; set; } = 300;
+        public int TimeoutSeconds { get; set; } = 10;
+        public string Exceptions { get; set; } = "";
+        public bool Enabled { get; set; } = true;
+    }
+
+    private AppRole _role = AppRole.Viewer;
+    private string? _me;
+    private bool _busy;
+    private Form? _editing;
+    private string? _filterServer;
+    private bool _failingOnly;
+    private EndpointCheckOutcome? _filterOutcome;
+    private int? _minLatencyMs;
+    private int? _expiresWithinDays;
+
+    // The dashboard links here with ?server=…&failing=true.
+    [SupplyParameterFromQuery(Name = "server")] public string? ServerQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "failing")] public bool? FailingQuery { get; set; }
+    private List<Whiskers.Models.ServerConfig> _servers = [];
+    private IReadOnlyList<EndpointCheckDefinition> _checks = [];
+    private IReadOnlyDictionary<string, EndpointCheckResultEntity> _last = new Dictionary<string, EndpointCheckResultEntity>();
+
+    private IEnumerable<EndpointCheckDefinition> Visible => _checks
+        .Where(c => string.IsNullOrEmpty(_filterServer) || c.ServerId == _filterServer)
+        .Where(c => !_failingOnly || (_last.TryGetValue(c.Id, out var r) && r.Outcome != EndpointCheckOutcome.Passed))
+        .Where(c => _filterOutcome is not { } o || (_last.TryGetValue(c.Id, out var r) && r.Outcome == o))
+        .Where(c => _minLatencyMs is not { } ms || (_last.TryGetValue(c.Id, out var r) && r.LatencyMs >= ms))
+        .Where(c => _expiresWithinDays is not { } days
+                    || (_last.TryGetValue(c.Id, out var r) && r.TlsNotAfterUtc is { } exp && exp <= DateTime.UtcNow.AddDays(days)));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _role = await CurrentUser.GetRoleAsync();
+        _me = await CurrentUser.GetEmailAsync() is { Length: > 0 } email ? PrincipalIds.User(email) : null;
+        _servers = ServerConfigService.GetEnabledServers().Where(EndpointCheckValidator.HasShellTransport).ToList();
+        _filterServer = string.IsNullOrWhiteSpace(ServerQuery) ? null : ServerQuery;
+        _failingOnly = FailingQuery == true;
+        Reload();
+    }
+
+    private void Reload()
+    {
+        _checks = Store.List();
+        _last = Store.LastResults();
+    }
+
+    private string ServerName(string id) => ServerConfigService.GetServer(id)?.Name ?? id;
+
+    /// <summary>Review m7: the target as the table shows it — secrets redacted, and for a non-Admin an http(s) URL's
+    /// query string replaced by "?…" (health URLs often carry a token there).</summary>
+    private string DisplayTarget(EndpointCheckDefinition c) => DisplayTarget(c, _role);
+
+    internal static string DisplayTarget(EndpointCheckDefinition c, AppRole role)
+    {
+        var target = c.Target;
+        if (c.Kind == EndpointCheckKind.Http)
+        {
+            if (role < AppRole.Admin && target.IndexOf('?') is >= 0 and var query)
+            {
+                var fragment = target.IndexOf('#', query);
+                target = target[..query] + "?…" + (fragment >= 0 ? target[fragment..] : "");
+            }
+            return Whiskers.Utils.SecretRedactor.Redact(target);
+        }
+        return Whiskers.Utils.SecretRedactor.Redact($"{target}:{c.Port}");
+    }
+
+    /// <summary>Review n4: a run's detail as the table shows it. It names the addresses the host resolved — for an
+    /// excepted target internal ones — so below Admin every address in a denied range (R1-54) is masked.</summary>
+    internal static string DisplayDetail(string? detail, AppRole role) =>
+        role >= AppRole.Admin ? detail ?? "" : EndpointCheckRunner.MaskInternalAddresses(detail);
+
+    private string KindLabel(EndpointCheckKind kind) => kind switch
+    {
+        EndpointCheckKind.Http => "HTTP",
+        EndpointCheckKind.Tcp => "TCP",
+        _ => L["Checks_Kind_Tls"],
+    };
+
+    private string OutcomeLabel(EndpointCheckOutcome outcome) => outcome switch
+    {
+        EndpointCheckOutcome.Passed => L["Checks_Outcome_Passed"],
+        EndpointCheckOutcome.Failed => L["Checks_Outcome_Failed"],
+        _ => L["Checks_Outcome_Refused"],
+    };
+
+    private static Color OutcomeColor(EndpointCheckOutcome outcome) => outcome switch
+    {
+        EndpointCheckOutcome.Passed => Color.Success,
+        EndpointCheckOutcome.Failed => Color.Error,
+        _ => Color.Warning,
+    };
+
+    /// <summary>The role check in front of a mutation; a refusal is also the gateway's Denied event (R1-22).</summary>
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
+    {
+        _role = (await CurrentUser.CheckSessionAsync()).Role;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required && _me is not null) return true;
+        Snackbar.Add(L["Checks_Snackbar_AdminOnly"].Value, Severity.Warning);
+        await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
+        return false;
+    }
+
+    private void NewCheck() => _editing = new Form { ServerId = _servers.FirstOrDefault()?.Id ?? "" };
+
+    private void Edit(EndpointCheckDefinition c) => _editing = new Form
+    {
+        Id = c.Id, Name = c.Name, ServerId = c.ServerId, Kind = c.Kind, Target = c.Target, Port = c.Port,
+        ExpectedStatus = c.ExpectedStatus, TlsWarnDays = c.TlsWarnDays, IntervalSeconds = c.IntervalSeconds,
+        TimeoutSeconds = c.TimeoutSeconds, Enabled = c.Enabled || c.SuspendedReason is not null,
+        Exceptions = string.Join('\n', c.Exceptions.Select(e => string.Join(' ', new[] { e.Host, e.Port.ToString() }.Concat(e.Addresses)))),
+    };
+
+    /// <summary>One exception per line: <c>host port [address …]</c> (a host name needs its exact addresses).</summary>
+    private static List<OutboundExceptionEntry> ParseExceptions(string text) =>
+        text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(line => line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            .Select(parts => new OutboundExceptionEntry
+            {
+                Host = parts[0],
+                Port = parts.Length > 1 && int.TryParse(parts[1], out var p) ? p : 0,
+                Addresses = parts.Skip(2).ToList(),
+            }).ToList();
+
+    private async Task SaveAsync()
+    {
+        if (_editing is not { } f) return;
+        var draft = new EndpointCheckDraft(f.Id, f.ServerId, f.Name, f.Kind, f.Target, f.Port,
+            f.Kind == EndpointCheckKind.Http ? f.ExpectedStatus : null,
+            f.Kind == EndpointCheckKind.TlsExpiry ? f.TlsWarnDays : null,
+            f.IntervalSeconds, f.TimeoutSeconds, ParseExceptions(f.Exceptions), f.Enabled);
+        var arguments = new { serverId = draft.ServerId, checkId = draft.Id };
+        if (!await RequireAsync("endpointcheck.save", arguments)) return;
+        _busy = true;
+        try
+        {
+            var editor = _me!;
+            await Mutations.RunAsync("endpointcheck.save", arguments, ct => Store.SaveAsync(draft, editor, ct));
+            Snackbar.Add(L["Checks_Snackbar_Saved"].Value, Severity.Success);
+            _editing = null;
+            Reload();
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (ArgumentException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        catch (KeyNotFoundException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync(EndpointCheckDefinition c)
+    {
+        var arguments = new { serverId = c.ServerId, checkId = c.Id };
+        if (!await RequireAsync("endpointcheck.delete", arguments)) return;
+        _busy = true;
+        try
+        {
+            await Mutations.RunAsync("endpointcheck.delete", arguments, ct => Store.DeleteAsync(c.Id, ct));
+            Snackbar.Add(L["Checks_Snackbar_Deleted"].Value, Severity.Success);
+            Reload();
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        finally { _busy = false; }
+    }
+
+    private async Task RunNowAsync(EndpointCheckDefinition c)
+    {
+        var arguments = new { serverId = c.ServerId, checkId = c.Id };
+        if (!await RequireAsync("endpointcheck.run", arguments)) return;
+        // Review m1: the same slots as the monitor — one run per check and per server, four across the fleet.
+        if (!Slots.TryAcquire(c.Id, c.ServerId))
+        {
+            Snackbar.Add(L["Checks_Snackbar_Busy"].Value, Severity.Warning);
+            return;
+        }
+        _busy = true;
+        try
+        {
+            // Review M1: only the id; the runner reads the check as it is stored now, inside the decision.
+            var checkId = c.Id;
+            // Review round 3 N2: a check switched off since the page loaded opens no decision (no "Executed" audit
+            // event for a run that would do nothing). The runner checks again inside the decision.
+            var now = Store.Get(checkId);
+            if (now is not { Enabled: true })
+            {
+                Snackbar.Add(L[now?.SuspendedReason is null ? "Checks_State_Off" : "Checks_State_Suspended"].Value, Severity.Info);
+                Reload();
+                return;
+            }
+            var run = await Mutations.RunAsync("endpointcheck.run", arguments, ct => Runner.RunInDecisionAsync(checkId, ct));
+            // Review n1: a check that is gone or off ran nothing and leaves no result. Review n2: a recorded "Run now"
+            // result does not move the monitor's schedule (the run is marked OnDemand).
+            if (!run.NothingRan) await Store.RecordAsync(run);
+            Snackbar.Add($"{OutcomeLabel(run.Outcome)}: {run.Detail}",
+                run.Outcome == EndpointCheckOutcome.Passed ? Severity.Success : Severity.Warning);
+            Reload();
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (MutationFailedException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally
+        {
+            Slots.Release(c.Id);
+            _busy = false;
+        }
+    }
+}

@@ -12,6 +12,11 @@ namespace Whiskers.Services.Mutations;
 /// </summary>
 public interface IMutationGateway
 {
+    /// <summary>
+    /// Runs the whole pipeline for one attempt. A request carrying an <see cref="MutationRequest.EventKey"/> is
+    /// rejected with <see cref="ArgumentException"/> before anything is decided or run: a key is honoured only for a
+    /// refusal (<see cref="RefuseAsync"/>, INV-45).
+    /// </summary>
     Task<MutationOutcome<T>> ExecuteAsync<T>(
         MutationRequest request,
         Func<MutationContext, CancellationToken, Task<T>> execute,
@@ -21,7 +26,8 @@ public interface IMutationGateway
     /// Steps 1–5 without executing (R1-12): authorizes, resolves the target, asks the policy and records the decision
     /// (INV-22); a refusal is audited as in <see cref="ExecuteAsync{T}"/>. An agent session uses it before it pauses
     /// for an approval or reports a block, so the approval names a recorded decision and a block is on record. Null
-    /// from a gateway that cannot decide on its own (test doubles).
+    /// from a gateway that cannot decide on its own (test doubles). A request carrying an
+    /// <see cref="MutationRequest.EventKey"/> is rejected with <see cref="ArgumentException"/> (INV-45).
     /// </summary>
     Task<MutationDecisionResult?> DecideAsync(MutationRequest request, CancellationToken ct = default) =>
         Task.FromResult<MutationDecisionResult?>(null);
@@ -175,8 +181,9 @@ public sealed class MutationGateway : IMutationGateway
                 if ((await _targets.ResolveAsync(request, capability, ct)).Target is { } resolved)
                     request = request with { Target = resolved };
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            catch (Exception ex)
             {
+                // A cancellation too (INV-45): the refusal is recorded with the target as named, never dropped.
                 // The type only: a resolver's message echoes the raw target from the arguments.
                 _logger.LogWarning("Target of refused {Capability} could not be resolved ({Error}, operation {OperationId})",
                     capability.Id, ex.GetType().Name, operationId);
@@ -192,6 +199,7 @@ public sealed class MutationGateway : IMutationGateway
         ArgumentNullException.ThrowIfNull(request.Principal);
         ArgumentNullException.ThrowIfNull(request.Target);
         ArgumentNullException.ThrowIfNull(request.Arguments);
+        RejectEventKey(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CapabilityId);
 
         var prepared = await PrepareAsync(request, ct);
@@ -215,11 +223,28 @@ public sealed class MutationGateway : IMutationGateway
         // Held from choosing the operation id until the approval gate has answered (released by the caller): two
         // identical calls without an id of their own then never pick different ids for one approval (R1-18).
         var admission = new AdmissionLease();
+        var progress = new PrepareProgress();
         try
         {
-            var prepared = await PrepareCoreAsync(request, admission, ct);
+            var prepared = await PrepareCoreAsync(request, admission, progress, ct);
             if (prepared.Refusal is not null) admission.Dispose();
             return prepared with { Admission = admission };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            admission.Dispose();
+            // INV-45: the attempt began when the caller asked for the capability, so a cancellation before the decision
+            // (the caller went away, a run's deadline passed during target resolution) is still one event: a refusal,
+            // recorded regardless of the cancelled token. Every refusal on the way returned instead of throwing, so this
+            // is the only event. The caller still sees the cancellation.
+            var seen = progress.Request ?? request with
+            {
+                OperationId = string.IsNullOrWhiteSpace(request.OperationId) ? Guid.NewGuid().ToString("N") : request.OperationId,
+            };
+            await RefuseAsync<object?>(seen.OperationId!, seen, progress.Capability ?? _catalog.Find(request.CapabilityId),
+                MutationStatus.Denied, seen.DecisionId is null ? CancelledBeforeDecision : CancelledBeforeRun,
+                CancellationToken.None);
+            throw;
         }
         catch
         {
@@ -228,7 +253,14 @@ public sealed class MutationGateway : IMutationGateway
         }
     }
 
-    private async Task<Prepared> PrepareCoreAsync(MutationRequest request, AdmissionLease admission, CancellationToken ct)
+    /// <summary>The reason of an attempt cancelled before it was decided (INV-45).</summary>
+    internal const string CancelledBeforeDecision = "The call was cancelled before its decision; nothing ran.";
+
+    /// <summary>The reason of an attempt cancelled after its decision but before its intent (INV-45).</summary>
+    internal const string CancelledBeforeRun = "The call was cancelled before it ran; nothing ran.";
+
+    private async Task<Prepared> PrepareCoreAsync(MutationRequest request, AdmissionLease admission, PrepareProgress progress,
+        CancellationToken ct)
     {
         // A call without an operation id of its own gets a fresh one — or, retrying an approval, the one that raised it.
         var callerOperationId = string.IsNullOrWhiteSpace(request.OperationId) ? null : request.OperationId;
@@ -244,12 +276,19 @@ public sealed class MutationGateway : IMutationGateway
         // R1-13: the trigger the mutation is made for, directly or because it is nested in a trigger's mutation.
         if ((TriggerAuthority.TriggerOf(request.Principal) ?? MutationScope.Current?.TriggerId) is { } triggerId)
             request = request with { TriggerId = triggerId };
+        progress.Request = request;
 
         // 1–2: the capability must exist, be switched on, and the principal must hold its level. Unknown means Deny.
         var capability = _catalog.Find(request.CapabilityId);
+        progress.Capability = capability;
         if (capability is null)
             return Prepared.Refused(await RefuseAsync<object?>(operationId, request, null, MutationStatus.Denied,
                 $"Unknown capability '{request.CapabilityId}'.", ct));
+        // A principal without authority (its owner could not be read) is refused outright, whatever the capability's
+        // level or a setting makes of it — not normalised to read (INV-45 review round 13).
+        if (McpPermissionLevels.IsNone(request.Principal.PermissionLevel))
+            return Prepared.Refused(await RefuseAsync<object?>(operationId, request, capability, MutationStatus.Denied,
+                $"'{capability.Id}' was refused: {request.Principal.DisplayName} holds no authority.", ct));
 
         if (_overrides is not null)
         {
@@ -331,6 +370,7 @@ public sealed class MutationGateway : IMutationGateway
                         ReasonArgs = resolution.Args ?? [resolution.Error ?? ""],
                     });
             request = request with { Target = resolution.Target };
+            progress.Request = request;
         }
 
         // PC-D6 / PC-D7 (R1-13): an AI trigger writes only what an Admin granted it (capability and every resource it
@@ -393,6 +433,7 @@ public sealed class MutationGateway : IMutationGateway
             {
                 operationId = raisedBy;
                 request = request with { OperationId = operationId };
+                progress.Request = request;
             }
         }
 
@@ -416,6 +457,7 @@ public sealed class MutationGateway : IMutationGateway
                     with { ReasonCode = MutationReasonCodes.DecisionNotRecorded });
             }
             request = request with { DecisionId = decisionId };
+            progress.Request = request;
         }
 
         // R1-53: the request this operation came from, next to the ids that carry it on (decision, operation) — one
@@ -480,6 +522,7 @@ public sealed class MutationGateway : IMutationGateway
         ArgumentNullException.ThrowIfNull(request.Principal);
         ArgumentNullException.ThrowIfNull(request.Target);
         ArgumentNullException.ThrowIfNull(request.Arguments);
+        RejectEventKey(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CapabilityId);
         ArgumentNullException.ThrowIfNull(execute);
 
@@ -513,6 +556,14 @@ public sealed class MutationGateway : IMutationGateway
                 return await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied,
                     "The approval could not be checked; the mutation was refused.", ct);
             }
+            catch (OperationCanceledException)
+            {
+                // INV-45: decided, cancelled before it ran: one refusal on record, and the caller sees the cancellation.
+                // The gate may have raised the approval before the cancellation reached it: the event names it.
+                await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied, CancelledBeforeRun, ct,
+                    RaisedApprovalOf(request, capability, decision, operationId));
+                throw;
+            }
             if (!approval.Approved)
             {
                 var pending = await RefuseAsync<T>(operationId, request, capability, MutationStatus.PendingApproval,
@@ -528,11 +579,25 @@ public sealed class MutationGateway : IMutationGateway
             }
         }
 
+        // INV-45: a caller that went away after the decision gets one refusal, not an intent for a run it no longer
+        // waits for. A cancellation that races the intent write below does not break that write (it gets no caller
+        // token); it is seen right after it and ends the intent as that same refusal — either way one event, and the
+        // caller sees its cancellation.
+        if (ct.IsCancellationRequested)
+        {
+            await RefuseAsync<T>(operationId, request, capability, MutationStatus.Denied, CancelledBeforeRun, ct,
+                approval?.ApprovalId);
+            ct.ThrowIfCancellationRequested();
+        }
+
         // 5: no intent record, no mutation (PC-D5).
         long auditId;
         try
         {
-            auditId = await _audit.BeginAsync(operationId, request, capability, approval, ct);
+            // Not the caller's token (the race above), but bounded: a write that runs out is the intent's refusal, kept
+            // in the outbox (review round 4, NIT-4).
+            using var intentTime = new CancellationTokenSource(RefusalWriteTimeout);
+            auditId = await _audit.BeginAsync(operationId, request, capability, approval, intentTime.Token);
         }
         catch (Exception ex)
         {
@@ -542,6 +607,15 @@ public sealed class MutationGateway : IMutationGateway
             return new MutationOutcome<T>(operationId, MutationStatus.Denied, default,
                 "The audit record could not be written; the mutation was refused.", VerificationStatus.NotRun, ex)
                 { DecisionId = request.DecisionId };
+        }
+        if (ct.IsCancellationRequested)
+        {
+            // Cancelled while the intent was written: nothing ran, nothing was claimed or used — the intent ends as the
+            // refusal (INV-45, the intent race).
+            await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, MutationStatus.Denied,
+                VerificationStatus.NotRun, CancelledBeforeRun, TimeSpan.Zero), capability);
+            LogNotRun(operationId, capability.Id, MutationStatus.Denied, approval?.ApprovalId, request.DecisionId);
+            ct.ThrowIfCancellationRequested();
         }
 
         // R1-18 (INV-39): the operation id is claimed before anything runs, so the same id never runs twice — not as a
@@ -595,6 +669,8 @@ public sealed class MutationGateway : IMutationGateway
                 IReadOnlyDictionary<string, string> facts;
                 using (var scope = MutationScope.Begin(capability.Id, operationId, context.Request.Principal, context.Request))
                 {
+                    // Contract 0006: which rule set decided, for the re-check after a compose run.
+                    scope.SetDecision(decision.AgentRuleSet, decision.ExposureConfirmClasses);
                     // The person whose approval was used for this run (approvers are always people, by email).
                     if (approval is { Approved: true, ApprovedBy: { } approver } && approver.Contains('@'))
                         scope.ApprovedBy = PrincipalIds.User(approver);
@@ -864,7 +940,10 @@ public sealed class MutationGateway : IMutationGateway
         reason = AuditLogMutationSink.WithoutPayloadValues(reason, request.Arguments) ?? reason;
         try
         {
-            await _audit.RecordDeniedAsync(operationId, request, capability, status, reason, approvalId, ct);
+            // INV-45: the refusal is recorded even when the caller has gone away, like an outcome (step 8): not on the
+            // caller's token, but within its own bounded time — one that runs out goes to the outbox below.
+            using var bounded = new CancellationTokenSource(RefusalWriteTimeout);
+            await _audit.RecordDeniedAsync(operationId, request, capability, status, reason, approvalId, bounded.Token);
         }
         catch (Exception ex)
         {
@@ -902,6 +981,45 @@ public sealed class MutationGateway : IMutationGateway
 
         public static Prepared Refused(MutationOutcome<object?> refusal, string? preset = null) =>
             new(refusal, null, null, null, null, preset);
+    }
+
+    /// <summary>The approval the gate raised (or holds open) for this operation, if any — for the event of a call
+    /// cancelled while the gate answered. A failed lookup names none; the refusal stands.</summary>
+    private string? RaisedApprovalOf(MutationRequest request, Capability capability, MutationPolicyDecision decision,
+        string operationId)
+    {
+        try
+        {
+            return ApprovalBinding.Of(request, capability, decision.Policy?.VersionHash) is { } binding
+                ? _approvals?.OpenApprovalOf(binding, operationId)
+                : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Open approval of operation {OperationId} could not be looked up", operationId);
+            return null;
+        }
+    }
+
+    /// <summary>How long a refusal's audit write may take (INV-45): long enough for a queue of audit writes, bounded
+    /// so a stop never waits on it — a write that runs out of time is kept in the audit outbox (R1-19).</summary>
+    internal static readonly TimeSpan RefusalWriteTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>INV-45 (review round 7, NIT-1): an event key names the one refusal several paths may write; it is
+    /// honoured only on <see cref="RefuseAsync"/>. A request that is decided or executed carries none — its denials and
+    /// approvals are attempts of their own and must never merge into one row.</summary>
+    private static void RejectEventKey(MutationRequest request)
+    {
+        if (request.EventKey is not null)
+            throw new ArgumentException("An event key is honoured only for a refusal (RefuseAsync).", nameof(request));
+    }
+
+    /// <summary>How far <see cref="PrepareCoreAsync"/> got: the request as decided so far and its capability, for the
+    /// refusal a cancellation on the way leaves on record (INV-45).</summary>
+    private sealed class PrepareProgress
+    {
+        public MutationRequest? Request { get; set; }
+        public Capability? Capability { get; set; }
     }
 
     /// <summary>One of the gateway's admission locks, held at most once and released at most once.</summary>

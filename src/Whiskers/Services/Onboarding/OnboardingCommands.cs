@@ -56,10 +56,13 @@ public static class OnboardingCommands
         return $"echo {b64} | base64 -d | python3 -";
     }
 
-    public static string NodeExporterCompose(string tsIp) =>
+    // Host files are LF: normalise, so a CRLF checkout of this source cannot put CR characters into them.
+    public static string NodeExporterCompose(string tsIp) => NodeExporterComposeFor(tsIp).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private static string NodeExporterComposeFor(string tsIp) =>
 $@"services:
   node-exporter:
-    image: quay.io/prometheus/node-exporter:v1.8.2
+    image: quay.io/prometheus/node-exporter:v1.12.1
     container_name: node-exporter
     restart: unless-stopped
     network_mode: host
@@ -67,14 +70,23 @@ $@"services:
     command:
       - '--path.rootfs=/host'
       - '--web.listen-address={tsIp}:9100'
+      - '--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector'
     volumes:
       - '/:/host:ro,rslave'
 ";
 
-    public static string DockerProxyCompose(string tsIp) =>
+    /// <summary>The mTLS proxy of a managed host: docker-socket-proxy behind ghostunnel. Since R1-44 ghostunnel admits
+    /// exactly one client name, the host's own (<paramref name="allowedClientCn"/>, allow-listed); every other flag is the
+    /// approved one (<see cref="Whiskers.Services.Certificates.MtlsAllowListCommands.ApprovedArgsWithoutAllowCn"/>).</summary>
+    public static string DockerProxyCompose(string tsIp, string allowedClientCn) =>
+        Whiskers.Services.Certificates.MtlsClientIdentity.IsValidCommonName(allowedClientCn)
+            ? DockerProxyComposeFor(tsIp, allowedClientCn).Replace("\r\n", "\n", StringComparison.Ordinal)
+            : throw new ArgumentException($"'{allowedClientCn}' is not an allowed client name.", nameof(allowedClientCn));
+
+    private static string DockerProxyComposeFor(string tsIp, string allowedClientCn) =>
 $@"services:
   socket-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     container_name: socket-proxy
     restart: unless-stopped
     environment:
@@ -95,7 +107,7 @@ $@"services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
   ghostunnel:
-    image: ghostunnel/ghostunnel:v1.8.2
+    image: ghostunnel/ghostunnel:v1.11.5@sha256:65c4e34ec0ee0f30ea1f72b7411ec70a91c32fc50f067a8466ad2adb1e7420f2
     container_name: ghostunnel
     restart: unless-stopped
     command:
@@ -106,7 +118,7 @@ $@"services:
       - --cert=/certs/server.crt
       - --key=/certs/server.key
       - --cacert=/certs/ca.crt
-      - --allow-cn=serverwatch-client
+      - --allow-cn={allowedClientCn}
     volumes:
       - /opt/dockerproxy/certs:/certs:ro
     ports:

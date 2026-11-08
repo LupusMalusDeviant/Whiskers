@@ -87,6 +87,7 @@ internal sealed class BootSettings : IDisposable
         AssertAuthenticationSetup(services,
             disabled: given.TryGetValue("Auth:Disabled", out var auth) && auth is not null && bool.Parse(auth));
         AssertSessionRevocationWiring(services, registry.IsEnabled("agent"));
+        AssertEndpointCheckSlotsShared(services);
         // R1-25: every logger of the booted app writes through the redaction.
         Assert.IsType<Whiskers.Utils.RedactingLoggerFactory>(
             services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>());
@@ -98,8 +99,10 @@ internal sealed class BootSettings : IDisposable
     /// the validator, the ContainerHub filter resolves, and with the agent module on, sessions re-read their principal.</summary>
     public static void AssertSessionRevocationWiring(IServiceProvider services, bool agentEnabled)
     {
-        Assert.IsType<Whiskers.Services.Auth.SessionValidator>(
+        var validator = Assert.IsType<Whiskers.Services.Auth.SessionValidator>(
             services.GetRequiredService<Whiskers.Services.Auth.ISessionValidator>());
+        // R1-27: without the bindings every federated session would be refused as store_unavailable.
+        Assert.True(validator.ChecksBindings, "The session validator was built without the identity bindings.");
         Assert.NotNull(services.GetRequiredService<Whiskers.Hubs.SessionHubFilter>());
         using (var scope = services.CreateScope())
         {
@@ -129,6 +132,19 @@ internal sealed class BootSettings : IDisposable
                 services.GetRequiredService<Whiskers.Services.Agent.IAgentService>());
             Assert.True(agent.RevalidatesAuthority, "Agent sessions were built without IAgentAuthority.");
         }
+    }
+
+    /// <summary>R1-57 review n6: the endpoint-check monitor and the /checks page ("Run now", resolved per circuit scope)
+    /// take the same run slots — one singleton. Separate instances would let both run the same check at once and break
+    /// the limits of decision 5.</summary>
+    public static void AssertEndpointCheckSlotsShared(IServiceProvider services)
+    {
+        var slots = services.GetRequiredService<Whiskers.Services.EndpointChecks.IEndpointCheckSlots>();
+        using (var scope = services.CreateScope())
+            Assert.Same(slots, scope.ServiceProvider.GetRequiredService<Whiskers.Services.EndpointChecks.IEndpointCheckSlots>());
+        var monitor = Assert.Single(services.GetServices<Microsoft.Extensions.Hosting.IHostedService>()
+            .OfType<Whiskers.Services.EndpointChecks.EndpointCheckMonitor>());
+        Assert.Same(slots, monitor.Slots);
     }
 
     /// <summary>Asserts which authentication setup the booted app registered. The two branches of

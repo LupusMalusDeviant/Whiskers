@@ -40,6 +40,65 @@ public class ServerTools
         return result.Message;
     }
 
+    [McpToolLevel(McpPermissionLevels.Admin)]
+    [McpServerTool, Description("Move one server from the fleet's shared mTLS client credential to its own (per-host identity " +
+        "whiskers-client-<id>-g<n>). Issues the credential, lets the host's proxy admit it besides the old one, switches " +
+        "Whiskers to it, then narrows the proxy to the new identity after proving the shared one is refused. Every host step " +
+        "rolls back by itself after 3 minutes unless confirmed through the new credential; a second call resumes. One server " +
+        "per call. Admin only.")]
+    public static async Task<string> MigrateMtlsClientCredential(
+        IHttpContextAccessor httpContextAccessor,
+        IMcpPermissionService permissionService,
+        Whiskers.Services.Certificates.IMtlsCertificateService certificates,
+        IToolAuditLog auditLog,
+        [Description("Server ID")] string serverId,
+        CancellationToken cancellationToken = default)
+    {
+        var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "migrate_mtls_client_credential");
+        if (denied != null) return MutationScope.Fail(denied);
+        if (string.IsNullOrWhiteSpace(serverId))
+            return MutationScope.Fail("Server ID is required.");
+
+        var result = await certificates.MigrateClientAsync(serverId, null, cancellationToken);
+        var message = ClientCredentialMessage(result);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "mtls.client_migrate", "server", serverId, serverId,
+            details: message, serverId: serverId, success: result.Ok);
+        return message;
+    }
+
+    [McpToolLevel(McpPermissionLevels.Admin)]
+    [McpServerTool, Description("Renew a migrated server's own mTLS client certificate. rotate=false: a new key and " +
+        "certificate under the same identity, the host is unchanged. rotate=true: the next generation; the host's proxy is " +
+        "widened, Whiskers switches, and the proxy is narrowed so the old certificate is refused there. Guarded like the " +
+        "migration. Admin only.")]
+    public static async Task<string> RenewMtlsClientCredential(
+        IHttpContextAccessor httpContextAccessor,
+        IMcpPermissionService permissionService,
+        Whiskers.Services.Certificates.IMtlsCertificateService certificates,
+        IToolAuditLog auditLog,
+        [Description("Server ID")] string serverId,
+        [Description("true = next generation (the old certificate is refused afterwards); false = same identity")] bool rotate = false,
+        CancellationToken cancellationToken = default)
+    {
+        var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "renew_mtls_client_credential");
+        if (denied != null) return MutationScope.Fail(denied);
+        if (string.IsNullOrWhiteSpace(serverId))
+            return MutationScope.Fail("Server ID is required.");
+
+        var result = await certificates.RenewClientAsync(serverId, rotate, cancellationToken);
+        var message = ClientCredentialMessage(result);
+        var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        await auditLog.LogAsync(actor, actorType, "mtls.client_renew", "server", serverId, serverId,
+            details: message, serverId: serverId, success: result.Ok);
+        return message;
+    }
+
+    private static string ClientCredentialMessage(Whiskers.Services.Certificates.MtlsClientMigrationResult result) =>
+        result.Ok
+            ? $"Done: the server uses its own client identity {result.Identity?.CommonName} (generation {result.Identity?.Generation})."
+            : $"Stopped in phase '{result.Phase}': {result.Error}";
+
     [McpToolLevel(McpPermissionLevels.Read)]
     [McpServerTool, Description("List all configured servers with their connection type and status. Optionally filter by a group or tag (case-insensitive) to narrow a large fleet.")]
     public static async Task<string> ListServers(

@@ -44,6 +44,7 @@ public class MutationGatewayCoverageTests
         "container.env_set",         // set_container_env (MCP/agent)
         "container.env_file_save",   // container page: .env save + compose up
         "container.exec",            // container page: Artisan migrate / rollback
+        "endpointcheck.run",         // R1-57: the monitor (as the owner) and "Run now" (as the Admin)
     ];
 
     /// <summary>Who calls the primitive, and under which capability (the scanner sees the caller, the guard the scope).</summary>
@@ -55,12 +56,12 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCustomCommand", "host.exec"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCleanup", "host.prune"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ApplyRetention", "db.backup_delete"),
-        ("Whiskers.Components.Pages.ContainerDetail", "SaveEnvAndRestart", "container.env_file_save"),
-        // Two separate calls in one helper: with a capability (migrate, rollback, SQL import) it runs the primitive inside
-        // that decision; without one (migrate:status) it reads through the plain executor — so it is in both lists.
-        ("Whiskers.Components.Pages.ContainerDetail", "ExecInContainerViaHost", "container.exec, db.query"),
+        ("Whiskers.Services.Mutations.ComposeImpact", "SaveEnvAsync", "container.env_file_save"),
+        // The write helper: migrate, rollback and SQL import run the primitive inside their capability decision.
+        ("Whiskers.Components.Pages.ContainerDatabasePanel", "ExecInContainerViaHost", "container.exec, db.query"),
         ("Whiskers.Services.Mutations.ComposeImpact", "DeployAsync", "app.deploy, compose.deploy"),
         ("Whiskers.Services.Webhooks.WebhookService", "DeployCompose", "compose.deploy"),
+        ("Whiskers.Services.EndpointChecks.EndpointCheckRunner", "ProbeAsync", "endpointcheck.run"),
     ];
 
     /// <summary>The writes by surface: a row per path a person, a key, the agent or Whiskers itself starts.</summary>
@@ -88,6 +89,9 @@ public class MutationGatewayCoverageTests
         ("ui", "webhook.set_enabled", "IWebhookService.SetEnabledAsync"),
         ("ui", "webhook.delete", "IWebhookService.DeleteWebhookAsync"),
         ("ui", "cloud.power_on", "ICloudControlService.PowerOnAsync"),
+        ("ui", "endpointcheck.save", "IEndpointCheckStore.SaveAsync"),
+        ("ui", "endpointcheck.delete", "IEndpointCheckStore.DeleteAsync"),
+        ("ui", "endpointcheck.run", "primitive"),
         // MCP tools and the agent (M-rows) — McpGuardrailFilter / AgentToolInvoker
         ("mcp", "host.exec", "primitive"),
         ("mcp", "container.env_set", "primitive"),
@@ -111,6 +115,7 @@ public class MutationGatewayCoverageTests
         ("background", "autopatch.run", "IAutoPatchService.RunCycleAsync"),
         ("background", "container.update", "IDockerService.RecreateContainerAsync"),
         ("background", "vpn.bootstrap", "IVpnProvider.EnsureUpAsync"),
+        ("background", "endpointcheck.run", "primitive"),
         // Webhooks (S-04/S-05) — automation runner on the owner's authority
         ("webhook", "container.restart", "IDockerService.RestartContainerAsync"),
         ("webhook", "gitdeploy.deploy", "IGitDeployService.DeployAsync"),
@@ -270,7 +275,7 @@ public class MutationGatewayCoverageTests
     /// <summary>Plain-executor calls that read (the command changes nothing on the host).</summary>
     public static readonly (string Owner, string Handler, string Why)[] PlainExecutorReads =
     [
-        ("Whiskers.Components.Pages.ContainerDetail", "ExecInContainerViaHost", "artisan migrate:status (capability null); the write branch uses the primitive"),
+        ("Whiskers.Components.Pages.ContainerDatabasePanel", "ReadMigrationStatusAsync", "artisan migrate:status, a fixed command; the writes go through ExecInContainerViaHost and the primitive"),
         ("Whiskers.Components.Pages.ContainerDetail", "LoadEnvVars", "finds the compose directory and reads its .env"),
         ("Whiskers.Mcp.Tools.MonitoringTools", "GetServerLogs", "journalctl / log tail"),
         ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumesAsync", "docker volume ls"),
@@ -278,12 +283,19 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.LogMonitor.Hygiene.LogInventory", "FreeDiskBytesAsync", "df"),
         ("Whiskers.Services.LogMonitor.Hygiene.LogInventory", "ReadSizeAsync", "du / stat of log files"),
         ("Whiskers.Services.Metrics.MetricsCollectorService", "GetDiskUsageAsync", "df"),
-        ("Whiskers.Services.Mutations.ComposePlanner", "ConfigEffectsAsync", "docker compose config in a temporary directory (read-only planning, R1-16)"),
+        ("Whiskers.Services.Mutations.ComposePlanner", "ConfigAsync", "docker compose config in a temporary directory (read-only planning, R1-16; contract 0006 reads its JSON)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "DiscoverAsync", "finds compose files"),
+        ("Whiskers.Services.Mutations.ComposePlanner", "InspectContainerAsync", "docker inspect of a container a namespace is shared with (contract 0006)"),
+        ("Whiskers.Services.Mutations.ComposePlanner", "InspectImagesAsync", "docker image inspect of the planned images (contract 0006)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "MountsOfContainerAsync", "docker inspect"),
         ("Whiskers.Services.Mutations.ComposePlanner", "ReadAsync", "reads compose files and .env"),
         ("Whiskers.Services.Mutations.ComposePlanner", "WorkingDirectoryAsync", "docker inspect labels"),
+        ("Whiskers.Services.Mutations.ComposeRunner", "CgroupnsDefaultAsync", "docker info / daemon.json: the daemon's default cgroup namespace mode (contract 0006, review M1)"),
+        ("Whiskers.Services.Mutations.ComposeRunner", "InspectImagesAsync", "step 4: docker image inspect of the images the run starts (contract 0006)"),
+        ("Whiskers.Services.Mutations.ComposeRunner", "RecheckAsync", "docker inspect of the containers the run created (contract 0006); the stop goes through ComposeExposureStopper"),
+        ("Whiskers.Services.Mutations.ComposeRunner", "RestoreTagsAsync", "docker image inspect before the tags are put back; the docker tag itself runs through the run's mutate delegate"),
         ("Whiskers.Services.Mutations.VerifierSupport", "HostReadAsync", "the verifiers' read-back (R1-37)"),
+        ("Whiskers.Services.Scheduler.TaskExecutor", "ApplyRetention", "ls -1Aq of the DB backup directory, inside db.backup_delete (INV-19 review); the rm of the chosen dumps runs on the primitive"),
         ("Whiskers.Services.Server.FirewallService", "GetStatusAsync", "ufw status"),
         ("Whiskers.Services.Server.NginxService", "GetSiteConfigAsync", "cat of a site file"),
         ("Whiskers.Services.Server.NginxService", "ListSitesAsync", "ls of sites-available / -enabled"),
@@ -306,6 +318,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Backup.VolumeBackupService", "RestoreVolumeAsync", "volume.restore"),
         ("Whiskers.Services.Database.DatabaseService", "BackupDatabaseAsync", "db.backup"),
         ("Whiskers.Services.GitDeploy.GitDeployService", "DeleteAppAsync", "gitdeploy.delete"),
+        ("Whiskers.Services.GitDeploy.GitDeployService", "DeployAsync", "gitdeploy.deploy"),   // contract 0006: the compose run's pull, build and up
         ("Whiskers.Services.Server.FirewallService", "AddRuleAsync", "firewall.rule_add"),
         ("Whiskers.Services.Server.FirewallService", "RemoveRuleAsync", "firewall.rule_remove"),
         ("Whiskers.Services.Server.FirewallService", "SetStatusAsync", "firewall.set_status"),
@@ -328,6 +341,7 @@ public class MutationGatewayCoverageTests
     [
         ("Whiskers.Services.Certificates.MtlsCertificateService", "ConfirmAsync", "certificate renewal: confirms the installed certificate"),
         ("Whiskers.Services.Certificates.MtlsCertificateService", "RunAsync", "certificate renewal / issue: installs the certificate"),
+        ("Whiskers.Services.Certificates.MtlsClientCredentialStore", "SignAsync", "R1-44: step-ca on local signs a per-host client CSR (certificate.issue_mtls)"),
         ("Whiskers.Services.Database.DatabaseService", "ExecInContainer", "db.query / db.backup and the database listings"),
         ("Whiskers.Services.GitDeploy.GitDeployService", "Sh", "gitdeploy.deploy / gitdeploy.delete: checkout, build, up"),
         ("Whiskers.Services.Onboarding.OnboardingService", "ResolveVmEndpoint", "server.onboard: reads the host's address"),
@@ -360,6 +374,46 @@ public class MutationGatewayCoverageTests
             .Order();
 
         Assert.Equal(["Whiskers.Services.Server.HostCommandExecutor"], callers);
+    }
+
+    [Fact]
+    public void Only_the_host_shell_drives_its_docker_steps()
+    {
+        // R1-57: the helper container's steps sit behind IHostShellDocker. Creating that privileged nsenter helper from
+        // anywhere else would be a host-command path past RunHostShellAsync and its pinned caller above.
+        var hostShell = typeof(Whiskers.Services.Docker.Operations.HostShellOperations).FullName!;
+
+        var callers = MutationCallScanner
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Docker.Operations.IHostShellDocker))
+            .Select(c => c.Owner.FullName!)
+            .Distinct()
+            .Order();
+        Assert.Equal([hostShell], callers);
+
+        var constructors = MutationCallScanner
+            .Constructors(App, typeof(Whiskers.Services.Docker.Operations.DockerClientHostShell))
+            .Select(t => t.FullName!)
+            .Distinct()
+            .Order();
+        Assert.Equal([hostShell], constructors);
+
+        // R1-44: the one-off helper over a client built from a not-yet-active credential has exactly one caller, the
+        // allow-list confirmation that must travel through the NEW client credential (contract 0007, MI-8).
+        var oneOff = MutationCallScanner
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Docker.Operations.HostShellOperations)
+                               && m.Name == nameof(Whiskers.Services.Docker.Operations.HostShellOperations.ForOneOffClient))
+            .Select(c => c.Owner.FullName!)
+            .Distinct()
+            .Order();
+        Assert.Equal([typeof(Whiskers.Services.Certificates.MtlsClientProbe).FullName!], oneOff);
+
+        // The interface pinned above has exactly one implementation in the app: another one would be a second way to
+        // drive Docker that the caller pin does not see.
+        var implementations = App.GetTypes()
+            .Where(t => !t.IsInterface && typeof(Whiskers.Services.Docker.Operations.IHostShellDocker).IsAssignableFrom(t))
+            .Select(t => t.FullName!)
+            .Order();
+        Assert.Equal([typeof(Whiskers.Services.Docker.Operations.DockerClientHostShell).FullName!], implementations);
     }
 
     [Fact]
@@ -452,6 +506,7 @@ public class MutationGatewayCoverageTests
         // The gateway and its records.
         ("IActionOutcomeService.RecordAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
         ("IApprovalGate.OpenOperationOf", "a lookup of the open approval of an operation (no write)"),
+        ("IApprovalGate.OpenApprovalOf", "a lookup of the open approval of an operation, for the event of a cancelled call (no write)"),
         ("IApprovalPersistence.ConsumeAsync", "the gateway uses up an approval (R1-14), its own record"),
         ("IAuditRecovery.RecoverAsync", "settles and re-writes the gateway's own audit events (R1-19)"),
         ("IApprovalStore.CreateAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
@@ -466,6 +521,7 @@ public class MutationGatewayCoverageTests
         ("IPolicyDecisionStore.RecordAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
         ("IUiMutationRunner.RunAsync", "the gateway entry for the UI"),
         // Designed exemptions with pinned callers (start-up, before the gateway can decide; the first admin).
+        ("IMtlsClientCredentialStore.WriteJournalAsync", "R1-44: the rollout journal, Whiskers' own record of the phase a host reached (written inside mtls.client_migrate / mtls.client_renew / server.onboard decisions)"),
         ("IAgentSettingsStore.AdoptApiKeyRefAsync", "start-up credential migration (R1-30), pinned by CredentialAdoptionCallersTests"),
         ("IAppSettingsStore.AdoptDnsTokenRefAsync", "start-up credential migration (R1-29), pinned by CredentialAdoptionCallersTests"),
         ("IAppSettingsStore.AdoptSettingRefAsync", "start-up credential migration (R1-30), pinned by CredentialAdoptionCallersTests"),
@@ -476,13 +532,22 @@ public class MutationGatewayCoverageTests
         ("IServerConfigService.AdoptCloudKeyRefAsync", "start-up credential migration (R1-29), pinned by CredentialAdoptionCallersTests"),
         ("IVaultService.AdoptLegacyCredentialAsync", "start-up credential migration, pinned by CredentialAdoptionCallersTests"),
         ("IWhitelistService.AddFirstAdminAsync", "first-run wizard, refuses once an Admin exists, pinned to SetupStateService"),
+        ("IIdentityBindingStore.RecordPendingAsync", "R1-27: a refused Google/OIDC sign-in records its binding request for a configured address — nobody exists yet the gateway could decide for; it grants nothing, pinned to FederatedAdmission"),
+        ("IIdentityBindingStore.RecordSignInAsync", "R1-27: the day of an admitted sign-in on its binding (housekeeping of the admission), pinned to FederatedAdmission"),
+        ("IIdentityBindingStore.PruneOrphansAsync", "R1-27: removes bindings of addresses that are no entries, before every decided config.roles / config.whitelist write that adds or removes one and the wizard's first-admin writes (the start-up prune goes through RefreshAsync); it only takes access away"),
         ("ILocalAccountService.RedeemRecoveryCodeAsync", "S-12 (R1-49): the holder of a one-time recovery code sets that account's own password on the anonymous /account/recover page — no person exists the gateway could decide for; audited, rate-limited, pinned to AccountRecover"),
         // Execution plumbing beneath a marked operation or the primitive.
         ("IDockerConnectionManager.ExecuteAsync", "the Docker API transport the marked IDockerService operations run on"),
         ("IDockerConnectionManager.ExecuteGuardedAsync", "the Docker API transport the marked IDockerService operations run on"),
         ("IDockerService.RunHostShellAsync", "the host executor's mTLS backend; only HostCommandExecutor calls it (pinned)"),
+        ("IHostShellDocker.CreateAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IHostShellDocker.KillAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IHostShellDocker.PullImageAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IHostShellDocker.RemoveAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IHostShellDocker.StartAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
         ("IHostCommandExecutor.ExecuteAsync", "the plain read path; every caller is listed (The_plain_executor_is_called_only_for_reads_or_inside_a_marked_operation)"),
         ("IServerBudget.RunAsync", "the per-server concurrency lane work runs in"),
+        ("IComposeRunner.RunAsync", "runs a compose plan inside its caller's decision: every host write goes through the mutate delegate the caller passes (the primitive, or Git deploy's own executor inside gitdeploy.deploy) — contract 0006"),
         ("ITaskExecutor.ExecuteAsync", "runs a scheduled task inside the scheduler's automation-runner decision; each step it takes is marked or the primitive"),
         ("IVpnProcessRunner.RunAsync", "the process runner behind IVpnProvider.EnsureUpAsync (vpn.bootstrap); protected VPN layer"),
         ("IVpnProcessRunner.StartDetached", "the process runner behind IVpnProvider.EnsureUpAsync (vpn.bootstrap); protected VPN layer"),
@@ -508,6 +573,14 @@ public class MutationGatewayCoverageTests
         ("IAgentTranscriptStore.ClearAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAgentTranscriptStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAlertBreachStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
+        ("IEndpointCheckStore.RecordAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
+        ("IEndpointCheckStore.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
+        ("IEndpointCheckStore.SuspendAsync", "R1-57: switches a check off because its owner lost the authority to run it (INV-04), as ScheduledTaskSuspender does — it never runs or widens anything"),
+        ("IEndpointCheckSlots.TryAcquire", "R1-57: in-memory run slot of the endpoint checks (4 fleet-wide, 1 per server); it only limits runs, each of which is its own endpointcheck.run decision"),
+        ("IEndpointCheckRunner.RunAsync", "R1-57: runs inside its own endpointcheck.run decision (IAutomationMutationRunner); the host command is the guarded primitive"),
+        ("IEndpointCheckRunner.RunInDecisionAsync", "R1-57: runs only inside an endpointcheck.run decision the caller holds; outside one the scope guard refuses its host command"),
+        // R1-58: the disk-health monitor's last readings and open alerts, kept across a restart.
+        ("IDiskHealthStateStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAlertSuppressionStore.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IAutoPatchNightlyStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IChatHistoryStore.ClearAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
@@ -520,7 +593,6 @@ public class MutationGatewayCoverageTests
         ("ICveFindingsStore.Remove", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ICveFindingsStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ICveFindingsStore.Set", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
-        ("ICveMonitorService.RunOneCycleAsync", "a scan cycle; its host side effects are the designed exemption ScannerHostSideEffects (M2)"),
         ("IFleetSnapshotCache.PruneRemovedServers", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IFleetSnapshotCache.Put", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IHealthStore.AddRecord", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
@@ -529,8 +601,6 @@ public class MutationGatewayCoverageTests
         ("IImageUpdateStore.SaveAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IImageUpdateStore.Set", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("IInAppNotificationStore.Add", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
-        ("IInAppNotificationStore.Clear", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
-        ("IInAppNotificationStore.MarkAllRead", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("ILogMonitorService.SuspendedContainers", "a read (the list of suspended containers)"),
         ("IMetricRollupService.PruneAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
         ("INotificationOutbox.AddAsync", "Whiskers' own runtime state (cache, history, counter), not infrastructure and not configuration a person manages"),
@@ -568,6 +638,19 @@ public class MutationGatewayCoverageTests
     }
 
     [Fact]
+    public void Only_the_trigger_dispatcher_detaches_a_scope()
+    {
+        // MutationScope.Detach drops the whole open scope — its authority and the restrictions nested calls inherit
+        // from it (pinned preset, trigger id). That is safe only for work that brings its own principal and pin: an AI
+        // trigger run. Anything else that starts work outside a decision suppresses the flow (test below).
+        var callers = MutationCallScanner.Callers(App, m => m.DeclaringType == typeof(MutationScope)
+                                                             && m.Name == nameof(MutationScope.Detach))
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().Order(StringComparer.Ordinal).ToList();
+
+        Assert.Equal(["Whiskers.Services.Agent.Triggers.AiTriggerDispatcher.OnEventAsync"], callers);
+    }
+
+    [Fact]
     public void Work_started_in_the_background_from_a_decision_does_not_inherit_its_scope()
     {
         // m3 (R1-48 review): a scope closed under work it started is refused from then on — also a nested decision begun
@@ -599,15 +682,16 @@ public class MutationGatewayCoverageTests
     /// decision (host start-up, hosted services, request handling before any decision, reads).</summary>
     private static readonly (string Handler, string Why)[] BackgroundStartsOutsideDecisions =
     [
-        ("Whiskers.Components.Pages.Cves.TriggerScan", "a page click that starts a CVE scan (no gateway operation); not inside a runner lambda"),
+        ("Whiskers.Components.Pages.Cves.TriggerScan", "a page click that opens the cve.scan decision off the circuit: the Task.Run is outside any decision, the scan runs inside the one it opens (INV-18)"),
         ("Whiskers.Components.Pages.Dashboard.OnInitializedAsync", "page initialisation loading stats (reads)"),
-        ("Whiskers.Components.Pages.Settings.TriggerCveScan", "a page click that starts a CVE scan (no gateway operation); not inside a runner lambda"),
+        ("Whiskers.Components.Pages.Settings.TriggerCveScan", "a page click that opens the cve.scan decision off the circuit: the Task.Run is outside any decision, the scan runs inside the one it opens (INV-18)"),
         ("Whiskers.Services.Auth.AuthAuditLog.StartAsync", "hosted-service start (host start-up)"),
         ("Whiskers.Services.Docker.SshTunnelManager.EstablishTunnelAsync", "the tunnel's pump forwards bytes and calls no service; a decision's scope it may carry authorizes nothing once closed"),
         ("Whiskers.Services.Notifications.OutboundTargetStartupCheck.StartAsync", "hosted-service start (host start-up)"),
         ("Whiskers.Services.Scheduler.SchedulerService.CheckAndRunDueTasks", "the scheduler loop (a hosted service); each task run opens its own decision"),
         ("Whiskers.Services.Webhooks.WebhookService.Bounded", "runs on the webhook worker, which StartAsync starts with the flow suppressed: never inside a decision"),
         ("Whiskers.Services.Webhooks.WebhookService.ExecuteRunAsync", "runs on the webhook worker, which StartAsync starts with the flow suppressed: never inside a decision"),
+        ("Whiskers.Services.Webhooks.WebhookService.GiveUpAsync", "runs on the webhook worker (started from ExecuteRunAsync after its decision ended): never inside a decision"),
         ("Whiskers.Services.Webhooks.WebhookService.StartAsync", "runs on the webhook worker, which StartAsync starts with the flow suppressed: never inside a decision"),
     ];
 
@@ -680,6 +764,35 @@ public class MutationGatewayCoverageTests
             .Callers(App, m => m.Name == "RunAsync" && m.DeclaringType?.Name == "LocalAccountRecoveryCli")
             .Select(c => c.Owner.FullName!).Distinct());
     }
+    [Fact]
+    public void The_identity_binding_exemptions_have_exactly_their_callers()
+    {
+        // R1-27 (contract 0003): the automatic binding at sign-in is a designed exemption like the setup wizard (S-13),
+        // the host confirmation one like the recovery CLI (S-11). Both are audited first; here they are pinned.
+        static IReadOnlyList<string> CallersOf(string method) => MutationCallScanner
+            .Callers(App, m => m.Name == method && m.DeclaringType?.Name is "IIdentityBindingStore" or "IdentityBindingStore")
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().Order(StringComparer.Ordinal).ToList();
+
+        Assert.Equal(["Whiskers.Services.Auth.FederatedAdmission.DecideAsync"], CallersOf("BindAtSignInAsync"));
+        Assert.Equal(["Whiskers.Services.Auth.FederatedAdmission.DecideAsync"], CallersOf("RecordPendingAsync"));
+        Assert.Equal(["Whiskers.Services.Auth.FederatedAdmission.DecideAsync"], CallersOf("RecordSignInAsync"));
+        Assert.Equal(["Whiskers.Services.Auth.IdentityBindingCli.RunAsync"], CallersOf("ConfirmFromHostAsync"));
+        Assert.Equal(["Program"], MutationCallScanner
+            .Callers(App, m => m.Name == "RunAsync" && m.DeclaringType?.Name == "IdentityBindingCli")
+            .Select(c => c.Owner.FullName!).Distinct());
+        // The prune runs only inside the role and whitelist writes (the wizard's first-admin writes included); the start-up
+        // prune, the admission's recovery and the CLI re-read and prune through RefreshAsync.
+        Assert.Equal(["Whiskers.Services.Auth.RoleService.PruneRemovedAsync",
+                "Whiskers.Services.Auth.RoleService.SetFirstAdminAsync",
+                "Whiskers.Services.Auth.WhitelistService.AddFirstAdminAsync",
+                "Whiskers.Services.Auth.WhitelistService.SaveWhitelistAsync"],
+            CallersOf("PruneOrphansAsync"));
+        Assert.Equal(["Whiskers.Services.Auth.FederatedAdmission.DecideAsync",
+                "Whiskers.Services.Auth.IdentityBindingCli.RunAsync",
+                "Whiskers.Services.Auth.IdentityBindingStartupPrune.InitializeAsync"],
+            CallersOf("RefreshAsync"));
+    }
+
     [Fact]
     public void The_first_admin_writes_have_exactly_the_setup_wizard_as_caller()
     {

@@ -32,7 +32,7 @@ See the [CHANGELOG](../CHANGELOG.md) for the full list. Notable:
 ## Upgrading
 
 - Image: `ghcr.io/lupusmalusdeviant/whiskers:X.Y.Z` · Helm: `oci://ghcr.io/lupusmalusdeviant/charts/whiskers`
-- Verify the image signature before running it (see README → Security → Supply chain).
+- Verify the image signature before running it (see README → Verifying the image).
 - Migrations run automatically on boot; back up `/app/data` (and your database) first.
 - Note any manual steps a breaking change requires.
 

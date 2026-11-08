@@ -2,7 +2,8 @@
 #
 #   prepare        validate the tag (X.Y.Z), check out the tag commit, match csproj + chart versions,
 #                  refuse early if the version is already published
-#   test           the full CI suite (ci.yml via workflow_call) on the tag commit
+#   test           the full CI suite (ci.yml via workflow_call) on the tag commit, with the release gate in release mode
+#   security       the security checks (security.yml via workflow_call) on the tag commit (R1-51, D8)
 #   build          build amd64 and arm64 ONCE each and stage them in GHCR untagged, by digest
 #   scan           Trivy gate on both staged digests (any CRITICAL fails; exceptions only via .trivyignore)
 #   artifact-test  R1-47 gate on the staged amd64 digest: hardened compose profile, N-1 upgrade and recovery
@@ -96,6 +97,11 @@ jobs:
           if [ "$(git rev-parse HEAD)" != "$SHA" ] || [ "$GITHUB_SHA" != "$SHA" ]; then
             echo "::error::checked-out commit, run commit (${GITHUB_SHA}) and tag commit (${SHA}) differ"; exit 1
           fi
+          # R1-51 (contract 0008, D16): a release is cut from main. A tag on a side branch would skip the pull request's
+          # base comparison (R18), so it is refused before anything is built.
+          if ! git merge-base --is-ancestor "$SHA" refs/remotes/origin/main; then
+            echo "::error::the tag commit ${SHA} is not reachable from origin/main; release only commits that are on main"; exit 1
+          fi
           VER="${TAG#v}"
           CSPROJ_VER="$(sed -n 's#.*<Version>\([^<]*\)</Version>.*#\1#p' src/Whiskers/Whiskers.csproj | head -n1)"
           CHART_VER="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' deploy/helm/whiskers/Chart.yaml)"
@@ -145,6 +151,20 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
+      # R1-51 (contract 0008): only this makes the run a release run for the release gate (Release mode from 1.0.0 on).
+      release-gate: release
+
+  # R1-51 (contract 0008, D8): the security checks (vulnerable packages, secrets, analyzers, CodeQL) on the tag commit,
+  # in this run — a release does not rely on the last weekly run having been green.
+  security:
+    needs: prepare
+    permissions:
+      contents: read
+      actions: read
+      security-events: write   # CodeQL uploads its SARIF to code scanning
+    uses: ./.github/workflows/security.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
 
   # Build each architecture once and stage it in GHCR by digest only (no tag). Nothing is built after this job:
   # the scan and the publish steps all work on these digests.
@@ -184,11 +204,11 @@ jobs:
         with:
           context: .
           # Always fetch the base images: their ASP.NET Core runtime carries the server-side SignalR and Kestrel fixes.
+          # No layer cache (cache-from/cache-to) in a release: it always builds fresh. A cached restore layer would be a
+          # NuGet package cache, and a cache hit skips NuGet's hash and signature checks (BuildReproducibilityTests).
           pull: true
           platforms: linux/amd64
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=release-amd64
-          cache-to: type=gha,scope=release-amd64,mode=max
           provenance: true
           sbom: true
 
@@ -200,8 +220,6 @@ jobs:
           pull: true
           platforms: linux/arm64
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=release-arm64
-          cache-to: type=gha,scope=release-arm64,mode=max
           provenance: true
           sbom: true
 
@@ -331,7 +349,7 @@ jobs:
   # Tag exactly the scanned digests. `X.Y.Z` is immutable (refused if it exists); the moving tags `X.Y` and `latest`
   # are moved by the last job, move-tags.
   publish-image:
-    needs: [prepare, test, build, scan, artifact-test]
+    needs: [prepare, test, security, build, scan, artifact-test]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -401,7 +419,11 @@ jobs:
       # Keyless-sign the published index by digest (Sigstore/cosign). The signature is bound to this workflow's
       # GitHub OIDC identity (release.yml@refs/tags/vX.Y.Z) and logged in Rekor. See README "Verifying the image".
       - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          # cosign v2 on purpose: v3 writes signatures in a new format that `cosign verify` as documented in the README
+          # would not find with an older client. Moving to v3 is its own change.
+          cosign-release: v2.6.1
       - name: Sign the image (keyless)
         env:
           DIGEST: ${{ steps.publish.outputs.digest }}
@@ -472,13 +494,13 @@ jobs:
       # Standalone SBOMs (syft), one per architecture, of exactly the scanned and published image manifests (an
       # SBOM of the multi-arch index would only describe the runner's platform). In addition to the attestations.
       - name: Generate SBOM amd64 (SPDX)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: ${{ env.IMAGE }}@${{ needs.build.outputs.amd64_image }}
           format: spdx-json
           output-file: whiskers-${{ needs.prepare.outputs.ver }}-linux-amd64.sbom.spdx.json
       - name: Generate SBOM arm64 (SPDX)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: ${{ env.IMAGE }}@${{ needs.build.outputs.arm64_image }}
           format: spdx-json

@@ -52,6 +52,8 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
         Services.AddSingleton(Null<IKubernetesClientCache>());
         Services.AddSingleton(Null<Whiskers.Services.Observability.ILoopSuspensionService>());
         Services.AddSingleton(Null<Whiskers.Services.Docker.Budget.IServerCircuitBreaker>());
+        Services.AddSingleton(EmptyClientCredentialStore());
+        Services.AddSingleton(Null<Whiskers.Services.Certificates.IMtlsCertificateService>());
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 
@@ -240,24 +242,17 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
     /// <summary>A do-nothing implementation of <typeparamref name="T"/>: default values and completed tasks.</summary>
     private static T Null<T>() where T : class => NullProxy<T>.Create();
 
-    public class NullProxy<T> : DispatchProxy where T : class
-    {
-        public static T Create() => DispatchProxy.Create<T, NullProxy<T>>();
+    /// <summary>R1-44: the page shows each host's client credential; a store over an empty data directory has none.</summary>
+    internal static Whiskers.Services.Certificates.IMtlsClientCredentialStore EmptyClientCredentialStore() =>
+        new Whiskers.Services.Certificates.MtlsClientCredentialStore(Null<Whiskers.Services.Server.IHostCommandExecutor>(),
+            NullLogger<Whiskers.Services.Certificates.MtlsClientCredentialStore>.Instance,
+            new DataPathOptions(Path.Combine(Path.GetTempPath(), "whiskers-empty-" + Guid.NewGuid().ToString("N"))));
 
-        protected override object? Invoke(MethodInfo? method, object?[]? args)
-        {
-            var type = method!.ReturnType;
-            if (type == typeof(void)) return null;
-            if (type == typeof(Task)) return Task.CompletedTask;
-            if (type == typeof(ValueTask)) return ValueTask.CompletedTask;
-            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Task<>))
-            {
-                var inner = type.GetGenericArguments()[0];
-                var value = inner.IsValueType ? Activator.CreateInstance(inner) : null;
-                return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(inner).Invoke(null, [value]);
-            }
-            return type.IsValueType ? Activator.CreateInstance(type) : null;
-        }
+    /// <summary>The shared <see cref="Whiskers.Tests.NullProxy{T}"/>, kept under this name for the tests that still
+    /// reach it here.</summary>
+    public class NullProxy<T> : Whiskers.Tests.NullProxy<T> where T : class
+    {
+        public static new T Create() => DispatchProxy.Create<T, NullProxy<T>>();
     }
 
     private sealed class AdminUser : ICurrentUserService

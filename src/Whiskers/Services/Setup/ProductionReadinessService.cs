@@ -33,12 +33,25 @@ public sealed class ProductionReadinessService : IProductionReadinessService
     private readonly Whiskers.Services.Agent.IAgentSettingsStore? _agentSettings;
     private readonly VaultKeyRingRepository? _keyRing;
     private readonly Whiskers.Configuration.DataPathOptions? _dataPaths;
+    private readonly Whiskers.Utils.ForwardedHeadersObserver? _forwarded;
+    private readonly Whiskers.Services.Certificates.IMtlsClientCredentialStore? _clientCredentials;
+    private readonly Whiskers.Services.Docker.IDockerService? _docker;
+    private readonly Whiskers.Services.Guardrails.IGuardrailStore? _guardrails;
+    private readonly IReadOnlySet<string> _selfContainerNames;
 
     public ProductionReadinessService(IConfiguration config, IVaultService vault, IServiceScopeFactory scopeFactory,
         IServerConfigService? servers = null, IAppSettingsStore? appSettings = null,
         Whiskers.Services.Agent.IAgentSettingsStore? agentSettings = null, Whiskers.Configuration.DataPathOptions? dataPaths = null,
-        VaultKeyRingRepository? keyRing = null)
+        VaultKeyRingRepository? keyRing = null, Whiskers.Utils.ForwardedHeadersObserver? forwarded = null,
+        Whiskers.Services.Certificates.IMtlsClientCredentialStore? clientCredentials = null,
+        Whiskers.Services.Docker.IDockerService? docker = null, Whiskers.Services.Guardrails.IGuardrailStore? guardrails = null,
+        IReadOnlySet<string>? selfContainerNames = null)
     {
+        _clientCredentials = clientCredentials;
+        _docker = docker;
+        _guardrails = guardrails;
+        _selfContainerNames = selfContainerNames ?? Whiskers.Services.LogMonitor.Hygiene.LogScanExclusions.ManualNamesFromEnvironment();
+        _forwarded = forwarded;
         _keyRing = keyRing;
         _dataPaths = dataPaths;
         _config = config;
@@ -60,9 +73,15 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             "Authentifizierung aktiv",
             !authDisabled,
             authDisabled
-                ? "AUTH_DISABLED=true — jeder mit Netzwerkzugriff ist Admin. Nur für isolierte LAN-Setups vertretbar."
+                ? "AUTH_DISABLED=true — jeder mit Netzwerkzugriff ist Admin. Nur für isolierte LAN-Setups vertretbar; " +
+                  "nie hinter einer TCP-Weiterleitung (Tailscale Serve --tcp/--tls-terminated-tcp, DockTail mit protocol=tcp) – dort kommt " +
+                  "jeder Besucher von einer privaten Adresse – und nie hinter Tailscale Funnel, das die Instanz ins " +
+                  "Internet stellt."
                 : "Login ist erforderlich (lokal, Google oder OIDC).",
             null, null));
+        // 1b) Contract 0006: with sign-in off, Whiskers' own container must not be published through a route label.
+        if (authDisabled && await SelfExposureCheckAsync() is { } selfExposure)
+            checks.Add(selfExposure);
 
         // 2) Vault — without VAULT_KEY stored secrets are unavailable/plaintext-blocked.
         checks.Add(new ReadinessCheck(
@@ -75,8 +94,12 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                                           + "DNS-Token, die Zugangsdaten der Benachrichtigungskanäle und der KI (wo sie stehen, sagen die "
                                           + "nächsten Punkte), kubeconfigs sowie Registry- und Git-Zugangsdaten; mit einem daraus "
                                           + "abgeleiteten Schlüssel verschlüsselt sind die Secrets eingehender Webhooks, die Rollback-Snapshots "
-                                          + "und die Sitzungsschlüssel. Noch unverschlüsselt gespeichert: SSH-Schlüssel und der "
-                                          + "mTLS-Client-Schlüssel im Datenverzeichnis.",
+                                          + "und die Sitzungsschlüssel. Noch unverschlüsselt gespeichert, nur durch die Dateirechte "
+                                          + "geschützt: die privaten SSH-Schlüssel (ssh-keys/) und alle mTLS-Client-Schlüssel "
+                                          + "– der gemeinsame und der eigene jedes Hosts – im Datenverzeichnis. Ob die mTLS-Schlüssel "
+                                          + "nur für Whiskers lesbar sind, zeigt der Punkt „mTLS-Client-Schlüssel geschützt“; den Modus "
+                                          + "der SSH-Schlüssel prüft diese Liste nicht. Wer das Datenverzeichnis lesen kann, kann als "
+                                          + "Whiskers handeln.",
                 VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.",
                 _ => "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
             },
@@ -223,7 +246,307 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 : "Diese Verbindung läuft über HTTP — im Dauerbetrieb einen TLS-terminierenden Reverse Proxy (Caddy/Traefik/nginx) davorschalten.",
             null, null));
 
+        // R1-50 (A-14): OIDC discovery over plain HTTP lets a man in the middle swap the IdP's keys and endpoints.
+        if (_config.GetValue<bool>("Oidc:Enabled") && !_config.GetValue("Oidc:RequireHttpsMetadata", true))
+        {
+            checks.Add(new ReadinessCheck(
+                "OIDC-Discovery über HTTPS",
+                false,
+                "Oidc:RequireHttpsMetadata ist aus: die Schlüssel und Endpunkte des Identity Providers werden über HTTP geholt " +
+                "und können unterwegs ausgetauscht werden. Nur im abgeschotteten Testnetz so betreiben.",
+                null, null));
+        }
+
+        // 7) R1-50: forwarded headers from a peer that is not a trusted proxy were ignored — either a reverse proxy that
+        // still has to be named in ForwardedHeaders:TrustedNetworks (until then the client address, the login rate limit
+        // and the audit see the proxy) or a client claiming another address.
+        if (_forwarded?.RecentUntrustedPeers is { Count: > 0 } untrusted)
+        {
+            var peers = string.Join(", ", untrusted.Select(u => $"{u.Peer} ({u.At:yyyy-MM-dd HH:mm} UTC)"));
+            checks.Add(new ReadinessCheck(
+                "Reverse-Proxy vertraut",
+                false,
+                $"X-Forwarded-Header von Peers, die keine vertrauten Proxys sind, wurden ignoriert (letzte 24 h): {peers}. " +
+                "Ist einer davon Ihr Reverse Proxy, tragen Sie seine Adresse möglichst eng (z. B. /32 bzw. /128) in " +
+                "ForwardedHeaders__TrustedNetworks__0 ein (Standard: nur Loopback) — sonst sehen Login-Limit und Audit nur " +
+                "seine Adresse, HTTPS wird als HTTP erkannt (Session-Cookie ohne Secure, Google-/OIDC-Rückruf mit http://) " +
+                "und Auth:Disabled weist die Anfragen ab. Eine öffentliche Adresse ist eher ein Client, der eine fremde " +
+                "Adresse vortäuschen wollte — nicht eintragen.",
+                null, null));
+        }
+
+        // 8) R1-44 (INV-58): per-host mTLS client identities.
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var certificates = scope.ServiceProvider.GetService<Whiskers.Services.Certificates.IMtlsCertificateService>();
+            checks.AddRange(await MtlsChecksAsync(certificates is null ? null : certificates.ReadLiveAllowListAsync));
+        }
+
         return checks;
+    }
+
+    /// <summary>The title of the line <see cref="SelfExposureCheckAsync"/> adds (contract 0006).</summary>
+    internal const string SelfExposureTitle = "Whiskers not published with sign-in turned off";
+
+    private static readonly TimeSpan SelfExposureReadTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Contract 0006 (synergy with H2), called only with <c>Auth:Disabled</c>: reads Whiskers' own container on its own
+    /// host (<see cref="Whiskers.Services.LogMonitor.LogMonitorService.ResolveSelfServerIds"/>), found by the names in
+    /// <c>WHISKERS_SELF_CONTAINERS</c> as <see cref="Whiskers.Services.LogMonitor.Hygiene.LogScanExclusions"/> does. A label
+    /// with an exposure prefix is not OK and the line quotes only its key; a container that cannot be found or read is
+    /// "unknown", not OK. No label: no line.
+    /// </summary>
+    internal async Task<ReadinessCheck?> SelfExposureCheckAsync()
+    {
+        const string unknown = "Unknown: Whiskers' own container could not be found or read, so it is not known whether it is " +
+                               "published through a route label (Tailscale Funnel, Traefik, Caddy) with sign-in turned off. " +
+                               "WHISKERS_SELF_CONTAINERS names it.";
+        if (_docker is null || _servers is null) return new ReadinessCheck(SelfExposureTitle, false, unknown, null, null);
+        var prefixes = _guardrails?.Current.EffectiveExposureLabelPrefixes
+                       ?? Whiskers.Configuration.GuardrailPolicy.DefaultExposureLabelPrefixes;
+        var found = false;
+        try
+        {
+            foreach (var serverId in Whiskers.Services.LogMonitor.LogMonitorService.ResolveSelfServerIds(_servers))
+            {
+                using var cts = new CancellationTokenSource(SelfExposureReadTimeout);
+                var containers = await _docker.ListContainersAsync(all: true, serverId, cts.Token).WaitAsync(cts.Token);
+                foreach (var container in containers.Where(c => _selfContainerNames.Contains(c.Name.TrimStart('/'))))
+                {
+                    found = true;
+                    var label = container.Labels.Keys
+                        .Where(k => prefixes.Any(p => k.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                        .Order(StringComparer.Ordinal).FirstOrDefault();
+                    if (label is not null)
+                        return new ReadinessCheck(SelfExposureTitle, false,
+                            $"Whiskers itself is published through `{label}` with sign-in turned off.", null, null);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return new ReadinessCheck(SelfExposureTitle, false, unknown, null, null);
+        }
+        return found ? null : new ReadinessCheck(SelfExposureTitle, false, unknown, null, null);
+    }
+
+    /// <summary>
+    /// R1-44 (contract 0007): the per-host credential lines and the live lines together. The live arguments are read
+    /// first so the per-host line of a host whose arguments cannot be read points to the break-glass re-onboarding
+    /// instead of „Migrieren“ (review r2 A: a restored older self-backup brings back the record and the journal
+    /// together, so only the live read shows that the host no longer admits what the record names).
+    /// </summary>
+    internal async Task<IReadOnlyList<ReadinessCheck>> MtlsChecksAsync(
+        Func<string, CancellationToken, Task<Whiskers.Services.Certificates.MtlsLiveAllowList>>? read)
+    {
+        if (read is null) return MtlsClientCredentialChecks();
+        var results = await ReadLiveAllowListsAsync(read);
+        var unreadable = results.Where(r => !r.Live.Readable).Select(r => r.Server.Id).ToHashSet(StringComparer.Ordinal);
+        var checks = new List<ReadinessCheck>(MtlsClientCredentialChecks(unreadable));
+        checks.AddRange(LiveAllowListChecks(results));
+        return checks;
+    }
+
+    /// <summary>
+    /// R1-44 (contract 0007, review m-9 and amendment 8): what each mTLS host's ghostunnel actually runs with, read live
+    /// (<c>docker inspect</c>, one bounded read per host, in parallel). One line names every host whose ghostunnel is not
+    /// running or whose arguments cannot be read — the mTLS channel is then the broken management path and the way back is
+    /// the break-glass re-onboarding over SSH; another names every narrowed host whose running <c>--allow-cn</c> list is
+    /// not exactly its own name (a hand edit, a restored compose file).
+    /// </summary>
+    internal async Task<IReadOnlyList<ReadinessCheck>> LiveAllowListChecksAsync(
+        Func<string, CancellationToken, Task<Whiskers.Services.Certificates.MtlsLiveAllowList>> read)
+        => LiveAllowListChecks(await ReadLiveAllowListsAsync(read));
+
+    private async Task<(Whiskers.Models.ServerConfig Server, Whiskers.Services.Certificates.MtlsLiveAllowList Live)[]> ReadLiveAllowListsAsync(
+        Func<string, CancellationToken, Task<Whiskers.Services.Certificates.MtlsLiveAllowList>> read)
+    {
+        if (_clientCredentials is null || _servers is null) return [];
+        var hosts = _servers.GetServers()
+            .Where(s => s.TcpUseTls && !string.IsNullOrWhiteSpace(s.TcpHost) && !string.IsNullOrWhiteSpace(s.TcpClientCertPath))
+            .ToList();
+        if (hosts.Count == 0) return [];
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        return await Task.WhenAll(hosts.Select(async s =>
+        {
+            try { return (Server: s, Live: await read(s.Id, cts.Token)); }
+            catch (Exception ex) { return (Server: s, Live: new Whiskers.Services.Certificates.MtlsLiveAllowList(false, false, [], ex.Message)); }
+        }));
+    }
+
+    private List<ReadinessCheck> LiveAllowListChecks(
+        IReadOnlyList<(Whiskers.Models.ServerConfig Server, Whiskers.Services.Certificates.MtlsLiveAllowList Live)> results)
+    {
+        var checks = new List<ReadinessCheck>();
+        if (_clientCredentials is not { } store || results.Count == 0) return checks;
+        var hosts = results;
+
+        var down = results.Where(r => !r.Live.Readable || !r.Live.Running)
+            .Select(r => r.Server.Name + (r.Live.Readable ? " (ghostunnel läuft nicht)" : " (Argumente nicht lesbar)"))
+            .ToList();
+        checks.Add(new ReadinessCheck("mTLS-Proxy (ghostunnel) läuft", down.Count == 0,
+            down.Count == 0
+                ? $"Auf allen {hosts.Count} mTLS-Hosts läuft ghostunnel; die laufenden Argumente sind lesbar."
+                : "Nicht erreichbar über mTLS: " + string.Join(", ", down) + ". Der mTLS-Kanal ist der einzige Verwaltungsweg; " +
+                  "zurück geht es über das Notfall-Re-Onboarding per SSH (docs/operations/per-host-mtls-migration.md).",
+            down.Count == 0 ? null : "/servers", down.Count == 0 ? null : "Server"));
+
+        // Every readable host whose running ghostunnel still admits the shared name, whatever its record uses —
+        // operator-supplied credentials included (contract 0007, amendment 3 m-9; review r1 M1): a stolen shared key opens it.
+        var sharedCn = Whiskers.Services.Certificates.MtlsCertificateService.CommonNameOf(store.SharedPaths.Cert)
+                       ?? Whiskers.Services.Certificates.MtlsCertificateService.SharedClientCommonName;
+        var admitShared = results.Where(r => r.Live is { Readable: true, Running: true } && r.Live.AllowedCommonNames.Contains(sharedCn))
+            .Select(r => r.Server.Name).ToList();
+        checks.Add(new ReadinessCheck("Gemeinsame Client-Identität im laufenden ghostunnel", admitShared.Count == 0,
+            admitShared.Count == 0
+                ? $"Kein lesbarer mTLS-Host nimmt laut docker inspect noch {sharedCn} an."
+                : $"Nimmt laut docker inspect noch {sharedCn} an: " + string.Join(", ", admitShared) +
+                  ". Ein gestohlener gemeinsamer Schlüssel öffnet diese Hosts. Von Whiskers verwaltete Hosts: „Migrieren“; " +
+                  "Hosts mit selbst gesetzten Zertifikaten: --allow-cn dort von Hand einengen (docs/operations/per-host-mtls-migration.md).",
+            admitShared.Count == 0 ? null : "/servers", admitShared.Count == 0 ? null : "Server"));
+
+        var mismatched = new List<string>();
+        foreach (var (server, live) in results.Where(r => r.Live is { Readable: true, Running: true }))
+        {
+            if (!Whiskers.Services.Certificates.MtlsClientCredentialStore.IsValidServerId(server.Id)) continue;
+            var status = store.StatusOf(server);
+            if (status.Kind != Whiskers.Services.Certificates.MtlsClientCredentialKind.Own || store.ReadJournal(server.Id) is not { IsNarrowed: true })
+                continue;
+            if (live.AllowedCommonNames.Count != 1 || live.AllowedCommonNames[0] != status.CommonName)
+                mismatched.Add($"{server.Name} (läuft mit {string.Join(", ", live.AllowedCommonNames)})");
+        }
+        checks.Add(new ReadinessCheck("Laufende --allow-cn-Liste", mismatched.Count == 0,
+            mismatched.Count == 0
+                ? "Jeder eingeengte Host nimmt laut docker inspect genau seine eigene Client-Identität an."
+                : "Eingeengt, aber der laufende ghostunnel nimmt anderes an: " + string.Join(", ", mismatched) + ". „Migrieren“ erneut starten.",
+            mismatched.Count == 0 ? null : "/servers", mismatched.Count == 0 ? null : "Server"));
+        return checks;
+    }
+
+    /// <summary>
+    /// R1-44 (contract 0007): one line per mTLS host about its client credential — a host on the shared credential and a
+    /// migration that is not finished are not OK, and so is a host whose live ghostunnel arguments could not be read
+    /// (<paramref name="unreadable"/>): after an older self-backup was restored, the record and the journal come back
+    /// together and name a credential the host no longer admits, so the way back is the break-glass re-onboarding, not
+    /// „Migrieren“ — plus the shared key still lying around while hosts no longer accept it, and the modes (Unix) or
+    /// ACLs (Windows) of every client key file.
+    /// </summary>
+    internal IReadOnlyList<ReadinessCheck> MtlsClientCredentialChecks(IReadOnlySet<string>? unreadable = null)
+    {
+        var checks = new List<ReadinessCheck>();
+        if (_clientCredentials is not { } store || _servers is null) return checks;
+
+        var narrowedHosts = 0;
+        foreach (var server in _servers.GetServers().Where(s => s.TcpUseTls && !string.IsNullOrWhiteSpace(s.TcpClientCertPath)))
+        {
+            var title = $"mTLS-Client-Identität: {server.Name}";
+            if (!Whiskers.Services.Certificates.MtlsClientCredentialStore.IsValidServerId(server.Id))
+            {
+                checks.Add(new ReadinessCheck(title, false, $"Die Server-ID '{server.Id}' taugt nicht als Verzeichnisname; dieser Host kann keine eigene Identität bekommen.", null, null));
+                continue;
+            }
+            var status = store.StatusOf(server);
+            var journal = store.ReadJournal(server.Id);
+            switch (status.Kind)
+            {
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared or Whiskers.Services.Certificates.MtlsClientCredentialKind.Own
+                    when unreadable?.Contains(server.Id) == true:
+                    // E.g. an older self-backup restored after a migration or rotation (review r2 A): the record and the
+                    // journal name a credential the host no longer admits, so „Migrieren“ cannot reach it either.
+                    if (journal is { IsNarrowed: true }) narrowedHosts++;
+                    checks.Add(new ReadinessCheck(title, false,
+                        (status.Kind == Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared
+                            ? "Der Eintrag nennt die gemeinsame Client-Identität"
+                            : $"Der Eintrag nennt {status.CommonName} (Generation {status.Generation})") +
+                        ", aber die laufenden ghostunnel-Argumente des Hosts sind nicht lesbar. Ist der Host nur gerade nicht " +
+                        "erreichbar, später erneut prüfen. Bleibt es so, nimmt er diese Identität vermutlich nicht mehr an (älteres " +
+                        "Backup zurückgespielt?): „Migrieren“ erreicht ihn dann nicht; zurück über das Notfall-Re-Onboarding per SSH " +
+                        "(docs/operations/per-host-mtls-migration.md, „Älteres Backup“).", "/servers", "Server"));
+                    break;
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Shared:
+                    checks.Add(new ReadinessCheck(title, false,
+                        "Nutzt noch die gemeinsame Client-Identität: ein gestohlener Schlüssel öffnet jeden Host, der sie annimmt. " +
+                        "Auf der Server-Seite „Migrieren“ (Anleitung: docs/operations/per-host-mtls-migration.md).", "/servers", "Server"));
+                    break;
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Own when journal is { IsNarrowed: true }:
+                    narrowedHosts++;
+                    checks.Add(new ReadinessCheck(title, true,
+                        $"Eigene Identität {status.CommonName} (Generation {status.Generation})" +
+                        (status.NotAfterUtc is { } until ? $", gültig bis {until:yyyy-MM-dd}" : "") +
+                        "; der Host nimmt nur sie an.", null, null));
+                    break;
+                case Whiskers.Services.Certificates.MtlsClientCredentialKind.Own:
+                    checks.Add(new ReadinessCheck(title, false,
+                        $"Eigene Identität {status.CommonName}, aber die Umstellung ist nicht abgeschlossen (Phase {journal?.Phase ?? 0} von 5): " +
+                        "der Host nimmt womöglich noch die gemeinsame Identität an. „Migrieren“ erneut starten — es setzt an der Stelle fort.", "/servers", "Server"));
+                    break;
+                default:
+                    checks.Add(new ReadinessCheck(title, true,
+                        "Vom Betreiber gesetzte Client-Zertifikatspfade; Whiskers verwaltet sie nicht. Ob der ghostunnel des Hosts " +
+                        "die gemeinsame Identität noch annimmt, zeigt die Zeile „Gemeinsame Client-Identität im laufenden ghostunnel“.", null, null));
+                    break;
+            }
+        }
+
+        var shared = store.SharedPaths;
+        if (File.Exists(shared.Key) && narrowedHosts > 0)
+            checks.Add(new ReadinessCheck("Gemeinsamer mTLS-Client-Schlüssel", false,
+                $"Der gemeinsame Client-Schlüssel liegt noch im Datenverzeichnis, obwohl {narrowedHosts} Host(s) ihn nicht mehr annehmen — " +
+                "vor dem Stilllegen, oder nach dem Zurückspielen eines älteren Backups (ältere Self-Backups enthalten ihn noch). " +
+                "Sind alle Hosts migriert: auf der Server-Seite stilllegen. Ist ein Host so nicht mehr erreichbar: Notfall-Re-Onboarding per SSH.",
+                "/servers", "Server"));
+
+        var keys = store.KeyFiles();
+        if (keys.Count > 0)
+        {
+            var exposed = keys.Where(KeyIsExposed).Select(k => Path.GetRelativePath(Path.GetDirectoryName(shared.Key)!, k).Replace('\\', '/')).ToList();
+            checks.Add(new ReadinessCheck("mTLS-Client-Schlüssel geschützt", exposed.Count == 0,
+                exposed.Count == 0
+                    ? (OperatingSystem.IsWindows()
+                        ? "Keiner der Client-Schlüssel ist für Jeder, Benutzer oder authentifizierte Benutzer lesbar."
+                        : "Alle Client-Schlüssel haben den Modus 0600.")
+                    : (OperatingSystem.IsWindows()
+                        ? "Für alle Benutzer lesbar: "
+                        : "Nicht 0600: ") + string.Join(", ", exposed) + ".",
+                null, null));
+        }
+        return checks;
+    }
+
+    /// <summary>Unix: anything but 0600. Windows: a read grant to Everyone, Users or Authenticated Users.</summary>
+    internal static bool KeyIsExposed(string path)
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+                return File.GetUnixFileMode(path) != (UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            return WindowsKeyIsExposed(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static bool WindowsKeyIsExposed(string path)
+    {
+        var broad = new[]
+        {
+            new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null),
+            new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null),
+            new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.AuthenticatedUserSid, null),
+        };
+        var rules = new FileInfo(path).GetAccessControl()
+            .GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier));
+        foreach (System.Security.AccessControl.FileSystemAccessRule rule in rules)
+            if (rule.AccessControlType == System.Security.AccessControl.AccessControlType.Allow
+                && (rule.FileSystemRights & System.Security.AccessControl.FileSystemRights.ReadData) != 0
+                && broad.Contains(rule.IdentityReference))
+                return true;
+        return false;
     }
 
     /// <summary>The unreadable store copies (<c>*.corrupt-*</c>, R1-35; the guardrails' <c>*.unreadable-*</c>) in the

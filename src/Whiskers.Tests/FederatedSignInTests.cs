@@ -8,8 +8,8 @@ using Whiskers.Services.Auth;
 
 namespace Whiskers.Tests;
 
-/// <summary>R1-22: the Google/OIDC whitelist gate and the failed provider round trip are audited; the gate decides
-/// exactly as before.</summary>
+/// <summary>R1-22: the Google/OIDC gate and the failed provider round trip are audited. R1-27: the gate decides through
+/// <see cref="IFederatedAdmission"/> and records a refused stranger as anonymous.</summary>
 public sealed class FederatedSignInTests
 {
     private sealed class Whitelist(params string[] allowed) : IWhitelistService
@@ -40,6 +40,19 @@ public sealed class FederatedSignInTests
         public Task SignedOutAsync(HttpContext context) => Task.CompletedTask;
     }
 
+    private static (DefaultHttpContext Http, Recording Audit) Http(IFederatedAdmission admission)
+    {
+        var audit = new Recording();
+        var http = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection()
+                .AddSingleton(admission)
+                .AddSingleton<IAuthAuditLog>(audit)
+                .BuildServiceProvider(),
+        };
+        return (http, audit);
+    }
+
     private static (DefaultHttpContext Http, Recording Audit) Http(params string[] allowed)
     {
         var audit = new Recording();
@@ -53,9 +66,13 @@ public sealed class FederatedSignInTests
         return (http, audit);
     }
 
-    private static TicketReceivedContext Ticket(HttpContext http, string scheme, string email)
+    private static TicketReceivedContext Ticket(HttpContext http, string scheme, string email, string subject = "sub-1")
     {
-        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Email, email)], scheme));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, subject, ClaimValueTypes.String, OidcIdentityBindingTests.OidcIssuer),
+            new Claim(ClaimTypes.Email, email), new Claim(AuthConstants.EmailVerifiedClaim, "true"),
+        ], scheme));
         return new TicketReceivedContext(http, new AuthenticationScheme(scheme, scheme, typeof(GoogleHandler)),
             new GoogleOptions(), new AuthenticationTicket(principal, scheme));
     }
@@ -65,26 +82,63 @@ public sealed class FederatedSignInTests
     [InlineData("oidc", "oidc")]
     public async Task An_allowed_sign_in_passes_and_is_recorded(string scheme, string method)
     {
-        var (http, audit) = Http("ops@example.com");
-        var context = Ticket(http, scheme, "ops@example.com");
+        // R1-27: allowed = admitted by the admission (a configured, verified address of a trusted provider).
+        await using var world = await BindingWorld.CreateAsync(trustOidc: true);
+        var (http, audit) = Http(world.Admission);
+        var context = Ticket(http, scheme, OidcIdentityBindingTests.Ops);
 
         await FederatedSignIn.WhitelistGateAsync(context, "/sw");
 
-        Assert.Null(context.Result);   // not handled: the cookie is issued as before
-        Assert.Equal(("in", method, "ops@example.com", null), Assert.Single(audit.Rows));
+        Assert.Null(context.Result);   // not handled: the cookie is issued
+        Assert.Equal(("in", method, OidcIdentityBindingTests.Ops, null), Assert.Single(audit.Rows));
+        Assert.Equal(AuthConstants.FederatedScheme, context.Principal!.Identity!.AuthenticationType);
     }
 
     [Fact]
-    public async Task A_sign_in_off_the_whitelist_is_refused_as_before_and_recorded()
+    public async Task A_sign_in_off_the_whitelist_is_refused_and_a_stranger_is_recorded_as_anonymous()
     {
-        var (http, audit) = Http("ops@example.com");
+        await using var world = await BindingWorld.CreateAsync(trustOidc: true);
+        var (http, audit) = Http(world.Admission);
         var context = Ticket(http, "oidc", "intruder@example.com");
 
         await FederatedSignIn.WhitelistGateAsync(context, "/sw");
 
         Assert.True(context.Result!.Handled);
         Assert.Equal("/sw/login?error=unauthorized", http.Response.Headers.Location.ToString());
-        Assert.Equal(("refused", "oidc", "intruder@example.com", AuthAuditReasons.NotWhitelisted), Assert.Single(audit.Rows));
+        // R1-27: the address of someone who is no configured entry is not recorded (like an unknown local account).
+        Assert.Equal(("refused", "oidc", null, AuthAuditReasons.NotWhitelisted), Assert.Single(audit.Rows));
+    }
+
+    [Fact]
+    public async Task A_refused_configured_account_is_recorded_with_its_account_and_the_reason()
+    {
+        await using var world = await BindingWorld.CreateAsync();   // OIDC not trusted
+        var (http, audit) = Http(world.Admission);
+        var context = Ticket(http, "oidc", OidcIdentityBindingTests.Ops);
+
+        await FederatedSignIn.WhitelistGateAsync(context, "");
+
+        Assert.True(context.Result!.Handled);
+        Assert.Equal("/login?error=unauthorized", http.Response.Headers.Location.ToString());
+        Assert.Equal(("refused", "oidc", OidcIdentityBindingTests.Ops, AuthAuditReasons.PendingConfirmation), Assert.Single(audit.Rows));
+    }
+
+    [Fact]
+    public async Task An_admission_that_throws_refuses()
+    {
+        var (http, audit) = Http(new ThrowingAdmission());
+        var context = Ticket(http, "Google", OidcIdentityBindingTests.Ops);
+
+        await FederatedSignIn.WhitelistGateAsync(context, "");
+
+        Assert.True(context.Result!.Handled);
+        Assert.Equal(("refused", "google", null, AuthAuditReasons.StoreUnavailable), Assert.Single(audit.Rows));
+    }
+
+    private sealed class ThrowingAdmission : IFederatedAdmission
+    {
+        public Task<AdmissionDecision> AdmitAsync(FederatedSignInClaims claims, CancellationToken ct = default) =>
+            throw new IOException("store down");
     }
 
     [Fact]

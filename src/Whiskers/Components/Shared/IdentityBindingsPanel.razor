@@ -1,0 +1,174 @@
+@using Whiskers.Services.Auth
+@inject IIdentityBindingStore Bindings
+@inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject IConfiguration Configuration
+@inject ISnackbar Snackbar
+@inject IUiMutationRunner Mutations
+@inject IStringLocalizer<SharedResource> L
+
+@* R1-27 (contract 0003): the Google/OIDC sign-in identities. A binding ties a provider's subject (issuer + subject, shown
+   only as a fingerprint) to a configured account; a pending request waits for an Admin to confirm it (a provider that is
+   not trusted to verify addresses, an unverified address, a second provider or a changed subject). Confirm and Remove are
+   audited gateway calls (identity.binding_confirm / identity.binding_remove); the store refuses to remove the last way the
+   last Admin who can sign in has. *@
+
+@if (_isAdmin)
+{
+<MudText Typo="Typo.body2" Class="mb-3">@L["IdentityBindings_Intro"]</MudText>
+@if (_authDisabled)
+{
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">@L["IdentityBindings_AuthDisabled"]</MudAlert>
+}
+@if (!_available)
+{
+    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3" id="identity-bindings-unavailable">@L["IdentityBindings_Unavailable"]</MudAlert>
+}
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">@L["IdentityBindings_Pending_Heading"]</MudText>
+<MudSimpleTable Dense="true" Elevation="0" Class="mb-4" id="identity-pending-table">
+    <thead><tr>
+        <th>@L["IdentityBindings_Th_Account"]</th><th>@L["IdentityBindings_Th_Provider"]</th><th>@L["IdentityBindings_Th_Issuer"]</th>
+        <th>@L["IdentityBindings_Th_Fingerprint"]</th><th>@L["IdentityBindings_Th_Reason"]</th>
+        <th>@L["IdentityBindings_Th_EmailVerified"]</th><th>@L["IdentityBindings_Th_Expires"]</th><th></th>
+    </tr></thead>
+    <tbody>
+        @if (_snapshot.Pending.Count == 0)
+        {
+            <tr><td colspan="8">@L["IdentityBindings_None_Pending"]</td></tr>
+        }
+        @foreach (var p in _snapshot.Pending)
+        {
+            <tr>
+                <td>@p.Account</td>
+                <td>@p.Provider</td>
+                <td style="word-break: break-all;">@p.Issuer</td>
+                <td style="font-family: monospace;">@p.Fingerprint</td>
+                <td>@Text("IdentityBindings_Reason_" + p.Reason, p.Reason)</td>
+                <td>@(p.EmailVerifiedAsserted ? L["IdentityBindings_Yes"] : L["IdentityBindings_No"])</td>
+                <td>@p.ExpiresUtc.ToString("yyyy-MM-dd HH:mm") UTC</td>
+                <td style="white-space: nowrap;">
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Check"
+                               OnClick="@(() => Confirm(p.Id))" Disabled="@_busy">@L["IdentityBindings_Button_Confirm"]</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                               OnClick="@(() => Remove(p.Id))" Disabled="@_busy">@L["IdentityBindings_Button_Remove"]</MudButton>
+                </td>
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+
+<MudText Typo="Typo.subtitle2" Class="mb-1">@L["IdentityBindings_Bindings_Heading"]</MudText>
+<MudSimpleTable Dense="true" Elevation="0" Class="mb-3" id="identity-bindings-table">
+    <thead><tr>
+        <th>@L["IdentityBindings_Th_Account"]</th><th>@L["IdentityBindings_Th_Provider"]</th><th>@L["IdentityBindings_Th_Issuer"]</th>
+        <th>@L["IdentityBindings_Th_Fingerprint"]</th><th>@L["IdentityBindings_Th_Bound"]</th>
+        <th>@L["IdentityBindings_Th_LastSignIn"]</th><th></th>
+    </tr></thead>
+    <tbody>
+        @if (_snapshot.Bindings.Count == 0)
+        {
+            <tr><td colspan="7">@L["IdentityBindings_None_Bindings"]</td></tr>
+        }
+        @foreach (var b in _snapshot.Bindings)
+        {
+            <tr>
+                <td>@b.Account</td>
+                <td>@b.Provider</td>
+                <td style="word-break: break-all;">@b.Issuer</td>
+                <td style="font-family: monospace;">@b.Fingerprint</td>
+                <td>@Text("IdentityBindings_Method_" + b.Method, b.Method), @b.BoundUtc.ToString("yyyy-MM-dd HH:mm") UTC</td>
+                <td>@(b.LastSignInDay ?? "–")</td>
+                <td style="white-space: nowrap;">
+                    @if (_confirmRemove == b.Id)
+                    {
+                        <MudText Typo="Typo.caption" Class="mr-2">@L["IdentityBindings_Confirm_Remove"]</MudText>
+                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" OnClick="@(() => Remove(b.Id))"
+                                   Disabled="@_busy">@L["IdentityBindings_Button_RemoveConfirm"]</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => _confirmRemove = null)">@L["IdentityBindings_Button_Cancel"]</MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.LinkOff"
+                                   OnClick="@(() => _confirmRemove = b.Id)" Disabled="@_busy">@L["IdentityBindings_Button_Remove"]</MudButton>
+                    }
+                </td>
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+<MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">@L["IdentityBindings_Hint"]</MudText>
+}
+
+@code {
+    private bool _isAdmin;
+    private bool _authDisabled;
+    private bool _available = true;
+    private bool _busy;
+    private string? _confirmRemove;
+    private IdentityBindingSnapshot _snapshot = new([], []);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The Settings page is Admin-only; the panel checks again before it shows anything.
+        _isAdmin = await CurrentUser.HasRoleAsync(Whiskers.Models.AppRole.Admin);
+        _authDisabled = Configuration.GetValue<bool>("Auth:Disabled");
+        if (_isAdmin) Load();
+    }
+
+    private void Load()
+    {
+        try
+        {
+            _snapshot = Bindings.Snapshot();
+            _available = true;
+        }
+        catch (IdentityBindingStoreUnavailableException)
+        {
+            _snapshot = new([], []);
+            _available = false;
+        }
+    }
+
+    private string Text(string key, string fallback)
+    {
+        var text = L[key];
+        return text.ResourceNotFound ? fallback : text.Value;
+    }
+
+    private async Task Confirm(string id)
+    {
+        var result = await RunAsync(() => Mutations.RunAsync("identity.binding_confirm", new { binding = id },
+            ct => Bindings.ConfirmAsync(id, ct)));
+        if (result is { Success: true }) Snackbar.Add(L["IdentityBindings_Snackbar_Confirmed"].Value, Severity.Success);
+        Load();
+    }
+
+    private async Task Remove(string id)
+    {
+        _confirmRemove = null;
+        var result = await RunAsync(() => Mutations.RunAsync("identity.binding_remove", new { binding = id },
+            ct => Bindings.RemoveAsync(id, ct)));
+        if (result is { Success: true }) Snackbar.Add(L["IdentityBindings_Snackbar_Removed"].Value, Severity.Success);
+        Load();
+    }
+
+    /// <summary>Runs one gated call and shows why it was refused; the result only when it succeeded.</summary>
+    private async Task<IdentityBindingResult?> RunAsync(Func<Task<IdentityBindingResult>> call)
+    {
+        _busy = true;
+        try
+        {
+            var result = await call();
+            if (!result.Success) Snackbar.Add(Text($"IdentityBindings_Error_{result.Error}", result.Error ?? ""), Severity.Warning);
+            return result;
+        }
+        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) when (ex is MutationFailedException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // The type only: the message of a store failure is not shown (it is in the log).
+            Snackbar.Add(L["IdentityBindings_Error_failed", ex.GetType().Name].Value, Severity.Error);
+        }
+        finally { _busy = false; }
+        return null;
+    }
+}

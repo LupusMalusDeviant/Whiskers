@@ -20,10 +20,24 @@ public sealed class MutationScopeViolationException : InvalidOperationException
         OpenScope = openScope;
     }
 
+    /// <summary>A call of a decided capability whose <see cref="MutationTargetAttribute"/> argument names something the
+    /// open decision did not cover, or names it on another server.</summary>
+    public MutationScopeViolationException(string capabilityId, string method, string? openScope, string? target)
+        : base($"'{capabilityId}' must act on what the Mutation Gateway decided ({method}): '{target}' is not the target " +
+               $"the open decision '{openScope}' was taken for, or not on its server.")
+    {
+        CapabilityId = capabilityId;
+        OpenScope = openScope;
+        Target = target;
+    }
+
     public string CapabilityId { get; }
 
     /// <summary>The capability of the innermost open scope, or <c>null</c> when none was open.</summary>
     public string? OpenScope { get; }
+
+    /// <summary>For a refused target binding: the target the call named; otherwise <c>null</c>.</summary>
+    public string? Target { get; }
 }
 
 /// <summary>
@@ -194,6 +208,21 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
             var server = actsOnServer ? _monitor.ResolveServer(named, named is null ? OmittedServer.Of(marked) : null) : null;
             Check(capability, targetMethod, MutationScope.Authorizes(capability, actsOnServer, server,
                 id => _monitor.ResolveServer(id)));
+            // The call is bound to the decision's target, not only its capability: whatever the execution delegate
+            // computed or captured, it acts only on an identity the decision covered, on the decided server.
+            if (TargetArgumentIndex(marked) is var t and >= 0)
+            {
+                var identity = args is not null && t < args.Length ? args[t] as string : null;
+                if (!MutationScope.AuthorizesTarget(capability, identity, actsOnServer, named, server,
+                        id => _monitor.ResolveServer(id)))
+                {
+                    _monitor.ReportOutsideScope(capability, targetMethod);
+                    if (_monitor.Enforces(capability))
+                        throw new MutationScopeViolationException(capability,
+                            $"{targetMethod.DeclaringType?.Name}.{targetMethod.Name}", MutationScope.Current?.CapabilityId,
+                            identity);
+                }
+            }
             // Review round 4: execution is bound to the identity that was checked. An omitted server is handed to the
             // implementation as the canonical id resolved above, so a default changed between this check and the
             // transport's own lookup cannot redirect the call to another server.
@@ -229,6 +258,9 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
         return -1;
     }
 
+    /// <summary>The position of the operation's <see cref="MutationTargetAttribute"/> parameter, or -1 when it has none.</summary>
+    private static int TargetArgumentIndex(MethodInfo method) => MutatingMethods.TargetIndexOf(method);
+
     /// <summary>Refuses (enforced) or counts (report mode, tests) a call the open scope did not decide.</summary>
     private void Check(string capability, MethodInfo method, bool decided)
     {
@@ -254,6 +286,25 @@ public static class MutatingMethods
 {
     private static readonly ConcurrentDictionary<Type, IReadOnlyDictionary<MethodInfo, string>> Cache = new();
     private static readonly ConcurrentDictionary<Type, IReadOnlySet<MethodInfo>> PrimitiveCache = new();
+
+    private static readonly ConcurrentDictionary<MethodInfo, int> TargetCache = new();
+
+    /// <summary>The position of <paramref name="method"/>'s <see cref="MutationTargetAttribute"/> parameter, or -1. More
+    /// than one is a declaration error.</summary>
+    public static int TargetIndexOf(MethodInfo method)
+    {
+        ArgumentNullException.ThrowIfNull(method);
+        return TargetCache.GetOrAdd(method, static m =>
+        {
+            var marked = m.GetParameters().Where(p => p.IsDefined(typeof(MutationTargetAttribute), false))
+                .Select(p => p.Position).ToList();
+            if (marked.Count > 1)
+                throw new InvalidOperationException($"{m.DeclaringType?.Name}.{m.Name} marks more than one [MutationTarget] parameter.");
+            if (marked.Count == 1 && m.GetParameters()[marked[0]].ParameterType != typeof(string))
+                throw new InvalidOperationException($"{m.DeclaringType?.Name}.{m.Name}: a [MutationTarget] parameter must be a string.");
+            return marked.Count == 1 ? marked[0] : -1;
+        });
+    }
 
     /// <summary>The <see cref="MutationPrimitiveAttribute"/> methods of <paramref name="serviceType"/>.</summary>
     public static IReadOnlySet<MethodInfo> PrimitivesOf(Type serviceType)

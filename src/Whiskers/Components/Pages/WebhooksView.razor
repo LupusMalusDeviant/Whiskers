@@ -222,21 +222,14 @@ else
     // The signed-in person as a principal id: the owner of the webhooks they create or take over (R1-09).
     private string? _me;
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["WebhooksView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-22).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required) return true;
+        Snackbar.Add(L["WebhooksView_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -286,7 +279,7 @@ else
     private async Task CreateWebhook()
     {
         if (_me is null) return;
-        if (!await RequireAsync(AppRole.Admin, "webhook.save",
+        if (!await RequireAsync("webhook.save",
                 new { name = _formName, action = _formAction, target = _formTarget, serverId = _formServerId, provider = _formProvider })) return;
         try
         {
@@ -327,7 +320,7 @@ else
     private async Task AdoptWebhook(Whiskers.Models.WebhookEntity wh)
     {
         if (_me is null) return;
-        if (!await RequireAsync(AppRole.Admin, "webhook.save",
+        if (!await RequireAsync("webhook.save",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId, owner = _me })) return;
         try
         {
@@ -357,9 +350,10 @@ else
 
     private async Task TestWebhook(Whiskers.Models.WebhookEntity wh)
     {
-        // Triggering runs restart/rebuild/deploy on the host — gate it behind Operator so a Viewer
-        // cannot fire host actions from the UI. A refusal is decided on the action the test would run (R1-22).
-        if (!await RequireAsync(AppRole.Operator, TestCapabilityOf(wh),
+        // Triggering runs restart/rebuild/deploy on the host. The role is the catalog's for the action the test
+        // would run (INV-13): Operator for restart / rebuild, Admin for compose deploy, Git deploy and anything else;
+        // a refusal is decided on that action (R1-22).
+        if (!await RequireAsync(TestCapabilityOf(wh),
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId })) return;
         Snackbar.Add(L["WebhooksView_Snackbar_Testing", wh.Name].Value, Severity.Info);
         bool success;
@@ -440,7 +434,7 @@ else
 
     private async Task RegenerateSecret(Whiskers.Models.WebhookEntity wh)
     {
-        if (!await RequireAsync(AppRole.Admin, "webhook.rotate_secret",
+        if (!await RequireAsync("webhook.rotate_secret",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["WebhooksView_Dialog_RegenerateTitle"].Value,
@@ -462,7 +456,7 @@ else
 
     private async Task ToggleEnabled(Whiskers.Models.WebhookEntity wh)
     {
-        if (!await RequireAsync(AppRole.Admin, "webhook.set_enabled",
+        if (!await RequireAsync("webhook.set_enabled",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId, enabled = !wh.Enabled })) return;
         try
         {
@@ -496,7 +490,7 @@ else
 
     private async Task DeleteWebhook(Whiskers.Models.WebhookEntity wh)
     {
-        if (!await RequireAsync(AppRole.Admin, "webhook.delete",
+        if (!await RequireAsync("webhook.delete",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["WebhooksView_Dialog_DeleteTitle"].Value,

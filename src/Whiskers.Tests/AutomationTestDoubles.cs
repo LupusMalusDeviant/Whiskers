@@ -13,6 +13,17 @@ internal sealed class MemoryAutomationOwners : IAutomationOwnerStore
 
     public bool IsBlocked(string feature) => Blocked.Contains(feature);
 
+    /// <summary>A blocked feature keeps the owner it had (a suspension), as the file store does.</summary>
+    public AutomationOwnerEntry? GetBlocked(string feature) =>
+        Blocked.Contains(feature) ? _entries.GetValueOrDefault(feature) : null;
+
+    /// <summary>The owner file could not be read: blocked, and nobody is named.</summary>
+    public void Unreadable(string feature)
+    {
+        _entries.Remove(feature);
+        Blocked.Add(feature);
+    }
+
     public Task<string?> SetAsync(string feature, string ownerId, CancellationToken ct = default)
     {
         var previous = _entries.GetValueOrDefault(feature)?.OwnerId;

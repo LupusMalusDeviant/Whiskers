@@ -37,16 +37,27 @@ public static class NotificationFormatter
         NotificationEventTypes.MetricsGap => ("No readings: alerts cannot fire for this", "Warning"),
         "metrics_gap_recovered" => ("Readings are back", "Info"),
         NotificationEventTypes.MetricAnomaly => ("Metric anomaly", "Warning"),
+        // R1-58: disk health — SMART, md arrays, ZFS pools.
+        NotificationEventTypes.DiskFailing => ("Disk failing (SMART)", "Error"),
+        "disk_failing_recovered" => ("Disks report SMART healthy again", "Info"),
+        NotificationEventTypes.ArrayDegraded => ("Disk array degraded", "Error"),
+        "array_degraded_recovered" => ("Disk arrays healthy again", "Info"),
+        NotificationEventTypes.DiskHealthUnknown => ("Disk health can no longer be read", "Warning"),
+        "disk_health_unknown_recovered" => ("Disk health readable again", "Info"),
         NotificationEventTypes.AgentAction => ("AI-Agent", "Info"),
         NotificationEventTypes.AgentApproval => ("Approval required", "Warning"),
         NotificationEventTypes.AutoUpdateFailed => ("Auto-update failed", "Error"),
         NotificationEventTypes.WebhookDisabled => ("Webhook disabled", "Warning"),
         NotificationEventTypes.AutomationSuspended => ("Automation suspended", "Warning"),
         NotificationEventTypes.AutomationRefused => ("Automation refused", "Warning"),
+        NotificationEventTypes.ExposureChange => ("Exposure change deployed", "Info"),
+        NotificationEventTypes.ExposureViolation => ("Undecided exposure after a deployment", "Error"),
         NotificationEventTypes.ServerUnreachable => ("Server unreachable", "Error"),
         NotificationEventTypes.ServerRecovered => ("Server reachable again", "Info"),
         NotificationEventTypes.CertificateExpiring => ("Certificate expires soon", "Warning"),
         NotificationEventTypes.CertificateExpired => ("Certificate expired", "Error"),
+        NotificationEventTypes.EndpointCheckFailed => ("Endpoint check failing", "Error"),
+        "endpoint_check_failed_recovered" => ("Endpoint check passing again", "Info"),
         // Whiskers throttling ITSELF. Never silent: a self-imposed pause that nobody is told about
         // turns "quiet" into "blind", and hides the next incident behind the fix for the last one.
         NotificationEventTypes.HostCpuAnomaly => ("Server CPU is far from this host's normal", "Warning"),
@@ -106,8 +117,13 @@ public static class NotificationFormatter
                 or "high_cpu_recovered" or "high_memory_recovered")
             return string.IsNullOrWhiteSpace(e.ContainerId) ? "servers" : $"container/{e.ContainerId}";
         if (e.EventType is NotificationEventTypes.HighDisk or "high_disk_recovered") return "servers";
+        // R1-58: the disk-health block sits in the server's panel on the dashboard.
+        if (e.EventType is NotificationEventTypes.DiskFailing or "disk_failing_recovered"
+                or NotificationEventTypes.ArrayDegraded or "array_degraded_recovered"
+                or NotificationEventTypes.DiskHealthUnknown or "disk_health_unknown_recovered") return "";
         if (e.EventType == "log_rotation_missing") return "servers";
         if (e.EventType is "certificate_expiring" or "certificate_expired") return "servers";
+        if (e.EventType is NotificationEventTypes.EndpointCheckFailed or "endpoint_check_failed_recovered") return "checks";
         if (e.EventType is "loops_paused" or "loops_resumed") return "servers";
         if (e.EventType is "monitoring_stalled" or "monitoring_resumed") return "servers";
         if (e.EventType is "log_scan_suspended" or "log_scan_resumed") return "logs";

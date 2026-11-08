@@ -90,15 +90,24 @@
             {
                 _current = _new = _confirm = "";
                 Snackbar.Add(L["Account_Snackbar_Changed"].Value, Severity.Success);
-                // Every session of the account has ended (new security stamp, R1-26): sign in again.
-                Nav.NavigateTo("logout", forceLoad: true);
+                // Every session of the account has ended (new security stamp, R1-26): sign in again. The cookie check
+                // refuses this session on the next request, so a full load of the sign-in page drops it (R1-50: the
+                // sign-out endpoint itself takes a POST with an antiforgery token).
+                Nav.NavigateTo("login", forceLoad: true);
                 return;
             }
             var text = L[$"LocalAccounts_Error_{result.Error}"];
             _error = text.ResourceNotFound ? result.Error : text.Value;
             _current = "";
         }
-        catch (MutationRefusedException ex) { _error = ex.Message; }
+        catch (MutationRefusedException ex)
+        {
+            // Contract 0009 (E4): refused by the kill switch's rule, said in the user's language. The refusal itself
+            // says so, not the policy as it is now (it may have changed since).
+            _error = ex.MatchedRules.Contains(Whiskers.Configuration.KillSwitchExemptions.RuleId, StringComparer.Ordinal)
+                ? L["KillSwitch_Blocked_Message"].Value
+                : ex.Message;
+        }
         catch (Exception ex) when (ex is MutationFailedException or InvalidOperationException)
         {
             _error = L["LocalAccounts_Error_failed", ex.GetType().Name].Value;

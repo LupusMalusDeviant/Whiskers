@@ -5,6 +5,7 @@
 @inject Whiskers.Services.Server.IHostCommandExecutor Executor
 @inject IUiMutationRunner Mutations
 @inject IComposePlanner ComposePlanner
+@inject IComposeRunner ComposeRunner
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject IDockerService DockerService
 @inject ISnackbar Snackbar
@@ -371,21 +372,14 @@
     private bool _loadingTags;
     private string _deployPorts = "";
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["AppStore_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required) return true;
+        Snackbar.Add(L["AppStore_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -508,7 +502,7 @@
     private async Task DeployTemplate()
     {
         // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
-        if (!await RequireAsync(AppRole.Admin, "app.deploy",
+        if (!await RequireAsync("app.deploy",
                 new { projectName = _deployProjectName, appName = _selectedTemplate?.Name, serverId = _deployServerId })) return;
         if (_selectedTemplate == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
         if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
@@ -627,7 +621,7 @@
     private async Task DeployRegistryImage()
     {
         // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
-        if (!await RequireAsync(AppRole.Admin, "app.deploy",
+        if (!await RequireAsync("app.deploy",
                 new { projectName = _deployProjectName, appName = _selectedImage?.PullReference, serverId = _deployServerId })) return;
         if (_selectedImage == null || string.IsNullOrWhiteSpace(_deployProjectName)) return;
         if (_deployProjectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_deployProjectName, @"^[a-zA-Z0-9._-]+$"))
@@ -683,7 +677,7 @@
     private async Task<Whiskers.Services.Server.CommandResult> DeployGatedAsync(string serverId, string yaml, string appName,
         string source)
     {
-        return await Mutations.DeployAsync(Executor, ComposePlanner, "app.deploy",
+        return await Mutations.DeployAsync(Executor, ComposePlanner, ComposeRunner, "app.deploy",
             new { projectName = _deployProjectName, appName, serverId, source },
             ComposeDeployment.FromContent(serverId, ComposeDeployment.DeploymentDirectory(_deployProjectName), yaml));
     }

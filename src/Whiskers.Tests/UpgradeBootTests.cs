@@ -111,7 +111,7 @@ public sealed class UpgradeBootTests
                 Assert.Contains("before any migration", all);
                 return Task.CompletedTask;
             });
-            SqliteConnection.ClearAllPools();
+            TestSqlite.ClearPools(dataDir);   // only this test's files: a global clear tears into parallel tests' pools
             Assert.Equal(before, Applied(paths.DbPath));
         }
         finally

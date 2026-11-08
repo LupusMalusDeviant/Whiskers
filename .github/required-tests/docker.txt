@@ -14,6 +14,42 @@
 1 Whiskers.Tests.PostgresSmokeTests.Audit_chain_writes_verifies_prunes_and_exports_on_real_postgres_with_retries_on
 1 Whiskers.Tests.PostgresSmokeTests.The_cli_migration_keeps_the_sqlite_audit_checkpoint_aside
 
-# PostgreSQL backup and restore (pg_dump/pg_restore), on the current server and on the oldest supported one.
+# PostgreSQL backup and restore (pg_dump/pg_restore), on the current server (18), the previous one (17, installs that
+# have not moved yet) and the oldest supported one.
 33 Whiskers.Tests.PostgresBackupRestoreTests
+33 Whiskers.Tests.PostgresBackupRestorePg17Tests
 33 Whiskers.Tests.PostgresBackupRestorePg14Tests
+
+# The PostgreSQL 17 -> 18 upgrade of the overlay: the guard's script from the compose file against prepared volumes
+# (10 normal-run cases, 4 bad dumps, 5 facts), the guide's dump, fingerprint and restore from 17 into 18 with the
+# restore mode's server checks, rollback and marker failure, the pg_control property of a real 17 start, and compose
+# reading the overlay.
+19 Whiskers.Tests.PostgresUpgradeGuardTests
+6 Whiskers.Tests.PostgresUpgradeTests
+1 Whiskers.Tests.PostgresPgControlTests
+1 Whiskers.Tests.PostgresOverlayComposeTests
+
+# BEGIN release-gate (generated)
+# Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md and docs/v1/RELEASE_GATE.md (contract 0008,
+# R8): one entry per test method named by a ✅ invariant or an accepted exception, the minimum = the cases xUnit
+# discovers. Do not edit by hand; a difference writes the fresh block to this file's .actual.
+1 Whiskers.Tests.PostgresBackupRestoreTests.A_backup_holds_the_database_and_a_restore_brings_back_database_and_files_together
+1 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_cut_off_on_the_volume_is_not_committed_half_way
+1 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_missing_a_column_this_version_uses_is_refused_before_the_commit
+8 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_that_brings_code_into_public_is_refused
+5 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_that_changes_settings_or_objects_outside_public_is_refused
+1 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_whose_history_lags_its_tables_is_refused_before_the_commit
+1 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_without_whiskers_tables_in_public_fails_the_backup
+3 Whiskers.Tests.PostgresBackupRestoreTests.A_meta_command_inside_the_protected_script_is_refused_by_psql
+1 Whiskers.Tests.PostgresBackupRestoreTests.A_postgres_archive_without_the_database_is_refused
+1 Whiskers.Tests.PostgresBackupRestoreTests.A_restore_that_fails_at_its_first_statement_returns_at_once_with_the_reason
+1 Whiskers.Tests.PostgresBackupRestoreTests.A_restore_that_fails_part_way_leaves_the_database_untouched
+2 Whiskers.Tests.PostgresBackupRestoreTests.A_script_that_ends_its_transaction_on_its_own_is_refused
+2 Whiskers.Tests.PostgresBackupRestoreTests.A_script_that_leaves_psql_reading_copy_data_is_not_taken_as_restored
+1 Whiskers.Tests.PostgresBackupRestoreTests.A_script_that_stops_psql_from_reading_is_ended_at_the_time_limit
+1 Whiskers.Tests.PostgresBackupRestoreTests.An_archive_from_an_older_schema_is_restored_and_brought_up_to_date_by_the_start
+1 Whiskers.Tests.PostgresBackupRestoreTests.An_archive_restores_off_the_volume_into_a_fresh_database_and_an_empty_data_directory
+1 Whiskers.Tests.PostgresBackupRestoreTests.An_upgrade_on_postgres_first_takes_a_backup_with_the_dump_of_the_schema_before_it
+1 Whiskers.Tests.PostgresBackupRestoreTests.The_round_trip_works_as_the_recommended_owner_role_without_superuser_rights
+1 Whiskers.Tests.PostgresSmokeTests.A_keyed_refusal_written_twice_is_one_row_on_real_postgres_with_retries_on
+# END release-gate

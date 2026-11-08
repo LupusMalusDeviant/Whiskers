@@ -27,7 +27,13 @@ public static class DatabaseDetector
     public static DatabaseCredentials ExtractCredentials(List<KeyValuePair<string, string>> env, DatabaseType dbType)
     {
         var creds = new DatabaseCredentials();
-        var dict = env.ToDictionary(e => e.Key, e => e.Value, StringComparer.OrdinalIgnoreCase);
+        // Read case-insensitively, but a container's environment is case-sensitive: HTTP_PROXY and http_proxy (Docker's
+        // client proxy configuration sets both) are two entries. The exact spelling a database image documents —
+        // upper case — wins; otherwise the first one listed.
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in env.Where(e => string.Equals(e.Key, e.Key.ToUpperInvariant(), StringComparison.Ordinal)))
+            dict.TryAdd(e.Key, e.Value);
+        foreach (var e in env) dict.TryAdd(e.Key, e.Value);
 
         switch (dbType)
         {
@@ -73,17 +79,6 @@ public static class DatabaseDetector
 
         return creds;
     }
-
-    /// <summary>Get the DB CLI command name for this database type.</summary>
-    public static string GetCliCommand(DatabaseType dbType) => dbType switch
-    {
-        DatabaseType.PostgreSQL => "psql",
-        DatabaseType.MySQL => "mysql",
-        DatabaseType.MongoDB => "mongosh",
-        DatabaseType.Redis => "redis-cli",
-        DatabaseType.Neo4j => "cypher-shell",
-        _ => "sh"
-    };
 
     /// <summary>Get the default internal port for this database type.</summary>
     public static int GetDefaultPort(DatabaseType dbType) => dbType switch

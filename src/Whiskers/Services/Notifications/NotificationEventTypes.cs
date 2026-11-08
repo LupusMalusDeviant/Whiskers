@@ -35,6 +35,16 @@ public static class NotificationEventTypes
     /// <summary>A series had no readings for longer than the gap tolerance: its breach state was reset (R1-56).</summary>
     public const string MetricsGap = "metrics_gap";
 
+    // --- Disk health (R1-58, contract 0005): one raise per breach and a <kind>_recovered, never held by quiet hours ----
+    /// <summary>A disk reports SMART overall-health failed.</summary>
+    public const string DiskFailing = "disk_failing";
+
+    /// <summary>An md array lost disks or a ZFS pool is not online.</summary>
+    public const string ArrayDegraded = "array_degraded";
+
+    /// <summary>A host's disk health that was read turned Unknown (never on a host that had no reading before).</summary>
+    public const string DiskHealthUnknown = "disk_health_unknown";
+
     /// <summary>A point-in-time outlier, not a breach: re-fires after the cool-down, has no recovery.</summary>
     public const string MetricAnomaly = "metric_anomaly";
 
@@ -62,6 +72,9 @@ public static class NotificationEventTypes
     public const string LogScanSuspended = "log_scan_suspended";
     public const string LogScanResumed = "log_scan_resumed";
 
+    /// <summary>R1-57: an endpoint check failed for its open window (contract 0004); closes with a <c>_recovered</c>.</summary>
+    public const string EndpointCheckFailed = "endpoint_check_failed";
+
     // --- Agent, automation and administration --------------------------------------------------------------------
     public const string AgentAction = "agent_action";
     public const string AgentApproval = "agent_approval";
@@ -69,6 +82,14 @@ public static class NotificationEventTypes
     public const string AutomationRefused = "automation_refused";
     public const string OperationsInterrupted = "operations_interrupted";
     public const string WebhookDisabled = "webhook_disabled";
+
+    /// <summary>Contract 0006: a person's (or a person's automation's) compose deployment made a service public or gave it
+    /// powers of the host — one per deployment, carrying service, kind and key only.</summary>
+    public const string ExposureChange = "exposure_change";
+
+    /// <summary>Contract 0006: after <c>up</c> a container exposed something that was not decided (stopped under the agent
+    /// rule set), or a tag could not be restored. Never held.</summary>
+    public const string ExposureViolation = "exposure_violation";
 
     /// <summary>What quiet hours held back, delivered as one message after the window (R1-56).</summary>
     public const string QuietHoursSummary = "quiet_hours_summary";
@@ -106,6 +127,10 @@ public static class NotificationEventTypes
         HostApiSlow => "slow Docker API",
         HostCpuAnomaly => "unusual server CPU",
         HostCpuBaselineDrifted => "drifted CPU baseline",
+        EndpointCheckFailed => "endpoint check",
+        DiskFailing => "failing disk",
+        ArrayDegraded => "degraded array",
+        DiskHealthUnknown => "disk health unknown",
         _ => kind,
     };
 
@@ -114,6 +139,8 @@ public static class NotificationEventTypes
     {
         HighCpu, HighMemory, HighDisk, MetricsGap,
         HostCpuHigh, HostMemoryHigh, HostCpuUnexplained, HostApiSlow, HostCpuAnomaly, HostCpuBaselineDrifted,
+        EndpointCheckFailed,
+        DiskFailing, ArrayDegraded, DiskHealthUnknown,
     };
 
     /// <summary>Every constant above (not the two patterns).</summary>
@@ -142,9 +169,11 @@ public static class NotificationEventTypes
     public static readonly IReadOnlySet<string> UnsuppressibleEvents = new HashSet<string>(StringComparer.Ordinal)
     {
         AutomationSuspended, AutomationRefused, OperationsInterrupted,
-        WebhookDisabled, AgentApproval,
+        WebhookDisabled, AgentApproval, ExposureViolation,
         LoopsPausedReminder, LogScanSuspended, LogScanResumed, MonitoringStalled, MonitoringResumed,
         AutoUpdateFailed, QuietHoursSummary, Test,
+        // R1-58 (decision 4): a dying disk does not wait for the morning — and neither does the end of it (IsSuppressible).
+        DiskFailing, ArrayDegraded, DiskHealthUnknown,
     };
 
     /// <summary>What quiet hours may hold (and a summary reports after the window).</summary>
@@ -153,8 +182,9 @@ public static class NotificationEventTypes
         Unhealthy, OomKilled, Stopped, RestartLoop, ImageUpdate, AutoUpdateStart, CveFinding,
         HighCpu, HighMemory, HighDisk, MetricsGap, MetricAnomaly,
         HostCpuHigh, HostMemoryHigh, HostCpuUnexplained, HostApiSlow, HostCpuAnomaly, HostCpuBaselineDrifted,
+        EndpointCheckFailed,
         ServerUnreachable, ServerRecovered, ServerThrottled, ServerThrottlingEnded, CertificateExpiring, CertificateExpired,
-        LogRotationMissing, LoopsPaused, LoopsResumed, AgentAction,
+        LogRotationMissing, LoopsPaused, LoopsResumed, AgentAction, ExposureChange,
     };
 
     /// <summary>Raise and end of a state: never throttled per channel. Each is announced once by its source (a breach
@@ -187,6 +217,8 @@ public static class NotificationEventTypes
     {
         var type = evt.EventType;
         if (!IsKnown(type) || UnsuppressibleEvents.Contains(type)) return false;
+        // R1-58: the end of a breach whose raise is never held is not held either (disk_failing_recovered, …).
+        if (IsRecovery(type) && UnsuppressibleEvents.Contains(type[..^RecoveredSuffix.Length])) return false;
         if (type == CveFinding && evt.HighestCveSeverity is Whiskers.Models.Cve.CveSeverity.Critical) return false;
         return SuppressibleEvents.Contains(type) || IsLogAlert(type) || IsRecovery(type);
     }

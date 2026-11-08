@@ -80,6 +80,17 @@ public sealed record MutationTarget(string Kind, string Id, string? Name = null,
     /// stored name and repository. Never a name the caller supplied.</summary>
     public IReadOnlyList<string> Aliases { get; init; } = Array.Empty<string>();
 
+    /// <summary>Contract 0006: the exposures a compose deployment adds (<see cref="ComposeExposure.Identity"/>: service,
+    /// kind, key and value), from the plan the resolver made or from the nested decision's <c>exposure</c> and
+    /// <c>exposureWithheld</c> arguments. A withheld one is also in <see cref="Withheld"/>: compared and bound, never
+    /// written. <c>ExposureChangeRule</c> reads only these.</summary>
+    public IReadOnlyList<string> Exposures { get; init; } = Array.Empty<string>();
+
+    /// <summary>Contract 0006 (review m1): the withheld <see cref="Exposures"/> whose key may be shown — only the value
+    /// is withheld (a value from a variable, or a literal value that could be a secret). The reason names their key;
+    /// an entry withheld and not listed here is named by its kind only.</summary>
+    public IReadOnlySet<string> ExposureKeysShown { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;
+
     /// <summary>The resolver found the target in the inventory and <see cref="Id"/> is canonical. False for a
     /// target that is created by the operation or whose kind is resolved by its own service.</summary>
     public bool Resolved { get; init; }
@@ -115,6 +126,14 @@ public sealed record MutationRequest(
     /// <summary>The operation this one runs inside (a mutation nested in another one's execution), set by the gateway
     /// from the enclosing <see cref="MutationScope"/> (R1-18); the journal and the audit keep the link.</summary>
     public string? ParentOperationId { get; init; }
+
+    /// <summary>INV-45 (review round 5): names the one event a refusal may be, when several paths can write it — the
+    /// event id is derived from it (<see cref="AuditLogMutationSink.KeyedEventId"/>), so a second write of the same
+    /// event, from any path or from the audit outbox, finds the first row and never adds one. Null: a fresh id. Honoured
+    /// only on <c>IMutationGateway.RefuseAsync</c> (a refusal written before any intent); <c>DecideAsync</c> and
+    /// <c>ExecuteAsync</c> reject a request that carries one, and an intent and its outcome always get a
+    /// fresh id, so two attempts are never merged into one row (review rounds 6 and 7, NIT-1).</summary>
+    public string? EventKey { get; init; }
 }
 
 public enum MutationStatus

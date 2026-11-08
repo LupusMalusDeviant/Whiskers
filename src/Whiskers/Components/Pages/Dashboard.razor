@@ -8,6 +8,7 @@
 @inject Whiskers.Services.ImageUpdate.IImageUpdateStore ImageUpdateStore
 @inject Whiskers.Services.AutoUpdate.IAutoUpdateService AutoUpdate
 @inject Whiskers.Services.Cve.ICveFindingsStore CveStore
+@inject Whiskers.Services.EndpointChecks.IEndpointCheckStore EndpointChecks
 @inject IMetricsQueryService MetricsQuery
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject IUiMutationRunner Mutations
@@ -202,6 +203,17 @@
             <span class="sw-pulse-dot sw-green" style="@(GetServerReachable(serverGroup.ServerId) ? "" : "background: var(--sw-accent-red); box-shadow: 0 0 6px rgba(248,113,113,0.5);")"></span>
             <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
             <MudText Typo="Typo.h6" Style="font-weight: 600;">@serverGroup.ServerName</MudText>
+            @* R1-57: failing endpoint checks of this server, whatever its own state — a check fails exactly when
+               something is wrong, so it is shown for an unreachable server too. *@
+            @if (_failingChecks.TryGetValue(serverGroup.ServerId, out var failingChecks) && failingChecks > 0)
+            {
+                <MudLink Href="@($"checks?server={Uri.EscapeDataString(serverGroup.ServerId)}&failing=true")"
+                         Underline="Underline.None" @onclick:stopPropagation="true">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Icon="@Icons.Material.Filled.NetworkCheck" Class="ml-2">
+                        @L["Dashboard_FailingChecks", failingChecks]
+                    </MudChip>
+                </MudLink>
+            }
             @if (_k8sServerIds.Contains(serverGroup.ServerId))
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined"
@@ -311,6 +323,9 @@
                     </MudStack>
                 </MudItem>
             </MudGrid>
+
+            @* R1-58: disk health (SMART, md, ZFS) — shown only while the feature is on; any signed-in role reads it. *@
+            <DiskHealthBlock ServerId="@serverGroup.ServerId" />
 
             @* Auslastungsverlauf *@
             <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-4 mb-2" Spacing="2">
@@ -592,23 +607,14 @@
     private int _refreshCount;
     private AppRole _role = AppRole.Viewer;
 
-    // Guards a write/destructive handler. Returns false (and warns) if the user lacks the role —
-    // defense in depth, since hiding the button is not by itself authorization.
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["Dashboard_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required) return true;
+        Snackbar.Add(L["Dashboard_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -675,8 +681,29 @@
         }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
 
+    /// <summary>R1-57: failing endpoint checks per server (enabled checks whose last run did not pass).</summary>
+    private IReadOnlyDictionary<string, int> _failingChecks = new Dictionary<string, int>();
+
+    private void LoadFailingChecks()
+    {
+        try
+        {
+            var last = EndpointChecks.LastResults();
+            _failingChecks = EndpointChecks.List()
+                .Where(c => c.Enabled && last.TryGetValue(c.Id, out var r) && r.Outcome != Whiskers.Models.EndpointCheckOutcome.Passed)
+                .GroupBy(c => c.ServerId)
+                .ToDictionary(g => g.Key, g => g.Count());
+        }
+        catch (Exception ex)
+        {
+            // The count is a pointer, not the checks themselves: the page renders without it.
+            _logger?.LogWarning(ex, "Counting failing endpoint checks failed");
+        }
+    }
+
     private async Task LoadContainerList()
     {
+        LoadFailingChecks();
         try
         {
             var containers = await DockerService.ListAllContainersAsync();
@@ -830,7 +857,7 @@
     private async Task StartContainer(ContainerInfo container)
     {
         var (capability, arguments) = RowAction(container, "start");
-        if (!await RequireAsync(AppRole.Operator, capability, arguments)) return;
+        if (!await RequireAsync(capability, arguments)) return;
         try
         {
             // K8s rows route through the workload seam (start = scale the controller back up).
@@ -856,7 +883,7 @@
     private async Task StopContainer(ContainerInfo container)
     {
         var (capability, arguments) = RowAction(container, "stop");
-        if (!await RequireAsync(AppRole.Operator, capability, arguments)) return;
+        if (!await RequireAsync(capability, arguments)) return;
         try
         {
             // K8s rows route through the workload seam (stop = scale the controller to 0).
@@ -882,7 +909,7 @@
     private async Task RestartContainer(ContainerInfo container)
     {
         var (capability, arguments) = RowAction(container, "restart");
-        if (!await RequireAsync(AppRole.Operator, capability, arguments)) return;
+        if (!await RequireAsync(capability, arguments)) return;
         try
         {
             // K8s rows route through the workload seam (restart = rollout-restart of the controller).
@@ -907,7 +934,7 @@
 
     private async Task RemoveContainer(ContainerInfo container)
     {
-        if (!await RequireAsync(AppRole.Admin, "container.remove",
+        if (!await RequireAsync("container.remove",
                 new { containerId = container.Id, name = container.Name, serverId = container.ServerId })) return;
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["Dashboard_Dialog_RemoveTitle"].Value,
@@ -945,7 +972,7 @@
 
     private async Task UpdateContainer(ContainerInfo container)
     {
-        if (!await RequireAsync(AppRole.Operator, "container.update",
+        if (!await RequireAsync("container.update",
                 new { containerId = container.Id, name = container.Name, serverId = container.ServerId })) return;
         try
         {
@@ -987,7 +1014,7 @@
 
     private async Task RollbackContainer(ContainerInfo container)
     {
-        if (!await RequireAsync(AppRole.Operator, "container.rollback",
+        if (!await RequireAsync("container.rollback",
                 new { containerId = container.Id, name = container.Name, serverId = container.ServerId })) return;
         if (!_rollbacks.TryGetValue($"{container.ServerId}|{container.Name}", out var snap)) return;
 

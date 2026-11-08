@@ -316,18 +316,8 @@ public class BackgroundServiceFailureTests
         // Review round 5: the budget also reports saturation when the request was sent but ran shorter than it waited
         // before the deadline expired. That request did reach the server, so it is the server's timeout and counts
         // toward server_unreachable; only a request still queued at the deadline is NotAsked.
-        var (docker, circuit, budget) = Connection(sentRequest: deadline => Task.Delay(Timeout.Infinite, deadline));
-        var release = new TaskCompletionSource();
-        // The slots are held through the unhooked path, so only the listing meets the silent server.
-        var busy = Enumerable.Range(0, new ServerBudgetSettings().InteractiveConcurrency)
-            .Select(_ => docker.ExecuteGuardedAsync("badwolf", async _ => { await release.Task; return 0; })).ToList();
-        var ops = Operations(docker, TimeSpan.FromSeconds(3));
-
-        // Queued for ~2 s, then sent to a server that does not answer before the deadline: ran ~1 s < waited. Wide margins
-        // so a slow CI runner cannot leave the listing still queued at the deadline.
-        _ = Task.Delay(2000).ContinueWith(_ => release.TrySetResult());
-        var listing = await ops.ListAllContainersDetailedAsync(true, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        await Task.WhenAll(busy);
+        // Queued for 2 s, then sent to a server that does not answer: the deadline (3 s) cuts it short after 1 s < waited.
+        var (listing, circuit, budget) = await ListingCutShort(waited: TimeSpan.FromSeconds(2), ran: TimeSpan.FromSeconds(1));
 
         var failure = Assert.Single(listing.FailedServers);
         Assert.False(failure.NotAsked, failure.Error);
@@ -338,6 +328,76 @@ public class BackgroundServiceFailureTests
         var tracker = new Whiskers.Services.HealthMonitor.ServerReachabilityTracker(threshold: 2, coldStartThreshold: 2);
         Assert.Empty(tracker.Evaluate(listing));
         Assert.Equal("server_unreachable", Assert.Single(tracker.Evaluate(listing)).EventType);
+    }
+
+    [Theory]
+    [InlineData(1000, 2000)] // ran longer than it waited
+    [InlineData(1500, 1500)] // the edge: as long as it waited
+    public async Task A_listing_that_ran_at_least_as_long_as_it_waited_is_no_saturation(int waitedMs, int ranMs)
+    {
+        // The other side of the rule above: only a run shorter than the wait is the queue's doing. A request that ran at
+        // least as long as it waited is the server's timeout alone.
+        var (listing, circuit, budget) = await ListingCutShort(
+            waited: TimeSpan.FromMilliseconds(waitedMs), ran: TimeSpan.FromMilliseconds(ranMs));
+
+        var failure = Assert.Single(listing.FailedServers);
+        Assert.False(failure.NotAsked, failure.Error);
+        Assert.StartsWith("Timed out", failure.Error);
+        Assert.Equal(0, budget.Snapshot("badwolf").SaturationFailures);
+        Assert.Equal(1, circuit.Snapshot("badwolf").ConsecutiveFailures); // the server's timeout, held against it
+    }
+
+    /// <summary>
+    /// A fleet listing that waits <paramref name="waited"/> for a budget slot and is then sent to a server that does not
+    /// answer, until the per-server deadline (<paramref name="waited"/> + <paramref name="ran"/>) cuts it short. The queue
+    /// wait, the run and the deadline all go by a clock the test moves (2026-11-05: on wall-clock time a slow CI runner
+    /// stretched the run past the wait, and the budget rightly counted no saturation).
+    /// </summary>
+    private static async Task<(FleetContainerListing Listing, ServerCircuitBreaker Circuit, ServerBudget Budget)> ListingCutShort(
+        TimeSpan waited, TimeSpan ran)
+    {
+        var clock = new QueueClock();
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (docker, circuit, budget) = Connection(
+            sentRequest: deadline => { sent.TrySetResult(); return Task.Delay(Timeout.Infinite, deadline); }, time: clock);
+        var release = new TaskCompletionSource();
+        try
+        {
+            // The slots are held through the unhooked path, so only the listing meets the silent server.
+            var slots = new ServerBudgetSettings().InteractiveConcurrency;
+            var holding = 0;
+            var busy = Enumerable.Range(0, slots)
+                .Select(_ => docker.ExecuteGuardedAsync("badwolf", async _ =>
+                {
+                    Interlocked.Increment(ref holding);
+                    await release.Task;
+                    return 0;
+                })).ToList();
+            var ops = Operations(docker, waited + ran, clock);
+            await Until(() => Volatile.Read(ref holding) == slots, "every slot is held");
+
+            // The listing reads the budget's clock once as it joins the queue; nothing else reads it while the slots are
+            // held. The clock counts a read only after it took the time, so the advance below cannot slip in between.
+            var readsBefore = clock.TimestampReads;
+            var listingTask = ops.ListAllContainersDetailedAsync(true, CancellationToken.None);
+            await Until(() => clock.TimestampReads > readsBefore, "the listing joined the queue");
+
+            clock.Advance(waited);
+            release.SetResult();
+            await Task.WhenAll(busy).WaitAsync(TimeSpan.FromSeconds(10));
+            await sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            clock.Advance(ran);
+            var listing = await listingTask.WaitAsync(TimeSpan.FromSeconds(10));
+            // The budget measured exactly the wait the test set (the held slots waited for nothing).
+            Assert.Equal((long)waited.TotalMilliseconds, budget.Snapshot("badwolf").MaxWaitMilliseconds);
+            return (listing, circuit, budget);
+        }
+        finally
+        {
+            // A failed step must not leave the held slots and the listing blocked for good.
+            release.TrySetResult();
+            clock.Advance(TimeSpan.FromMinutes(1));
+        }
     }
 
     [Fact]
@@ -431,25 +491,115 @@ public class BackgroundServiceFailureTests
         await Task.WhenAll(busy);
     }
 
+    /// <summary>Waits for a step another task takes; the 10 s are only a guard against a hang, never part of a result.</summary>
+    private static async Task Until(Func<bool> condition, string what)
+    {
+        var guard = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (guard.Elapsed > TimeSpan.FromSeconds(10)) throw new TimeoutException($"Still waiting for: {what}");
+            await Task.Delay(1);
+        }
+    }
+
+    /// <summary>A clock the test moves by hand: timestamps for the budget's wait and run, one-shot timers for the server
+    /// deadline. It counts timestamp reads, so a test can see a call join the budget's queue. Timers are one-shot and fire
+    /// only on <see cref="Advance"/>, a zero due time included.</summary>
+    private sealed class QueueClock : TimeProvider
+    {
+        private readonly object _gate = new();
+        private readonly List<ManualTimer> _timers = [];
+        private long _ticks;
+        private int _reads;
+
+        public int TimestampReads => Volatile.Read(ref _reads);
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            lock (_gate)
+            {
+                var now = _ticks;
+                Volatile.Write(ref _reads, _reads + 1); // counted only once the time is taken
+                return now;
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            if (period != Timeout.InfiniteTimeSpan && period != TimeSpan.Zero)
+                throw new NotSupportedException("QueueClock has one-shot timers only.");
+            var timer = new ManualTimer(this, callback, state);
+            timer.Change(dueTime, period);
+            return timer;
+        }
+
+        public void Advance(TimeSpan by)
+        {
+            List<ManualTimer> due;
+            lock (_gate)
+            {
+                _ticks += by.Ticks;
+                due = _timers.Where(t => t.Due <= _ticks).ToList();
+                foreach (var t in due) _timers.Remove(t);
+            }
+            foreach (var t in due) t.Fire();
+        }
+
+        private sealed class ManualTimer(QueueClock clock, TimerCallback callback, object? state) : ITimer
+        {
+            public long Due;
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                if (period != Timeout.InfiniteTimeSpan && period != TimeSpan.Zero)
+                    throw new NotSupportedException("QueueClock has one-shot timers only.");
+                lock (clock._gate)
+                {
+                    clock._timers.Remove(this);
+                    if (dueTime == Timeout.InfiniteTimeSpan) return true;
+                    Due = clock._ticks + dueTime.Ticks;
+                    clock._timers.Add(this);
+                }
+                return true;
+            }
+
+            public void Fire() => callback(state);
+
+            public void Dispose()
+            {
+                lock (clock._gate) clock._timers.Remove(this);
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
     private static readonly ServerConfig Badwolf = new()
     {
         Id = "badwolf", Name = "Badwolf", IsDefault = true, Enabled = true, ConnectionType = ConnectionType.Local,
     };
 
     private static Whiskers.Services.Docker.Operations.ContainerOperations Operations(
-        Whiskers.Services.Docker.DockerConnectionManager docker, TimeSpan perServer) =>
+        Whiskers.Services.Docker.DockerConnectionManager docker, TimeSpan perServer, TimeProvider? clock = null) =>
         new(docker, new FakeServerConfig(Badwolf), NullLogger<Whiskers.Services.Docker.DockerService>.Instance,
             new MemoryCache(new MemoryCacheOptions()), new Whiskers.Services.Observability.SelfMetrics.SelfMetrics())
         {
             PerServerTimeout = perServer,
+            PerServerClock = clock ?? TimeProvider.System,
         };
 
     private static (Whiskers.Services.Docker.DockerConnectionManager Docker, ServerCircuitBreaker Circuit, ServerBudget Budget) Connection(
-        Func<CancellationToken, Task>? sentRequest = null)
+        Func<CancellationToken, Task>? sentRequest = null, TimeProvider? time = null)
     {
         var servers = new FakeServerConfig(Badwolf);
         var settings = new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings());
-        var budget = new ServerBudget(settings, NullLogger<ServerBudget>.Instance);
+        var budget = new ServerBudget(settings, NullLogger<ServerBudget>.Instance, time);
         var circuit = new ServerCircuitBreaker(settings, new ServiceCollection().BuildServiceProvider(),
             NullLogger<ServerCircuitBreaker>.Instance);
         var suspension = new Whiskers.Services.Observability.LoopSuspensionService(new FakeNotifications(), servers,

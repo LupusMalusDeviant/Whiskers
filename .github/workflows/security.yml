@@ -5,6 +5,9 @@
 # time-limited and every action pinned to a full commit SHA (Dependabot keeps them current). Controls that live in the
 # repository settings (branch protection and required checks, Dependabot alerts, GitHub secret scanning and push
 # protection, code-scanning merge protection) are documented in docs/operations/ci-and-release-checks.md.
+#
+# R1-51 (contract 0008, D8): release.yml calls this file (`workflow_call`) with the tag commit as `ref`, and its
+# publish-image job needs it, so a release runs these checks on the commit it ships.
 name: security
 
 on:
@@ -15,6 +18,13 @@ on:
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to check (the release workflow passes the tag commit). Empty = the event's ref."
+        required: false
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -36,29 +46,48 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
 
       - name: Vulnerable packages (gate)
         run: |
           set -euo pipefail
-          dotnet restore Whiskers.slnx --locked-mode
-          dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json
-          PROJECTS="$(jq '.projects | length' vulnerable.json)"
-          if [ "$PROJECTS" -lt 5 ]; then echo "::error::only ${PROJECTS} project(s) were checked"; exit 1; fi
-          PROBLEMS="$(jq '[.problems // [] | .[]] | length' vulnerable.json)"
-          if [ "$PROBLEMS" -gt 0 ]; then jq '.problems' vulnerable.json; echo "::error::the check reported problems"; exit 1; fi
-          FOUND="$(jq '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
-            | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json)"
+          bash .github/scripts/restore-locked.sh
+          # The vulnerability data comes live from nuget.org. Retried (3 tries, 20 s apart) only while there is no
+          # complete data: a non-zero exit, unreadable JSON, problems, or fewer than 5 projects. A finding is never retried:
+          # FOUND > 0 ends the loop at once and fails below. With no finding, the data is asserted complete again after the
+          # loop (BuildReproducibilityTests.VulnerableGateViolations holds this shape). All three values are computed anew on
+          # every try, before any break. A jq failure (jq -e: also no output at all) is incomplete data — status=1, never
+          # "no finding" — and jq's error stays in the log.
+          for attempt in 1 2 3; do
+            status=0
+            dotnet list Whiskers.slnx package --vulnerable --include-transitive --format json > vulnerable.json || status=$?
+            FOUND="$(jq -e '[.projects[] | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
+              | select((.vulnerabilities // []) | length > 0)] | length' vulnerable.json)" || { FOUND=0; status=1; }
+            PROJECTS="$(jq -e '.projects | length' vulnerable.json)" || { PROJECTS=0; status=1; }
+            PROBLEMS="$(jq -e '[.problems // [] | .[]] | length' vulnerable.json)" || { PROBLEMS=1; status=1; }
+            if [ "$FOUND" -gt 0 ]; then break; fi
+            if [ "$status" -eq 0 ] && [ "$PROJECTS" -ge 5 ] && [ "$PROBLEMS" -eq 0 ]; then break; fi
+            if [ "$attempt" -eq 3 ]; then
+              if [ "$PROBLEMS" -gt 0 ]; then jq '.problems' vulnerable.json || true; fi
+              echo "::error::no complete vulnerability data after 3 tries (last exit $status, ${PROJECTS} project(s) checked, ${PROBLEMS} problem(s))"
+              exit 1
+            fi
+            echo "::warning::no complete vulnerability data (exit $status, ${PROJECTS} project(s), ${PROBLEMS} problem(s); attempt $attempt of 3); retrying in 20 s"
+            sleep 20
+          done
           if [ "$FOUND" -gt 0 ]; then
             jq -r '.projects[] | .path as $p | (.frameworks // [])[] | ((.topLevelPackages // []) + (.transitivePackages // []))[]
               | select((.vulnerabilities // []) | length > 0)
               | "\($p): \(.id) \(.resolvedVersion) -> \([.vulnerabilities[] | "\(.severity) \(.advisoryurl)"] | join(", "))"' vulnerable.json
             echo "::error::${FOUND} vulnerable package(s)"; exit 1
           fi
+          if [ "$status" -ne 0 ] || [ "$PROJECTS" -lt 5 ] || [ "$PROBLEMS" -ne 0 ]; then echo "::error::no finding, but the data is not complete (exit $status, ${PROJECTS} project(s), ${PROBLEMS} problem(s))"; exit 1; fi
           echo "no known-vulnerable packages in ${PROJECTS} projects"
 
   # A pull request may not add a dependency with a known vulnerability (any severity), in any ecosystem the dependency
@@ -71,6 +100,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - name: Dependency review (gate)
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
@@ -86,6 +117,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
 
       - name: gitleaks (history and tree, gate)
@@ -108,16 +140,18 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
 
       - name: Security analyzers (gate)
         run: |
           set -euo pipefail
-          dotnet restore Whiskers.slnx --locked-mode
+          bash .github/scripts/restore-locked.sh
           dotnet build src/Whiskers/Whiskers.csproj --no-restore --configuration Release --no-incremental \
             -p:AnalysisModeSecurity=All -p:CodeAnalysisTreatWarningsAsErrors=true
 
@@ -132,15 +166,17 @@ jobs:
       security-events: write   # upload the SARIF to code scanning
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: csharp
           build-mode: none
           queries: security-extended
 
       - name: Analyze
-        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:csharp

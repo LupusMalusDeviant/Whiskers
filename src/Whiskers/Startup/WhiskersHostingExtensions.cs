@@ -135,11 +135,13 @@ public static class WhiskersHostingExtensions
                 options.ServerInfo = new ModelContextProtocol.Protocol.Implementation
                 {
                     Name = "whiskers",
-                    Title = "Whiskers",
+                    Title = "Whiskers — Zero-Trust MCP Control Plane",
                     Version = Whiskers.Utils.AppVersion.Display,
-                    Description = "Governed infrastructure operations for AI agents: Docker hosts, Kubernetes "
-                        + "workloads, logs, CVEs and cloud servers through scoped tools (Read/Write/Admin), "
-                        + "code-enforced guardrails and human approvals. Self-hosted, SSH-key-free (mesh + mTLS).",
+                    Description = "Zero-trust MCP control plane for Docker & Kubernetes: AI agents operate Docker "
+                        + "hosts, logs, CVEs and cloud servers through scoped tools (Read/Write/Admin) instead of a "
+                        + "raw socket; Kubernetes workloads are managed in the governed UI. Code-enforced "
+                        + "guardrails, human-in-the-loop approvals, hash-chained audit. Self-hosted, SSH-key-free "
+                        + "in steady state (mesh + mTLS).",
                     WebsiteUrl = "https://github.com/LupusMalusDeviant/Whiskers",
                     Icons =
                     [
@@ -201,6 +203,11 @@ public static class WhiskersHostingExtensions
         builder.Services.AddHostedService<Whiskers.Services.Observability.Outcomes.ActionOutcomeSweeper>();
         // Warns before an mTLS or certbot certificate expires (NextToImplement C1).
         builder.Services.AddHostedService<Whiskers.Services.Certificates.CertificateMonitor>();
+        // R1-57 (contract 0004): endpoint checks run on the managed host, through the gateway as the check's owner.
+        builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckStore, Whiskers.Services.EndpointChecks.EndpointCheckStore>();
+        builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckSlots, Whiskers.Services.EndpointChecks.EndpointCheckSlots>();
+        builder.Services.AddSingleton<Whiskers.Services.EndpointChecks.IEndpointCheckRunner, Whiskers.Services.EndpointChecks.EndpointCheckRunner>();
+        builder.Services.AddHostedService<Whiskers.Services.EndpointChecks.EndpointCheckMonitor>();
         // Last known reading per server, so a page paints from what the loops already learned instead of
         // asking the whole fleet again while the user waits.
         builder.Services.AddSingleton<Whiskers.Services.Observability.IFleetSnapshotCache, Whiskers.Services.Observability.FleetSnapshotCache>();
@@ -256,6 +263,11 @@ public static class WhiskersHostingExtensions
         builder.Services.AddHostedService(sp => sp.GetRequiredService<Whiskers.Services.Auth.AuthAuditLog>());
         builder.Services.AddSingleton<Whiskers.Services.Auth.IRoleService, Whiskers.Services.Auth.RoleService>();
         builder.Services.AddSingleton<Whiskers.Services.Setup.ISetupStateService, Whiskers.Services.Setup.SetupStateService>();
+        // R1-27 (contract 0003): Google/OIDC sign-ins are admitted on the provider's stable subject, bound once to a
+        // configured address. The role and whitelist writers prune the bindings of addresses they remove.
+        builder.Services.AddSingleton<Whiskers.Services.Auth.IIdentityBindingStore, Whiskers.Services.Auth.IdentityBindingStore>();
+        builder.Services.AddSingleton<Whiskers.Services.Auth.IFederatedAdmission, Whiskers.Services.Auth.FederatedAdmission>();
+        builder.Services.AddSingleton<Whiskers.Services.Auth.IdentityBindingStartupPrune>();
         // Track B.1/B.2: backend-neutral workload seam. Dispatches per server (Docker hosts vs.
         // Kubernetes clusters). Consumers migrate onto it incrementally.
         builder.Services.AddSingleton<Whiskers.Services.Workloads.IWorkloadProviderFactory, Whiskers.Services.Workloads.WorkloadProviderFactory>();
@@ -264,6 +276,8 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Registries.IRegistryConfigService, Whiskers.Services.Registries.RegistryConfigService>();
         // W3.4: static production-readiness checklist (Settings panel). Read-only checks.
         builder.Services.AddSingleton<Whiskers.Services.Setup.IProductionReadinessService, Whiskers.Services.Setup.ProductionReadinessService>();
+        // R1-50: peers whose forwarded headers were ignored (not a trusted proxy), for the readiness check.
+        builder.Services.AddSingleton<Whiskers.Utils.ForwardedHeadersObserver>();
         // Per-circuit current-user/role resolver (scoped — depends on the scoped AuthenticationStateProvider)
         builder.Services.AddScoped<Whiskers.Services.Auth.ICurrentUserService, Whiskers.Services.Auth.CurrentUserService>();
         // R1-49: local-account lifecycle (own password, Admin add/reset/delete, recovery codes) on ASP.NET Identity.
@@ -297,6 +311,10 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();
         // Compose deployment plans (R1-07): read-only, on top of the Docker service and the host executor.
         builder.Services.AddSingleton<Whiskers.Services.Mutations.IComposePlanner, Whiskers.Services.Mutations.ComposePlanner>();
+        // Contract 0006: runs a planned compose deployment (write, pull, build, inspect the images, up, re-check).
+        builder.Services.AddSingleton<Whiskers.Services.Mutations.IComposeRunner, Whiskers.Services.Mutations.ComposeRunner>();
+        // R1-44: per-host mTLS client credentials (key made in-process, signed by step-ca, kept under {MtlsDir}/hosts/).
+        builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsClientCredentialStore, Whiskers.Services.Certificates.MtlsClientCredentialStore>();
         builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsCertificateService, Whiskers.Services.Certificates.MtlsCertificateService>();
         builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, Whiskers.Services.Onboarding.OnboardingService>();
 
@@ -313,7 +331,9 @@ public static class WhiskersHostingExtensions
             // so /healthz (the container liveness probe) is unaffected.
             .AddCheck<MaintenanceReadyCheck>("maintenance", tags: new[] { "ready" })
             // R1-19: Degraded (still ready) while an audit event is incomplete.
-            .AddCheck<AuditTrailCheck>("audit", tags: new[] { "ready" });
+            .AddCheck<AuditTrailCheck>("audit", tags: new[] { "ready" })
+            // R1-27: Degraded (still ready) while the identity bindings cannot be read.
+            .AddCheck<Whiskers.HealthChecks.IdentityBindingsReadyCheck>("identity-bindings", tags: new[] { "ready" });
         builder.Services.Configure<MetricsSettings>(builder.Configuration.GetSection(MetricsSettings.SectionName));
         builder.Services.AddOptions<MetricsSettings>().ValidateInterval(s => s.CollectionIntervalSeconds,
             "Metrics:CollectionIntervalSeconds", IntervalValidation.MinMetricsSeconds, IntervalValidation.MaxMetricsSeconds,
@@ -349,6 +369,21 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Metrics.IAlertBreachStore>(sp =>
             new Whiskers.Services.Metrics.AlertBreachStore(sp.GetRequiredService<DataPathOptions>().AlertBreachesJson));
         builder.Services.AddHostedService<MetricsCollectorService>();
+        // R1-58: optional disk-health readings (SMART, md, ZFS) from the hosts' metrics endpoints — off by default, a gated
+        // config.save turns them on. The typed query client is generic; PrometheusMetricsSource keeps its own reads.
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.IPrometheusQueryClient, Whiskers.Services.Metrics.PrometheusQueryClient>();
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.IDiskHealthSettingsService>(sp =>
+            new Whiskers.Services.Metrics.DiskHealth.DiskHealthSettingsService(
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<Whiskers.Services.Persistence.IAppSettingsStore>(),
+                sp.GetRequiredService<ILogger<Whiskers.Services.Metrics.DiskHealth.DiskHealthSettingsService>>(),
+                sp.GetRequiredService<DataPathOptions>().AppSettingsJson));
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.DiskHealthService>();
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.IDiskHealthService>(sp =>
+            sp.GetRequiredService<Whiskers.Services.Metrics.DiskHealth.DiskHealthService>());
+        builder.Services.AddSingleton<Whiskers.Services.Metrics.DiskHealth.IDiskHealthStateStore>(sp =>
+            new Whiskers.Services.Metrics.DiskHealth.DiskHealthStateStore(sp.GetRequiredService<DataPathOptions>().DiskHealthJson));
+        builder.Services.AddHostedService<Whiskers.Services.Metrics.DiskHealth.DiskHealthMonitor>();
 
         // Database service
         builder.Services.AddSingleton<Whiskers.Services.Database.IDatabaseService, Whiskers.Services.Database.DatabaseService>();
@@ -396,8 +431,10 @@ public static class WhiskersHostingExtensions
         // Startup initializers — the loop after Build() runs each IInitializable's async warm-up in Order,
         // replacing the previously hand-wired InitializeAsync calls. Order values live on the services.
         builder.Services.AddInitializable<Whiskers.Services.Auth.IWhitelistService>();              // 10
+        builder.Services.AddInitializable<Whiskers.Services.Auth.IIdentityBindingStore>();          // 15 (R1-27)
         builder.Services.AddInitializable<Whiskers.Services.Auth.IRoleService>();                   // 20
         builder.Services.AddInitializable<Whiskers.Services.Setup.ISetupStateService>();            // 25 (after roles)
+        builder.Services.AddInitializable<Whiskers.Services.Auth.IdentityBindingStartupPrune>();    // 26 (R1-27, after roles)
         builder.Services.AddInitializable<Whiskers.Services.Notifications.IContainerNotificationPrefsService>(); // 30
         builder.Services.AddInitializable<Whiskers.Services.Vault.IVaultService>();                 // 40
         // R1-34: the pre-upgrade backup, after the vault checked its key and before anything rewrites data in a new format.

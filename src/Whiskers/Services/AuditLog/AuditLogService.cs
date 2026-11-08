@@ -61,9 +61,29 @@ public class AuditLogService : IAuditLogService
                 return (row.Id, (IReadOnlyCollection<long>)[row.Id]);
             });
 
-            _logger.LogInformation("Audit: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} (success={Success})",
-                actorType, actor, action, targetType, targetName, success);
+            if (IsAccountRow(action))
+                // R1-27: a sign-in and identity row names an account by its address — the row keeps it, the application
+                // log does not (contract 0003: no address in a log). Nothing of the actor or the target reaches the line;
+                // what does is kept on one line.
+                _logger.LogInformation("Audit: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} (success={Success})",
+                    OneLine(actorType), AccountPlaceholder, OneLine(action), OneLine(targetType), AccountPlaceholder, success);
+            else
+                _logger.LogInformation("Audit: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} (success={Success})",
+                    actorType, actor, action, targetType, targetName, success);
             return true;
+        }
+        catch (Exception ex) when (IsAccountRow(action))
+        {
+            // R1-27: what survives here is what happened, without whom; the exception's type only (a message may carry a
+            // value). Identity rows carry issuer and subject fingerprint in their details: those stay out of the log; the
+            // other sign-in rows' details (reason code and client address) are kept on one line.
+            _logger.LogError(
+                "AUDIT WRITE FAILED: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} " +
+                "(target={TargetId}, server={ServerId}, success={Success}, details={Details}, error={Error})",
+                OneLine(actorType), AccountPlaceholder, OneLine(action), OneLine(targetType), AccountPlaceholder,
+                AccountPlaceholder, OneLine(serverId), success, LoggedDetails(action, details), ex.GetType().Name);
+            _recovery?.LegacyWriteFailed();
+            return false;
         }
         catch (Exception ex)
         {
@@ -79,6 +99,29 @@ public class AuditLogService : IAuditLogService
             return false;
         }
     }
+
+    /// <summary>What the application log shows instead of an account address.</summary>
+    public const string AccountPlaceholder = "[account]";
+
+    /// <summary>Rows whose actor and target are a person's account address (sign-ins, sessions, identity bindings —
+    /// <c>auth.*</c>): the database keeps the address, the application log never sees it.</summary>
+    public static bool IsAccountRow(string? action) => action?.StartsWith("auth.", StringComparison.Ordinal) == true;
+
+    /// <summary>What the application log shows instead of the details of an identity row (issuer, subject fingerprint).</summary>
+    public const string WithheldDetails = "[withheld]";
+
+    /// <summary>The details of an <c>auth.*</c> row as a log line may show them: none of an identity row
+    /// (<c>auth.identity_*</c>: issuer and subject fingerprint come from the provider's token), the others redacted and
+    /// on one line.</summary>
+    public static string LoggedDetails(string? action, string? details) =>
+        action?.StartsWith("auth.identity_", StringComparison.Ordinal) == true
+            ? WithheldDetails
+            : OneLine(SinkRedaction.Json(details));
+
+    /// <summary>A value as one log line: CR, LF and the other line breaks become a space, so no value can forge a
+    /// line of its own.</summary>
+    public static string OneLine(string? value) => (value ?? "")
+        .Replace("\r", " ").Replace("\n", " ").Replace("\u0085", " ").Replace("\u2028", " ").Replace("\u2029", " ");
 
     public async Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0,
                                                             string? actionFilter = null,

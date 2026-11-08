@@ -13,10 +13,11 @@ internal static class GuardrailRuleHelpers
     public static int Rank(string level) => McpPermissionLevels.GetRank(level);
 
     /// <summary>All argument values as strings (strings directly, everything else as raw JSON).</summary>
-    public static IEnumerable<string> ArgumentValues(GuardrailRequest req)
+    public static IEnumerable<string> ArgumentValues(GuardrailRequest req, Func<string, bool>? skip = null)
     {
         foreach (var kv in req.Arguments)
         {
+            if (skip?.Invoke(kv.Key) == true) continue;
             var v = kv.Value;
             yield return v.ValueKind == JsonValueKind.String ? (v.GetString() ?? "") : v.GetRawText();
         }
@@ -73,13 +74,24 @@ public sealed class PrincipalCeilingRule : IGuardrailRule
 /// <summary>Kill switch: in ReadOnlyMode everything above read is an immediate Deny.</summary>
 public sealed class ReadOnlyModeRule : IGuardrailRule
 {
-    public string Id => "read-only-mode";
+    public string Id => Whiskers.Configuration.KillSwitchExemptions.RuleId;
+
+    /// <summary>The capability of exemption E4 (contract 0009).</summary>
+    public const string PasswordChangeCapability = "account.password_change";
 
     public GuardrailVerdict Evaluate(GuardrailRequest request, out string reason)
     {
         if (request.Context.Policy.ReadOnlyMode && request.RequiredLevel != McpPermissionLevels.Read)
         {
             reason = $"Read-only mode active: '{request.ToolName}' ({request.RequiredLevel}) is blocked.";
+            return GuardrailVerdict.Deny;
+        }
+        // Contract 0009 (D5): the one read-level capability the kill switch lets through, a user's own password change
+        // (E4), unless an Admin blocked it beforehand — and always while the policy store is fail-closed (D4).
+        if (request.ToolName == PasswordChangeCapability
+            && request.Context.Policy.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.PasswordChange))
+        {
+            reason = "Read-only mode active: own password changes are blocked while the kill switch is on.";
             return GuardrailVerdict.Deny;
         }
         reason = "";
@@ -251,7 +263,9 @@ public sealed class ForbiddenArgumentRule : IGuardrailRule
                 reason = $"The guardrail policy holds an invalid forbidden-argument pattern ('{invalid}'); refused until it is fixed.";
                 return GuardrailVerdict.Deny;
             }
-            foreach (var value in GuardrailRuleHelpers.ArgumentValues(request))
+            // Contract 0006: the exposure lists (a nested decision's and the resolved target's) are no shell or SQL, and a
+            // withheld one must not be matched into a reason; the resolved target carries them for ExposureChangeRule.
+            foreach (var value in GuardrailRuleHelpers.ArgumentValues(request, skip: ProtectedResourceMatcher.IsExposureArgument))
             {
                 foreach (var pattern in patterns)
                 {

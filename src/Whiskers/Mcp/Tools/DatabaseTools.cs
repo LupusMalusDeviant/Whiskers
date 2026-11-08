@@ -129,7 +129,12 @@ public class DatabaseTools
         if (error != null) return MutationScope.Fail(error);
 
         if (!string.IsNullOrEmpty(database))
+        {
+            // INV-19: the name is an operand of the client; refused before anything runs (DatabaseService checks too).
+            try { DatabaseService.CheckDatabaseName(database, container!.DatabaseType); }
+            catch (Whiskers.Utils.UnsafeOperandException ex) { return MutationScope.Fail(ex.Message); }
             creds!.Database = database;
+        }
 
         var result = await dbService.ExecuteQueryAsync(container!.Id, query, container.DatabaseType, creds!, serverId);
 
@@ -170,7 +175,7 @@ public class DatabaseTools
         if (error != null) return MutationScope.Fail(error);
 
         var (success, filePath, sizeBytes, backupError) = await dbService.BackupDatabaseAsync(
-            container!.Id, database, container.DatabaseType, creds!, serverId);
+            container!.Id, database, container.DatabaseType, creds!, serverId, container.Name);
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         await auditLog.LogAsync(actor, actorType, "backup.create", "volume", database, $"{container.Name}/{database}", details: success ? filePath : backupError, serverId: serverId, success: success);

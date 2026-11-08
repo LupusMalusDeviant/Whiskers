@@ -63,6 +63,65 @@ public class ProductionReadinessServiceTests : IDisposable
             servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true);
 
     [Fact]
+    public async Task A_peer_whose_forwarded_headers_were_ignored_is_named_and_none_means_no_line()
+    {
+        // R1-50: a reverse proxy that still has to be listed in ForwardedHeaders:TrustedNetworks (or a spoofing client).
+        var (vault, servers) = await Stores(null);
+        var observer = new Whiskers.Utils.ForwardedHeadersObserver();
+        async Task<ReadinessCheck?> Line() => (await new ProductionReadinessService(Config(null), vault,
+                _sp.GetRequiredService<IServiceScopeFactory>(), servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths,
+                forwarded: observer).GetChecksAsync(isHttps: true))
+            .SingleOrDefault(c => c.Title == "Reverse-Proxy vertraut");
+
+        Assert.Null(await Line());
+
+        observer.Untrusted(System.Net.IPAddress.Parse("172.18.0.2"));
+        var line = await Line();
+
+        Assert.NotNull(line);
+        Assert.False(line!.Ok);
+        Assert.Contains("172.18.0.2", line.Detail);
+        Assert.Contains("ForwardedHeaders__TrustedNetworks__0", line.Detail);
+    }
+
+    [Fact]
+    public async Task Disabled_authentication_warns_against_funnel_and_tcp_forwards()
+    {
+        // 2026-11-06 (DockTail evaluation): behind a TCP forward every visitor arrives from tailscaled's private address
+        // and names its own Host, so the Auth:Disabled network check lets the internet in through Funnel.
+        var (vault, servers) = await Stores(null);
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:Disabled"] = "true" }).Build();
+
+        var line = (await new ProductionReadinessService(config, vault, _sp.GetRequiredService<IServiceScopeFactory>(),
+                servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true))
+            .Single(c => c.Title == "Authentifizierung aktiv");
+
+        Assert.False(line.Ok);
+        Assert.Contains("TCP-Weiterleitung", line.Detail);
+        Assert.Contains("Funnel", line.Detail);
+        Assert.Contains("Internet", line.Detail);
+    }
+
+    [Theory]
+    [InlineData(true, "false", true)]
+    [InlineData(true, "true", false)]
+    [InlineData(true, null, false)]
+    [InlineData(false, "false", false)]
+    public async Task Oidc_discovery_over_plain_http_is_named(bool enabled, string? requireHttps, bool named)
+    {
+        var (vault, servers) = await Stores(null);
+        var values = new Dictionary<string, string?> { ["Oidc:Enabled"] = enabled ? "true" : "false" };
+        if (requireHttps is not null) values["Oidc:RequireHttpsMetadata"] = requireHttps;
+        var config = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+
+        var checks = await new ProductionReadinessService(config, vault, _sp.GetRequiredService<IServiceScopeFactory>(),
+            servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true);
+
+        Assert.Equal(named, checks.Any(c => c.Title == "OIDC-Discovery über HTTPS" && !c.Ok));
+    }
+
+    [Fact]
     public async Task Unreadable_store_copies_kept_in_the_data_directory_are_named_after_a_restart()
     {
         // R1-35: the copy outlasts the restart that follows a power loss; the in-memory recovery record does not.
@@ -208,5 +267,93 @@ public class ProductionReadinessServiceTests : IDisposable
         var vaultCheck = (await Checks("another-passphrase-entirely", vault, servers)).Single(c => c.Title == VaultTitle);
         Assert.False(vaultCheck.Ok);
         Assert.Contains("passt nicht", vaultCheck.Detail);
+    }
+
+    [Fact]
+    public async Task The_vault_line_names_every_plaintext_key_kind_and_claims_no_more_than_file_protection()
+    {
+        // R1-51 (INV-56): since R1-44 there is one mTLS client key per host besides the shared one, all of them in
+        // plaintext like the SSH keys; the line must not read as if one key were left or as if the vault held them.
+        var (vault, servers) = await Stores("readiness-test-passphrase");
+
+        var vaultCheck = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == VaultTitle);
+
+        Assert.True(vaultCheck.Ok);
+        Assert.Contains("ssh-keys/", vaultCheck.Detail);
+        Assert.Contains("alle mTLS-Client-Schlüssel", vaultCheck.Detail);
+        Assert.Contains("eigene jedes Hosts", vaultCheck.Detail);
+        Assert.Contains("Dateirechte", vaultCheck.Detail);
+        // Whiskers does not write the shared key and does not check the SSH keys' mode: no unconditional "0600".
+        Assert.DoesNotContain("0600", vaultCheck.Detail);
+        Assert.Contains("mTLS-Client-Schlüssel geschützt", vaultCheck.Detail);
+        Assert.DoesNotContain("der mTLS-Client-Schlüssel im", vaultCheck.Detail);
+        Assert.DoesNotContain("alle Secrets", vaultCheck.Detail);
+    }
+
+    // ---------------------------------------------------------------- contract 0006: the own container's exposure
+
+    private async Task<ReadinessCheck?> SelfExposureLine(bool authDisabled, bool withDocker,
+        Func<string, ContainerInfo[]>? containers = null, bool listThrows = false)
+    {
+        var (vault, servers) = await Stores(null);
+        var self = Whiskers.Services.LogMonitor.LogMonitorService.ResolveSelfServerIds(servers).Single();
+        var docker = withDocker ? new FakeDocker(containers?.Invoke(self) ?? []) { ListContainersThrows = listThrows } : null;
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:Disabled"] = authDisabled ? "true" : "false" }).Build();
+        var checks = await new ProductionReadinessService(config, vault, _sp.GetRequiredService<IServiceScopeFactory>(),
+            servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths, docker: docker,
+            selfContainerNames: new HashSet<string>(["whiskers"], StringComparer.OrdinalIgnoreCase)).GetChecksAsync(isHttps: true);
+        return checks.SingleOrDefault(c => c.Title == ProductionReadinessService.SelfExposureTitle);
+    }
+
+    private static ContainerInfo Self(string serverId, string name, params (string Key, string Value)[] labels) => new()
+    {
+        Id = name + "-id", Name = name, ServerId = serverId,
+        Labels = labels.ToDictionary(l => l.Key, l => l.Value),
+    };
+
+    [Fact]
+    public async Task The_own_container_published_through_funnel_with_sign_in_off_is_not_ok_and_quotes_only_the_key()
+    {
+        var line = await SelfExposureLine(true, true, id =>
+            [Self(id, "whiskers", ("docktail.funnel.enable", "true"), ("docktail.funnel.port", "secret-value-443"))]);
+
+        Assert.NotNull(line);
+        Assert.False(line!.Ok);
+        Assert.Contains("Whiskers itself is published through `docktail.funnel.", line.Detail);
+        Assert.Contains("with sign-in turned off", line.Detail);
+        Assert.DoesNotContain("secret-value", line.Detail);
+        Assert.DoesNotContain("true", line.Detail);
+    }
+
+    [Fact]
+    public async Task Without_a_label_or_with_sign_in_on_there_is_no_line()
+    {
+        Assert.Null(await SelfExposureLine(true, true, id =>
+            [Self(id, "whiskers", ("com.docker.compose.project", "whiskers"))]));
+        Assert.Null(await SelfExposureLine(false, true, id =>
+            [Self(id, "whiskers", ("docktail.funnel.enable", "true"))]));
+    }
+
+    [Fact]
+    public async Task Another_container_with_a_route_label_is_not_the_own_one()
+    {
+        Assert.Null(await SelfExposureLine(true, true, id =>
+            [Self(id, "whiskers"), Self(id, "blog", ("traefik.http.routers.blog.rule", "Host(`blog.example.org`)"))]));
+    }
+
+    [Fact]
+    public async Task An_own_container_that_cannot_be_found_or_read_is_unknown_not_ok()
+    {
+        var missing = await SelfExposureLine(true, true, id => [Self(id, "something-else")]);
+        var unreadable = await SelfExposureLine(true, true, listThrows: true);
+        var noDocker = await SelfExposureLine(true, false);
+
+        foreach (var line in new[] { missing, unreadable, noDocker })
+        {
+            Assert.NotNull(line);
+            Assert.False(line!.Ok);
+            Assert.StartsWith("Unknown", line.Detail);
+        }
     }
 }

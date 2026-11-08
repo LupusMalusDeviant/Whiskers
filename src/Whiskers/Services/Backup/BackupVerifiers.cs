@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Whiskers.Configuration;
 using Whiskers.Models;
+using Whiskers.Services.Database;
 using Whiskers.Services.Mutations;
 using Whiskers.Utils;
 
@@ -41,7 +42,7 @@ internal static partial class BackupReadBack
         if (test.Success) throw new MutationVerificationFailedException($"'{path}' is still on the host.");
     }
 
-    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.-]*$")]
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.-]*\z")]
     private static partial Regex SafeName();
 }
 
@@ -130,7 +131,7 @@ public sealed partial class DbBackupVerifier(IServiceProvider services) : Servic
     private static partial Regex FileLine();
 }
 
-/// <summary>db.backup_delete: no more than the kept number of dumps of the database remain on the host.</summary>
+/// <summary>db.backup_delete: no more than the kept number of dumps of the container's database remain on the host.</summary>
 public sealed partial class DbBackupDeleteVerifier(IServiceProvider services) : ServiceVerifier(services)
 {
     public override string CapabilityId => "db.backup_delete";
@@ -138,25 +139,29 @@ public sealed partial class DbBackupDeleteVerifier(IServiceProvider services) : 
     protected override async Task CheckAsync(MutationContext context, object? result, CancellationToken ct)
     {
         var database = VerifierSupport.Arg(context, "database");
+        var container = VerifierSupport.Arg(context, "dumpContainer");
         var keep = VerifierSupport.LongArg(context, "keep");
-        if (database is null || keep is null) throw new MutationNotVerifiableException(BackupReadBack.RunNow);
-        if (!SafeDb().IsMatch(database))
-            throw new MutationNotVerifiableException("the call named no valid database to read back.");
+        if (database is null || container is null || keep is null) throw new MutationNotVerifiableException(BackupReadBack.RunNow);
+        if (!Whiskers.Utils.CommandOperands.IsSafeDatabaseName(database) || !Whiskers.Utils.CommandOperands.IsSafeContainerRef(container))
+            throw new MutationNotVerifiableException("the call named no valid container and database to read back.");
         var dir = Services.GetRequiredService<DataPathOptions>().BackupsDir;
-        // The directory is listed as a whole (a glob that matches nothing is no error, an unreadable directory is) and
-        // filtered like the retention's glob {database}_*.sql*. A backup taken meanwhile can make a legitimate
-        // retention look short; that race is accepted: it fails towards "check again", never towards success.
-        var listing = await VerifierSupport.HostOutputAsync(Services, RequireServer(context), $"ls -1 {ShellUtils.Quote(dir)}", ct);
-        var left = listing.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Count(f => f.StartsWith(database + "_", StringComparison.Ordinal)
-                        && f.IndexOf(".sql", database.Length + 1, StringComparison.Ordinal) >= 0);
+        // The directory is listed as a whole (an unreadable directory is an error) and filtered as the retention
+        // filters it: exactly this container's dumps of this database in the current format (DbDumpFiles.DumpsOf;
+        // legacy dumps are never pruned, so never counted). A backup taken meanwhile can make a legitimate retention
+        // look short; that race is accepted: it fails towards "check again", never towards success.
+        var read = await VerifierSupport.HostReadAsync(Services, RequireServer(context), DbDumpFiles.ListingCommand(dir), ct);
+        if (!read.Success)
+            throw new MutationVerificationFailedException(
+                $"the backup directory could not be listed (exit code {read.ExitCode}).", stateUnknown: true);
+        // A cut listing hides names, so too few dumps would look like a retention that worked.
+        if (read.OutputTruncated)
+            throw new MutationVerificationFailedException(
+                "the backup directory's listing was truncated; the dumps left cannot be counted.", stateUnknown: true);
+        var left = DbDumpFiles.DumpsOf(read.Output, container, database).Count;
         if (left > keep)
-            throw new MutationVerificationFailedException($"{left} dumps of '{database}' remain, more than the {keep} kept.");
+            throw new MutationVerificationFailedException(
+                $"{left} dumps of '{database}' in '{container}' remain, more than the {keep} kept.");
     }
-
-    // The same charset the retention itself accepts before the name enters a shell glob.
-    [GeneratedRegex(@"^[A-Za-z0-9_-]+$")]
-    private static partial Regex SafeDb();
 }
 
 /// <summary>volume.backup: the archive is recorded and on the host, not empty.</summary>

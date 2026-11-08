@@ -127,6 +127,9 @@ internal sealed class ContainerOperations
     /// shorten it.</summary>
     internal TimeSpan PerServerTimeout { get; init; } = TimeSpan.FromSeconds(8);
 
+    /// <summary>The clock that runs <see cref="PerServerTimeout"/> down. Tests only replace it.</summary>
+    internal TimeProvider PerServerClock { get; init; } = TimeProvider.System;
+
     /// <summary>The fleet listing. <paramref name="ct"/> is the caller's (a loop's stop, a chat closed): it ends the whole
     /// listing with an <see cref="OperationCanceledException"/> and is held against no server. Each server additionally
     /// has <see cref="PerServerTimeout"/> — for the wait for its client and for a budget slot as well as for the request —
@@ -150,8 +153,8 @@ internal sealed class ContainerOperations
                 // Cancel the request, do not merely stop waiting for it: a Task.WhenAny race leaves the
                 // call running against the daemon, and this runs for every server on every cycle. Same
                 // defect as the log fetch in the 2026-08-26 incident.
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeout.CancelAfter(perServerTimeout);
+                using var expiry = new CancellationTokenSource(perServerTimeout, PerServerClock);
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct, expiry.Token);
                 try
                 {
                     // The API-latency probe (Plan-0004 WP4). This call happens once per server per health
@@ -304,7 +307,7 @@ internal sealed class ContainerOperations
         }
     }
 
-    // The four operations below stay outside the budget on purpose, and the reason is not the one that was
+    // The four operations below (and DisableRestartAsync after them) stay outside the budget on purpose, and the reason is not the one that was
     // written here before ("must never be auto-retried" — ExecuteGuardedAsync does not retry, so that was
     // never the risk). The real reason is the circuit breaker: it refuses calls to a server it has given up
     // on, and these four are exactly what a person reaches for when a server is in trouble — which is the
@@ -321,6 +324,16 @@ internal sealed class ContainerOperations
         var client = await GetClient(serverId);
         await client.Containers.StopContainerAsync(containerId,
             new ContainerStopParameters { WaitBeforeKillSeconds = 10 });
+    }
+
+    /// <summary>Contract 0006: <c>docker update --restart=no</c>, so a container the re-check stops stays stopped.</summary>
+    public async Task DisableRestartAsync(string containerId, string? serverId = null)
+    {
+        var client = await GetClient(serverId);
+        await client.Containers.UpdateContainerAsync(containerId, new ContainerUpdateParameters
+        {
+            RestartPolicy = new RestartPolicy { Name = RestartPolicyKind.No },
+        });
     }
 
     public async Task RestartContainerAsync(string containerId, string? serverId = null)

@@ -18,6 +18,10 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
     public const string LogoutAction = "auth.logout";
     /// <summary>A session ended because it no longer passed revalidation (R1-26).</summary>
     public const string SessionRevokedAction = "auth.session_revoked";
+    /// <summary>A Google/OIDC subject was bound to a configured account (R1-27): written before the binding is.</summary>
+    public const string IdentityBoundAction = "auth.identity_bound";
+    /// <summary>A binding request was recorded for a configured account and waits for confirmation (R1-27).</summary>
+    public const string IdentityPendingAction = "auth.identity_pending";
 
     /// <summary>Rows waiting to be written; beyond this a row is dropped (and reported), never waited for.</summary>
     public const int Capacity = 1024;
@@ -93,8 +97,12 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
     {
         if (!_queue.Writer.TryWrite(row))
         {
+            // The account is not named (R1-27: no address in a log); what happened, how and from where is — on one line,
+            // and without the details of an identity row (issuer and subject fingerprint, contract 0003).
             _logger.LogError("AUDIT WRITE FAILED: sign-in audit queue {State}, dropped [web] {Actor} → {Action} ({Method}, success={Success}, {Details})",
-                Volatile.Read(ref _stopped) ? "stopped" : "full", row.Actor, row.Action, row.Method, row.Success, row.Details);
+                Volatile.Read(ref _stopped) ? "stopped" : "full", AuditLogService.AccountPlaceholder,
+                AuditLogService.OneLine(row.Action), AuditLogService.OneLine(row.Method), row.Success,
+                AuditLogService.LoggedDetails(row.Action, row.Details));
             _recovery?.LegacyWriteFailed();
         }
         return Task.CompletedTask;

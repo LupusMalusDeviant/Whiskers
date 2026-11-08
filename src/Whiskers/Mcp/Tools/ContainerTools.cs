@@ -399,6 +399,7 @@ public class ContainerTools
         IDockerService docker,
         IHostCommandExecutor executor,
         IComposePlanner planner,
+        IComposeRunner composeRunner,
         IToolAuditLog auditLog,
         [Description("Container ID or name")] string containerId,
         [Description("Environment variables to set as 'KEY=VALUE' pairs, comma-separated (e.g. 'OPENAI_API_KEY=sk-...,MODEL=gpt-4')")] string envVars,
@@ -433,18 +434,22 @@ public class ContainerTools
         var changed = DotEnvMerge.Merge(null, envVars).Changed;
         var workingDir = plan.ProjectDirectory;
 
-        // Write the planned .env and bring the project up with the planned files
-        var restartResult = await executor.ExecuteMutationAsync(sid, plan.DeployScript(pull: false), TimeSpan.FromMinutes(2));
+        // Write the planned .env, pull and build only what is missing (no --pull), inspect the images, bring the project up
+        // with the planned files and re-check what it started (contract 0006).
+        var run = await composeRunner.RunAsync(plan,
+            (command, timeout, ct) => executor.ExecuteMutationAsync(sid, command, timeout, ct),
+            new ComposeRunOptions(Pull: false, TimeSpan.FromMinutes(2)));
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
-        if (!restartResult.Success)
+        if (!run.Success)
         {
             await auditLog.LogAsync(actor, actorType, "env.save", "env", container.Id, container.Name, details: $"{changed.Count} var(s): {string.Join(", ", changed)}", serverId: serverId, success: false);
-            return MutationScope.Fail($"Writing the .env or the restart failed: {restartResult.Output}\n{restartResult.Error}");
+            var why = run.Refusal ?? (run.Violations.Count > 0 ? string.Join("; ", run.Violations) : $"{run.Output}\n{run.Error}");
+            return MutationScope.Fail($"Writing the .env or the restart failed: {why}");
         }
 
         await auditLog.LogAsync(actor, actorType, "env.save", "env", container.Id, container.Name, details: $"{changed.Count} var(s): {string.Join(", ", changed)}", serverId: serverId);
-        return $"Updated {changed.Count} variable(s) in {workingDir}/.env and restarted:\n  {string.Join(", ", changed)}\n\n{restartResult.Output}";
+        return $"Updated {changed.Count} variable(s) in {workingDir}/.env and restarted:\n  {string.Join(", ", changed)}\n\n{run.Output}";
     }
 
     [McpToolLevel(McpPermissionLevels.Admin)]
@@ -454,6 +459,7 @@ public class ContainerTools
         IMcpPermissionService permissionService,
         IHostCommandExecutor executor,
         IComposePlanner planner,
+        IComposeRunner composeRunner,
         IToolAuditLog auditLog,
         [Description("Server ID to deploy on")] string serverId,
         [Description("Name/directory for the deployment (e.g. 'my-app')")] string projectName,
@@ -485,13 +491,21 @@ public class ContainerTools
         ComposeImpact.ReportProject(plan);
 
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
-        var deployResult = await executor.ExecuteMutationAsync(serverId, plan.DeployScript(pull: true), TimeSpan.FromMinutes(5));
+        // Contract 0006: write, pull, build, inspect the images (an undecided Funnel label refuses here, before up), up —
+        // then the re-check of what up started.
+        var deployResult = await composeRunner.RunAsync(plan,
+            (command, timeout, ct) => executor.ExecuteMutationAsync(serverId, command, timeout, ct),
+            new ComposeRunOptions(Pull: true, TimeSpan.FromMinutes(5)));
 
         await auditLog.LogAsync(actor, actorType, "deploy.compose", "container", projectName, projectName, serverId: serverId, success: deployResult.Success);
         if (deployResult.Success)
             return $"Compose deployment '{projectName}' succeeded:\n{deployResult.Output}";
+        if (deployResult.Refusal is { } refusal)
+            return MutationScope.Fail($"Compose deployment refused: {refusal}");
         MutationScope.Fail("Compose deployment failed.");
-        return $"Compose deployment failed:\n{deployResult.Output}\n{deployResult.Error}";
+        return deployResult.Violations.Count > 0
+            ? $"Compose deployment failed: {string.Join("; ", deployResult.Violations)}"
+            : $"Compose deployment failed:\n{deployResult.Output}\n{deployResult.Error}";
     }
 }
 

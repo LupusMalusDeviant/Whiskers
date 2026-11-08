@@ -83,16 +83,6 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
     // `since` filter, this is the real ceiling on how much of a burst we can still match in one cycle.
     private const int TailLines = 200;
 
-    // Our own container must never be scanned for log alerts. Whiskers logs its own
-    // "Log alert triggered: … {matchedLine}" and "Trivy scan failed … FATAL" lines; when an
-    // "all containers" rule reads those back they re-match the pattern and create a
-    // self-amplifying trigger loop (this is what ran the "Echte Fehler" rule up to 133×).
-    // Self-monitoring, if ever wanted, must be a deliberate out-of-band mechanism, not this.
-    // Override the excluded name(s) via WHISKERS_SELF_CONTAINERS (comma-separated; the legacy
-    // SERVERWATCH_SELF_CONTAINERS is still read) — same source as the log-hygiene exclusions.
-    private static readonly IReadOnlySet<string> SelfContainerNames =
-        Hygiene.LogScanExclusions.ManualNamesFromEnvironment();
-
     public LogMonitorService(
         IServiceScopeFactory scopeFactory,
         IDockerService docker,
@@ -172,7 +162,6 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         var listing = await _docker.ListAllContainersDetailedAsync(all: false, ct);
         ct.ThrowIfCancellationRequested();
         var containers = listing.Containers;
-        var selfServerIds = ResolveSelfServerIds();
         var hits = new ConcurrentQueue<LogAlertHit>();
         // Suspension/resume notices are collected here and sent on the cycle thread, next to the alerts, so
         // the order does not depend on which host answered first.
@@ -182,7 +171,7 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         // containers of a host sequentially so we don't fan a burst of log requests at one connection.
         await Task.WhenAll(containers
             .GroupBy(c => c.ServerId, StringComparer.OrdinalIgnoreCase)
-            .Select(g => ScanServerAsync(g.ToList(), rules, compiledRegexes, selfServerIds, hits, scanEvents, ct)));
+            .Select(g => ScanServerAsync(g.ToList(), rules, compiledRegexes, hits, scanEvents, ct)));
         ct.ThrowIfCancellationRequested();
 
         // Scan-health notices first: "this container is no longer being read" is context for any alert that
@@ -243,7 +232,6 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         IReadOnlyList<ContainerInfo> containers,
         IReadOnlyList<LogAlertRuleEntity> rules,
         IReadOnlyDictionary<string, Regex> compiledRegexes,
-        IReadOnlySet<string> selfServerIds,
         ConcurrentQueue<LogAlertHit> hits,
         ConcurrentQueue<NotificationEvent> events,
         CancellationToken ct)
@@ -533,11 +521,6 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         || rule.ContainerId == container.Id
         || rule.ContainerName == container.Name;
 
-    /// <summary>The self-log guard, restricted to the host we ourselves run on. A container that merely
-    /// shares our name on a REMOTE host is a different process and must stay monitored.</summary>
-    public static bool IsSelfContainer(ContainerInfo container, IReadOnlySet<string> selfServerIds) =>
-        selfServerIds.Contains(container.ServerId) && SelfContainerNames.Contains(container.Name);
-
     /// <summary>The server(s) whose containers can be our OWN container: Whiskers reaches its own host
     /// through the <see cref="ConnectionType.Local"/> entry. If the fleet has no local server (an all-mTLS
     /// or Kubernetes setup, where our own container may not be visible at all), fall back to the default
@@ -554,8 +537,6 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
 
         return ids;
     }
-
-    private IReadOnlySet<string> ResolveSelfServerIds() => ResolveSelfServerIds(_serverConfig);
 
     /// <summary>A pattern match found while scanning; applied to the rule stats and notifications
     /// afterwards, off the parallel scan.</summary>

@@ -95,6 +95,8 @@ public sealed class DataPathOptions
     public string AuditCheckpointJson => P("audit-checkpoint.json");
     /// <summary>Emails that had a local account, so a deleted one is noticed with federated sign-in too (R1-04).</summary>
     public string KnownLocalAccountsJson => P("known-local-accounts.json");
+    /// <summary>The Google/OIDC identity bindings and the binding requests waiting for confirmation (R1-27).</summary>
+    public string IdentityBindingsJson => P("identity-bindings.json");
     /// <summary>The day and the start and end of the last nightly AutoPatch cycle, so a restart neither repeats nor loses it
     /// (R1-39).</summary>
     public string AutoPatchNightlyJson => P("autopatch-nightly.json");
@@ -102,6 +104,10 @@ public sealed class DataPathOptions
     public string NotificationOutboxJson => P("notification-outbox.json");
     /// <summary>The threshold breaches open when Whiskers stopped, so a restart resumes them (R1-56).</summary>
     public string AlertBreachesJson => P("alert-breaches.json");
+    /// <summary>The endpoint-check alerts open when Whiskers stopped, so a restart resumes them (R1-57).</summary>
+    public string EndpointCheckBreachesJson => P("endpoint-check-breaches.json");
+    /// <summary>The last disk-health readings and the open disk-health alerts, so a restart resumes them (R1-58).</summary>
+    public string DiskHealthJson => P("disk-health.json");
 
     // --- Directories ---
     public string SshKeysDir => P("ssh-keys");

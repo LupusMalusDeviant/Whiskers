@@ -25,7 +25,7 @@ public class SslCertService : ISslCertService
 
     // Only allow safe cert names (similar to domain names); must start with a letter/digit so a name can
     // never begin with '-' (option-injection into certbot).
-    private static readonly Regex SafeCertNameRegex = new(@"^[a-zA-Z0-9][a-zA-Z0-9._-]*$", RegexOptions.Compiled);
+    private static readonly Regex SafeCertNameRegex = new(@"^[a-zA-Z0-9][a-zA-Z0-9._-]*\z", RegexOptions.Compiled);
 
     // Certbot expiry date format: "2024-03-15 12:00:00+00:00 (VALID: 89 days)" or similar
     private static readonly Regex ExpiryDateRegex = new(

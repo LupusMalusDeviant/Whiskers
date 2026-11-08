@@ -42,6 +42,7 @@ public static class VerificationContracts
             ["container.remove"] = VerificationContract.ReadBack("the container is gone."),
             ["container.create"] = VerificationContract.ReadBack("the container the call returned runs."),
             ["container.rollback"] = VerificationContract.ReadBack("the container of the snapshot runs again."),
+            ["container.disable_restart"] = VerificationContract.None(NestedOnly),
             ["container.env_set"] = VerificationContract.None(
                 "compose recreates the container from the .env; the new variables are read by its process, not by Whiskers."),
             ["container.env_file_save"] = VerificationContract.None(
@@ -96,6 +97,12 @@ public static class VerificationContracts
             ["certificate.renew_mtls"] = VerificationContract.None(
                 "the renewal itself confirms the presented certificate's thumbprint before it reports success."),
             ["certificate.issue_mtls"] = VerificationContract.None(NestedOnly),
+            ["mtls.client_migrate"] = VerificationContract.None(
+                "every host step is confirmed inside the rollout: the running ghostunnel's allow-list is read back, the new " +
+                "credential is admitted and, before narrowing, the previous one refused."),
+            ["mtls.client_renew"] = VerificationContract.None(
+                "the rollout confirms the new certificate through a rebuilt connection (and a rotation reads the allow-list back) before it reports success."),
+            ["mtls.shared_client_retire"] = VerificationContract.None(OwnRecord),
 
             // Databases
             ["db.query"] = VerificationContract.None("an arbitrary SQL statement: no semantic read-back."),
@@ -112,6 +119,10 @@ public static class VerificationContracts
                 "the agent stack is installed by a script; the next health check shows whether the host reports."),
             ["server.save"] = VerificationContract.None(OwnRecord),
             ["server.remove"] = VerificationContract.None(OwnRecord),
+            ["endpointcheck.save"] = VerificationContract.None(OwnRecord),
+            ["endpointcheck.delete"] = VerificationContract.None(OwnRecord),
+            ["endpointcheck.run"] = VerificationContract.None(
+                "a probe changes nothing on the host; its result is the check's answer and is recorded as such."),
             ["aitrigger.save"] = VerificationContract.None(OwnRecord),
             ["selfbackup.restore"] = VerificationContract.None(
                 "staged only: the restore is applied by the next start, before anything opens the database."),
@@ -144,6 +155,10 @@ public static class VerificationContracts
             ["logalert.toggle"] = VerificationContract.None(OwnRecord),
             ["checks.pause"] = VerificationContract.None(OwnRecord),
             ["checks.resume"] = VerificationContract.None(OwnRecord),
+            ["cve.scan"] = VerificationContract.None(
+                "a scan changes no workload: its findings are Whiskers' own record, with nothing external to read back."),
+            ["notifications.mark_read"] = VerificationContract.None(OwnRecord),
+            ["notifications.clear"] = VerificationContract.None(OwnRecord),
             ["autopatch.preview"] = VerificationContract.None("a preview pulls images to compare digests; it changes no container."),
             ["autopatch.run"] = VerificationContract.None(
                 "each container it patches is updated as container.update, which is verified."),
@@ -178,6 +193,10 @@ public static class VerificationContracts
             ["account.create"] = VerificationContract.None(OwnAccount),
             ["account.password_reset"] = VerificationContract.None(OwnAccount),
             ["account.delete"] = VerificationContract.None(OwnAccount),
+
+            // Google/OIDC identity bindings (R1-27)
+            ["identity.binding_confirm"] = VerificationContract.None(OwnRecord),
+            ["identity.binding_remove"] = VerificationContract.None(OwnRecord),
         };
 
     private const string OwnAccount =

@@ -16,6 +16,7 @@ properties below is removed or weakened (each property has negative tests that m
 |---|---|---|
 | `build-test` → Test (in-process) | The whole in-process suite, including `EndpointAuthMatrixTests`, the boot matrix and the workflow policy tests | any test fails, fewer than the floor of tests passed (`check-test-results.sh`, the floor is in the step; raise it when the suite grows), or a test named in `.github/required-tests/in-process.txt` is missing or did not pass |
 | `build-test` → Test (Docker integration, mandatory) | PostgreSQL metrics (`PostgresSmokeTests`), local accounts on PostgreSQL (`PostgresIdentityTests`), PostgreSQL backup and restore on 17 and 14 — against real servers (Testcontainers) | no Docker daemon, a server that does not start (the tests throw on CI, `DockerRequirement`), any failed **or skipped** test, fewer than the floor, or a test named in `.github/required-tests/docker.txt` is missing or did not pass |
+| `build-test` → Release gate (compare with the base) | Pull requests and release runs only (R1-51, contract 0008, D16/R18): no invariant ID disappears without a retirement, the pinned highest ID never goes down, an accepted §6.1 release decision is never edited or deleted — against the pull request's base commit, or in a release run the previous release tag (`ReleaseGateBaseTests`) | a finding, an unreadable base, or the test skipped or missing from `gate-base.trx` |
 | `build-test` → DI boot gate | The app boots in Development (`ValidateOnBuild`) until `/healthz` answers | the app exits or never becomes healthy |
 | `artifact` | The image built from this commit (amd64): Trivy (CRITICAL fails, exceptions only in `.trivyignore`), the hardened compose profile, the upgrade from the previous published release and the way back | see [Artifact checks](#artifact-checks) |
 
@@ -25,16 +26,26 @@ must contain and pass (`<minimum> <name>`: a test, every case of a theory, or a 
 --require` fails on any entry that is missing, skipped or failed, whatever the floor says. `RequiredTestsManifestTests`
 keeps the manifests in step with the test assembly: every entry must name tests of its run, every container test must be
 required in the Docker run, and the endpoint matrix and the PostgreSQL Identity and metrics tests are named one by one.
-A new mandatory test goes into the manifest in the same change.
+A new mandatory test goes into the manifest in the same change. Each manifest ends in a block between
+`# BEGIN release-gate (generated)` and `# END release-gate`: the tests the ✅ invariants name, rendered by
+`ReleaseGateTests` (R1-51); do not edit it by hand — on a difference the test writes the fresh block to the manifest's
+`.actual` file. The `image-runtime` job is checked the same way (`image-runtime.trx`, `--no-skips`,
+`.github/required-tests/image-runtime.txt`).
+
+**Release gate (R1-51, contract 0008).** `ReleaseGateTests` runs inside the in-process tests and checks
+`docs/v1/SECURITY_INVARIANTS.md`, `RELEASE_GATE.md`, `PRODUCT_CONTRACT.md` (§6.1, §7), `PATH_CAPABILITIES.md` and the
+generated `CAPABILITY_INVENTORY.md` against the test assembly and these workflows. Its mode follows the version (below
+1.0.0: Development); only release.yml's `release-gate: release` input, turned into `WHISKERS_RELEASE_GATE` for the
+in-process step alone, makes a run a release run. The rules and the records are described in `docs/v1/RELEASE_GATE.md`.
 
 In a release, `ci.yml` runs on the tag commit (`workflow_call`) and the `artifact` job is skipped: the release checks the
 staged digest it publishes instead (`artifact-test`, below).
 
-### `security.yml` — every push and pull request against `main`, and weekly
+### `security.yml` — every push and pull request against `main`, weekly, and inside every release
 
 | Job | What it checks | Fails when |
 |---|---|---|
-| `dependency-vulnerabilities` | `dotnet list package --vulnerable --include-transitive` over every project of the solution | any known-vulnerable package (any severity), the check reports problems, or fewer than 5 projects were checked |
+| `dependency-vulnerabilities` | `dotnet list package --vulnerable --include-transitive` over every project of the solution | any known-vulnerable package (any severity), the check reports problems, or fewer than 5 projects were checked (no complete data is retried up to three times; a finding never — see [External downloads](#external-downloads-retries-no-nuget-cache-the-committed-pgdg-key)) |
 | `dependency-review` (pull requests) | the dependency changes of the pull request (NuGet, Actions, Docker) | the pull request adds a dependency with a known vulnerability (`fail-on-severity: low`) |
 | `secret-scan` | gitleaks 8.30.1 (pinned by digest) over the whole history and the working tree, default rules + `.gitleaks.toml` | any finding outside the exceptions in `.gitleaks.toml`. Every exception names its rule, its file and the exact value (two identifiers in vendored bundles, two names the rules mistake for credentials, the test fixtures); no directory and no line pattern is exempt, so a real credential in a test, in a vendored bundle or next to an excepted value, or an excepted value in another file, fails |
 | `static-analysis` | the .NET security analyzers (`AnalysisModeSecurity=All`) over the shipped projects, as errors | any security analyzer warning; a reviewed false positive is suppressed at its method with a justification |
@@ -42,14 +53,41 @@ staged digest it publishes instead (`artifact-test`, below).
 
 ### `release.yml` — a `v*` tag
 
-`prepare` → `test` (the whole `ci.yml` on the tag commit) → `build` (amd64 and arm64, staged by digest) → `scan` (Trivy on
+`prepare` (the tag commit must be on `origin/main`) → `test` (the whole `ci.yml` on the tag commit, release gate in
+release mode) and `security` (the whole `security.yml` on the tag commit; `dependency-review` runs on pull requests only) → `build` (amd64 and arm64, staged by digest) → `scan` (Trivy on
 both digests) and **`artifact-test`** (the staged amd64 digest: hardened profile, N−1 upgrade and recovery) → `publish-image`
-(only after `test`, `scan` and `artifact-test`) → chart, GitHub release, moving tags. Nothing is tagged before the image
+(only after `test`, `security`, `scan` and `artifact-test`) → chart, GitHub release, moving tags. Nothing is tagged before the image
 that will be published passed the artifact checks. The arm64 image is scanned but not started (the runners are amd64).
+
+- **Releases come from `main`, patch releases included.** `prepare` refuses a tag whose commit is not reachable from
+  `origin/main` (R1-51, D16), so a patch tag cut on a `release/*` branch is refused: land the fix on `main` and tag there.
+- **The base of a release run** is the highest *published* GitHub release (not a draft, not a pre-release) below the
+  version. What makes it trustworthy is that its commit must be an ancestor of the release commit and its csproj must
+  carry the tag's version; the published list only screens out tags whose release run failed (anyone who can push a
+  tag can also publish a release by hand). A tag between that base and the version that is in the history and carries
+  its own version but has no published release fails the run, so the base cannot silently fall back past a deleted
+  or demoted release. **After a failed release**, either finish it (re-run) or delete its tag before the next release.
+- **CodeQL runs but does not block the release on alerts.** In the release, `security` runs CodeQL on the tag commit;
+  the job fails only when the analysis cannot run. Open alerts block merges through the repository's code-scanning rule
+  (below), not the release run itself.
 
 ### `chart-ci.yml`
 
 Lint and render invariants of the Helm chart on chart changes; the kind install smoke stays manual (`workflow_dispatch`).
+
+## External downloads: retries, no NuGet cache, the committed PGDG key
+
+nuget.org and postgresql.org have bad minutes. A job must survive a reset connection, but it must never retry its way past
+a real failure, and it must never trade a check for speed. `BuildReproducibilityTests` holds each point below, with
+negative tests that mutate the real files.
+
+| What | How | Why |
+|---|---|---|
+| NuGet restore in the workflows | Every workflow restores with `bash .github/scripts/restore-locked.sh`: the locked restore of `Whiskers.slnx`, up to three tries 20 s apart. Each warning names the exit code. | A connection reset passes on the next try. NU1004/NU1005 (the lock file does not match) and NU1403 (a content hash differs) would fail the same way every time, so they fail **at once**, without retries: a supply-chain signal is not hidden behind network-sounding warnings. NU1101/NU1102 (the package or the locked version is gone from nuget.org) also fail at once, unless the same log shows a source failure (NU1301, NU1801): nuget.org can report a package as missing when the request for it failed, and that case is retried. The third failure fails the step. A restore step may not use `continue-on-error`, `set +e` (also combined, `set +eu`) or `set +o errexit`. |
+| NuGet restore in the image | The Dockerfile's restore `RUN` (stage `build`) has the same loop, in POSIX `sh`. | `image-runtime` builds without a layer cache. `artifact` keeps its BuildKit layer cache (`type=gha`) for the runtime stage, but with `no-cache-filters: build`: the restore stage never comes from the cache, so it restores from nuget.org on every build. `cache-to` uses `mode=min`, so only the final image's layers are exported, not the never-read build stage. The release builds (`release.yml`) have no layer cache at all; a release always builds fresh. The policy recognises a release workflow by its file name, its `name:` or a tag trigger (`on.push.tags`). A reusable workflow that only a release calls is not recognised as one. A `run` step may not pass `--cache-from`/`--cache-to` to `docker build`/`docker buildx build` in any workflow. |
+| **No NuGet cache** | Not in `setup-dotnet` (`cache:`), not through `actions/cache`, not through `NUGET_PACKAGES`, not as a BuildKit cache mount, and not as a cached restore layer: a `docker/build-push-action` with `cache-from` must name the restore stage in `no-cache-filters`, and a release build may have no `cache-from`/`cache-to`. | NuGet hashes a package and checks its signature only when it downloads and extracts it. For a package that is already in the global-packages folder, it trusts the recorded hash and checks nothing. A cache hit would make the cache entry a trust root that nothing re-checks, and would keep a package nuget.org has removed. A cached restore layer is such a cache: it holds the packages and the assets file, and BuildKit reuses it without running the restore. |
+| Vulnerability data (`security.yml`) | `dotnet list package --vulnerable` is retried (three tries) only while it has no complete data: a non-zero exit, problems, or fewer than 5 projects. | The data comes live from nuget.org. Each try computes `FOUND`, the project count and the problem count anew, all three before any break, so no value from an earlier try survives. A jq failure (`jq -e`: also no output at all) is incomplete data (`status=1`), never "no finding", and its error stays in the log. A finding (`FOUND > 0`) ends the loop at once and fails the job (`exit 1`), so a finding is never retried. With no finding, the data is asserted complete again after the loop (exit 0, at least 5 projects, no problems). The step has no `exit 0`. |
+| PostgreSQL (PGDG) repository key | Committed as `deploy/keys/pgdg-ACCC4CF8.asc`. CI and the Dockerfile use this file. Before apt trusts it they check the whole file's SHA-256 (`sha256sum -c`, `0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76`) and the key's fingerprint `B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8`. The `sha256sum -c -` command stands on its own (nothing like `|| true` after it) and runs before `gpg --dearmor`. Nothing downloads a key from postgresql.org. The test checks the file's SHA-256, computes the fingerprint itself, and refuses a second public key inside the armor. | No download that can fail. The file is pinned byte for byte: any changed byte, or a second key appended inside the same armor block, fails the tests and the `sha256sum` check in CI and the image. When PGDG rotates its key, replace the file, the SHA-256 and the fingerprint together, after checking the new key out of band. |
 
 ## Artifact checks
 

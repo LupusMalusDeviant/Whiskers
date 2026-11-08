@@ -28,6 +28,10 @@ public sealed record AutomationActor(string RunnerId, string DisplayName, string
     /// <summary>The operation id of the run (R1-18), when the item has one of its own — a webhook delivery's run id.
     /// Otherwise the gateway assigns one per call.</summary>
     public string? OperationId { get; init; }
+
+    /// <summary>The key of the one event a refusal of this run may be (<see cref="MutationRequest.EventKey"/>): a webhook
+    /// delivery that did not run is recorded under it from every path that can record it (review round 5).</summary>
+    public string? EventKey { get; init; }
 }
 
 /// <summary>The owner's authority right now. Re-read on every run (INV-04).</summary>
@@ -177,12 +181,7 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
         // A user who can no longer sign in — removed from the whitelist, or whose local account was deleted — has no
         // authority left, whatever role entry remains.
         var state = UserState(email);
-        var userLevel = state != OwnerState.Active ? McpPermissionLevels.Read : _roles.GetRole(email) switch
-        {
-            AppRole.Admin => McpPermissionLevels.Admin,
-            AppRole.Operator => McpPermissionLevels.Write,
-            _ => McpPermissionLevels.Read,
-        };
+        var userLevel = state != OwnerState.Active ? McpPermissionLevels.Read : CapabilityCatalog.LevelFor(_roles.GetRole(email));
         return new MutationPrincipal(MutationPrincipalKind.Human, ownerId, state switch
         {
             OwnerState.AccountDeleted => $"{email} (account deleted)",
@@ -233,12 +232,14 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
     private readonly IAutomationOwnerResolver _owners;
     private readonly IOptionsMonitor<AutomationOptions> _options;
     private readonly ICapabilityOverrides? _overrides;
+    private readonly ILogger<AutomationMutationRunner> _logger;
 
     public AutomationMutationRunner(IMutationGateway gateway, ICapabilityCatalog catalog,
         IAutomationOwnerResolver owners, IOptionsMonitor<AutomationOptions> options,
-        ICapabilityOverrides? overrides = null)
+        ICapabilityOverrides? overrides = null, ILogger<AutomationMutationRunner>? logger = null)
     {
         _overrides = overrides;
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AutomationMutationRunner>.Instance;
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _owners = owners ?? throw new ArgumentNullException(nameof(owners));
@@ -290,7 +291,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
                 $"{actor.DisplayName} (no owner)", McpPermissionLevels.Read)
             : PrincipalOf(actor, capability);
         return _gateway.RefuseAsync(new MutationRequest(capabilityId, principal, MutationSurface.Automation, target, args,
-            OperationId: actor.OperationId), reason, ct);
+            OperationId: actor.OperationId) { EventKey = actor.EventKey }, reason, ct);
     }
 
     public string? LostAuthority(AutomationActor actor, string capabilityId)
@@ -300,8 +301,21 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         if (capability is null) return null;
         if (string.IsNullOrWhiteSpace(actor.OwnerId))
             return _options.CurrentValue.RequireOwner ? "it has no owner, and owners are required" : null;
-        var owner = _owners.Resolve(actor.OwnerId);
-        var state = _owners.Describe(actor.OwnerId).State;
+        MutationPrincipal owner;
+        OwnerState state;
+        try
+        {
+            owner = _owners.Resolve(actor.OwnerId);
+            state = _owners.Describe(actor.OwnerId).State;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Unknown, not lost: the run was refused (PrincipalOf), the item is not suspended for a store that failed.
+            _logger.LogWarning(ex, "The owner {OwnerId} of automation {Runner} could not be resolved; its authority is " +
+                "unknown, it is not suspended",
+                actor.OwnerId, actor.RunnerId);
+            return null;
+        }
         // Unverified is refused but not suspended: it runs again once the owner signs in (or an admin takes over).
         if (state == OwnerState.Unverified) return null;
         if (state != OwnerState.Active)
@@ -334,7 +348,27 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
     {
         if (!string.IsNullOrWhiteSpace(actor.OwnerId))
         {
-            var owner = _owners.Resolve(actor.OwnerId);
+            MutationPrincipal owner;
+            try
+            {
+                owner = _owners.Resolve(actor.OwnerId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Logged with its cause (review round 14): a fault in the owner lookup must not read as a refusal.
+                _logger.LogError(ex, "The owner {OwnerId} of automation {Runner} could not be resolved; the run is refused",
+                    actor.OwnerId, actor.RunnerId);
+                // The owner's authority cannot be read (INV-45 review round 13): the run is still one event — the
+                // gateway refuses this principal for every capability (McpPermissionLevels.None, never normalised to
+                // read) — and the audit row says why and names the stored owner, itself without authority. Nothing is
+                // granted to anyone; no level is guessed.
+                var unreadable = new MutationPrincipal(
+                    PrincipalIds.KeyIdOf(actor.OwnerId) is not null ? MutationPrincipalKind.ApiKey : MutationPrincipalKind.Human,
+                    actor.OwnerId, $"{actor.OwnerId} (unreadable: {ex.GetType().Name})", McpPermissionLevels.None);
+                return new MutationPrincipal(MutationPrincipalKind.Automation, actor.RunnerId,
+                    $"{actor.DisplayName} (owner unreadable)", McpPermissionLevels.None, OnBehalfOf: unreadable,
+                    DelegatedBy: actor.CreatedVia);
+            }
             return new MutationPrincipal(MutationPrincipalKind.Automation, actor.RunnerId,
                 $"{actor.DisplayName} (owner {owner.DisplayName})", owner.PermissionLevel,
                 OnBehalfOf: owner, AllowedTools: owner.AllowedTools, DelegatedBy: actor.CreatedVia);

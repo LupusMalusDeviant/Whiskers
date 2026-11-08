@@ -50,7 +50,8 @@
         }
 
         // PC-D2: a shell inside a container is Admin, like the host shell.
-        if (await CurrentUser.GetRoleAsync() < AppRole.Admin)
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        if (await CurrentUser.GetRoleAsync() < CapabilityCatalog.RoleOf("terminal.container_open"))
         {
             _error = L["TerminalView_Error_AdminRequired"].Value;
             await InvokeAsync(StateHasChanged);

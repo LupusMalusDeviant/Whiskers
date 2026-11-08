@@ -28,6 +28,13 @@ registers a new tailnet node and needs a reusable auth key.
 NOTE: no VAULT_KEY is set — the secret vault (kubeconfig-based Kubernetes servers, encrypted backups) is off.
 Values: vault.existingSecret / vault.key.
 {{- end }}
+{{- if and .Values.ingress.enabled (empty .Values.trustedProxyCidrs) }}
+
+WARNING: ingress.enabled=true but trustedProxyCidrs is empty — Whiskers trusts X-Forwarded-* from loopback only
+(R1-50), so behind the ingress controller every visitor has the controller's address, HTTPS is seen as HTTP (session
+cookie without Secure, Google/OIDC callback built with http://) and the login rate limit counts all visitors as one.
+List the ingress controller's pod CIDR or addresses in trustedProxyCidrs.
+{{- end }}
 {{- if .Values.localDocker.enabled }}
 
 WARNING: localDocker.enabled=true mounts the node's Docker socket — root-equivalent access to the node, and the pod

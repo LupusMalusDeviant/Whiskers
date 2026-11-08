@@ -17,10 +17,11 @@ namespace Whiskers.Startup;
 
 /// <summary>The HTTP request pipeline + startup warm-up, moved <b>verbatim</b> from Program.cs. The middleware
 /// ORDER is security-critical (protected layer, docs/ARCHITECTURE.md): the request correlation id (R1-53, decides
-/// nothing) ahead of everything, forwarded headers first among the rest, then the fixed
-/// <c>Antiforgery → Authentication → [LAN bypass] → McpBearer → Authorization</c> chain. This method keeps
-/// every <c>Use*</c>/<c>Map*</c> call in the exact same order as before — nothing is reordered, only relocated
-/// (the McpCallLog middleware still sits between the endpoint maps exactly where it did).</summary>
+/// nothing) ahead of everything, then (R1-50, approved 2026-11-05) the untrusted-forwarded-headers marker (it must see
+/// the original peer), the forwarded headers, the response-header registration (before anything can write), then the fixed
+/// <c>Antiforgery → Authentication → [LAN bypass] → McpBearer → Authorization</c> chain. Apart from the R1-50 steps every
+/// <c>Use*</c>/<c>Map*</c> call keeps the order it had in Program.cs (the McpCallLog middleware still sits between the
+/// endpoint maps exactly where it did).</summary>
 public static class WhiskersPipelineExtensions
 {
     /// <summary>The audit action of a self-backup download, handed out or refused (R1-22).</summary>
@@ -43,16 +44,50 @@ public static class WhiskersPipelineExtensions
         };
         // Trust forwarded headers ONLY from configured proxy networks. Leaving both lists empty makes
         // ASP.NET Core skip the known-proxy check entirely (trust-all), which lets any client spoof
-        // X-Forwarded-For and corrupt the SourceIp recorded for webhooks/audit. Defaults to loopback +
-        // RFC1918 + Tailscale CGNAT; override via ForwardedHeaders:TrustedNetworks (array of CIDRs).
+        // X-Forwarded-For and corrupt the client address of the login rate limit, the Auth:Disabled gate and the
+        // audit. R1-50: defaults to loopback only; override via ForwardedHeaders:TrustedNetworks (CIDRs or addresses).
+        // An entry that is neither refuses the start (fail closed) instead of trusting a different set.
+        var trustedProxies = ForwardedHeadersConfig.FromConfiguration(app.Configuration);
+        // The framework's own switch adds a forwarded-headers step ahead of this pipeline that trusts EVERY peer.
+        ForwardedHeadersConfig.RefuseFrameworkTrustAll(app.Configuration);
         forwardedHeadersOptions.KnownIPNetworks.Clear();
         forwardedHeadersOptions.KnownProxies.Clear();
-        foreach (var network in ForwardedHeadersConfig.ParseTrustedNetworks(
-                     app.Configuration.GetSection("ForwardedHeaders:TrustedNetworks").Get<string[]>()))
-        {
+        foreach (var network in trustedProxies)
             forwardedHeadersOptions.KnownIPNetworks.Add(network);
-        }
+
+        // R1-50: forwarded headers from an untrusted peer are ignored by the middleware below; this notes the peer for
+        // the production-readiness check (a reverse proxy that still has to be named there, or a spoofing client).
+        var forwardedObserver = app.Services.GetService<ForwardedHeadersObserver>();
+        app.Use(async (ctx, next) =>
+        {
+            if ((ctx.Request.Headers.ContainsKey("X-Forwarded-For") || ctx.Request.Headers.ContainsKey("X-Forwarded-Proto"))
+                && ctx.Connection.RemoteIpAddress is not null   // a local transport: the middleware applies the headers
+                && !ForwardedHeadersConfig.IsTrusted(trustedProxies, ctx.Connection.RemoteIpAddress))
+            {
+                // The Auth:Disabled gate refuses such a request: the peer may be a proxy that is not listed yet, and
+                // then its address (often a private one) would stand in for every client behind it.
+                ctx.Items[ForwardedHeadersConfig.IgnoredItemKey] = true;
+                forwardedObserver?.Untrusted(ctx.Connection.RemoteIpAddress);
+            }
+            await next();
+        });
         app.UseForwardedHeaders(forwardedHeadersOptions);
+
+        // R1-50 (A-13): response headers every answer carries — no framing by another site (clickjacking), no MIME
+        // sniffing, no full URL in the Referer of outbound links. Set before anything can write the response.
+        app.Use(async (ctx, next) =>
+        {
+            ctx.Response.OnStarting(static state =>
+            {
+                var headers = ((HttpContext)state).Response.Headers;
+                headers["X-Content-Type-Options"] = "nosniff";
+                headers["X-Frame-Options"] = "DENY";
+                headers["Content-Security-Policy"] = "frame-ancestors 'none'";
+                headers["Referrer-Policy"] = "same-origin";
+                return Task.CompletedTask;
+            }, ctx);
+            await next();
+        });
 
         // Support reverse proxy with subpath
         if (!string.IsNullOrEmpty(configuredPathBase))
@@ -148,7 +183,8 @@ public static class WhiskersPipelineExtensions
             {
                 // Every request below this point is an Admin — refuse anything that is not plainly from the trusted
                 // network (public client, DNS-rebinding Host, cross-site Origin). See AuthDisabledAccessPolicy.
-                var refused = access.Check(ctx.Connection.RemoteIpAddress, ctx.Request.Host.Value, ctx.Request.Headers.Origin);
+                var refused = access.Check(ctx.Connection.RemoteIpAddress, ctx.Request.Host.Value, ctx.Request.Headers.Origin,
+                    forwardedIgnored: ctx.Items.ContainsKey(ForwardedHeadersConfig.IgnoredItemKey));
                 if (refused is not null)
                 {
                     ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Whiskers.AuthDisabled")
@@ -204,25 +240,29 @@ public static class WhiskersPipelineExtensions
                     CookieRequestCultureProvider.MakeCookieValue(new RequestCulture(culture)),
                     new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true, Path = "/" });
             }
-            return Results.LocalRedirect(string.IsNullOrEmpty(redirect) ? "/" : redirect);
+            // R1-50: a redirect that is not local goes home instead of throwing (500); only a local path is followed.
+            var target = !string.IsNullOrEmpty(redirect) && IsLocalPath(redirect) ? redirect : "~/";
+            return Results.LocalRedirect(target);
         }).AllowAnonymous();
 
         // Auth endpoints
-        app.MapGet("/login-google", async (HttpContext ctx) =>
-        {
-            await ctx.ChallengeAsync(GoogleDefaults.AuthenticationScheme, new AuthenticationProperties
-            {
-                RedirectUri = configuredPathBase + "/"
-            });
-        }).AllowAnonymous();
+        // R1-50: a provider that is not configured answers 404, not the 500 its challenge used to throw.
+        app.MapGet("/login-google", (HttpContext ctx) => ChallengeIfConfiguredAsync(ctx, GoogleDefaults.AuthenticationScheme))
+            .AllowAnonymous();
 
-        app.MapGet("/login-oidc", async (HttpContext ctx) =>
+        app.MapGet("/login-oidc", (HttpContext ctx) => ChallengeIfConfiguredAsync(ctx, "oidc"))
+            .AllowAnonymous();
+
+        async Task ChallengeIfConfiguredAsync(HttpContext ctx, string scheme)
         {
-            await ctx.ChallengeAsync("oidc", new AuthenticationProperties
+            var schemes = ctx.RequestServices.GetRequiredService<IAuthenticationSchemeProvider>();
+            if (await schemes.GetSchemeAsync(scheme) is null)
             {
-                RedirectUri = configuredPathBase + "/"
-            });
-        }).AllowAnonymous();
+                ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+            await ctx.ChallengeAsync(scheme, new AuthenticationProperties { RedirectUri = configuredPathBase + "/" });
+        }
 
         // Local username/password login (F1). Only when auth is real. Validates against the Identity user
         // store, applies the SAME whitelist gate as Google/OIDC, then issues the EXISTING cookie carrying a
@@ -252,6 +292,9 @@ public static class WhiskersPipelineExtensions
                 // MaxFailedAccessAttempts (5) wrong passwords lock the account for DefaultLockoutTimeSpan.
                 if (await users.IsLockedOutAsync(user))
                 {
+                    // R1-50: the same password-hash work as every other refusal, so the hash cost does not tell a locked
+                    // account from an unknown one (a wrong password still does its own database writes).
+                    LocalLoginTiming.BurnPasswordCheck(users, password);
                     await authAudit.SignInRefusedAsync(ctx, "local", user.Email, Whiskers.Services.Auth.AuthAuditReasons.LockedOut);
                     return Results.Redirect(configuredPathBase + "/login?error=invalid");
                 }
@@ -294,12 +337,41 @@ public static class WhiskersPipelineExtensions
             }).AllowAnonymous().RequireRateLimiting(LocalLoginTiming.RateLimitPolicy);
         }
 
-        app.MapGet("/logout", async (HttpContext ctx, Whiskers.Services.Auth.IAuthAuditLog authAudit) =>
+        // R1-50 (A-16): signing out is a POST that carries the antiforgery token. A GET — a link or an image another site
+        // embeds — no longer ends the session; it shows a one-button form that posts here.
+        app.MapPost("/logout", async (HttpContext ctx, Whiskers.Services.Auth.IAuthAuditLog authAudit,
+            Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery) =>
         {
+            // Validated here: the antiforgery middleware only rejects requests of endpoints that bind form fields, and
+            // this one binds none. A missing or wrong token ends nothing (fail closed).
+            if (!await antiforgery.IsRequestValidAsync(ctx))
+            {
+                // A tab left open after the session ended (expired, revoked): its token belonged to that session.
+                // Nothing is ended either way; without a session the caller just goes to the sign-in page.
+                if (ctx.User.Identity?.IsAuthenticated != true)
+                    return Results.Redirect(configuredPathBase + "/login");
+                return Results.BadRequest();
+            }
             // Recorded before the cookie goes: afterwards the request no longer names the user (R1-22).
             await authAudit.SignedOutAsync(ctx);
             await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            ctx.Response.Redirect(configuredPathBase + "/login");
+            return Results.Redirect(configuredPathBase + "/login");
+        }).AllowAnonymous();
+
+        app.MapGet("/logout", (HttpContext ctx, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery) =>
+        {
+            if (ctx.User.Identity?.IsAuthenticated != true)
+                return Results.Redirect(configuredPathBase + "/login");
+            var tokens = antiforgery.GetAndStoreTokens(ctx);
+            var field = System.Net.WebUtility.HtmlEncode(tokens.FormFieldName);
+            var value = System.Net.WebUtility.HtmlEncode(tokens.RequestToken ?? "");
+            var action = System.Net.WebUtility.HtmlEncode(configuredPathBase + "/logout");
+            return Results.Content(
+                "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Sign out — Whiskers</title></head>" +
+                "<body style=\"font-family:system-ui,sans-serif;margin:3rem\"><p>Sign out of Whiskers?</p>" +
+                $"<form method=\"post\" action=\"{action}\"><input type=\"hidden\" name=\"{field}\" value=\"{value}\">" +
+                "<button type=\"submit\">Sign out</button></form></body></html>",
+                "text/html; charset=utf-8");
         }).AllowAnonymous();
 
         // SignalR hubs
@@ -652,6 +724,13 @@ public static class WhiskersPipelineExtensions
         foreach (var module in Whiskers.Modules.ModuleCatalog.DiscoverEnabled(app.Configuration))
             await module.InitializeAsync(app.Services, CancellationToken.None);
     }
+
+    /// <summary>R1-50: whether <paramref name="url"/> is a path on this site — "/x", never "//host", "/\host" or an
+    /// absolute URL (the rule of <c>IUrlHelper.IsLocalUrl</c>; "~/" paths are not accepted here).</summary>
+    internal static bool IsLocalPath(string url) =>
+        url.Length > 0 && url[0] == '/'
+        && (url.Length == 1 || (url[1] != '/' && url[1] != '\\'))
+        && !url.Any(char.IsControl);
 
     /// <summary>The <c>whiskers_self_*</c> series: what Whiskers is doing to the fleet and how its own loops
     /// are faring (Plan-0003 WP3). Reads process-local counters only — no Docker call, no database round trip,

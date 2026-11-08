@@ -62,7 +62,7 @@
     <value>Container management</value>
   </data>
   <data name="Login_Error_Unauthorized" xml:space="preserve">
-    <value>Your email is not authorized to access this application.</value>
+    <value>Your email is not authorized to access this application. If you expected access, an administrator can confirm your sign-in under Settings → Sign-in identities.</value>
   </data>
   <data name="Login_Button_Google" xml:space="preserve">
     <value>Sign in with Google</value>
@@ -1224,6 +1224,9 @@ Project: {4}</value>
   <data name="Dashboard_Chart_UsageHistoryTitle" xml:space="preserve">
     <value>Usage history</value>
   </data>
+  <data name="Dashboard_FailingChecks" xml:space="preserve">
+    <value>{0} check(s) failing</value>
+  </data>
   <data name="Dashboard_Cve_Tooltip" xml:space="preserve">
     <value>{0} Critical, {1} High, {2} Medium, {3} Low — click to open /cves</value>
   </data>
@@ -1684,6 +1687,42 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Servers_Action_TestConnection" xml:space="preserve">
     <value>Test connection</value>
+  </data>
+  <data name="Servers_Mtls_Shared" xml:space="preserve">
+    <value>Shared client credential (expires {0}) — not isolated</value>
+  </data>
+  <data name="Servers_Mtls_Own" xml:space="preserve">
+    <value>Own client credential (generation {0}), expires {1}</value>
+  </data>
+  <data name="Servers_Mtls_OwnUnfinished" xml:space="preserve">
+    <value>Own client credential (generation {0}), migration unfinished (phase {1} of 5)</value>
+  </data>
+  <data name="Servers_Mtls_Operator" xml:space="preserve">
+    <value>Operator-supplied client credential (expires {0})</value>
+  </data>
+  <data name="Servers_Mtls_Migrate" xml:space="preserve">
+    <value>Migrate to its own client credential</value>
+  </data>
+  <data name="Servers_Mtls_MigrateTitle" xml:space="preserve">
+    <value>Migrate {0} to its own client credential?</value>
+  </data>
+  <data name="Servers_Mtls_MigrateMessage" xml:space="preserve">
+    <value>Whiskers issues this host its own client certificate, lets the host's proxy admit it besides the shared one, switches over, and then narrows the proxy to the new identity once the shared one is proven refused. Each host step rolls back by itself after 3 minutes unless confirmed. This takes a few minutes.</value>
+  </data>
+  <data name="Servers_Mtls_Migrated" xml:space="preserve">
+    <value>{0} now admits only its own client identity {1}.</value>
+  </data>
+  <data name="Servers_Mtls_MigrateFailed" xml:space="preserve">
+    <value>Migration of {0} stopped in phase "{1}": {2} Starting it again resumes there.</value>
+  </data>
+  <data name="Servers_Mtls_Retire" xml:space="preserve">
+    <value>Retire shared client key</value>
+  </data>
+  <data name="Servers_Mtls_RetireTitle" xml:space="preserve">
+    <value>Retire the shared client credential?</value>
+  </data>
+  <data name="Servers_Mtls_RetireMessage" xml:space="preserve">
+    <value>Deletes the shared client key and certificate. Whiskers refuses while any host still uses or admits them. This cannot be undone except from a backup.</value>
   </data>
   <data name="Servers_Button_Add" xml:space="preserve">
     <value>Add server</value>
@@ -4676,6 +4715,9 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Cves_Snackbar_ScanFinished" xml:space="preserve">
     <value>CVE scan finished.</value>
   </data>
+  <data name="Cves_Snackbar_ScanNotStarted" xml:space="preserve">
+    <value>No CVE scan was started: one is already running, or the CVE module is off.</value>
+  </data>
   <data name="Cves_Snackbar_ScanFailed" xml:space="preserve">
     <value>CVE scan failed: {0}</value>
   </data>
@@ -5113,6 +5155,12 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Webhook_Test_Busy" xml:space="preserve">
     <value>The delivery queue is full; try again shortly.</value>
+  </data>
+  <data name="Webhook_Test_Stopping" xml:space="preserve">
+    <value>Whiskers is stopping: the delivery is queued and is settled at the next start; its action did not run.</value>
+  </data>
+  <data name="Webhook_Test_StoppingNotAccepted" xml:space="preserve">
+    <value>Whiskers is stopping: the test delivery may not have been accepted and has not run; try again after the restart.</value>
   </data>
   <data name="Webhook_Test_NotAccepted" xml:space="preserve">
     <value>The test delivery was not accepted ({0}).</value>
@@ -5602,5 +5650,398 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Recover_NoCode" xml:space="preserve">
     <value>No code? An Admin resets your password under Settings → Local accounts; if no Admin can sign in, the host operator issues one with --recover-local-account.</value>
+  </data>
+  <data name="IdentityBindings_Panel" xml:space="preserve">
+    <value>Sign-in identities</value>
+  </data>
+  <data name="IdentityBindings_Intro" xml:space="preserve">
+    <value>A Google or OIDC sign-in is admitted on the provider's subject, bound once to a configured address (a role entry or a whitelist listing). The first sign-in binds automatically only when the provider is trusted to verify addresses (Google by default; OIDC only with Oidc:TrustEmailVerified) and the address is verified; everything else waits here for confirmation.</value>
+  </data>
+  <data name="IdentityBindings_AuthDisabled" xml:space="preserve">
+    <value>Authentication is disabled (AUTH_DISABLED): there is no Google/OIDC sign-in, and bindings cannot be confirmed or removed here. The host command --confirm-identity-binding still works.</value>
+  </data>
+  <data name="IdentityBindings_Unavailable" xml:space="preserve">
+    <value>The identity bindings (identity-bindings.json) cannot be read, or a save failed: every Google/OIDC sign-in and session is refused until they are read and saved again (retried every 30 seconds) or the host operator repairs the file. Local accounts are not affected.</value>
+  </data>
+  <data name="IdentityBindings_Pending_Heading" xml:space="preserve">
+    <value>Waiting for confirmation</value>
+  </data>
+  <data name="IdentityBindings_Bindings_Heading" xml:space="preserve">
+    <value>Bound identities</value>
+  </data>
+  <data name="IdentityBindings_Th_Account" xml:space="preserve">
+    <value>Account</value>
+  </data>
+  <data name="IdentityBindings_Th_Provider" xml:space="preserve">
+    <value>Provider</value>
+  </data>
+  <data name="IdentityBindings_Th_Issuer" xml:space="preserve">
+    <value>Issuer</value>
+  </data>
+  <data name="IdentityBindings_Th_Fingerprint" xml:space="preserve">
+    <value>Subject fingerprint</value>
+  </data>
+  <data name="IdentityBindings_Th_Reason" xml:space="preserve">
+    <value>Why it waits</value>
+  </data>
+  <data name="IdentityBindings_Th_EmailVerified" xml:space="preserve">
+    <value>Address verified by the provider</value>
+  </data>
+  <data name="IdentityBindings_Th_Expires" xml:space="preserve">
+    <value>Expires</value>
+  </data>
+  <data name="IdentityBindings_Th_Bound" xml:space="preserve">
+    <value>Bound</value>
+  </data>
+  <data name="IdentityBindings_Th_LastSignIn" xml:space="preserve">
+    <value>Last sign-in</value>
+  </data>
+  <data name="IdentityBindings_None_Pending" xml:space="preserve">
+    <value>No sign-in waits for confirmation.</value>
+  </data>
+  <data name="IdentityBindings_None_Bindings" xml:space="preserve">
+    <value>No Google/OIDC identity is bound yet.</value>
+  </data>
+  <data name="IdentityBindings_Yes" xml:space="preserve">
+    <value>yes</value>
+  </data>
+  <data name="IdentityBindings_No" xml:space="preserve">
+    <value>no</value>
+  </data>
+  <data name="IdentityBindings_Reason_email_unverified" xml:space="preserve">
+    <value>Address not verified by the provider</value>
+  </data>
+  <data name="IdentityBindings_Reason_provider_untrusted" xml:space="preserve">
+    <value>Provider not trusted to verify addresses</value>
+  </data>
+  <data name="IdentityBindings_Reason_second_issuer" xml:space="preserve">
+    <value>Second provider for a bound account</value>
+  </data>
+  <data name="IdentityBindings_Reason_subject_changed" xml:space="preserve">
+    <value>New subject from the same provider</value>
+  </data>
+  <data name="IdentityBindings_Reason_nonstandard_email_claim" xml:space="preserve">
+    <value>Address from a non-standard claim</value>
+  </data>
+  <data name="IdentityBindings_Method_verified_email" xml:space="preserve">
+    <value>verified address at sign-in</value>
+  </data>
+  <data name="IdentityBindings_Method_admin" xml:space="preserve">
+    <value>confirmed by an Admin</value>
+  </data>
+  <data name="IdentityBindings_Method_host_cli" xml:space="preserve">
+    <value>confirmed on the host</value>
+  </data>
+  <data name="IdentityBindings_Button_Confirm" xml:space="preserve">
+    <value>Confirm</value>
+  </data>
+  <data name="IdentityBindings_Button_Remove" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="IdentityBindings_Button_RemoveConfirm" xml:space="preserve">
+    <value>Remove binding</value>
+  </data>
+  <data name="IdentityBindings_Button_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="IdentityBindings_Confirm_Remove" xml:space="preserve">
+    <value>The Google/OIDC sessions of this binding end. Removing a binding does not take the access away: while the address is still configured (a role or a whitelist entry), the next sign-in binds again — automatically through a trusted provider with a verified address, otherwise after a confirmation here. To take the access away, remove the address from the roles and the whitelist.</value>
+  </data>
+  <data name="IdentityBindings_Hint" xml:space="preserve">
+    <value>Confirm only a request you expected: it lets that provider's subject sign in as the account. Without an Admin who can sign in, the host operator confirms with: dotnet Whiskers.dll --confirm-identity-binding &lt;address&gt;.</value>
+  </data>
+  <data name="IdentityBindings_Snackbar_Confirmed" xml:space="preserve">
+    <value>The sign-in is bound; the person can sign in now.</value>
+  </data>
+  <data name="IdentityBindings_Snackbar_Removed" xml:space="preserve">
+    <value>Removed.</value>
+  </data>
+  <data name="IdentityBindings_Error_not_authorized" xml:space="preserve">
+    <value>Only an Admin may change sign-in identities.</value>
+  </data>
+  <data name="IdentityBindings_Error_session_invalid" xml:space="preserve">
+    <value>Your session is no longer valid; sign in again.</value>
+  </data>
+  <data name="IdentityBindings_Error_not_found" xml:space="preserve">
+    <value>The request or binding no longer exists, or its address is no longer configured.</value>
+  </data>
+  <data name="IdentityBindings_Error_last_admin" xml:space="preserve">
+    <value>This is the last way the last Admin who can sign in has; it stays.</value>
+  </data>
+  <data name="IdentityBindings_Error_ambiguous" xml:space="preserve">
+    <value>Several requests match; choose one.</value>
+  </data>
+  <data name="IdentityBindings_Error_store_unavailable" xml:space="preserve">
+    <value>The identity bindings could not be read or saved.</value>
+  </data>
+  <data name="IdentityBindings_Error_audit_unavailable" xml:space="preserve">
+    <value>The audit log could not be written; nothing was changed.</value>
+  </data>
+  <data name="IdentityBindings_Error_conflict" xml:space="preserve">
+    <value>This subject is already bound to another account.</value>
+  </data>
+  <data name="IdentityBindings_Error_auth_disabled" xml:space="preserve">
+    <value>Authentication is disabled; sign-in identities cannot be changed here.</value>
+  </data>
+  <data name="DiskHealth_Panel" xml:space="preserve">
+    <value>Disk health (SMART, RAID, ZFS)</value>
+  </data>
+  <data name="DiskHealth_Intro" xml:space="preserve">
+    <value>Reads SMART, md RAID and ZFS state from each host's metrics endpoint (node_exporter through VictoriaMetrics) every 5 minutes. Whiskers runs nothing on the hosts; SMART needs a timer on the host that writes smartmon.prom. A reading it cannot vouch for — missing, malformed or older than 2 hours — is shown as unknown, never as healthy.</value>
+  </data>
+  <data name="DiskHealth_GuideLink" xml:space="preserve">
+    <value>Operations guide</value>
+  </data>
+  <data name="DiskHealth_Label_Enabled" xml:space="preserve">
+    <value>Read disk health (SMART, RAID, ZFS)</value>
+  </data>
+  <data name="DiskHealth_Snackbar_Saved" xml:space="preserve">
+    <value>Disk-health setting saved.</value>
+  </data>
+  <data name="DiskHealth_Snackbar_SaveFailed" xml:space="preserve">
+    <value>The disk-health setting could not be saved: {0}</value>
+  </data>
+  <data name="DiskHealth_Block_Title" xml:space="preserve">
+    <value>Disks</value>
+  </data>
+  <data name="DiskHealth_Block_NotReadYet" xml:space="preserve">
+    <value>Not read yet; the first reading follows within 5 minutes.</value>
+  </data>
+  <data name="DiskHealth_Block_Unsupported" xml:space="preserve">
+    <value>No disk-health readings for this host: it has no metrics endpoint, or none of SMART, md RAID and ZFS reports.</value>
+  </data>
+  <data name="DiskHealth_Block_NoItems" xml:space="preserve">
+    <value>Nothing is reported any more.</value>
+  </data>
+  <data name="DiskHealth_Block_Age" xml:space="preserve">
+    <value>{0} ago</value>
+  </data>
+  <data name="DiskHealth_Block_ReadAgo" xml:space="preserve">
+    <value>read {0} ago</value>
+  </data>
+  <data name="DiskHealth_Block_Stale" xml:space="preserve">
+    <value>This reading is older than two cycles: Whiskers has not read this host since, so nothing here is vouched for as healthy.</value>
+  </data>
+  <data name="DiskHealth_Block_NotReadYetFailed" xml:space="preserve">
+    <value>Not read yet: {0}</value>
+  </data>
+  <data name="DiskHealth_ReadOnly" xml:space="preserve">
+    <value>Set by {0}; it cannot be changed here.</value>
+  </data>
+  <data name="DiskHealth_State_Healthy" xml:space="preserve">
+    <value>Healthy</value>
+  </data>
+  <data name="DiskHealth_State_DegradedOrFailing" xml:space="preserve">
+    <value>Degraded / failing</value>
+  </data>
+  <data name="DiskHealth_State_Unknown" xml:space="preserve">
+    <value>Unknown</value>
+  </data>
+  <data name="DiskHealth_State_Unsupported" xml:space="preserve">
+    <value>Not supported</value>
+  </data>
+  <data name="IdentityBindings_Error_failed" xml:space="preserve">
+    <value>The action failed ({0}); see the log.</value>
+  </data>
+  <data name="Nav_EndpointChecks" xml:space="preserve">
+    <value>Endpoint checks</value>
+  </data>
+  <data name="Checks_Title" xml:space="preserve">
+    <value>Endpoint checks</value>
+  </data>
+  <data name="Checks_Subtitle" xml:space="preserve">
+    <value>HTTP, TCP and certificate checks, run from the managed hosts</value>
+  </data>
+  <data name="Checks_Intro" xml:space="preserve">
+    <value>Each check runs on the host it belongs to (curl, nc, openssl, getent), never from Whiskers itself. Internal addresses are refused unless an Admin adds an exception. Every run is recorded in the audit log.</value>
+  </data>
+  <data name="Checks_Button_New" xml:space="preserve">
+    <value>New check</value>
+  </data>
+  <data name="Checks_Form_New" xml:space="preserve">
+    <value>New endpoint check</value>
+  </data>
+  <data name="Checks_Form_Edit" xml:space="preserve">
+    <value>Edit endpoint check</value>
+  </data>
+  <data name="Checks_Field_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Checks_Field_Server" xml:space="preserve">
+    <value>Runs on server</value>
+  </data>
+  <data name="Checks_Field_Kind" xml:space="preserve">
+    <value>Kind</value>
+  </data>
+  <data name="Checks_Kind_Tls" xml:space="preserve">
+    <value>TLS expiry</value>
+  </data>
+  <data name="Checks_Field_Url" xml:space="preserve">
+    <value>URL (http:// or https://)</value>
+  </data>
+  <data name="Checks_Field_Host" xml:space="preserve">
+    <value>Host name or IP address</value>
+  </data>
+  <data name="Checks_Field_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="Checks_Field_Status" xml:space="preserve">
+    <value>Expected status (empty = any 2xx)</value>
+  </data>
+  <data name="Checks_Field_WarnDays" xml:space="preserve">
+    <value>Warn days (default 14)</value>
+  </data>
+  <data name="Checks_Field_Interval" xml:space="preserve">
+    <value>Interval (s)</value>
+  </data>
+  <data name="Checks_Field_Timeout" xml:space="preserve">
+    <value>Timeout (s)</value>
+  </data>
+  <data name="Checks_Field_Exceptions" xml:space="preserve">
+    <value>Internal-target exceptions</value>
+  </data>
+  <data name="Checks_Field_ExceptionsHelp" xml:space="preserve">
+    <value>One per line: "host port address…" (a host name needs its exact addresses) or "IP port".</value>
+  </data>
+  <data name="Checks_Field_Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="Checks_Button_Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Checks_Button_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Checks_Filter_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Checks_Filter_Outcome" xml:space="preserve">
+    <value>Outcome</value>
+  </data>
+  <data name="Checks_Filter_Latency" xml:space="preserve">
+    <value>Latency ≥ ms</value>
+  </data>
+  <data name="Checks_Filter_Expiry" xml:space="preserve">
+    <value>Certificate expires within (days)</value>
+  </data>
+  <data name="Checks_Filter_Failing" xml:space="preserve">
+    <value>Only failing</value>
+  </data>
+  <data name="Checks_Empty" xml:space="preserve">
+    <value>No endpoint checks.</value>
+  </data>
+  <data name="Checks_Table_Name" xml:space="preserve">
+    <value>Check</value>
+  </data>
+  <data name="Checks_Table_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="Checks_Table_Target" xml:space="preserve">
+    <value>Target</value>
+  </data>
+  <data name="Checks_Table_Last" xml:space="preserve">
+    <value>Last run</value>
+  </data>
+  <data name="Checks_Table_Latency" xml:space="preserve">
+    <value>Latency</value>
+  </data>
+  <data name="Checks_Table_Expiry" xml:space="preserve">
+    <value>Certificate expires</value>
+  </data>
+  <data name="Checks_State_Off" xml:space="preserve">
+    <value>Off</value>
+  </data>
+  <data name="Checks_State_Suspended" xml:space="preserve">
+    <value>Suspended</value>
+  </data>
+  <data name="Checks_State_NotRun" xml:space="preserve">
+    <value>Not run yet</value>
+  </data>
+  <data name="Checks_Button_RunNow" xml:space="preserve">
+    <value>Run now</value>
+  </data>
+  <data name="Checks_Button_Edit" xml:space="preserve">
+    <value>Edit</value>
+  </data>
+  <data name="Checks_Button_Delete" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="Checks_Outcome_Passed" xml:space="preserve">
+    <value>Passed</value>
+  </data>
+  <data name="Checks_Outcome_Failed" xml:space="preserve">
+    <value>Failed</value>
+  </data>
+  <data name="Checks_Outcome_Refused" xml:space="preserve">
+    <value>Refused</value>
+  </data>
+  <data name="Checks_Snackbar_AdminOnly" xml:space="preserve">
+    <value>Only an Admin can change or run endpoint checks.</value>
+  </data>
+  <data name="Checks_Snackbar_Busy" xml:space="preserve">
+    <value>A run of this check or on this server is in progress. Try again in a moment.</value>
+  </data>
+  <data name="Checks_Snackbar_Saved" xml:space="preserve">
+    <value>Endpoint check saved.</value>
+  </data>
+  <data name="Checks_Snackbar_Deleted" xml:space="preserve">
+    <value>Endpoint check deleted.</value>
+  </data>
+  <data name="KillSwitch_Blocked_Message" xml:space="preserve">
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
+  </data>
+  <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
+  </data>
+  <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
+    <value>Preset '{0}': '{1}' is not a kill-switch exemption that can be blocked. Nothing was saved.</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Title" xml:space="preserve">
+    <value>While the kill switch is on, still allowed</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Intro" xml:space="preserve">
+    <value>These exceptions are fixed in code; none can be added. The last three can be blocked here beforehand — the kill switch refuses this save while it is on.</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Fixed" xml:space="preserve">
+    <value>Always allowed</value>
+  </data>
+  <data name="GuardrailsView_Exemptions_Block_Label" xml:space="preserve">
+    <value>Also block while the kill switch is on</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E1_Name" xml:space="preserve">
+    <value>Switching the kill switch off</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E1_Reason" xml:space="preserve">
+    <value>The way out of the kill switch: an Admin in the UI, audited.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E2_Name" xml:space="preserve">
+    <value>First-run setup</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E2_Reason" xml:space="preserve">
+    <value>Runs only while no Admin exists, so there is nothing to protect yet.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E3_Name" xml:space="preserve">
+    <value>Host command-line tools</value>
+  </data>
+  <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
+    <value>Need a shell in the container (root-equivalent). While recovery codes are blocked, the recovery CLI asks for --force: repair guardrails.json on the host instead.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
+    <value>Own password change</value>
+  </data>
+  <data name="GuardrailsView_Exemption_password_change_Reason" xml:space="preserve">
+    <value>A person changes their own access; needs the current password.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_recovery_code_Name" xml:space="preserve">
+    <value>Recovery-code redemption</value>
+  </data>
+  <data name="GuardrailsView_Exemption_recovery_code_Reason" xml:space="preserve">
+    <value>Restores a person's own access with a one-time code.</value>
+  </data>
+  <data name="GuardrailsView_Exemption_federated_binding_at_sign_in_Name" xml:space="preserve">
+    <value>Federated identity binding at sign-in</value>
+  </data>
+  <data name="GuardrailsView_Exemption_federated_binding_at_sign_in_Reason" xml:space="preserve">
+    <value>Binds a verified Google/OIDC identity to a configured account at its first sign-in.</value>
   </data>
 </root>

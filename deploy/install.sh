@@ -19,7 +19,7 @@ set -euo pipefail
 # version differs from this line (release.yml, prepare), so the install.sh of release X.Y.Z installs X.Y.Z.
 WHISKERS_RELEASE="0.15.0"
 REPOSITORY="ghcr.io/lupusmalusdeviant/whiskers"
-# The identity the release workflow signs with (keyless cosign, see README "Supply chain"). For a release X.Y.Z the
+# The identity the release workflow signs with (keyless cosign, see docs/security-architecture.md "Supply chain"). For a release X.Y.Z the
 # installer requires exactly the run of tag vX.Y.Z (signer_identity below), so an older signed image re-tagged as
 # X.Y.Z does not pass.
 SIGNER_IDENTITY_PREFIX='^https://github\.com/LupusMalusDeviant/Whiskers/\.github/workflows/release\.yml@refs/tags/v'
@@ -530,5 +530,7 @@ ${B}Back up — two things, kept apart, off this host${N}
 ${B}Later${N}
   • Upgrade:  bash install.sh --version <X.Y.Z>   (or the install.sh of the newer release; downgrades are refused)
   • Logs:     ( cd $DIR && ${DC[*]} logs -f )
-  • Hardened/K8s:  see the README, docker-compose.hardened.yml and the Helm chart
+  • Hardened/K8s:  see https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/installation.md
+  • Before production use:  https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md
+  • When something is wrong: https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/troubleshooting.md
 EOF

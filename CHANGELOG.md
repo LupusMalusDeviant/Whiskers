@@ -6,11 +6,337 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
+  gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
+  test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can
+  have. Refusals that were made before the gateway and left no event — an AutoPatch night without an owner or with an
+  unreadable owner entry, an AutoUpdate with a blocked owner entry, an endpoint-check run the monitor refused, a
+  webhook delivery that ended before its decision or was given up after its start, a scheduled task refused before
+  the gateway (no target or command, a missing database container, a database name the INV-19 check refuses, a
+  protected stopped container, and any failure of a call before its decision, such as a Docker call that timed out)
+  — are now recorded as denied events. **Fix:** a scheduled DB backup of a container whose environment repeats a key
+  in another case (Docker's client proxy configuration sets `HTTP_PROXY` and `http_proxy`) failed every run; the
+  environment is now read with the upper-case spelling first. An endpoint check whose suspension cannot be saved is
+  refused again at its interval, not every 15 seconds. A call cancelled after it asked the gateway and before it ran
+  (the caller gone, a run's deadline passed while the target resolved) is one denied event, and an accepted webhook
+  delivery its worker gives up before it started now ends failed and final, on record once (also in the webhook log,
+  with an `automation_refused` notification), instead of waiting for a redelivery — it needs a new delivery. An
+  automation whose owner cannot be read (the owner store fails) is refused as one denied event marked "owner
+  unreadable", for every capability, and the cause is logged as an error. Deliveries a stop or crash left queued or
+  running are recorded and settled at the next start; a delivery's acceptance is now stored before it is answered, a
+  repeat of one an earlier process accepted is answered busy until it is settled (it is never run), and a
+  reconciliation that cannot settle every delivery is retried until it does. The audit event of a delivery that did
+  not run is keyed by its run id, so the worker, the start reconciliation and the audit outbox can never write it
+  twice; a delivery given up during a stop is no longer taken over by a repeat. A delivery the worker refused itself
+  (its webhook changed while it waited, an unknown action) keeps the state "refused" and one log entry when the start
+  reconciliation finds it; every page Test waiting on a run that a stop left queued is told at once, also while every
+  worker is busy; a new delivery arriving while Whiskers stops is answered busy and not recorded, so the provider may
+  deliver it again (a repeat of a known delivery is still its duplicate; a page Test is told that Whiskers is
+  stopping). Development builds only: deliveries given up by an unreleased build of this branch before this change
+  carry an unkeyed refusal and are settled as refused at the next start, without a log entry or notification;
+  deliveries such a build refused itself (webhook changed, unknown action) and left unsettled were keyed as "did not
+  run" and are settled failed, with a second log entry and a notification.
+- **MCP permission levels fail closed (behaviour change).** A tool whose stored required level is not `read`, `write`
+  or `admin` is no longer allowed to every key (it ranked below `read`); it is allowed to none. Creating a key or
+  saving Settings → MCP with any other level — `none` in any case included — is refused. A permissions file edited by
+  hand is settled on start and written back. Another spelling of a level (`"Admin"`, `" write"`) is rewritten to its
+  exact form, which changes what it allows: a key spelled differently without a tool list was refused every MCP tool
+  until now and now gets the tools of its level over `/mcp` (and in its tool list); the Claude Code agent's check that
+  its configured key has no more rights than the caller is stricter for such a key (`"Admin"` used to rank below
+  `read`, which any caller met; now only an admin caller does); a tool spelled differently now requires exactly its
+  written level instead of falling to its code floor. A level that is still unknown (`none`, anything else, empty) switches the key off
+  (level `read`, to be re-enabled deliberately) — scheduled tasks, webhooks and AutoUpdate/AutoPatch items that key
+  owns are then suspended until an admin re-enables it or takes them over — and raises the tool to `admin`. Levels
+  written by Whiskers itself are unaffected.
+- **Root-equivalent capabilities are proven Admin on every surface (INV-19 ✅).** `CapabilityCatalog.RootEquivalent`
+  names the set; tests drive each member over `/mcp`, through the agent, the UI runner (pages, "Run now", host and
+  container terminals), the automation runner and the scheduler's own run, and show that only Admin passes and that a
+  Write approval never covers one. `nginx.update` and `volume.restore` are now marked root-equivalent (both were Admin
+  already; no level changed). **Fix:** the database name reached the database client unchecked — in the Read-level
+  listings (`list_tables`, `get_schema`, the database panel) a name starting with `--` could make mongosh run code in
+  the container, and in a backup (Admin) it could be a dump-tool option or put the dump, written as root, outside the
+  backup directory. Every database path (listings, query, backup, import, the scheduled DB backup) now requires a name
+  that starts with a letter or digit and uses only letters, digits and `_ . -` (for MongoDB no `.`). Name checks of
+  volumes, services, certificates, sites, compose projects and autopatch containers (and the compose-deploy
+  verifier's project name) no longer accept a trailing line break. **Behaviour change, DB dump file names:** a dump is
+  now written as `{container}@{db}_{yyyyMMdd}_{HHmmssfff}_{8 hex}.sql` (`.sql.gz` for MongoDB) instead of
+  `{db}_{yyyyMMdd}_{HHmmss}.sql`. The DB-backup retention removed the oldest dumps of every database whose name started
+  with the task's (`app` also pruned `app_db`) and of a same-named database in every other container on the server, and
+  two dumps in the same second overwrote each other; it now prunes only the task's container's dumps of exactly that
+  database. Dumps in the old format, older dumps of a renamed container and of a re-created container keyed by its id are
+  kept: a retention neither counts nor deletes them. A container name longer than 64 characters is keyed by a hash of the name. The AI
+  Operations page saves a preset as the signed-in user's own level instead of a fixed Admin.
+- **Pages take their role from the capability catalog (INV-13, R1-05).** Every role check in front of a capability
+  asks `CapabilityCatalog.RoleOf` instead of naming a role; no page helper takes a role any more, the three reads a
+  page guards itself take a named role from `PageReads` (the migration-status read runs one fixed command), the
+  account service re-checks create, reset and delete with the catalog role, and a deny-by-default source scan forbids
+  any other role there. A test runs every capability for every role through the gateway. The role → level rule has
+  one spelling, `CapabilityCatalog.LevelFor`, which every surface calls, and a required level that is not read, write
+  or admin maps to Admin. No level changed. **Behaviour change:** testing a compose-deploy, Git-deploy or other
+  non-container webhook from the Webhooks page now needs Admin on the page as well (the gateway already required it);
+  an Operator is refused there with one Denied audit event, and restart / rebuild webhooks stay testable by an
+  Operator.
+- **Tests: the read-only kill switch is proven on the booted app (INV-21 ✅).** `ReadOnlyKillSwitchWireTests` calls
+  every mutating MCP tool over `/mcp` and every mutating capability through the UI runner with the kill switch on:
+  each is denied by `read-only-mode` and recorded as Denied, nothing runs, no terminal session opens; only an Admin in
+  the UI can switch it off, and that is audited. No behaviour change.
+- **The kill switch's exceptions are fixed, shown and can be blocked beforehand (contract 0009, INV-21).** The
+  *Guardrails* page lists them: switching it off, the first-run setup and the host CLIs always pass; a user's own
+  password change, recovery-code redemption and binding a Google/OIDC identity at a first sign-in pass unless an Admin
+  blocked them beforehand (new optional policy field `KillSwitchBlockedExemptions`, left out of the policy version while
+  empty; an unknown id fails the guardrails closed). **Behaviour change:** while `guardrails.json` is fail-closed these
+  three are refused too, and `--recover-local-account` refuses without `--force` while a code could not be redeemed
+  (new exit code 4); the way back is repairing or removing `guardrails.json` on the host (or turning off `ReadOnlyMode`
+  or the block in it) and restarting. A refused one says "Blocked while the kill switch is on" and names that way back;
+  a refused sign-in binding goes to `/login?error=kill_switch`. Pending sign-in requests, the last sign-in day, lockout
+  counters and the audit keep being recorded under the kill switch; they are records, not mutations (amendment A1.1).
+- **Tests: the Servers pause/resume handlers and the firewall rule dialog are pinned at handler level (INV-17).** A role
+  below the catalog level is refused at the click, recorded as Denied and never reaches the service.
+- **Marking the notification log read, clearing it and starting a manual CVE scan now need the Operator role
+  (INV-17, INV-18).** They are gateway capabilities (`notifications.mark_read`, `notifications.clear`, `cve.scan`):
+  each attempt is audited and a Viewer is refused at the click. **Behaviour change:** Viewers no longer see these
+  buttons, and opening the bell as a Viewer no longer marks the shared log read. The bell marks read only when
+  something is unread; a scan started while one is running says so and is recorded as not run; the Settings
+  test-notification buttons check for Admin when clicked; AI triggers started by a scan's findings no longer
+  inherit the person's open decision, and otherwise keep the flow of their event as before (lane, correlation id): a
+  trigger fired by a background loop stays in the background lane and is refused on a server paused with
+  `checks.pause`. "Scan started" is shown only for a scan that started; with the CVE module off a manual scan is
+  recorded as not run.
+- **Docs: the README is now facts and commands only.** Install, first sign-in, MCP client, image verification, key
+  settings, accepted limits and the compose remaining risks stay in it; the rest moved unchanged in substance to
+  `docs/governance.md`, `features.md`, `installation.md`, `configuration.md`, `mcp.md`, `agent.md`,
+  `security-architecture.md`, `screenshots.md`, `roadmap.md` and `project-structure.md` (indexed in `docs/README.md`).
+- **Exposure changes in compose deployments are decided as such (contract 0006, INV-62).** A compose deployment that
+  publishes a port, uses the host network, runs privileged, adds capabilities, shares host namespaces, mounts devices,
+  weakens a security option, shares a namespace with another container or carries a route label (Tailscale
+  Funnel/serve via DockTail, Traefik, Caddy) is decided on each of these on every compose path (Compose editor, app
+  templates, `deploy_compose`, `set_container_env`, the `.env` save, compose webhooks, Git deploy), and what starts is
+  checked against the decision. New policy fields `ExposureLabelPrefixes` and `ExposureConfirmClasses`; new
+  capability `container.disable_restart` (only composed); new notifications `exposure_change` (suppressible) and
+  `exposure_violation` (never suppressed); a readiness line for Whiskers' own container published with sign-in off.
+  **Behaviour changes:**
+  - An agent's or API key's deployment with Funnel (or another `public` route label) or the host network (class
+    `host`) now waits for a confirmation **even under a policy that lets Admin act autonomously**; an unattended run
+    owned by a key is refused. An empty `ExposureConfirmClasses` turns this off.
+  - The new defaults change every policy's `VersionHash`: open approvals and the policy snapshots of pinned runs
+    expire at the upgrade.
+  - Unresolved variables are now refused: a label key, a label value under an exposure prefix, a port, network or
+    privilege field, a relative `label_file` or `COMPOSE_PROFILES` from a variable the `.env` does not set refuses the
+    plan (compose would also read the host's environment).
+  - Redeploys of projects with `build:` services now rebuild with `--pull` (compose deploys, app templates, compose
+    webhooks); the `.env` paths build only missing images, without `--pull`.
+  - Git deploys now pull images (`pull --ignore-buildable`) before building.
+  - Every compose run starts with `up -d --pull never --no-build` after the images were inspected.
+  - `docker compose pull --ignore-buildable` needs **Docker Compose v2.15 or newer** on every managed host; an older
+    Compose fails the run.
+  - Under the agent rule set a container a run created with an exposure nobody decided is stopped and its restart
+    policy set to `no`. A host cgroup namespace the compose file did not ask for counts only when it is not the
+    daemon's default (read from `daemon.json` / `docker info`; unreadable → it counts; on cgroup v1 a privileged
+    container's default is `host` whatever `daemon.json` says).
+  - A `compose.deploy` call that brings the nested decisions' own arguments (`exposure…`, `related…`, `mounts`) is
+    refused on every surface except UI and automation.
+
+- **Every managed host gets its own mTLS client identity (R1-44, INV-58): action needed after the upgrade.**
+  - **Before:** one client certificate (`serverwatch-client`) opened every host. Its key, if stolen, opened the whole
+    fleet.
+  - **New hosts:** onboarding issues the host its own identity `whiskers-client-{slug}-g1`. The key is made in Whiskers'
+    process and stored in `{MtlsDir}/hosts/{id}/`. The host's ghostunnel admits only that name.
+  - **Existing hosts** keep working on the shared credential until you migrate them, one at a time, from the server page
+    (key icon) or with the Admin MCP tool `migrate_mtls_client_credential`.
+    - Each host step changes only the `--allow-cn` items of ghostunnel's compose file.
+    - Each step is guarded: the host restores the previous file by itself unless the step is confirmed through the new
+      credential.
+    - A host counts as migrated only once the shared credential was refused there with a TLS alert.
+  - **Renewal and rotation:** `renew_mtls_client_credential` renews a migrated host's credential, or rotates it to the
+    next generation with `rotate=true`.
+  - **Retiring:** once every host is migrated, the shared key can be retired from the server page (UI only).
+  - **Readiness checklist:** it lists every host still on the shared credential, every unfinished migration, every host
+    whose ghostunnel is not running or cannot be read, and every migrated host whose running allow list differs.
+  - **Order:** Bifröst first, then the whiskers.site host, then host by host. Guide:
+    `docs/operations/per-host-mtls-migration.md`.
+- **Tailscale Serve, Funnel and DockTail in front of Whiskers: documented.**
+  - In TCP mode tailscaled adds no forwarded headers. This covers `tailscale serve --tcp`/`--tls-terminated-tcp` and
+    DockTail with `protocol=tcp`.
+  - What the client sends passes through unchanged, `Host` and `X-Forwarded-*` included. Every visitor arrives from
+    tailscaled's private address.
+  - So `AUTH_DISABLED=true` behind such a forward makes every visitor Admin; with Funnel, that is anyone on the
+    internet.
+  - With sign-in enabled, a forward from a trusted proxy address lets the client choose its own address. That defeats
+    the per-client login rate limit and the audit.
+  - The README ("Name your proxy") covers both modes, which address to trust, what trusting the Docker gateway also
+    trusts, and the sidecar layout that needs no entry.
+  - The production-readiness line for disabled authentication warns against TCP forwards and Funnel.
+  - No behaviour change.
+
+- **An approved call executes only on the approved target.** An approval was bound to the exact call the gateway
+  checked, but the code that then ran was the caller's own delegate, and the scope guard matched only its capability:
+  inside a decision for container `web-1` a delegate could have restarted `db-1`, or `web-1` on another server. Marked
+  operations now declare the parameter that names their target (`[MutationTarget]`: container start/stop/restart/
+  remove, `db.query`, systemd units, nginx sites), and the scope guard refuses such a call unless an open decision
+  covered that identity on the server the call acts on. No behaviour change for calls that act on what was decided.
+
+- **PostgreSQL 18 for the database overlay (`deploy/docker-compose.postgres.yml`) — action needed when you come from
+  17.**
+  - **What changes:** the overlay runs `postgres:18-alpine` on a new volume `whiskers-db18-data`, mounted at
+    `/var/lib/postgresql`. The 18 image refuses the old mount at `/var/lib/postgresql/data`, even for an empty volume,
+    and PostgreSQL does not read a 17 data directory.
+  - **The guard:** the new one-shot service `db-upgrade-guard` decides whether PostgreSQL 18 may start. It passes when
+    the old `whiskers-db-data` volume is empty (a fresh install, or the 17 volume removed), or when it holds a 17
+    cluster that the guard itself restored: a fingerprint of that cluster's `global/pg_control` in the 18 volume.
+    It refuses everything else, among it a blind pull, a failed or skipped restore, a 17 data directory it does not
+    recognise (a volume holding only `lost+found` included) and a volume it cannot read. Whiskers then stays down with
+    a message that names the volumes and points to the guide; a pulled overlay never starts as an empty,
+    fresh-looking install.
+  - **Dump bound to the 17 state:** the guide's dump command refuses while other clients (Whiskers) are connected to
+    the 17 database; a refused or cut-off dump has no closing line, so the restore refuses it. After the dump, with
+    17 stopped,
+    `docker compose … run --rm --no-deps -T -e WHISKERS_FINGERPRINT=1 db-upgrade-guard >> whiskers-pg17.sql` appends
+    the 17 cluster's fingerprint as one SQL comment line; it refuses while 17 still runs. Any later 17 start changes
+    the fingerprint, so a stale dump is refused.
+  - **Restore through the guard:** with the 18 database running,
+    `docker compose … run --rm --no-deps -T -e WHISKERS_RESTORE=1 db-upgrade-guard < whiskers-pg17.sql` checks the dump
+    (complete, fingerprint of the current 17 data) and the server (PostgreSQL 18, no Whiskers tables yet, so an 18
+    database Whiskers initialised on its own is refused), restores in one transaction, checks the migration history
+    and only then writes the marker.
+  - **Upgrade:** `docs/operations/postgres-18-upgrade.md` covers it: dump on 17 (user and database from the container's
+    own environment, the file created private) and fingerprint, restore through the guard, start. The database's
+    health check now asks over TCP, so the image's temporary init server never counts as ready.
+  - **Rollback:** the new overlay mounts the 17 volume read-only. The dump and a rollback run PostgreSQL 17 on it
+    read-write, so the way back is the data as of the dump. After going back, the 17 data has changed and the guard
+    refuses to start 18 on the older copy; to upgrade again, remove the 18 volume first (the guide shows how to dump
+    the 18-period data before that) and take a new dump. `down -v` now removes the 17 volume kept for the way back as
+    well.
+  - **Tested with Docker,** in the test suite and once by hand with compose:
+    - 17 → 18 with Whiskers' schema, data, migration history and sequences carried over;
+    - the guard refusing a blind pull and, after a rollback, the older 18 copy and the stale dump;
+    - the restore refusing an 18 database Whiskers had initialised;
+    - a second upgrade and a fresh install starting directly on 18.
+  - **Not affected:** SQLite installs and Helm installs with an external database.
+  - **Tests:**
+    - `PostgresUpgradeGuardTests`: the guard's script, taken from the compose file, runs against prepared volumes,
+      including the fingerprint and restore modes' dump checks.
+    - `PostgresUpgradeTests`: the guide's flow from 17 into 18 with the guide's own dump command, the restore mode's
+      server checks, the rollback of a dump that fails halfway and a marker that cannot be written.
+    - `PostgresPgControlTests`: a real 17 start changes the fingerprint.
+    - `PostgresOverlayComposeTests`: `docker compose config` over the overlay.
+    - The PostgreSQL suites run on 18; the self-backup suite also runs on 17 and 14.
+
+- **New: endpoint checks from the managed host (R1-57).** Under **Checks** (`/checks`) an Admin defines HTTP
+  (status and latency), TCP-connect and TLS-expiry checks that run **on the host** they are bound to, from its side of
+  the network, through the existing host command executor; Whiskers never connects to the target. A name is resolved
+  on the host and every answered address must be public or allowed by an Admin-only exception on the check; at most 4
+  addresses are tried, each run is bounded (1 + 4 calls, timeout × 5 + 10 s, 16 KiB output) and passes only on
+  positive evidence. Every run is one audited `endpointcheck.run` event as the check's owner; a check whose owner is
+  no longer Admin is suspended. A check failing for 5 minutes raises `endpoint_check_failed`, 5 minutes of passing
+  clear it. Results are kept 7 days. All roles can read the page (an HTTP target's query string only for Admins; below
+  Admin, internal addresses in a run's detail and a suspension reason are not shown); the read-only MCP tool
+  `endpoint_checks_list` shows the checks and their last outcome and numbers, never internal addresses or a suspension
+  reason. Alerts show internal addresses as `[internal address]` and never name a suspended check's former owner, in
+  every channel and for every role. "Run now" runs the check as it is stored at that moment, shares the run slots
+  with the background loop, is not offered for a check that is off, and neither moves the loop's schedule nor feeds
+  the alert. **Hosts need `getent`, `curl`, `openssl` and OpenBSD `nc`** — see
+  [docs/operations/endpoint-checks.md](docs/operations/endpoint-checks.md). New tables `EndpointChecks` and
+  `EndpointCheckResults` (migrated automatically on SQLite and PostgreSQL).
+- **New: optional disk-health readings — SMART, md RAID, ZFS (R1-58).** Whiskers can show whether each host's disks
+  and arrays are healthy, read only from the host's existing metrics endpoint (node_exporter through VictoriaMetrics).
+  It never runs anything on the host. Off by default; an Admin switches it on in Settings → *Disk health (SMART, RAID,
+  ZFS)* (a gated, audited `config.save`). Each server's expanded dashboard panel then shows a *Disks* block: the overall
+  state and one line per disk, array and pool, readable by every role. States: Healthy, Degraded / failing, Unknown and
+  Not supported. Whiskers shows Unknown, never Healthy, when it cannot vouch for a reading: a failed or malformed
+  query, something missing since the last reading, or SMART data older than 2 hours. Freshness is judged by the
+  smartctl run time and the textfile's modification time, never by the query time. New alerts `disk_failing`,
+  `array_degraded` and `disk_health_unknown` are raised after 10 minutes and cleared after 10 minutes of good readings.
+  Quiet hours never hold them; Unknown never clears them. SMART needs a host timer writing `smartmon.prom`:
+  `docs/operations/disk-health.md` has the shell script and systemd units. md and ZFS need nothing. **Upgrade note:**
+  the node_exporter template (`deploy/telemetry/host/docker-compose.yml`, and the onboarding wizard) now enables the
+  textfile collector (`--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector`, through the
+  existing read-only mount). Hosts set up earlier need the flag added and node_exporter recreated before they can
+  deliver SMART data. The block shows when the reading was made; a reading older than two cycles plus a
+  minute is shown Unknown. SMART counts as failing only on a disk with SMART available and enabled; disagreeing
+  duplicate series are Unknown, and one device reported twice under the same name is one line (failing if a copy
+  fails, Unknown otherwise).
+  `disk_health_unknown` is armed per disk, array and pool, and an Unknown reading restarts the 10 minutes. Switching
+  the feature off forgets the readings at once (also the way to drop a renamed or removed device; disabling one server
+  for a cycle does it for that host); a value set through
+  the environment (`DiskHealth__Enabled`) is shown read-only in Settings.
+- **Security: dependencies on the latest patches of their supported lines.** .NET SDK 10.0.403 (`global.json`, build
+  image) with the 10.0.14 runtime; Entity Framework Core, Identity and `System.Security.Cryptography.Pkcs` 10.0.14,
+  MailKit 4.18.2, Markdig 1.6.0, MudBlazor 9.12.0; lock files refreshed (`dotnet list package --vulnerable
+  --include-transitive`: none). Test-only: Microsoft.NET.Test.Sdk 18.11.0, Testcontainers 4.16.0 (it now brings the
+  fixed SSH.NET 2026.0.0 itself, so the separate pin is gone), Xunit.SkippableFact 1.5.85; bUnit still pulls the
+  10.0.13 Blazor component packages into the test project (test-only: the Components packages come from the shared
+  framework at run time, the WebAssembly ones are not used by the tests).
+- **docker-socket-proxy v0.5.0** (HAProxy 3.x; 0.3.0 shipped the end-of-life HAProxy 2.2). The verb whitelist is
+  unchanged — a test now pins it exactly, in the hardened profile and in the onboarding template — and, measured by
+  hand against a real Docker engine, 24 endpoints answered with the same status as under 0.3.0. Whiskers does not use
+  the new pause/unpause switches and does not set them (with `POST: 1` they would not narrow anything).
+  **Fix:** the hardened profile's socket proxy did not start on its read-only root — 0.3.0 exited with "can't create
+  /usr/local/etc/haproxy/haproxy.cfg", v0.5.0 with "can't create /tmp/haproxy.cfg"; it now has a `/tmp` tmpfs.
+  **Upgrade note:** if you keep your own copy of `docker-compose.hardened.yml`, add `- /tmp` under the socket proxy's
+  `tmpfs:` together with the new image.
+- **Onboarding** rolls out the socket proxy pinned by digest (it used `:latest`) and **ghostunnel v1.11.5** (was v1.8.2)
+  for **new** hosts; hosts already onboarded keep their running ghostunnel until they are updated. Tested end to end
+  with a step-ca-shaped chain (root + intermediate, leaf bundle, root-owned 0600 key): the `serverwatch-client`
+  certificate reaches the Docker API (`/version` 200, `/secrets` 403 by the whitelist), another CN and a client without
+  a certificate are refused in the handshake — the same as v1.8.2; v1.11.5 additionally negotiates hybrid
+  post-quantum key exchange (X25519MLKEM768). A test keeps the templates' socket-proxy and node_exporter images equal to
+  the compose files Dependabot updates.
+- **Telemetry:** node_exporter v1.12.1, VictoriaMetrics v1.155.0. **Upgrade note (VictoriaMetrics):** since v1.133 the
+  storage uses a per-partition index; the first start after the upgrade registers every active series once (slower
+  ingestion and queries for a while). Take a snapshot of `vm-storage` before upgrading: going back to a release
+  before v1.133 means restoring that snapshot.
+- **Release workflow:** cosign-installer v3.10.1 with cosign pinned to v2.6.1 explicitly (cosign v3 changes the
+  signature format and is its own change), sbom-action v0.24.3; chart CI: kind-action v1.15.1.
+
+- **Security: proxy trust defaults to loopback only — check your reverse proxy (R1-50).** Whiskers used to believe
+  `X-Forwarded-For` from every private network (RFC 1918 and Tailscale's range), so any client in the LAN or tailnet
+  could claim another address and slip past the per-client sign-in limit. Now only loopback is trusted unless
+  `ForwardedHeaders__TrustedNetworks__0` (… `__1`, …) names your proxy as a CIDR or address. **Upgrade note:** behind a
+  proxy in another container or on another host, add its address before you upgrade — until then Whiskers sees the
+  proxy's address for every visitor and, behind a TLS-terminating proxy, plain HTTP: the session cookie loses its
+  `Secure` flag, Google/OIDC sign-in breaks (the callback is built with `http://`), and with `AUTH_DISABLED=true`
+  every proxied request is refused (`403`, naming `ForwardedHeaders:TrustedNetworks`) instead of being let in under the
+  proxy's private address. Settings → production readiness names the ignored peers. An entry that is not a canonical
+  CIDR or address (`172.18.0` or `10` no longer pass) stops the start; a single value without index is read as a
+  comma-separated list. Helm: set `trustedProxyCidrs` to your ingress controller's pods (`NOTES.txt` warns when an
+  ingress is enabled and the list is empty). **Do not** set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` as a shortcut:
+  it makes ASP.NET Core trust forwarded headers from every peer, and Whiskers now refuses to start with it.
+- **Security: HTTP hardening (R1-50).** Every answer forbids framing by another site and MIME sniffing and keeps the
+  referrer on the site. Signing out is a POST with an antiforgery token (another site can no longer sign you out with a
+  link or image; opening `/logout` shows a sign-out button). The session cookie's flags are stated (HttpOnly,
+  SameSite=Lax, Secure over HTTPS); OIDC no longer stores the identity provider's tokens in it. MCP clients without
+  credentials get `401` with a Bearer challenge instead of a sign-in redirect; a signed-in user without the role gets
+  `403`; an unconfigured Google/OIDC sign-in answers `404` instead of `500`; the language switch ignores a redirect that
+  is not a local path. A locked account costs the same password-hash work as an unknown one.
+
+- **Fix: a host command over mTLS can no longer hang past its timeout.** The SSH-free host shell (a one-shot helper
+  container over the mTLS Docker connection) started its timeout only once the helper was created; checking or pulling
+  the helper image, creating it, reading its output and removing it ran without a limit, so a stalled Docker step could
+  hold the caller — and with it a background loop's slot — indefinitely. The timeout now covers every step from the
+  first Docker call to the output, also a call that ignores its cancellation, and killing and removing the helper hold
+  the caller for at most 5 seconds after it. A clean-up that takes longer goes on in the background with retries (up to
+  2 minutes, each retry with the server's current Docker client) instead of being dropped. Every helper now carries its
+  latest end as a label (`serverwatch.hostshell.deadline`), and the sweep judges a labelled helper by it — also one
+  still **running** a minute past it, which before was never swept. When the background clean-up gives up, or a create
+  never answers, a sweep of that server is scheduled for when the helper is past its label, and it keeps trying for up
+  to an hour while the server cannot be reached; otherwise the sweep runs with a later host-shell call on the server (at
+  most every 5 minutes), so a helper left behind by a Whiskers restart waits for that. The label is Whiskers' clock: a
+  forward step of it between a run and the sweep could remove a helper early. The error says where the run stood: "did
+  not start" before the start request, "effect unknown" after it (also for a Docker error there, which used to read
+  like a plain failure), "exit code N, output not read" once it had finished. Local and SSH commands: a timeout reads
+  "effect unknown" as well, and a command that exited while a process it left running kept its output open is reported
+  with its exit code at the deadline instead of as a timeout; their deadline is set before the process starts, and an
+  error after the start (a failed read) stops the process and reads "effect unknown" or "exit code N, output not read"
+  instead of the bare exception text that looked like a start failure. A timeout that is not finite and positive (zero,
+  negative, infinite) is refused on every transport before anything starts — before, an infinite one gave a local or
+  SSH command no deadline at all. Timeout texts are formatted the same on every host ("0.5s", not "0,5s").
+  Prerequisite of R1-57; the mTLS transport itself (certificates, allowed client name, proxy verbs) is unchanged.
 - **Fix: an unset `GOOGLE_ADMIN_EMAIL` no longer switches on a whitelist that admits nobody.** Compose passes it as
   `GoogleAuth__AllowedEmails__0=`, and a fresh instance seeded an enabled whitelist holding one empty entry, which turned
   away every Google and OIDC sign-in. The seed now drops blank entries (and trims and de-duplicates the rest); with none
-  left the whitelist stays off, so the C5 rule applies: until a role exists every Google/OIDC account is admitted as
-  Viewer, afterwards only accounts with a role — set `WHISKERS_ADMIN_EMAIL` or finish the setup promptly. The artifact
+  left the whitelist stays off, so the C5 rule applies: only accounts with a role are admitted once a role exists, and
+  since R1-27 no Google/OIDC sign-in is admitted at all until an Admin exists — set `WHISKERS_ADMIN_EMAIL` or finish the
+  setup. The artifact
   check now starts the hardened image with `GOOGLE_ADMIN_EMAIL` empty and signs the administrator in. An existing
   `whitelist.json` is not changed. An instance that already holds the empty entry: stop it, delete `whitelist.json` and
   `whitelist.json.bak` in the data directory and start it again (or remove the entry in Settings, if an administrator
@@ -196,6 +522,46 @@ All notable changes to Whiskers are documented here. The format follows
   (`tailscaleSidecar.state`) are missing: use your values file or `--reset-then-reuse-values`. The sidecar now reads
   its auth key from a mounted file: the Secret named by `tailscaleSidecar.authKeySecret` must keep the key `authKey`
   (unchanged); nothing else to do.
+
+- R1-27: **Google and OIDC sign-ins are bound to the provider's account, not to an email address.** A federated user
+  is now identified by issuer and subject. The email address is used once per provider: to bind a new subject to an
+  address an Admin configured (a role or a whitelist entry), automatically only when the provider is trusted and says
+  `email_verified=true` for the standard `email` claim — Google is trusted by default, a generic OIDC provider is **not**
+  (`Oidc:TrustEmailVerified=false`; `GoogleAuth:TrustEmailVerified=true`). Everything else — unverified or untrusted, a
+  non-standard `Oidc:EmailClaim`, the same address from a second provider, a new subject for an already bound address
+  (IdP account re-created, issuer changed) — becomes a **pending request**; the sign-in is refused with the usual
+  message, which now adds that an administrator can confirm it under *Settings → Sign-in identities*. Admins confirm or
+  remove bindings there (new audited capabilities `identity.binding_confirm`, `identity.binding_remove`; the last way the
+  last Admin can sign in cannot be removed). The host operator confirms the newest pending request of an address with
+  `docker compose exec serverwatch dotnet Whiskers.dll --confirm-identity-binding <email> [--issuer <issuer>]` (exit
+  `0` bound, `2` usage, `3` nothing pending, `4` several issuers pending, `1` nothing changed; its audit row is written
+  first); it shares the file with the running instance under a lock, and the running instance sees the binding at once —
+  no restart. **No Google/OIDC sign-in is admitted before an Admin exists** — before, every Google/OIDC account in the
+  world was admitted as Viewer until a role existed and reached `/mcp` and the hubs. Removing a binding ends that IdP
+  account's sessions but not the access: while the address is configured, the next sign-in binds again (automatically
+  or after confirmation). When an address stops being an entry (its role and its whitelist listing are gone), its
+  bindings go in the same write, so a recycled address never revives the old account. New audit actions
+  `auth.identity_bound`, `auth.identity_pending`; refused sign-ins of addresses that are not configured are recorded as
+  `anonymous`. The application log no longer names the account of any `auth.*` audit row (written, failed or dropped —
+  the audit row itself keeps it), shows no details of an identity row and keeps every value of such a line on one
+  line, and no R1-27 log line carries an address or a subject. The readiness check
+  `identity-bindings` reports an unavailable store: unreadable, incomplete, missing while its `.bak` exists (the `.bak`
+  is never taken over by itself), after a failed save, a start-up prune that did not succeed, or a repair of the file
+  (readable again with other content), until it is read and pruned again; every federated sign-in and session is then
+  refused and local sign-in keeps working. Every role or whitelist change that adds or removes an address — the setup
+  wizard's included — prunes the bindings of addresses that are no entries first, and is refused while that cannot be
+  done. Do not set `DOTNET_SYSTEM_IO_DISABLEFILELOCKING`: it switches off the lock the instance and the CLI share. An
+  Admin with a local password **or an active binding** counts as one who can sign in (replaces "seen signing in");
+  removing a binding and deleting a local account check that rule one at a time.
+  **Upgrade notes:** nothing on disk changes; `identity-bindings.json` appears in the data directory with the first
+  binding and is part of the self-backup. **Every Google/OIDC browser session ends at its next request** (open pages
+  within 30 s); local sessions continue. A Google user signs in again and is bound. **An OIDC user (Authentik included)
+  is pending once:** run the `--confirm-identity-binding` command above (or let a local Admin confirm in Settings), then
+  sign in again; only if your IdP emits `email_verified` honestly and users cannot change their own address, set
+  `Oidc__TrustEmailVerified=true` to bind automatically. An instance whose setup is not finished admits no federated
+  sign-in until the wizard has run. Changing the OIDC Authority (issuer) later puts every OIDC user back to pending.
+  Restoring a backup from before this release restores no bindings. MCP keys are unaffected.
+  See [docs/operations/identity-bindings.md](docs/operations/identity-bindings.md).
 
 - R1-49: **Local accounts get a complete lifecycle.** Everyone with a local account changes their own password under
   *My account* (person icon in the top bar; the current password is required and a wrong one counts towards the

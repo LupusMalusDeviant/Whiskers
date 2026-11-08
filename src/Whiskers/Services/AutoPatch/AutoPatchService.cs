@@ -217,21 +217,30 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     /// for tests.</summary>
     internal async Task<string?> RunNightlyAsync(CancellationToken ct)
     {
+        var dryRun = _settings.CurrentValue.DryRun;
         if (_owners.IsBlocked(IAutomationOwnerStore.AutoPatch))
         {
-            _logger.LogError("Auto-patch owner could not be read; tonight's cycle did not run. Take AutoPatch over " +
-                             "again in Settings → Automation owners");
-            return "Not run: the AutoPatch owner could not be read.";
+            // A suspended entry still names its owner: the refusal is on record for them, not as unowned — and says
+            // that it is suspended, not that it could not be read (review NIT-2).
+            var suspended = BlockedOwner();
+            var blocked = suspended is null
+                ? "Not run: the AutoPatch owner could not be read."
+                : "Not run: the AutoPatch owner is suspended (they lost their authority).";
+            _logger.LogError("Auto-patch blocked ({Reason}); tonight's cycle did not run. Take AutoPatch over " +
+                             "again in Settings → Automation owners", blocked);
+            await RefuseNightAsync(new { dryRun }, blocked, suspended, ct);
+            return blocked;
         }
         var owner = _owners.Get(IAutomationOwnerStore.AutoPatch)?.OwnerId;
         if (owner is null)
         {
             _logger.LogWarning("Auto-patch is switched on but no admin has taken it over (Settings → Automation); " +
                                "tonight's cycle did not run");
-            return "Not run: no admin has taken AutoPatch over.";
+            const string noOwner = "Not run: no admin has taken AutoPatch over.";
+            await RefuseNightAsync(new { dryRun }, noOwner, null, ct);
+            return noOwner;
         }
 
-        var dryRun = _settings.CurrentValue.DryRun;
         // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
         var actor = new AutomationActor(NightlyRunner, "AutoPatch", owner, owner);
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
@@ -249,6 +258,29 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
         return null;
     }
+
+    /// <summary>A night that refused itself before the gateway — no owner, an unreadable owner entry — is recorded as
+    /// the gateway's Denied event for <c>autopatch.run</c>, so the attempt is on record exactly once (INV-45, as the
+    /// VPN bring-up does, R1-43): on behalf of <paramref name="owner"/> when a blocked entry still names one, else at
+    /// read level as unowned. Nothing runs.</summary>
+    private async Task RefuseNightAsync(object arguments, string reason, string? owner, CancellationToken ct)
+    {
+        try
+        {
+            await _automation.RefuseAsync(new AutomationActor(NightlyRunner, "AutoPatch", owner, owner), "autopatch.run",
+                arguments, reason, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The refusal stands either way; the audit trail's own failure is reported by the gateway.
+            _logger.LogError(ex, "The refused auto-patch night could not be recorded");
+        }
+    }
+
+    /// <summary>The owner a blocked entry still names (a suspended one keeps it for the record); <c>null</c> when the
+    /// owner file could not be read at all.</summary>
+    private string? BlockedOwner() =>
+        _owners.GetBlocked(IAutomationOwnerStore.AutoPatch)?.OwnerId is { Length: > 0 } owner ? owner : null;
 
     /// <summary>The owner lost their authority (PC-D6): AutoPatch is suspended until an admin takes it over, and the
     /// admins are told. A refusal by policy leaves it on.</summary>

@@ -11,6 +11,11 @@
 # parts also name their mandatory tests (.github/required-tests/): each must be in the run and pass, whatever the floor. The
 # `artifact` job builds the image and checks the deliverable itself (Trivy, hardened profile, N-1 upgrade and recovery);
 # in a release the same checks run against the staged digest instead (release.yml `artifact-test`). Every job is bounded.
+#
+# R1-51 (contract 0008): the release gate (ReleaseGateTests) runs inside the in-process tests. Its mode follows the
+# version; only release.yml makes a run a release run, through the input `release-gate: release`, which this file turns
+# into WHISKERS_RELEASE_GATE for the in-process step and nowhere else. On a pull request and in a release run the records
+# are also compared with a base (the pull request's base commit, or the previous release tag).
 name: ci
 
 on:
@@ -22,6 +27,11 @@ on:
     inputs:
       ref:
         description: "Commit to build and test (the release workflow passes the tag commit). Empty = the event's ref."
+        required: false
+        type: string
+        default: ""
+      release-gate:
+        description: "'release' in a release run (release.yml); empty otherwise. Can only make the release gate stricter."
         required: false
         type: string
         default: ""
@@ -40,13 +50,14 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
 
-      # R1-52: locked restore — exactly the packages.lock.json of every project, or the job fails.
+      # R1-52: locked restore — exactly the packages.lock.json of every project, or the job fails. The script retries only
+      # a transient failure (a nuget.org connection reset); a lock-file or content-hash mismatch fails at once.
       - name: Restore
-        run: dotnet restore Whiskers.slnx --locked-mode
+        run: bash .github/scripts/restore-locked.sh
 
       - name: Build
         run: dotnet build Whiskers.slnx --no-restore --configuration Release
@@ -57,7 +68,11 @@ jobs:
         run: |
           set -euo pipefail
           . /etc/os-release
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg
+          # The PGDG signing key is committed (deploy/keys/, the same file the Dockerfile uses): no download from
+          # postgresql.org, and the key is pinned — the whole file by SHA-256 and its fingerprint — before apt trusts it.
+          echo "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76  deploy/keys/pgdg-ACCC4CF8.asc" | sha256sum -c -
+          gpg --show-keys --with-colons deploy/keys/pgdg-ACCC4CF8.asc | grep '^fpr:::::::::B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8:$' >/dev/null
+          sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg deploy/keys/pgdg-ACCC4CF8.asc
           echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y --no-install-recommends postgresql-client-18
@@ -67,6 +82,8 @@ jobs:
       # The floor guards against a silently-empty or shrunken run: with the test project missing from Whiskers.slnx,
       # `dotnet test --no-build` once exited 0 without executing any test. Raise it when the suite grows.
       - name: Test (in-process)
+        env:
+          WHISKERS_RELEASE_GATE: ${{ inputs.release-gate }}
         run: |
           set -euo pipefail
           dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
@@ -84,6 +101,37 @@ jobs:
             --filter "Category=RequiresDocker" --logger "console;verbosity=minimal" \
             --logger "trx;LogFileName=docker.trx" --results-directory TestResults
           bash .github/scripts/check-test-results.sh TestResults/docker.trx 70 --no-skips --require .github/required-tests/docker.txt
+
+      # R1-51 (contract 0008, D16 and R18): no invariant ID disappears without a retirement, the pinned highest ID never goes
+      # down, and an accepted release decision is never edited — compared with the pull request's base commit, or in a
+      # release run with the previous release: the highest published GitHub release below the version that is an ancestor
+      # of the release commit and carries its tag's version (ancestry and version are the guarantee; the published list only
+      # screens out failed releases). History, tags and the release list are fetched only in a release run, and the token
+      # is passed to `gh release list` alone and unset before the tests run, so it is not in the tests' environment (the
+      # checkout's persisted credentials still hold the same read-only token).
+      - name: Release gate (compare with the base)
+        if: github.event_name == 'pull_request' || inputs.release-gate == 'release'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          RELEASE_GATE: ${{ inputs.release-gate }}
+          RELEASES_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE_GATE" = "release" ]; then
+            git fetch --no-tags --unshallow origin '+refs/tags/v*:refs/tags/v*'
+            GH_TOKEN="$RELEASES_TOKEN" gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName' > "$RUNNER_TEMP/releases.txt"
+            export WHISKERS_GATE_RELEASES="$RUNNER_TEMP/releases.txt"
+            export WHISKERS_GATE_BASE=previous-tag
+          else
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            export WHISKERS_GATE_BASE="$BASE_SHA"
+          fi
+          unset RELEASES_TOKEN
+          export WHISKERS_GATE_BASE_REQUIRED=true
+          dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
+            --filter "FullyQualifiedName~Whiskers.Tests.ReleaseGate.ReleaseGateBaseTests" --logger "console;verbosity=minimal" \
+            --logger "trx;LogFileName=gate-base.trx" --results-directory TestResults
+          bash .github/scripts/check-test-results.sh TestResults/gate-base.trx 1 --no-skips
 
       # DI boot gate (project rule): build+tests miss DI-graph regressions — boot the app in
       # Development (ValidateOnBuild/ValidateScopes) against a fresh data dir until /healthz answers.
@@ -133,8 +181,12 @@ jobs:
           load: true
           push: false
           tags: ${{ env.ARTIFACT }}
+          # The layer cache speeds up the runtime stage only. The `build` stage (the NuGet restore) is never taken from it:
+          # a cached restore layer is a NuGet package cache, and a cache hit skips NuGet's hash and signature checks.
+          # mode=min exports only the final image's (runtime) layers: the build stage is never read back, so not stored.
           cache-from: type=gha,scope=ci-amd64
-          cache-to: type=gha,scope=ci-amd64,mode=max
+          cache-to: type=gha,scope=ci-amd64,mode=min
+          no-cache-filters: build
 
       - name: Trivy scan (gate, fail on CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -187,14 +239,14 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
 
       - name: Build the test project
         run: |
           set -euo pipefail
-          dotnet restore Whiskers.slnx --locked-mode
+          bash .github/scripts/restore-locked.sh
           dotnet build src/Whiskers.Tests/Whiskers.Tests.csproj --no-restore --configuration Release
 
       - name: Build the image
@@ -207,6 +259,8 @@ jobs:
         run: |
           set -euo pipefail
           dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
-            --filter "Category=ImageRuntime" --logger "console;verbosity=normal" | tee image-runtime.log
-          grep -Eq "Passed:\s*[1-9]" image-runtime.log
-          if grep -Eq "Skipped:\s*[1-9]" image-runtime.log; then echo "::error::image runtime tests were skipped"; exit 1; fi
+            --filter "Category=ImageRuntime" --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=image-runtime.trx" --results-directory TestResults
+          # R1-51 (contract 0008, D14): checked from the TRX file like the other suites — a floor, no skip, and the
+          # required tests of image-runtime.txt (the image tests invariants may name are rendered into its block).
+          bash .github/scripts/check-test-results.sh TestResults/image-runtime.trx 7 --no-skips --require .github/required-tests/image-runtime.txt

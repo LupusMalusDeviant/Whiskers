@@ -58,8 +58,119 @@ public sealed class MutationScope : IDisposable
                 if (value.ValueKind == System.Text.Json.JsonValueKind.String && value.GetString() is { Length: > 0 } s)
                     _decided.Add(s);
             _decided.Remove("");
+            // Contract 0006 (review B1): the exposures and the related containers this decision covers come from the
+            // resolved target only — never from a caller's argument (the resolver folds the nested decision's lists into
+            // the target, and only on the UI and automation surfaces).
+            _exposures.UnionWith(request.Target.Exposures);
+            _related.Add(request.Target.Id);
+            if (request.Target.Name is { } targetName) _related.Add(targetName);
+            _related.UnionWith(request.Target.Related);
+            _related.Remove("");
         }
     }
+
+    private readonly HashSet<string> _exposures = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _related = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Contract 0006 (review B1): whether this scope or an enclosing one decided one of <paramref name="identities"/> on
+    /// <paramref name="serverId"/> as its resolved target or a related resource of it — never because a caller passed
+    /// the name as an argument (<see cref="Covers"/> also counts argument values). The shared-namespace containers of a
+    /// plan and of the re-check after <c>up</c> are checked with this.
+    /// </summary>
+    public bool CoversRelated(string serverId, params string[] identities)
+    {
+        for (var scope = this; scope is not null; scope = scope._parent)
+            if (scope._serverId == serverId && identities.Any(i => i.Length > 0 && scope._related.Contains(i)))
+                return true;
+        return false;
+    }
+    private readonly HashSet<(string Server, string Id)> _createdByRun = [];
+    private bool _agentRuleSet;
+    private IReadOnlyList<string> _exposureConfirmClasses = [];
+
+    /// <summary>Contract 0006: set by the gateway from the policy decision this scope runs under.</summary>
+    internal void SetDecision(bool agentRuleSet, IReadOnlyList<string> exposureConfirmClasses)
+    {
+        _agentRuleSet = agentRuleSet;
+        _exposureConfirmClasses = exposureConfirmClasses;
+    }
+
+    /// <summary>Contract 0006: this scope or an enclosing one was decided by the agent rule set
+    /// (<c>GuardrailEngine.CreateDefault</c>) — the agent, an API key, an AI trigger or an automation that keeps their
+    /// rules. Only then does the re-check after <c>up</c> stop an undecided exposure.</summary>
+    public bool AgentRuleSet
+    {
+        get
+        {
+            for (var s = this; s is not null; s = s._parent)
+                if (s._agentRuleSet) return true;
+            return false;
+        }
+    }
+
+    /// <summary>Contract 0006: the exposure classes that needed a confirmation under the agent rule set that decided this
+    /// scope or an enclosing one (empty when none did).</summary>
+    public IReadOnlySet<string> AgentExposureConfirmClasses
+    {
+        get
+        {
+            var classes = new HashSet<string>(StringComparer.Ordinal);
+            for (var s = this; s is not null; s = s._parent)
+                if (s._agentRuleSet) classes.UnionWith(s._exposureConfirmClasses);
+            return classes;
+        }
+    }
+
+    /// <summary>Contract 0006: whether this scope or an enclosing one decided the exposure <paramref name="identity"/> on
+    /// server <paramref name="serverId"/>.</summary>
+    public bool CoversExposure(string serverId, string identity)
+    {
+        for (var scope = this; scope is not null; scope = scope._parent)
+            if (scope._serverId == serverId && scope._exposures.Contains(identity))
+                return true;
+        return false;
+    }
+
+    /// <summary>Contract 0006: every exposure this scope and the enclosing ones decided on <paramref name="serverId"/>.</summary>
+    public IReadOnlySet<string> DecidedExposures(string serverId)
+    {
+        var all = new HashSet<string>(StringComparer.Ordinal);
+        for (var scope = this; scope is not null; scope = scope._parent)
+            if (scope._serverId == serverId) all.UnionWith(scope._exposures);
+        return all;
+    }
+
+    /// <summary>
+    /// Contract 0006 (Amendments 5, 6 and 10): the containers a compose run created or recreated on
+    /// <paramref name="serverId"/>, kept in a set of their own. Only <c>container.disable_restart</c> and
+    /// <c>container.stop</c> (through <see cref="AuthorizesTarget"/>) and the re-check's namespace rule
+    /// (<see cref="CreatedByRun"/>) read it — <see cref="Covers"/> and <see cref="ComposePlan.EnsureDecided"/> never do.
+    /// </summary>
+    public void AddCreatedByRun(string serverId, IEnumerable<string> containerIds)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverId);
+        lock (_createdByRun)
+            foreach (var id in containerIds.Where(i => !string.IsNullOrWhiteSpace(i)))
+                _createdByRun.Add((serverId, id));
+    }
+
+    /// <summary>Contract 0006: whether a compose run in this scope or an enclosing one created <paramref name="containerId"/>
+    /// (a full id, or a unique prefix of one) on <paramref name="serverId"/>.</summary>
+    public bool CreatedByRun(string serverId, string containerId)
+    {
+        if (string.IsNullOrWhiteSpace(containerId)) return false;
+        for (var scope = this; scope is not null; scope = scope._parent)
+            lock (scope._createdByRun)
+                if (scope._createdByRun.Any(c => string.Equals(c.Server, serverId, StringComparison.OrdinalIgnoreCase)
+                                                 && c.Id.StartsWith(containerId, StringComparison.Ordinal)))
+                    return true;
+        return false;
+    }
+
+    /// <summary>The operations that may act on a container a compose run created (contract 0006, Amendment 5).</summary>
+    internal static readonly IReadOnlySet<string> RunCreatedOperations =
+        new HashSet<string>(StringComparer.Ordinal) { "container.disable_restart", "container.stop" };
 
     /// <summary>
     /// True when this scope or an enclosing one decided on server <paramref name="serverId"/> about any of
@@ -133,6 +244,57 @@ public sealed class MutationScope : IDisposable
             // Review round 3: an identity that cannot be resolved — the call's or the decision's — matches nothing.
             var decided = canonical is null ? s._serverId : canonical(s._serverId);
             if (server is not null && decided is not null && string.Equals(decided, server, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The target binding of a call (<see cref="MutationTargetAttribute"/>): true when an open scope of this flow that
+    /// authorizes <paramref name="capabilityId"/> (it decided it, or a capability that composes it) also decided
+    /// <paramref name="identity"/> — as its resolved target, a related resource or an argument value policy saw — on
+    /// the server the call acts on. Unlike <see cref="Authorizes(string, bool, string?, Func{string, string?}?)"/>, the
+    /// server is matched for the decided capability itself too: a delegate that names the decided container on another
+    /// server acts on another container. Servers compare by their canonical id (<paramref name="canonical"/>), or
+    /// exactly as named when neither side resolves; anything else fails closed. A scope opened without a request
+    /// decided nothing and covers no target.
+    /// </summary>
+    public static bool AuthorizesTarget(string capabilityId, string? identity, bool actsOnServer, string? namedServer,
+        string? server, Func<string, string?>? canonical)
+    {
+        if (string.IsNullOrWhiteSpace(identity)) return false;
+        // Contract 0006 (Amendment 5): the narrow way to a container a compose run created — only for the two operations
+        // that stop it, inside a scope that authorizes them, on the server the run created it on.
+        if (RunCreatedOperations.Contains(capabilityId) && Current is { } current
+            && Authorizes(capabilityId, actsOnServer, server, canonical))
+        {
+            for (var s = current; s is not null; s = s._parent)
+                lock (s._createdByRun)
+                    foreach (var (created, id) in s._createdByRun)
+                    {
+                        if (!string.Equals(id, identity, StringComparison.Ordinal)) continue;
+                        var decided = canonical is null ? null : canonical(created);
+                        if (!actsOnServer
+                            || (server is not null && decided is not null && string.Equals(decided, server, StringComparison.OrdinalIgnoreCase))
+                            || (server is null && decided is null && namedServer is not null
+                                && string.Equals(namedServer, created, StringComparison.OrdinalIgnoreCase)))
+                            return true;
+                    }
+        }
+        for (var s = Current; s is not null; s = s._parent)
+        {
+            if (!string.Equals(s.CapabilityId, capabilityId, StringComparison.Ordinal)
+                && !MutationCompositions.Allows(s.CapabilityId, capabilityId))
+                continue;
+            if (!s._decided.Contains(identity)) continue;
+            if (!actsOnServer || string.IsNullOrEmpty(s._serverId)) return true;
+            var decided = canonical is null ? null : canonical(s._serverId);
+            if (server is not null && decided is not null
+                && string.Equals(decided, server, StringComparison.OrdinalIgnoreCase))
+                return true;
+            // Neither side resolves (no registry): only the very same name is the same server.
+            if (server is null && decided is null && namedServer is not null
+                && string.Equals(namedServer, s._serverId, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;
@@ -280,6 +442,26 @@ public sealed class MutationScope : IDisposable
         var scope = new MutationScope(capabilityId, operationId, principal, Current, request);
         CurrentScope.Value = scope;
         return scope;
+    }
+
+    /// <summary>
+    /// Takes the open scope off the current async flow until the returned handle is disposed, and changes nothing else
+    /// on the flow (budget lane, correlation id). For unattended work started from inside a decision that is not part
+    /// of that decision — an AI trigger run fired by an event a person's operation raised: what it starts there sees
+    /// no scope, so its own gateway calls do not become children of the person's operation. It removes the whole scope:
+    /// the authority it decided and also the restrictions nested calls inherit from it (pinned preset, trigger id,
+    /// <see cref="Covers"/>). That is safe only for work that brings its own principal and pin, as a trigger run does;
+    /// <c>AiTriggerDispatcher.OnEventAsync</c> is therefore its only caller, pinned by
+    /// <c>MutationGatewayCoverageTests.Only_the_trigger_dispatcher_detaches_a_scope</c>. Dispose in the same synchronous
+    /// frame that called it.
+    /// </summary>
+    internal static IDisposable Detach() => new Detached();
+
+    private sealed class Detached : IDisposable
+    {
+        private readonly MutationScope? _previous = CurrentScope.Value;
+        public Detached() => CurrentScope.Value = null;
+        public void Dispose() => CurrentScope.Value = _previous;
     }
 
     public void Dispose()

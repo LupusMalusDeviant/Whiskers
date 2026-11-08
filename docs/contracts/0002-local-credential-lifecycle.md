@@ -46,6 +46,10 @@ Host CLI: `dotnet Whiskers.dll --recover-local-account <email>` — exit codes `
 account, `1` nothing changed. Audit actions: `auth.recovery_issued` (CLI, written before the change),
 `auth.recovery_redeemed`, `auth.recovery_refused` (reason only).
 
+> Note (7 November 2026, after acceptance): contract 0009, amendment A1.2, adds exit code `4` (refused, nothing changed,
+> while the guardrail policy would block redeeming the code) and the `--force` flag that issues it anyway. The decisions
+> above are unchanged.
+
 UI: `/account` (*My account*), `/account/recover` (anonymous), Settings panel *Local accounts* (`LocalAccountsPanel`).
 
 ## Rules
@@ -81,6 +85,7 @@ UI: `/account` (*My account*), `/account/recover` (anonymous), Settings panel *L
     protected pipeline stays unchanged). The client address is the circuit's hub connection's (WebSockets and long
     polling), as the forwarded-headers middleware resolved it. Unknown client addresses share one bucket; each table
     holds at most 4096 keys, beyond which new keys share one overflow bucket (fail closed). Every answer of the page
-    takes at least one second. Operators should narrow `ForwardedHeaders:TrustedNetworks` to the real proxy.
+    takes at least one second. Operators must list their real proxy in `ForwardedHeaders:TrustedNetworks` (default
+    since R1-50: loopback only).
 11. Demotion of the only Admin who can sign in is guarded only by the role store's explicit-Admin rule (TA-02); not
     extended in R1-49.

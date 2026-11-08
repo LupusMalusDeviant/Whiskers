@@ -224,8 +224,7 @@ public sealed class SessionRevocationTests
         using var sweep = new Whiskers.Hubs.HubSessionSweep(world.Validator, clock, log);
         await sweep.StartAsync(CancellationToken.None);
         var ops = new HubConnection(world.OpsCookiePrincipal(), "ops");
-        var other = new HubConnection(new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Email, World.Root)], "Google")), "root");
+        var other = new HubConnection(world.RootCookiePrincipal(), "root");
         var filter = new Whiskers.Hubs.SessionHubFilter(world.Validator, sweep);
         await filter.OnConnectedAsync(new Microsoft.AspNetCore.SignalR.HubLifetimeContext(ops,
             world.Scopes.CreateScope().ServiceProvider, new NoHub()), _ => Task.CompletedTask);
@@ -407,9 +406,12 @@ public sealed class SessionRevocationTests
             (await world.Validator.CheckAsync(world.OpsCookiePrincipal(stamp: null))).Reason);
         Assert.Equal(SessionRevocationReasons.StampMismatch,
             (await world.Validator.CheckAsync(world.OpsCookiePrincipal(stamp: "other"))).Reason);
-        // No email; synthetic identities with auth enabled; an anonymous principal.
+        // No email; a provider's own principal (R1-27: no binding behind it); synthetic identities with auth enabled; an
+        // anonymous principal.
         Assert.Equal(SessionRevocationReasons.NoEmail, (await world.Validator.CheckAsync(new ClaimsPrincipal(
-            new ClaimsIdentity([new Claim(ClaimTypes.Name, "x")], "Google")))).Reason);
+            new ClaimsIdentity([new Claim(ClaimTypes.Name, "x")], AuthConstants.LocalPasswordScheme)))).Reason);
+        Assert.Equal(SessionRevocationReasons.BindingMissing, (await world.Validator.CheckAsync(new ClaimsPrincipal(
+            new ClaimsIdentity([new Claim(ClaimTypes.Email, World.Ops)], "Google")))).Reason);
         foreach (var scheme in new[] { AuthConstants.AuthDisabledScheme, AuthConstants.AgentSyntheticScheme })
             Assert.Equal(SessionRevocationReasons.SyntheticIdentity, (await world.Validator.CheckAsync(new ClaimsPrincipal(
                 new ClaimsIdentity([new Claim(ClaimTypes.Email, World.Ops)], scheme)))).Reason);
@@ -556,6 +558,7 @@ public sealed class SessionRevocationTests
         public const string Root = "root@local.test";
         public const string Ops = "ops@local.test";
         private const string OpsId = "u-ops";
+        private const string RootId = "u-root";
         private const string Stamp = "stamp-1";
 
         private readonly string _dir;
@@ -601,6 +604,11 @@ public sealed class SessionRevocationTests
                     Id = OpsId, UserName = Ops, NormalizedUserName = Ops.ToUpperInvariant(),
                     Email = Ops, NormalizedEmail = Ops.ToUpperInvariant(), SecurityStamp = Stamp,
                 });
+                db.Users.Add(new AppUser
+                {
+                    Id = RootId, UserName = Root, NormalizedUserName = Root.ToUpperInvariant(),
+                    Email = Root, NormalizedEmail = Root.ToUpperInvariant(), SecurityStamp = Stamp,
+                });
                 await db.SaveChangesAsync();
             }
             var roles = new RoleService(configuration, NullLogger<RoleService>.Instance, dataPaths: paths);
@@ -621,6 +629,13 @@ public sealed class SessionRevocationTests
             if (stamp is not null) claims.Add(new Claim(AuthConstants.SecurityStampClaim, stamp));
             return new ClaimsPrincipal(new ClaimsIdentity(claims, AuthConstants.LocalPasswordScheme));
         }
+
+        /// <summary>The cookie of Root, the seeded Admin: untouched by every <see cref="Change"/>.</summary>
+        public ClaimsPrincipal RootCookiePrincipal() => new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.Email, Root), new Claim(ClaimTypes.Name, Root), new Claim(ClaimTypes.NameIdentifier, RootId),
+            new Claim(AuthConstants.SecurityStampClaim, Stamp),
+        ], AuthConstants.LocalPasswordScheme));
 
         public async Task ApplyAsync(Change change)
         {

@@ -22,8 +22,9 @@ public sealed class LocalAccountService : ILocalAccountService
     public const string RecoveryRedeemedAction = "auth.recovery_redeemed";
     public const string RecoveryRefusedAction = "auth.recovery_refused";
 
-    // One Admin change at a time, also across scopes (each circuit has its own service).
-    private static readonly SemaphoreSlim AdminGate = new(1, 1);
+    // One Admin change at a time, also across scopes (each circuit has its own service) — and the same boundary as the
+    // removal of an identity binding (R1-27): the last-usable-Admin check and the commit of a removal are one step.
+    private static SemaphoreSlim AdminGate => AdminSignIn.Gate;
 
     private readonly UserManager<AppUser> _users;
     private readonly WhiskersIdentityDbContext _db;
@@ -36,12 +37,18 @@ public sealed class LocalAccountService : ILocalAccountService
     private readonly bool _authDisabled;
     private readonly TimeProvider _time;
     private readonly ILogger<LocalAccountService>? _logger;
+    private readonly IIdentityBindingStore? _bindings;
+    private readonly Whiskers.Services.Guardrails.IGuardrailStore _guardrails;
 
+    /// <param name="bindings">R1-27: an Admin with an active Google/OIDC binding can sign in (last-Admin rule).</param>
     public LocalAccountService(UserManager<AppUser> users, WhiskersIdentityDbContext db, IRoleService roles,
         ICurrentUserService user, IOwnerAccounts owners, IAuditLogService audit, IRecoveryAttemptLimiter limiter,
-        IClientAddress client, IConfiguration configuration, TimeProvider? time = null,
-        ILogger<LocalAccountService>? logger = null)
+        IClientAddress client, IConfiguration configuration, Whiskers.Services.Guardrails.IGuardrailStore guardrails,
+        TimeProvider? time = null, ILogger<LocalAccountService>? logger = null, IIdentityBindingStore? bindings = null)
     {
+        _bindings = bindings;
+        // Contract 0009 (E5): the kill switch may block recovery-code redemption. Required: without it the check could not fail closed.
+        _guardrails = guardrails ?? throw new ArgumentNullException(nameof(guardrails));
         _limiter = limiter ?? throw new ArgumentNullException(nameof(limiter));
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -63,7 +70,7 @@ public sealed class LocalAccountService : ILocalAccountService
 
     public async Task<IReadOnlyList<LocalAccountInfo>> ListAsync(CancellationToken ct = default)
     {
-        if ((await AdminAsync()).Error is not null) return [];
+        if ((await AdminAsync(AppRole.Admin)).Error is not null) return [];   // listing accounts is a read, Admin only
         var users = await _db.Users.AsNoTracking().OrderBy(u => u.Email).ToListAsync(ct);
         var codes = await _db.UserTokens.AsNoTracking()
             .Where(t => t.LoginProvider == RecoveryCodes.TokenProvider && t.Name == RecoveryCodes.TokenName)
@@ -135,7 +142,7 @@ public sealed class LocalAccountService : ILocalAccountService
             // Inside the try: the context of a circuit closed while it waited is disposed, and Clear() throws — the
             // gate is released all the same.
             _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
-            if ((await AccountAdminAsync()).Error is { } refused) return LocalAccountResult.Refused(refused);
+            if ((await AccountAdminAsync("account.create")).Error is { } refused) return LocalAccountResult.Refused(refused);
             if (await _users.FindByEmailAsync(email) is not null) return LocalAccountResult.Refused(LocalAccountErrors.AlreadyExists);
             // An email that already holds a different explicit role (a Google/OIDC user) is not silently changed:
             // its role is managed in the role list.
@@ -195,7 +202,7 @@ public sealed class LocalAccountService : ILocalAccountService
             // Inside the try: the context of a circuit closed while it waited is disposed, and Clear() throws — the
             // gate is released all the same.
             _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
-            var (actor, refused) = await AccountAdminAsync();
+            var (actor, refused) = await AccountAdminAsync("account.password_reset");
             if (refused is not null) return LocalAccountResult.Refused(refused);
             if (SameEmail(actor, email)) return LocalAccountResult.Refused(LocalAccountErrors.OwnAccount);
             var user = await _users.FindByEmailAsync(email);
@@ -219,7 +226,7 @@ public sealed class LocalAccountService : ILocalAccountService
             // gate is released all the same.
             _db.ChangeTracker.Clear();   // a circuit lives long: read the account as it is now
             // Re-checked under the lock: an Admin whose own account went a moment ago decides nothing.
-            var (actor, refused) = await AccountAdminAsync();
+            var (actor, refused) = await AccountAdminAsync("account.delete");
             if (refused is not null) return LocalAccountResult.Refused(refused);
             if (SameEmail(actor, email)) return LocalAccountResult.Refused(LocalAccountErrors.OwnAccount);
             var user = await _users.FindByEmailAsync(email);
@@ -263,23 +270,16 @@ public sealed class LocalAccountService : ILocalAccountService
         finally { AdminGate.Release(); }
     }
 
-    /// <summary>Whether an Admin other than <paramref name="target"/> can still sign in: a local account with a
-    /// password, or (without a local account) a Google/OIDC user Whiskers has seen signing in — what
-    /// <see cref="IOwnerAccounts"/> counts as present. An Admin waiting for a recovery code does not count.</summary>
+    /// <summary>Whether an Admin other than <paramref name="target"/> can still sign in (R1-27, contract 0003 rule 6 —
+    /// the predicate the identity-binding store's last-Admin rule uses too): a local account with a password, or an
+    /// active Google/OIDC identity binding. An Admin waiting for a recovery code without a binding does not count.</summary>
     private async Task<bool> AnotherUsableAdminAsync(string target, CancellationToken ct)
     {
         foreach (var admin in _roles.GetRoleData().Roles
                      .Where(r => r.Role == AppRole.Admin && !SameEmail(r.Email, target)).Select(r => r.Email))
         {
-            var normalized = _users.NormalizeEmail(admin);
-            var local = await _db.Users.AsNoTracking().Where(u => u.NormalizedEmail == normalized)
-                .Select(u => new { u.PasswordHash }).FirstOrDefaultAsync(ct);
-            if (local is not null)
-            {
-                if (local.PasswordHash is not null) return true;
-                continue;
-            }
-            if (_owners.StateOf(admin) == OwnerAccountState.Present) return true;
+            if (await AdminSignIn.HasLocalPasswordAsync(_db, _users.KeyNormalizer, admin, ct)) return true;
+            if (AdminSignIn.HasBinding(_bindings, admin)) return true;
         }
         return false;
     }
@@ -338,6 +338,16 @@ public sealed class LocalAccountService : ILocalAccountService
                 _logger?.LogWarning("{Count} recovery-code attempts of one client were throttled in the current window",
                     attempt.RefusedInWindow);
             return LocalAccountResult.Refused(LocalAccountErrors.InvalidCode);
+        }
+
+        // Contract 0009 (D5, E5): while the kill switch is on and an Admin blocked this exemption beforehand — or the
+        // policy store is fail-closed (D4) — nothing is read or changed; one refusal names the kill switch's rule.
+        if (_guardrails.Current.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.RecoveryCode))
+        {
+            // The typed address is not recorded: no account was looked up (as for an unknown one).
+            await _audit.TryLogAsync("anonymous", "web", RecoveryRefusedAction, AuthAuditLog.Target, "", "",
+                $"reason=kill_switch; rule={Whiskers.Configuration.KillSwitchExemptions.RuleId}", success: false);
+            return LocalAccountResult.Refused(LocalAccountErrors.KillSwitch);
         }
 
         _db.ChangeTracker.Clear();   // read the account as it is now, not as this scope last saw it
@@ -438,16 +448,17 @@ public sealed class LocalAccountService : ILocalAccountService
 
     // ------------------------------------------------------------------------------------------------ helpers
 
-    /// <summary>The caller as an Admin who may change accounts: refused while authentication is disabled.</summary>
-    private async Task<(string? Email, string? Error)> AccountAdminAsync() =>
-        _authDisabled ? (null, LocalAccountErrors.AuthDisabled) : await AdminAsync();
+    /// <summary>The caller as someone who may run <paramref name="capabilityId"/> on accounts, with the role from the
+    /// capability catalog (INV-13; Admin for every account capability): refused while authentication is disabled.</summary>
+    private async Task<(string? Email, string? Error)> AccountAdminAsync(string capabilityId) =>
+        _authDisabled ? (null, LocalAccountErrors.AuthDisabled) : await AdminAsync(CapabilityCatalog.RoleOf(capabilityId));
 
-    /// <summary>The caller as an Admin, with the session checked now.</summary>
-    private async Task<(string? Email, string? Error)> AdminAsync()
+    /// <summary>The caller holding <paramref name="required"/>, with the session checked now.</summary>
+    private async Task<(string? Email, string? Error)> AdminAsync(AppRole required)
     {
         var session = await _user.CheckSessionAsync();
         if (!session.Valid) return (null, LocalAccountErrors.SessionInvalid);
-        if (session.Role < AppRole.Admin) return (null, LocalAccountErrors.NotAuthorized);
+        if (session.Role < required) return (null, LocalAccountErrors.NotAuthorized);
         return (await _user.GetEmailAsync(), null);
     }
 

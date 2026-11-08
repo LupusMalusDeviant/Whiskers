@@ -8,13 +8,13 @@ public interface ISystemdService
     Task<string> GetStatusAsync(string serverId, string serviceName);
     Task<string> GetJournalAsync(string serverId, string serviceName, int lines = 100);
     [MutatingOperation("systemd.manage")]
-    Task<CommandResult> StartAsync(string serverId, string serviceName);
+    Task<CommandResult> StartAsync(string serverId, [MutationTarget] string serviceName);
     [MutatingOperation("systemd.manage")]
-    Task<CommandResult> StopAsync(string serverId, string serviceName);
+    Task<CommandResult> StopAsync(string serverId, [MutationTarget] string serviceName);
     [MutatingOperation("systemd.manage")]
-    Task<CommandResult> RestartAsync(string serverId, string serviceName);
+    Task<CommandResult> RestartAsync(string serverId, [MutationTarget] string serviceName);
     [MutatingOperation("systemd.manage")]
-    Task<CommandResult> EnableAsync(string serverId, string serviceName);
+    Task<CommandResult> EnableAsync(string serverId, [MutationTarget] string serviceName);
     [MutatingOperation("systemd.manage")]
-    Task<CommandResult> DisableAsync(string serverId, string serviceName);
+    Task<CommandResult> DisableAsync(string serverId, [MutationTarget] string serviceName);
 }

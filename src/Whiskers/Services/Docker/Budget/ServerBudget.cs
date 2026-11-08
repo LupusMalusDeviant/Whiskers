@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Whiskers.Configuration;
 
@@ -41,10 +40,16 @@ public sealed class ServerBudget : IServerBudget
     private readonly IOptionsMonitor<ServerBudgetSettings> _settings;
     private readonly ILogger<ServerBudget> _logger;
 
-    public ServerBudget(IOptionsMonitor<ServerBudgetSettings> settings, ILogger<ServerBudget> logger)
+    /// <summary>Measures the queue wait and the run behind <see cref="Lanes.SaturationFailures"/>. The system clock in
+    /// production; tests pass a clock they move by hand, so "waited longer than it ran" does not depend on a runner's
+    /// scheduling.</summary>
+    private readonly TimeProvider _time;
+
+    public ServerBudget(IOptionsMonitor<ServerBudgetSettings> settings, ILogger<ServerBudget> logger, TimeProvider? time = null)
     {
         _settings = settings;
         _logger = logger;
+        _time = time ?? TimeProvider.System;
     }
 
     public IDisposable BackgroundScope() => EnterBackground();
@@ -84,7 +89,7 @@ public sealed class ServerBudget : IServerBudget
             throw new DuplicateRequestException(dedupe);
         }
 
-        var waited = Stopwatch.GetTimestamp();
+        var waited = _time.GetTimestamp();
         // The token covers the WAIT, not just the operation: a caller that timed out while queued has to
         // leave the queue, otherwise the backlog outlives the callers and the next slot goes to a ghost.
         // R1-41: a deadline about the call ends the wait too. Running out here is the queue's doing — never the server's,
@@ -98,10 +103,10 @@ public sealed class ServerBudget : IServerBudget
         {
             if (dedupe is not null) lanes.InFlightKeys.TryRemove(dedupe, out _);
             if (!spentBeforeQueue) Interlocked.Increment(ref lanes.SaturationFailures);
-            throw new BudgetSaturatedException(serverId, Stopwatch.GetElapsedTime(waited), TimeSpan.Zero, ex);
+            throw new BudgetSaturatedException(serverId, _time.GetElapsedTime(waited), TimeSpan.Zero, ex);
         }
         catch { if (dedupe is not null) lanes.InFlightKeys.TryRemove(dedupe, out _); throw; }
-        var waitMs = (long)Stopwatch.GetElapsedTime(waited).TotalMilliseconds;
+        var waitMs = (long)_time.GetElapsedTime(waited).TotalMilliseconds;
 
         Interlocked.Add(ref lanes.WaitedMillisecondsTotal, waitMs);
         Interlocked.Increment(ref lanes.Started);
@@ -112,7 +117,7 @@ public sealed class ServerBudget : IServerBudget
         if (background) Interlocked.Increment(ref lanes.BackgroundInFlight);
         else Interlocked.Increment(ref lanes.InteractiveInFlight);
 
-        var startedAt = Stopwatch.GetTimestamp();
+        var startedAt = _time.GetTimestamp();
         try
         {
             return await operation();
@@ -123,11 +128,11 @@ public sealed class ServerBudget : IServerBudget
         // R1-41: never for a call its caller cancelled — that is neither the budget's nor the server's doing.
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException
                                    && !ct.IsCancellationRequested
-                                   && Stopwatch.GetElapsedTime(startedAt) < TimeSpan.FromMilliseconds(waitMs))
+                                   && _time.GetElapsedTime(startedAt) < TimeSpan.FromMilliseconds(waitMs))
         {
             Interlocked.Increment(ref lanes.SaturationFailures);
             throw new BudgetSaturatedException(
-                serverId, TimeSpan.FromMilliseconds(waitMs), Stopwatch.GetElapsedTime(startedAt), ex);
+                serverId, TimeSpan.FromMilliseconds(waitMs), _time.GetElapsedTime(startedAt), ex);
         }
         finally
         {

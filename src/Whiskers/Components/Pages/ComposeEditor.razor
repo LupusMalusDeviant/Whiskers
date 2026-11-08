@@ -4,6 +4,7 @@
 @inject Whiskers.Services.Server.IHostCommandExecutor Executor
 @inject IUiMutationRunner Mutations
 @inject IComposePlanner ComposePlanner
+@inject IComposeRunner ComposeRunner
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
@@ -156,21 +157,14 @@
     private List<Whiskers.Models.ServerConfig> _servers = new();
     private string _serverId = "local";
 
-    private bool Require(AppRole required)
-    {
-        if (_role < required)
-        {
-            Snackbar.Add(L["ComposeEditor_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
-            return false;
-        }
-        return true;
-    }
-
     /// <summary>The role check in front of a mutation: a refusal is also the gateway's Denied event for
     /// <paramref name="capabilityId"/> on <paramref name="arguments"/>, so the attempt is on record once (R1-21).</summary>
-    private async Task<bool> RequireAsync(AppRole required, string capabilityId, object arguments)
+    private async Task<bool> RequireAsync(string capabilityId, object arguments)
     {
-        if (Require(required)) return true;
+        // The role comes from the capability catalog, the one level table (INV-13), never from the page.
+        var required = CapabilityCatalog.RoleOf(capabilityId);
+        if (_role >= required) return true;
+        Snackbar.Add(L["ComposeEditor_Snackbar_NoPermission", required, _role].Value, Severity.Warning);
         await Mutations.RefuseAsync(capabilityId, arguments, $"Requires the {required} role.");
         return false;
     }
@@ -259,7 +253,7 @@
     private async Task Deploy()
     {
         // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
-        if (!await RequireAsync(AppRole.Admin, "compose.deploy", new { projectName = _projectName, serverId = _serverId })) return;
+        if (!await RequireAsync("compose.deploy", new { projectName = _projectName, serverId = _serverId })) return;
         if (string.IsNullOrWhiteSpace(_projectName)) return;
         if (_projectName.Contains("..") || !System.Text.RegularExpressions.Regex.IsMatch(_projectName, @"^[a-zA-Z0-9._-]+$"))
         {
@@ -272,7 +266,7 @@
             var serverId = _serverId;
             // The plan (R1-07): the project compose will really use and every existing container `up` recreates or
             // collides with — each is decided too, and the deploy runs exactly what was planned.
-            var result = await Mutations.DeployAsync(Executor, ComposePlanner, "compose.deploy",
+            var result = await Mutations.DeployAsync(Executor, ComposePlanner, ComposeRunner, "compose.deploy",
                 new { projectName = _projectName, serverId },
                 ComposeDeployment.FromContent(serverId, ComposeDeployment.DeploymentDirectory(_projectName), GenerateYaml()));
 

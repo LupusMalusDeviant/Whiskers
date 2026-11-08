@@ -15,14 +15,31 @@ public class RoleService : IRoleService, IInitializable
     // R1-22: one writer at a time from capture to diff, so a save's recorded change is the change it made. R1-48 review
     // round 2: the boundary is shared with the whitelist and the setup wizard (AccessControlWriteGate).
     private readonly AccessControlWriteGate _gate;
+    // R1-27: an address that stops being a role entry loses its identity bindings before the write (rule 5).
+    private readonly IIdentityBindingStore? _bindings;
 
     public RoleService(IConfiguration configuration, ILogger<RoleService> logger, string? storePath = null, DataPathOptions? dataPaths = null,
-        AccessControlWriteGate? writeGate = null)
+        AccessControlWriteGate? writeGate = null, IIdentityBindingStore? bindings = null)
     {
         _store = new JsonFileStore<UserRoleData>(storePath ?? (dataPaths ?? DataPathOptions.Default).RolesJson);
         _configuration = configuration;
         _logger = logger;
         _gate = writeGate ?? new AccessControlWriteGate();
+        _bindings = bindings;
+    }
+
+    /// <summary>R1-27 (contract 0003, rule 5): when the write removes a role entry, the bindings and pending requests of
+    /// addresses that stop being entries are pruned first, under the held gate. A failed prune throws: the write is refused.
+    /// A write that adds an entry prunes first too (amendment c) — an address configured again must not revive a binding
+    /// from before it stopped being one.</summary>
+    private async Task PruneRemovedAsync(UserRoleData before, UserRoleData next, AccessControlWriteGate.Lease lease)
+    {
+        if (_bindings is null) return;
+        static bool Missing(UserRoleData data, string email) =>
+            !data.Roles.Any(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+        var removesAnEntry = before.Roles.Any(b => Missing(next, b.Email));
+        var addsAnEntry = next.Roles.Any(n => Missing(before, n.Email));
+        if (removesAnEntry || addsAnEntry) await _bindings.PruneOrphansAsync(lease, nextRoles: next);
     }
 
     /// <summary>Tests only: replaces the persistence of <see cref="SetFirstAdminAsync"/> (a save that waits or fails on
@@ -122,10 +139,11 @@ public class RoleService : IRoleService, IInitializable
     {
         // Clone before persisting/caching so the caller's mutable object can't alias the enforcement state.
         var copy = Snapshot(data);
-        using (await _gate.EnterAsync())
+        using (var lease = await _gate.EnterAsync())
         {
             var before = GetRoleData();
             EnsureAdminRemains(before, copy);
+            await PruneRemovedAsync(before, copy, lease);
             await _store.SaveAsync(copy);
             SetData(copy);
             Whiskers.Services.Mutations.ConfigChange.Record("roles", before, copy);   // R1-22
@@ -135,7 +153,7 @@ public class RoleService : IRoleService, IInitializable
 
     public async Task SetRoleAsync(string email, AppRole role)
     {
-        using (await _gate.EnterAsync())
+        using (var lease = await _gate.EnterAsync())
         {
             // The gate makes this the only writer, so the state read here is still current when it is published.
             var before = GetRoleData();
@@ -146,6 +164,7 @@ public class RoleService : IRoleService, IInitializable
             else
                 next.Roles.Add(new UserRoleEntry { Email = email, Role = role });
             EnsureAdminRemains(before, next);
+            await PruneRemovedAsync(before, next, lease);
 
             // Persist first, publish after: a failed save throws here and the change never takes effect, so it cannot
             // act now and then vanish on the next start.
@@ -176,6 +195,8 @@ public class RoleService : IRoleService, IInitializable
             existing.Role = AppRole.Admin;
         else
             candidate.Roles.Add(new UserRoleEntry { Email = email, Role = AppRole.Admin });
+        // R1-27 (contract 0003, amendment c): an addition prunes first, under the held gate; a failed prune refuses it.
+        if (existing is null && _bindings is not null) await _bindings.PruneOrphansAsync(lease, nextRoles: candidate);
 
         // Persist first, publish after: no reader (GetRole, session validation, the gateway's principal) sees the Admin
         // before it is on disk. A failed save throws here and leaves the published roles untouched — the wizard stays open.
@@ -187,12 +208,13 @@ public class RoleService : IRoleService, IInitializable
 
     public async Task RemoveRoleAsync(string email)
     {
-        using (await _gate.EnterAsync())
+        using (var lease = await _gate.EnterAsync())
         {
             var before = GetRoleData();
             var next = Snapshot(before);
             next.Roles.RemoveAll(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
             EnsureAdminRemains(before, next);
+            await PruneRemovedAsync(before, next, lease);
 
             // Persist first, publish after (see SetRoleAsync).
             await _store.SaveAsync(Snapshot(next));

@@ -22,7 +22,7 @@ public sealed class ScriptAutoPatchRunner : IAutoPatchRunner
 {
     internal const string ResourceName = "Whiskers.AutoPatch.img-update.sh";
     internal const string RemotePath = "/root/.whiskers/img-update.sh";
-    private static readonly Regex SafeName = new("^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant);
+    private static readonly Regex SafeName = new(@"^[A-Za-z0-9][A-Za-z0-9_.-]*\z", RegexOptions.CultureInvariant);
 
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<ScriptAutoPatchRunner> _logger;

@@ -79,21 +79,47 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         }
     }
 
-    /// <summary>Loads the config from disk; creates the SafeDefault on first run and migrates a
-    /// legacy single-policy file into a "Standard" preset.</summary>
     public int Order => 80;
 
-    public async Task InitializeAsync(CancellationToken ct = default)
+    private volatile bool _loaded;
+
+    /// <summary>True once the configuration was read from disk (<see cref="InitializeAsync"/> or
+    /// <see cref="InspectAsync"/>). Before that <see cref="Current"/> is only the in-memory SafeDefault.</summary>
+    public bool IsLoaded => _loaded;
+
+    /// <summary>Loads the config from disk; creates the SafeDefault on first run and migrates a
+    /// legacy single-policy file into a "Standard" preset.</summary>
+    public Task InitializeAsync(CancellationToken ct = default) => LoadAsync(persist: true, ct);
+
+    /// <summary>Contract 0009 A1.2: the same load and validation for a host CLI next to the running instance, but
+    /// read-only: nothing is saved, no unreadable copy is kept, a missing file is the SafeDefault in memory and a
+    /// legacy file is migrated in memory only.</summary>
+    public Task InspectAsync(CancellationToken ct = default) => LoadAsync(persist: false, ct);
+
+    private async Task LoadAsync(bool persist, CancellationToken ct)
     {
-        await _lock.WaitAsync();
+        await _lock.WaitAsync();   // as before: the start-up load is not cancelled while it waits for the lock
+        try
+        {
+            await LoadLockedAsync(persist, ct);
+            _loaded = true;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    private async Task LoadLockedAsync(bool persist, CancellationToken ct)
+    {
         try
         {
             if (!_store.Exists())
             {
                 var initial = GuardrailConfig.SafeDefault();
-                await _store.SaveAsync(initial);
+                if (persist) await _store.SaveAsync(initial);
                 _state = new State(initial, null);
-                _logger?.LogInformation("Guardrails: SafeDefault created.");
+                _logger?.LogInformation(persist ? "Guardrails: SafeDefault created." : "Guardrails: no file; SafeDefault (not saved).");
                 return;
             }
 
@@ -107,7 +133,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
             {
-                FailClosed($"guardrails.json could not be read ({ex.GetType().Name}).", ex);
+                FailClosed(persist, $"guardrails.json could not be read ({ex.GetType().Name}).", ex);
                 return;
             }
 
@@ -115,7 +141,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             // any casing) could pass the check and enforce the other value. Such a file is refused.
             if (DuplicateProperty(root) is { } duplicate)
             {
-                FailClosed($"guardrails.json is invalid: the property '{duplicate}' appears more than once.", null);
+                FailClosed(persist, $"guardrails.json is invalid: the property '{duplicate}' appears more than once.", null);
                 return;
             }
 
@@ -126,7 +152,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 // default by the deserializer, so the file is refused instead (INV-25).
                 if (IncompletePresetFile(root) is { } incomplete)
                 {
-                    FailClosed($"guardrails.json is invalid: {incomplete}", null);
+                    FailClosed(persist, $"guardrails.json is invalid: {incomplete}", null);
                     return;
                 }
                 try
@@ -136,7 +162,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 }
                 catch (Exception ex) when (ex is JsonException or NotSupportedException)
                 {
-                    FailClosed($"guardrails.json could not be read ({ex.GetType().Name}).", ex);
+                    FailClosed(persist, $"guardrails.json could not be read ({ex.GetType().Name}).", ex);
                     return;
                 }
             }
@@ -146,7 +172,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 // else (unrelated JSON) is invalid and is neither guessed at nor overwritten.
                 if (LegacyPolicy(root) is not { } legacy)
                 {
-                    FailClosed("guardrails.json is invalid: it holds no presets and no legacy policy.", null);
+                    FailClosed(persist, "guardrails.json is invalid: it holds no presets and no legacy policy.", null);
                     return;
                 }
                 var migrated = new GuardrailConfig
@@ -156,19 +182,21 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
                 };
                 if (migrated.Problem() is { } legacyProblem)
                 {
-                    FailClosed($"guardrails.json is invalid: {legacyProblem}", null);
+                    FailClosed(persist, $"guardrails.json is invalid: {legacyProblem}", null);
                     return;
                 }
-                await _store.SaveAsync(migrated);
+                if (persist) await _store.SaveAsync(migrated);
                 loaded = migrated;
-                _logger?.LogInformation("Guardrails: legacy policy migrated into preset 'Standard'.");
+                _logger?.LogInformation(persist
+                    ? "Guardrails: legacy policy migrated into preset 'Standard'."
+                    : "Guardrails: legacy policy read as preset 'Standard' (not saved).");
             }
 
             // An active preset that does not exist (or any other invalid content) is not guessed at: picking another
             // preset could enforce a weaker policy than the one an admin chose.
             if (loaded.Problem() is { } problem)
             {
-                FailClosed($"guardrails.json is invalid: {problem}", null);
+                FailClosed(persist, $"guardrails.json is invalid: {problem}", null);
                 return;
             }
 
@@ -179,11 +207,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Whatever else goes wrong while loading, the store stays recoverable and enforces nothing weaker.
-            FailClosed($"guardrails.json could not be loaded ({ex.GetType().Name}).", ex);
-        }
-        finally
-        {
-            _lock.Release();
+            FailClosed(persist, $"guardrails.json could not be loaded ({ex.GetType().Name}).", ex);
         }
     }
 
@@ -249,15 +273,15 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
 
     /// <summary>Enforces <see cref="GuardrailPolicy.FailClosed"/> until <c>guardrails.json</c> is repaired (or removed
     /// together with <c>guardrails.json.bak</c>, which recreates the SafeDefault) on the host and Whiskers restarted. The
-    /// unreadable file is kept next to it.</summary>
-    private void FailClosed(string reason, Exception? ex)
+    /// unreadable file is kept next to it (<paramref name="keepCopy"/>; not for a read-only inspection).</summary>
+    private void FailClosed(bool keepCopy, string reason, Exception? ex)
     {
         _state = new State(new GuardrailConfig(), reason);
         _logger?.LogError(ex, "Guardrails: {Reason} Every mutation is refused until guardrails.json is repaired, or removed together with guardrails.json.bak, on the host and Whiskers is restarted",
             reason);
         try
         {
-            if (File.Exists(_filePath))
+            if (keepCopy && File.Exists(_filePath))
                 File.Copy(_filePath, $"{_filePath}.unreadable-{DateTime.UtcNow:yyyyMMddHHmmss}", overwrite: true);
         }
         catch (Exception copyEx) when (copyEx is IOException or UnauthorizedAccessException)
@@ -315,8 +339,14 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
     ];
 
     /// <summary>Policy fields a file may leave out (added after the format was fixed); when present they are kept,
-    /// never dropped — a legacy file that turns one on must not lose it in the migration.</summary>
-    private static readonly string[] OptionalPolicyFields = [nameof(GuardrailPolicy.RequireSecondApprover)];
+    /// never dropped — a legacy file that turns one on must not lose it in the migration.
+    /// Contract 0006: the exposure label prefixes and confirm classes are optional too (<c>null</c> or missing = the
+    /// default), so preset files written before them stay complete.</summary>
+    private static readonly string[] OptionalPolicyFields =
+    [
+        nameof(GuardrailPolicy.RequireSecondApprover), nameof(GuardrailPolicy.ExposureLabelPrefixes),
+        nameof(GuardrailPolicy.ExposureConfirmClasses), nameof(GuardrailPolicy.KillSwitchBlockedExemptions),
+    ];
 
     private static JsonNode? Field(JsonObject obj, string name, out bool present)
     {

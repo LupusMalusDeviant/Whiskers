@@ -5,7 +5,7 @@ Deployment assets — the pieces used to install and run Whiskers, separate from
 | File / dir | What it is |
 |---|---|
 | [`install.sh`](install.sh) | One-command installer (outOfTheBox W2, R1-46). Installs **one released version** of `ghcr.io/lupusmalusdeviant/whiskers` (never `latest`), generates the vault key, verifies the image signature when cosign is installed, writes a small compose file into `./whiskers/`, brings it up, waits for `/healthz`, and prints the URL, the setup token and what to back up. Re-running it upgrades in place. See [Installer](#installer) below. |
-| [`docker-compose.postgres.yml`](docker-compose.postgres.yml) | Overlay that adds a PostgreSQL service and points Whiskers at it. Use with the base file: `docker compose -f docker-compose.yml -f deploy/docker-compose.postgres.yml up -d`. |
+| [`docker-compose.postgres.yml`](docker-compose.postgres.yml) | Overlay that adds a PostgreSQL 18 service and points Whiskers at it. Use with the base file: `docker compose -f docker-compose.yml -f deploy/docker-compose.postgres.yml up -d`. Coming from the PostgreSQL 17 overlay: [`docs/operations/postgres-18-upgrade.md`](../docs/operations/postgres-18-upgrade.md); until then a guard keeps an empty 18 database from starting. |
 | [`helm/whiskers/`](helm/whiskers/) | Helm chart for running Whiskers **on** Kubernetes (Track A): single replica + Recreate, non-root/read-only, PVC data dir, optional Postgres/ingress/Tailscale sidecar. Published as an OCI artifact (`oci://ghcr.io/lupusmalusdeviant/charts/whiskers`) by the release pipeline; linted + render-checked by [`chart-ci.yml`](../.github/workflows/chart-ci.yml). |
 | [`k8s/`](k8s/) | Assets for **managing** a Kubernetes cluster *from* Whiskers (Track B): least-privilege `whiskers-agent` RBAC manifest + kubeconfig onboarding guide. |
 | [`telemetry/`](telemetry/) | mTLS / socket-proxy templates for the hardened remote-monitoring posture. |
@@ -121,7 +121,17 @@ These build inputs are pinned, and each has an update path in [`.github/dependab
 | Base images (SDK, ASP.NET runtime, `docker:<v>-cli`) | `FROM image:tag@sha256:…` in the [`Dockerfile`](../Dockerfile), each a multi-arch index (amd64 + arm64, checked in CI) | Dependabot `docker`: a new digest behind the same tag (OS and runtime fixes) or a new tag |
 | GitHub Actions | full commit SHA + `# vX.Y.Z` comment | Dependabot `github-actions` |
 
-Covered by Dependabot but **not digest-pinned**: the images of the compose files (`postgres:17-alpine`, node-exporter, VictoriaMetrics; the socket-proxy is pinned by digest) and of the Helm chart (the Tailscale sidecar, pinned by digest) — Dependabot `docker-compose` and `helm` propose new versions; a moving tag such as `17-alpine` still resolves to whatever it points at when pulled.
+Covered by Dependabot but **not digest-pinned**: the images of the compose files (`postgres:18-alpine`, node-exporter, VictoriaMetrics; the socket-proxy is pinned by digest) and of the Helm chart (the Tailscale sidecar, pinned by digest) — Dependabot `docker-compose` and `helm` propose new versions; a moving tag such as `18-alpine` still resolves to whatever it points at when pulled.
+
+**Onboarding templates (not seen by Dependabot):** `OnboardingCommands` writes the host-side compose files of the mTLS
+proxy (docker-socket-proxy + ghostunnel) and node_exporter. The socket-proxy and node_exporter images must equal those
+in `docker-compose.hardened.yml` and `deploy/telemetry/host/docker-compose.yml` (`OnboardingCommandsTests` fails
+otherwise), so a Dependabot bump there is completed in the template in the same PR. **ghostunnel** has no compose file
+Dependabot scans: check its releases by hand with every dependency refresh and move `ghostunnel/ghostunnel:vX.Y.Z@sha256:…`
+in the template (protected mTLS layer — the maintainer approves the change; the flags are pinned by a test).
+Since R1-44 the one per-host value in that template is `--allow-cn=whiskers-client-{slug}-g{n}`: each host's ghostunnel
+admits only its own client identity, not the former shared `serverwatch-client`. Existing hosts are moved over by the
+guarded migration in `docs/operations/per-host-mtls-migration.md`, which edits only the `--allow-cn` items.
 
 **Not pinned — mutable inputs of the image build:** the runtime stage runs `apt-get install` against the live Ubuntu, Tailscale (`pkgs.tailscale.com`) and PostgreSQL (`apt.postgresql.org`) repositories without version numbers (`openssh-client`, `sshpass`, `iptables`, `curl`, `ca-certificates`, `tailscale`, `postgresql-client-18`). The same commit and base digests can therefore install newer package versions on a later build. What a release actually shipped is recorded in its SBOMs (one per architecture, attached to the GitHub release).
 
@@ -131,7 +141,7 @@ Covered by Dependabot but **not digest-pinned**: the images of the compose files
 
 **Runtime tools in the image.** The image ships what Whiskers starts as a process and nothing of the Docker engine: the static docker CLI (local terminal `docker exec`), `nsenter` (host shell of the full profile), `ssh`/`sshpass`, `tailscale`/`tailscaled` with `iptables`, the PostgreSQL 18 client tools and `curl` (health probe). `ImageRuntimeToolsTests` keeps that list in step with the source and checks a built image in CI (`image-runtime` job, x64 and arm64): tools, terminal, host shell, a compose deployment on the runner host and its cleanup, a VPN runtime smoke, multi-arch base digests and the boot. The deployment test needs `docker compose` in PID 1's namespaces of the Docker host (a Linux host or a docker:dind container; Docker Desktop's VM has none, so it skips there unless `WHISKERS_IMAGE_TESTS_REQUIRED=true`). Run them locally against an image with `WHISKERS_IMAGE=<image> dotnet test src/Whiskers.Tests --filter Category=ImageRuntime`. The Tailscale and PostgreSQL packages come from their apt repositories at their current version.
 
-See the [README quick start](../README.md#quick-start) for the user-facing install paths.
+See the [README install section](../README.md#install) and [docs/installation.md](../docs/installation.md) for the user-facing install paths.
 
 ## `tailnet-guard.sh` — for hosts that reach their fleet over Tailscale
 

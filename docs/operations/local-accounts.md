@@ -40,7 +40,7 @@ readable form and never writes them to a log or the audit trail — not even a p
 
 | Action | Where | Who | Capability (audited) |
 |---|---|---|---|
-| Change your own password | *My account* (person icon in the top bar) | every signed-in user with a local account; needs the current password | `account.password_change` (read level — also allowed while the kill switch is on) |
+| Change your own password | *My account* (person icon in the top bar) | every signed-in user with a local account; needs the current password | `account.password_change` (read level — also allowed while the kill switch is on, unless an Admin blocked it beforehand, contract 0009) |
 | Add a local account | *Settings → Local accounts* | Admin | `account.create` |
 | Reset another account's password | *Settings → Local accounts* | Admin (not for the own account) | `account.password_reset` |
 | Delete a local account | *Settings → Local accounts* | Admin (not the own account, never the last Admin who can sign in) | `account.delete` |
@@ -88,13 +88,22 @@ people counted as one client — when:
   refused for a few minutes (clients) and up to about 15 minutes after the flood stops (accounts), and new entries may
   share one budget for up to about two windows (2 minutes for clients, 30 for accounts); the limit is never lifted. IPv6 clients are counted per /64, so a site with a delegated /56 or /48 prefix can present many clients.
 
-**Narrow `ForwardedHeaders:TrustedNetworks` to your real proxy.** The default trusts loopback, all private (RFC 1918)
-networks and the Tailscale range, so any client on your LAN can send its own `X-Forwarded-For` and pose as many clients.
-The per-account limit and the lockout still hold, but the per-client limit and the bounded audit trail of refusals
-do not. Example: `ForwardedHeaders__TrustedNetworks__0=172.18.0.2/32` for a single proxy container.
+**List your real proxy in `ForwardedHeaders:TrustedNetworks`, and only it.** Since R1-50 the default trusts loopback
+only, so no client can pose as another with its own `X-Forwarded-For`; a proxy in another container or on another host
+must be listed, or every visitor counts as that proxy (Settings → production readiness then names the proxy). Do not
+list whole private ranges: anything in a listed range can claim any address, and the per-client limit and the bounded
+audit trail of refusals no longer hold for it (the per-account limit and the lockout still do). Example:
+`ForwardedHeaders__TrustedNetworks__0=172.18.0.2/32` for a single proxy container. An entry that is not a canonical CIDR
+or address stops the start, naming the reason (for example host bits set in `172.18.0.2/16`). Do not set
+`ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`: it makes ASP.NET Core trust every peer, so Whiskers refuses to start with it.
 
-The recovery page and the host CLI are not stopped by the kill switch (a person recovering their own access is not
-a write to managed infrastructure). Adding, resetting and deleting accounts — and redeeming a code — are refused while
+The host CLI is never stopped by the kill switch, and the recovery page is not stopped by default (a person recovering
+their own access is not a write to managed infrastructure). An Admin can block the recovery page — and the own password
+change and the Google/OIDC binding at a first sign-in — under the kill switch beforehand on the *Guardrails* page
+(contract 0009); while the guardrail policy is fail-closed they are blocked. The way back then is on the host: repair or remove
+`guardrails.json` in the data directory, or turn off `ReadOnlyMode` or the block in it, then restart Whiskers. The binding
+CLI only helps for an existing pending request, and the recovery CLI refuses while a code could not be redeemed (see
+below). Adding, resetting and deleting accounts — and redeeming a code — are refused while
 `AUTH_DISABLED` is set: every client is the synthetic Admin then, and there is no local sign-in to recover. A code
 issued on the host meanwhile can be redeemed once authentication is on again (within its 24 hours).
 
@@ -121,11 +130,20 @@ staged restore. The account's password is removed and its sessions end; set a ne
   of that container's log and may be shipped by a logging driver.
 - It works only for an **existing** local account and changes nothing else: it never creates an account and never
   grants a role. To re-create a lost Admin entirely, see the admin bootstrap (`WHISKERS_ADMIN_EMAIL`, first run only)
-  in the README.
+  in [configuration.md](../configuration.md).
 - The audit row (`auth.recovery_issued`, actor `cli (--recover-local-account)`) is written **before** anything changes;
   if it cannot be written, nothing changes (exit code 1).
-- Exit codes: `0` code issued, `2` usage, `3` no local account with that email, `1` nothing changed (audit or store
-  unavailable, or the account changed at the same moment — run it again).
+- While a code could not be redeemed — the guardrail policy is fail-closed (`guardrails.json` unreadable, or the policy
+  could not be checked at all), or the kill switch is on and an Admin blocked recovery codes — the command refuses (exit code `4`, nothing changed): issuing would
+  remove the password and leave a code nobody can use. Fix that first: repair or remove `guardrails.json` in the data
+  directory, or turn off `ReadOnlyMode` or the `recovery_code` block in it, then restart Whiskers. `--force` issues the
+  code anyway (contract 0009, amendment A1.2), and the audit row says so. The CLI reads `guardrails.json` on disk
+  (read-only); the running instance picks up a repaired file only after its restart.
+- Exit codes: `0` code issued, `2` usage, `3` no local account with that email, `4` refused because the code could not
+  be redeemed now, `1` nothing changed (audit or store unavailable, or the account changed at the same moment — run
+  it again).
+- Scripts wrapping both host CLIs: exit code `4` means "refused, the code could not be redeemed now" here, but
+  "ambiguous" for `--confirm-identity-binding`.
 
 Why this is safe: anyone who can run a command in the Whiskers container already holds its database, data directory and
 keys (PRODUCT_CONTRACT §5.2). The command gives that person nothing new; it only spares them editing the database.
