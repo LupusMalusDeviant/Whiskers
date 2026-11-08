@@ -38,7 +38,7 @@ public sealed partial class ComposeImpactExposureTests
 
     public ComposeImpactExposureTests()
     {
-        _host.Images["nginx"] = ("sha256:1", "{}");
+        _host.Images["nginx"] = ("sha256:1111111111111111111111111111111111111111111111111111111111111111", "{}");
         _host.Effect = command =>
         {
             if (command.Contains(" pull", StringComparison.Ordinal) && command.Contains("docker compose", StringComparison.Ordinal))
@@ -57,6 +57,7 @@ public sealed partial class ComposeImpactExposureTests
                         Labels = new() { [ComposeModel.ProjectLabel] = "shop", [ComposeModel.ServiceLabel] = service },
                     });
                     _host.Inspect[id] = "{\"Id\":\"" + id + "\",\"Name\":\"/shop-" + service + "-1\"," +
+                        Image(service) +
                         "\"Config\":{\"Labels\":{\"com.docker.compose.project\":\"shop\",\"com.docker.compose.service\":\"" +
                         service + "\"" + labels + "}},\"HostConfig\":" + hostConfig + "}";
                 }
@@ -65,6 +66,11 @@ public sealed partial class ComposeImpactExposureTests
     }
 
     // ---------------------------------------------------------------- harness
+
+    /// <summary>Contract 0013: a created container runs the image its service was pinned to (the inspect field <c>Image</c>).</summary>
+    private string Image(string service) =>
+        _host.PinnedImageId(service) is { } id ? "\"Image\":\"" + id + "\"," : "";
+
 
     private ComposePlanner Planner() => new(_docker, _host);
     private ComposeRunner Runner() => new(_host, _docker, _notifications);
@@ -126,7 +132,7 @@ public sealed partial class ComposeImpactExposureTests
     {
         var plan = await PlanAsync("name: shop\nservices:\n  web:\n    build: .\n",
             """{"services":{"web":{"build":{"context":"/opt/deployments/shop"}}}}""");
-        _host.Images["shop-web"] = ("sha256:2", "{}");
+        _host.Images["shop-web"] = ("sha256:2222222222222222222222222222222222222222222222222222222222222222", "{}");
         using var _ = Decide(plan, agent: true);
 
         var result = await RunAsync(plan);
@@ -140,7 +146,7 @@ public sealed partial class ComposeImpactExposureTests
     {
         var plan = await PlanAsync("name: shop\nservices:\n  web:\n    build: .\n  db:\n    image: nginx\n",
             """{"services":{"web":{"build":{"context":"."}},"db":{"image":"nginx"}}}""");
-        _host.Images["shop-web"] = ("sha256:2", "{}");
+        _host.Images["shop-web"] = ("sha256:2222222222222222222222222222222222222222222222222222222222222222", "{}");
         using var _ = Decide(plan, agent: true, "container.env_set");
 
         var result = await RunAsync(plan, pull: false);
@@ -155,8 +161,8 @@ public sealed partial class ComposeImpactExposureTests
     {
         var plan = await PlanAsync("name: shop\nservices:\n  web:\n    build: .\n  db:\n    image: redis\n",
             """{"services":{"web":{"build":{"context":"."}},"db":{"image":"redis"}}}""");
-        _builds["shop-web"] = ("sha256:2", "{}");
-        _pulls["redis"] = ("sha256:3", "{}");
+        _builds["shop-web"] = ("sha256:2222222222222222222222222222222222222222222222222222222222222222", "{}");
+        _pulls["redis"] = ("sha256:3333333333333333333333333333333333333333333333333333333333333333", "{}");
         using var _ = Decide(plan, agent: true, "container.env_set");
 
         var result = await RunAsync(plan, pull: false);
@@ -190,7 +196,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task A_pull_that_brings_a_funnel_label_is_refused_before_up_and_the_tag_is_put_back()
     {
         var plan = await PlanAsync(PlainYaml, PlainConfig);
-        _pulls["nginx"] = ("sha256:9", """{"docktail.funnel.enable":"true"}""");
+        _pulls["nginx"] = ("sha256:9999999999999999999999999999999999999999999999999999999999999999", """{"docktail.funnel.enable":"true"}""");
         using var _ = Decide(plan, agent: true);
 
         var result = await RunAsync(plan);
@@ -198,7 +204,7 @@ public sealed partial class ComposeImpactExposureTests
         Assert.False(result.Success);
         Assert.Contains("docktail.funnel.enable", result.Refusal);
         Assert.Equal(-1, IndexOf(" up -d"));
-        Assert.Contains("docker tag 'sha256:1' 'nginx'", _host.Executed);
+        Assert.Contains("docker tag 'sha256:1111111111111111111111111111111111111111111111111111111111111111' 'nginx'", _host.Executed);
     }
 
     [Fact]
@@ -207,7 +213,7 @@ public sealed partial class ComposeImpactExposureTests
         var plan = await PlanAsync("name: shop\nservices:\n  web:\n    build:\n      context: .\n      dockerfile_inline: |\n" +
                                    "        FROM nginx\n        LABEL docktail.funnel.enable=true\n",
             """{"services":{"web":{"build":{"context":".","dockerfile_inline":"FROM nginx"}}}}""");
-        _builds["shop-web"] = ("sha256:7", """{"docktail.funnel.enable":"true"}""");
+        _builds["shop-web"] = ("sha256:7777777777777777777777777777777777777777777777777777777777777777", """{"docktail.funnel.enable":"true"}""");
         using var _ = Decide(plan, agent: true);
 
         var result = await RunAsync(plan);
@@ -222,7 +228,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task For_persons_an_image_label_is_noted_and_announced_not_a_violation()
     {
         var plan = await PlanAsync(PlainYaml, PlainConfig);
-        _pulls["nginx"] = ("sha256:9", """{"docktail.funnel.enable":"true"}""");
+        _pulls["nginx"] = ("sha256:9999999999999999999999999999999999999999999999999999999999999999", """{"docktail.funnel.enable":"true"}""");
         using var _ = Decide(plan, agent: false);
 
         var result = await RunAsync(plan);
@@ -238,12 +244,12 @@ public sealed partial class ComposeImpactExposureTests
     public async Task A_concurrent_re_tag_by_another_run_is_not_undone()
     {
         var plan = await PlanAsync(PlainYaml, PlainConfig);
-        _pulls["nginx"] = ("sha256:9", """{"docktail.funnel.enable":"true"}""");
+        _pulls["nginx"] = ("sha256:9999999999999999999999999999999999999999999999999999999999999999", """{"docktail.funnel.enable":"true"}""");
         var inspections = 0;
         _host.ImageInspected = () =>
         {
             // After the inspection of step 4, another run moves the tag on.
-            if (++inspections == 2) _host.Images["nginx"] = ("sha256:other", "{}");
+            if (++inspections == 2) _host.Images["nginx"] = ("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "{}");
         };
         using var _ = Decide(plan, agent: true);
 
@@ -251,7 +257,7 @@ public sealed partial class ComposeImpactExposureTests
 
         Assert.NotNull(result.Refusal);
         Assert.DoesNotContain(_host.Executed, c => c.StartsWith("docker tag", StringComparison.Ordinal));
-        Assert.Equal("sha256:other", _host.Images["nginx"].Id);
+        Assert.Equal("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", _host.Images["nginx"].Id);
     }
 
     [Fact]
@@ -273,7 +279,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task A_refused_run_puts_the_written_files_back()
     {
         var plan = await PlanAsync(PlainYaml, PlainConfig);
-        _pulls["nginx"] = ("sha256:9", """{"docktail.funnel.enable":"true"}""");
+        _pulls["nginx"] = ("sha256:9999999999999999999999999999999999999999999999999999999999999999", """{"docktail.funnel.enable":"true"}""");
         using var _ = Decide(plan, agent: true);
 
         await RunAsync(plan);
@@ -508,7 +514,7 @@ public sealed partial class ComposeImpactExposureTests
     [Fact]
     public async Task A_local_image_label_found_while_planning_needs_a_confirmation_over_mcp()
     {
-        _host.Images["nginx"] = ("sha256:1", """{"traefik.http.routers.web.rule":"Host(`shop.example.org`)"}""");
+        _host.Images["nginx"] = ("sha256:1111111111111111111111111111111111111111111111111111111111111111", """{"traefik.http.routers.web.rule":"Host(`shop.example.org`)"}""");
         _host.ComposeConfig = PlainConfig;
 
         var (outcome, _) = await McpAsync(new { serverId = "local", projectName = "shop", composeContent = PlainYaml });

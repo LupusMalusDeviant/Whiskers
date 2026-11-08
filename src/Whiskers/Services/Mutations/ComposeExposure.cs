@@ -533,53 +533,66 @@ public static class ComposeExposures
     /// <summary>The marker <see cref="InspectImagesCommand"/> prints for an image that is not on the host.</summary>
     public const string MissingImage = "MISSING";
 
-    /// <summary>One line per image: <c>&lt;ref&gt;\t&lt;id&gt;\t&lt;Config as JSON&gt;</c>, or <c>&lt;ref&gt;\tMISSING</c>.
-    /// Local only: nothing is pulled. The labels are read from the whole <c>Config</c>: Docker 29 fails
-    /// <c>.Config.Labels</c> on an image without labels ("map has no entry"), which read as a missing image.</summary>
+    /// <summary>One line per image: <c>&lt;ref&gt;\t&lt;id&gt;\t&lt;Config as JSON&gt;\t&lt;RepoDigests as JSON&gt;</c>,
+    /// or <c>&lt;ref&gt;\tMISSING</c> (contract 0013, D10: the repo digests give the pin). Local only: nothing is pulled.
+    /// The labels are read from the whole <c>Config</c>: Docker 29 fails <c>.Config.Labels</c> on an image without
+    /// labels ("map has no entry"), which read as a missing image. JSON never holds a literal tab, so the tab separates
+    /// the columns.</summary>
     public static string InspectImagesCommand(IEnumerable<string> images) =>
         "for i in " + string.Join(' ', images.Select(Whiskers.Utils.ShellUtils.Quote)) +
-        "; do o=$(docker image inspect --format '{{.Id}}{{\"\\t\"}}{{json .Config}}' \"$i\" 2>/dev/null)" +
+        "; do o=$(docker image inspect --format '{{.Id}}{{\"\\t\"}}{{json .Config}}{{\"\\t\"}}{{json .RepoDigests}}' \"$i\" 2>/dev/null)" +
         " && printf '%s\\t%s\\n' \"$i\" \"$o\" || printf '%s\\t" + MissingImage + "\\n' \"$i\"; done";
 
-    /// <summary>What <see cref="InspectImagesCommand"/> printed, per image: its id and labels, or <c>null</c> when it is
-    /// missing. An image without a line, or a line that cannot be read, throws (fail closed).</summary>
-    public static IReadOnlyDictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?> ParseImages(
-        string output, IReadOnlyCollection<string> images)
+    /// <summary>What <see cref="InspectImagesCommand"/> printed, per image: its id, labels and repo digests, or
+    /// <c>null</c> when it is missing. An image without a line, or a line that cannot be read, throws (fail closed).</summary>
+    public static IReadOnlyDictionary<string, ComposeImage?> ParseImages(string output, IReadOnlyCollection<string> images)
     {
-        var result = new Dictionary<string, (string, IReadOnlyDictionary<string, string>)?>(StringComparer.Ordinal);
+        const string unreadable = "The images of the deployment could not be read on the server.";
+        var result = new Dictionary<string, ComposeImage?>(StringComparer.Ordinal);
         foreach (var line in output.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
-            var parts = line.Split('\t', 3);
+            var parts = line.Split('\t', 4);
             if (parts.Length < 2 || !images.Contains(parts[0]))
-                throw new ComposePlanException("The images of the deployment could not be read on the server.");
+                throw new ComposePlanException(unreadable);
             if (parts.Length == 2 && parts[1] == MissingImage)
             {
                 result[parts[0]] = null;
                 continue;
             }
-            if (parts.Length != 3 || !parts[1].StartsWith("sha256:", StringComparison.Ordinal))
-                throw new ComposePlanException("The images of the deployment could not be read on the server.");
+            if (parts.Length != 4 || !parts[1].StartsWith("sha256:", StringComparison.Ordinal))
+                throw new ComposePlanException(unreadable);
             var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+            var digests = new List<string>();
             try
             {
-                using var document = JsonDocument.Parse(parts[2]);
-                var config = document.RootElement;
-                if (config.ValueKind == JsonValueKind.Object && Property(config, "Labels") is { } found)
+                using (var document = JsonDocument.Parse(parts[2]))
                 {
-                    if (found.ValueKind == JsonValueKind.Object)
-                        foreach (var p in found.EnumerateObject())
-                            labels[p.Name] = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.GetRawText();
-                    else if (found.ValueKind != JsonValueKind.Null)
-                        throw new ComposePlanException("The images of the deployment could not be read on the server.");
+                    var config = document.RootElement;
+                    if (config.ValueKind == JsonValueKind.Object && Property(config, "Labels") is { } found)
+                    {
+                        if (found.ValueKind == JsonValueKind.Object)
+                            foreach (var p in found.EnumerateObject())
+                                labels[p.Name] = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.GetRawText();
+                        else if (found.ValueKind != JsonValueKind.Null)
+                            throw new ComposePlanException(unreadable);
+                    }
+                    else if (config.ValueKind is not (JsonValueKind.Object or JsonValueKind.Null))
+                        throw new ComposePlanException(unreadable);
                 }
-                else if (config.ValueKind is not (JsonValueKind.Object or JsonValueKind.Null))
-                    throw new ComposePlanException("The images of the deployment could not be read on the server.");
+                using (var document = JsonDocument.Parse(parts[3]))
+                {
+                    if (document.RootElement.ValueKind == JsonValueKind.Array)
+                        foreach (var d in document.RootElement.EnumerateArray())
+                            digests.Add(d.ValueKind == JsonValueKind.String ? d.GetString() ?? "" : throw new ComposePlanException(unreadable));
+                    else if (document.RootElement.ValueKind != JsonValueKind.Null)
+                        throw new ComposePlanException(unreadable);
+                }
             }
             catch (JsonException)
             {
-                throw new ComposePlanException("The images of the deployment could not be read on the server.");
+                throw new ComposePlanException(unreadable);
             }
-            result[parts[0]] = (parts[1], labels);
+            result[parts[0]] = new ComposeImage(parts[1], labels, digests);
         }
         if (images.Any(i => !result.ContainsKey(i)))
             throw new ComposePlanException("The images of the deployment could not be read on the server.");
@@ -623,6 +636,10 @@ public static class ComposeExposures
 
     private static readonly Regex VariablePattern = new(@"\$", RegexOptions.CultureInvariant);
 }
+
+/// <summary>A local image as <see cref="ComposeExposures.InspectImagesCommand"/> read it: its id, its labels and its
+/// repo digests (<c>&lt;repository&gt;@sha256:…</c>, contract 0013, D10).</summary>
+public readonly record struct ComposeImage(string Id, IReadOnlyDictionary<string, string> Labels, IReadOnlyList<string> RepoDigests);
 
 /// <summary>What daemon.json says about <c>default-cgroupns-mode</c> (review N4): not set, <c>host</c>,
 /// <c>private</c>, or something that cannot be read (not a JSON object, another value).</summary>

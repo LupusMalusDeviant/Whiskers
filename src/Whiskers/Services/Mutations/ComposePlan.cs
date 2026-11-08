@@ -150,7 +150,9 @@ public sealed record ComposePlan(
     public string EnvFilePath => ComposePaths.Join(ProjectDirectory, ".env");
 
     /// <summary><c>docker compose</c> with the plan's project, directory and files, then <paramref name="subcommand"/>.</summary>
-    public string Command(string subcommand)
+    public string Command(string subcommand) => Command(subcommand, pinned: false);
+
+    private string Command(string subcommand, bool pinned)
     {
         // The shell's own orphan switches are dropped: the plan decided on orphans from the call and the .env only.
         var sb = new StringBuilder("env -u COMPOSE_REMOVE_ORPHANS -u COMPOSE_IGNORE_ORPHANS docker compose -p ")
@@ -158,6 +160,8 @@ public sealed record ComposePlan(
             .Append(" --project-directory ").Append(ShellUtils.Quote(ProjectDirectory));
         foreach (var file in Files)
             sb.Append(" -f ").Append(ShellUtils.Quote(file));
+        if (pinned)
+            sb.Append(" -f ").Append(ShellUtils.Quote(PinFilePath));
         if (HasEnvFile)
             sb.Append(" --env-file ").Append(ShellUtils.Quote(EnvFilePath));
         return sb.Append(' ').Append(subcommand).ToString();
@@ -179,11 +183,34 @@ public sealed record ComposePlan(
     public string BuildServicesCommand(IEnumerable<string> services) =>
         Command("build " + string.Join(' ', services.Select(ShellUtils.Quote)));
 
-    /// <summary>Step 5: <c>up</c> uses exactly the images step 4 inspected — it pulls and builds nothing itself.</summary>
-    public string UpCommand => Command(RemoveOrphans ? "up -d --remove-orphans --pull never --no-build" : "up -d --pull never --no-build");
+    /// <summary>Step 5: <c>up</c> uses exactly the images step 4 inspected — it pulls and builds nothing itself, and on a
+    /// <see cref="Pinned"/> plan it starts them by their pins (contract 0013, D11).</summary>
+    public string UpCommand => PinnedCommand(RemoveOrphans ? "up -d --remove-orphans --pull never --no-build" : "up -d --pull never --no-build");
 
     /// <summary>The fallback stop of the re-check (contract 0006, Amendment 5): every container of the project.</summary>
-    public string StopCommand => Command("stop");
+    public string StopCommand => PinnedCommand("stop");
+
+    /// <summary>Contract 0013, D11: the run wrote and verified <see cref="PinFilePath"/>; <see cref="UpCommand"/> and
+    /// <see cref="StopCommand"/> add it after the planned files. <c>config</c>, <c>pull</c> and <c>build</c> never use it.</summary>
+    public bool Pinned { get; init; }
+
+    /// <summary>The project's pin file (contract 0013, D11–D12).</summary>
+    public string PinFilePath => ComposePins.PathIn(ProjectDirectory);
+
+    private string PinnedCommand(string subcommand) => Command(subcommand, Pinned);
+
+    /// <summary>
+    /// Contract 0013, D11: writes the pin file. It is replaced in one step (written beside it, then moved), so a write
+    /// that fails leaves the previous pin file — the one the running containers were started with — as it was.
+    /// </summary>
+    public string PinScript(string yaml)
+    {
+        var path = ShellUtils.Quote(PinFilePath);
+        var temporary = ShellUtils.Quote(PinFilePath + ".tmp");
+        return $"mkdir -p {ShellUtils.Quote(ComposePaths.DirectoryOf(PinFilePath))} && " +
+               $"{{ echo '{Convert.ToBase64String(Encoding.UTF8.GetBytes(yaml))}' | base64 -d > {temporary} && mv -f {temporary} {path} " +
+               $"|| {{ rm -f {temporary}; false; }}; }}";
+    }
 
     /// <summary>The files a deployment writes (the planned compose files, then the <c>.env</c>), with their content.</summary>
     public IReadOnlyList<(string Path, string Content)> WrittenFiles =>

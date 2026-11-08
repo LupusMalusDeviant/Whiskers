@@ -29,6 +29,10 @@
 1 Whiskers.Tests.PostgresPgControlTests
 1 Whiskers.Tests.PostgresOverlayComposeTests
 
+# Contract 0013 (INV-62), digest pinning on a real daemon: a pulled and a built service go through the planner and the
+# compose runner and start exactly the inspected images; a tag moved after the inspection never starts another image.
+2 Whiskers.Tests.ComposePinIntegrationTests
+
 # BEGIN release-gate (generated)
 # Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md and docs/v1/RELEASE_GATE.md (contract 0008,
 # R8): one entry per test method named by a ✅ invariant or an accepted exception, the minimum = the cases xUnit

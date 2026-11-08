@@ -292,6 +292,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Mutations.ComposePlanner", "WorkingDirectoryAsync", "docker inspect labels"),
         ("Whiskers.Services.Mutations.ComposeRunner", "CgroupnsDefaultAsync", "docker info / daemon.json: the daemon's default cgroup namespace mode (contract 0006, review M1)"),
         ("Whiskers.Services.Mutations.ComposeRunner", "InspectImagesAsync", "step 4: docker image inspect of the images the run starts (contract 0006)"),
+        ("Whiskers.Services.Mutations.ComposeRunner", "PinAsync", "docker image inspect of the pins (contract 0013, D11); the pin file is written through the run's mutate delegate"),
         ("Whiskers.Services.Mutations.ComposeRunner", "RecheckAsync", "docker inspect of the containers the run created (contract 0006); the stop goes through ComposeExposureStopper"),
         ("Whiskers.Services.Mutations.ComposeRunner", "RestoreTagsAsync", "docker image inspect before the tags are put back; the docker tag itself runs through the run's mutate delegate"),
         ("Whiskers.Services.Mutations.VerifierSupport", "HostReadAsync", "the verifiers' read-back (R1-37)"),

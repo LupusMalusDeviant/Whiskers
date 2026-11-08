@@ -83,6 +83,11 @@ public sealed class ComposeRunner : IComposeRunner
         public List<ComposeExposure> FromImages { get; } = [];
         /// <summary>The label keys of the images step 4 inspected, per service (review m3: such a key is no .env value).</summary>
         public HashSet<(string Service, string Key)> ImageLabelKeys { get; } = [];
+        /// <summary>Contract 0013, D13: the image id step 4 inspected, per active service.</summary>
+        public Dictionary<string, string> ImageIds { get; } = new(StringComparer.Ordinal);
+        /// <summary>The plan <c>up</c> and the fallback <c>stop</c> run: <see cref="Plan"/> with its pins once step 4
+        /// passed (contract 0013, D11).</summary>
+        public ComposePlan? UpPlan { get; set; }
         public List<string> Violations { get; } = [];
         public List<string> Output { get; } = [];
     }
@@ -170,11 +175,11 @@ public sealed class ComposeRunner : IComposeRunner
 
             // 4) Every image the run will start, as up will use it.
             Report(run, "④ Inspecting the images…");
-            IReadOnlyDictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?> inspected;
+            IReadOnlyDictionary<string, ComposeImage?> inspected;
             try
             {
                 inspected = images.Count == 0
-                    ? new Dictionary<string, (string, IReadOnlyDictionary<string, string>)?>()
+                    ? new Dictionary<string, ComposeImage?>()
                     : await InspectImagesAsync(plan, images, ct);
             }
             catch (ComposePlanException ex)
@@ -193,6 +198,14 @@ public sealed class ComposeRunner : IComposeRunner
                 restoreFiles = true;
                 return Refused(run, refusal);
             }
+
+            // Contract 0013, D10–D11: every image up starts is pinned to what step 4 inspected, verified, and written to
+            // the pin file. A failed pin refuses like any step-4 refusal (files and tags put back).
+            if (await PinAsync(run, active, inspected, ct) is { } pinRefusal)
+            {
+                restoreFiles = true;
+                return Refused(run, pinRefusal);
+            }
             tagsAtRisk = false;
 
             // 5) Up — nothing pulled or built inside it.
@@ -201,7 +214,7 @@ public sealed class ComposeRunner : IComposeRunner
             System.Runtime.ExceptionServices.ExceptionDispatchInfo? upThrew = null;
             try
             {
-                up = await mutate(plan.UpCommand + " 2>&1", options.UpTimeout ?? options.Timeout, ct);
+                up = await mutate(run.UpPlan!.UpCommand + " 2>&1", options.UpTimeout ?? options.Timeout, ct);
             }
             catch (Exception ex)
             {
@@ -244,11 +257,12 @@ public sealed class ComposeRunner : IComposeRunner
     /// confirmation refuses the run (naming the key); otherwise the label joins this run's decided set and is audited
     /// and announced as an exposure change (Amendments 4 and 5).</summary>
     private static string? CheckImages(Run run,
-        IReadOnlyList<ComposeServicePlan> active, IReadOnlyDictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?> inspected)
+        IReadOnlyList<ComposeServicePlan> active, IReadOnlyDictionary<string, ComposeImage?> inspected)
     {
         foreach (var service in active)
         {
             var image = inspected[service.Image!]!.Value;
+            run.ImageIds[service.Name] = image.Id;
             foreach (var label in image.Labels.Keys) run.ImageLabelKeys.Add((service.Name, label.ToLowerInvariant()));
             foreach (var exposure in ComposeExposures.FromImageLabels(service.Name, image.Labels, run.Plan.ExposurePrefixes))
             {
@@ -263,6 +277,50 @@ public sealed class ComposeRunner : IComposeRunner
                 MutationScope.Note($"exposure from the image of {service.Name}: label {exposure.Key} (class '{cls}')");
             }
         }
+        return null;
+    }
+
+    // ------------------------------------------------------------------------------------------- pins (contract 0013)
+
+    /// <summary>
+    /// D10–D11, between step 4 and step 5: chooses each active service's pin, verifies on the host that every pin
+    /// resolves to the inspected id, and writes the pin file through the run's mutate delegate. Sets
+    /// <see cref="Run.UpPlan"/>; returns the refusal when any of it fails (fail closed).
+    /// </summary>
+    private async Task<string?> PinAsync(Run run, IReadOnlyList<ComposeServicePlan> active,
+        IReadOnlyDictionary<string, ComposeImage?> inspected, CancellationToken ct)
+    {
+        run.UpPlan = run.Plan;
+        if (active.Count == 0) return null;
+        Report(run, "④ Pinning the inspected images…");
+        IReadOnlyList<ComposePin> pins;
+        try
+        {
+            pins = ComposePins.Choose(active, inspected);
+            var verify = await _reader.ExecuteAsync(run.Plan.ServerId, ComposePins.VerifyCommand(pins), ReadTimeout, ct,
+                MaxOutputChars);
+            if (!verify.Success || verify.OutputTruncated)
+                return "The pinned images could not be verified on the server; nothing was started.";
+            ComposePins.Verify(verify.Output, pins);
+        }
+        catch (ComposePlanException ex)
+        {
+            return ex.Message;
+        }
+
+        CommandResult written;
+        try
+        {
+            written = await run.Mutate(run.Plan.PinScript(ComposePins.Yaml(pins)), run.Options.Timeout, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex, "The pin file of project {Project} could not be written", run.Plan.ProjectName);
+            written = new CommandResult { ExitCode = -1 };
+        }
+        if (!written.Success) return "The pin file could not be written; nothing was started.";
+        run.UpPlan = run.Plan with { Pinned = true };
+        MutationScope.Note(ComposePins.Note(pins));
         return null;
     }
 
@@ -291,7 +349,7 @@ public sealed class ComposeRunner : IComposeRunner
             if (run.Agent && run.Confirm.Contains(ExposureClasses.Public))
             {
                 // Fallback (Amendments 5–7): stop every container of the project with the plan's own command.
-                var stopped = await TryAsync(() => run.Mutate(plan.StopCommand + " 2>&1", RestoreTimeout, CancellationToken.None));
+                var stopped = await TryAsync(() => run.Mutate((run.UpPlan ?? plan).StopCommand + " 2>&1", RestoreTimeout, CancellationToken.None));
                 if (stopped?.Success != true) Violation(run, "the containers of the project were not stopped");
             }
             return;
@@ -349,6 +407,11 @@ public sealed class ComposeRunner : IComposeRunner
                 Undecided(container, ExposureClasses.Public, "the container could not be checked (counts as class 'public')");
                 continue;
             }
+            // Contract 0013, D13: the container runs exactly the image step 4 inspected for its service.
+            if (!run.ImageIds.TryGetValue(service, out var inspectedId)
+                || ComposeExposures.Text(doc, "Image") is not { } runningId
+                || !string.Equals(runningId, inspectedId, StringComparison.Ordinal))
+                Undecided(container, ExposureClasses.Public, "runs an image other than the one inspected (counts as class 'public')");
             foreach (var exposure in exposures)
             {
                 if (run.Decided.Contains(ComposeExposures.ComparisonKey(exposure.Identity))) continue;
@@ -525,7 +588,7 @@ public sealed class ComposeRunner : IComposeRunner
 
     // ------------------------------------------------------------------------------------------- helpers
 
-    private async Task<IReadOnlyDictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?>> InspectImagesAsync(
+    private async Task<IReadOnlyDictionary<string, ComposeImage?>> InspectImagesAsync(
         ComposePlan plan, IReadOnlyList<string> images, CancellationToken ct)
     {
         var result = await _reader.ExecuteAsync(plan.ServerId, ComposeExposures.InspectImagesCommand(images), ReadTimeout, ct,
@@ -535,8 +598,7 @@ public sealed class ComposeRunner : IComposeRunner
         return ComposeExposures.ParseImages(result.Output, images);
     }
 
-    private static IReadOnlyDictionary<string, string?> Ids(
-        IReadOnlyDictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?> images) =>
+    private static IReadOnlyDictionary<string, string?> Ids(IReadOnlyDictionary<string, ComposeImage?> images) =>
         images.ToDictionary(i => i.Key, i => i.Value?.Id, StringComparer.Ordinal);
 
     private static void Violation(Run run, string text)

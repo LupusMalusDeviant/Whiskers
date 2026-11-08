@@ -118,6 +118,9 @@ public static class AutoPatchPlanner
             return "not managed by compose — no file to recreate it from";
         if (!string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase))
             return $"not running ({c.State})";
+        // Contract 0013, D14: a Whiskers compose run pinned it to the image it inspected — updated by a redeploy.
+        if (Whiskers.Services.Mutations.ComposePins.IsPinned(c.Labels))
+            return Whiskers.Services.Mutations.ComposePins.PinnedRefusal;
         if (c.Image.Contains("@sha256:", StringComparison.Ordinal))
             return "pinned to a digest";
         return null;

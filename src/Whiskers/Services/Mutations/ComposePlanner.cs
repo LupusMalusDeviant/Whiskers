@@ -73,6 +73,14 @@ public sealed class ComposePlanner : IComposePlanner
             : ComposeModel.FilesFromEnv(env, directory) is { } configured
                 ? configured
                 : await DiscoverAsync(serverId, directory, ct);
+        // Contract 0013, D12: Whiskers' own pin file never enters a plan — a redeploy plans and pulls the tags, not the
+        // digests the last run pinned. It is dropped wherever a file list names it (the labels, COMPOSE_FILE, a call);
+        // a deployment that wants to write it is refused.
+        if (inputs.FirstOrDefault(f => f.Content is not null && ComposePins.IsPinFile(f.Path)) is { } own)
+            throw new ComposePlanException($"'{own.Path}' is Whiskers' own pin file and cannot be deployed.");
+        inputs = inputs.Where(f => !ComposePins.IsPinFile(f.Path)).ToList();
+        if (inputs.Count == 0)
+            throw new ComposePlanException($"No compose file in '{directory}'.");
         foreach (var file in inputs)
             if (!file.Path.StartsWith('/'))
                 throw new ComposePlanException($"Compose file path '{file.Path}' is not absolute.");
@@ -142,7 +150,7 @@ public sealed class ComposePlanner : IComposePlanner
         // The images as they are on the host now: their labels count as the services' own (contract 0006, Amendment 4).
         var images = active.Select(a => a.Image).Distinct(StringComparer.Ordinal).ToList();
         var inspected = images.Count == 0
-            ? new Dictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?>()
+            ? new Dictionary<string, ComposeImage?>()
             : await InspectImagesAsync(plan.ServerId, images, ct);
 
         var shared = new List<ComposeSharedContainer>();
@@ -213,7 +221,7 @@ public sealed class ComposePlanner : IComposePlanner
     }
 
     /// <summary>The images on the host, inspected locally (nothing is pulled): id and labels, or missing.</summary>
-    private async Task<IReadOnlyDictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?>> InspectImagesAsync(
+    private async Task<IReadOnlyDictionary<string, ComposeImage?>> InspectImagesAsync(
         string serverId, IReadOnlyList<string> images, CancellationToken ct)
     {
         var result = await _executor.ExecuteAsync(serverId, ComposeExposures.InspectImagesCommand(images), ConfigTimeout, ct, MaxFileChars);

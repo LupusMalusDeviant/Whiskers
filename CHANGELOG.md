@@ -9,6 +9,14 @@ All notable changes to Whiskers are documented here. The format follows
 - **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
   asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
   host. The labels are now read from the whole `Config`.
+- **Compose runs start exactly the inspected images (contract 0013, INV-62 step 1).** After the image inspection every
+  image `up` starts is pinned — a repo digest of its own repository, else the image id — verified on the host and
+  written to `<project>/.whiskers/pin.override.yml`, which only `up` and the fallback `stop` use; a failed pin refuses
+  the run before `up` (files and tags put back). The planner never plans that file (Git deploy checkouts exclude
+  `.whiskers/`). The re-check counts a container running another image than the inspected one as class `public`.
+  Pinned containers carry `whiskers.image.ref`: `container.update` and AutoPatch refuse them ("redeploy the project to
+  update"), and the update check asks about that reference. Behaviour change: the first redeploy after the upgrade
+  recreates the project's containers (new label, pinned image).
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
   test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can

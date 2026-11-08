@@ -149,11 +149,14 @@ or caught only after `up`:
   never sees.
 - **Tailscale sidecar `serve`/Funnel** configured inside a sidecar's own state or `serve.json`, and **cloudflared**
   tunnels, publish without a label on the deployed service.
-- **The re-tag window**: an image re-tagged by someone else between the image inspection and `up --pull never` is caught
-  only by the re-check after `up`.
 - **The tag race**: putting a tag back after a refused run checks that it still points where this run left it; a tag
   moved by another run in between is left alone (and so not restored).
-- **`container.update` and `autopatch.run`** recreate containers from new images without this check.
+- **`container.update` and `autopatch.run`** recreate containers from new images without this check — except a
+  container a compose run pinned (label `whiskers.image.ref`), which they refuse: it is updated by redeploying its
+  project (contract 0013).
+- **Pinned images on the containerd image store**: `up` starts each image by the pin of contract 0013; there a tag
+  moved after the inspection takes a repo digest pin along, so `up` fails (nothing else starts) instead of starting
+  the inspected image.
 - **Late daemon work after a timeout**: a pull, build or `up` the daemon finishes after Whiskers stopped waiting is not
   re-checked.
 - **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own

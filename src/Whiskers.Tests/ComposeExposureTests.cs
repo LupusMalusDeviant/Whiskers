@@ -273,19 +273,24 @@ public sealed class ComposeExposureTests
     [Fact]
     public void An_image_line_that_cannot_be_read_fails_closed()
     {
-        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tnot-an-id\t{}\n", ["nginx"]));
+        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tnot-an-id\t{}\t[]\n", ["nginx"]));
         Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("other\tMISSING\n", ["nginx"]));
+        // Contract 0013, D10: the repo digests are a required fourth column, a JSON list of strings (or null).
+        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\t{}\n", ["nginx"]));
+        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\t{}\t{}\n", ["nginx"]));
+        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\t{}\t[1]\n", ["nginx"]));
         // The labels come from the image's whole Config (Docker 29 fails .Config.Labels on an image without labels).
-        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\t{\"Labels\":[1]}\n", ["nginx"]));
-        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\t[]\n", ["nginx"]));
+        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\t{\"Labels\":[1]}\t[]\n", ["nginx"]));
+        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\t[]\t[]\n", ["nginx"]));
         var parsed = ComposeExposures.ParseImages(
-            "nginx\tsha256:1\t{\"Env\":[\"A=1\"],\"Labels\":{\"caddy\":\"x\"}}\nredis\tMISSING\n" +
-            "bare\tsha256:4\t{\"Cmd\":[\"sh\"]}\nempty\tsha256:5\tnull\n",
-            ["nginx", "redis", "bare", "empty"]);
-        Assert.Equal("sha256:1", parsed["nginx"]!.Value.Id);
+            "nginx\tsha256:1\t{\"Env\":[\"A=1\"],\"Labels\":{\"caddy\":\"x\"}}\t[\"nginx@sha256:2\"]\nredis\tMISSING\n" +
+            "built\tsha256:3\tnull\tnull\nbare\tsha256:4\t{\"Cmd\":[\"sh\"]}\t[]\n",
+            ["nginx", "redis", "built", "bare"]);
         Assert.Equal(new Dictionary<string, string> { ["caddy"] = "x" }, parsed["nginx"]!.Value.Labels);
         Assert.Empty(parsed["bare"]!.Value.Labels);
-        Assert.Empty(parsed["empty"]!.Value.Labels);
+        Assert.Equal("sha256:1", parsed["nginx"]!.Value.Id);
+        Assert.Equal(["nginx@sha256:2"], parsed["nginx"]!.Value.RepoDigests);
+        Assert.Empty(parsed["built"]!.Value.RepoDigests);
         Assert.Null(parsed["redis"]);
     }
 

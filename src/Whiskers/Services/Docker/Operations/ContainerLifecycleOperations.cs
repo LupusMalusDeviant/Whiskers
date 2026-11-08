@@ -74,6 +74,14 @@ internal sealed class ContainerLifecycleOperations
         return response.ID;
     }
 
+    /// <summary>Contract 0013, D14: <c>container.update</c> refuses a container a Whiskers compose run pinned (label
+    /// <c>whiskers.image.ref</c>) — it is updated by redeploying its project.</summary>
+    internal static void RefuseIfPinned(string name, IEnumerable<KeyValuePair<string, string>>? labels)
+    {
+        if (Whiskers.Services.Mutations.ComposePins.IsPinned(labels))
+            throw new InvalidOperationException($"Container '{name}' is {Whiskers.Services.Mutations.ComposePins.PinnedRefusal}.");
+    }
+
     public async Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null)
     {
         var client = await GetClient(serverId);
@@ -85,6 +93,10 @@ internal sealed class ContainerLifecycleOperations
         var hostConfig = inspect.HostConfig;
         var name = inspect.Name.TrimStart('/');
         var image = config.Image;
+
+        // Contract 0013, D14: a container a Whiskers compose run pinned to its inspected image is updated by redeploying
+        // its project, never recreated from a newer image outside the runner. Refused before anything changes.
+        RefuseIfPinned(name, config.Labels);
 
         // 2. Pull latest image
         progress?.Report($"Pulling {image}...");

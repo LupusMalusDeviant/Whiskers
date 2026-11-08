@@ -53,10 +53,18 @@ public static class GitDeployCommands
         var fetchSpec = ShellUtils.Quote($"+refs/heads/{branch}:refs/remotes/origin/{branch}");
         var tracking = ShellUtils.Quote($"refs/remotes/origin/{branch}");
         var branchOption = ShellUtils.Quote($"--branch={branch}");
+        // Contract 0013, D12: the pin file a compose run writes into the checkout (.whiskers/ beside the compose file) is
+        // Whiskers' own, never part of the repository's working tree state.
         return $"mkdir -p {dir} && cd {dir} && " +
                $"if [ -d repo/.git ]; then cd repo && {env}git fetch origin {fetchSpec} && git checkout -q -f -B {br} {tracking} && git reset --hard {tracking}; " +
-               $"else rm -rf repo && {env}git clone {branchOption} --single-branch -- {repo} repo; fi";
+               $"else rm -rf repo && {env}git clone {branchOption} --single-branch -- {repo} repo; fi" +
+               $" && cd {dir}/repo && {{ grep -qxF '{ExcludePattern}' .git/info/exclude 2>/dev/null || " +
+               $"{{ mkdir -p .git/info && echo '{ExcludePattern}' >> .git/info/exclude; }}; }}";
     }
+
+    /// <summary>The <c>.git/info/exclude</c> line that keeps Whiskers' pin directory out of the checkout's state
+    /// (contract 0013, D12): <c>.whiskers/</c> at any depth.</summary>
+    public const string ExcludePattern = Whiskers.Services.Mutations.ComposePins.DirectoryName + "/";
 
     public static string CurrentShaCommand(string appId) =>
         $"cd {WorkDir(appId)}/repo && git rev-parse --short=12 HEAD";
