@@ -1235,8 +1235,8 @@
       },
       "System.Reactive": {
         "type": "Transitive",
-        "resolved": "6.1.0",
-        "contentHash": "M5cCC1ZMkZr9jbSQGTHnVkb5TDN67qWCV7AP8TAHdGkvDlu0puT5NzemESNn9+HkYIDpWpocP68/i+/ame2/2w=="
+        "resolved": "7.0.0",
+        "contentHash": "VYaSP2Kt+45GFnr3q7c/b4awT48VvueOJV4jPjdUXi5MxC9mSUy+HkJYtm8rGZ6fC3tNHG9gBu/YwNAR/FYqhg=="
       },
       "System.Security.Cryptography.Pkcs": {
         "type": "Transitive",
@@ -1323,7 +1323,7 @@
           "NCrontab": "[3.4.0, )",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )",
-          "System.Reactive": "[6.1.0, )",
+          "System.Reactive": "[7.0.0, )",
           "System.Security.Cryptography.Pkcs": "[10.0.14, )",
           "Whiskers.Data": "[1.0.0, )",
           "Whiskers.Migrations.Postgres": "[1.0.0, )",
