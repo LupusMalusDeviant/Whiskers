@@ -43,7 +43,7 @@ public sealed class DeployPageComposeTests : BunitContext, IAsyncLifetime
         policy.ForbiddenArgPatterns = [];
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
 
         Services.AddLogging();
         Services.AddLocalization(o => o.ResourcesPath = "Resources");

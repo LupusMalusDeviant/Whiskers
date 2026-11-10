@@ -295,6 +295,9 @@ internal sealed class FakeDocker : IDockerService
 
     /// <summary>Adds a container, as a compose run would create one (contract 0006).</summary>
     public void Add(ContainerInfo container) => _containers.Add(container);
+
+    /// <summary>Removes the container with <paramref name="id"/>, as a <c>docker rm</c> elsewhere would (contract 0012).</summary>
+    public void Remove(string id) => _containers.RemoveAll(c => c.Id == id);
     public Task RestartContainerAsync(string containerId, string? serverId = null) =>
         Act("restart", containerId, serverId, Task.CompletedTask);
     public Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null) => throw new NotSupportedException();
@@ -381,4 +384,24 @@ internal sealed class NoOutcomes : Whiskers.Services.Observability.Outcomes.IAct
         => Task.FromResult<IReadOnlyList<Whiskers.Services.Observability.Outcomes.OutcomeTally>>([]);
 
     public Task<int> OverdueCountAsync(DateTime nowUtc, CancellationToken ct = default) => Task.FromResult(0);
+}
+
+/// <summary>Volume backups held in memory, and every volume they back up present on its server (contract 0012, D5).</summary>
+internal sealed class StoredVolumeBackups(params VolumeBackupEntity[] backups) : Whiskers.Services.Backup.IVolumeBackupService
+{
+    public List<VolumeBackupEntity> Backups { get; } = [.. backups];
+
+    public Task<IReadOnlyList<Whiskers.Services.Backup.VolumeInfo>> ListVolumeInfoAsync(string? serverId, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<Whiskers.Services.Backup.VolumeInfo>>(Backups.Where(b => b.ServerId == serverId)
+            .Select(b => b.VolumeName).Distinct()
+            .Select(n => new Whiskers.Services.Backup.VolumeInfo(n, "local", new Dictionary<string, string>())).ToList());
+
+    public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null) =>
+        Task.FromResult(Backups.Where(b => (serverId is null || b.ServerId == serverId) && (volumeName is null || b.VolumeName == volumeName)).ToList());
+
+    public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null) =>
+        throw new NotSupportedException();
+    public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => throw new NotSupportedException();
+    public Task DeleteBackupAsync(string backupId) => throw new NotSupportedException();
+    public Task<List<string>> ListVolumesAsync(string? serverId = null) => throw new NotSupportedException();
 }

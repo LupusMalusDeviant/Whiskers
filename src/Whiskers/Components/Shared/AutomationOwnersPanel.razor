@@ -121,9 +121,9 @@
             // The replaced owner comes from the store's locked write, not from this page: another admin may have
             // taken the feature over since it was rendered.
             var previous = await Mutations.RunAsync("automation.owner_set", new { feature = featureId, owner },
-                async _ =>
+                async (ResolvedRecord rt, CancellationToken _) =>
                 {
-                    var replaced = await Owners.SetAsync(featureId, owner);
+                    var replaced = await Owners.SetAsync(rt.Id, owner);
                     // Who held the feature before is part of the gateway's event (R1-22).
                     MutationScope.Note($"Owner: previous={AutomationOwners.AuthorityOf(OwnerResolver, replaced)}; " +
                                        $"new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");

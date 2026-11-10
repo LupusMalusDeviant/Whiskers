@@ -138,7 +138,7 @@
     private async Task Confirm(string id)
     {
         var result = await RunAsync(() => Mutations.RunAsync("identity.binding_confirm", new { binding = id },
-            ct => Bindings.ConfirmAsync(id, ct)));
+            (ResolvedRecord rt, CancellationToken ct) => Bindings.ConfirmAsync(rt.Id, ct)));
         if (result is { Success: true }) Snackbar.Add(L["IdentityBindings_Snackbar_Confirmed"].Value, Severity.Success);
         Load();
     }
@@ -147,7 +147,7 @@
     {
         _confirmRemove = null;
         var result = await RunAsync(() => Mutations.RunAsync("identity.binding_remove", new { binding = id },
-            ct => Bindings.RemoveAsync(id, ct)));
+            (ResolvedRecord rt, CancellationToken ct) => Bindings.RemoveAsync(rt.Id, ct)));
         if (result is { Success: true }) Snackbar.Add(L["IdentityBindings_Snackbar_Removed"].Value, Severity.Success);
         Load();
     }

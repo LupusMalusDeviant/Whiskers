@@ -648,8 +648,8 @@ else
             var sid = _resolvedServerId;
             _termSession = await Mutations.RunAsync("terminal.container_open",
                 new { containerId = ContainerId, serverId = sid },
-                ct => SessionManager.OpenContainerShellAsync(
-                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, sid, ContainerId), ct));
+                (ResolvedContainer c, CancellationToken ct) => SessionManager.OpenContainerShellAsync(
+                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, c.ServerId!, c.Id), ct));
 
             var opened = _termSession;
             _ = Task.WhenAll(ReadTermStreamAsync(opened.Output, _termCts.Token), ReadTermStreamAsync(opened.Errors, _termCts.Token))
@@ -762,7 +762,7 @@ else
         var sid = _resolvedServerId;
         // The gateway's event is the record of this attempt — refused, failed or done (R1-21).
         if (!await RequireAsync("container.start", new { containerId, name, serverId = sid })) return;
-        try { await Mutations.RunAsync("container.start", new { containerId, name, serverId = sid }, _ => DockerService.StartContainerAsync(containerId, sid)); Snackbar.Add(L["ContainerDetail_Snackbar_Started"].Value, Severity.Success); }
+        try { await Mutations.RunAsync("container.start", new { containerId, name, serverId = sid }, (ResolvedContainer c, CancellationToken _) => DockerService.StartContainerAsync(c.Id, c.ServerId)); Snackbar.Add(L["ContainerDetail_Snackbar_Started"].Value, Severity.Success); }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
@@ -775,7 +775,7 @@ else
         var sid = _resolvedServerId;
         // The gateway's event is the record of this attempt — refused, failed or done (R1-21).
         if (!await RequireAsync("container.stop", new { containerId, name, serverId = sid })) return;
-        try { await Mutations.RunAsync("container.stop", new { containerId, name, serverId = sid }, _ => DockerService.StopContainerAsync(containerId, sid)); Snackbar.Add(L["ContainerDetail_Snackbar_Stopped"].Value, Severity.Success); }
+        try { await Mutations.RunAsync("container.stop", new { containerId, name, serverId = sid }, (ResolvedContainer c, CancellationToken _) => DockerService.StopContainerAsync(c.Id, c.ServerId)); Snackbar.Add(L["ContainerDetail_Snackbar_Stopped"].Value, Severity.Success); }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
@@ -788,7 +788,7 @@ else
         var sid = _resolvedServerId;
         // The gateway's event is the record of this attempt — refused, failed or done (R1-21).
         if (!await RequireAsync("container.restart", new { containerId, name, serverId = sid })) return;
-        try { await Mutations.RunAsync("container.restart", new { containerId, name, serverId = sid }, _ => DockerService.RestartContainerAsync(containerId, sid)); Snackbar.Add(L["ContainerDetail_Snackbar_Restarted"].Value, Severity.Success); }
+        try { await Mutations.RunAsync("container.restart", new { containerId, name, serverId = sid }, (ResolvedContainer c, CancellationToken _) => DockerService.RestartContainerAsync(c.Id, c.ServerId)); Snackbar.Add(L["ContainerDetail_Snackbar_Restarted"].Value, Severity.Success); }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await LoadContainer();
@@ -809,7 +809,7 @@ else
         try
         {
             await Mutations.RunAsync("container.remove", new { containerId, name, serverId = sid },
-                _ => DockerService.RemoveContainerAsync(containerId, force: true, serverId: sid));
+                (ResolvedContainer c, CancellationToken _) => DockerService.RemoveContainerAsync(c.Id, force: true, serverId: c.ServerId));
             Snackbar.Add(L["ContainerDetail_Snackbar_Removed"].Value, Severity.Success);
             Nav.NavigateTo("/");
         }

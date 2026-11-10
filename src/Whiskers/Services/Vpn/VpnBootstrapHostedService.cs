@@ -97,7 +97,7 @@ public class VpnBootstrapHostedService : IHostedService
         var actor = AutomationActor.ForVpnBootstrap(DisplayName, owner);
         _logger.LogInformation("[vpn] bringing up provider '{Provider}'", provider.Id);
         var settingsNote = SettingsNote(provider.Id);
-        var outcome = await _automation.RunAsync(actor, Capability, arguments, async token =>
+        var outcome = await _automation.RunAsync(actor, Capability, arguments, async (ResolvedRecord _, CancellationToken token) =>
         {
             MutationScope.Note(settingsNote);
             var result = await provider.EnsureUpAsync(token);

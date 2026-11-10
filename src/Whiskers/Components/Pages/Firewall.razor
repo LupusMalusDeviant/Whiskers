@@ -145,7 +145,7 @@ else
         {
             var serverId = ServerId;
             var result = await Mutations.RunAsync("firewall.set_status", new { serverId, enable },
-                _ => FirewallService.SetStatusAsync(serverId, enable));
+                (ResolvedHostObject h, CancellationToken _) => FirewallService.SetStatusAsync(h.ServerId!, enable));
             if (result.Success)
             {
                 _firewallActive = enable;
@@ -171,7 +171,7 @@ else
         {
             var serverId = ServerId;
             var result = await Mutations.RunAsync("firewall.rule_remove", new { serverId, ruleNumber },
-                _ => FirewallService.RemoveRuleAsync(serverId, ruleNumber));
+                (ResolvedHostObject h, CancellationToken _) => FirewallService.RemoveRuleAsync(h.ServerId!, h.SubObject!));
             if (result.Success)
             {
                 Snackbar.Add(L["Firewall_Snackbar_RuleRemoved"].Value, Severity.Success);

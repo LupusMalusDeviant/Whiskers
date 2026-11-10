@@ -460,7 +460,7 @@ public sealed partial class ProtectedResourceResolutionTests
             var runner = UiRunner(GuardrailPolicy.SafeDefault());
 
             var (success, _) = await runner.RunAsync("gitdeploy.deploy", new { appId = app.Id, serverId = "local" },
-                _ => git.DeployAsync(app, runner.GateFor("gitdeploy.deploy")));
+                (ResolvedTarget _, CancellationToken _) => git.DeployAsync(app, runner.GateFor("gitdeploy.deploy")));
 
             Assert.True(success);
             Assert.Contains(_host.Executed, c => c.Contains("-p 'payments'") && c.EndsWith("up -d --remove-orphans --pull never --no-build 2>&1"));
@@ -548,7 +548,7 @@ public sealed partial class ProtectedResourceResolutionTests
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
             new AgentToolTestHelpers.NullMutationAudit(), [], NullLogger<MutationGateway>.Instance,
-            approvals: new ApprovalGate(new ApprovalStore(), store));
+            targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
         return new UiMutationRunner(gateway, new CapabilityCatalog(), new AdminUser());
     }
 

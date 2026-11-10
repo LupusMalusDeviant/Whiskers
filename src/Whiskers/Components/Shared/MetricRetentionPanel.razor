@@ -53,7 +53,7 @@
         try
         {
             await Mutations.RunAsync("config.save", new { section = "metrics-retention" },
-                ct => Retention.SaveAsync(values, ct));
+                (ResolvedRecord rt, CancellationToken ct) => Retention.SaveAsync(values, ct));
             Snackbar.Add(L["MetricRetention_Snackbar_Saved"].Value, Severity.Success);
             Load();
         }

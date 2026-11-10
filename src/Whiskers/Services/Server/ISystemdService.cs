@@ -5,6 +5,11 @@ namespace Whiskers.Services.Server;
 public interface ISystemdService
 {
     Task<List<SystemdUnit>> ListServicesAsync(string serverId);
+
+    /// <summary>Contract 0012 (D11): every service unit the host knows (its unit files and loaded units, active or not),
+    /// for the gateway to resolve a <c>systemd.manage</c> target. Throws when the host cannot be asked.</summary>
+    [InventoryLookup]
+    Task<IReadOnlyList<string>> ListUnitNamesAsync(string serverId);
     Task<string> GetStatusAsync(string serverId, string serviceName);
     Task<string> GetJournalAsync(string serverId, string serviceName, int lines = 100);
     [MutatingOperation("systemd.manage")]

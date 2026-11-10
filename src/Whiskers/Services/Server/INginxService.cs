@@ -4,6 +4,7 @@ namespace Whiskers.Services.Server;
 /// <summary>Lists and edits nginx site configurations on a server.</summary>
 public interface INginxService
 {
+    [InventoryLookup]
     Task<List<NginxSite>> ListSitesAsync(string serverId);
     Task<string> GetSiteConfigAsync(string serverId, string siteName);
     [MutatingOperation("nginx.update")]

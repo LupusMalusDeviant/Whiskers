@@ -8,20 +8,21 @@ namespace Whiskers.Services.Cloud;
 /// per-server cloud credentials (Hetzner/Hostinger).</summary>
 public interface ICloudControlService
 {
+    [Whiskers.Services.Mutations.InventoryLookup]
     List<Whiskers.Models.ServerConfig> CloudServers();
     Whiskers.Models.ServerConfig? ResolveWhiskers(string idOrName);
     Task<CloudServerInfo?> ResolveAsync(Whiskers.Models.ServerConfig sw);
     Task<List<CloudServerInfo>> ListAllAsync();
     [MutatingOperation("cloud.power_on")]
-    Task<string> PowerOnAsync(string idOrName);
+    Task<string> PowerOnAsync([MutationTarget] string idOrName);
     [MutatingOperation("cloud.shutdown")]
-    Task<string> ShutdownAsync(string idOrName);
+    Task<string> ShutdownAsync([MutationTarget] string idOrName);
     [MutatingOperation("cloud.reboot")]
-    Task<string> RebootAsync(string idOrName);
+    Task<string> RebootAsync([MutationTarget] string idOrName);
     [MutatingOperation("cloud.hard_reset")]
-    Task<string> HardResetAsync(string idOrName);
+    Task<string> HardResetAsync([MutationTarget] string idOrName);
     [MutatingOperation("cloud.snapshot_create")]
-    Task<string> CreateSnapshotAsync(string idOrName, string? description);
+    Task<string> CreateSnapshotAsync([MutationTarget] string idOrName, string? description);
     Task<string> MetricsAsync(string idOrName, string type);
     Task<(string token, HetznerServer server)?> HetznerContextAsync(string idOrName);
 }

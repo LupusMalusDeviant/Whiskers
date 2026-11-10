@@ -369,6 +369,14 @@ public partial class SecretsAtRestTests
     /// <summary>Runs every mutation, refusing the listed capabilities.</summary>
     private sealed class SettingsRunner : IUiMutationRunner
     {
+        public Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
+        public Task RunAsync<TTarget>(string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
         public HashSet<string> Refuse { get; init; } = [];
 
         public async Task<T> RunAsync<T>(string capabilityId, object arguments, Func<CancellationToken, Task<T>> action,

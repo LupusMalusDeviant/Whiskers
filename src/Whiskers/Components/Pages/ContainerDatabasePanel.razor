@@ -749,13 +749,11 @@ else
         string[] cmd, TimeSpan timeout, string? command = null, string? query = null, string? database = null,
         Func<string, string?>? failedWhen = null)
     {
-        var dockerCmd = DockerExecCommand(cmd);
-        var sid = _resolvedServerId ?? "local";
         var r = await Mutations.RunAsync(capability,
             new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database, command, query },
-            async _ =>
+            async (ResolvedContainer c, CancellationToken _) =>
             {
-                var result = await HostCommandExecutor.ExecuteMutationAsync(sid, dockerCmd, timeout);
+                var result = await HostCommandExecutor.ExecuteMutationAsync(c.ServerId!, DockerExecCommand(cmd, c.Id), timeout);
                 if (result.ExitCode != 0) MutationScope.Fail($"Command exited with {result.ExitCode}.");
                 else if (failedWhen?.Invoke(result.Output ?? "") is { } failure) MutationScope.Fail(failure);
                 return result;
@@ -773,9 +771,13 @@ else
     }
 
     // R1-42 (INV-41): the container reference comes from the route; it is checked and follows `--`.
-    private string DockerExecCommand(string[] cmd) =>
+    private string DockerExecCommand(string[] cmd) => DockerExecCommand(cmd, ContainerId);
+
+    /// <summary>The `docker exec` line for <paramref name="containerRef"/> — inside a decision the resolved container's id
+    /// (contract 0012), never the route parameter.</summary>
+    private static string DockerExecCommand(string[] cmd, string containerRef) =>
         "docker exec -- " +
-        Whiskers.Utils.ShellUtils.Quote(Whiskers.Utils.CommandOperands.RequireContainerRef(ContainerId)) + " " +
+        Whiskers.Utils.ShellUtils.Quote(Whiskers.Utils.CommandOperands.RequireContainerRef(containerRef)) + " " +
         string.Join(' ', cmd.Select(Whiskers.Utils.ShellUtils.Quote));
 
     /// <summary>The role check in front of the migration status read; its role is fixed by the read
@@ -980,7 +982,7 @@ else
             // The SQL goes to the gateway, which checks it for protected resources (R1-16); the audit keeps only its
             // length, since it can carry credentials (ALTER ROLE … PASSWORD '…').
             State.DbResult = await Mutations.RunAsync("db.query", new { containerId, serverId = sid, database = creds.Database, query },
-                _ => DatabaseService.ExecuteQueryAsync(containerId, query, dbType, creds, sid));
+                (ResolvedContainer c, CancellationToken _) => DatabaseService.ExecuteQueryAsync(c.Id, query, dbType, creds, c.ServerId));
         }
         catch (MutationRefusedException ex)
         {
@@ -1013,9 +1015,9 @@ else
             var creds = State.DbCreds;
             var sid = _resolvedServerId;
             var (success, filePath, size, error) = await Mutations.RunAsync("db.backup", new { containerId, serverId = sid, database = db },
-                async _ =>
+                async (ResolvedContainer c, CancellationToken _) =>
                 {
-                    var backup = await DatabaseService.BackupDatabaseAsync(dockerId, db, dbType, creds, sid, containerName);
+                    var backup = await DatabaseService.BackupDatabaseAsync(c.Id, db, dbType, creds, c.ServerId, c.Name ?? containerName);
                     if (backup.Success) MutationScope.Note($"Backup file: {backup.FilePath} ({backup.SizeBytes} bytes)");
                     return backup;
                 });

@@ -2065,6 +2065,14 @@ public sealed class WebhookReplayTests : IDisposable
     /// <summary>Runs nothing: records each run, how many overlapped, and can hold a run until released.</summary>
     private sealed class RecordingRunner : IAutomationMutationRunner
     {
+        public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
+        public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
         private int _runs, _current, _max;
         private TaskCompletionSource _gate = Completed();
         private readonly List<TaskCompletionSource> _gates = [];
@@ -2132,7 +2140,8 @@ public sealed class WebhookReplayTests : IDisposable
                 OperationIds.Add(actor.OperationId);
                 Owners.Add(actor.OwnerId);
                 Contexts.Add((Ambient.Value, MutationScope.Current?.OperationId));
-                ContainerIds.Add(arguments.GetType().GetProperty("containerId")?.GetValue(arguments) as string);
+                // Contract 0012 (A7): what the run read under its lock is passed as the expected target.
+                ContainerIds.Add(actor.ExpectedTarget?.Id ?? arguments.GetType().GetProperty("containerId")?.GetValue(arguments) as string);
             }
             var held = _gate;
             var first = Interlocked.Increment(ref _held) == 1;

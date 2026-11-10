@@ -41,7 +41,13 @@ public sealed class EndpointCheckGatingTests : IDisposable
     {
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance,
+            // Contract 0012 (D4 b): the check is resolved against its store, so a delete is bound to its id.
+            targets: new MutationTargetResolver(new ServiceCollection()
+                .AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(_servers)
+                .AddSingleton<IEndpointCheckStore>(RawStore())
+                .BuildServiceProvider()),
+            approvals: new ApprovalGate(new ApprovalStore(), store));
         return new UiMutationRunner(gateway, new CapabilityCatalog(), _user);
     }
 
@@ -55,11 +61,11 @@ public sealed class EndpointCheckGatingTests : IDisposable
     // As the /checks page runs them.
     private static Task<EndpointCheckDefinition> Save(IUiMutationRunner ui, IEndpointCheckStore store, EndpointCheckDraft draft) =>
         ui.RunAsync("endpointcheck.save", new { serverId = draft.ServerId, checkId = draft.Id },
-            ct => store.SaveAsync(draft, AdminId, ct));
+            (ResolvedTarget _, CancellationToken ct) => store.SaveAsync(draft, AdminId, ct));
 
     private static Task Delete(IUiMutationRunner ui, IEndpointCheckStore store, EndpointCheckDefinition check) =>
         ui.RunAsync("endpointcheck.delete", new { serverId = check.ServerId, checkId = check.Id },
-            ct => store.DeleteAsync(check.Id, ct));
+            (ResolvedRecord rt, CancellationToken ct) => store.DeleteAsync(rt.RecordId, ct));
 
     private static EndpointCheckDraft Tcp(string serverId = "web") =>
         Draft(EndpointCheckKind.Tcp, "db.lan", 5432, serverId: serverId,
@@ -73,7 +79,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         var store = Store();
         var intentFirst = false;
 
-        var saved = await Ui().RunAsync("endpointcheck.save", new { serverId = "web", checkId = (string?)null }, async ct =>
+        var saved = await Ui().RunAsync("endpointcheck.save", new { serverId = "web", checkId = (string?)null }, async (ResolvedTarget _, CancellationToken ct) =>
         {
             intentFirst = _audit.Events.Contains("begin:endpointcheck.save:") && store.List().Count == 0;
             return await store.SaveAsync(Tcp(), AdminId, ct);
@@ -303,7 +309,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         await Save(ui, store, Internal(check.Id, withException: false));
 
         var run = await ui.RunAsync("endpointcheck.run", new { serverId = loaded.ServerId, checkId = loaded.Id },
-            ct => runner.RunInDecisionAsync(loaded.Id, ct));
+            (ResolvedTarget _, CancellationToken ct) => runner.RunInDecisionAsync(loaded.Id, ct));
 
         Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
         Assert.Empty(host.Calls);
@@ -319,12 +325,13 @@ public sealed class EndpointCheckGatingTests : IDisposable
         await Delete(ui, store, deleted);
         var off = await Save(ui, store, Draft(EndpointCheckKind.Tcp, "93.184.215.14", 444) with { Enabled = false });
 
-        foreach (var check in new[] { deleted, off })
-        {
-            var run = await ui.RunAsync("endpointcheck.run", new { serverId = check.ServerId, checkId = check.Id },
-                ct => runner.RunInDecisionAsync(check.Id, ct));
-            Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
-        }
+        // Contract 0012 (D12): a deleted check is no longer in the store — refused before policy, nothing runs.
+        await Assert.ThrowsAsync<MutationRefusedException>(() => ui.RunAsync("endpointcheck.run",
+            new { serverId = deleted.ServerId, checkId = deleted.Id },
+            (ResolvedRecord rt, CancellationToken ct) => runner.RunInDecisionAsync(rt.RecordId, ct)));
+        var run = await ui.RunAsync("endpointcheck.run", new { serverId = off.ServerId, checkId = off.Id },
+            (ResolvedRecord rt, CancellationToken ct) => runner.RunInDecisionAsync(rt.RecordId, ct));
+        Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
         Assert.Empty(host.Calls);
     }
 
@@ -343,7 +350,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         foreach (var check in new[] { off, suspended })
         {
             var run = await ui.RunAsync("endpointcheck.run", new { serverId = check.ServerId, checkId = check.Id },
-                ct => runner.RunInDecisionAsync(check.Id, ct));
+                (ResolvedTarget _, CancellationToken ct) => runner.RunInDecisionAsync(check.Id, ct));
             await RawStore().RecordAsync(run);
 
             Assert.Equal(EndpointCheckOutcome.Refused, run.Outcome);
@@ -357,7 +364,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         var invalid = await Save(ui, store, Internal());
         await Save(ui, store, Internal(invalid.Id, withException: false));
         var refused = await ui.RunAsync("endpointcheck.run", new { serverId = invalid.ServerId, checkId = invalid.Id },
-            ct => runner.RunInDecisionAsync(invalid.Id, ct));
+            (ResolvedTarget _, CancellationToken ct) => runner.RunInDecisionAsync(invalid.Id, ct));
         await RawStore().RecordAsync(refused);
         Assert.False(refused.NothingRan);
         Assert.Equal(EndpointCheckOutcome.Refused, Assert.Single(RawStore().Results(invalid.Id)).Outcome);
@@ -377,7 +384,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         _user.Role = role;
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => Ui().RunAsync("endpointcheck.run",
-            new { serverId = check.ServerId, checkId = check.Id }, ct => runner.RunInDecisionAsync(check.Id, ct)));
+            new { serverId = check.ServerId, checkId = check.Id }, (ResolvedTarget _, CancellationToken ct) => runner.RunInDecisionAsync(check.Id, ct)));
 
         Assert.Equal(["denied:Denied"], _audit.Events);
         Assert.Empty(host.Calls);
@@ -394,7 +401,7 @@ public sealed class EndpointCheckGatingTests : IDisposable
         _audit.Events.Clear();
 
         var run = await ui.RunAsync("endpointcheck.run", new { serverId = check.ServerId, checkId = check.Id },
-            ct => runner.RunInDecisionAsync(check.Id, ct));
+            (ResolvedTarget _, CancellationToken ct) => runner.RunInDecisionAsync(check.Id, ct));
         await RawStore().RecordAsync(run);
 
         Assert.True(run.Outcome == EndpointCheckOutcome.Passed, run.Detail);

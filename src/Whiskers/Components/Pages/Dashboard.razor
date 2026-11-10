@@ -863,10 +863,10 @@
             // K8s rows route through the workload seam (start = scale the controller back up).
             if (_k8sServerIds.Contains(container.ServerId))
                 await Mutations.RunAsync("workload.start", new { workloadId = container.Id, name = WorkloadController(container), pod = container.Name, serverId = container.ServerId },
-                    token => WorkloadFactory.GetForServer(container.ServerId).StartAsync(container.Id, token));
+                    (Whiskers.Services.Mutations.ResolvedWorkload w, CancellationToken token) => WorkloadFactory.GetForServer(w.ServerId!).StartAsync(w, token));
             else
                 await Mutations.RunAsync("container.start", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
-                    _ => DockerService.StartContainerAsync(container.Id, container.ServerId));
+                    (ResolvedContainer c, CancellationToken _) => DockerService.StartContainerAsync(c.Id, c.ServerId));
             Snackbar.Add(L["Dashboard_Snackbar_Started", container.Name].Value, Severity.Success);
             await RefreshAll();
         }
@@ -889,10 +889,10 @@
             // K8s rows route through the workload seam (stop = scale the controller to 0).
             if (_k8sServerIds.Contains(container.ServerId))
                 await Mutations.RunAsync("workload.stop", new { workloadId = container.Id, name = WorkloadController(container), pod = container.Name, serverId = container.ServerId },
-                    token => WorkloadFactory.GetForServer(container.ServerId).StopAsync(container.Id, token));
+                    (Whiskers.Services.Mutations.ResolvedWorkload w, CancellationToken token) => WorkloadFactory.GetForServer(w.ServerId!).StopAsync(w, token));
             else
                 await Mutations.RunAsync("container.stop", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
-                    _ => DockerService.StopContainerAsync(container.Id, container.ServerId));
+                    (ResolvedContainer c, CancellationToken _) => DockerService.StopContainerAsync(c.Id, c.ServerId));
             Snackbar.Add(L["Dashboard_Snackbar_Stopped", container.Name].Value, Severity.Success);
             await RefreshAll();
         }
@@ -915,10 +915,10 @@
             // K8s rows route through the workload seam (restart = rollout-restart of the controller).
             if (_k8sServerIds.Contains(container.ServerId))
                 await Mutations.RunAsync("workload.restart", new { workloadId = container.Id, name = WorkloadController(container), pod = container.Name, serverId = container.ServerId },
-                    token => WorkloadFactory.GetForServer(container.ServerId).RestartAsync(container.Id, token));
+                    (Whiskers.Services.Mutations.ResolvedWorkload w, CancellationToken token) => WorkloadFactory.GetForServer(w.ServerId!).RestartAsync(w, token));
             else
                 await Mutations.RunAsync("container.restart", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
-                    _ => DockerService.RestartContainerAsync(container.Id, container.ServerId));
+                    (ResolvedContainer c, CancellationToken _) => DockerService.RestartContainerAsync(c.Id, c.ServerId));
             Snackbar.Add(L["Dashboard_Snackbar_Restarted", container.Name].Value, Severity.Success);
             await RefreshAll();
         }
@@ -944,7 +944,7 @@
         try
         {
             await Mutations.RunAsync("container.remove", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
-                _ => DockerService.RemoveContainerAsync(container.Id, force: true, serverId: container.ServerId));
+                (ResolvedContainer c, CancellationToken _) => DockerService.RemoveContainerAsync(c.Id, force: true, serverId: c.ServerId));
             Snackbar.Add(L["Dashboard_Snackbar_Removed", container.Name].Value, Severity.Success);
             await RefreshAll();
         }
@@ -979,7 +979,7 @@
             Snackbar.Add(L["Dashboard_Snackbar_Updating", container.Name].Value, Severity.Info);
             var progress = new Progress<string>(msg => Snackbar.Add(msg, Severity.Info));
             await Mutations.RunAsync("container.update", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
-                async _ =>
+                async (ResolvedContainer c, CancellationToken _) =>
                 {
                     // C12: snapshot the current image + config BEFORE recreating, so this update can be rolled back.
                     // Inside the gateway: a refused update must not overwrite the previous rollback point.
@@ -993,7 +993,7 @@
                         if (cex is Whiskers.Services.AutoUpdate.RollbackSnapshotUnavailableException)
                             Snackbar.Add(L["Dashboard_Snackbar_NoRollbackSnapshot", container.Name].Value, Severity.Warning);
                     }
-                    await DockerService.RecreateContainerAsync(container.Id, container.ServerId, progress);
+                    await DockerService.RecreateContainerAsync(c.Id, c.ServerId, progress);
                 });
             ImageUpdateStore.Remove(container.Id, container.ServerId);
             Snackbar.Add(L["Dashboard_Snackbar_Updated", container.Name].Value, Severity.Success);
@@ -1029,7 +1029,7 @@
             Snackbar.Add(L["Dashboard_Snackbar_RollingBack", container.Name].Value, Severity.Info);
             var rollbackId = snap.Id;
             var msg = await Mutations.RunAsync("container.rollback", new { containerId = container.Id, name = container.Name, serverId = container.ServerId, rollbackId },
-                _ => AutoUpdate.RollbackAsync(rollbackId));
+                (ResolvedContainer c, CancellationToken _) => AutoUpdate.RollbackAsync(rollbackId));
             // Verified by the gateway: only now is the snapshot used up.
             await AutoUpdate.CompleteRollbackAsync(rollbackId);
             Snackbar.Add(msg, Severity.Success);

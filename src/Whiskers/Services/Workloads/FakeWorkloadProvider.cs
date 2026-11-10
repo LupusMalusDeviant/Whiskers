@@ -44,6 +44,23 @@ public sealed class FakeWorkloadProvider : IWorkloadProvider
         }
     }
 
+    public Task<WorkloadIdentity?> GetWorkloadIdentityAsync(string id, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            Calls.Add($"identity:{id}");
+            return Task.FromResult(WorkloadIdentity.OfContainer(Find(id) is { } w ? Clone(w) : null));
+        }
+    }
+
+    // Contract 0012 (D8): the interface acts on the decided workload; the string forms stay for the demo and tests.
+    public Task StartAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default) =>
+        StartAsync(workload.PodId, ct);
+    public Task StopAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default) =>
+        StopAsync(workload.PodId, ct);
+    public Task RestartAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default) =>
+        RestartAsync(workload.PodId, ct);
+
     public Task StartAsync(string id, CancellationToken ct = default) => Mutate(id, "start", "running");
     public Task StopAsync(string id, CancellationToken ct = default) => Mutate(id, "stop", "exited");
 

@@ -55,6 +55,7 @@ public class MutationBypassArchitectureTests
 
         Assert.Equal(
         [
+            // Contract 0012 (D3, step 7): only the typed overloads are left (the lambda receives the resolved object).
             "Whiskers.Services.Mutations.IAutomationMutationRunner.RunAsync",
             "Whiskers.Services.Mutations.IAutomationMutationRunner.RunAsync",
             "Whiskers.Services.Mutations.IUiMutationRunner.RunAsync",
@@ -62,6 +63,18 @@ public class MutationBypassArchitectureTests
             "Whiskers.Services.Scheduler.TaskExecutor.RunGatedAsync",
             "Whiskers.Services.Scheduler.TaskExecutor.RunGatedAsync",
         ], entryPoints);
+
+        // Contract 0012 (step 7): the old Func<CancellationToken, …> overloads are gone — every entry point's action
+        // receives the resolved object first.
+        var untyped = types
+            .SelectMany(t => t.GetMethods(all))
+            .Where(m => m.IsDefined(typeof(MutationEntryPointAttribute), false))
+            .Where(m => !m.GetParameters().Any(p => p.ParameterType.IsGenericType
+                && p.ParameterType.GetGenericArguments() is [var first, ..] && first.IsGenericParameter
+                && first.GetGenericParameterConstraints().Contains(typeof(ResolvedTarget))))
+            .Select(m => $"{m.DeclaringType!.FullName}.{m.Name}")
+            .ToList();
+        Assert.Empty(untyped);
     }
 
     /// <summary>INV-45 review round 12 (MINOR-4): the scheduler's wrapper is trusted only because it forwards — its body
@@ -80,7 +93,7 @@ public class MutationBypassArchitectureTests
         var wrappers = root.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>()
             .Where(m => m.Identifier.Text == "RunGatedAsync").ToList();
 
-        Assert.Equal(2, wrappers.Count);
+        Assert.Equal(2, wrappers.Count);   // contract 0012 (step 7): the two typed overloads
         foreach (var wrapper in wrappers)
         {
             var calls = wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
@@ -198,8 +211,8 @@ public class MutationBypassArchitectureTests
     {
         public async Task StartAsync(string id)
         {
-            await mutations.RunAsync("container.start", new { containerId = id }, _ => docker.StartContainerAsync(id));
-            await mutations.RunAsync("container.restart", new { containerId = id }, async _ =>
+            await mutations.RunAsync("container.start", new { containerId = id }, (ResolvedTarget _, CancellationToken _) => docker.StartContainerAsync(id));
+            await mutations.RunAsync("container.restart", new { containerId = id }, async (ResolvedTarget _, CancellationToken _) =>
             {
                 await docker.RestartContainerAsync(id);
                 await docker.StopContainerAsync(id);   // not the gated capability → still a bypass
@@ -211,7 +224,7 @@ public class MutationBypassArchitectureTests
     private sealed class ComposingProbe(IUiMutationRunner mutations, Whiskers.Services.Docker.IDockerService docker)
     {
         public Task DeployAsync(string id) =>
-            mutations.RunAsync("app.deploy", new { serverId = "local" }, async _ =>
+            mutations.RunAsync("app.deploy", new { serverId = "local" }, async (ResolvedTarget _, CancellationToken _) =>
             {
                 await docker.StopContainerAsync(id);
                 await docker.RecreateContainerAsync("x");   // container.update: not composed by app.deploy
@@ -220,9 +233,9 @@ public class MutationBypassArchitectureTests
 
     private sealed class HelperProbe(IUiMutationRunner mutations, Whiskers.Services.Docker.IDockerService docker)
     {
-        public Task StartAsync(string id) => mutations.RunAsync("container.start", new { containerId = id }, _ => StartCore(id));
+        public Task StartAsync(string id) => mutations.RunAsync("container.start", new { containerId = id }, (ResolvedTarget _, CancellationToken _) => StartCore(id));
 
-        public Task StopAsync(string id) => mutations.RunAsync("container.stop", new { containerId = id }, _ => StopCore(id));
+        public Task StopAsync(string id) => mutations.RunAsync("container.stop", new { containerId = id }, (ResolvedTarget _, CancellationToken _) => StopCore(id));
 
         public Task StopUngatedAsync(string id) => StopCore(id);
 

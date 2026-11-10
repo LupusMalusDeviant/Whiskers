@@ -21,7 +21,7 @@ public interface IEndpointCheckStore
 
     /// <summary>Deletes a check and its results.</summary>
     [MutatingOperation("endpointcheck.delete")]
-    Task DeleteAsync(string id, CancellationToken ct);
+    Task DeleteAsync([MutationTarget] string id, CancellationToken ct);
 
     /// <summary>Switches a check off because its owner lost the authority to run it — only while it still has
     /// <paramref name="expectedOwnerId"/> and is on. False when an Admin took it over meanwhile, or it is gone.</summary>

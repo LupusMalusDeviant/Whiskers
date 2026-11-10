@@ -58,7 +58,7 @@ public sealed partial class PrincipalCompletenessTests
                      AutomationActor.ForGitDeploy("g1", "shop", owner),
                      AutomationActor.ForAutoUpdate(owner),
                  })
-            await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+            await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(4, f.Audit.Principals.Count);
         Assert.All(f.Audit.Principals, p =>
@@ -79,7 +79,7 @@ public sealed partial class PrincipalCompletenessTests
         var f = AutomationMutationRunnerTests.Build(requireOwner: true);
 
         await f.Runner.RunAsync(AutomationActor.ForTask("t1", "old", null, null), "container.restart",
-            new { containerId = "web-1" }, _ => Task.CompletedTask);
+            new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         var p = Assert.Single(f.Audit.Principals);
         Assert.Equal("unowned:task:t1", p.Id);

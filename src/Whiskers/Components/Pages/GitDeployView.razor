@@ -237,7 +237,7 @@ else
             var owner = _me ?? throw new InvalidOperationException("No signed-in user.");
             await Mutations.RunAsync("gitdeploy.save",
                 new { appId, name = form.Name, serverId = form.ServerId, branch = form.Branch, revision = form.Revision },
-                async _ =>
+                async (ResolvedTarget rt, CancellationToken _) =>
                 {
                     var saved = await GitDeploy.SaveAppAsync(form, token, owner);
                     // The saved app's id (new on create) is part of the gateway's event (R1-21).
@@ -276,7 +276,7 @@ else
         {
             await Mutations.RunAsync("gitdeploy.delete",
                 new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch, revision = app.Revision },
-                _ => GitDeploy.DeleteAppAsync(app.Id));
+                (ResolvedGitApp rt, CancellationToken _) => GitDeploy.DeleteAppAsync(rt.Id));
             Snackbar.Add(L["GitDeployView_Snackbar_Deleted"].Value, Severity.Success);
             _apps = await GitDeploy.GetAppsAsync();
         }
@@ -307,7 +307,7 @@ else
                 new { appId = snapshot.Id, name = snapshot.Name, serverId = snapshot.ServerId, branch = snapshot.Branch,
                       revision = snapshot.Revision },
                 // Each existing container of the deployment's plan is decided too, before the first build (R1-07).
-                async _ =>
+                async (ResolvedGitApp rt, CancellationToken _) =>
                 {
                     var deployed = await GitDeploy.DeployAsync(snapshot, Mutations.GateFor("gitdeploy.deploy"), progress);
                     // The deployment's output enriches the gateway's event (redacted there) — R1-21.
@@ -346,7 +346,7 @@ else
             var adopted = await Mutations.RunAsync("gitdeploy.save",
                 new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch,
                       revision = app.Revision, owner = me },
-                async _ =>
+                async (ResolvedTarget rt, CancellationToken _) =>
                 {
                     var changed = await GitDeploy.SetOwnerAsync(app.Id, me, previous);
                     if (changed) MutationScope.Note($"Owner: previous={previous ?? "none"}; new={me}");

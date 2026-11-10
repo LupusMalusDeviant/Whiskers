@@ -23,7 +23,7 @@ public static class MutationTargets
         ArgumentNullException.ThrowIfNull(capability);
         ArgumentNullException.ThrowIfNull(args);
         var serverId = String(args, "serverId");
-        var id = IdKey(capability.TargetKind, args) is { } key ? String(args, key) : null;
+        var id = IdKey(capability, args) is { } key ? String(args, key) : null;
         var name = capability.TargetKind switch
         {
             "host" => String(args, "projectName") ?? String(args, "appName") ?? String(args, "serviceName") ?? String(args, "siteName"),
@@ -48,7 +48,7 @@ public static class MutationTargets
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resolved);
         var canonical = new Dictionary<string, JsonElement>(args);
-        if (resolved.Resolved && IdKey(capability.TargetKind, args) is { } key && key != "serverId"
+        if (resolved.Resolved && IdKey(capability, args) is { } key && key != "serverId"
             && !string.IsNullOrEmpty(resolved.Id))
             canonical[key] = JsonSerializer.SerializeToElement(resolved.Id);
         // The server is passed whenever the tool takes one, also when the caller left it out: "no server" means the
@@ -62,16 +62,20 @@ public static class MutationTargets
         return canonical;
     }
 
-    /// <summary>The argument that names the target of a kind, if the caller passed one.</summary>
-    private static string? IdKey(string kind, IReadOnlyDictionary<string, JsonElement> args) => kind switch
+    /// <summary>The argument that names the target of a capability, if the caller passed one. A volume backup is named
+    /// by its backup id, a log-alert rule by its rule id where the call has one (contract 0012, D5, D6).</summary>
+    private static string? IdKey(Capability capability, IReadOnlyDictionary<string, JsonElement> args) => capability.TargetKind switch
     {
         "container" => "containerId",
         "network" => Has(args, "networkId") ? "networkId" : "name",
         "dns-zone" => "zone",
         "cloud-server" => "server",
         "scheduled-task" => Has(args, "taskId") ? "taskId" : "name",
-        "log-alert" => "name",
+        "log-alert" => Has(args, "ruleId") ? "ruleId" : "name",
+        "volume" when capability.Id is "volume.restore" or "volume.backup_delete" => "backupId",
         "volume" => Has(args, "volumeName") ? "volumeName" : "name",
+        "whiskers" when capability.Id == "selfbackup.delete" => "archive",
+        "fleet" when capability.Id == "automation.owner_set" => "feature",
         "workload" => "workloadId",
         "git-deploy-app" => "appId",
         "webhook" => "webhookId",
@@ -93,13 +97,34 @@ public static class MutationTargets
 /// <summary>Result of resolving a target against the inventory: the canonical target, or why it was refused —
 /// with a <see cref="MutationReasonCodes"/> code and its arguments, so the UI can say it in the user's language.</summary>
 public sealed record TargetResolution(MutationTarget? Target, string? Error, string? Code = null,
-    IReadOnlyList<string>? Args = null);
+    IReadOnlyList<string>? Args = null)
+{
+    /// <summary>Contract 0012 (D1): the typed object the execution acts on, built by the resolver from
+    /// <see cref="Target"/> (which stays the recorded form). Set by <see cref="MutationTargetResolver"/> for every
+    /// resolved target; <c>null</c> for a refusal and from a resolver that builds none (test doubles).</summary>
+    public ResolvedTarget? Object { get; init; }
+
+    /// <summary>How a branch builds its object from the final recorded target (inside the resolver only).</summary>
+    internal Func<MutationTarget, ResolvedTarget>? Build { get; init; }
+}
 
 /// <summary>Pipeline step after authorization: the target must exist and be unambiguous before policy is
 /// evaluated (INV-57). An unresolved target is refused.</summary>
 public interface IMutationTargetResolver
 {
     Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct);
+
+    /// <summary>
+    /// Contract 0012 (D9): reads <paramref name="target"/> again right before it is acted on — resolving
+    /// <paramref name="request"/> (the target as the caller named it) the same way as the decision did — and compares
+    /// the object's stable identity, server and
+    /// <see cref="ResolvedTarget.Fingerprint"/>. Returns a resolution with <see cref="TargetResolution.Target"/> set
+    /// when the object is still the decided one; otherwise a refusal coded
+    /// <see cref="MutationReasonCodes.TargetUnknown"/> (vanished) or <see cref="MutationReasonCodes.TargetChanged"/>
+    /// (replaced or changed). A read that fails throws; the gateway refuses (fail closed).
+    /// </summary>
+    Task<TargetResolution> ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target,
+        CancellationToken ct);
 }
 
 /// <summary>
@@ -110,15 +135,17 @@ public interface IMutationTargetResolver
 /// container a network is connected to, a workload's live controller) so a protected resource is matched on what
 /// really changes.
 /// <para>Operations that create their target (a new network or task) resolve only the server; adding or saving a
-/// server matches only that server by its own id (never the default server or a name) and passes a new one through. Volumes,
-/// log alerts and the Whiskers-wide kinds pass through: their services identify them by a name they own.</para>
+/// server matches only that server by its own id (never the default server or a name) and passes a new one through.</para>
+/// <para>Contract 0012: every kind has a branch — volumes and volume backups, log-alert rules and Whiskers' own records
+/// included (<c>MutationTargetObjects.cs</c>) — and every resolution carries its typed <see cref="ResolvedTarget"/>
+/// (<see cref="TargetResolution.Object"/>). A kind without a branch is refused.</para>
 /// </summary>
-public sealed class MutationTargetResolver : IMutationTargetResolver
+public sealed partial class MutationTargetResolver : IMutationTargetResolver
 {
-    /// <summary>Capabilities whose target does not exist yet.</summary>
+    /// <summary>Capabilities whose target does not exist yet (and <c>server.onboard</c>, which may name a new server).</summary>
     private static readonly HashSet<string> Creates = new(StringComparer.Ordinal)
     {
-        "network.create", "scheduler.create", "server.onboard",
+        "network.create", "scheduler.create", "server.onboard", "container.create",
     };
 
     private readonly IServiceProvider _services;
@@ -136,8 +163,11 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
 
         var resolution = capability.TargetKind switch
         {
+            "container" when Creates.Contains(capability.Id) => NewOnServer(target),
             "container" => await ContainerAsync(request, capability, target, ct),
             "host" => await HostAsync(request, capability, target, ct),
+            "server" when capability.Id.StartsWith("endpointcheck.", StringComparison.Ordinal) =>
+                await RecordAsync(request, capability, target, ct),
             "server" => Server(target, NullIfEmpty(target.Id) ?? target.ServerId,
                 mustExist: capability.Id is not ("server.onboard" or "server.save")),
             "network" => await NetworkAsync(request, capability, target, ct),
@@ -147,9 +177,20 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             "workload" => await WorkloadAsync(target, ct),
             "git-deploy-app" => await GitAppAsync(request, capability, target, ct),
             "webhook" => await WebhookAsync(request, capability, target),
-            _ => Pass(target),
+            "volume" => await VolumeAsync(request, capability, target, ct),
+            "log-alert" => await LogAlertAsync(capability, target),
+            "config" or "account" or "identity" or "whiskers" or "fleet" => await RecordAsync(request, capability, target, ct),
+            // Contract 0012 (D2): every kind has a branch; one without is refused, never passed through.
+            _ => Refuse($"'{capability.Id}' acts on a '{capability.TargetKind}', which Whiskers cannot resolve."),
         };
-        return await WithMentionedContainersAsync(request, resolution, ct);
+        return Finish(capability, await WithMentionedContainersAsync(request, resolution, ct));
+    }
+
+    /// <summary>An object the operation creates on a server: the server only.</summary>
+    private TargetResolution NewOnServer(MutationTarget target)
+    {
+        var (server, error) = ResolveServer(target.ServerId);
+        return server is null ? Refuse(error!, target.ServerId) : Pass(target with { ServerId = server.Id });
     }
 
     /// <summary>Shortest word of free text that is looked up as a container id (Docker's short ids have 12), so
@@ -234,13 +275,20 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (container is null)
             return Refuse(notFound ?? $"Container not found: {target.Id}", target.Id);
         var resolved = target with { Id = container.Id, Name = container.Name, ServerId = server.Id };
+        // Contract 0012 (D9): a container replaced under the same name has another id or creation time.
+        var fingerprint = Hash(container.Id, container.Created.ToString("O"));
+        var project = container.ComposeProject is { Length: > 0 } p && p != "Standalone" ? p : null;
+        Func<MutationTarget, ResolvedTarget> build = t => new ResolvedContainer(Token, t, fingerprint, project);
 
         // A changed .env brings the container's whole compose project up (R1-07): every container of the plan is
         // decided with it. A plan that cannot be made is refused.
         if (capability.Id == "container.env_set" && MutationTargets.String(request.Arguments, "envVars") is { } envVars)
-            return await WithPlanAsync(resolved,
+        {
+            var planned = await WithPlanAsync(resolved,
                 planner => planner.PlanEnvChangeAsync(container, server.Id, existing => DotEnvMerge.Merge(existing, envVars).Content, ct));
-        return Done(resolved);
+            return planned.Target is null ? planned : planned with { Build = build };
+        }
+        return Done(resolved, build);
     }
 
     /// <summary>A host-level operation: its server. A compose deployment that brings its file along (the MCP
@@ -252,6 +300,9 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         CancellationToken ct)
     {
         var resolution = Server(target, target.ServerId ?? NullIfEmpty(target.Id), mustExist: true);
+        // Contract 0012 (D11): an nginx site, a systemd unit or a firewall rule on the server, against the host's listing.
+        if (resolution.Target is { } onServer && CapabilityCatalog.HostObjects.Contains(capability.Id))
+            return await HostObjectAsync(request, capability, onServer);
         if (resolution.Target is { } pruned && capability.Id == "host.prune")
             return await WithStoppedContainersAsync(pruned,
                 MutationTargets.String(request.Arguments, "containerIds")?.Split('\n', StringSplitOptions.RemoveEmptyEntries), ct);
@@ -568,16 +619,25 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (factory is null)
             return Refuse("No workload runtime is available to resolve the target.");
 
-        // Live, not the label the page rendered: start / stop scale and restart rolls the pod's CURRENT controller.
-        var pod = await factory.GetForServer(server.Id).GetWorkloadAsync(target.Id, ct);
-        if (pod is null) return Refuse($"Workload not found: {target.Id}", target.Id);
-        var controller = pod.ComposeProject is { Length: > 0 } c && c != "Standalone" ? c : pod.Name;
+        // Live, not the label the page rendered: start / stop scale and restart roll the pod's CURRENT controller —
+        // read here with its UID (contract 0012, D8), and acted on exactly as read: the provider reads nothing again.
+        var identity = await factory.GetForServer(server.Id).GetWorkloadIdentityAsync(target.Id, ct);
+        if (identity is null) return Refuse($"Workload not found: {target.Id}", target.Id);
+        var pod = identity.Workload;
+        var controller = identity.ControllerKind is "None" or "Container"
+            ? pod.ComposeProject is { Length: > 0 } c && c != "Standalone" ? c : pod.Name
+            : identity.ControllerName;
+        // D9: a controller replaced under the same name has another UID; a bare pod (or a container) is its own UID.
+        var fingerprint = identity.ControllerKind is "None"
+            ? Hash(pod.Id, identity.PodUid)
+            : Hash(identity.Namespace, identity.ControllerKind, identity.ControllerName, identity.ControllerUid);
         return Done(target with
         {
             Id = pod.Id, Name = controller, ServerId = server.Id,
             Related = new[] { pod.Id, pod.Name }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
             Aliases = Aliases(pod.Name),
-        });
+        }, t => new ResolvedWorkload(Token, t, fingerprint, pod.Id, identity.ControllerName, identity.Namespace,
+            identity.ControllerKind, identity.ControllerUid, identity.PodUid));
     }
 
     /// <summary>
@@ -627,13 +687,15 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         if (capability.Id != "gitdeploy.save" && !string.IsNullOrWhiteSpace(target.ServerId)
             && ResolveServer(target.ServerId).Server?.Id != server.Id)
             return Refuse($"'{app.Name}' deploys to '{server.Id}', not to '{target.ServerId}'.");
+        var revisionDecided = app.Revision;
         return Done(target with
         {
             Id = app.Id, Name = capability.Id == "gitdeploy.save" ? target.Name ?? app.Name : app.Name,
             ServerId = server.Id, Related = [app.Name, app.RepoUrl],
             // The stored name and the repository are the app's own, not another resource it acts on.
             Aliases = Aliases(app.Name, app.RepoUrl),
-        });
+        }, t => new ResolvedGitApp(Token, t, Hash(app.Id, revisionDecided.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            revisionDecided));
     }
 
     /// <summary>
@@ -680,14 +742,20 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
             return Refuse($"Webhook not found: {target.Id}", target.Id);
         var serverId = Whiskers.Services.Webhooks.WebhookTargets.ServerOf(webhook);
         var server = ResolveServer(serverId).Server;
+        var fingerprint = WebhookFingerprint(webhook);
         return Done(target with
         {
             Id = webhook.WebhookId, Name = webhook.Name, ServerId = server?.Id ?? serverId,
             Related = new[] { webhook.Name, webhook.TargetId }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
             Aliases = Aliases(webhook.Name),
             RelatedResources = new[] { Aliases(webhook.TargetId) }.Where(g => g.Count > 0).ToList(),
-        });
+        }, t => new ResolvedWebhook(Token, t, fingerprint, null));
     }
+
+    /// <summary>Contract 0012 (D9): what makes a webhook another one — its action, target, server, owner and switch.</summary>
+    internal static string WebhookFingerprint(WebhookEntity webhook) =>
+        Hash(webhook.WebhookId, webhook.Action, webhook.TargetType, webhook.TargetId, webhook.ServerId, webhook.Owner,
+            webhook.Enabled ? "on" : "off");
 
     /// <summary>The server a call acts on: an empty id is the configured default server; otherwise exactly one
     /// server whose id matches (case-sensitive first) or whose id / name matches ignoring case.</summary>

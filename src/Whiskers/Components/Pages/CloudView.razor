@@ -152,15 +152,15 @@
             var msg = action switch
             {
                 "poweron" => await Mutations.RunAsync("cloud.power_on", new { server },
-                    _ => CloudControl.PowerOnAsync(server)),
+                    (ResolvedCloudServer cloud, CancellationToken _) => CloudControl.PowerOnAsync(cloud.Id)),
                 "shutdown" => await Mutations.RunAsync("cloud.shutdown", new { server },
-                    _ => CloudControl.ShutdownAsync(server)),
+                    (ResolvedCloudServer cloud, CancellationToken _) => CloudControl.ShutdownAsync(cloud.Id)),
                 "reboot" => await Mutations.RunAsync("cloud.reboot", new { server },
-                    _ => CloudControl.RebootAsync(server)),
+                    (ResolvedCloudServer cloud, CancellationToken _) => CloudControl.RebootAsync(cloud.Id)),
                 "reset" => await Mutations.RunAsync("cloud.hard_reset", new { server },
-                    _ => CloudControl.HardResetAsync(server)),
+                    (ResolvedCloudServer cloud, CancellationToken _) => CloudControl.HardResetAsync(cloud.Id)),
                 "snapshot" => await Mutations.RunAsync("cloud.snapshot_create", new { server, description },
-                    _ => CloudControl.CreateSnapshotAsync(server, description)),
+                    (ResolvedCloudServer cloud, CancellationToken _) => CloudControl.CreateSnapshotAsync(cloud.Id, description)),
                 _ => L["CloudView_Snackbar_UnknownAction"].Value
             };
             Snackbar.Add(msg, Severity.Success);

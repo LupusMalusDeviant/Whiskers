@@ -108,10 +108,10 @@ public sealed class HumanPrincipalTests
         var audit = new AutomationMutationRunnerTests.PrincipalAudit();
         var gateway = new MutationGateway(new CapabilityCatalog(),
             AgentToolTestHelpers.Policy(new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault())), audit, [],
-            NullLogger<MutationGateway>.Instance);
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver());
         var ui = new UiMutationRunner(gateway, new CapabilityCatalog(), new SignedIn("Ops@Example.com", "local:u-1", "sid-9"));
 
-        await ui.RunAsync("container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+        await ui.RunAsync("container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         var p = Assert.Single(audit.Principals);
         Assert.Equal(MutationPrincipalKind.Human, p.Kind);

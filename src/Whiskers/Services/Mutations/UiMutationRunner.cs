@@ -14,20 +14,29 @@ namespace Whiskers.Services.Mutations;
 /// </summary>
 public interface IUiMutationRunner
 {
-    /// <summary>Runs <paramref name="action"/> through the gateway and returns its result.</summary>
+    /// <summary>
+    /// Runs <paramref name="action"/> through the gateway and returns its result.
+    /// Contract 0012 (D3): it runs on the object the gateway resolved and confirmed — the page writes its type in the
+    /// lambda (<c>(ResolvedContainer c, CancellationToken ct) =&gt; …</c>) and acts on it, never on an id of its own. A <typeparamref name="TTarget"/> that is not the capability's
+    /// <see cref="Capability.TargetType"/> (or a base of it) is refused before the gateway is asked, and the refusal is
+    /// recorded (INV-45).
+    /// </summary>
     /// <exception cref="MutationRefusedException">The gateway refused the call (level, tool switch, kill switch,
     /// protected resource, unknown target, audit not writable). Nothing ran.</exception>
     /// <exception cref="MutationFailedException">The call ran past its deadline.</exception>
     /// <remarks>An exception thrown by <paramref name="action"/> itself is rethrown unchanged, so a page's existing
     /// error handling keeps working.</remarks>
     [MutationEntryPoint]
-    Task<T> RunAsync<T>(string capabilityId, object arguments, Func<CancellationToken, Task<T>> action,
-        CancellationToken ct = default);
+    Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments, Func<TTarget, CancellationToken, Task<T>> action,
+        CancellationToken ct = default) where TTarget : ResolvedTarget =>
+        // A runner that cannot obtain a resolved object (a test double) refuses: only the resolver makes one (D4 a).
+        throw new NotSupportedException($"{GetType().Name} cannot run on a resolved target.");
 
-    /// <inheritdoc cref="RunAsync{T}"/>
+    /// <inheritdoc cref="RunAsync{TTarget, T}"/>
     [MutationEntryPoint]
-    Task RunAsync(string capabilityId, object arguments, Func<CancellationToken, Task> action,
-        CancellationToken ct = default);
+    Task RunAsync<TTarget>(string capabilityId, object arguments, Func<TTarget, CancellationToken, Task> action,
+        CancellationToken ct = default) where TTarget : ResolvedTarget =>
+        throw new NotSupportedException($"{GetType().Name} cannot run on a resolved target.");
 
     /// <summary>
     /// Records that the page refused <paramref name="capabilityId"/> on <paramref name="arguments"/> itself (its role
@@ -72,12 +81,44 @@ public sealed class UiMutationRunner : IUiMutationRunner
         _user = user ?? throw new ArgumentNullException(nameof(user));
     }
 
-    public async Task<T> RunAsync<T>(string capabilityId, object arguments, Func<CancellationToken, Task<T>> action,
-        CancellationToken ct = default)
+    public Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments,
+        Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        return RunCoreAsync<T>(capabilityId, arguments, typeof(TTarget),
+            (context, token) => action(ResolvedTargetOf<TTarget>(context), token), ct);
+    }
+
+    public Task RunAsync<TTarget>(string capabilityId, object arguments, Func<TTarget, CancellationToken, Task> action,
+        CancellationToken ct = default) where TTarget : ResolvedTarget
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        return RunCoreAsync<bool>(capabilityId, arguments, typeof(TTarget), async (context, token) =>
+        {
+            await action(ResolvedTargetOf<TTarget>(context), token);
+            return true;
+        }, ct);
+    }
+
+    /// <summary>Contract 0012 (D3): the decided object as the lambda's type. The type was checked against the
+    /// capability before the gateway was asked; an object missing here (a gateway without a resolver) fails the run
+    /// before the lambda acts on anything.</summary>
+    internal static TTarget ResolvedTargetOf<TTarget>(MutationContext context) where TTarget : ResolvedTarget =>
+        context.Target as TTarget ?? throw new InvalidOperationException(
+            $"'{context.Capability.Id}' has no resolved {typeof(TTarget).Name} to act on; nothing ran.");
+
+    /// <summary>Contract 0012 (D3): why <paramref name="targetType"/> cannot receive what <paramref name="capability"/>
+    /// resolves to, or <c>null</c> when it can (its declared type or a base of it).</summary>
+    internal static string? TargetTypeMismatch(Capability? capability, Type? targetType) =>
+        capability is null || targetType is null || targetType.IsAssignableFrom(capability.TargetType)
+            ? null
+            : $"'{capability.Id}' acts on a {capability.TargetType.Name}, not a {targetType.Name}; nothing ran.";
+
+    private async Task<T> RunCoreAsync<T>(string capabilityId, object arguments, Type? targetType,
+        Func<MutationContext, CancellationToken, Task<T>> action, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(capabilityId);
         ArgumentNullException.ThrowIfNull(arguments);
-        ArgumentNullException.ThrowIfNull(action);
 
         var args = ToArguments(arguments);
         // An unknown id still goes to the gateway, which refuses it and records the refusal.
@@ -100,9 +141,16 @@ public sealed class UiMutationRunner : IUiMutationRunner
                     : "Your session has ended. Sign in again.", MutationStatus.Denied, refused.OperationId);
         }
 
+        // Contract 0012 (D3): a lambda typed for another kind of object is refused before the gateway is asked.
+        if (TargetTypeMismatch(capability, targetType) is { } mismatch)
+        {
+            var refused = await _gateway.RefuseAsync(request, mismatch, ct);
+            throw new MutationRefusedException(mismatch, MutationStatus.Denied, refused.OperationId);
+        }
+
         // A service that answers with a failure value instead of throwing is recorded as Failed (MutationResults).
         var outcome = await _gateway.ExecuteAsync(request,
-            async (_, token) => MutationResults.Report(await action(token)), ct);
+            async (context, token) => MutationResults.Report(await action(context, token)), ct);
         switch (outcome.Status)
         {
             case MutationStatus.Executed:
@@ -155,17 +203,6 @@ public sealed class UiMutationRunner : IUiMutationRunner
         if (_text is null || outcome.ReasonCode is not { } code) return null;
         var text = _text[MutationReasonCodes.KeyOf(code), outcome.ReasonArgs.Cast<object>().ToArray()];
         return text.ResourceNotFound ? null : text.Value;
-    }
-
-    public Task RunAsync(string capabilityId, object arguments, Func<CancellationToken, Task> action,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-        return RunAsync<bool>(capabilityId, arguments, async token =>
-        {
-            await action(token);
-            return true;
-        }, ct);
     }
 
     /// <summary>The signed-in user, with the session re-checked now (R1-26). The current role decides the level; the

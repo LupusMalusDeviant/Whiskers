@@ -43,7 +43,7 @@ internal static class AuditTrail
         IMutationTargetResolver? targets = null, IEnumerable<IMutationVerifier>? verifiers = null,
         ITriggerAuthority? triggers = null) =>
         new(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), new AuditLogMutationSink(scopes), verifiers ?? [],
-            NullLogger<MutationGateway>.Instance, targets: targets,
+            NullLogger<MutationGateway>.Instance, targets: targets ?? TestTargets.Resolver(),
             approvals: new ApprovalGate(approvals ?? new ApprovalStore(), store),
             decisions: new DbPolicyDecisionStore(scopes), triggers: triggers, journal: new DbOperationJournal(scopes));
 

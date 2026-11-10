@@ -299,7 +299,7 @@ else
             var wh = await Mutations.RunAsync("webhook.save",
                 new { name = entity.Name, action = entity.Action, target = entity.TargetId, serverId = entity.ServerId, owner,
                       provider = entity.Provider },
-                async _ =>
+                async (ResolvedTarget rt, CancellationToken _) =>
                 {
                     var created = await WebhookService.CreateWebhookAsync(entity);
                     // The new webhook's id is part of the gateway's event (R1-22); its secret never is.
@@ -328,7 +328,7 @@ else
             var previous = wh.Owner;
             var adopted = await Mutations.RunAsync("webhook.save",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId, owner = me },
-                async _ =>
+                async (ResolvedTarget rt, CancellationToken _) =>
                 {
                     var changed = await WebhookService.SetOwnerAsync(wh.WebhookId, me, previous);
                     if (changed) MutationScope.Note($"Owner: previous={previous ?? "none"}; new={me}");
@@ -398,7 +398,7 @@ else
                 var (container, _) = await Whiskers.Services.Webhooks.WebhookTargets.ContainerAsync(DockerService, wh);
                 return await Mutations.RunAsync(wh.Action == "restart" ? "container.restart" : "container.update",
                     new { containerId = container?.Id ?? wh.TargetId, name = container?.Name ?? wh.TargetId, serverId },
-                    _ => Fire());
+                    (ResolvedContainer rt, CancellationToken _) => Fire());
             }
             case "deploy":
             {
@@ -407,7 +407,7 @@ else
                 if (plan is null) return (false, error!);   // nothing can be decided, so nothing runs
                 return await Mutations.RunAsync("compose.deploy",
                     new { projectName = plan.ProjectNameForAudit, projectDir = plan.ProjectDirectory, serverId },
-                    _ => Mutations.RunForEachAsync("compose.deploy", plan.Containers, serverId, Fire));
+                    (ResolvedHostObject rt, CancellationToken _) => Mutations.RunForEachAsync("compose.deploy", plan.Containers, serverId, Fire));
             }
             case "git-deploy":
             {
@@ -416,7 +416,7 @@ else
                 var app = await GitDeploy.GetAppAsync(wh.TargetId);
                 if (app is null) return (false, "Git deploy app not found.");
                 return await Mutations.RunAsync("gitdeploy.deploy",
-                    new { appId = app.Id, name = app.Name, serverId = app.ServerId, revision = app.Revision }, _ => Fire());
+                    new { appId = app.Id, name = app.Name, serverId = app.ServerId, revision = app.Revision }, (ResolvedGitApp rt, CancellationToken _) => Fire());
             }
             default:
                 return await Fire();
@@ -446,7 +446,7 @@ else
             // The new secret is the action's result for the one-time display, never an argument of the decision.
             var secret = await Mutations.RunAsync("webhook.rotate_secret",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId },
-                _ => WebhookService.RegenerateSecretAsync(wh.WebhookId));
+                (ResolvedWebhook rt, CancellationToken _) => WebhookService.RegenerateSecretAsync(rt.Id));
             ShowSecretOnce(wh.WebhookId, secret);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }
@@ -463,7 +463,7 @@ else
             var enable = !wh.Enabled;
             await Mutations.RunAsync("webhook.set_enabled",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId, enabled = enable },
-                _ => WebhookService.SetEnabledAsync(wh.WebhookId, enable));
+                (ResolvedWebhook rt, CancellationToken _) => WebhookService.SetEnabledAsync(rt.Id, enable));
             Snackbar.Add(wh.Enabled ? L["WebhooksView_Snackbar_Disabled"].Value : L["WebhooksView_Snackbar_Enabled"].Value, Severity.Success);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }
@@ -501,7 +501,7 @@ else
         {
             await Mutations.RunAsync("webhook.delete",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId },
-                _ => WebhookService.DeleteWebhookAsync(wh.WebhookId));
+                (ResolvedWebhook rt, CancellationToken _) => WebhookService.DeleteWebhookAsync(rt.Id));
             Snackbar.Add(L["WebhooksView_Snackbar_Deleted"].Value, Severity.Success);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }

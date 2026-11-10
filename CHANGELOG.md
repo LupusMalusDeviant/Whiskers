@@ -6,6 +6,24 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Mutations act on the object the gateway resolved (INV-57 ✅, contract 0012).** Every capability declares
+  how its target resolves; volumes, volume backups, log-alert rules and Whiskers' own records are resolved before policy
+  like containers and servers. Right before an object is acted on it is read again: a container, rule or record that
+  vanished or was recreated since the decision is refused (`TargetUnknown` / `TargetChanged`), nothing runs and an
+  approval given for it stays usable. Every page, automation, webhook and workload action receives the resolved object;
+  the runner overloads without it are gone. A webhook delivery is decided on the target its webhook stores and
+  acts on the container, server or Git app the gateway resolved; a container replaced or an app moved after the
+  delivery read it is refused as changed. A Kubernetes start, stop or restart acts on the controller the decision
+  read — the patch carries its UID as a precondition, a bare pod is deleted with its UID — and no longer reads the pod
+  again; a controller replaced in between is refused. nginx sites, systemd units and a firewall rule to remove are
+  resolved against the host's own listing before policy (an unknown one is refused, a rule list renumbered in between
+  is refused as changed). An operation that names its object (`[MutationTarget]`, now on every object operation that
+  takes one) runs only on the decided id, name or alias — an argument value the policy merely saw no longer counts; a
+  deleted endpoint check is refused before policy instead of failing in its run.
+  **Upgrade (Kubernetes):** the workload role now needs `get` on `replicasets` and `patch` on `deployments`,
+  `statefulsets` and `daemonsets` (start, stop and restart patch the controller itself, not its scale subresource).
+  Apply `deploy/k8s/whiskers-agent-rbac.yaml` again on every connected cluster — with an older or hand-made role,
+  start, stop and restart fail with 403.
 - **Private keys sealed at rest, and `VAULT_KEY` rotation (INV-52, contract 0015).** SSH keys and mTLS client keys in
   the data directory are now sealed with the vault key (same file, `f1:` content); a start-up migration seals existing
   plaintext keys and removes the plaintext. SSH keys are opened only into a short-lived 0600 lease in memory

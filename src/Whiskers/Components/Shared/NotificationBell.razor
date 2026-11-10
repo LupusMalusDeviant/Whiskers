@@ -114,7 +114,7 @@
             try
             {
                 await Mutations.RunAsync("notifications.mark_read", new { },
-                    _ => { Store.MarkAllRead(); return Task.CompletedTask; });
+                    (ResolvedRecord rt, CancellationToken _) => { Store.MarkAllRead(); return Task.CompletedTask; });
             }
             catch (MutationRefusedException) { /* recorded as Denied; the list stays unread */ }
         }
@@ -131,7 +131,7 @@
         try
         {
             await Mutations.RunAsync("notifications.clear", new { },
-                _ => { Store.Clear(); return Task.CompletedTask; });
+                (ResolvedRecord rt, CancellationToken _) => { Store.Clear(); return Task.CompletedTask; });
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
     }

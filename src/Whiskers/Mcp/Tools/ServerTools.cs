@@ -295,7 +295,7 @@ public class ServerTools
         if (ruleNumber <= 0)
             return MutationScope.Fail("Rule number must be a positive integer.");
 
-        var result = await firewall.RemoveRuleAsync(serverId, ruleNumber);
+        var result = await firewall.RemoveRuleAsync(serverId, ruleNumber.ToString(System.Globalization.CultureInfo.InvariantCulture));
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         await auditLog.LogAsync(actor, actorType, "firewall.remove", "firewall", ruleNumber.ToString(), $"Rule #{ruleNumber}", serverId: serverId, success: result.Success);
         return result.Success ? $"Rule {ruleNumber} removed." : $"Failed: {result.Error}";

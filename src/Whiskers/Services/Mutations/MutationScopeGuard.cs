@@ -212,7 +212,10 @@ public class MutationScopeProxy<TService> : DispatchProxy, IMutationScopeProxy w
             // computed or captured, it acts only on an identity the decision covered, on the decided server.
             if (TargetArgumentIndex(marked) is var t and >= 0)
             {
-                var identity = args is not null && t < args.Length ? args[t] as string : null;
+                // A resolved object (contract 0012, D8) is named by its stable id.
+                var identity = args is not null && t < args.Length
+                    ? args[t] switch { string s => s, ResolvedTarget resolved => resolved.Id, _ => null }
+                    : null;
                 if (!MutationScope.AuthorizesTarget(capability, identity, actsOnServer, named, server,
                         id => _monitor.ResolveServer(id)))
                 {
@@ -300,8 +303,10 @@ public static class MutatingMethods
                 .Select(p => p.Position).ToList();
             if (marked.Count > 1)
                 throw new InvalidOperationException($"{m.DeclaringType?.Name}.{m.Name} marks more than one [MutationTarget] parameter.");
-            if (marked.Count == 1 && m.GetParameters()[marked[0]].ParameterType != typeof(string))
-                throw new InvalidOperationException($"{m.DeclaringType?.Name}.{m.Name}: a [MutationTarget] parameter must be a string.");
+            // Contract 0012 (D8): the target is named by a string, or handed over as the resolved object itself.
+            if (marked.Count == 1 && m.GetParameters()[marked[0]].ParameterType is var type
+                && type != typeof(string) && !typeof(ResolvedTarget).IsAssignableFrom(type))
+                throw new InvalidOperationException($"{m.DeclaringType?.Name}.{m.Name}: a [MutationTarget] parameter must be a string or a ResolvedTarget.");
             return marked.Count == 1 ? marked[0] : -1;
         });
     }

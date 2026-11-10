@@ -39,7 +39,7 @@ public class NotificationsRoleTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IInAppNotificationStore>(_store);
         var policy = new AgentToolTestHelpers.FixedGuardrailStore(_policy);
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(policy), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), policy));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), policy));
         Services.AddSingleton<IUiMutationRunner>(new UiMutationRunner(gateway, new CapabilityCatalog(), _user));
         JSInterop.Mode = JSRuntimeMode.Loose;
     }

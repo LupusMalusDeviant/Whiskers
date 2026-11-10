@@ -471,17 +471,17 @@ public sealed class SessionRevocationTests
         var audit = new AgentToolTestHelpers.NullMutationAudit();
         var store = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
         var runner = new UiMutationRunner(gateway, new CapabilityCatalog(), user);
         var before = false;
-        await runner.RunAsync("config.roles", new { }, _ => { before = true; return Task.CompletedTask; });
+        await runner.RunAsync("config.roles", new { }, (ResolvedTarget _, CancellationToken _) => { before = true; return Task.CompletedTask; });
         Assert.True(before);                                        // control: the Admin's session runs it
 
         await world.ApplyAsync(change);
         var ran = false;
         // config.roles needs Admin — what the page's cached role still claims.
         await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("config.roles", new { },
-            _ => { ran = true; return Task.CompletedTask; }));
+            (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
 
         Assert.False(ran);
         Assert.Contains(audit.Events, e => e.StartsWith("denied:", StringComparison.Ordinal));

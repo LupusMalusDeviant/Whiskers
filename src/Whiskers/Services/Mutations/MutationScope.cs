@@ -58,6 +58,16 @@ public sealed class MutationScope : IDisposable
                 if (value.ValueKind == System.Text.Json.JsonValueKind.String && value.GetString() is { Length: > 0 } s)
                     _decided.Add(s);
             _decided.Remove("");
+            // Contract 0012 (D4 b): the identities a [MutationTarget] argument may name — the decided object itself (its
+            // id, its name, the further names the inventory gave it), and apart from that only what it also touches.
+            _target.Add(request.Target.Id);
+            if (request.Target.Name is { } decidedName) _target.Add(decidedName);
+            _target.UnionWith(request.Target.Aliases);
+            _target.Remove("");
+            _targetRelated.UnionWith(request.Target.Related);
+            if (request.Target.RelatedContainerId is { } relatedContainer) _targetRelated.Add(relatedContainer);
+            foreach (var resource in request.Target.RelatedResources) _targetRelated.UnionWith(resource);
+            _targetRelated.Remove("");
             // Contract 0006 (review B1): the exposures and the related containers this decision covers come from the
             // resolved target only — never from a caller's argument (the resolver folds the nested decision's lists into
             // the target, and only on the UI and automation surfaces).
@@ -69,6 +79,8 @@ public sealed class MutationScope : IDisposable
         }
     }
 
+    private readonly HashSet<string> _target = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _targetRelated = new(StringComparer.Ordinal);
     private readonly HashSet<string> _exposures = new(StringComparer.Ordinal);
     private readonly HashSet<string> _related = new(StringComparer.Ordinal);
 
@@ -252,8 +264,9 @@ public sealed class MutationScope : IDisposable
     /// <summary>
     /// The target binding of a call (<see cref="MutationTargetAttribute"/>): true when an open scope of this flow that
     /// authorizes <paramref name="capabilityId"/> (it decided it, or a capability that composes it) also decided
-    /// <paramref name="identity"/> — as its resolved target, a related resource or an argument value policy saw — on
-    /// the server the call acts on. Unlike <see cref="Authorizes(string, bool, string?, Func{string, string?}?)"/>, the
+    /// <paramref name="identity"/> — as its resolved target (id, name or alias), or as a related resource when the
+    /// call is composed into the decision or the decision composes or plans (contract 0012, D4 b) — on the server the
+    /// call acts on. An argument value policy merely saw authorizes nothing. Unlike <see cref="Authorizes(string, bool, string?, Func{string, string?}?)"/>, the
     /// server is matched for the decided capability itself too: a delegate that names the decided container on another
     /// server acts on another container. Servers compare by their canonical id (<paramref name="canonical"/>), or
     /// exactly as named when neither side resolves; anything else fails closed. A scope opened without a request
@@ -286,7 +299,12 @@ public sealed class MutationScope : IDisposable
             if (!string.Equals(s.CapabilityId, capabilityId, StringComparison.Ordinal)
                 && !MutationCompositions.Allows(s.CapabilityId, capabilityId))
                 continue;
-            if (!s._decided.Contains(identity)) continue;
+            // Contract 0012 (D4 b): the decided object by its id, name or aliases; what it also touches (Related) only for
+            // a call composed into the decision or a decision that composes or plans (compose) — never an argument value
+            // policy merely saw.
+            var composes = !string.Equals(s.CapabilityId, capabilityId, StringComparison.Ordinal)
+                           || MutationCompositions.Of(s.CapabilityId).Count > 0;
+            if (!s._target.Contains(identity) && !(composes && s._targetRelated.Contains(identity))) continue;
             if (!actsOnServer || string.IsNullOrEmpty(s._serverId)) return true;
             var decided = canonical is null ? null : canonical(s._serverId);
             if (server is not null && decided is not null

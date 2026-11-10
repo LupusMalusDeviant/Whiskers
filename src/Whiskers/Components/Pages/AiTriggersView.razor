@@ -209,7 +209,7 @@
                     Enabled = true,
                 };
                 await Mutations.RunAsync("logalert.create", new { name = rule.Name, containerName = rule.ContainerName },
-                    _ => LogMonitor.CreateRuleAsync(rule));
+                    (ResolvedNew rt, CancellationToken _) => LogMonitor.CreateRuleAsync(rule));
                 Snackbar.Add(L["AiTriggersView_LogRuleCreated_Snackbar"].Value, Severity.Success);
             }
         }
@@ -234,7 +234,7 @@
         {
             var principal = await BuildPrincipalAsync();
             await Mutations.RunAsync("aitrigger.save", new { count = _triggers.Count },
-                _ => Store.SaveAsync(_triggers, principal, _readAt));
+                (ResolvedRecord rt, CancellationToken _) => Store.SaveAsync(_triggers, principal, _readAt));
             Snackbar.Add(L["AiTriggersView_Saved_Snackbar", _triggers.Count].Value, Severity.Success);
             // The store decides owner and suspension; show what it saved.
             Reload();

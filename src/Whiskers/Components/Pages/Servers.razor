@@ -388,7 +388,7 @@
         try
         {
             await Mutations.RunAsync("checks.pause", new { serverId, reason, minutes },
-                _ => { Suspension.Suspend(serverId, until, reason); return Task.CompletedTask; });
+                (ResolvedServer rt, CancellationToken _) => { Suspension.Suspend(rt.Id, until, reason); return Task.CompletedTask; });
         }
         catch (MutationRefusedException ex)
         {
@@ -408,7 +408,7 @@
         try
         {
             await Mutations.RunAsync("checks.resume", new { serverId },
-                _ => { Suspension.Resume(serverId); return Task.CompletedTask; });
+                (ResolvedServer rt, CancellationToken _) => { Suspension.Resume(rt.Id); return Task.CompletedTask; });
         }
         catch (MutationRefusedException ex)
         {
@@ -440,7 +440,7 @@
             try
             {
                 await Mutations.RunAsync("checks.pause", new { serverId, reason, minutes },
-                    _ => { Suspension.Suspend(serverId, until, reason); return Task.CompletedTask; });
+                    (ResolvedServer rt, CancellationToken _) => { Suspension.Suspend(rt.Id, until, reason); return Task.CompletedTask; });
                 paused++;
             }
             catch (MutationRefusedException ex)
@@ -524,7 +524,7 @@
     // keeps the transient SshPassword (used for onboarding) that is never written to disk. One gateway decision
     // (server.save); a validation error thrown inside still reaches the caller unchanged.
     private Task<Whiskers.Models.ServerConfig> PersistServerAsync() =>
-        Mutations.RunAsync("server.save", SaveArguments(), _ => PersistServerCoreAsync());
+        Mutations.RunAsync("server.save", SaveArguments(), (ResolvedTarget rt, CancellationToken _) => PersistServerCoreAsync(rt));
 
     private object SaveArguments()
     {
@@ -535,13 +535,13 @@
     // Set by PersistServerRecordAsync for the one save in flight (saves are serialized by _saving).
     private string? _newKubeconfigKey, _oldKubeconfigKey, _newCloudKey, _oldCloudKey;
 
-    private async Task<Whiskers.Models.ServerConfig> PersistServerCoreAsync()
+    private async Task<Whiskers.Models.ServerConfig> PersistServerCoreAsync(ResolvedTarget server)
     {
         _newKubeconfigKey = _oldKubeconfigKey = _newCloudKey = _oldCloudKey = null;
         Whiskers.Models.ServerConfig saved;
         try
         {
-            saved = await PersistServerRecordAsync();
+            saved = await PersistServerRecordAsync(server);
         }
         catch (Exception ex) when (_newKubeconfigKey is not null || _newCloudKey is not null)
         {
@@ -581,7 +581,7 @@
         try
         {
             await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
-                _ => Vault.DeleteSecretAsync(vaultKey));
+                (ResolvedRecord rt, CancellationToken _) => Vault.DeleteSecretAsync(vaultKey));
         }
         catch { /* an unused secret at worst; no server names it */ }
     }
@@ -595,12 +595,13 @@
         try
         {
             await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
-                _ => Vault.DeleteSecretAsync(vaultKey));
+                (ResolvedRecord rt, CancellationToken _) => Vault.DeleteSecretAsync(vaultKey));
         }
         catch { /* an unused secret at worst; no server names it */ }
     }
 
-    private async Task<Whiskers.Models.ServerConfig> PersistServerRecordAsync()
+    /// <param name="server">The server the decision resolved (contract 0012): its SSH key is stored under its id.</param>
+    private async Task<Whiskers.Models.ServerConfig> PersistServerRecordAsync(ResolvedTarget server)
     {
         // R1-42 (INV-41): host, user and port become ssh operands. The executor, tunnel and terminal refuse an unsafe
         // value anyway; refusing it here says so while the dialog is still open.
@@ -652,7 +653,7 @@
                 if (Whiskers.Services.Workloads.Kubernetes.KubeconfigPolicy.AdmissionViolations(kubeconfig) is { Count: > 0 } refused)
                     throw new InvalidOperationException(L["Servers_Error_KubeconfigRefused", string.Join("; ", refused)].Value);
                 await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
-                    _ => Vault.SetSecretAsync(vaultKey, kubeconfig));
+                    (ResolvedTarget rt, CancellationToken _) => Vault.SetSecretAsync(vaultKey, kubeconfig));
                 _newKubeconfigKey = vaultKey;
             }
         }
@@ -675,7 +676,7 @@
             var vaultKey = Whiskers.Services.Vault.CredentialRefs.NewCloudKey(id);
             // apiKey: a key entered now, or a plaintext one from before R1-29 that the save moves into the vault.
             await Mutations.RunAsync("vault.secret_set", new { section = "vault", key = vaultKey },
-                _ => Vault.SetSecretAsync(vaultKey, apiKey));
+                (ResolvedTarget rt, CancellationToken _) => Vault.SetSecretAsync(vaultKey, apiKey));
             _newCloudKey = vaultKey;
             // A moved plaintext key applies only while the stored record still holds it (decided under the store lock).
             cloudKey = string.IsNullOrWhiteSpace(_cloudApiKey)
@@ -702,7 +703,7 @@
             _form.Enabled = _editingServer.Enabled;
 
             if (_sshKeyData != null && _sshKeyFileName != null)
-                await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
+                await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
 
             // The store decides the kubeconfig reference when it writes (R1-11): the new one, or whatever the server
             // has at that moment — a save queued behind another admin's rotation keeps the rotated kubeconfig.
@@ -719,7 +720,7 @@
             await ServerConfigService.AddServerAsync(Record());
 
             if (_sshKeyData != null && _sshKeyFileName != null)
-                await ServerConfigService.SaveSshKeyAsync(_form.Id, _sshKeyFileName, _sshKeyData);
+                await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
 
             // The server now exists: if the connection probe fails and the user fixes the form and
             // saves again, that retry must UPDATE this entry instead of adding a duplicate id.
@@ -847,7 +848,7 @@
         if (confirmed != true) return;
         try
         {
-            var cleaned = await Mutations.RunAsync("server.remove", new { serverId = server.Id, name = server.Name }, _ =>
+            var cleaned = await Mutations.RunAsync("server.remove", new { serverId = server.Id, name = server.Name }, (ResolvedServer rt, CancellationToken _) =>
             {
                 // The server record first, then its kubeconfig and cloud API key, as one decision (R1-11): a failed
                 // removal leaves a working server, a failed cleanup at most an unused secret.
@@ -934,7 +935,7 @@
         {
             // Root installs on the target host: through the gateway like every other root-equivalent action.
             _onboardResult = await Mutations.RunAsync("server.onboard", new { serverId = server.Id, name = server.Name },
-                token => Onboarding.OnboardServerAsync(server.Id, progress, token));
+                (ResolvedTarget rt, CancellationToken token) => Onboarding.OnboardServerAsync(rt.ServerId ?? rt.Id, progress, token));
         }
         catch (MutationRefusedException ex)
         {
@@ -1015,7 +1016,7 @@
         try
         {
             var result = await Mutations.RunAsync("mtls.client_migrate", new { serverId = server.Id },
-                token => Certificates.MigrateClientAsync(server.Id, null, token));
+                (ResolvedHostObject rt, CancellationToken token) => Certificates.MigrateClientAsync(rt.ServerId!, null, token));
             if (result.Ok) Snackbar.Add(L["Servers_Mtls_Migrated", server.Name, result.Identity?.CommonName ?? ""].Value, Severity.Success);
             else Snackbar.Add(L["Servers_Mtls_MigrateFailed", server.Name, result.Phase, result.Error ?? ""].Value, Severity.Warning);
         }
@@ -1049,7 +1050,7 @@
         try
         {
             var result = await Mutations.RunAsync("mtls.shared_client_retire", new { section = "mtls" },
-                token => Certificates.RetireSharedClientAsync(token));
+                (ResolvedRecord rt, CancellationToken token) => Certificates.RetireSharedClientAsync(token));
             Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Warning);
         }
         catch (MutationRefusedException ex)

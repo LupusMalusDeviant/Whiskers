@@ -27,7 +27,17 @@ public sealed record Capability(
     string TargetKind,
     CapabilityRisk Risk,
     string? McpTool,
-    TimeSpan Deadline);
+    TimeSpan Deadline)
+{
+    /// <summary>How its target resolves (contract 0012, D2). The catalog declares it for every capability; a capability
+    /// made elsewhere (a test double) is an <see cref="TargetResolutionKind.Object"/>.</summary>
+    public TargetResolutionKind Resolution { get; init; } = TargetResolutionKind.Object;
+
+    /// <summary>The <see cref="ResolvedTarget"/> type its execution receives (D2, D3): the runners refuse a delegate
+    /// typed for anything else. <see cref="ResolvedTarget"/> itself only for a capability that saves an object which may
+    /// not exist yet (<see cref="CapabilityCatalog.Upserts"/>) and for test doubles.</summary>
+    public Type TargetType { get; init; } = typeof(ResolvedTarget);
+}
 
 /// <summary>Who acts (INV-01). Ids follow <see cref="PrincipalIds"/>.</summary>
 public enum MutationPrincipalKind { Human, ApiKey, Agent, Automation, Webhook, System }
@@ -135,6 +145,11 @@ public sealed record MutationRequest(
     /// <c>ExecuteAsync</c> reject a request that carries one, and an intent and its outcome always get a
     /// fresh id, so two attempts are never merged into one row (review rounds 6 and 7, NIT-1).</summary>
     public string? EventKey { get; init; }
+
+    /// <summary>Contract 0012 (D7): what the caller expects the target to resolve to (a webhook delivery's pre-lock
+    /// read). A resolution whose kind, id or server differs is refused before policy as
+    /// <see cref="MutationReasonCodes.TargetChanged"/>. A request field only, never stored (D14). Null: no expectation.</summary>
+    public MutationTarget? ExpectedTarget { get; init; }
 }
 
 public enum MutationStatus
@@ -243,6 +258,11 @@ public static class MutationReasonCodes
 /// <summary>Handed to the execution delegate: the decided request (with its resolved target) and its capability.</summary>
 public sealed record MutationContext(string OperationId, MutationRequest Request, Capability Capability)
 {
+    /// <summary>Contract 0012 (D3): the object the gateway resolved — and, for an <see cref="TargetResolutionKind.Object"/>
+    /// capability, confirmed right before this run (D9). What the execution acts on. <c>null</c> only from a resolver
+    /// that builds no object (a test double) or a gateway without a resolver.</summary>
+    public ResolvedTarget? Target { get; init; }
+
     /// <summary>R1-37: what the call reported for its read-back (<see cref="MutationScope.ReadBack"/>).</summary>
     public IReadOnlyDictionary<string, string> ReadBackFacts { get; init; } = new Dictionary<string, string>();
 }

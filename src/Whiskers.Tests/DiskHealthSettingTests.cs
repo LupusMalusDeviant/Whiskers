@@ -43,13 +43,13 @@ public sealed class DiskHealthSettingTests : IDisposable
     {
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
         return new UiMutationRunner(gateway, new CapabilityCatalog(), _user);
     }
 
     // As the Settings panel runs it.
     private static Task Save(UiMutationRunner runner, IDiskHealthSettingsService service, bool enabled) =>
-        runner.RunAsync("config.save", new { section = "diskhealth" }, ct => service.SaveAsync(enabled, ct));
+        runner.RunAsync("config.save", new { section = "diskhealth" }, (ResolvedTarget _, CancellationToken ct) => service.SaveAsync(enabled, ct));
 
     [Fact]
     public void It_is_off_by_default()
@@ -72,7 +72,7 @@ public sealed class DiskHealthSettingTests : IDisposable
         var service = Service();
         var intentFirst = false;
 
-        await Runner().RunAsync("config.save", new { section = "diskhealth" }, async ct =>
+        await Runner().RunAsync("config.save", new { section = "diskhealth" }, async (ResolvedTarget _, CancellationToken ct) =>
         {
             intentFirst = _audit.Events.Contains("begin:config.save:");
             await service.SaveAsync(true, ct);

@@ -39,7 +39,12 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<Whiskers.Modules.IModuleRegistry>(new HostManagementEnabled());
         var store = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store),
+            // Contract 0012: the dialog acts on the server the gateway resolved.
+            targets: new MutationTargetResolver(new ServiceCollection()
+                .AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
+                    new Whiskers.Models.ServerConfig { Id = "srv-1", Name = "srv-1", IsDefault = true }))
+                .BuildServiceProvider()));
         Services.AddSingleton<IUiMutationRunner>(new UiMutationRunner(gateway, new CapabilityCatalog(), _user));
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
@@ -145,7 +150,7 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
             lock (Calls) Calls.Add($"add:{serverId}:{port}:{protocol}:{action}:{from}");
             return Task.FromResult(new CommandResult());
         }
-        public Task<CommandResult> RemoveRuleAsync(string serverId, int ruleNumber)
+        public Task<CommandResult> RemoveRuleAsync(string serverId, string ruleNumber)
         {
             lock (Calls) Calls.Add($"remove:{serverId}:{ruleNumber}");
             return Task.FromResult(new CommandResult());

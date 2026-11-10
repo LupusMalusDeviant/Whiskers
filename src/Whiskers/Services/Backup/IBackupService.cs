@@ -22,7 +22,7 @@ public interface IBackupService
 
     /// <summary>Deletes a backup archive and its sidecar.</summary>
     [Whiskers.Services.Mutations.MutatingOperation("selfbackup.delete")]
-    Task DeleteBackupAsync(string id, CancellationToken ct = default);
+    Task DeleteBackupAsync([Whiskers.Services.Mutations.MutationTarget] string id, CancellationToken ct = default);
 
     /// <summary>Retention: keeps the newest <paramref name="keepNewest"/> backups and deletes the rest.</summary>
     [Whiskers.Services.Mutations.MutatingOperation("selfbackup.prune")]

@@ -39,7 +39,6 @@ Highest invariant ID: INV-62
 
 | Invariant | Status | Package | Why it is open | Reference |
 |---|---|---|---|---|
-| INV-57 | ⚠️ | WP2 | UI and automation delegates, webhooks, workloads, volumes and log alerts do not act on the resolved target object | — |
 | INV-58 | ⚠️ | R1-44 | holds per host only after the migration; hosts on the shared client credential are exposed (D12) | — |
 
 ## Retired invariants

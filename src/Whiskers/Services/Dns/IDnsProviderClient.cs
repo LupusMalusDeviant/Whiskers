@@ -15,14 +15,14 @@ public interface IDnsProviderClient
 
     /// <summary>Creates the record; returns it with the provider-assigned id.</summary>
     [Whiskers.Services.Mutations.MutatingOperation("dns.record_set")]
-    Task<DnsRecord> CreateRecordAsync(string token, string zone, DnsRecord record, CancellationToken ct = default);
+    Task<DnsRecord> CreateRecordAsync(string token, [Whiskers.Services.Mutations.MutationTarget] string zone, DnsRecord record, CancellationToken ct = default);
 
     /// <summary>Replaces value/TTL of the record with the given id; name and type stay as they are.</summary>
     [Whiskers.Services.Mutations.MutatingOperation("dns.record_set")]
-    Task<DnsRecord> UpdateRecordAsync(string token, string zone, string recordId, DnsRecord record, CancellationToken ct = default);
+    Task<DnsRecord> UpdateRecordAsync(string token, [Whiskers.Services.Mutations.MutationTarget] string zone, string recordId, DnsRecord record, CancellationToken ct = default);
 
     [Whiskers.Services.Mutations.MutatingOperation("dns.record_delete")]
-    Task DeleteRecordAsync(string token, string zone, string recordId, CancellationToken ct = default);
+    Task DeleteRecordAsync(string token, [Whiskers.Services.Mutations.MutationTarget] string zone, string recordId, CancellationToken ct = default);
 }
 
 /// <summary>A provider answered with an error (HTTP status and/or an error envelope). The message carries the

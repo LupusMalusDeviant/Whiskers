@@ -133,6 +133,6 @@ public sealed class WebhookPrincipalTests : IDisposable
             "gitdeploy.deploy" => new { appId = "0123456789ab" },
             _ => new { containerId = "web-1" },
         };
-        return await f.Runner.RunAsync(actor, capability, arguments, _ => Task.CompletedTask);
+        return await f.Runner.RunAsync(actor, capability, arguments, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
     }
 }

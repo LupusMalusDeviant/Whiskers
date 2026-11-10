@@ -217,7 +217,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 updateActor = actor;
                 var outcome = await _automation.RunAsync(actor,
                     "container.update", new { containerId = container.Id, name = container.Name, serverId = sid },
-                    async _ =>
+                    async (ResolvedContainer decided, CancellationToken _) =>
                     {
                         // C12: capture + PERSIST the pre-update snapshot BEFORE the recreate pulls the new image and
                         // drops the old container, so a failed update can be rolled back (and the snapshot survives
@@ -234,7 +234,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                             _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name);
                             noRollback = true;
                         }
-                        var recreated = await _docker.RecreateContainerAsync(container.Id, sid, progress);
+                        var recreated = await _docker.RecreateContainerAsync(decided.Id, decided.ServerId, progress);
                         recreateReturned = true;
                         return recreated;
                     }, ct);
@@ -541,7 +541,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
             long snapshotId = 0;
             var outcome = await _automation.RunAsync(actor, "container.rollback",
                 new { containerId = container.Name, containerName = container.Name, serverId = container.ServerId },
-                async _ =>
+                async (ResolvedContainer decided, CancellationToken _) =>
                 {
                     using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -549,8 +549,8 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                                    r => r.ContainerName == container.Name && r.ServerId == container.ServerId)
                                ?? throw new InvalidOperationException("No rollback snapshot found.");
                     snapshotId = snap.Id;
-                    return await _docker.RollbackContainerAsync(snap.ContainerName, snap.OldImageRef,
-                        SnapshotConfig(snap), snap.ServerId, RollbackProgress(snap));
+                    return await _docker.RollbackContainerAsync(decided.Name!, snap.OldImageRef,
+                        SnapshotConfig(snap), decided.ServerId, RollbackProgress(snap));
                 }, ct);
             if (outcome.Status == MutationStatus.Executed)
             {

@@ -53,7 +53,7 @@
             var action = _action;
             var source = string.IsNullOrWhiteSpace(_from) ? null : _from;
             var result = await Mutations.RunAsync("firewall.rule_add", new { serverId, port, protocol, action, from = source },
-                _ => FirewallService.AddRuleAsync(serverId, port, protocol, action, source));
+                (ResolvedHostObject h, CancellationToken _) => FirewallService.AddRuleAsync(h.ServerId!, port, protocol, action, source));
             if (result.Success)
             {
                 Snackbar.Add(L["AddFirewallRuleDialog_Snackbar_RuleAdded"].Value, Severity.Success);

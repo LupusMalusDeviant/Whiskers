@@ -85,7 +85,7 @@
         {
             // The arguments name the account only; the passwords stay inside the call.
             var result = await Mutations.RunAsync("account.password_change", new { account = _account!.Email },
-                ct => Accounts.ChangeOwnPasswordAsync(current, next, ct));
+                (ResolvedRecord rt, CancellationToken ct) => Accounts.ChangeOwnPasswordAsync(current, next, ct));
             if (result.Success)
             {
                 _current = _new = _confirm = "";

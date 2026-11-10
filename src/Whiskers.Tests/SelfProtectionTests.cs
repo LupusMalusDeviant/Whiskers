@@ -40,6 +40,12 @@ internal sealed class ProtectionHarness
     public GuardrailPolicy Policy { get; }
     public ApprovalStore Approvals { get; }
     public AgentToolTestHelpers.NullMutationAudit Audit { get; } = new();
+
+    /// <summary>Backups of Whiskers' data volume (plain and of a compose project) on "local" (contract 0012, D5: a
+    /// backup is resolved by its id).</summary>
+    public StoredVolumeBackups Backups { get; } = new(
+        new VolumeBackupEntity { BackupId = "bk-data", VolumeName = "serverwatch-data", ServerId = "local", FileName = "d.tar.gz" },
+        new VolumeBackupEntity { BackupId = "bk-prod", VolumeName = "prod_serverwatch-data", ServerId = "local", FileName = "p.tar.gz" });
     public MutationGateway Gateway { get; }
     public int Runs { get; private set; }
 
@@ -59,10 +65,10 @@ internal sealed class ProtectionHarness
         Gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), Audit, [],
             NullLogger<MutationGateway>.Instance,
             targets: new MutationTargetResolver(planner is null
-                ? new TestServices(Docker, new FakeServerConfig(Server(serverName)))
+                ? new TestServices(Docker, new FakeServerConfig(Server(serverName)), Backups)
                 : host is null
-                    ? new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker))
-                    : new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker), host)),
+                    ? new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker), Backups)
+                    : new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker), host, Backups)),
             approvals: new ApprovalGate(Approvals, store));
     }
 
@@ -106,8 +112,8 @@ public class SelfProtectionTests
         { "container.restart", """{"containerId":"whiskers","serverId":"local"}""" },               // the app
         { "container.restart", """{"containerId":"c0ffee","serverId":"local"}""" },                 // by a unique id prefix
         { "db.query", """{"containerId":"whiskers-db","serverId":"local","query":"select 1"}""" },  // the database
-        { "volume.backup_delete", """{"volumeName":"serverwatch-data","serverId":"local"}""" },     // the data volume
-        { "volume.backup_delete", """{"volumeName":"prod_serverwatch-data","serverId":"local"}""" }, // … of a compose project
+        { "volume.backup_delete", """{"volumeName":"serverwatch-data","backupId":"bk-data","serverId":"local"}""" },     // the data volume
+        { "volume.backup_delete", """{"volumeName":"prod_serverwatch-data","backupId":"bk-prod","serverId":"local"}""" }, // … of a compose project
         { "container.stop", """{"containerId":"nginx-proxy-manager","serverId":"local"}""" },       // the proxy
         { "container.restart", """{"containerId":"ghostunnel","serverId":"local"}""" },             // the mTLS tunnel
         { "container.stop", """{"containerId":"socket-proxy","serverId":"local"}""" },             // the socket proxy

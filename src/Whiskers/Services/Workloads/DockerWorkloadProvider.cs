@@ -29,14 +29,29 @@ public sealed class DockerWorkloadProvider : IWorkloadProvider
     public Task<ContainerInfo?> GetWorkloadAsync(string id, CancellationToken ct = default)
         => _docker.GetContainerAsync(id, Sid);
 
-    public Task StartAsync(string id, CancellationToken ct = default)
-        => _docker.StartContainerAsync(id, Sid);
+    public async Task<WorkloadIdentity?> GetWorkloadIdentityAsync(string id, CancellationToken ct = default)
+        => WorkloadIdentity.OfContainer(await _docker.GetContainerAsync(id, Sid));
 
-    public Task StopAsync(string id, CancellationToken ct = default)
-        => _docker.StopContainerAsync(id, Sid);
+    // Contract 0012 (D8): the decided container id on this provider's server.
+    public Task StartAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default)
+        => _docker.StartContainerAsync(Decided(workload), Sid);
 
-    public Task RestartAsync(string id, CancellationToken ct = default)
-        => _docker.RestartContainerAsync(id, Sid);
+    public Task StopAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default)
+        => _docker.StopContainerAsync(Decided(workload), Sid);
+
+    public Task RestartAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default)
+        => _docker.RestartContainerAsync(Decided(workload), Sid);
+
+    /// <summary>The decided container's id; a workload decided on another server is refused.</summary>
+    private string Decided(Whiskers.Services.Mutations.ResolvedWorkload workload)
+    {
+        ArgumentNullException.ThrowIfNull(workload);
+        if (!string.IsNullOrEmpty(workload.ServerId) && !string.IsNullOrEmpty(Sid)
+            && !string.Equals(workload.ServerId, Sid, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"The workload was decided on '{workload.ServerId}', not on '{Sid}'; nothing changed.");
+        return workload.PodId.Length > 0 ? workload.PodId : workload.Id;
+    }
 
     public Task<string> GetLogsAsync(string id, int tailLines = 100, DateTime? since = null, CancellationToken ct = default)
         => _docker.GetContainerLogsAsync(id, tailLines, Sid, since);

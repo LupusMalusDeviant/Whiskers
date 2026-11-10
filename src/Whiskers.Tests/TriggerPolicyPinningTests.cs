@@ -423,6 +423,14 @@ public class TriggerPolicyPinningTests
 
     private sealed class CountingRunner : IAutomationMutationRunner
     {
+        public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
+        public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
         public int Calls;
 
         public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,

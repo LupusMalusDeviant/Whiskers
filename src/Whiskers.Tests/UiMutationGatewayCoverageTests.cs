@@ -202,7 +202,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
             var ran = false;
 
             var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
-                runner.RunAsync(capability, new { section = "x" }, _ => { ran = true; return Task.CompletedTask; }));
+                runner.RunAsync(capability, new { section = "x" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
 
             Assert.False(ran);
             Assert.Equal(MutationStatus.Denied, refused.Status);
@@ -215,12 +215,12 @@ public class UiMutationGatewayCoverageTests : IDisposable
     {
         var user = new MutableUser(AppRole.Admin);
         var (runner, _) = Runner(user);
-        await runner.RunAsync("config.roles", new { section = "roles" }, _ => Task.CompletedTask);
+        await runner.RunAsync("config.roles", new { section = "roles" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         user.Role = AppRole.Operator;   // the page is still open, its buttons still rendered
         var ran = false;
         await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.RunAsync("config.roles", new { section = "roles" }, _ => { ran = true; return Task.CompletedTask; }));
+            runner.RunAsync("config.roles", new { section = "roles" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
         Assert.False(ran);
     }
 
@@ -231,7 +231,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var (runner, audit) = Runner(AppRole.Admin);
         var intentFirst = false;
 
-        await runner.RunAsync(capability, new { section = "x" }, _ =>
+        await runner.RunAsync(capability, new { section = "x" }, (ResolvedTarget _, CancellationToken _) =>
         {
             intentFirst = audit.Events.Contains($"begin:{capability}:");
             return Task.CompletedTask;
@@ -249,7 +249,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var ran = false;
 
         await Assert.ThrowsAnyAsync<Exception>(() =>
-            runner.RunAsync("config.whitelist", new { section = "whitelist" }, _ => { ran = true; return Task.CompletedTask; }));
+            runner.RunAsync("config.whitelist", new { section = "whitelist" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
 
         Assert.False(ran);
     }
@@ -264,7 +264,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var ran = false;
 
         var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.RunAsync(capability, new { section = "x" }, _ => { ran = true; return Task.CompletedTask; }));
+            runner.RunAsync(capability, new { section = "x" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
 
         Assert.False(ran);
         Assert.Contains("Read-only", refused.Message);
@@ -275,7 +275,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
     {
         var (runner, audit) = Runner(AppRole.Admin, KillSwitchOn());
 
-        await runner.RunAsync(GuardrailMutationPolicy.KillSwitchOff, new { section = "guardrails" }, _ => Task.CompletedTask);
+        await runner.RunAsync(GuardrailMutationPolicy.KillSwitchOff, new { section = "guardrails" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Contains($"begin:{GuardrailMutationPolicy.KillSwitchOff}:", audit.Events);
         Assert.Contains("complete:Executed", audit.Events);
@@ -287,7 +287,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var (runner, _) = Runner(AppRole.Operator, KillSwitchOn());
 
         await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.RunAsync(GuardrailMutationPolicy.KillSwitchOff, new { section = "guardrails" }, _ => Task.CompletedTask));
+            runner.RunAsync(GuardrailMutationPolicy.KillSwitchOff, new { section = "guardrails" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask));
     }
 
     [Theory]
@@ -323,7 +323,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         {
             var ran = false;
             await Assert.ThrowsAsync<MutationRefusedException>(() =>
-                admin.RunAsync(capability, new { section = "guardrails" }, _ => { ran = true; return Task.CompletedTask; }));
+                admin.RunAsync(capability, new { section = "guardrails" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
             Assert.False(ran);
         }
     }
@@ -700,7 +700,7 @@ public class UiMutationGatewayCoverageTests : IDisposable
         var audit = new AgentToolTestHelpers.NullMutationAudit();
         store ??= new Store(policy ?? GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
         return (new UiMutationRunner(gateway, new CapabilityCatalog(), user), audit);
     }
 

@@ -8,7 +8,9 @@ namespace Whiskers.Services.Docker;
 [OmittedServer]
 public interface IDockerService
 {
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true);
 
     /// <summary>R1-41: the fleet-wide list for a caller with a deadline or a stop of its own (the AutoPatch planning, the
@@ -27,6 +29,7 @@ public interface IDockerService
     /// cancels the work itself.</summary>
     Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all, CancellationToken ct)
         => ListAllContainersDetailedAsync(all).WaitAsync(ct);
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null);
     Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null);
     [MutatingOperation("container.start")]
@@ -92,7 +95,7 @@ public interface IDockerService
     Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId, CancellationToken ct)
         => GetImageContractAsync(imageRef, serverId).WaitAsync(ct);
     [MutatingOperation("container.update")]
-    Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null);
+    Task<string> RecreateContainerAsync([MutationTarget] string containerId, string? serverId = null, IProgress<string>? progress = null);
     /// <summary>The container's log-driver configuration and log file path, or null when Docker reports
     /// none. Used by the log-hygiene inventory (Plan-0007 WP3).</summary>
     Task<ContainerLogConfiguration?> GetLogConfigurationAsync(string containerId, string? serverId = null);
@@ -103,18 +106,19 @@ public interface IDockerService
     // failed update can be undone; RollbackContainerAsync recreates the container from that snapshot's old image.
     Task<(string ImageId, string ConfigJson)> CaptureRollbackSnapshotAsync(string containerId, string? serverId = null);
     [MutatingOperation("container.rollback")]
-    Task<string> RollbackContainerAsync(string containerName, string imageId, string configJson, string? serverId = null, IProgress<string>? progress = null);
+    Task<string> RollbackContainerAsync([MutationTarget] string containerName, string imageId, string configJson, string? serverId = null, IProgress<string>? progress = null);
 
     // Networks
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null);
     [MutatingOperation("network.create")]
     Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null);
     [MutatingOperation("network.remove")]
-    Task RemoveNetworkAsync(string networkId, string? serverId = null);
+    Task RemoveNetworkAsync([MutationTarget] string networkId, string? serverId = null);
     [MutatingOperation("network.connect")]
-    Task ConnectContainerToNetworkAsync(string networkId, string containerId, string? serverId = null);
+    Task ConnectContainerToNetworkAsync([MutationTarget] string networkId, string containerId, string? serverId = null);
     [MutatingOperation("network.disconnect")]
-    Task DisconnectContainerFromNetworkAsync(string networkId, string containerId, string? serverId = null);
+    Task DisconnectContainerFromNetworkAsync([MutationTarget] string networkId, string containerId, string? serverId = null);
 
     // Run a shell command on the HOST via a short-lived privileged nsenter container over the Docker
     // API. This is the SSH-free shell plane for TCP+mTLS servers — same effect as nsenter -t 1 locally,

@@ -40,7 +40,7 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IAgentToolRegistry>(new NoTools());
         Services.AddSingleton<ICurrentUserService>(_user);
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), _store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), _store));
         Services.AddSingleton<IUiMutationRunner>(new UiMutationRunner(gateway, new CapabilityCatalog(), _user));
         JSInterop.Mode = JSRuntimeMode.Loose;
     }

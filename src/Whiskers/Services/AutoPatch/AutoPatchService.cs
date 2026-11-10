@@ -244,7 +244,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
         var actor = AutomationActor.ForAutoPatch(owner);
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
-            new { dryRun }, async token => MutationResults.Report(await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
+            new { dryRun }, async (ResolvedRecord _, CancellationToken token) =>
+                MutationResults.Report(await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
         if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)
         {
             _logger.LogWarning("Auto-patch cycle refused: {Reason}", outcome.Reason);
@@ -323,9 +324,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     {
         var gated = await _automation.RunAsync(actor, "container.update",
             new { containerId = c.Id, name = c.Name, serverId = c.ServerId, dryRun },
-            async token =>
+            async (ResolvedContainer decided, CancellationToken token) =>
             {
-                var result = (await _runner.PatchAsync(c.ServerId, c.Name, dryRun, token)).Outcome;
+                var result = (await _runner.PatchAsync(decided.ServerId!, decided.Name!, dryRun, token)).Outcome;
                 if (result.Failed) MutationScope.Fail($"Auto-patch ended as {result.Kind}.");
                 return result;
             }, ct);

@@ -346,6 +346,8 @@ public sealed class MutationGateway : IMutationGateway
                 $"'{McpPermissionLevels.Normalize(request.Principal.PermissionLevel)}'.", ct));
 
         // The target must resolve before policy sees it (INV-57); an error here is a Deny.
+        ResolvedTarget? resolvedObject = null;
+        var namedTarget = request.Target;
         if (_targets is not null)
         {
             TargetResolution resolution;
@@ -369,7 +371,19 @@ public sealed class MutationGateway : IMutationGateway
                         ReasonCode = resolution.Code ?? MutationReasonCodes.TargetNotResolved,
                         ReasonArgs = resolution.Args ?? [resolution.Error ?? ""],
                     });
+            // Contract 0012 (D7): a caller that read the target before (a webhook delivery choosing its lock key) must
+            // get the same object; one that resolves differently now is refused before policy.
+            if (request.ExpectedTarget is { } expected && !SameObject(expected, resolution.Target))
+                return Prepared.Refused(await RefuseAsync<object?>(operationId, request with { Target = resolution.Target },
+                    capability, MutationStatus.Denied,
+                    $"{expected.Name ?? expected.Id} changed after it was read; nothing ran.", ct)
+                    with
+                    {
+                        ReasonCode = MutationReasonCodes.TargetChanged,
+                        ReasonArgs = [expected.Name ?? expected.Id],
+                    });
             request = request with { Target = resolution.Target };
+            resolvedObject = resolution.Object;
             progress.Request = request;
         }
 
@@ -510,8 +524,20 @@ public sealed class MutationGateway : IMutationGateway
                     decision.Policy?.Preset);
         }
 
-        return new Prepared(null, request, capability, decision, callerOperationId, decision.Policy?.Preset);
+        return new Prepared(null, request, capability, decision, callerOperationId, decision.Policy?.Preset)
+        {
+            Resolved = resolvedObject,
+            NamedTarget = namedTarget,
+        };
     }
+
+    /// <summary>Contract 0012 (D7): whether <paramref name="resolved"/> is the object <paramref name="expected"/> named —
+    /// same kind and stable id, and the same server when the expectation names one.</summary>
+    internal static bool SameObject(MutationTarget expected, MutationTarget resolved) =>
+        string.Equals(expected.Kind, resolved.Kind, StringComparison.Ordinal)
+        && string.Equals(expected.Id, resolved.Id, StringComparison.Ordinal)
+        && (string.IsNullOrEmpty(expected.ServerId)
+            || string.Equals(expected.ServerId, resolved.ServerId, StringComparison.Ordinal));
 
     public async Task<MutationOutcome<T>> ExecuteAsync<T>(
         MutationRequest request,
@@ -639,6 +665,51 @@ public sealed class MutationGateway : IMutationGateway
             };
         }
 
+        // Contract 0012 (D9): the object is read again right before it is acted on — after the intent and the claim,
+        // before the approval is used. Vanished or changed (or a read that fails): the intent ends as the refusal, the
+        // claim is released, the approval stays usable, nothing runs — one event (INV-45).
+        if (prepared.Resolved is { } decidedObject && capability.Resolution == TargetResolutionKind.Object
+            && _targets is not null)
+        {
+            TargetResolution confirmation;
+            try
+            {
+                confirmation = await _targets.ConfirmAsync(request with { Target = prepared.NamedTarget ?? request.Target },
+                    capability, decidedObject, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Target of {Capability} could not be confirmed (operation {OperationId})",
+                    capability.Id, operationId);
+                confirmation = new TargetResolution(null, "The target could not be confirmed (see the log); nothing ran.",
+                    MutationReasonCodes.TargetNotResolved, ["see the log"]);
+            }
+            catch (OperationCanceledException)
+            {
+                await ReleaseAsync(operationId, claim, capability);
+                await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, MutationStatus.Denied,
+                    VerificationStatus.NotRun, CancelledBeforeRun, TimeSpan.Zero), capability);
+                LogNotRun(operationId, capability.Id, MutationStatus.Denied, approval?.ApprovalId, request.DecisionId);
+                throw;
+            }
+            if (confirmation.Target is null)
+            {
+                await ReleaseAsync(operationId, claim, capability);
+                var reason = confirmation.Error ?? "The target changed after the decision; nothing ran.";
+                await CompleteAuditAsync(new PendingAuditOutcome(auditId, operationId, MutationStatus.Denied,
+                    VerificationStatus.NotRun, reason, TimeSpan.Zero), capability);
+                LogNotRun(operationId, capability.Id, MutationStatus.Denied, approval?.ApprovalId, request.DecisionId);
+                return new MutationOutcome<T>(operationId, MutationStatus.Denied, default, reason, VerificationStatus.NotRun,
+                    ApprovalId: approval?.ApprovalId)
+                {
+                    MatchedRules = decision.MatchedRules,
+                    DecisionId = request.DecisionId,
+                    ReasonCode = confirmation.Code ?? MutationReasonCodes.TargetChanged,
+                    ReasonArgs = confirmation.Args ?? [decidedObject.Name ?? decidedObject.Id],
+                };
+            }
+        }
+
         // The approval is used only now, after the intent is on record: a refusal before this point leaves it valid.
         // Losing the race against a concurrent identical call (or the approval lapsing meanwhile) turns this attempt's
         // intent row into a refusal.
@@ -655,7 +726,7 @@ public sealed class MutationGateway : IMutationGateway
         }
 
         // 6–7: execute inside the scope and under the deadline, then verify.
-        var context = new MutationContext(operationId, request, capability);
+        var context = new MutationContext(operationId, request, capability) { Target = prepared.Resolved };
         var started = _time.GetTimestamp();
         MutationOutcome<T> outcome;
         IReadOnlyList<MutationDomainResult> results = [];
@@ -977,6 +1048,12 @@ public sealed class MutationGateway : IMutationGateway
     {
         /// <summary>The admission lock this call holds until the approval gate answered; disposing releases it.</summary>
         public AdmissionLease? Admission { get; init; }
+
+        /// <summary>Contract 0012: the typed object the target resolved to (null without a resolver or from a double).</summary>
+        public ResolvedTarget? Resolved { get; init; }
+
+        /// <summary>The target as the caller named it, before resolution: the confirmation resolves it the same way again.</summary>
+        public MutationTarget? NamedTarget { get; init; }
 
         public static Prepared Refused(MutationOutcome<object?> refusal, string? preset = null) =>
             new(refusal, null, null, null, null, preset);

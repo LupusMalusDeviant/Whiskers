@@ -281,6 +281,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Components.Pages.ContainerDatabasePanel", "ReadMigrationStatusAsync", "artisan migrate:status, a fixed command; the writes go through ExecInContainerViaHost and the primitive"),
         ("Whiskers.Components.Pages.ContainerDetail", "LoadEnvVars", "finds the compose directory and reads its .env"),
         ("Whiskers.Mcp.Tools.MonitoringTools", "GetServerLogs", "journalctl / log tail"),
+        ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumeInfoAsync", "docker volume ls --format json: the inventory a volume target is resolved against (contract 0012)"),
         ("Whiskers.Services.Backup.VolumeBackupService", "ListVolumesAsync", "docker volume ls"),
         ("Whiskers.Services.Cve.OsCveScanner", "GetCveIdsFromChangelogAsync", "apt changelog of an installed package"),
         ("Whiskers.Services.LogMonitor.Hygiene.LogInventory", "FreeDiskBytesAsync", "df"),
@@ -311,6 +312,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Server.SystemdService", "GetJournalAsync", "journalctl"),
         ("Whiskers.Services.Server.SystemdService", "GetStatusAsync", "systemctl status"),
         ("Whiskers.Services.Server.SystemdService", "ListServicesAsync", "systemctl list-units"),
+        ("Whiskers.Services.Server.SystemdService", "ListUnitNamesAsync", "systemctl list-unit-files / list-units --all (contract 0012, D11: the units a target resolves against)"),
         // The primitive's own default body hands the command to the transport: it is the guarded call itself.
         ("Whiskers.Services.Server.IHostCommandExecutor", "ExecuteMutationAsync", "the primitive's body (guarded by [MutationPrimitive])"),
     ];
@@ -745,6 +747,7 @@ public class MutationGatewayCoverageTests
         var users = MutationScanner_Callers(m => m.DeclaringType == typeof(OmittedServer) && m.Name == nameof(OmittedServer.For));
         Assert.Equal([
                 "Whiskers.Services.Backup.VolumeBackupService.BackupVolumeAsync",
+                "Whiskers.Services.Backup.VolumeBackupService.ListVolumeInfoAsync",
                 "Whiskers.Services.Backup.VolumeBackupService.ListVolumesAsync",
                 "Whiskers.Services.Database.DatabaseService.BackupDatabaseAsync",
                 "Whiskers.Services.Database.DatabaseService.ExecInContainer"],
@@ -835,7 +838,7 @@ public class MutationGatewayCoverageTests
         var provider = factory.GetForServer("local");
 
         Assert.IsAssignableFrom<DispatchProxy>(provider);
-        await Assert.ThrowsAsync<MutationScopeViolationException>(() => provider.StartAsync("c1"));
+        await Assert.ThrowsAsync<MutationScopeViolationException>(() => provider.StartAsync(null!));
     }
 
     // ---------------------------------------------------------------- compositions

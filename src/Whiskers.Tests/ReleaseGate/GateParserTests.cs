@@ -176,8 +176,8 @@ public class ReleaseGateDocumentTests
         Assert.Equal("INV-62", gate.Pin);
         Assert.Equal(InvariantTableParser.Parse(GateFiles.Require(GateFiles.Invariants)).Count(r => r.Status != InvariantStatus.Holds),
             gate.Open.Count);
-        Assert.Contains(gate.Open, o => o is { Id: "INV-57", Status: InvariantStatus.Partial, Package: "WP2" });
-        Assert.Contains(gate.Open, o => o is { Id: "INV-58", Status: InvariantStatus.Partial });
+        Assert.Contains(gate.Open, o => o is { Id: "INV-58", Status: InvariantStatus.Partial, Package: "R1-44" });
+        Assert.DoesNotContain(gate.Open, o => o.Id == "INV-57");   // closed by contract 0012
         Assert.Empty(gate.Exceptions);
         Assert.Empty(gate.Known);
         Assert.Empty(gate.Retired);

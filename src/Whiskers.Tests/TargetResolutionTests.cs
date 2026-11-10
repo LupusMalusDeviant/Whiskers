@@ -26,7 +26,7 @@ namespace Whiskers.Tests;
 /// controller — unknown or ambiguous ones are refused, and execution runs on the resolved identity. "local" and a
 /// remote default server stand side by side throughout: decision and execution always pick the same one.
 /// </summary>
-public sealed class TargetResolutionTests : IDisposable
+public sealed partial class TargetResolutionTests : IDisposable
 {
     private static readonly MutationPrincipal Admin =
         new(MutationPrincipalKind.Human, "admin@example.com", "admin@example.com", McpPermissionLevels.Admin);
@@ -425,7 +425,8 @@ public sealed class TargetResolutionTests : IDisposable
         Assert.True(ok, output);
         var decided = Assert.Single(resolved);
         Assert.Equal(("aaa111local", "local"), (decided.Id, decided.ServerId));
-        Assert.Equal(("restart", "web", (string?)"local"), Assert.Single(_docker.Actions));
+        // Contract 0012: the restart acts on the decided container's id, not on the name the task stored.
+        Assert.Equal(("restart", "aaa111local", (string?)"local"), Assert.Single(_docker.Actions));
         Assert.Equal("local", ScheduledTaskServer.Of(new ScheduledTaskEntity()));
     }
 
@@ -543,6 +544,9 @@ public sealed class TargetResolutionTests : IDisposable
 
     private sealed class RecordingResolver(IMutationTargetResolver inner) : IMutationTargetResolver
     {
+        public Task<TargetResolution> ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target,
+            CancellationToken ct) => inner.ConfirmAsync(request, capability, target, ct);
+
         public List<MutationTarget> Resolved { get; } = [];
 
         public async Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct)
@@ -626,9 +630,18 @@ public sealed class TargetResolutionTests : IDisposable
                 }, "local", "Local")
                 : null);
 
-        public Task StartAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task StopAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task RestartAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
+        /// <summary>As the real provider reads it: the ReplicaSet's owner reference names the Deployment "api" and its UID.</summary>
+        public async Task<WorkloadIdentity?> GetWorkloadIdentityAsync(string id, CancellationToken ct = default) =>
+            await GetWorkloadAsync(id, ct) is { } pod
+                ? new WorkloadIdentity(pod, "prod", "Deployment", "api", ControllerUid, "pod-uid-1")
+                : null;
+
+        /// <summary>The Deployment's UID: a test replaces the controller by changing it.</summary>
+        public string ControllerUid { get; set; } = "dep-uid-1";
+
+        public Task StartAsync(ResolvedWorkload workload, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task StopAsync(ResolvedWorkload workload, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task RestartAsync(ResolvedWorkload workload, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> GetLogsAsync(string id, int tailLines = 100, DateTime? since = null, CancellationToken ct = default) =>
             throw new NotSupportedException();
         public Task<ContainerStats?> GetStatsAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();

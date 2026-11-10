@@ -96,7 +96,7 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
         }
 
         var outcome = await _automation.RunAsync(ActorOf(check), "endpointcheck.run", arguments,
-            innerCt => ProbeAsync(check, target, at, innerCt), ct);
+            (ResolvedRecord _, CancellationToken innerCt) => ProbeAsync(check, target, at, innerCt), ct);
 
         return outcome.Status switch
         {

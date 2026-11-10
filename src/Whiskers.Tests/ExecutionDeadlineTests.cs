@@ -500,6 +500,14 @@ public class ExecutionDeadlineTests
     /// <summary>Runs each patch with the token it is given, inside an operation scope as the gateway would.</summary>
     private sealed class PassThroughAutomation : IAutomationMutationRunner
     {
+        public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
+        public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
         public async Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
             Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
         {

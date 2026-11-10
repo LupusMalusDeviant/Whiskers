@@ -22,11 +22,12 @@ public interface ILogMonitorService
     /// alert scrolls out of the channel — so it has to be visible somewhere that is still true tomorrow.</para></summary>
     IReadOnlyList<SuspendedContainer> SuspendedContainers();
 
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<List<LogAlertRuleEntity>> GetRulesAsync();
     [MutatingOperation("logalert.create")]
     Task<LogAlertRuleEntity> CreateRuleAsync(LogAlertRuleEntity rule);
     [MutatingOperation("logalert.delete")]
-    Task DeleteRuleAsync(string ruleId);
+    Task DeleteRuleAsync([MutationTarget] string ruleId);
     [MutatingOperation("logalert.toggle")]
-    Task ToggleRuleAsync(string ruleId, bool enabled);
+    Task ToggleRuleAsync([MutationTarget] string ruleId, bool enabled);
 }

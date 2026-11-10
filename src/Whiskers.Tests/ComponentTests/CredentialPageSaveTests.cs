@@ -446,7 +446,10 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     private static Task Persist(IRenderedComponent<Servers> page)
     {
         var method = typeof(Servers).GetMethod("PersistServerCoreAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        return page.InvokeAsync(() => (Task)method.Invoke(page.Instance, null)!);
+        var arguments = typeof(Servers).GetMethod("SaveArguments", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        // Contract 0012: the core acts on the server the gateway resolved for the save.
+        return page.InvokeAsync(() => (Task)method.Invoke(page.Instance,
+            [TestTargets.Of<ResolvedTarget>("server.save", arguments.Invoke(page.Instance, null)!)])!);
     }
 
     private static void Set(IRenderedComponent<Servers> page, string field, object? value) => SetField(page.Instance, field, value);
@@ -477,6 +480,14 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     /// <summary>Runs every mutation, except that it can run something else first, or refuse, once per capability.</summary>
     private sealed class HookedRunner : IUiMutationRunner
     {
+        public Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
+        public Task RunAsync<TTarget>(string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
         private readonly Dictionary<string, Func<Task>> _before = new();
         private readonly HashSet<string> _refuse = new();
 

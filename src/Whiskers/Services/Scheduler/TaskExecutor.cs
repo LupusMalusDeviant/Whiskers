@@ -147,10 +147,11 @@ public class TaskExecutor : ITaskExecutor
     /// <summary>Every gateway run of a scheduled task goes through here: it marks the run as having reached its
     /// decision, so the dispatcher's backstop never records a second event for it (INV-45). Nothing in this class
     /// calls <c>_automation.RunAsync</c> directly (TaskExecutorRefusalInventoryTests). It only forwards to the runner, so
-    /// it is a <see cref="MutationEntryPointAttribute"/> like the runner itself: a lambda handed to it is gated.</summary>
+    /// it is a <see cref="MutationEntryPointAttribute"/> like the runner itself: a lambda handed to it is gated.
+    /// Contract 0012 (D3): the lambda acts on the object the gateway decided.</summary>
     [MutationEntryPoint]
-    private Task<MutationOutcome<T>> RunGatedAsync<T>(ScheduledTaskEntity task, string capabilityId, object arguments,
-        Func<CancellationToken, Task<T>> action)
+    private Task<MutationOutcome<T>> RunGatedAsync<TTarget, T>(ScheduledTaskEntity task, string capabilityId,
+        object arguments, Func<TTarget, CancellationToken, Task<T>> action) where TTarget : ResolvedTarget
     {
         // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
         // (its argument checks) wrote no event and still reaches the backstop (review round 12); an owner that cannot be
@@ -160,10 +161,10 @@ public class TaskExecutor : ITaskExecutor
         return pending;
     }
 
-    /// <inheritdoc cref="RunGatedAsync{T}"/>
+    /// <inheritdoc cref="RunGatedAsync{TTarget, T}"/>
     [MutationEntryPoint]
-    private Task<MutationOutcome<bool>> RunGatedAsync(ScheduledTaskEntity task, string capabilityId, object arguments,
-        Func<CancellationToken, Task> action)
+    private Task<MutationOutcome<bool>> RunGatedAsync<TTarget>(ScheduledTaskEntity task, string capabilityId,
+        object arguments, Func<TTarget, CancellationToken, Task> action) where TTarget : ResolvedTarget
     {
         // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
         // (its argument checks) wrote no event and still reaches the backstop (review round 12); an owner that cannot be
@@ -182,7 +183,7 @@ public class TaskExecutor : ITaskExecutor
         var containerId = task.TargetId;
         var outcome = await RunGatedAsync(task, "container.restart",
             new { containerId, name = task.TargetName, serverId = ScheduledTaskServer.Of(task) },
-            _ => _docker.RestartContainerAsync(containerId, ScheduledTaskServer.Of(task)));
+            (ResolvedContainer c, CancellationToken _) => _docker.RestartContainerAsync(c.Id, c.ServerId));
         return Problem(outcome, "container.restart") is { } problem
             ? (false, problem)
             : (true, $"Container {task.TargetName ?? task.TargetId} restarted.");
@@ -232,7 +233,14 @@ public class TaskExecutor : ITaskExecutor
         }
 
         var outcome = await RunGatedAsync(task, "db.backup", resolved,
-            _ => _dbService.BackupDatabaseAsync(container.Id, database, container.DatabaseType, creds, ScheduledTaskServer.Of(task), container.Name));
+            (ResolvedContainer c, CancellationToken _) =>
+            {
+                // Contract 0012: the dump runs on the container the gateway decided and confirmed. The lookup above only
+                // read its database type and credentials; a different container now is a changed target, never dumped.
+                if (c.Id != container.Id)
+                    throw new InvalidOperationException($"The database container changed after it was read ({c.Name}); nothing ran.");
+                return _dbService.BackupDatabaseAsync(c.Id, database, container.DatabaseType, creds, c.ServerId, c.Name);
+            });
         if (Problem(outcome, "db.backup") is { } problem) return (false, problem);
         var (success, filePath, sizeBytes, error) = outcome.Value;
 
@@ -253,7 +261,8 @@ public class TaskExecutor : ITaskExecutor
         var volumeName = task.TargetId;
         var outcome = await RunGatedAsync(task, "volume.backup",
             new { volumeName, containerName = task.TargetName, serverId = ScheduledTaskServer.Of(task) },
-            _ => _backupService.BackupVolumeAsync(volumeName, task.TargetName ?? "", ScheduledTaskServer.Of(task), $"Scheduled: {task.Name}"));
+            (ResolvedVolume v, CancellationToken _) =>
+                _backupService.BackupVolumeAsync(v.Id, task.TargetName ?? "", v.ServerId, $"Scheduled: {task.Name}"));
         if (Problem(outcome, "volume.backup") is { } problem) return (false, problem);
         var backup = outcome.Value!;
 
@@ -268,7 +277,7 @@ public class TaskExecutor : ITaskExecutor
         // Whiskers self-backup of /app/data (F3). Backs up the app itself, so ServerId/TargetId are ignored.
         var label = $"scheduled-{task.Name}";
         var outcome = await RunGatedAsync(task, "selfbackup.create", new { label },
-            _ => _selfBackupService.CreateBackupAsync(label));
+            (ResolvedNew _, CancellationToken _) => _selfBackupService.CreateBackupAsync(label));
         if (Problem(outcome, "selfbackup.create") is { } problem) return (false, problem);
         var info = outcome.Value!;
 
@@ -291,7 +300,7 @@ public class TaskExecutor : ITaskExecutor
         // they are today, not when the task was created); the audit row keeps only its length.
         var outcome = await RunGatedAsync(task, "host.exec",
             new { serverId = sid, taskId = task.TaskId, command },
-            _ => _executor.ExecuteMutationAsync(sid, command, TimeSpan.FromMinutes(5)));
+            (ResolvedHostObject h, CancellationToken _) => _executor.ExecuteMutationAsync(h.ServerId!, command, TimeSpan.FromMinutes(5)));
         if (Problem(outcome, "host.exec") is { } problem) return (false, problem);
         var result = outcome.Value!;
 
@@ -330,7 +339,7 @@ public class TaskExecutor : ITaskExecutor
         // told before the prune, so a protected network could not be decided on — they stay.
         var outcome = await RunGatedAsync(task, "host.prune",
             new { serverId = sid, taskId = task.TaskId, containerIds = string.Join('\n', ids) },
-            _ => _executor.ExecuteMutationAsync(sid, CleanupCommandFor(ids), TimeSpan.FromMinutes(2)));
+            (ResolvedHostObject h, CancellationToken _) => _executor.ExecuteMutationAsync(h.ServerId!, CleanupCommandFor(ids), TimeSpan.FromMinutes(2)));
         if (Problem(outcome, "host.prune") is { } problem) return (false, problem);
         var result = outcome.Value!;
 
@@ -403,7 +412,7 @@ public class TaskExecutor : ITaskExecutor
                     var backupId = b.BackupId;
                     var outcome = await RunGatedAsync(task, "volume.backup_delete",
                         new { volumeName = task.TargetId, backupId, fileName = b.FileName, serverId = ScheduledTaskServer.Of(task) },
-                        _ => _backupService.DeleteBackupAsync(backupId));
+                        (ResolvedVolumeBackup b, CancellationToken _) => _backupService.DeleteBackupAsync(b.Id));
                     if (Problem(outcome, "volume.backup_delete") is { } problem)
                     {
                         // The backup itself succeeded; retention waits until the owner may delete again.
@@ -416,7 +425,7 @@ public class TaskExecutor : ITaskExecutor
             {
                 // Self-backups are tracked by the self-backup service (files + sidecars); keep the newest N.
                 var outcome = await RunGatedAsync(task, "selfbackup.prune", new { keep = maxBackups },
-                    _ => _selfBackupService.PruneAsync(maxBackups));
+                    (ResolvedRecord _, CancellationToken _) => _selfBackupService.PruneAsync(maxBackups));
                 if (Problem(outcome, "selfbackup.prune") is { } problem)
                     _logger.LogWarning("Retention for task {Name} stopped: {Reason}", task.Name, problem);
             }
@@ -443,10 +452,12 @@ public class TaskExecutor : ITaskExecutor
                 // Deleting dumps is its own decision, taken now: the owner may have lost the right since the backup.
                 var outcome = await RunGatedAsync(task, "db.backup_delete",
                     new { containerId = task.TargetId, dumpContainer = containerKey, database = dbName, keep = maxBackups, serverId = sid },
-                    async _ =>
+                    async (ResolvedContainer c, CancellationToken _) =>
                     {
-                        // The listing is a read (ExecuteAsync); only the rm runs on the raw primitive.
-                        var listing = await _executor.ExecuteAsync(sid, DbDumpFiles.ListingCommand(_hostBackupDir), TimeSpan.FromSeconds(15));
+                        // The listing is a read (ExecuteAsync); only the rm runs on the raw primitive. Both on the server
+                        // the gateway decided.
+                        var server = c.ServerId!;
+                        var listing = await _executor.ExecuteAsync(server, DbDumpFiles.ListingCommand(_hostBackupDir), TimeSpan.FromSeconds(15));
                         if (!listing.Success) return listing;
                         if (listing.OutputTruncated)
                         {
@@ -460,7 +471,7 @@ public class TaskExecutor : ITaskExecutor
                                 Error = "the backup directory's listing was truncated; nothing was pruned.",
                             };
                         }
-                        return await _executor.ExecuteMutationAsync(sid,
+                        return await _executor.ExecuteMutationAsync(server,
                             RetentionCommandFor(_hostBackupDir, DbDumpFiles.ToPrune(listing.Output, containerKey!, dbName, maxBackups)),
                             TimeSpan.FromSeconds(15));
                     });

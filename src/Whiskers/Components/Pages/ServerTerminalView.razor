@@ -72,8 +72,8 @@
             var sessionId = Whiskers.Services.Terminal.TerminalSession.NewId();
             _session = await Mutations.RunAsync("terminal.host_open",
                 new { serverId = server.Id },
-                ct => SessionManager.OpenHostShellAsync(
-                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, server.Id), ct));
+                (ResolvedHostObject h, CancellationToken ct) => SessionManager.OpenHostShellAsync(
+                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, h.ServerId!), ct));
 
             _ = PumpStreamsAsync(_session.Output, _session.Errors, _cts.Token);
         }
