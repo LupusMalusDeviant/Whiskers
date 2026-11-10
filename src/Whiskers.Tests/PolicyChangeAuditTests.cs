@@ -25,8 +25,7 @@ public sealed class PolicyChangeAuditTests : IDisposable
     [Fact]
     public async Task Unsaved_edits_do_not_change_live_policy()
     {
-        var store = new GuardrailStore(filePath: FilePath);
-        await store.InitializeAsync();
+        var store = await GuardrailStoreTestExtensions.FirstStartStore(FilePath).StartAsync();
 
         // Edits on what the store handed out, never saved.
         var config = store.Config;
@@ -47,8 +46,7 @@ public sealed class PolicyChangeAuditTests : IDisposable
     [Fact]
     public async Task Editing_a_saved_object_afterwards_does_not_change_live_policy()
     {
-        var store = new GuardrailStore(filePath: FilePath);
-        await store.InitializeAsync();
+        var store = await GuardrailStoreTestExtensions.FirstStartStore(FilePath).StartAsync();
         var config = store.Config;
         config.Presets[0].Policy.ProtectedResources.Add("payments-db");
         await store.SaveConfigAsync(config, Admin);
@@ -62,8 +60,7 @@ public sealed class PolicyChangeAuditTests : IDisposable
     [Fact]
     public async Task A_save_that_cannot_be_written_leaves_the_previous_policy_active()
     {
-        var store = new GuardrailStore(filePath: FilePath);
-        await store.InitializeAsync();
+        var store = await GuardrailStoreTestExtensions.FirstStartStore(FilePath).StartAsync();
         // The file cannot be written (as on a full or read-only disk).
         DurableFile.FailingWrites[Path.GetFullPath(FilePath)] = 0;
         var config = store.Config;

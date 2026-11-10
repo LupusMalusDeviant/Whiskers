@@ -616,7 +616,7 @@ public sealed class WebhookReplayTests : IDisposable
     private async Task<AuditLogEntity> NotRunAsync(string runId, string capability, bool owned = true, string? targetId = "web-1")
     {
         var rows = await AuditTrail.ForOperationAsync(Scopes, runId);
-        var row = AuditTrail.One(rows, AuditTrail.Denied, capability, "Automation", owned: owned, decided: false,
+        var row = AuditTrail.One(rows, AuditTrail.Denied, capability, "Webhook", owned: owned, decided: false,
             targetId: targetId);
         Assert.Equal(runId, row.OperationId);
         return row;
@@ -783,7 +783,7 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(1, _faults.Tripped);   // the settlement really stalled once, and was tried again
         // Recorded before it was settled: nothing of it can come later.
         var rows = (await AuditTrail.RowsAsync(Scopes)).Where(r => r.OperationId == accepted.RunId).ToList();
-        AuditTrail.One(rows, AuditTrail.Denied, "container.restart", "Automation", decided: false, targetId: "web-1");
+        AuditTrail.One(rows, AuditTrail.Denied, "container.restart", "Webhook", decided: false, targetId: "web-1");
         await Until(() => Logs(waiting.WebhookId).Any(l => !l.Success));
         Assert.Equal(1, _runner.Runs);
         _runner.Release();
@@ -1014,9 +1014,9 @@ public sealed class WebhookReplayTests : IDisposable
         _faults.Arm(".\"EventId\" = @", Fault.Fail);
         var sink = new AuditLogMutationSink(Scopes, outbox: _outbox);
         var giveUp = new MutationRequest("container.restart",
-            new MutationPrincipal(MutationPrincipalKind.Automation, "webhook:" + wh.WebhookId, "Webhook",
+            new MutationPrincipal(MutationPrincipalKind.Webhook, "webhook:" + wh.WebhookId, "Webhook",
                 McpPermissionLevels.Write),
-            MutationSurface.Automation, new MutationTarget("container", "web-1"),
+            MutationSurface.Webhook, new MutationTarget("container", "web-1"),
             new Dictionary<string, System.Text.Json.JsonElement>(), OperationId: "kept-then-drained")
         {
             EventKey = WebhookService.NotRunEventKey("kept-then-drained"),
@@ -1211,7 +1211,7 @@ public sealed class WebhookReplayTests : IDisposable
             db.AuditLog.Add(new AuditLogEntity
             {
                 EventId = Guid.NewGuid().ToString("N"), OperationId = runningCutOff, Phase = "intent",
-                Action = "container.restart", Surface = "Automation",
+                Action = "container.restart", Surface = "Webhook",
             });
             db.SaveChanges();
         }

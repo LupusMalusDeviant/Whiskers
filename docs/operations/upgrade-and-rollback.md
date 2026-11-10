@@ -27,7 +27,7 @@ short downtime and the way back is a backup, not a second replica.
 4. **No restore pending.** If `.restore-pending` exists in the data directory, a staged restore is waiting for the
    next start; let it finish (or give it up) first.
 5. **PostgreSQL only:** the client tools in the image must be at least as new as the server (the readiness line
-   "PostgreSQL-Client-Tools für das Self-Backup" says so), or the pre-upgrade backup fails and the start stops.
+   "PostgreSQL client tools for the self-backup" says so), or the pre-upgrade backup fails and the start stops.
 6. **Large database:** raise the start-up allowance before you start (Compose: the health check's `start_period`, 5 minutes in the image, see the comment in `docker-compose.yml`;
    Helm: `probes.startup.failureThreshold`). Otherwise the orchestrator restarts the container in the middle of the
    migration.

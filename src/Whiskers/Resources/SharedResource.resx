@@ -222,7 +222,7 @@
     <value>Agent</value>
   </data>
   <data name="Nav_Guardrails" xml:space="preserve">
-    <value>Guardrails</value>
+    <value>Guardrails page</value>
   </data>
   <data name="Nav_Approvals" xml:space="preserve">
     <value>Approvals</value>
@@ -4964,8 +4964,11 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="ScheduledTasksView_Snackbar_NoOwner" xml:space="preserve">
     <value>A scheduled task needs an owner: sign in with an account that has an email address.</value>
   </data>
+  <data name="GuardrailsView_FailClosed_Reason" xml:space="preserve">
+    <value>Reason: {0}</value>
+  </data>
   <data name="GuardrailsView_FailClosed_Alert" xml:space="preserve">
-    <value>guardrails.json could not be read or is invalid. Every change is refused (saving this page included) and agents and MCP clients get no tool. Repair guardrails.json on the host, or remove it together with guardrails.json.bak, and restart Whiskers; without either file the safe default is created. The previous file was kept next to it as guardrails.json.unreadable-&lt;timestamp&gt;.</value>
+    <value>The guardrail policy is fail-closed: guardrails.json is unreadable or invalid, or it is missing although this instance had a guardrail policy. Every change is refused (saving this page included) and agents and MCP clients get no tool. The way back is on the host: put a valid guardrails.json into the data directory (repair it, or restore it from a self-backup; an unreadable file was kept next to it as guardrails.json.unreadable-&lt;timestamp&gt;), or, with guardrails.json and guardrails.json.bak both missing, run --reset-guardrails. Then restart Whiskers.</value>
   </data>
   <data name="GuardrailsView_FailClosedPreset_Name" xml:space="preserve">
     <value>Fail-closed (configuration unreadable)</value>
@@ -6012,10 +6015,10 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Endpoint check deleted.</value>
   </data>
   <data name="KillSwitch_Blocked_Message" xml:space="preserve">
-    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read or is missing, put a valid guardrails.json back on the host (or run --reset-guardrails there when guardrails.json and guardrails.json.bak are both missing; or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
   </data>
   <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
-    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read or is missing, put a valid guardrails.json back on the host (or run --reset-guardrails there when guardrails.json and guardrails.json.bak are both missing; or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
   </data>
   <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
     <value>Preset '{0}': '{1}' is not a kill-switch exemption that can be blocked. Nothing was saved.</value>
@@ -6048,7 +6051,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Host command-line tools</value>
   </data>
   <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
-    <value>Need a shell in the container (root-equivalent). While recovery codes are blocked, the recovery CLI asks for --force: repair guardrails.json on the host instead.</value>
+    <value>Need a shell in the container (root-equivalent). While recovery codes are blocked, the recovery CLI asks for --force: put a valid guardrails.json back on the host instead (or run --reset-guardrails when it and guardrails.json.bak are both missing).</value>
   </data>
   <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
     <value>Own password change</value>
@@ -6067,5 +6070,278 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="GuardrailsView_Exemption_federated_binding_at_sign_in_Reason" xml:space="preserve">
     <value>Binds a verified Google/OIDC identity to a configured account at its first sign-in.</value>
+  </data>
+  <data name="Readiness_auth_Title" xml:space="preserve">
+    <value>Authentication enabled</value>
+  </data>
+  <data name="Readiness_auth_Ok" xml:space="preserve">
+    <value>Sign-in is required (local, Google or OIDC).</value>
+  </data>
+  <data name="Readiness_auth_Fail" xml:space="preserve">
+    <value>AUTH_DISABLED=true — everyone with network access is an Admin. Acceptable only for isolated LAN setups; never behind a TCP forward (Tailscale Serve --tcp/--tls-terminated-tcp, DockTail with protocol=tcp) — there every visitor comes from a private address — and never behind Tailscale Funnel, which puts the instance on the internet.</value>
+  </data>
+  <data name="Readiness_selfExposure_Title" xml:space="preserve">
+    <value>Whiskers not published with sign-in turned off</value>
+  </data>
+  <data name="Readiness_selfExposure_Fail" xml:space="preserve">
+    <value>Whiskers itself is published through `{0}` with sign-in turned off.</value>
+  </data>
+  <data name="Readiness_selfExposure_Unknown" xml:space="preserve">
+    <value>Unknown: Whiskers' own container could not be found or read, so it is not known whether it is published through a route label (Tailscale Funnel, Traefik, Caddy) with sign-in turned off. WHISKERS_SELF_CONTAINERS names it.</value>
+  </data>
+  <data name="Readiness_vault_Title" xml:space="preserve">
+    <value>Secret vault active (VAULT_KEY)</value>
+  </data>
+  <data name="Readiness_vault_Ok" xml:space="preserve">
+    <value>The vault is active; backups can be encrypted. The vault holds the cloud API keys, the DNS token, the credentials of the notification channels and of the AI (the next lines say where they are), kubeconfigs and registry and Git credentials; encrypted with a key derived from it are the inbound webhooks' secrets, the rollback snapshots and the session keys. Still stored unencrypted, protected only by file permissions: the private SSH keys (ssh-keys/) and all mTLS client keys — the shared one and each host's own — in the data directory. Whether the mTLS keys are readable by Whiskers only is shown by the line “mTLS client keys protected”; this list does not check the mode of the SSH keys. Whoever can read the data directory can act as Whiskers.</value>
+  </data>
+  <data name="Readiness_vault_Wrong" xml:space="preserve">
+    <value>VAULT_KEY does not match this vault — secrets are locked, vault.json stays unchanged. Set the right key and restart.</value>
+  </data>
+  <data name="Readiness_vault_Missing" xml:space="preserve">
+    <value>No VAULT_KEY set — the vault and encrypted backups are off. Set a key and keep it safe.</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_Title" xml:space="preserve">
+    <value>Guardrail policy loaded and recorded</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_FailClosed" xml:space="preserve">
+    <value>The guardrails are fail-closed: every change is refused, agents and MCP clients get no tool. Reason: {0}</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_MarkerProblem" xml:space="preserve">
+    <value>The policy applies, but the database's record that a guardrail policy exists is missing: {0}. Without it, deleting guardrails.json and guardrails.json.bak would look like a first start. It is written again at the next save of the guardrails or at the next start.</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_Ok" xml:space="preserve">
+    <value>The guardrail policy applies, and the database records that it exists: if guardrails.json and guardrails.json.bak go missing later, Whiskers stays fail-closed instead of creating the default policy again.</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_Unconfirmed" xml:space="preserve">
+    <value>The guardrail policy applies, but the database's record of it is not confirmed yet (the start has not finished).</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_Link" xml:space="preserve">
+    <value>Guardrails page</value>
+  </data>
+  <data name="Readiness_cloudDns_Title" xml:space="preserve">
+    <value>Cloud and DNS credentials in the vault</value>
+  </data>
+  <data name="Readiness_cloudDns_Ok" xml:space="preserve">
+    <value>No cloud API keys and no DNS token in plaintext: they are encrypted in the vault (or not configured).</value>
+  </data>
+  <data name="Readiness_cloudDns_FailCloud" xml:space="preserve">
+    <value>Stored in plaintext: {0} cloud API key(s) in servers.json.</value>
+  </data>
+  <data name="Readiness_cloudDns_FailCloudDns" xml:space="preserve">
+    <value>Stored in plaintext: {0} cloud API key(s) in servers.json and the DNS token in app-settings.json.</value>
+  </data>
+  <data name="Readiness_cloudDns_PendingVault" xml:space="preserve">
+    <value>They have not been moved into the vault yet (the move runs at start; if it fails, the log names the reason) — restart, or save the server or the DNS settings once: that stores the value under a new vault key.</value>
+  </data>
+  <data name="Readiness_cloudDns_PendingNoVault" xml:space="preserve">
+    <value>They are moved into the vault at the first start with a valid VAULT_KEY.</value>
+  </data>
+  <data name="Readiness_notifyAi_Title" xml:space="preserve">
+    <value>Notification and AI credentials in the vault</value>
+  </data>
+  <data name="Readiness_notifyAi_Ok" xml:space="preserve">
+    <value>No credentials of the notification channels, the AI chat or the agent in plaintext: they are encrypted in the vault (or not configured).</value>
+  </data>
+  <data name="Readiness_notifyAi_Fail" xml:space="preserve">
+    <value>Stored in plaintext: {0}.</value>
+  </data>
+  <data name="Readiness_notifyAi_PendingVault" xml:space="preserve">
+    <value>They have not been moved into the vault yet (the move runs at start; if it fails, the log names the reason) — restart, or save the settings once: that stores the values under new vault keys. A value written by hand next to a vault reference is not moved at start; only saving removes it.</value>
+  </data>
+  <data name="Readiness_notifyAi_PendingNoVault" xml:space="preserve">
+    <value>They are moved into the vault at the first start with a valid VAULT_KEY.</value>
+  </data>
+  <data name="Readiness_storedEncrypted_Title" xml:space="preserve">
+    <value>Webhook secrets, rollback snapshots and session keys encrypted</value>
+  </data>
+  <data name="Readiness_storedEncrypted_Ok" xml:space="preserve">
+    <value>No webhook secrets, rollback snapshots (with the containers' environment variables) or session keys in plaintext.</value>
+  </data>
+  <data name="Readiness_storedEncrypted_Fail" xml:space="preserve">
+    <value>Stored in plaintext: {0} webhook secret(s) and {1} rollback snapshot(s) in the database, {2} session key file(s) in the data directory.</value>
+  </data>
+  <data name="Readiness_storedEncrypted_PendingVault" xml:space="preserve">
+    <value>They are encrypted at start (if that fails, the log names the reason) — restart.</value>
+  </data>
+  <data name="Readiness_storedEncrypted_PendingNoVault" xml:space="preserve">
+    <value>They are encrypted at the first start with a valid VAULT_KEY; until then Whiskers creates no new webhook secrets and no rollback snapshots.</value>
+  </data>
+  <data name="Readiness_selfBackup_Title" xml:space="preserve">
+    <value>Self-backup scheduled</value>
+  </data>
+  <data name="Readiness_selfBackup_Ok" xml:space="preserve">
+    <value>A scheduled Whiskers self-backup task is active.</value>
+  </data>
+  <data name="Readiness_selfBackup_Fail" xml:space="preserve">
+    <value>No scheduled self-backup task — create a SelfBackup schedule under Tasks (manual backups: Settings → Backup &amp; Restore).</value>
+  </data>
+  <data name="Readiness_selfBackup_Link" xml:space="preserve">
+    <value>Open tasks</value>
+  </data>
+  <data name="Readiness_pgTools_Title" xml:space="preserve">
+    <value>PostgreSQL client tools for the self-backup</value>
+  </data>
+  <data name="Readiness_pgTools_Ok" xml:space="preserve">
+    <value>{0} — backups contain the database (pg_dump).</value>
+  </data>
+  <data name="Readiness_pgTools_TooOld" xml:space="preserve">
+    <value>{0} — too old for a restore: client tools 17.6 or newer (or 16.10, 15.14, 14.19) and at least as new as the server are needed.</value>
+  </data>
+  <data name="Readiness_pgTools_Unusable" xml:space="preserve">
+    <value>pg_dump not usable — self-backups fail: {0} (set WHISKERS_PG_BIN_DIR to the bin directory of the client tools).</value>
+  </data>
+  <data name="Readiness_updatePolicy_Title" xml:space="preserve">
+    <value>Update policy set</value>
+  </data>
+  <data name="Readiness_updatePolicy_Ok" xml:space="preserve">
+    <value>At least one container has an auto-update policy (rollback snapshot included).</value>
+  </data>
+  <data name="Readiness_updatePolicy_Fail" xml:space="preserve">
+    <value>No auto-update policy active — updates stay fully manual (a deliberate decision is fine too).</value>
+  </data>
+  <data name="Readiness_updatePolicy_Link" xml:space="preserve">
+    <value>Open image updates</value>
+  </data>
+  <data name="Readiness_storesReadable_Title" xml:space="preserve">
+    <value>Data stores readable</value>
+  </data>
+  <data name="Readiness_storesReadable_Ok" xml:space="preserve">
+    <value>Every store file (roles, whitelist, vault, servers, permissions …) is readable; no damaged file lies in the data directory.</value>
+  </data>
+  <data name="Readiness_storesReadable_Recovered" xml:space="preserve">
+    <value>Restored from the previous version since the start — the last change may be missing; check roles, whitelist, MCP keys and vault for a revoked access that applies again: {0}.</value>
+  </data>
+  <data name="Readiness_storesReadable_Kept" xml:space="preserve">
+    <value>Unreadable files kept (check them, then delete them): {0}.</value>
+  </data>
+  <data name="Readiness_nonRoot_Title" xml:space="preserve">
+    <value>Hardened profile (non-root)</value>
+  </data>
+  <data name="Readiness_nonRoot_Ok" xml:space="preserve">
+    <value>The process runs without root rights (hardened profile).</value>
+  </data>
+  <data name="Readiness_nonRoot_Fail" xml:space="preserve">
+    <value>The process runs privileged — for continuous operation use docker-compose.hardened.yml (non-root, read-only rootfs, socket proxy).</value>
+  </data>
+  <data name="Readiness_https_Title" xml:space="preserve">
+    <value>HTTPS at the reverse proxy</value>
+  </data>
+  <data name="Readiness_https_Ok" xml:space="preserve">
+    <value>This page was delivered over HTTPS.</value>
+  </data>
+  <data name="Readiness_https_Fail" xml:space="preserve">
+    <value>This connection runs over HTTP — for continuous operation put a TLS-terminating reverse proxy (Caddy/Traefik/nginx) in front of it.</value>
+  </data>
+  <data name="Readiness_oidcHttps_Title" xml:space="preserve">
+    <value>OIDC discovery over HTTPS</value>
+  </data>
+  <data name="Readiness_oidcHttps_Fail" xml:space="preserve">
+    <value>Oidc:RequireHttpsMetadata is off: the identity provider's keys and endpoints are fetched over HTTP and can be swapped on the way. Run it like this only in an isolated test network.</value>
+  </data>
+  <data name="Readiness_proxyTrusted_Title" xml:space="preserve">
+    <value>Reverse proxy trusted</value>
+  </data>
+  <data name="Readiness_proxyTrusted_Fail" xml:space="preserve">
+    <value>X-Forwarded headers from peers that are not trusted proxies were ignored (last 24 h): {0}. If one of them is your reverse proxy, enter its address as narrowly as possible (e.g. /32 or /128) in ForwardedHeaders__TrustedNetworks__0 (default: loopback only) — otherwise the login limit and the audit see only its address, HTTPS is taken for HTTP (session cookie without Secure, callback of Google/OIDC with http://) and Auth:Disabled refuses the requests. A public address is more likely a client that tried to claim another address — do not enter it.</value>
+  </data>
+  <data name="Readiness_mtlsProxy_Title" xml:space="preserve">
+    <value>mTLS proxy (ghostunnel) running</value>
+  </data>
+  <data name="Readiness_mtlsProxy_Ok" xml:space="preserve">
+    <value>ghostunnel runs on all {0} mTLS hosts; the running arguments are readable.</value>
+  </data>
+  <data name="Readiness_mtlsProxy_Fail" xml:space="preserve">
+    <value>Not reachable over mTLS: {0}. The mTLS channel is the only management path; the way back is the break-glass re-onboarding over SSH (docs/operations/per-host-mtls-migration.md).</value>
+  </data>
+  <data name="Readiness_mtlsProxy_HostStopped" xml:space="preserve">
+    <value>{0} (ghostunnel not running)</value>
+  </data>
+  <data name="Readiness_mtlsProxy_HostUnreadable" xml:space="preserve">
+    <value>{0} (arguments not readable)</value>
+  </data>
+  <data name="Readiness_mtlsProxy_Link" xml:space="preserve">
+    <value>Servers</value>
+  </data>
+  <data name="Readiness_mtlsSharedLive_Title" xml:space="preserve">
+    <value>Shared client identity in the running ghostunnel</value>
+  </data>
+  <data name="Readiness_mtlsSharedLive_Ok" xml:space="preserve">
+    <value>According to docker inspect, no readable mTLS host admits {0} any more.</value>
+  </data>
+  <data name="Readiness_mtlsSharedLive_Fail" xml:space="preserve">
+    <value>According to docker inspect, these hosts still admit {0}: {1}. A stolen shared key opens these hosts. Hosts managed by Whiskers: “Migrate”; hosts with certificates set by hand: narrow --allow-cn there by hand (docs/operations/per-host-mtls-migration.md).</value>
+  </data>
+  <data name="Readiness_mtlsSharedLive_Link" xml:space="preserve">
+    <value>Servers</value>
+  </data>
+  <data name="Readiness_mtlsAllowCn_Title" xml:space="preserve">
+    <value>Running --allow-cn list</value>
+  </data>
+  <data name="Readiness_mtlsAllowCn_Ok" xml:space="preserve">
+    <value>According to docker inspect, every narrowed host admits exactly its own client identity.</value>
+  </data>
+  <data name="Readiness_mtlsAllowCn_Fail" xml:space="preserve">
+    <value>Narrowed, but the running ghostunnel admits something else: {0}. Start “Migrate” again.</value>
+  </data>
+  <data name="Readiness_mtlsAllowCn_Host" xml:space="preserve">
+    <value>{0} (runs with {1})</value>
+  </data>
+  <data name="Readiness_mtlsAllowCn_Link" xml:space="preserve">
+    <value>Servers</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_Title" xml:space="preserve">
+    <value>mTLS client identity: {0}</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_InvalidId" xml:space="preserve">
+    <value>The server ID '{0}' cannot be used as a directory name; this host cannot get its own identity.</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_UnreadableShared" xml:space="preserve">
+    <value>The record names the shared client identity, but the host's running ghostunnel arguments are not readable. If the host is only unreachable right now, check again later. If it stays so, it probably no longer admits this identity (an older backup restored?): “Migrate” cannot reach it then; the way back is the break-glass re-onboarding over SSH (docs/operations/per-host-mtls-migration.md, “An older backup”).</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_UnreadableOwn" xml:space="preserve">
+    <value>The record names {0} (generation {1}), but the host's running ghostunnel arguments are not readable. If the host is only unreachable right now, check again later. If it stays so, it probably no longer admits this identity (an older backup restored?): “Migrate” cannot reach it then; the way back is the break-glass re-onboarding over SSH (docs/operations/per-host-mtls-migration.md, “An older backup”).</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_Shared" xml:space="preserve">
+    <value>Still uses the shared client identity: a stolen key opens every host that admits it. On the server page, “Migrate” (guide: docs/operations/per-host-mtls-migration.md).</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_Own" xml:space="preserve">
+    <value>Own identity {0} (generation {1}); the host admits only it.</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_OwnUntil" xml:space="preserve">
+    <value>Own identity {0} (generation {1}), valid until {2}; the host admits only it.</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_Unfinished" xml:space="preserve">
+    <value>Own identity {0}, but the switch is not finished (phase {1} of 5): the host may still admit the shared identity. Start “Migrate” again — it continues where it stopped.</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_Operator" xml:space="preserve">
+    <value>Client certificate paths set by the operator; Whiskers does not manage them. Whether the host's ghostunnel still admits the shared identity is shown by the line “Shared client identity in the running ghostunnel”.</value>
+  </data>
+  <data name="Readiness_mtlsIdentity_Link" xml:space="preserve">
+    <value>Servers</value>
+  </data>
+  <data name="Readiness_mtlsSharedKey_Title" xml:space="preserve">
+    <value>Shared mTLS client key</value>
+  </data>
+  <data name="Readiness_mtlsSharedKey_Fail" xml:space="preserve">
+    <value>The shared client key is still in the data directory although {0} host(s) no longer admit it — before it is retired, or after an older backup was restored (older self-backups still contain it). Once all hosts are migrated: retire it on the server page. If a host can then no longer be reached: break-glass re-onboarding over SSH.</value>
+  </data>
+  <data name="Readiness_mtlsSharedKey_Link" xml:space="preserve">
+    <value>Servers</value>
+  </data>
+  <data name="Readiness_mtlsKeysProtected_Title" xml:space="preserve">
+    <value>mTLS client keys protected</value>
+  </data>
+  <data name="Readiness_mtlsKeysProtected_OkWindows" xml:space="preserve">
+    <value>None of the client keys is readable by Everyone, Users or Authenticated Users.</value>
+  </data>
+  <data name="Readiness_mtlsKeysProtected_OkUnix" xml:space="preserve">
+    <value>All client keys have mode 0600.</value>
+  </data>
+  <data name="Readiness_mtlsKeysProtected_FailWindows" xml:space="preserve">
+    <value>Readable by all users: {0}.</value>
+  </data>
+  <data name="Readiness_mtlsKeysProtected_FailUnix" xml:space="preserve">
+    <value>Not 0600: {0}.</value>
   </data>
 </root>

@@ -33,7 +33,8 @@ public sealed record Capability(
 public enum MutationPrincipalKind { Human, ApiKey, Agent, Automation, Webhook, System }
 
 /// <param name="Id">Stable identifier (<see cref="PrincipalIds"/>): <c>user:&lt;email&gt;</c>, <c>key:&lt;id&gt;</c>,
-/// <c>trigger:&lt;id&gt;</c>, <c>agent:&lt;session id&gt;</c>, <c>task:&lt;id&gt;</c>. Never derived from a display name.</param>
+/// <c>trigger:&lt;id&gt;</c>, <c>agent:&lt;session id&gt;</c>, <c>task:&lt;id&gt;</c>, <c>webhook:&lt;id&gt;</c>, <c>system:&lt;component&gt;</c>, … — the
+/// closed scheme of contract 0014. Never derived from a display name.</param>
 /// <param name="DisplayName">What the audit log and the UI show.</param>
 /// <param name="PermissionLevel">The principal's effective level (<c>read</c> / <c>write</c> / <c>admin</c>).</param>
 /// <param name="CredentialId">The MCP key id when a key authenticated the call.</param>

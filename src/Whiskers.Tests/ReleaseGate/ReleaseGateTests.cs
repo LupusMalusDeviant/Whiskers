@@ -27,9 +27,9 @@ public class ReleaseGateTests
     /// checks that need a ❌ (R1, R2, R11, R17) use it now that the real table has none.</summary>
     private static readonly Lazy<GateInputs> ViolatedInputs = new(() => Real with
     {
-        Invariants = Mutate(Mutate(SetCell(Real.Invariants, "| INV-18 |", 2, "❌"),
-            "| ✅ | 56 |", "| ✅ | 55 |"), "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
-        ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-01 |",
+        Invariants = Mutate(ShiftHolds(SetCell(Real.Invariants, "| INV-18 |", 2, "❌"), -1),
+            "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
+        ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-58 |",
             "| INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |"),
     });
     private static GateInputs Violated => ViolatedInputs.Value;
@@ -99,14 +99,14 @@ public class ReleaseGateTests
     {
         // Today's records in a 1.0.0 release run: every ⚠️ and the ❌ are refused.
         var release = Evaluate(Violated, GateMode.Release, V100);
-        Assert.Contains(release, f => f.Rule == "R1" && f.Subject == "INV-01");
+        Assert.Contains(release, f => f.Rule == "R1" && f.Subject == "INV-58");
         Assert.Contains(release, f => f.Rule == "R1" && f.Subject == "INV-18");
 
         // ⚠️ with a complete, accepted exception passes; ❌ fails even with a complete exception row.
-        var excepted = WithException(Violated, "INV-01", "RG-1") with { };
+        var excepted = WithException(Violated, "INV-58", "RG-1") with { };
         excepted = WithException(excepted, "INV-18", "RG-2", status: "❌");
         var findings = Evaluate(excepted, GateMode.Release, V100);
-        Assert.DoesNotContain(findings, f => f.Rule == "R1" && f.Subject == "INV-01");
+        Assert.DoesNotContain(findings, f => f.Rule == "R1" && f.Subject == "INV-58");
         Assert.Contains(findings, f => f.Rule == "R1" && f.Subject == "INV-18");
         Assert.Contains(findings, f => f.Rule == "R11" && f.Subject == "INV-18" && f.Message.Contains("never accepted"));
 
@@ -122,15 +122,15 @@ public class ReleaseGateTests
     {
         Assert.DoesNotContain(Evaluate(Real, GateMode.Development, Dev), f => f.Rule == "R2");
 
-        var unlisted = Real with { ReleaseGate = RemoveLine(Real.ReleaseGate, "| INV-01 |") };
-        Assert.Contains(Evaluate(unlisted, GateMode.Development, Dev), f => f.Rule == "R2" && f.Subject == "INV-01");
+        var unlisted = Real with { ReleaseGate = RemoveLine(Real.ReleaseGate, "| INV-58 |") };
+        Assert.Contains(Evaluate(unlisted, GateMode.Development, Dev), f => f.Rule == "R2" && f.Subject == "INV-58");
 
         // An accepted exception only waives the reference, not the row.
-        var excepted = WithException(unlisted, "INV-01", "RG-1");
-        Assert.Contains(Evaluate(excepted, GateMode.Development, Dev), f => f.Rule == "R2" && f.Subject == "INV-01");
-        Assert.Contains(Evaluate(excepted, GateMode.Line, V100), f => f.Rule == "R2" && f.Subject == "INV-01");
+        var excepted = WithException(unlisted, "INV-58", "RG-1");
+        Assert.Contains(Evaluate(excepted, GateMode.Development, Dev), f => f.Rule == "R2" && f.Subject == "INV-58");
+        Assert.Contains(Evaluate(excepted, GateMode.Line, V100), f => f.Rule == "R2" && f.Subject == "INV-58");
 
-        var stale = Real with { ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-01 |", "| INV-02 | ✅ | WP6 | done | — |") };
+        var stale = Real with { ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-58 |", "| INV-02 | ✅ | WP6 | done | — |") };
         Assert.Contains(Evaluate(stale, GateMode.Development, Dev), f => f.Rule == "R2" && f.Subject == "INV-02" && f.Message.Contains("✅ now"));
 
         var wrongStatus = Violated with { ReleaseGate = SetCell(Violated.ReleaseGate, "| INV-18 |", 1, "⚠️") };
@@ -191,8 +191,8 @@ public class ReleaseGateTests
         var example = Real with { Invariants = Mutate(Real.Invariants, "## 11.", "```\n| INV-63 | example |\n```\n\n## 11.") };
         Assert.DoesNotContain(Evaluate(example, GateMode.Development, Dev), f => f.Subject == "INV-63");
 
-        var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 56 |", "| ✅ | 57 |") };
-        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 57, the table has 56"));
+        var miscounted = Real with { Invariants = ShiftHolds(Real.Invariants, +1) };
+        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains($"✅ is {Holds + 1}, the table has {Holds}"));
 
         var pipe = Real with { Invariants = Mutate(Real.Invariants, "`docker system\\|container", "`docker system|container") };
         Assert.Contains(Evaluate(pipe, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("cells"));
@@ -203,7 +203,7 @@ public class ReleaseGateTests
     {
         var deleted = Real with
         {
-            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 56 |", "| ✅ | 55 |"), "| **Total** | **62** |", "| **Total** | **61** |"),
+            Invariants = Mutate(ShiftHolds(RemoveLine(Real.Invariants, "| INV-61 |"), -1), "| **Total** | **62** |", "| **Total** | **61** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
@@ -266,19 +266,19 @@ public class ReleaseGateTests
     [Fact]
     public void A_planned_marker_must_name_the_owed_test()
     {
-        // On a ⚠️ row (INV-01). INV-21's marker, the first of this kind, was paid with ReadOnlyKillSwitchWireTests.
-        var existingClass = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |", "`KillSwitchTests` *(planned, WP6)*") };
-        Assert.Contains(Evaluate(existingClass, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-01");
+        // On a ⚠️ row (INV-58). INV-21's marker, the first of this kind, was paid with ReadOnlyKillSwitchWireTests.
+        var existingClass = Real with { Invariants = AppendTest(Real.Invariants, "| INV-58 |", "`KillSwitchTests` *(planned, WP6)*") };
+        Assert.Contains(Evaluate(existingClass, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-58");
 
-        var existingMethod = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |",
+        var existingMethod = Real with { Invariants = AppendTest(Real.Invariants, "| INV-58 |",
             "`UiMutationRunnerTests.The_kill_switch_stops_a_human_too` *(planned, WP6)*") };
-        Assert.Contains(Evaluate(existingMethod, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-01");
+        Assert.Contains(Evaluate(existingMethod, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-58");
 
-        var nameless = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |", "a wire test *(planned, WP6)*") };
-        Assert.Contains(Evaluate(nameless, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-01" && f.Message.Contains("only on a ❌ or ❓ row"));
+        var nameless = Real with { Invariants = AppendTest(Real.Invariants, "| INV-58 |", "a wire test *(planned, WP6)*") };
+        Assert.Contains(Evaluate(nameless, GateMode.Development, Dev), f => f.Rule == "R6" && f.Subject == "INV-58" && f.Message.Contains("only on a ❌ or ❓ row"));
 
         // The owed form passes: a class that does not exist yet, named; and today's table passes.
-        var owed = Real with { Invariants = AppendTest(Real.Invariants, "| INV-01 |", "`PrincipalKeyWireTests` *(planned, R1-03)*") };
+        var owed = Real with { Invariants = AppendTest(Real.Invariants, "| INV-58 |", "`PrincipalKeyWireTests` *(planned, R1-03)*") };
         Assert.DoesNotContain(Evaluate(owed, GateMode.Development, Dev), f => f.Rule == "R6");
         Assert.DoesNotContain(Evaluate(Real, GateMode.Development, Dev), f => f.Rule == "R6");
 
@@ -418,26 +418,26 @@ public class ReleaseGateTests
     [Fact]
     public void An_exception_needs_an_accepted_dated_decision_and_a_limitation()
     {
-        var valid = WithException(Real, "INV-01", "RG-1");
+        var valid = WithException(Real, "INV-58", "RG-1");
         Assert.DoesNotContain(Evaluate(valid, GateMode.Development, Dev), f => f.Rule == "R11");
 
         void Fails(GateInputs inputs, string because, GateVersion? version = null)
             => Assert.Contains(Evaluate(inputs, GateMode.Development, version ?? Dev), f => f.Rule == "R11" && f.Message.Contains(because));
 
-        Fails(WithException(Real, "INV-01", "RG-1", decisionStatus: "Proposed"), "not Accepted");
-        Fails(WithException(Real, "INV-01", "RG-1", date: ""), "no ISO date");
-        Fails(WithException(Real, "INV-01", "RG-1", date: "2999-01-01"), "in the future");
-        Fails(WithException(Real, "INV-01", "RG-1", decidedBy: "—"), "names no maintainer");
-        Fails(WithException(Real, "INV-01", "RG-1", decisionKind: "retirement"), "not 'exception'");
-        Fails(WithException(Real, "INV-01", "RG-1", decisionInvariant: "INV-13"), "not for INV-01");
-        Fails(WithException(Real, "INV-01", "RG-1", link: "docs/operations/no-such-page.md#limits"), "does not exist");
-        Fails(WithException(Real, "INV-01", "RG-1", link: LimitsDoc + "#no-such-heading"), "has no heading");
-        Fails(WithException(Real, "INV-01", "RG-1", limitationText: "Principals are typed."), "does not name INV-01");
-        Fails(WithException(Real, "INV-01", "RG-1", link: "docs/v1/WORK_PACKAGES.md#r1-51"), "must be in README.md");
+        Fails(WithException(Real, "INV-58", "RG-1", decisionStatus: "Proposed"), "not Accepted");
+        Fails(WithException(Real, "INV-58", "RG-1", date: ""), "no ISO date");
+        Fails(WithException(Real, "INV-58", "RG-1", date: "2999-01-01"), "in the future");
+        Fails(WithException(Real, "INV-58", "RG-1", decidedBy: "—"), "names no maintainer");
+        Fails(WithException(Real, "INV-58", "RG-1", decisionKind: "retirement"), "not 'exception'");
+        Fails(WithException(Real, "INV-58", "RG-1", decisionInvariant: "INV-13"), "not for INV-58");
+        Fails(WithException(Real, "INV-58", "RG-1", link: "docs/operations/no-such-page.md#limits"), "does not exist");
+        Fails(WithException(Real, "INV-58", "RG-1", link: LimitsDoc + "#no-such-heading"), "has no heading");
+        Fails(WithException(Real, "INV-58", "RG-1", limitationText: "Principals are typed."), "does not name INV-58");
+        Fails(WithException(Real, "INV-58", "RG-1", link: "docs/v1/WORK_PACKAGES.md#r1-51"), "must be in README.md");
         Fails(WithException(Violated, "INV-18", "RG-1", status: "❌"), "never accepted");
         Fails(WithException(Real, "INV-02", "RG-1", status: "✅"), "stale");
-        Fails(WithException(Real, "INV-01", "RG-1", reviewBy: "0.15.0"), "is due");                 // in Development mode too
-        Fails(WithException(Real, "INV-01", "RG-1", reviewBy: "1.0.0"), "is due", V100);
+        Fails(WithException(Real, "INV-58", "RG-1", reviewBy: "0.15.0"), "is due");                 // in Development mode too
+        Fails(WithException(Real, "INV-58", "RG-1", reviewBy: "1.0.0"), "is due", V100);
     }
 
     // ---- R17 ---------------------------------------------------------------------------------------------------
@@ -467,8 +467,8 @@ public class ReleaseGateTests
         Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1", limitationText: "No limitation is named here."), V101, "does not name INV-18");
         Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1", advisory: "CVE-2026-1234"), V101, "is not GHSA");
         Fails(WithKnownViolation(Violated, "INV-18", "RG-1", "1.0.1", decisionKind: "exception"), V101, "not 'known violation'");
-        Assert.Contains(Evaluate(WithKnownViolation(Violated, "INV-01", "RG-1", "1.0.1", status: "⚠️"), GateMode.Release, V101),
-            f => f.Rule == "R17" && f.Subject == "INV-01" && f.Message.Contains("❌ or ❓ only"));
+        Assert.Contains(Evaluate(WithKnownViolation(Violated, "INV-58", "RG-1", "1.0.1", status: "⚠️"), GateMode.Release, V101),
+            f => f.Rule == "R17" && f.Subject == "INV-58" && f.Message.Contains("❌ or ❓ only"));
         Assert.Contains(Evaluate(WithKnownViolation(Violated, "INV-02", "RG-1", "1.0.1", status: "✅"), GateMode.Release, V101),
             f => f.Rule == "R17" && f.Subject == "INV-02");
     }
@@ -480,12 +480,12 @@ public class ReleaseGateTests
     {
         const string csproj = "<Project><PropertyGroup><Version>0.15.0</Version></PropertyGroup></Project>";
         GateSnapshot Snapshot(GateInputs i, string? project = null) => new(project ?? csproj, i.Invariants, i.ReleaseGate, i.Contract);
-        var withRg2 = Real with { Contract = WithDecision(Real.Contract, "RG-2", "exception", "INV-01") };
+        var withRg2 = Real with { Contract = WithDecision(Real.Contract, "RG-2", "exception", "INV-58") };
         var baseline = Snapshot(withRg2);
         Assert.Empty(BaseComparison.Compare(baseline, baseline, "the base"));
 
         // Edited in one cell, deleted, an ID reused, a new ID at or below the base's highest: all fail.
-        var edited = Snapshot(Real with { Contract = WithDecision(Real.Contract, "RG-2", "exception", "INV-01", date: "2026-01-02") });
+        var edited = Snapshot(Real with { Contract = WithDecision(Real.Contract, "RG-2", "exception", "INV-58", date: "2026-01-02") });
         Assert.Contains(BaseComparison.Compare(edited, baseline, "the base"), f => f.Rule == "R18" && f.Subject == "RG-2" && f.Message.Contains("never edited"));
         Assert.Contains(BaseComparison.Compare(Snapshot(Real), baseline, "the base"), f => f.Rule == "R18" && f.Subject == "RG-2" && f.Message.Contains("never deleted"));
         var reused = Snapshot(Real with { Contract = WithDecision(withRg2.Contract, "RG-1", "exception", "INV-13") });
@@ -671,6 +671,18 @@ public class ReleaseGateTests
         => CapabilityInventoryRenderer.Render(inputs.Capabilities, PathMatrixParser.Parse(inputs.Contract, inputs.PathCapabilities),
             inputs.Surfaces, inputs.Compositions);
 
+    /// <summary>The §11 ✅ count moved by <paramref name="delta"/>, whatever it is today (the count grows as invariants
+    /// close, so the mutations do not pin it).</summary>
+    /// <summary>The ✅ rows of the real invariant table.</summary>
+    private static int Holds => InvariantTableParser.Parse(Real.Invariants).Count(r => r.Status == InvariantStatus.Holds);
+
+    internal static string ShiftHolds(string text, int delta)
+    {
+        var count = new System.Text.RegularExpressions.Regex(@"\| ✅ \| (\d+) \|");
+        Assert.True(count.IsMatch(text), "mutation anchor not found: the §11 ✅ count");
+        return count.Replace(text, m => $"| ✅ | {int.Parse(m.Groups[1].Value) + delta} |", 1);
+    }
+
     internal static string Mutate(string text, string from, string to)
     {
         var index = text.IndexOf(from, StringComparison.Ordinal);
@@ -715,7 +727,7 @@ public class ReleaseGateTests
         => Mutate(contract, DecisionsHeader, DecisionsHeader + $"| {id} | {kind} | {invariant} | test decision | {release ?? "—"} | {status} | {date} | {decidedBy} |\n");
 
     private static Func<string, string?> WithLimits(Func<string, string?> read, string invariant, string? text)
-        => path => path == LimitsDoc ? $"# Test limits\n\n## Accepted limits (test)\n\n{text ?? $"{invariant} and the other recorded gaps (INV-01, INV-02, INV-13, INV-18) are open in this release; operators must know."}\n\n## Other\n\nNothing.\n" : read(path);
+        => path => path == LimitsDoc ? $"# Test limits\n\n## Accepted limits (test)\n\n{text ?? $"{invariant} and the other recorded gaps (INV-58, INV-02, INV-13, INV-18) are open in this release; operators must know."}\n\n## Other\n\nNothing.\n" : read(path);
 
     private static GateInputs WithException(GateInputs inputs, string invariant, string decision, string status = "⚠️",
         string decisionStatus = "Accepted", string date = "2026-01-01", string decidedBy = "the maintainer", string decisionKind = "exception",

@@ -207,7 +207,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
     }
 
-    private const string NightlyRunner = "autopatch";
+    private const string NightlyRunner = PrincipalIds.AutoPatch;
 
     internal const string SuspensionNotSaved =
         " The suspension could not be saved: it holds only until Whiskers restarts — take it over or switch it off now.";
@@ -242,7 +242,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         }
 
         // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
-        var actor = new AutomationActor(NightlyRunner, "AutoPatch", owner, owner);
+        var actor = AutomationActor.ForAutoPatch(owner);
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
             new { dryRun }, async token => MutationResults.Report(await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
         if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)
@@ -267,7 +267,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     {
         try
         {
-            await _automation.RefuseAsync(new AutomationActor(NightlyRunner, "AutoPatch", owner, owner), "autopatch.run",
+            await _automation.RefuseAsync(AutomationActor.ForAutoPatch(owner), "autopatch.run",
                 arguments, reason, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -356,7 +356,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             if (_stopRequested) return false;
             // Claimed here, so "started" is never answered for a cycle that then does not run.
             if (Interlocked.CompareExchange(ref _running, 1, 0) != 0) return false;
-            var actor = new AutomationActor("autopatch-preview", "AutoPatch preview", onBehalfOf);
+            var actor = AutomationActor.ForAutoPatchPreview(onBehalfOf);
             var cts = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
             cts.CancelAfter(deadline);
             Task run;
@@ -400,7 +400,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     public Task<bool> RunCycleAsync(bool forceDryRun, string onBehalfOf, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(onBehalfOf);
-        return RunGuardedAsync(forceDryRun, new AutomationActor("autopatch-preview", "AutoPatch preview", onBehalfOf), ct);
+        return RunGuardedAsync(forceDryRun, AutomationActor.ForAutoPatchPreview(onBehalfOf), ct);
     }
 
     /// <summary><paramref name="actor"/> is the nightly owner, or whoever started a preview; each container the cycle

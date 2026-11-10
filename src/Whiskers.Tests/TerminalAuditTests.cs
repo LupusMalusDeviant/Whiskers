@@ -130,6 +130,10 @@ public class TerminalAuditTests
         var row = Assert.Single(audit.Rows);
         Assert.Equal("terminal.close", row.Action);
         Assert.Equal("admin@example.com", row.Actor);
+        // INV-01 (contract 0014): the row carries the owner's principal, not only its display name.
+        var principal = Assert.Single(audit.Principals);
+        Assert.Equal("user:admin@example.com", principal.Id);
+        Assert.Equal(Whiskers.Services.Mutations.MutationPrincipalKind.Human, principal.Kind);
         Assert.Equal("container", row.TargetType);
         Assert.Equal("c0ffee", row.TargetId);
         Assert.Equal("local", row.ServerId);

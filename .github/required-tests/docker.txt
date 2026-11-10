@@ -11,6 +11,7 @@
 1 Whiskers.Tests.PostgresSmokeTests.Migrator_copies_sqlite_data_into_real_postgres
 1 Whiskers.Tests.PostgresSmokeTests.A_failed_transfer_into_real_postgres_leaves_it_empty_and_runs_again
 1 Whiskers.Tests.PostgresSmokeTests.Approval_decisions_and_uses_commit_on_real_postgres_with_retries_on
+1 Whiskers.Tests.PostgresSmokeTests.The_guardrail_policy_record_exists_after_migration_and_round_trips
 1 Whiskers.Tests.PostgresSmokeTests.Audit_chain_writes_verifies_prunes_and_exports_on_real_postgres_with_retries_on
 1 Whiskers.Tests.PostgresSmokeTests.The_cli_migration_keeps_the_sqlite_audit_checkpoint_aside
 
@@ -34,9 +35,10 @@
 2 Whiskers.Tests.ComposePinIntegrationTests
 
 # BEGIN release-gate (generated)
-# Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md and docs/v1/RELEASE_GATE.md (contract 0008,
-# R8): one entry per test method named by a ✅ invariant or an accepted exception, the minimum = the cases xUnit
-# discovers. Do not edit by hand; a difference writes the fresh block to this file's .actual.
+# Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md, docs/v1/RELEASE_GATE.md and docs/v1/CLAIMS.md
+# (contract 0008, R8; contract 0011): one entry per test method named by a ✅ invariant, an accepted exception or a
+# registered claim, the minimum = the cases xUnit discovers. Do not edit by hand; a difference writes the fresh
+# block to this file's .actual.
 1 Whiskers.Tests.ComposePinIntegrationTests.A_pulled_and_a_built_service_start_exactly_the_inspected_images_with_the_pin_file
 1 Whiskers.Tests.ComposePinIntegrationTests.Moving_both_tags_after_the_inspection_still_starts_the_inspected_images
 1 Whiskers.Tests.PostgresBackupRestoreTests.A_backup_holds_the_database_and_a_restore_brings_back_database_and_files_together

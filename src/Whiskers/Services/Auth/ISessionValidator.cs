@@ -46,4 +46,8 @@ public static class SessionRevocationReasons
     public const string BindingRevoked = "binding_revoked";
     /// <summary>A federated session on an instance without an explicit Admin.</summary>
     public const string SetupIncomplete = "setup_incomplete";
+
+    /// <summary>Contract 0014 (D2): a session without its own id (<see cref="AuthConstants.SessionIdClaim"/>), issued
+    /// before the upgrade. Ended once; the person signs in again.</summary>
+    public const string SessionIdMissing = "session_id_missing";
 }

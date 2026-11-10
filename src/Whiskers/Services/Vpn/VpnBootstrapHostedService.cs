@@ -20,7 +20,7 @@ namespace Whiskers.Services.Vpn;
 public class VpnBootstrapHostedService : IHostedService
 {
     internal const string Capability = "vpn.bootstrap";
-    internal const string RunnerId = "vpn-bootstrap";
+    internal const string RunnerId = PrincipalIds.VpnBootstrap;
     internal const string DisplayName = "VPN bring-up";
 
     private readonly IVpnService _vpn;
@@ -80,7 +80,7 @@ public class VpnBootstrapHostedService : IHostedService
         {
             const string blocked = "The VPN bring-up owner could not be read, or the bring-up is suspended: an admin " +
                                    "must take it over in Settings → Automation owners.";
-            return await RefuseAsync(VpnBootstrapStatus.Blocked, new AutomationActor(RunnerId, DisplayName, null),
+            return await RefuseAsync(VpnBootstrapStatus.Blocked, AutomationActor.ForVpnBootstrap(DisplayName, null),
                 arguments, blocked, ct);
         }
 
@@ -89,12 +89,12 @@ public class VpnBootstrapHostedService : IHostedService
         {
             const string noOwner = "No admin has taken the VPN bring-up over (Settings → Automation owners): the VPN " +
                                    "was not brought up. It runs at the next start after an admin takes it over.";
-            return await RefuseAsync(VpnBootstrapStatus.NoOwner, new AutomationActor(RunnerId, DisplayName, null),
+            return await RefuseAsync(VpnBootstrapStatus.NoOwner, AutomationActor.ForVpnBootstrap(DisplayName, null),
                 arguments, noOwner, ct);
         }
 
         // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
-        var actor = new AutomationActor(RunnerId, DisplayName, owner, owner);
+        var actor = AutomationActor.ForVpnBootstrap(DisplayName, owner);
         _logger.LogInformation("[vpn] bringing up provider '{Provider}'", provider.Id);
         var settingsNote = SettingsNote(provider.Id);
         var outcome = await _automation.RunAsync(actor, Capability, arguments, async token =>

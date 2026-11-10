@@ -271,12 +271,16 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
     // The default encoder escapes <, >, &, quotes and every control character, so no field can end the block.
     private static readonly JsonSerializerOptions EventDataJson = new() { WriteIndented = true };
 
+    /// <summary>INV-01 (contract 0014): the trigger as the automation principal its run records, keyed by its id.</summary>
+    private static MutationPrincipal TriggerPrincipal(AiTrigger t) =>
+        new(MutationPrincipalKind.Automation, PrincipalIds.Trigger(t.Id), PrincipalIds.Trigger(t.Id), McpPermissionLevels.None);
+
     private async Task TryAuditAsync(AiTrigger t, NotificationEvent evt)
     {
         try
         {
             var audit = _sp.GetRequiredService<IAuditLogService>();
-            await audit.LogAsync(PrincipalIds.Trigger(t.Id), "trigger", "agent.run", "ai-trigger", t.Id, t.Name,
+            await audit.TryLogAsync(TriggerPrincipal(t), "agent.run", "ai-trigger", t.Id, t.Name,
                 details: $"{evt.EventType} @ {evt.ContainerName}");
         }
         catch (Exception ex) { _logger?.LogWarning(ex, "Audit of the AI trigger run failed."); }
@@ -287,7 +291,7 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
         try
         {
             var audit = _sp.GetRequiredService<IAuditLogService>();
-            await audit.LogAsync(PrincipalIds.Trigger(t.Id), "trigger", "agent.run", "ai-trigger", t.Id, t.Name,
+            await audit.TryLogAsync(TriggerPrincipal(t), "agent.run", "ai-trigger", t.Id, t.Name,
                 details: $"{evt.EventType} @ {evt.ContainerName}: not run — {reason}", success: false);
         }
         catch (Exception ex) { _logger?.LogWarning(ex, "Audit of the refused AI trigger run failed."); }

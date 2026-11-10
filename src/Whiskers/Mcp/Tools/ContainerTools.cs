@@ -347,7 +347,7 @@ public class ContainerTools
         // Contract 0006 / 0013: write, pull, build, inspect and pin the images, up — then the re-check.
         var run = await composeRunner.RunAsync(plan,
             (command, timeout, ct) => executor.ExecuteMutationAsync(sid, command, timeout, ct),
-            new ComposeRunOptions(Pull: true, TimeSpan.FromMinutes(5)));
+            new ComposeRunOptions(Pull: true, ComposeImpact.RunBudget));
         if (!run.Success)
         {
             if (run.Refusal is { } refusal)

@@ -123,6 +123,18 @@ internal static class TerminalDoubles
 
         public List<AuditRow> Rows { get; } = [];
 
+        /// <summary>The principal of each row written with one (contract 0014).</summary>
+        public List<Whiskers.Services.Mutations.MutationPrincipal> Principals { get; } = [];
+
+        public async Task<bool> TryLogAsync(Whiskers.Services.Mutations.MutationPrincipal principal, string action,
+            string targetType, string targetId, string targetName, string? details = null, string? serverId = null,
+            bool success = true, DateTime? occurredUtc = null)
+        {
+            lock (Rows) Principals.Add(principal);
+            return await TryLogAsync(principal.DisplayName, AuditPrincipals.ActorTypeOf(principal), action, targetType,
+                targetId, targetName, details, serverId, success);
+        }
+
         public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
             string targetName, string? details = null, string? serverId = null, bool success = true)
         {

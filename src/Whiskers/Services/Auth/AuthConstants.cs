@@ -30,6 +30,10 @@ public static class AuthConstants
     /// <summary>Claim carrying the id of the identity binding a federated session was admitted on (R1-27).</summary>
     public const string BindingIdClaim = "whiskers:binding";
 
+    /// <summary>Contract 0014 (D2, INV-01): the id of the web session itself — 128 random bits issued by each sign-in
+    /// handler. A cookie without it (issued before the upgrade) is ended once (<see cref="SessionRevocationReasons.SessionIdMissing"/>).</summary>
+    public const string SessionIdClaim = "whiskers:sid";
+
     /// <summary>The claim type the Google and OIDC handlers map the provider's <c>email_verified</c> to (R1-27).</summary>
     public const string EmailVerifiedClaim = "email_verified";
 

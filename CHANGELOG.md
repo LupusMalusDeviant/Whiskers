@@ -57,6 +57,48 @@ All notable changes to Whiskers are documented here. The format follows
   update"), and the update check asks about that reference. Behaviour change: the first redeploy after the upgrade
   recreates the project's containers (new label, pinned image), and their Image column shows the image id
   (`sha256:…`) instead of the name, which stays in `whiskers.image.ref`.
+- **Every action names one structured principal (INV-01, contract 0014).** Webhook deliveries are a principal kind of
+  their own (`Webhook`, naming the generation of the secret their signature was checked against — a new additive
+  column `Webhooks.SecretVersion`, raised by every regeneration) and decide exactly as before; Whiskers' own work is a
+  `System` principal from a closed list; a person keeps their account handle as id and now carries the sign-in
+  credential and the web session; every audit row written outside the gateway (retention, suspensions, terminal
+  close, sign-in and binding rows, restores, recovery codes, backup downloads, audit exports) records the principal.
+  **Behaviour changes:** everyone signs in again once after the update (sessions from before it carry no session id
+  and are ended, as with R1-26); approvals pending at the update can no longer be used (an approval is now bound to the
+  sign-in credential that asked for it) and expire as usual; webhook rows in the audit log say `Webhook` instead of
+  `Automation`; expired or cancelled approvals name `system:approval-expiry` instead of `system`.
+- **Self-reports are tested against the code (INV-56, contract 0011).** The production-readiness lines come from resx
+  in English (default) and German with stable ids; a parity test keeps keys, placeholders and fact tokens equal across
+  the languages, and every resx key exists in both. README.md, SECURITY.md, `docs/security-architecture.md` and
+  `docs/operations/production-checklist.md` mark each claim; `docs/v1/CLAIMS.md` registers 80 claims with
+  fingerprints and the tests that pin them, and the release gate requires those tests. SECURITY.md and the security
+  architecture now say what onboarding does ("bound to the mesh address") instead of "mesh-bound by design".
+  Readiness titles quoted in the docs are the English ones.
+- **A deleted guardrail policy is no first start any more (INV-25, contract 0010).** The database now records that a
+  guardrail policy has existed (new table `InstanceMarkers`, additive migration for SQLite and PostgreSQL; written when
+  the safe default is first created, at every start with a policy file and after saves; never changed or removed). With
+  that record — or with policy decisions on record — missing both `guardrails.json` and `guardrails.json.bak` keeps the
+  guardrails fail-closed instead of creating the weaker default, and so does a record that cannot be read. The start
+  decides this only once the database schema is current; a start that fails earlier never leaves the default behind.
+  **Way back** (host only): put a valid `guardrails.json` back (repaired or restored) and restart, or, with both files
+  missing, run `dotnet Whiskers.dll --reset-guardrails` in the container: it writes the safe default with the kill
+  switch **on** (audited as `guardrails.reset_on_host`), and after the restart an Admin switches the kill switch off on
+  the Guardrails page. Removing the policy files is no longer described as a reset anywhere. The Guardrails page and a
+  new readiness line ("Guardrail policy loaded and recorded", German "Guardrail-Policy geladen und vermerkt") show the reason; after upgrading, check that line once.
+  `--migrate-to-postgres` copies the record and accepts sources of older releases without the table.
+- **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
+  asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
+  host. The labels are now read from the whole `Config`.
+- **MCP SDK 2.4 with sessions bound to their key (contract 0016).** `ModelContextProtocol.AspNetCore` 1.4.1 → 2.4.0.
+  The SDK now defaults to stateless; Whiskers keeps stateful sessions (`initialize` → `Mcp-Session-Id`, GET/DELETE
+  `/mcp`) as before. Each session is bound to the API key that opened it: the key's principal carries the subject
+  `mcp-key:<key record id>` (never the secret, its hash or its hint), and a request with another key on that session
+  is refused with `403` (on 1.4.1 key principals had no subject, so any valid key could send on another key's session
+  if it knew the session id). A key whose record id is empty or shared with another key (only possible by editing the
+  permission file by hand) is refused with `401`. Clients on the `2026-07-28` protocol revision are asked to fall back
+  to the `initialize` handshake. **Behaviour change:** a federated (Google/OIDC) browser session can no longer call
+  `/mcp` directly — the SDK refuses principals without a subject; use an API key.
+
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
   test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can

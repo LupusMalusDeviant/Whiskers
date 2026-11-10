@@ -151,7 +151,10 @@ public static class WhiskersHostingExtensions
                     ],
                 };
             })
-            .WithHttpTransport()
+            // Contract 0016: SDK 2.x defaults to stateless. Whiskers keeps the 1.x behaviour — a session per client
+            // from `initialize`, bound by the SDK to the caller's subject (the API key's record id, see
+            // McpBearerAuthMiddleware). StatefulForInitializeClients is a separate, later decision.
+            .WithHttpTransport(transport => transport.SessionMode = ModelContextProtocol.AspNetCore.HttpServerSessionMode.Stateful)
             .WithTools(mcpToolTypes)
             // User-invokable workflows and read-only context about the MCP surface itself (no infrastructure data).
             .WithPrompts<Whiskers.Mcp.Prompts.OperationsPrompts>()

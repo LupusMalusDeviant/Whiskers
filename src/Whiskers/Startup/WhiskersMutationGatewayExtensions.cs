@@ -32,6 +32,8 @@ public static class WhiskersMutationGatewayExtensions
         ArgumentNullException.ThrowIfNull(services);
         // The guardrail engine is stateless → a shared default rule set is enough.
         services.AddSingleton<IAgentGuardrailEngine>(GuardrailEngine.CreateDefault());
+        // Contract 0010: the database's record that a guardrail policy has existed (read and written by the store only).
+        services.AddSingleton<IGuardrailPolicyMarker, DbGuardrailPolicyMarker>();
         services.AddSingletonWithInterface<GuardrailStore, IGuardrailStore>();
         services.AddSingleton<IGuardrailRuleCatalog, GuardrailRuleCatalog>();
         // R1-14: approvals live in the database; the store loads the open ones after the schema is migrated.

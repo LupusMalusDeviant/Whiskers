@@ -347,7 +347,12 @@ public sealed class HelpContentService : IHelpContentService
                     nicht), statt mit leeren Rollen oder Berechtigungen zu laufen: Datei reparieren, sie
                     **zusammen mit** `<datei>.bak` entfernen oder ein Backup zurückspielen. Eine kaputte
                     `guardrails.json` wird nicht durch die vorige Fassung ersetzt: die abgesicherten Aktionen
-                    des Agenten bleiben gesperrt, bis du sie reparierst.
+                    des Agenten bleiben gesperrt, bis du sie reparierst. Sie samt `.bak` zu entfernen setzt sie auch
+                    nicht zurück: die Datenbank vermerkt, dass es eine Guardrail-Policy gab, also bleiben die Aktionen
+                    gesperrt, bis wieder eine gültige `guardrails.json` da ist (repariert oder aus einem Backup) oder,
+                    wenn beide Dateien fehlen, im Container `dotnet Whiskers.dll --reset-guardrails` läuft. Das schreibt
+                    die sichere Standard-Policy mit eingeschaltetem Kill-Switch; nach dem Neustart schaltet ein Admin ihn
+                    auf der Guardrails-Seite aus.
                     """),
             }),
 
