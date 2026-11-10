@@ -60,11 +60,12 @@ again. Afterwards INV-57 is ✅ without a limitation.
 - **D3 — Runner signatures carry the object.** Both runners and `TaskExecutor.RunGatedAsync` get
   `RunAsync<TTarget, T>(…, Func<TTarget, CancellationToken, Task<T>> action, …) where TTarget : ResolvedTarget`
   (plus the `Task` variant), still `[MutationEntryPoint]`. The page writes the type in the lambda
-  (`(ResolvedContainer c, ct) => Docker.StartContainerAsync(c.Id, c.ServerId)`); the runner refuses a `TTarget` that is
+  (`(ResolvedContainer c, CancellationToken ct) => Docker.StartContainerAsync(c.Id, c.ServerId)` — C# requires
+  either every lambda parameter typed or none; amendment A3); the runner refuses a `TTarget` that is
   not the capability's type before the gateway is asked (recorded via `RefuseAsync`, INV-45). `MutationContext` gains
   `Target`. `ComposeImpact.RunForEachAsync` hands each nested decision its `ResolvedContainer`. The old
-  `Func<CancellationToken, …>` overloads are marked `[Obsolete]` during the migration and **deleted** in the last step
-  (no compatibility shim).
+  `Func<CancellationToken, …>` overloads stay unmarked during the migration (no `[Obsolete]`, amendment A4; the
+  pending list of D10 tracks the remaining callers) and are **deleted** in the last step (no compatibility shim).
 
 ### "Cannot obtain a different object"
 
@@ -207,7 +208,7 @@ and the codebase map. Each PR updates the documents of what it changes.
 | Step | Content | Triage |
 |---|---|---|
 | 1 | `ResolvedTarget` types + token, catalog `Resolution`, resolver branches for volume, backup, log alert, records (D1, D2, D5, D6, D12); catalog test | [Claude-prüfbar] |
-| 2 | Gateway `ConfirmAsync`, `ExpectedTarget`, `MutationContext.Target`; new runner overloads (old ones `[Obsolete]`); `ResolvedTargetFlowTests` with the pending list (D3, D9, D10) | [Claude-prüfbar] |
+| 2 | Gateway `ConfirmAsync`, `ExpectedTarget`, `MutationContext.Target`; new runner overloads (old ones unmarked, A4); `ResolvedTargetFlowTests` with the pending list (D3, D9, D10) | [Claude-prüfbar] |
 | 3 | Automation: `TaskExecutor`, AutoUpdate, AutoPatch, GitDeployOwners, endpoint checks, VPN | [Claude-prüfbar] |
 | 4 | Webhooks (D7) | [Claude-prüfbar] |
 | 5 | Workloads (D8) | [Claude-prüfbar]; live check [braucht Nutzer/Hardware: k3s-Cluster] |
@@ -234,6 +235,25 @@ Every question was answered as recommended; the answers are decisions of this co
 - **Q6 — The old runner overloads are deleted in the last step, without a shim.**
 - **Q7 — Kubernetes UID preconditions** are tested with a fake client in CI plus one manual check on a k3s cluster
   (numbered checklist item, [braucht Nutzer/Hardware]) before INV-57 is set to ✅.
+
+## Amendments (accepted by the maintainer, 10 November 2026)
+
+Found while building step 1; each replaces the wording above where they differ.
+
+- **A1 — Upserts are `Creates` with type `ResolvedTarget`.** Capabilities that save an object which may or may not
+  exist yet (`server.onboard`, `server.save`, `gitdeploy.save`, `webhook.save`, `vault.secret_set`, `registry.save`,
+  `endpointcheck.save`; `CapabilityCatalog.Upserts`) declare `Resolution = Creates` and the abstract `ResolvedTarget` as
+  their type. The execution receives the existing object (confirmed before it runs, D9) or a `ResolvedNew`.
+- **A2 — New interface `ILocalAccountDirectory`** (`Services/Auth/LocalAccountDirectory.cs`): the inventory an
+  `account.*` target resolves against (D12). `FindAsync(email)` returns the stored email of an existing local account or
+  `null`, reads in a scope of its own and independent of the caller (a Viewer changing their own password resolves too),
+  and throws on a failed read instead of answering "not found" (fail closed). `ILocalAccountService.ListAsync` stays
+  Admin-only.
+- **A3 — Lambda syntax.** D3's example is written as valid C#: `(ResolvedContainer c, CancellationToken ct) => …`
+  (C# allows either every lambda parameter typed or none).
+- **A4 — No `[Obsolete]` on the old runner overloads.** Marking them would add a warning for each of the ~150 remaining
+  callers to every intermediate build and bury real warnings; the pending list of `ResolvedTargetFlowTests` tracks them instead and step 7 deletes
+  the overloads (Q6 unchanged).
 
 ## Not in scope
 
