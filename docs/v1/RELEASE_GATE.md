@@ -42,7 +42,6 @@ Highest invariant ID: INV-62
 | INV-56 | ⚠️ | WP7 | readiness lines are German only, and no test compares README/SECURITY.md claims with the code | — |
 | INV-57 | ⚠️ | WP2 | UI and automation delegates, webhooks, workloads, volumes and log alerts do not act on the resolved target object | — |
 | INV-58 | ⚠️ | R1-44 | holds per host only after the migration; hosts on the shared client credential are exposed (D12) | — |
-| INV-62 | ⚠️ | 0006, 0013 | the Deploy page's compose mode and `deploy_app` are out of scope (contract 0013 step 3) | — |
 
 ## Retired invariants
 

@@ -195,7 +195,7 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-02 | `stop_container` | write | ✅ read back (R1-36) | GW ✅ + details | INV-43 |
 | M-03 | `restart_container` | write | ✅ read back (R1-36) | GW ✅ + details | INV-43 |
 | M-04 | `update_container` | write | ✅ the new container (same name) read back (R1-36); no health check; a failed snapshot is a warning, not a stop (that rule is AutoUpdate's) | GW ✅ + details | INV-43, 44, 53 |
-| M-05 | `deploy_app` | admin | ✅ the returned container read back (R1-36); a deployment that names none: `NotVerifiable` with its reason | GW ✅ + details | INV-43 (volumes checked since R1-16), 62 (out of scope of contract 0006: a `DeploymentRequest` is not decided on its exposures) |
+| M-05 | `deploy_app` | admin | ✅ every container of its compose project read back (contract 0013, D7) | GW ✅ + details | INV-43 (volumes checked since R1-16), 62 (contract 0013: a compose project planned from the arguments, its exposures decided, pinned and re-checked; a malformed entry refuses) |
 | M-06 | `set_container_env` | **admin** (R1-05, root-equivalent like the page's .env save; was write) | `NotVerifiable` + reason (the process reads the .env, R1-37) | GW ✅ + details | INV-43, 51, 62 (the exposures of the planned project decided, run and re-checked through `ComposeRunner`, contract 0006) |
 | M-07 | `deploy_compose` | admin | ✅ every container of the project the plan resolved (a top-level `name:` included) read back (R1-37); an interpolated project name: `NotVerifiable` + reason | GW ✅ + details | INV-43 (plan incl. mounts decided since R1-16), 62 (exposures decided and re-checked after `up`, contract 0006) |
 | M-08 | `execute_command` | admin | `NotVerifiable` + reason (arbitrary command; its exit code decides, R1-37) | GW ✅ + details (redacted) | INV-24 (free text ✅ R1-16), 43, 59 |
@@ -322,8 +322,8 @@ mTLS carries the server's diff.
 | U-07 | Container detail DB query (arbitrary SQL) | **Admin** (PC-D3, WP2) | `NotVerifiable` + reason (arbitrary SQL, R1-37) | GW ✅ (R1-21) | — |
 | U-08 | Artisan migrate / rollback / SQL file / seed | Admin | `NotVerifiable` + reason (arbitrary command, R1-37) | GW ✅ (R1-21) | — |
 | U-09 | Container detail DB backup | Admin | ✅ dump file on the host, not empty (R1-37) | GW ✅ (R1-21) | — |
-| U-10 | Deploy form / raw compose | **Admin** (WP1) | ✅ the form's container (R1-36); raw compose `NotVerifiable` + reason (no project name to read back, R1-37) | GW ✅ (R1-21) | INV-43, 62 (out of scope of contract 0006: the compose mode, `ComposeFileParser`) |
-| U-11 | App store template / registry image | **Admin** (WP1) | `NotVerifiable` + reason (the deployment answers with the compose output, not a container, R1-37) | GW ✅ (R1-21) | INV-43, 62 (contract 0006) |
+| U-10 | Deploy form / compose tab | **Admin** (WP1) | ✅ every container of the compose project read back (contract 0013, D7) | GW ✅ (R1-21) | INV-43, 62 (contract 0013: both tabs run a planned compose project through the compose runner) |
+| U-11 | App store template / registry image | **Admin** (WP1) | ✅ every container of the compose project read back (contract 0013, D7) | GW ✅ (R1-21) | INV-43, 62 (contract 0006) |
 | U-12 | Compose editor | **Admin** (WP1) | ✅ every container of the project the plan resolved read back (R1-37); an interpolated project name `NotVerifiable` + reason | GW ✅ (R1-21) | INV-43, 62 (contract 0006) |
 | U-13 | Networks create/remove | Admin | ✅ listed with its driver / no longer listed (R1-37) | GW ✅ (R1-21) | — (MCP admin since R1-05) |
 | U-14 | Firewall enable/disable UFW | Admin | ✅ `ufw status` read back (R1-37) | GW ✅ (R1-21) | — |

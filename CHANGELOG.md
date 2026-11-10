@@ -6,6 +6,26 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **One way to deploy: the Deploy page and `deploy_app` run compose projects (contract 0013, INV-62 step 3; INV-62
+  is ✅).** The form tab and MCP `deploy_app` map their request through one mapper (`DeploymentCompose`) to a compose
+  file in `/opt/deployments/<name>` (project = service = container name; first line `# whiskers: app.deploy`), and the
+  compose tab deploys its file like the compose editor (a required project name, "Check plan" shows project, services,
+  touched containers and every exposure with its class). All three are planned, have their mounts and exposures
+  decided, run through the compose runner (pinned images, re-check) and are read back per container of the project.
+  The gateway plans `deploy_app` from its arguments, so `ExposureChangeRule` decides its exposures (a Funnel label or a
+  `TUNNEL_TOKEN` asks for a confirmation even under Admin autonomy). Removed: `IDeploymentService`,
+  `ComposeFileParser`, `IDockerService.CreateContainerAsync` and the capability `container.create`; `app.deploy`
+  composes `container.disable_restart` / `container.stop` (no longer `image.pull` / `container.create`).
+  **Behaviour changes:** real compose projects replace single containers (the form and `deploy_app` keep
+  `network_mode: bridge`; a redeploy with the same name updates the project instead of failing on "name already in
+  use"); `build:`, `labels`, `cap_add` and everything else compose knows now work in the compose tab (and are
+  decided) instead of being refused or ignored; `deploy_app` refuses a malformed port or environment entry instead of
+  dropping it, refuses a Kubernetes server, and answers `App '<name>' deployed as compose project '<project>' on
+  <server>` with the containers (name and short id), the image and the pinned image id and the published ports — the
+  old `Container ID:` line is gone; a refusal answers `Deployment refused: …`. A plan is refused before anything is
+  written when a project of that name runs from another directory, when (form and `deploy_app`) the directory holds a
+  `docker-compose.yml` without the marker, or when a plain container of the old page has a name the deployment would
+  use — remove it on the container page or choose another name.
 - **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
   asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
   host. The labels are now read from the whole `Config`.

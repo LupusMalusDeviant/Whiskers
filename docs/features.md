@@ -35,7 +35,9 @@ shared with another container, route labels — Tailscale Funnel/serve (DockTail
 `traefik.enable=false`, caddy-docker-proxy (`ExposureLabelPrefixes` in the guardrail policy) — and proxies or tunnels
 without a label (contract 0013): a Traefik with `exposedByDefault` in the deployment or already on the host, cloudflared,
 Tailscale serve/Funnel; one whose configuration cannot be read refuses the plan. This holds for the Compose editor, the app
-templates, MCP `deploy_compose`, `set_container_env`, the container page's `.env` save, compose webhooks and Git deploy.
+templates, the Deploy page (form and compose tab), MCP `deploy_app` and `deploy_compose`, `set_container_env`, the container
+page's `.env` save, compose webhooks and Git deploy. The Deploy page's form and `deploy_app` are written as a compose project
+in `/opt/deployments/<name>` (contract 0013, U1): no deployment path creates a container outside the compose runner.
 
 - **Agents and API keys** need a confirmation for the classes in `ExposureConfirmClasses` (default `public` and
   `host`) — also under a policy that lets Admin act autonomously. An unattended run owned by a key cannot get one and

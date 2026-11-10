@@ -164,8 +164,9 @@ or caught only after `up`:
   re-checked.
 - **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own
   300 s / 600 s / 300 s.
-- **Out of scope**: the Deploy page's compose mode (`ComposeFileParser`) and `DeploymentRequest` / `deploy_app` are not
-  decided on their exposures.
+- **Legacy containers of the old Deploy page** (plain containers without compose labels) are left alone; a deployment
+  that would use one of their names is refused until the container is removed or another name is chosen (contract 0013,
+  D15).
 
 **Upgrade note (contract 0006).** The new policy defaults change every policy's version hash, so open approvals and
 the policy snapshots of pinned runs expire at the upgrade. `docker compose pull --ignore-buildable` needs Docker
@@ -178,7 +179,12 @@ Git deploys now pull images as well.
 open approvals expire at the upgrade. A Traefik with `exposedByDefault`, cloudflared and Tailscale serve/Funnel in a
 deployment — and a Traefik already running on the host — are decided as exposures; a proxy or tunnel whose configuration
 cannot be read (a variable that is not set, a config file on a named volume, a file larger than 1 MiB) refuses the
-plan. Containers a compose run starts are pinned to their image id.
+plan. Containers a compose run starts are pinned to their image id; `container.update` and AutoPatch refuse a pinned
+container (redeploy its project to update it). The Deploy page (form and compose tab) and MCP `deploy_app` now create
+real compose projects in `/opt/deployments/<project>` instead of single containers: the form and `deploy_app` keep
+`network_mode: bridge`, a redeploy with the same name updates the project, `deploy_app` refuses a malformed port or
+environment entry instead of dropping it and answers with the project, its containers and the pinned image id. A plain
+container the old page created blocks a deployment that would reuse its name.
 
 ## Operating it
 
