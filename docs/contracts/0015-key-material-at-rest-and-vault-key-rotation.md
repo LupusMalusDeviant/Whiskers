@@ -1,12 +1,19 @@
 # Contract 0015 — Private keys at rest and `VAULT_KEY` rotation (INV-52)
 
-Status: **Draft** · 10 November 2026. Not accepted yet; the decisions D1–D10 and the open questions Q1–Q8 at the end
-need the maintainer. Nothing in this contract is implemented.
+Status: **Accepted** · 10 November 2026 by the maintainer, with the decisions D1–D10 as recommended (see
+*Decisions of the maintainer* at the end, Q1–Q8).
 
 **Protected layer.** Part A changes how Whiskers stores and loads the **mTLS client keys** — part of the mTLS layer that
-only an explicit approval may change (contract 0007, `common` rules). The maintainer approved *writing* this contract,
-not its implementation. Every step that touches the layer is marked **[mTLS layer]** below and in the plan; nothing on a
-managed host, in ghostunnel's flags, in the server-certificate validation or in the socket-proxy verbs changes.
+only an explicit approval may change (contract 0007, `common` rules). With Q1 the maintainer **approved** plan steps 2
+and 4 in that layer, limited to how the client key is stored and loaded (`IMtlsClientKeyLoader`,
+`DockerConnectionManager.BuildMtlsCredentials`, `MtlsClientProbe`, `MtlsClientCredentialStore`, the start migration).
+Every step that touches the layer is marked **[mTLS layer]** below and in the plan; nothing on a managed host, in
+ghostunnel's flags, in the server-certificate validation, in the rollout's phases or in the socket-proxy verbs changes.
+
+**Correction of contract 0007 D3.** Contract 0007 D3 kept the per-host client keys as plain files on the assumption that
+"the key must be written out for the Docker client". That assumption is wrong (see *Current state*: the Docker client
+takes an in-memory `X509Certificate2`); this contract replaces it. The rest of 0007 D3 (one slot per issue, file names,
+modes, the record as the authority) stands.
 
 ## Purpose
 
@@ -220,7 +227,7 @@ vault `Wrong` (INV-54) and the readiness check names the rotation.
 
 Self-backups made before the rotation stay sealed with the old key (D9).
 
-## Decisions (D1–D10, recommendation first)
+## Decisions (D1–D10, recommendation first — all accepted as recommended)
 
 - **D1 — Scope of INV-52.** Keep both parts in INV-52 (the gate row names both); INV-52 becomes ✅ only after Part B.
   Parts A and B are separate packages and pull requests. *Alternative:* INV-52 ✅ after Part A, and rotation becomes a new
@@ -346,22 +353,19 @@ Part B — rotation
     verifies, the hosts answer, a new self-backup restores; then replace the key file and restart once more. Only then on
     Badwolf, with the old key kept in the password manager until a self-backup under the new key has been restored once.
 
-## Open questions for the maintainer
+## Decisions of the maintainer (10 November 2026)
 
-- **Q1 — Implementation in the protected mTLS layer (steps 2 and 4).** Recommended: approve these two steps as described
-  (only how the client key is stored and loaded; host side, validation, flags and rollout untouched). Alternative: no
-  change to the mTLS layer — then D10's alternative applies and mTLS client keys need an accepted exception for INV-52.
-- **Q2 — Rotation inside INV-52 (D1).** Recommended: both parts in INV-52, ✅ after both. Alternative: INV-52 ✅ after Part A,
-  rotation as a new INV-63.
-- **Q3 — SSH keys in use (D2).** Recommended: lease file in `/dev/shm`, refused without a memory-backed directory.
-  Alternative: an in-process `ssh-agent`.
-- **Q4 — New keys without `VAULT_KEY` (D4).** Recommended: refused (SSH upload, onboarding and client migration need
-  the vault). Alternative: plaintext when no key is configured at all, reported by the readiness check.
-- **Q5 — Keys outside the data directory (D6).** Recommended: keep supporting them as operator-managed, reported, outside
-  INV-52's scope. Alternative: refuse them once a vault is configured.
-- **Q6 — Rotation trigger (D7).** Recommended: `VAULT_KEY_NEW_FILE` at the next start. Alternative: a host CLI run with
-  Whiskers stopped.
-- **Q7 — Older self-backups (D9).** Recommended: not re-sealed; marked and restorable with their own key, plus a fresh
-  backup right after the rotation. Alternative: re-seal all kept archives during the rotation.
-- **Q8 — Wrong key cuts mTLS (D10).** Recommended: accept it as fail-closed, with the cause named and the way back
-  documented. Alternative: leave mTLS client keys unsealed and record an accepted exception.
+All eight questions were decided as recommended.
+
+- **Q1 — Implementation in the protected mTLS layer (steps 2 and 4): approved**, limited to how the client key is stored
+  and loaded (`IMtlsClientKeyLoader`, `DockerConnectionManager.BuildMtlsCredentials`, `MtlsClientProbe`,
+  `MtlsClientCredentialStore`, the start migration). The host side, the server-certificate validation, ghostunnel's flags,
+  the rollout's phases and the socket-proxy verbs stay unchanged.
+- **Q2 — Rotation inside INV-52 (D1):** both parts in INV-52; ✅ only after both.
+- **Q3 — SSH keys in use (D2):** lease file in `/dev/shm`, refused without a memory-backed directory.
+- **Q4 — New keys without `VAULT_KEY` (D4):** refused (SSH upload, onboarding and client migration need the vault).
+- **Q5 — Keys outside the data directory (D6):** still allowed as operator-managed, reported, outside INV-52's scope.
+- **Q6 — Rotation trigger (D7):** `VAULT_KEY_NEW_FILE` (or `VAULT_KEY_NEW`) at the next start.
+- **Q7 — Older self-backups (D9):** not re-sealed; marked and restorable with their own key, and a fresh backup is made
+  right after the rotation.
+- **Q8 — Wrong key cuts mTLS (D10):** accepted as fail-closed, with the cause named and the way back documented.
