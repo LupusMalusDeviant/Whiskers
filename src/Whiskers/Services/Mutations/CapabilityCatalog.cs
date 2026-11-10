@@ -206,7 +206,6 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         // same as the container page's .env save, root-equivalent on the host.
         yield return Tool("container.env_set", "set_container_env", A, "container", Root, Normal);
         yield return Ui("container.remove", A, "container", Des, Normal);
-        yield return Ui("container.create", A, "container", Root, Long);
         yield return Ui("container.rollback", W, "container", Dis, Long);
         // Kubernetes rows on the Dashboard (start / stop = scale the controller, restart = rollout restart).
         yield return Ui("workload.start", W, "workload", Rev, Normal);

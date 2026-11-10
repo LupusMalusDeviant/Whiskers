@@ -109,6 +109,18 @@ public class UiMutationGatewayCoverageTests : IDisposable
     }
 
     [Fact]
+    public void The_guardrail_policy_record_is_a_record_write_not_a_mutation()
+    {
+        // Contract 0010 D1 with contract 0009 A1.1: the record that a guardrail policy existed grants nothing and only
+        // inserts, so it is no configuration write — no capability, not gated, not stopped by the kill switch.
+        var methods = typeof(IGuardrailPolicyMarker).GetMethods();
+        Assert.Contains(methods, m => m.Name == nameof(IGuardrailPolicyMarker.EnsureAsync));
+        Assert.All(methods, m => Assert.Null(m.GetCustomAttribute<MutatingOperationAttribute>()));
+        Assert.DoesNotContain(Writes, w => w.Service == typeof(IGuardrailPolicyMarker));
+        Assert.DoesNotContain(new CapabilityCatalog().All, c => c.Id.Contains("marker", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void No_page_or_component_writes_configuration_past_the_gateway()
     {
         var capabilities = Writes.Select(w => w.Capability).ToHashSet();

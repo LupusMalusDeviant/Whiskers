@@ -1,18 +1,19 @@
 @page "/deploy"
 @attribute [Authorize]
-@inject IDeploymentService DeploymentService
 @inject Whiskers.Services.ServerConfig.IServerConfigService ServerConfigService
 @inject ISnackbar Snackbar
-@inject NavigationManager Nav
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IUiMutationRunner Mutations
 @inject IDockerService DockerService
+@inject IHostCommandExecutor Executor
+@inject IComposePlanner ComposePlanner
+@inject IComposeRunner ComposeRunner
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["Deploy_PageTitle"]</PageTitle>
 
 @* RoadToSAP Phase 1: gated by the Deployment module; when off, ModuleGuard shows a "disabled" notice.
-   The IDeploymentService injection resolves the Core no-op default either way. *@
+   Contract 0013 (U1): both tabs deploy a real compose project through ComposePlan / ComposeRunner. *@
 <ModuleGuard ModuleId="deployment">
 
 <div class="sw-page-header">
@@ -26,6 +27,8 @@
         </div>
     </MudStack>
 </div>
+
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">@L["Deploy_Hint_ComposeProjects"]</MudText>
 
 @* Server Selection (applies to both tabs) *@
 <MudSelect T="string" @bind-Value="_serverId" Label="@L["Deploy_Label_TargetServer"]" Variant="Variant.Outlined" Class="mb-4" Style="max-width: 320px;">
@@ -136,14 +139,16 @@
         }
     </MudTabPanel>
 
-    @* Tab 2: Compose Deploy *@
+    @* Tab 2: Compose Deploy — the compose editor's path (contract 0013, D2) *@
     <MudTabPanel Text="Compose" Icon="@Icons.Material.Filled.Description">
-        <MudTextField @bind-Value="_composeYaml" Label="docker-compose.yml" Variant="Variant.Outlined"
-                      Lines="15" Placeholder="@L["Deploy_Placeholder_ComposeContent"]"
+        <MudTextField @bind-Value="_projectName" Label="@L["Deploy_Label_ProjectName"]" Variant="Variant.Outlined"
+                      Placeholder="my-app" Class="mb-3" Style="max-width: 320px;" />
+        <MudTextField @bind-Value="_composeYaml" @bind-Value:after="SuggestProjectName" Label="docker-compose.yml"
+                      Variant="Variant.Outlined" Lines="15" Placeholder="@L["Deploy_Placeholder_ComposeContent"]"
                       Style="font-family: 'Cascadia Code', monospace; font-size: 13px;" />
 
         <MudStack Row="true" Class="mt-4">
-            <MudButton Variant="Variant.Outlined" OnClick="ValidateCompose"
+            <MudButton Variant="Variant.Outlined" OnClick="CheckPlan" Disabled="@(_checking || string.IsNullOrWhiteSpace(_composeYaml))"
                        StartIcon="@Icons.Material.Filled.CheckCircle">
                 @L["Deploy_Button_Validate"]
             </MudButton>
@@ -158,27 +163,42 @@
             }
         </MudStack>
 
-        @if (_validationResult != null)
+        @if (_planError != null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-4">
+                @L["Deploy_Validation_ErrorsTitle"] @_planError
+            </MudAlert>
+        }
+        else if (_checkedPlan != null)
         {
             <MudPaper Class="pa-4 mt-4" Elevation="1">
-                @if (_validationResult.IsValid)
+                <MudAlert Severity="Severity.Success">
+                    @L["Deploy_Validation_Valid", _checkedPlan.ProjectNameForAudit, _checkedPlan.ProjectDirectory, _checkedPlan.ActiveServices.Count]
+                    @string.Join(", ", _checkedPlan.ActiveServices.Select(s => s.Name))
+                </MudAlert>
+                @if (_checkedPlan.Impact.Count > 0)
                 {
-                    <MudAlert Severity="Severity.Success">
-                        @L["Deploy_Validation_Valid", _validationResult.Services.Count]
-                        @string.Join(", ", _validationResult.Services.Select(s => s.ContainerName ?? s.Image))
-                    </MudAlert>
+                    <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Deploy_Plan_Touches"]</MudText>
+                    <ul class="deploy-plan-touches">
+                        @foreach (var i in _checkedPlan.Impact)
+                        {
+                            <li>@i.Container.Name (@i.Kind)</li>
+                        }
+                    </ul>
+                }
+                @if (_checkedPlan.Exposures().Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Deploy_Plan_Exposures"]</MudText>
+                    <ul class="deploy-plan-exposures">
+                        @foreach (var e in _checkedPlan.Exposures())
+                        {
+                            <li>@e.Display — @ExposureClasses.Of(e.Kind, e.Key, _checkedPlan.ExposurePrefixes)</li>
+                        }
+                    </ul>
                 }
                 else
                 {
-                    <MudAlert Severity="Severity.Error">
-                        @L["Deploy_Validation_ErrorsTitle"]
-                        <ul>
-                            @foreach (var err in _validationResult.Errors)
-                            {
-                                <li>@err</li>
-                            }
-                        </ul>
-                    </MudAlert>
+                    <MudText Typo="Typo.body2" Class="mt-3">@L["Deploy_Plan_NoExposures"]</MudText>
                 }
             </MudPaper>
         }
@@ -198,7 +218,10 @@
     private List<string> _volumes = new();
     private List<EnvEntry> _envVars = new();
     private string _composeYaml = string.Empty;
-    private DeploymentValidationResult? _validationResult;
+    private string _projectName = string.Empty;
+    private ComposePlan? _checkedPlan;
+    private string? _planError;
+    private bool _checking;
     private bool _deploying;
     private string _deployProgress = string.Empty;
     private AppRole _role = AppRole.Viewer;
@@ -226,6 +249,15 @@
         _serverId = ServerConfigService.GetDefaultServer()?.Id ?? "local";
     }
 
+    /// <summary>The planner of a tab (contract 0013, D3/D15): the project's directory and names must be free.</summary>
+    private IComposePlanner PlannerFor(DeploymentPath path) => new DeploymentPathPlanner(ComposePlanner, DockerService, Executor, path);
+
+    private IProgress<string> Progress() => new Progress<string>(msg =>
+    {
+        _deployProgress = msg;
+        InvokeAsync(StateHasChanged);
+    });
+
     private async Task DeployFromForm()
     {
         // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
@@ -238,8 +270,7 @@
 
         var ports = _ports.Where(p => !string.IsNullOrWhiteSpace(p.Host) && !string.IsNullOrWhiteSpace(p.Container)).ToList();
         var envs = _envVars.Where(e => !string.IsNullOrWhiteSpace(e.Key)).ToList();
-        // ToDictionary throws on a duplicate — outside the try below that tore down the circuit instead of
-        // telling the user which entry is doubled.
+        // ToDictionary throws on a duplicate — tell the user which entry is doubled instead.
         var dup = ports.GroupBy(p => p.Host.Trim()).FirstOrDefault(g => g.Count() > 1)?.Key
                ?? envs.GroupBy(e => e.Key.Trim()).FirstOrDefault(g => g.Count() > 1)?.Key;
         if (dup != null)
@@ -247,92 +278,97 @@
             Snackbar.Add(L["Deploy_Snackbar_Duplicate", dup].Value, Severity.Warning);
             return;
         }
-        _formRequest.PortMappings = ports.ToDictionary(p => p.Host.Trim(), p => p.Container);
-        _formRequest.Volumes = _volumes.Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
-        _formRequest.EnvironmentVars = envs.ToDictionary(e => e.Key.Trim(), e => e.Value ?? "");
+        var request = new DeploymentRequest
+        {
+            Image = _formRequest.Image.Trim(),
+            ContainerName = _formRequest.ContainerName,
+            RestartPolicy = _formRequest.RestartPolicy,
+            NetworkName = _formRequest.NetworkName,
+            PortMappings = ports.ToDictionary(p => p.Host.Trim(), p => p.Container.Trim()),
+            Volumes = _volumes.Where(v => !string.IsNullOrWhiteSpace(v)).ToList(),
+            EnvironmentVars = envs.ToDictionary(e => e.Key.Trim(), e => e.Value ?? ""),
+        };
 
-        _deploying = true;
-        _deployProgress = "";
+        // Contract 0013, D1: the one mapper — the file the decision sees is the file that runs.
+        DeploymentComposeFile file;
         try
         {
-            var progress = new Progress<string>(msg =>
-            {
-                _deployProgress = msg;
-                InvokeAsync(StateHasChanged);
-            });
-            var request = _formRequest;
-            var sid = _serverId;
-            var deployName = string.IsNullOrWhiteSpace(request.ContainerName) ? request.Image : request.ContainerName;
-            var id = await Mutations.RunAsync("app.deploy", new { serverId = sid, appName = deployName, image = request.Image,
-                    volumes = string.Join(",", request.Volumes) },
-                async (ResolvedHostObject h, CancellationToken _) =>
-                {
-                    var created = await DeploymentService.DeployFromFormAsync(request, progress, h.ServerId);
-                    // The created container is part of the gateway's event (R1-21).
-                    MutationScope.Note($"Container {created}");
-                    return created;
-                });
-            Snackbar.Add(L["Deploy_Snackbar_Deployed", id[..12]].Value, Severity.Success);
-            _deployProgress = L["Deploy_Progress_Success", id[..12]].Value;
+            file = DeploymentCompose.ToCompose(request);
         }
-        catch (MutationRefusedException ex)
+        catch (DeploymentComposeException ex)
         {
-            Snackbar.Add(ex.Message, Severity.Warning);
+            Snackbar.Add(L["Deploy_Snackbar_Refused", ex.Message].Value, Severity.Warning);
+            return;
         }
-        catch (Exception ex)
-        {
-            Snackbar.Add(L["Deploy_Snackbar_DeployFailed", ex.Message].Value, Severity.Error);
-            _deployProgress = L["Deploy_Progress_Error", ex.Message].Value;
-        }
-        finally
-        {
-            _deploying = false;
-        }
-    }
 
-    private void ValidateCompose()
-    {
-        _validationResult = DeploymentService.ValidateCompose(_composeYaml);
+        var sid = _serverId;
+        await RunAsync(DeploymentPath.AppDeploy, "app.deploy",
+            new { serverId = sid, appName = file.Name, image = request.Image, volumes = string.Join(",", request.Volumes) },
+            file.Deployment(sid), "Deploy_Snackbar_Deployed", "Deploy_Progress_Success");
     }
 
     private async Task DeployFromCompose()
     {
         // Deploy = root on the host (bind mounts, privileged); same level as the MCP deploy tools.
-        if (!await RequireAsync("compose.deploy", new { serverId = _serverId })) return;
+        if (!await RequireAsync("compose.deploy", new { projectName = _projectName, serverId = _serverId })) return;
+        SuggestProjectName();
+        if (!McpInputValidationName(_projectName))
+        {
+            Snackbar.Add(L["Deploy_Snackbar_InvalidProjectName"].Value, Severity.Warning);
+            return;
+        }
+        var sid = _serverId;
+        // Contract 0013, D2: exactly the compose editor's path — the file is planned, its mounts, exposures and the
+        // containers it touches are decided, and it runs through the compose runner.
+        await RunAsync(DeploymentPath.ComposeTab, "compose.deploy", new { projectName = _projectName, serverId = sid },
+            ComposeDeployment.FromContent(sid, ComposeDeployment.DeploymentDirectory(_projectName), _composeYaml),
+            "Deploy_Snackbar_ComposeDeployed", "Deploy_Progress_ComposeSuccess");
+    }
+
+    private async Task RunAsync(DeploymentPath path, string capabilityId, object arguments, ComposeDeployment deployment,
+        string deployedKey, string progressKey)
+    {
         _deploying = true;
         _deployProgress = "";
         try
         {
-            var progress = new Progress<string>(msg =>
+            var deployed = await Mutations.RunDeploymentAsync(Executor, PlannerFor(path), ComposeRunner, capabilityId, arguments,
+                deployment, progress: Progress());
+            var plan = deployed.Plan;
+            var run = deployed.Run;
+            if (run.Success)
             {
-                _deployProgress = msg;
-                InvokeAsync(StateHasChanged);
-            });
-            var yaml = _composeYaml;
-            var sid = _serverId;
-            // This deploy creates each service as a plain container named after it (no compose project): the only
-            // existing containers it can meet are those with the same names (R1-07), and each is decided too.
-            var services = DeploymentService.ValidateCompose(yaml).Services
-                .Select(s => s.ContainerName ?? "").Where(n => n.Length > 0)
-                .Select(n => new ComposeServicePlan(n, n)).ToList();
-            var colliding = ComposeModel.Impact("", services, removeOrphans: false,
-                await DockerService.ListContainersAsync(all: true, serverId: sid)).Select(i => i.Container).ToList();
-            var ids = await Mutations.RunForEachAsync("compose.deploy", colliding, sid,
-                // The file goes along (as `yaml`, which the audit withholds) so the gateway checks what it names —
-                // images, volumes, bind mounts — for protected resources (R1-16).
-                () => Mutations.RunAsync("compose.deploy", new { serverId = sid, yaml },
-                    async (ResolvedHostObject h, CancellationToken _) =>
-                    {
-                        var created = await DeploymentService.DeployFromComposeAsync(yaml, progress, h.ServerId);
-                        MutationScope.Note($"{created.Count} container(s): {string.Join(", ", created)}");
-                        return created;
-                    }));
-            Snackbar.Add(L["Deploy_Snackbar_ComposeDeployed", ids.Count].Value, Severity.Success);
-            _deployProgress = L["Deploy_Progress_ComposeSuccess", ids.Count].Value;
+                var names = string.Join(", ", plan.ActiveServices.Select(s => s.ContainerName ?? $"{plan.ProjectName}-{s.Name}-1"));
+                Snackbar.Add(L[deployedKey, plan.ProjectNameForAudit, names].Value, Severity.Success);
+                _deployProgress = L[progressKey, plan.ProjectNameForAudit, names].Value;
+            }
+            else if (run.Refusal is { } refusal)
+            {
+                // D4: refused before up — nothing started; a warning naming service, kind and key only.
+                Snackbar.Add(L["Deploy_Snackbar_Refused", refusal].Value, Severity.Warning);
+                _deployProgress = L["Deploy_Snackbar_Refused", refusal].Value;
+            }
+            else if (run.Violations.Count > 0)
+            {
+                var violations = string.Join("; ", run.Violations);
+                Snackbar.Add(L["Deploy_Snackbar_Violations", violations].Value, Severity.Error);
+                _deployProgress = L["Deploy_Snackbar_Violations", violations].Value;
+            }
+            else
+            {
+                Snackbar.Add(L["Deploy_Snackbar_DeployFailed", run.Error].Value, Severity.Error);
+                _deployProgress = L["Deploy_Progress_Error", run.Error].Value;
+            }
         }
         catch (MutationRefusedException ex)
         {
             Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (ComposePlanException ex)
+        {
+            // D3 / D15 and every other plan refusal: before anything is written.
+            Snackbar.Add(L["Deploy_Snackbar_Refused", ex.Message].Value, Severity.Warning);
+            _deployProgress = L["Deploy_Snackbar_Refused", ex.Message].Value;
         }
         catch (Exception ex)
         {
@@ -342,6 +378,62 @@
         finally
         {
             _deploying = false;
+        }
+    }
+
+    /// <summary>"Check plan" (D2): the read-only plan of the compose tab — project, services, the existing containers it
+    /// touches and every exposure with its class.</summary>
+    private async Task CheckPlan()
+    {
+        _checkedPlan = null;
+        _planError = null;
+        SuggestProjectName();
+        if (!McpInputValidationName(_projectName))
+        {
+            _planError = L["Deploy_Snackbar_InvalidProjectName"].Value;
+            return;
+        }
+        _checking = true;
+        try
+        {
+            _checkedPlan = await PlannerFor(DeploymentPath.ComposeTab).PlanAsync(
+                ComposeDeployment.FromContent(_serverId, ComposeDeployment.DeploymentDirectory(_projectName), _composeYaml));
+        }
+        catch (ComposePlanException ex)
+        {
+            _planError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _planError = ex.Message;
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
+    private static bool McpInputValidationName(string name) => Whiskers.Mcp.Tools.McpInputValidation.IsSafeProjectName(name);
+
+    /// <summary>D2: the project name is pre-filled from a top-level <c>name:</c> or the first service, while empty.</summary>
+    private void SuggestProjectName()
+    {
+        if (!string.IsNullOrWhiteSpace(_projectName) || string.IsNullOrWhiteSpace(_composeYaml)) return;
+        try
+        {
+            var stream = new YamlDotNet.RepresentationModel.YamlStream();
+            stream.Load(new StringReader(_composeYaml));
+            if (stream.Documents.FirstOrDefault()?.RootNode is not YamlDotNet.RepresentationModel.YamlMappingNode root) return;
+            string? Scalar(YamlDotNet.RepresentationModel.YamlNode? node) => (node as YamlDotNet.RepresentationModel.YamlScalarNode)?.Value;
+            var name = root.Children.TryGetValue(new YamlDotNet.RepresentationModel.YamlScalarNode("name"), out var n) ? Scalar(n) : null;
+            if (string.IsNullOrWhiteSpace(name) && root.Children.TryGetValue(new YamlDotNet.RepresentationModel.YamlScalarNode("services"), out var s)
+                && s is YamlDotNet.RepresentationModel.YamlMappingNode services)
+                name = Scalar(services.Children.Keys.FirstOrDefault());
+            if (!string.IsNullOrWhiteSpace(name) && !name.Contains('$')) _projectName = name;
+        }
+        catch (YamlDotNet.Core.YamlException)
+        {
+            // Not YAML yet: the field stays empty; the plan will say why.
         }
     }
 

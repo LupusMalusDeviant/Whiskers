@@ -38,11 +38,15 @@ public sealed class AgentPrincipalResolver : IAgentPrincipalResolver
         // Web-User per Cookie.
         if (httpContext.User.Identity?.AuthenticationType == "AuthDisabled")
             return new AgentPrincipal(AgentPrincipalKind.WebUser, "local",
-                McpPermissionLevels.Admin, null, UserEmail: "local@serverwatch.local");
+                McpPermissionLevels.Admin, null, UserEmail: "local@serverwatch.local",
+                CredentialId: Whiskers.Services.Mutations.PrincipalCredentials.AuthDisabled);
 
         var email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;
         var role = _roles.GetRole(email);
         var level = Whiskers.Services.Mutations.CapabilityCatalog.LevelFor(role);
-        return new AgentPrincipal(AgentPrincipalKind.WebUser, email ?? "unbekannt", level, null, UserEmail: email);
+        // Contract 0014 (D2): the sign-in credential and the web session the user acts in.
+        var (credential, session) = Whiskers.Services.Auth.WebSessionClaims.Of(httpContext.User);
+        return new AgentPrincipal(AgentPrincipalKind.WebUser, email ?? "unbekannt", level, null, UserEmail: email,
+            CredentialId: credential, WebSessionId: session);
     }
 }

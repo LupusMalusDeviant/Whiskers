@@ -16,6 +16,13 @@ namespace Whiskers.Services.GitDeploy;
 /// are materialized only as a 0600 askpass file inside the app's workspace on the target.</summary>
 public class GitDeployService : IGitDeployService
 {
+    /// <summary>The Git deploy's own compose budgets: pull 300 s, build 600 s, up 300 s, any other step 300 s (README
+    /// claim RM-13).</summary>
+    internal static readonly TimeSpan DeployStepBudget = TimeSpan.FromSeconds(300);
+    internal static readonly TimeSpan DeployPullBudget = TimeSpan.FromSeconds(300);
+    internal static readonly TimeSpan DeployBuildBudget = TimeSpan.FromSeconds(600);
+    internal static readonly TimeSpan DeployUpBudget = TimeSpan.FromSeconds(300);
+
     private readonly JsonFileStore<GitDeployData> _store;
     private readonly IHostCommandExecutor _executor;
     private readonly IVaultService _vault;
@@ -357,11 +364,11 @@ public class GitDeployService : IGitDeployService
                 var serverId = app.ServerId;
                 var run = await runner.RunAsync(plan,
                     async (command, timeout, token) => await _executor.ExecuteAsync(serverId, command, timeout, token),
-                    new ComposeRunOptions(true, TimeSpan.FromSeconds(300))
+                    new ComposeRunOptions(true, DeployStepBudget)
                     {
-                        PullTimeout = TimeSpan.FromSeconds(300),
-                        BuildTimeout = TimeSpan.FromSeconds(600),
-                        UpTimeout = TimeSpan.FromSeconds(300),
+                        PullTimeout = DeployPullBudget,
+                        BuildTimeout = DeployBuildBudget,
+                        UpTimeout = DeployUpBudget,
                         Progress = new LineProgress(Report),
                     }, ct);
                 Report(Tail(run.Output, 15));

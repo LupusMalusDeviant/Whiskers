@@ -17,8 +17,8 @@ namespace Whiskers.Tests;
 // switch suggests, and never claims that every secret is encrypted.
 public class ProductionReadinessServiceTests : IDisposable
 {
-    private const string CredentialsTitle = "Cloud- und DNS-Zugangsdaten im Vault";
-    private const string VaultTitle = "Secret-Vault aktiv (VAULT_KEY)";
+    private const string CredentialsId = ProductionReadinessService.Ids.CloudDns;
+    private const string VaultId = ProductionReadinessService.Ids.Vault;
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "sw-tests", "ready-" + Guid.NewGuid().ToString("N"));
     private readonly DataPathOptions _paths;
@@ -60,7 +60,7 @@ public class ProductionReadinessServiceTests : IDisposable
 
     private async Task<IReadOnlyList<ReadinessCheck>> Checks(string? vaultKey, IVaultService vault, IServerConfigService servers)
         => await new ProductionReadinessService(Config(vaultKey), vault, _sp.GetRequiredService<IServiceScopeFactory>(),
-            servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true);
+            servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths, text: ReadinessTexts.English).GetChecksAsync(isHttps: true);
 
     [Fact]
     public async Task A_peer_whose_forwarded_headers_were_ignored_is_named_and_none_means_no_line()
@@ -70,8 +70,8 @@ public class ProductionReadinessServiceTests : IDisposable
         var observer = new Whiskers.Utils.ForwardedHeadersObserver();
         async Task<ReadinessCheck?> Line() => (await new ProductionReadinessService(Config(null), vault,
                 _sp.GetRequiredService<IServiceScopeFactory>(), servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths,
-                forwarded: observer).GetChecksAsync(isHttps: true))
-            .SingleOrDefault(c => c.Title == "Reverse-Proxy vertraut");
+                forwarded: observer, text: ReadinessTexts.English).GetChecksAsync(isHttps: true))
+            .SingleOrDefault(c => c.Id == ProductionReadinessService.Ids.ProxyTrusted);
 
         Assert.Null(await Line());
 
@@ -94,13 +94,13 @@ public class ProductionReadinessServiceTests : IDisposable
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:Disabled"] = "true" }).Build();
 
         var line = (await new ProductionReadinessService(config, vault, _sp.GetRequiredService<IServiceScopeFactory>(),
-                servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true))
-            .Single(c => c.Title == "Authentifizierung aktiv");
+                servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths, text: ReadinessTexts.English).GetChecksAsync(isHttps: true))
+            .Single(c => c.Id == ProductionReadinessService.Ids.Auth);
 
         Assert.False(line.Ok);
-        Assert.Contains("TCP-Weiterleitung", line.Detail);
+        Assert.Contains("TCP forward", line.Detail);
         Assert.Contains("Funnel", line.Detail);
-        Assert.Contains("Internet", line.Detail);
+        Assert.Contains("internet", line.Detail);
     }
 
     [Theory]
@@ -116,9 +116,9 @@ public class ProductionReadinessServiceTests : IDisposable
         var config = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
         var checks = await new ProductionReadinessService(config, vault, _sp.GetRequiredService<IServiceScopeFactory>(),
-            servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths).GetChecksAsync(isHttps: true);
+            servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths, text: ReadinessTexts.English).GetChecksAsync(isHttps: true);
 
-        Assert.Equal(named, checks.Any(c => c.Title == "OIDC-Discovery über HTTPS" && !c.Ok));
+        Assert.Equal(named, checks.Any(c => c.Id == ProductionReadinessService.Ids.OidcHttps && !c.Ok));
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public class ProductionReadinessServiceTests : IDisposable
         await File.WriteAllTextAsync(_paths.RolesJson + ".corrupt-20261101000000", "{torn");
         var (vault, servers) = await Stores(null);
 
-        var line = (await Checks(null, vault, servers)).Single(c => c.Title == "Datenspeicher lesbar");
+        var line = (await Checks(null, vault, servers)).Single(c => c.Id == ProductionReadinessService.Ids.StoresReadable);
 
         Assert.False(line.Ok);
         Assert.Contains("roles.json.corrupt-20261101000000", line.Detail);
@@ -157,18 +157,18 @@ public class ProductionReadinessServiceTests : IDisposable
         var (vault, servers) = await Stores("readiness-test-passphrase");
 
         var checks = await Checks("readiness-test-passphrase", vault, servers);
-        var credentials = checks.Single(c => c.Title == CredentialsTitle);
+        var credentials = checks.Single(c => c.Id == CredentialsId);
         Assert.False(credentials.Ok);
-        Assert.Contains("1 Cloud-API-Key(s) in servers.json", credentials.Detail);
-        Assert.Contains("DNS-Token in app-settings.json", credentials.Detail);
-        Assert.Contains("noch nicht in den Vault übernommen", credentials.Detail);
+        Assert.Contains("1 cloud API key(s) in servers.json", credentials.Detail);
+        Assert.Contains("DNS token in app-settings.json", credentials.Detail);
+        Assert.Contains("not been moved into the vault yet", credentials.Detail);
         Assert.DoesNotContain(_cloudKey, credentials.Detail);
 
         // The vault line names what is still unencrypted instead of "secrets are stored encrypted".
-        var vaultCheck = checks.Single(c => c.Title == VaultTitle);
+        var vaultCheck = checks.Single(c => c.Id == VaultId);
         Assert.True(vaultCheck.Ok);
-        Assert.Contains("Noch unverschlüsselt gespeichert", vaultCheck.Detail);
-        Assert.DoesNotContain("Secrets werden verschlüsselt gespeichert", vaultCheck.Detail);
+        Assert.Contains("Sealed with a key derived from it", vaultCheck.Detail);
+        Assert.DoesNotContain("secrets are stored encrypted", vaultCheck.Detail);
     }
 
     [Fact]
@@ -177,9 +177,9 @@ public class ProductionReadinessServiceTests : IDisposable
         WriteLegacyCredentials();
         var (vault, servers) = await Stores(null);
 
-        var credentials = (await Checks(null, vault, servers)).Single(c => c.Title == CredentialsTitle);
+        var credentials = (await Checks(null, vault, servers)).Single(c => c.Id == CredentialsId);
         Assert.False(credentials.Ok);
-        Assert.Contains("gültigem VAULT_KEY", credentials.Detail);
+        Assert.Contains("valid VAULT_KEY", credentials.Detail);
     }
 
     [Fact]
@@ -190,11 +190,11 @@ public class ProductionReadinessServiceTests : IDisposable
         await new CredentialVaultMigration(vault, servers, new AppSettingsStore(dataPaths: _paths),
             NullLogger<CredentialVaultMigration>.Instance, dataPaths: _paths).InitializeAsync();
 
-        var credentials = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == CredentialsTitle);
+        var credentials = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Id == CredentialsId);
         Assert.True(credentials.Ok);
     }
 
-    private const string SettingsTitle = "Benachrichtigungs- und KI-Zugangsdaten im Vault";
+    private const string SettingsId = ProductionReadinessService.Ids.NotifyAi;
 
     [Fact]
     public async Task Plaintext_notification_and_ai_credentials_are_reported_by_name_until_migrated()
@@ -207,7 +207,7 @@ public class ProductionReadinessServiceTests : IDisposable
         File.WriteAllText(_paths.AgentSettingsJson, new JsonObject { ["Agent"] = new JsonObject { ["ApiKey"] = agentKey } }.ToJsonString());
         var (vault, servers) = await Stores("readiness-test-passphrase");
 
-        var before = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == SettingsTitle);
+        var before = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Id == SettingsId);
         Assert.False(before.Ok);
         Assert.Contains("Email:Password", before.Detail);
         Assert.Contains("Agent:ApiKey", before.Detail);
@@ -215,18 +215,18 @@ public class ProductionReadinessServiceTests : IDisposable
 
         await new CredentialVaultMigration(vault, servers, new AppSettingsStore(dataPaths: _paths),
             NullLogger<CredentialVaultMigration>.Instance, dataPaths: _paths).InitializeAsync();
-        Assert.True((await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == SettingsTitle).Ok);
+        Assert.True((await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Id == SettingsId).Ok);
 
         // A plaintext value written by hand next to the reference is at rest all the same.
         var agent = JsonNode.Parse(File.ReadAllText(_paths.AgentSettingsJson))!.AsObject();
         agent["Agent"]!["ApiKey"] = "AGENT-" + Guid.NewGuid().ToString("N");
         File.WriteAllText(_paths.AgentSettingsJson, agent.ToJsonString());
-        var stray = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == SettingsTitle);
+        var stray = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Id == SettingsId);
         Assert.False(stray.Ok);
         Assert.Contains("Agent:ApiKey", stray.Detail);
     }
 
-    private const string StoredTitle = "Webhook-Secrets, Rollback-Snapshots und Sitzungsschlüssel verschlüsselt";
+    private const string StoredId = ProductionReadinessService.Ids.StoredEncrypted;
 
     [Fact]
     public async Task Plaintext_webhook_secrets_snapshots_and_key_files_are_counted_until_encrypted()
@@ -244,12 +244,12 @@ public class ProductionReadinessServiceTests : IDisposable
         var (vault, servers) = await Stores("readiness-test-passphrase");
         var keyRing = new VaultKeyRingRepository(_paths.KeysDir, vault, NullLogger<VaultKeyRingRepository>.Instance);
         async Task<ReadinessCheck> Stored() => (await new ProductionReadinessService(Config("readiness-test-passphrase"), vault,
-            _sp.GetRequiredService<IServiceScopeFactory>(), servers, keyRing: keyRing).GetChecksAsync(isHttps: true)).Single(c => c.Title == StoredTitle);
+            _sp.GetRequiredService<IServiceScopeFactory>(), servers, keyRing: keyRing, text: ReadinessTexts.English).GetChecksAsync(isHttps: true)).Single(c => c.Id == StoredId);
 
         var before = await Stored();
         Assert.False(before.Ok);
-        Assert.Contains("1 Webhook-Secret(s) und 1 Rollback-Snapshot(s)", before.Detail);
-        Assert.Contains("1 Sitzungsschlüssel-Datei(en)", before.Detail);
+        Assert.Contains("1 webhook secret(s) and 1 rollback snapshot(s)", before.Detail);
+        Assert.Contains("1 session key file(s)", before.Detail);
 
         using (var scope = _sp.CreateScope())
             await ProtectedFieldMigration.RunAsync(scope.ServiceProvider.GetRequiredService<MetricsDbContext>(), vault, NullLogger.Instance);
@@ -264,30 +264,43 @@ public class ProductionReadinessServiceTests : IDisposable
         await first.SetSecretAsync("x", "y");
         var (vault, servers) = await Stores("another-passphrase-entirely");
 
-        var vaultCheck = (await Checks("another-passphrase-entirely", vault, servers)).Single(c => c.Title == VaultTitle);
+        var vaultCheck = (await Checks("another-passphrase-entirely", vault, servers)).Single(c => c.Id == VaultId);
         Assert.False(vaultCheck.Ok);
-        Assert.Contains("passt nicht", vaultCheck.Detail);
+        Assert.Contains("does not match", vaultCheck.Detail);
     }
 
     [Fact]
-    public async Task The_vault_line_names_every_plaintext_key_kind_and_claims_no_more_than_file_protection()
+    public async Task The_vault_line_names_every_sealed_key_kind_and_the_key_line_counts_what_is_left()
     {
-        // R1-51 (INV-56): since R1-44 there is one mTLS client key per host besides the shared one, all of them in
-        // plaintext like the SSH keys; the line must not read as if one key were left or as if the vault held them.
+        // Contract 0015 (INV-52): SSH keys and every mTLS client key (shared and per host) are sealed; the vault line
+        // says so and names its consequence, the key line counts what still lies in plaintext.
         var (vault, servers) = await Stores("readiness-test-passphrase");
 
-        var vaultCheck = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Title == VaultTitle);
-
+        var checks = await Checks("readiness-test-passphrase", vault, servers);
+        var vaultCheck = checks.Single(c => c.Id == VaultId);
         Assert.True(vaultCheck.Ok);
         Assert.Contains("ssh-keys/", vaultCheck.Detail);
-        Assert.Contains("alle mTLS-Client-Schlüssel", vaultCheck.Detail);
-        Assert.Contains("eigene jedes Hosts", vaultCheck.Detail);
-        Assert.Contains("Dateirechte", vaultCheck.Detail);
-        // Whiskers does not write the shared key and does not check the SSH keys' mode: no unconditional "0600".
-        Assert.DoesNotContain("0600", vaultCheck.Detail);
-        Assert.Contains("mTLS-Client-Schlüssel geschützt", vaultCheck.Detail);
-        Assert.DoesNotContain("der mTLS-Client-Schlüssel im", vaultCheck.Detail);
-        Assert.DoesNotContain("alle Secrets", vaultCheck.Detail);
+        Assert.Contains("all mTLS client keys", vaultCheck.Detail);
+        Assert.Contains("each host's own", vaultCheck.Detail);
+        Assert.Contains("no mTLS host is reachable", vaultCheck.Detail);
+        Assert.DoesNotContain("Still stored unencrypted", vaultCheck.Detail);
+        Assert.DoesNotContain("all secrets", vaultCheck.Detail);
+        Assert.True(checks.Single(c => c.Id == ProductionReadinessService.Ids.KeysSealed).Ok);
+
+        // A legacy plaintext key and an operator-managed one outside the data directory are named.
+        Directory.CreateDirectory(Path.Combine(_paths.SshKeysDir, "edge"));
+        File.WriteAllText(Path.Combine(_paths.SshKeysDir, "edge", "id_ecdsa"), SealedKeyFilesTests.NewPem());
+        await servers.AddServerAsync(new ServerConfig
+        {
+            Id = "own", Name = "own", ConnectionType = ConnectionType.TCP, TcpHost = "10.0.0.9", TcpUseTls = true,
+            TcpClientCertPath = "/etc/whiskers/own.crt", TcpClientKeyPath = "/etc/whiskers/own.key",
+        });
+        var keyLine = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Id == ProductionReadinessService.Ids.KeysSealed);
+        Assert.False(keyLine.Ok);
+        Assert.Contains("1 SSH keys and 0 mTLS client keys", keyLine.Detail);
+        Assert.Contains("sealed at the next start", keyLine.Detail);
+        Assert.Contains("Managed by the operator", keyLine.Detail);
+        Assert.Contains("own", keyLine.Detail);
     }
 
     // ---------------------------------------------------------------- contract 0006: the own container's exposure
@@ -302,8 +315,8 @@ public class ProductionReadinessServiceTests : IDisposable
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:Disabled"] = authDisabled ? "true" : "false" }).Build();
         var checks = await new ProductionReadinessService(config, vault, _sp.GetRequiredService<IServiceScopeFactory>(),
             servers, new AppSettingsStore(dataPaths: _paths), dataPaths: _paths, docker: docker,
-            selfContainerNames: new HashSet<string>(["whiskers"], StringComparer.OrdinalIgnoreCase)).GetChecksAsync(isHttps: true);
-        return checks.SingleOrDefault(c => c.Title == ProductionReadinessService.SelfExposureTitle);
+            selfContainerNames: new HashSet<string>(["whiskers"], StringComparer.OrdinalIgnoreCase), text: ReadinessTexts.English).GetChecksAsync(isHttps: true);
+        return checks.SingleOrDefault(c => c.Id == ProductionReadinessService.Ids.SelfExposure);
     }
 
     private static ContainerInfo Self(string serverId, string name, params (string Key, string Value)[] labels) => new()

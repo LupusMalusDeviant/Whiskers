@@ -33,7 +33,10 @@
     {
         @if (GuardrailStore.LoadError is not null)
         {
-            <MudAlert Severity="Severity.Error" Class="mb-4">@L["GuardrailsView_FailClosed_Alert"]</MudAlert>
+            <MudAlert Severity="Severity.Error" Class="mb-4">
+                @L["GuardrailsView_FailClosed_Alert"]
+                <div class="mt-2">@L["GuardrailsView_FailClosed_Reason", GuardrailStore.LoadError]</div>
+            </MudAlert>
         }
         @* Preset bar *@
         <MudPaper Class="pa-4 mb-4">

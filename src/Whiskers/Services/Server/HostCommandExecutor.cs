@@ -11,6 +11,8 @@ public class HostCommandExecutor : IHostCommandExecutor
     private readonly IServerConfigService _serverConfigService;
     private readonly IDockerService _docker;
     private readonly ILogger<HostCommandExecutor> _logger;
+    // Contract 0015 (D2): the stored key is sealed; ssh gets a lease in a memory-backed directory until it exits.
+    private readonly ISshKeyLeases? _keyLeases;
 
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
@@ -37,10 +39,12 @@ public class HostCommandExecutor : IHostCommandExecutor
     private static readonly string ControlDir =
         Path.Combine(Path.GetTempPath(), "whiskers-ssh");
 
-    public HostCommandExecutor(IServerConfigService serverConfigService, IDockerService docker, ILogger<HostCommandExecutor> logger)
+    public HostCommandExecutor(IServerConfigService serverConfigService, IDockerService docker, ILogger<HostCommandExecutor> logger,
+        ISshKeyLeases? keyLeases = null)
     {
         _serverConfigService = serverConfigService;
         _docker = docker;
+        _keyLeases = keyLeases;
         _logger = logger;
     }
 
@@ -149,9 +153,27 @@ public class HostCommandExecutor : IHostCommandExecutor
 
         // R1-42 (INV-41, E-02): user, host and port become ssh operands. A user like "-oProxyCommand=…" would make the
         // destination token an option that runs a command on the Whiskers host, so they are checked before any process.
-        List<string> args;
-        try { args = BuildSshArguments(server, keyPath, command); }
+        try { _ = BuildSshArguments(server, keyPath, command); }
         catch (UnsafeOperandException ex) { return new CommandResult { ExitCode = -1, Error = ex.Message }; }
+
+        if (usePassword) return await RunSshAsync(server, null, command, usePassword, timeout, ct, maxOutputChars);
+
+        // Contract 0015 (D2): the key is sealed at rest; ssh reads it from a lease that is removed once ssh exited (with
+        // ControlMaster, the master has authenticated by then). A key that cannot be opened is a reason, not a fallback.
+        if (_keyLeases is null)
+            return new CommandResult { ExitCode = -1, Error = "SSH keys are sealed at rest and no key lease service is configured." };
+        SshKeyLease? lease;
+        try { lease = await _keyLeases.AcquireAsync(server, ct); }
+        catch (Whiskers.Services.Vault.SealedKeyException ex) { return new CommandResult { ExitCode = -1, Error = ex.Message }; }
+        if (lease is null) return new CommandResult { ExitCode = -1, Error = "SSH key not found for server" };
+        await using (lease)
+            return await RunSshAsync(server, lease.Path, command, usePassword, timeout, ct, maxOutputChars);
+    }
+
+    private async Task<CommandResult> RunSshAsync(Models.ServerConfig server, string? keyPath, string command, bool usePassword,
+        TimeSpan timeout, CancellationToken ct, int? maxOutputChars)
+    {
+        var args = BuildSshArguments(server, keyPath, command);
 
         try { Directory.CreateDirectory(ControlDir); } catch { /* best effort; ssh falls back to no mux */ }
 

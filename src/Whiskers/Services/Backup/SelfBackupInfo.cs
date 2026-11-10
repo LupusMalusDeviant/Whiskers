@@ -38,4 +38,9 @@ public sealed class SelfBackupInfo
     /// <summary>The archive holds everything a restore needs: a SQLite archive always holds its database.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool Restorable => string.Equals(Provider, SelfBackupFormat.ProviderSqlite, StringComparison.OrdinalIgnoreCase) || IncludesDatabase;
+
+    /// <summary>Contract 0015 (D9): sealed with a VAULT_KEY that was rotated away since — restorable only with that
+    /// earlier key (set VAULT_KEY_FILE to it for the restore). Set by the listing, never stored.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool SealedWithEarlierKey { get; set; }
 }

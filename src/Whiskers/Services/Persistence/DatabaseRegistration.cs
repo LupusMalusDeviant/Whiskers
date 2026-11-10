@@ -47,6 +47,15 @@ public static class DatabaseRegistration
             o.ConnectionString = connectionString;
         });
 
+        builder.Services.AddWhiskersDbContexts(provider, connectionString, dataPaths);
+        return builder;
+    }
+
+    /// <summary>The two contexts for <paramref name="provider"/> — also used by the VAULT_KEY rotation at the start, before
+    /// the container is built (contract 0015).</summary>
+    public static IServiceCollection AddWhiskersDbContexts(this IServiceCollection services, string provider, string? connectionString,
+        DataPathOptions dataPaths)
+    {
         switch (provider)
         {
             case "sqlite":
@@ -56,13 +65,13 @@ public static class DatabaseRegistration
                 // Context in Whiskers.Data, SQLite migrations in Whiskers.Migrations.Sqlite — EF must be
                 // told which assembly to load them from (ADR-0004, separate migration assemblies).
                 // R1-24: every sink row is redacted on save, whoever wrote it.
-                builder.Services.AddDbContext<MetricsDbContext>(
+                services.AddDbContext<MetricsDbContext>(
                     o => o.UseSqlite(sqliteCs, sql => sql.MigrationsAssembly(SqliteMigrationsAssembly))
                         .AddInterceptors(SinkRedactionInterceptor.Instance),
                     ServiceLifetime.Transient);
                 // Local-auth Identity context (F1): SAME database, its OWN __IdentityMigrationsHistory so it
                 // never touches the metrics legacy-baseline path. Scoped (default) — UserManager/store are Scoped.
-                builder.Services.AddDbContext<WhiskersIdentityDbContext>(
+                services.AddDbContext<WhiskersIdentityDbContext>(
                     o => o.UseSqlite(sqliteCs, sql =>
                     {
                         sql.MigrationsAssembly(SqliteMigrationsAssembly);
@@ -75,7 +84,7 @@ public static class DatabaseRegistration
                     throw new InvalidOperationException(
                         "Database:Provider=postgres requires a connection string " +
                         "(Database:ConnectionString / WHISKERS_DB_CONNECTION / WHISKERS_DB_CONNECTION_FILE).");
-                builder.Services.AddDbContext<MetricsDbContext>(
+                services.AddDbContext<MetricsDbContext>(
                     o => o.UseNpgsql(connectionString, npg =>
                     {
                         npg.EnableRetryOnFailure(3);
@@ -83,7 +92,7 @@ public static class DatabaseRegistration
                     }).AddInterceptors(SinkRedactionInterceptor.Instance),
                     ServiceLifetime.Transient);
                 // Local-auth Identity context (F1): SAME database, its OWN __IdentityMigrationsHistory. Scoped.
-                builder.Services.AddDbContext<WhiskersIdentityDbContext>(
+                services.AddDbContext<WhiskersIdentityDbContext>(
                     o => o.UseNpgsql(connectionString, npg =>
                     {
                         npg.EnableRetryOnFailure(3);
@@ -97,6 +106,6 @@ public static class DatabaseRegistration
                     $"Unknown Database:Provider '{provider}'. Use 'sqlite' or 'postgres'.");
         }
 
-        return builder;
+        return services;
     }
 }

@@ -4,6 +4,7 @@ using Whiskers.Configuration;
 using Whiskers.Mcp.Tools;
 using Whiskers.Models;
 using Whiskers.Services.Cloud;
+using Whiskers.Services.Deployment;
 using Whiskers.Services.Dns;
 using Whiskers.Services.Docker;
 using Whiskers.Services.Scheduler;
@@ -305,12 +306,14 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         if (resolution.Target is { } pruned && capability.Id == "host.prune")
             return await WithStoppedContainersAsync(pruned,
                 MutationTargets.String(request.Arguments, "containerIds")?.Split('\n', StringSplitOptions.RemoveEmptyEntries), ct);
+        if (resolution.Target is { } appHost && capability.Id == "app.deploy")
+            return await AppDeployAsync(request, resolution, appHost, ct);
         if (resolution.Target is not { } resolvedHost || capability.Id != "compose.deploy") return resolution;
         // Contract 0006 (review B1): the nested decision's lists are Whiskers' own — a page or an automation gate fills
         // them from the plan it made. A caller on any other surface (MCP, the agent) could mark an exposure or a shared
         // container as decided with them, so such a call is refused — and so is `mounts` (review N3), which would
         // otherwise reach the target's Related set.
-        if (request.Surface is not (MutationSurface.Ui or MutationSurface.Automation)
+        if (request.Surface != MutationSurface.Ui && !Unattended.IsSurface(request.Surface)
             && request.Arguments.Keys.FirstOrDefault(k => RefusedFromCallers.Contains(k, StringComparer.OrdinalIgnoreCase)) is { } injected)
             return Refuse($"The argument '{injected}' is set by Whiskers itself for a planned deployment; a call may not bring it.");
         // Contract 0006 (Amendment 7): the containers a planned deployment shares a namespace with, from the nested
@@ -352,6 +355,47 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             return Refuse("A compose deployment needs a valid project name.");
         return await WithPlanAsync(host, planner => planner.PlanAsync(
             ComposeDeployment.FromContent(host.ServerId!, ComposeDeployment.DeploymentDirectory(project), content), ct));
+    }
+
+    /// <summary>
+    /// Contract 0013, D5: an <c>app.deploy</c> from any surface but the UI and automation (MCP <c>deploy_app</c>, the
+    /// agent) is planned here from its arguments through the same mapper the tool uses (<see cref="DeploymentCompose"/>)
+    /// and the same path checks (<see cref="DeploymentPathPlanner"/>), so its exposures, mounts and touched containers
+    /// are decided — <c>ExposureChangeRule</c> sees them. Arguments that cannot be mapped, a Kubernetes server, or the
+    /// nested decision's arguments refuse the call. The UI and automation decide their plan nested themselves
+    /// (<see cref="ComposeImpact"/>); only the server is resolved for them.
+    /// </summary>
+    private async Task<TargetResolution> AppDeployAsync(MutationRequest request, TargetResolution resolution,
+        MutationTarget host, CancellationToken ct)
+    {
+        // INV-62 (user decision 2026-11-10): no app deployment while the Deployment module is off, on any surface.
+        if (DeploymentModuleGate.IsOff(_services.GetService<Whiskers.Modules.IModuleRegistry>()))
+            return Refuse($"Deployment refused: {DeploymentModuleGate.DisabledReason}");
+        if (request.Surface is MutationSurface.Ui or MutationSurface.Automation) return resolution;
+        if (request.Arguments.Keys.FirstOrDefault(k => RefusedFromCallers.Contains(k, StringComparer.OrdinalIgnoreCase)) is { } injected)
+            return Refuse($"The argument '{injected}' is set by Whiskers itself for a planned deployment; a call may not bring it.");
+        var (server, error) = ResolveServer(host.ServerId);
+        if (server is null) return Refuse(error!, host.ServerId);
+        if (server.ConnectionType == ConnectionType.Kubernetes)
+            return Refuse("deploy_app needs a Docker host.");
+        DeploymentComposeFile file;
+        try
+        {
+            var args = request.Arguments;
+            file = DeploymentCompose.ToCompose(DeploymentCompose.FromToolArguments(MutationTargets.String(args, "appName"),
+                MutationTargets.String(args, "image"), MutationTargets.String(args, "ports"),
+                MutationTargets.String(args, "envVars"), MutationTargets.String(args, "volumes"),
+                MutationTargets.String(args, "restartPolicy"), MutationTargets.String(args, "network")));
+        }
+        catch (DeploymentComposeException ex)
+        {
+            return Refuse($"Deployment refused: {ex.Message}");
+        }
+        if (_services.GetService<IDockerService>() is not { } docker
+            || _services.GetService<Whiskers.Services.Server.IHostCommandExecutor>() is not { } executor)
+            return Refuse("The deployment's impact cannot be determined: no container runtime is available.");
+        return await WithPlanAsync(host, planner =>
+            new DeploymentPathPlanner(planner, docker, executor, DeploymentPath.AppDeploy).PlanAsync(file.Deployment(server.Id), ct));
     }
 
     /// <summary>Contract 0006 (review B1): the arguments of the nested exposure decision, accepted only from the UI and

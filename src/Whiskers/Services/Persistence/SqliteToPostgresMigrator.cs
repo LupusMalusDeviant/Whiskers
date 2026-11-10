@@ -72,12 +72,13 @@ public static class SqliteToPostgresMigrator
         "NULL AS \"Verification\", NULL AS \"DurationMs\" FROM \"AuditLog\"";
 
     /// <summary>The tables a supported older release does not have yet, newest release first: a source may lack
-    /// exactly one of these sets — the tables of every release after its own (R1-56: what quiet hours held back; R1-55: the
+    /// exactly one of these sets — the tables of every release after its own (contract 0010: the instance markers; R1-56: what quiet hours held back; R1-55: the
     /// metric roll-up tiers; R1-10: the
     /// webhook deliveries; R1-18: the operations; R1-14: the approvals; R1-12: the decision tables).</summary>
     internal static readonly IReadOnlyList<HashSet<string>> OlderReleaseTables =
     [
-        new(StringComparer.Ordinal) { "QuietHoursSuppressions" },
+        new(StringComparer.Ordinal) { "InstanceMarkers" },
+        new(StringComparer.Ordinal) { "QuietHoursSuppressions", "InstanceMarkers" },
         Older(),
         Older("WebhookDeliveries"),
         Older("WebhookDeliveries", "Operations"),
@@ -88,7 +89,7 @@ public static class SqliteToPostgresMigrator
     /// <summary>A release before R1-55 lacks its tables too: it has raw samples only — they are copied, and the target
     /// rolls them up once on its first start, as an upgrade in place would. And R1-56's: nothing was held by quiet hours.</summary>
     private static HashSet<string> Older(params string[] tables) =>
-        new([.. tables, "ContainerMetricRollups", "ServerMetricRollups", "MetricRollupStates", "QuietHoursSuppressions"],
+        new([.. tables, "ContainerMetricRollups", "ServerMetricRollups", "MetricRollupStates", "QuietHoursSuppressions", "InstanceMarkers"],
             StringComparer.Ordinal);
 
     /// <summary>Whether the SQLite source has the table at all. Any other provider is assumed to have the full schema.</summary>
@@ -174,6 +175,8 @@ public static class SqliteToPostgresMigrator
         // R1-23: the audit chain is not copied. The audit rows get new ids in the target, so the old links would no
         // longer name them; the target starts its own chain on its first start, sealing the copied rows (genesis,
         // ADR-0006). The checkpoint file stays with the old database.
+        // Contract 0010: the record that a guardrail policy existed travels with the data, as it is (keyed by name).
+        T("InstanceMarkers",   c => c.InstanceMarkers,   _ => { }),
         NotCopied<Whiskers.Models.AuditChainEntry>("AuditChain"),
         NotCopied<Whiskers.Models.AuditCheckpointEntity>("AuditCheckpoints"),
     ];

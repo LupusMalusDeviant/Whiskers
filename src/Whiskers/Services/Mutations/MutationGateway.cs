@@ -1040,8 +1040,7 @@ public sealed class MutationGateway : IMutationGateway
             RequestCorrelation.CurrentOrNone);
 
     /// <summary>Nobody is there to confirm: an automation run, or anything made for an AI trigger (R1-13).</summary>
-    private static bool Unattended(MutationRequest request) =>
-        request.Surface == MutationSurface.Automation || request.TriggerId is not null;
+    private static bool Unattended(MutationRequest request) => Mutations.Unattended.Is(request);
 
     /// <summary>Result of steps 1–5: a refusal (already audited), or the decided request.</summary>
     private sealed record Prepared(MutationOutcome<object?>? Refusal, MutationRequest? Request, Capability? Capability,

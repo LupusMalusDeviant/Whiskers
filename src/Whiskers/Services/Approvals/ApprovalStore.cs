@@ -71,6 +71,9 @@ public interface IApprovalStore
 
 public sealed class ApprovalStore : IApprovalStore, IDisposable
 {
+    /// <summary>Contract 0014 (D6): who expires and cancels approvals — Whiskers itself, by its component id.</summary>
+    public static readonly string ExpirySystem = Whiskers.Services.Mutations.PrincipalIds.System("approval-expiry");
+
     /// <summary>How long an approval stays usable after it was approved.</summary>
     public static readonly TimeSpan GrantLifetime = TimeSpan.FromMinutes(10);
 
@@ -155,8 +158,11 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
             .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
         // C-19: one principal cannot flood the list (and the bell). An approval counts against everyone in its
         // requester chain — the agent session and the user or key it acts for — so a user cannot get past the bound
-        // by opening more chats. A caller that names no requester is counted under its displayed actor.
-        var counted = requesters.Count > 0 ? requesters : [request.Actor];
+        // by opening more chats. Contract 0014 (D8): a display string never decides — a request that names no requester
+        // is refused (fail closed) instead of being counted under its displayed actor.
+        if (requesters.Count == 0)
+            throw new ArgumentException("An approval request must name its requesters (INV-01).", nameof(request));
+        var counted = requesters;
         SweepExpired();
         var pending = _entries.Values.Where(e => e.Approval.Status == ApprovalStatus.Pending).ToList();
         foreach (var id in counted)
@@ -202,8 +208,8 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         return approval;
     }
 
-    private static IReadOnlyList<string> CountedAgainst(Approval approval) =>
-        approval.Requesters.Count > 0 ? approval.Requesters : [approval.Actor];
+    /// <summary>The principals an approval counts against: its requesters, never its displayed actor (contract 0014, D8).</summary>
+    private static IReadOnlyList<string> CountedAgainst(Approval approval) => approval.Requesters;
 
     public IReadOnlyList<Approval> GetPending()
     {
@@ -348,7 +354,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         foreach (var entry in affected)
         {
             if (Interlocked.CompareExchange(ref entry.Resolved, 1, 0) != 0) continue;
-            await PersistAsync(entry, ApprovalStatus.Cancelled, "system");
+            await PersistAsync(entry, ApprovalStatus.Cancelled, ExpirySystem);
             await SafeResolve(entry, false);
         }
         Changed?.Invoke();
@@ -366,7 +372,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
             if (approval.Status == ApprovalStatus.Pending && (approval.Interactive || approval.Requesters.Count == 0))
             {
                 Interlocked.Exchange(ref entry.Resolved, 1);
-                await PersistAsync(entry, ApprovalStatus.Cancelled, "system", ct);
+                await PersistAsync(entry, ApprovalStatus.Cancelled, ExpirySystem, ct);
             }
             else if (approval.Status != ApprovalStatus.Pending)
                 Interlocked.Exchange(ref entry.Resolved, 1);
@@ -386,7 +392,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
             // Expired here at once, so nothing reads it as pending while the record is written.
             entry.Approval.Status = ApprovalStatus.Expired;
             entry.Approval.ResolvedAt = now;
-            entry.Approval.ResolvedBy = "system";
+            entry.Approval.ResolvedBy = ExpirySystem;
             _ = ExpireAsync(entry);
         }
         Changed?.Invoke();
@@ -394,7 +400,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
 
     private async Task ExpireAsync(Entry entry)
     {
-        await PersistAsync(entry, ApprovalStatus.Expired, "system");
+        await PersistAsync(entry, ApprovalStatus.Expired, ExpirySystem);
         await SafeResolve(entry, false); // unblock the waiting session; deny on timeout
     }
 

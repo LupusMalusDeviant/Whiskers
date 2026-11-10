@@ -68,4 +68,7 @@ public class CurrentUserService : ICurrentUserService
 
     /// <summary>True if the current user's role is at least <paramref name="required"/>.</summary>
     public async Task<bool> HasRoleAsync(AppRole required) => (await GetRoleAsync()) >= required;
+
+    public async Task<(string? CredentialId, string? SessionId)> GetPrincipalFieldsAsync() =>
+        WebSessionClaims.Of((await _authProvider.GetAuthenticationStateAsync()).User);
 }

@@ -21,6 +21,18 @@ public interface IAuditLogService
                              string? details = null, string? serverId = null, bool success = true) =>
         TryLogAsync(actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
 
+    /// <summary>
+    /// INV-01 (contract 0014, D7): writes a row with every principal column. The display actor and the actor type are
+    /// derived from the principal (<see cref="AuditPrincipals"/>), never the other way round. Every row Whiskers writes
+    /// outside the gateway goes through here; the string overloads above stay for the MCP tools' enrichment
+    /// (<see cref="ToolAuditLog"/>) only — a source test pins that. Tells whether the row was stored.
+    /// </summary>
+    Task<bool> TryLogAsync(Mutations.MutationPrincipal principal, string action, string targetType, string targetId,
+        string targetName, string? details = null, string? serverId = null, bool success = true,
+        DateTime? occurredUtc = null) =>
+        TryLogAtAsync(occurredUtc ?? DateTime.UtcNow, principal.DisplayName, AuditPrincipals.ActorTypeOf(principal),
+            action, targetType, targetId, targetName, details, serverId, success);
+
     Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0,
                                                string? actionFilter = null,
                                                string? targetTypeFilter = null);

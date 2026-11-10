@@ -178,34 +178,6 @@ public class VerificationOutcomeTests
         AssertOutcome(outcome, false, "Container web updated.");
     }
 
-    [Theory]
-    [InlineData("running", true)]
-    [InlineData("created", false)]
-    public async Task A_deployed_container_must_run(string state, bool verified)
-    {
-        var (gateway, docker) = Build();
-        docker.States[Ids["new"]] = state;
-
-        var outcome = await gateway.ExecuteAsync(Request("container.create", new { serverId = "local" }),
-            (_, _) => Task.FromResult(Ids["new"]));
-
-        AssertOutcome(outcome, verified, Ids["new"]);
-    }
-
-    [Theory]
-    [InlineData("running", true)]
-    [InlineData("exited", false)]
-    public async Task An_app_deployment_that_returned_its_container_is_read_back(string state, bool verified)
-    {
-        var (gateway, docker) = Build();
-        docker.States[Ids["new"]] = state;
-
-        var outcome = await gateway.ExecuteAsync(Request("app.deploy", new { serverId = "local" }),
-            (_, _) => Task.FromResult(Ids["new"]));
-
-        AssertOutcome(outcome, verified, Ids["new"]);
-    }
-
     [Fact]
     public async Task An_app_deployment_that_names_no_container_is_not_verifiable_never_verified()
     {
@@ -305,7 +277,7 @@ public class VerificationOutcomeTests
     {
         var verified = Verifiers(new ServiceCollection().BuildServiceProvider()).Select(v => v.CapabilityId).ToHashSet();
         string[] lifecycle = ["container.start", "container.stop", "container.restart", "container.remove",
-            "container.update", "container.create", "container.rollback"];
+            "container.update", "container.rollback"];
 
         Assert.All(lifecycle, c => Assert.Contains(c, verified));
         Assert.All(lifecycle, c => Assert.NotNull(new CapabilityCatalog().Find(c)));

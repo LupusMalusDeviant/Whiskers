@@ -26,6 +26,9 @@ that is what the named tests are for.
 - **Capabilities and paths** (R12–R15). [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTORY.md) is generated from the
   capability table; every capability is named by a §7 row ([`PATH_CAPABILITIES.md`](PATH_CAPABILITIES.md)), every row
   names real tools and capabilities, and §7.6 counts the rows.
+- **Self-report claims** (R8, [contract 0011](../contracts/0011-self-report-claims.md)). Every test that a claim of
+  [`CLAIMS.md`](CLAIMS.md) names is required like a ✅ invariant's, in the generated block of its run's manifest; the
+  register's own rules (markers, fingerprints, quotes) are `ClaimRegisterTests`.
 
 Locally, `WHISKERS_RELEASE_GATE=dry-run dotnet test --filter ReleaseGateTests` shows what a 1.0 release would refuse
 today.
@@ -36,12 +39,7 @@ Highest invariant ID: INV-62
 
 | Invariant | Status | Package | Why it is open | Reference |
 |---|---|---|---|---|
-| INV-01 | ⚠️ | R1-03 | webhook and system principals come with their packages; humans are keyed by the account handle, not the credential | — |
-| INV-25 | ⚠️ | R1-02 | with neither policy file present the restrictive default is created, so deleting both looks like a first start | — |
-| INV-52 | ⚠️ | WP7 | SSH private keys and mTLS client keys are stored in plaintext; no in-place `VAULT_KEY` rotation | — |
-| INV-56 | ⚠️ | WP7 | readiness lines are German only, and no test compares README/SECURITY.md claims with the code | — |
 | INV-58 | ⚠️ | R1-44 | holds per host only after the migration; hosts on the shared client credential are exposed (D12) | — |
-| INV-62 | ⚠️ | 0006 | the Deploy page's compose mode and `deploy_app` are out of scope; a re-tag before `up`, Traefik `exposedByDefault`, Tailscale sidecar `serve` and cloudflared are caught only by the re-check or not at all | — |
 
 ## Retired invariants
 
@@ -67,6 +65,7 @@ proven test.
 | Test | Skips when | Runs unskipped in | Why |
 |---|---|---|---|
 | Whiskers.Tests.PerHostCredentialTests.On_windows_a_key_readable_by_everyone_is_exposed | not Windows | — (no Windows CI job) | Windows ACL check |
+| Whiskers.Tests.SshKeyLeaseTests.On_linux_the_real_lease_directory_is_on_tmpfs_with_owner_only_modes | not Linux (no /dev/shm) | ci.yml build-test / Test (in-process) | the lease directory lives on Linux tmpfs |
 
 ## Mandatory suites
 
@@ -74,6 +73,7 @@ proven test.
 |---|---|---|---|
 | ci.yml | build-test | Test (in-process) | the in-process suite: no failure, a floor of passed tests, the required tests of `in-process.txt` (generated block included) |
 | ci.yml | build-test | Test (Docker integration, mandatory) | the PostgreSQL and other Docker-backed suites: a floor, no skip, the required tests of `docker.txt` |
+| ci.yml | build-test | Test (compose pin on the minimum Compose) | the compose pin (`ComposePinIntegrationTests`) on Compose v2.15.1, the release binary checked against its pinned SHA-256: a floor, no skip, the version asserted by the tests (contract 0013, § 4) |
 | ci.yml | build-test | Release gate (compare with the base) | no invariant ID or accepted decision lost against the pull request's base or the previous release tag (D16, R18) |
 | ci.yml | build-test | DI boot gate | the application boots with its dependency graph validated |
 | ci.yml | image-runtime | Image runtime tests | the built image's runtime tools, on amd64 and arm64: a floor, no skip, the required tests of `image-runtime.txt` (D14) |

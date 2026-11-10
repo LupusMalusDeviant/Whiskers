@@ -411,7 +411,7 @@ public class ImageRuntimeToolsTests
         return stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
-    private static string ImageUnderTest()
+    internal static string ImageUnderTest()
     {
         var required = Required;
         var image = Environment.GetEnvironmentVariable("WHISKERS_IMAGE");
@@ -430,7 +430,7 @@ public class ImageRuntimeToolsTests
         return image!;
     }
 
-    private static (int Exit, string Stdout, string Stderr) Docker(IReadOnlyList<string> args, string? stdin = null, int timeoutMs = 180_000)
+    internal static (int Exit, string Stdout, string Stderr) Docker(IReadOnlyList<string> args, string? stdin = null, int timeoutMs = 180_000)
     {
         var psi = new ProcessStartInfo(DeploymentScripts.FindOnPath("docker") ?? "docker")
         {

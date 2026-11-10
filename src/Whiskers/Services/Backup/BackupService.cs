@@ -68,6 +68,12 @@ public sealed class BackupService : IBackupService
 
     public Task<SelfBackupInfo> CreateBackupAsync(string label, CancellationToken ct = default) => CreateCoreAsync(label, ct);
 
+    /// <summary>Contract 0015 D9 (start-up only, like S-09): the <c>pre-rotation</c> / <c>post-rotation</c> backup of a
+    /// <c>VAULT_KEY</c> rotation, taken before the host and the Mutation Gateway exist. Its only caller is
+    /// <see cref="Whiskers.Services.Vault.VaultKeyRotationBootHandler"/> (pinned by VaultKeyRotationTests).</summary>
+    internal Task<SelfBackupInfo> CreateVaultRotationBackupAsync(string label, CancellationToken ct = default) =>
+        CreateCoreAsync(label, ct);
+
     /// <inheritdoc />
     public Task<SelfBackupInfo> CreatePreUpgradeBackupAsync(CancellationToken ct = default) =>
         CreateCoreAsync($"{PreUpgradeLabelPrefix}{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);
@@ -267,7 +273,25 @@ public sealed class BackupService : IBackupService
                 _logger.LogWarning(ex, "Skipping unreadable backup sidecar {File}", meta);
             }
         }
+        // Contract 0015 (D9): archives sealed before the last VAULT_KEY rotation need the key they were sealed with.
+        if (VaultRotationCutoff() is { } rotatedAt)
+            foreach (var b in list) b.SealedWithEarlierKey = b.Encrypted && b.CreatedAtUtc < rotatedAt;
         return list.OrderByDescending(b => b.CreatedAtUtc).ToList();
+    }
+
+    /// <summary>When the last VAULT_KEY rotation finished (its fresh backup is the first under the new key), or null.</summary>
+    private DateTime? VaultRotationCutoff()
+    {
+        try
+        {
+            return Whiskers.Services.Vault.VaultKeyRotation.ReadJournal(_dataPaths) is { Phase: Whiskers.Services.Vault.VaultKeyRotationJournal.Done } done
+                ? done.CompletedAtUtc
+                : null;
+        }
+        catch (Whiskers.Services.Vault.VaultKeyRotationException)
+        {
+            return null;
+        }
     }
 
     public string? ResolveArchivePath(string id)

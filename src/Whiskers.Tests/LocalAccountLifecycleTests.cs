@@ -1135,7 +1135,7 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         return new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.Email, row.Email!), new Claim(ClaimTypes.Name, row.Email!),
-            new Claim(ClaimTypes.NameIdentifier, row.Id), new Claim(AuthConstants.SecurityStampClaim, row.SecurityStamp!),
+            new Claim(ClaimTypes.NameIdentifier, row.Id), new Claim(AuthConstants.SecurityStampClaim, row.SecurityStamp!), WebSessionClaims.NewSessionClaim(),
         ], AuthConstants.LocalPasswordScheme));
     }
 
@@ -1150,7 +1150,7 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         return new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.Email, decision.Account!), new Claim(ClaimTypes.Name, decision.Account!),
-            new Claim(AuthConstants.BindingIdClaim, decision.BindingId!),
+            new Claim(AuthConstants.BindingIdClaim, decision.BindingId!), WebSessionClaims.NewSessionClaim(),
         ], AuthConstants.FederatedScheme));
     }
 

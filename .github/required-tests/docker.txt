@@ -11,6 +11,7 @@
 1 Whiskers.Tests.PostgresSmokeTests.Migrator_copies_sqlite_data_into_real_postgres
 1 Whiskers.Tests.PostgresSmokeTests.A_failed_transfer_into_real_postgres_leaves_it_empty_and_runs_again
 1 Whiskers.Tests.PostgresSmokeTests.Approval_decisions_and_uses_commit_on_real_postgres_with_retries_on
+1 Whiskers.Tests.PostgresSmokeTests.The_guardrail_policy_record_exists_after_migration_and_round_trips
 1 Whiskers.Tests.PostgresSmokeTests.Audit_chain_writes_verifies_prunes_and_exports_on_real_postgres_with_retries_on
 1 Whiskers.Tests.PostgresSmokeTests.The_cli_migration_keeps_the_sqlite_audit_checkpoint_aside
 
@@ -29,10 +30,17 @@
 1 Whiskers.Tests.PostgresPgControlTests
 1 Whiskers.Tests.PostgresOverlayComposeTests
 
+# Contract 0013 (INV-62), digest pinning on a real daemon: a pulled and a built service go through the planner and the
+# compose runner and start exactly the inspected images; a tag moved after the inspection never starts another image.
+2 Whiskers.Tests.ComposePinIntegrationTests
+
 # BEGIN release-gate (generated)
-# Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md and docs/v1/RELEASE_GATE.md (contract 0008,
-# R8): one entry per test method named by a ✅ invariant or an accepted exception, the minimum = the cases xUnit
-# discovers. Do not edit by hand; a difference writes the fresh block to this file's .actual.
+# Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md, docs/v1/RELEASE_GATE.md and docs/v1/CLAIMS.md
+# (contract 0008, R8; contract 0011): one entry per test method named by a ✅ invariant, an accepted exception or a
+# registered claim, the minimum = the cases xUnit discovers. Do not edit by hand; a difference writes the fresh
+# block to this file's .actual.
+1 Whiskers.Tests.ComposePinIntegrationTests.A_pulled_and_a_built_service_start_exactly_the_inspected_images_with_the_pin_file
+1 Whiskers.Tests.ComposePinIntegrationTests.Moving_both_tags_after_the_inspection_still_starts_the_inspected_images
 1 Whiskers.Tests.PostgresBackupRestoreTests.A_backup_holds_the_database_and_a_restore_brings_back_database_and_files_together
 1 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_cut_off_on_the_volume_is_not_committed_half_way
 1 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_missing_a_column_this_version_uses_is_refused_before_the_commit
@@ -52,4 +60,5 @@
 1 Whiskers.Tests.PostgresBackupRestoreTests.An_upgrade_on_postgres_first_takes_a_backup_with_the_dump_of_the_schema_before_it
 1 Whiskers.Tests.PostgresBackupRestoreTests.The_round_trip_works_as_the_recommended_owner_role_without_superuser_rights
 1 Whiskers.Tests.PostgresSmokeTests.A_keyed_refusal_written_twice_is_one_row_on_real_postgres_with_retries_on
+1 Whiskers.Tests.PostgresVaultRotationTests.Step_four_commits_on_postgres_and_a_fault_before_the_commit_rolls_back
 # END release-gate

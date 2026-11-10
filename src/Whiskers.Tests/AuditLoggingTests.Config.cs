@@ -163,8 +163,7 @@ public sealed partial class AuditLoggingTests : IDisposable
     [Fact]
     public async Task A_policy_write_records_the_changed_rule()
     {
-        var guardrails = new Whiskers.Services.Guardrails.GuardrailStore(filePath: Path.Combine(_dir, "guardrails.json"));
-        await guardrails.InitializeAsync();
+        var guardrails = await GuardrailStoreTestExtensions.FirstStartStore(Path.Combine(_dir, "guardrails.json")).StartAsync();
         var policy = GuardrailPolicy.SafeDefault();
         policy.MaxAutonomousLevel = McpPermissionLevels.Write;
 
@@ -705,7 +704,7 @@ public sealed partial class AuditLoggingTests : IDisposable
         var servers = new Whiskers.Services.ServerConfig.ServerConfigService(
             Microsoft.Extensions.Options.Options.Create(new DockerSettings { SocketPath = "unix:///nope.sock" }),
             NullLogger<Whiskers.Services.ServerConfig.ServerConfigService>.Instance, storePath: Path.Combine(_dir, "servers.json"),
-            dataPaths: new DataPathOptions(_dir));
+            dataPaths: new DataPathOptions(_dir), sealedKeys: new Whiskers.Services.Vault.SealedKeyFiles(TestVault.Usable, new DataPathOptions(_dir)));
         await servers.InitializeAsync();
         await servers.AddServerAsync(new ServerConfig { Id = "edge", Name = "edge", ConnectionType = ConnectionType.SSH, SshHost = "10.0.0.1" });
         await servers.SaveSshKeyAsync("edge", "id_ed25519", "first-key-material"u8.ToArray());

@@ -29,8 +29,8 @@ public class GuardrailsViewGatewayTests : BunitContext, IAsyncLifetime
     public GuardrailsViewGatewayTests()
     {
         Directory.CreateDirectory(_dir);
-        _store = new GuardrailStore(filePath: Path.Combine(_dir, "guardrails.json"));
-        _store.InitializeAsync().GetAwaiter().GetResult();
+        _store = GuardrailStoreTestExtensions.FirstStartStore(Path.Combine(_dir, "guardrails.json"));
+        _store.StartAsync().GetAwaiter().GetResult();
 
         Services.AddLogging();
         Services.AddLocalization();

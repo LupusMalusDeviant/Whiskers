@@ -127,7 +127,8 @@ internal static class AuditTrail
         Assert.False(string.IsNullOrEmpty(row.OperationId), context);
         Assert.False(string.IsNullOrEmpty(row.PrincipalKind), context);
         Assert.False(string.IsNullOrEmpty(row.PrincipalId), context);
-        if (owned && row.PrincipalKind is nameof(MutationPrincipalKind.Agent) or nameof(MutationPrincipalKind.Automation))
+        if (owned && row.PrincipalKind is nameof(MutationPrincipalKind.Agent) or nameof(MutationPrincipalKind.Automation)
+            or nameof(MutationPrincipalKind.Webhook))
         {
             Assert.False(string.IsNullOrEmpty(row.OnBehalfOfId), context);
             Assert.False(string.IsNullOrEmpty(row.OnBehalfOfKind), context);

@@ -109,7 +109,7 @@ public static class McpGuardrailFilter
         Func<CancellationToken, ValueTask<CallToolResult>> next, CancellationToken ct)
     {
         var mutation = new MutationRequest(
-            capability.Id, PrincipalOf(principal), MutationSurface.Mcp,
+            capability.Id, PrincipalOf(principal) with { SessionId = McpSessionOf(tool.Http) }, MutationSurface.Mcp,
             MutationTargets.FromArguments(capability, arguments), arguments);
 
         MutationOutcome<CallToolResult> outcome;
@@ -189,6 +189,11 @@ public static class McpGuardrailFilter
 
     /// <summary>An API key, or a web user calling <c>/mcp</c> with a session cookie.</summary>
     internal static MutationPrincipal PrincipalOf(AgentPrincipal p) => MutationPrincipals.Of(p);
+
+    /// <summary>Contract 0014 (D5): the MCP transport session (<c>Mcp-Session-Id</c>) a key's call belongs to, or
+    /// <c>null</c> for a stateless call — "no session".</summary>
+    internal static string? McpSessionOf(HttpContext? http) =>
+        http?.Request.Headers["Mcp-Session-Id"].FirstOrDefault() is { Length: > 0 } id ? id : null;
 
     /// <summary>One call being handled: where its outcome goes.</summary>
     private sealed record Call(HttpContext Http, string? RequestId, string Tool)

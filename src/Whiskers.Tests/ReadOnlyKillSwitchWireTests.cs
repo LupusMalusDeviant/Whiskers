@@ -747,12 +747,13 @@ public class ReadOnlyKillSwitchWireTests
 
     /// <summary>The doubles hold one server ("local") and one container ("web-1") and nothing else: a fallback is
     /// allowed only for the other kinds, and for a container action whose compose project the double cannot show
-    /// (its impact is planned before the policy). A capability whose target the doubles hold never falls back.</summary>
+    /// (its impact is planned before the policy), and for a deployment planned as a compose project (app.deploy,
+    /// compose.deploy: the double cannot read the project's .env). A capability whose target the doubles hold never falls back.</summary>
     private static void AssertFallbacksOnlyForUnknownTargets(KillSwitchHost host)
     {
         var fallbacks = host.Resolver!.Fallbacks.ToList();
         Assert.NotEmpty(fallbacks);   // the sweep did meet unknown targets: the decorator is not idle
-        string[] composePlanned = ["container.env_set", "compose.deploy", "container.env_file_save"];
+        string[] composePlanned = ["container.env_set", "compose.deploy", "app.deploy", "container.env_file_save"];
         // Contract 0012 (D12): records inside a held kind — an MCP key, a vault secret, a registry, an endpoint check —
         // are resolved against stores the sweep does not fill.
         string[] recordsNotHeld = ["mcp.key_delete", "vault.secret_set", "vault.secret_delete", "registry.delete",

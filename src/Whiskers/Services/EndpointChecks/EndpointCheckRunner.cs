@@ -65,7 +65,7 @@ public sealed class EndpointCheckRunner : IEndpointCheckRunner
     public static AutomationActor ActorOf(EndpointCheckDefinition check)
     {
         var owner = string.IsNullOrWhiteSpace(check.OwnerId) ? null : check.OwnerId;
-        return new("check:" + check.Id, $"Endpoint check '{check.Name}'", owner, owner);
+        return AutomationActor.ForCheck(check.Id, check.Name, owner);
     }
 
     /// <summary>The executor timeout of one attempt.</summary>

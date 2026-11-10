@@ -213,7 +213,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 var sid = container.ServerId;
                 // Only an admin taking it over in Settings records the owner, so the owner is also its provenance.
                 var updateOwner = _owners.Get(IAutomationOwnerStore.AutoUpdate)?.OwnerId;
-                var actor = new AutomationActor("autoupdate", "AutoUpdate", updateOwner, updateOwner);
+                var actor = AutomationActor.ForAutoUpdate(updateOwner);
                 updateActor = actor;
                 var outcome = await _automation.RunAsync(actor,
                     "container.update", new { containerId = container.Id, name = container.Name, serverId = sid },
@@ -368,7 +368,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
         try
         {
             var owner = _owners.GetBlocked(IAutomationOwnerStore.AutoUpdate)?.OwnerId is { Length: > 0 } o ? o : null;
-            await _automation.RefuseAsync(new AutomationActor("autoupdate", "AutoUpdate", owner, owner), "container.update",
+            await _automation.RefuseAsync(AutomationActor.ForAutoUpdate(owner), "container.update",
                 new { containerId = container.Id, name = container.Name, serverId = container.ServerId }, reason, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

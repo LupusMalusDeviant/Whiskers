@@ -238,8 +238,10 @@ internal static class HelpContentEn
             new List<HelpSection>
             {
                 new("Deploying Containers", """
-                    Under **Deployment > Deploy** you launch a new container: image, name, ports,
-                    volumes, environment variables and restart policy — like a guided `docker run`.
+                    Under **Deployment > Deploy** you launch an app from an image: name, ports, volumes,
+                    environment variables and restart policy. Whiskers writes it as a compose project in
+                    `/opt/deployments/<name>`, plans it, decides how it is exposed and starts it with the image
+                    pinned to the inspected image id. The **Compose** tab deploys a whole file the same way.
                     """,
                     Shot("Deploy form")),
                 new("Compose Editor & App Store", """
@@ -337,7 +339,11 @@ internal static class HelpContentEn
                     start** (for stores read on first use, such as git deploys and registries: that feature
                     does not work) rather than run with empty roles or permissions: repair the file, or remove
                     it **together with** `<file>.bak`, or restore a backup. A broken `guardrails.json` is not replaced by its previous version: the agent's
-                    guarded actions stay refused until you repair it.
+                    guarded actions stay refused until you repair it. Removing `guardrails.json` and its `.bak` does
+                    not reset it either: the database records that a guardrail policy existed, so the actions stay
+                    refused until a valid `guardrails.json` is back (repaired or restored from a backup) or, with
+                    both files missing, `dotnet Whiskers.dll --reset-guardrails` is run in the container. That writes the
+                    safe default with the kill switch on; restart, then an Admin switches it off on the Guardrails page.
                     """),
             }),
 

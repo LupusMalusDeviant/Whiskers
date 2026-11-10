@@ -24,6 +24,107 @@ All notable changes to Whiskers are documented here. The format follows
   `statefulsets` and `daemonsets` (start, stop and restart patch the controller itself, not its scale subresource).
   Apply `deploy/k8s/whiskers-agent-rbac.yaml` again on every connected cluster — with an older or hand-made role,
   start, stop and restart fail with 403.
+- **Private keys sealed at rest, and `VAULT_KEY` rotation (INV-52, contract 0015).** SSH keys and mTLS client keys in
+  the data directory are now sealed with the vault key (same file, `f1:` content); a start-up migration seals existing
+  plaintext keys and removes the plaintext. SSH keys are opened only into a short-lived 0600 lease in memory
+  (`/dev/shm`) and removed after use. **Behaviour change (D4):** without `VAULT_KEY` Whiskers refuses to store new SSH
+  keys or issue new mTLS client keys. **Behaviour change (D10):** with a wrong `VAULT_KEY`, sealed client keys do not
+  open and mTLS hosts become unreachable (fail-closed). New: rotate `VAULT_KEY` at start via `VAULT_KEY_NEW_FILE`,
+  all or nothing, with a journal, crash resume and a refusal when the audit trail does not verify; the trail is
+  re-signed, `pre-rotation` and `post-rotation` self-backups are taken, and older backups are marked "earlier key".
+  See `docs/operations/vault-key-rotation.md`.
+- **One way to deploy: the Deploy page and `deploy_app` run compose projects (contract 0013, INV-62 step 3; INV-62
+  is ✅).** The form tab and MCP `deploy_app` map their request through one mapper (`DeploymentCompose`) to a compose
+  file in `/opt/deployments/<name>` (project = service = container name; first line `# whiskers: app.deploy`), and the
+  compose tab deploys its file like the compose editor (a required project name, "Check plan" shows project, services,
+  touched containers and every exposure with its class). All three are planned, have their mounts and exposures
+  decided, run through the compose runner (pinned images, re-check) and are read back per container of the project.
+  The gateway plans `deploy_app` from its arguments, so `ExposureChangeRule` decides its exposures (a Funnel label or a
+  `TUNNEL_TOKEN` asks for a confirmation even under Admin autonomy). Removed: `IDeploymentService`,
+  `ComposeFileParser`, `IDockerService.CreateContainerAsync` and the capability `container.create`; `app.deploy`
+  composes `container.disable_restart` / `container.stop` (no longer `image.pull` / `container.create`).
+  **Behaviour changes:** real compose projects replace single containers (the form and `deploy_app` keep
+  `network_mode: bridge`; a redeploy with the same name updates the project instead of failing on "name already in
+  use"); `build:`, `labels`, `cap_add` and everything else compose knows now work in the compose tab (and are
+  decided) instead of being refused or ignored; `deploy_app` refuses a malformed port or environment entry instead of
+  dropping it, refuses a Kubernetes server, and answers `App '<name>' deployed as compose project '<project>' on
+  <server>` with the containers (name and short id), the image and the pinned image id and the published ports — the
+  old `Container ID:` line is gone; a refusal answers `Deployment refused: …`. A plan is refused before anything is
+  written when a project of that name runs from another directory, when (form and `deploy_app`) the directory holds a
+  `docker-compose.yml` without the marker, or when a plain container of the old page has a name the deployment would
+  use — remove it on the container page or choose another name. With the Deployment module off
+  (`Features:deployment:Enabled=false`), `deploy_app` and every other app deployment are refused with
+  `Deployment refused: the Deployment module is disabled …`; before, only the pages were hidden and `deploy_app`
+  still created containers.
+- **CI: the compose pin on the minimum Compose (contract 0013, § 4).** A new step of the Docker job runs
+  `ComposePinIntegrationTests` on Compose v2.15.1 — the official release binary, checked against a SHA-256 pinned in
+  the workflow before it runs, as the `docker compose` plugin of its own `DOCKER_CONFIG`; the tests fail on any other
+  version (`WHISKERS_TEST_COMPOSE_VERSION`). The step is a mandatory suite of the release gate.
+- **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
+  asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
+  host. The labels are now read from the whole `Config`.
+- **Proxies and tunnels are decided as exposures (contract 0013, INV-62 step 2).** A compose plan recognises Traefik,
+  cloudflared and Tailscale by image name, `argv[0]`, a word of a `sh -c` string or an environment key, and reads
+  Traefik's docker/swarm provider from its CLI, environment and static file (YAML, a TOML subset) and Tailscale's
+  `TS_SERVE_CONFIG`, through bind mounts (at most 1 MiB). A Traefik with `exposedByDefault`, cloudflared, Tailscale
+  Funnel and Tailscale with an unreadable serve state are class `public`, Tailscale serve `published` (new kind
+  `ExternalRoute`, key = the signal, never a value). A running Traefik on the host (by image name) routes every planned
+  service without `traefik.enable=false`. Anything of the plan's own services that cannot be read refuses the plan; step
+  4 checks again with the pulled images and refuses a changed config file; the re-check reads the containers.
+  **Behaviour changes:** the default label prefix `traefik.` replaces the router prefixes (a literal
+  `traefik.enable=false` is no exposure), which changes every policy's version hash (open approvals expire); an `image`,
+  `entrypoint`, `command`, `working_dir` or a `TS_*`/`TUNNEL_*`/`TRAEFIK_*` value from an unset variable refuses the
+  plan.
+- **Compose runs start exactly the inspected images (contract 0013, INV-62 step 1).** After the image inspection every
+  image `up` starts is pinned to its image id (contract 0013, D10 as amended on 2026-11-10) — verified on the host and
+  written to `<project>/.whiskers/pin.override.yml`, which only `up` and the fallback `stop` use; a failed pin refuses
+  the run before `up` (files and tags put back). The planner never plans that file (Git deploy checkouts exclude
+  `.whiskers/`). The re-check counts a container running another image than the inspected one as class `public`.
+  Pinned containers carry `whiskers.image.ref`: `container.update` and AutoPatch refuse them ("redeploy the project to
+  update"), and the update check asks about that reference. Behaviour change: the first redeploy after the upgrade
+  recreates the project's containers (new label, pinned image), and their Image column shows the image id
+  (`sha256:…`) instead of the name, which stays in `whiskers.image.ref`.
+- **Every action names one structured principal (INV-01, contract 0014).** Webhook deliveries are a principal kind of
+  their own (`Webhook`, naming the generation of the secret their signature was checked against — a new additive
+  column `Webhooks.SecretVersion`, raised by every regeneration) and decide exactly as before; Whiskers' own work is a
+  `System` principal from a closed list; a person keeps their account handle as id and now carries the sign-in
+  credential and the web session; every audit row written outside the gateway (retention, suspensions, terminal
+  close, sign-in and binding rows, restores, recovery codes, backup downloads, audit exports) records the principal.
+  **Behaviour changes:** everyone signs in again once after the update (sessions from before it carry no session id
+  and are ended, as with R1-26); approvals pending at the update can no longer be used (an approval is now bound to the
+  sign-in credential that asked for it) and expire as usual; webhook rows in the audit log say `Webhook` instead of
+  `Automation`; expired or cancelled approvals name `system:approval-expiry` instead of `system`.
+- **Self-reports are tested against the code (INV-56, contract 0011).** The production-readiness lines come from resx
+  in English (default) and German with stable ids; a parity test keeps keys, placeholders and fact tokens equal across
+  the languages, and every resx key exists in both. README.md, SECURITY.md, `docs/security-architecture.md` and
+  `docs/operations/production-checklist.md` mark each claim; `docs/v1/CLAIMS.md` registers 80 claims with
+  fingerprints and the tests that pin them, and the release gate requires those tests. SECURITY.md and the security
+  architecture now say what onboarding does ("bound to the mesh address") instead of "mesh-bound by design".
+  Readiness titles quoted in the docs are the English ones.
+- **A deleted guardrail policy is no first start any more (INV-25, contract 0010).** The database now records that a
+  guardrail policy has existed (new table `InstanceMarkers`, additive migration for SQLite and PostgreSQL; written when
+  the safe default is first created, at every start with a policy file and after saves; never changed or removed). With
+  that record — or with policy decisions on record — missing both `guardrails.json` and `guardrails.json.bak` keeps the
+  guardrails fail-closed instead of creating the weaker default, and so does a record that cannot be read. The start
+  decides this only once the database schema is current; a start that fails earlier never leaves the default behind.
+  **Way back** (host only): put a valid `guardrails.json` back (repaired or restored) and restart, or, with both files
+  missing, run `dotnet Whiskers.dll --reset-guardrails` in the container: it writes the safe default with the kill
+  switch **on** (audited as `guardrails.reset_on_host`), and after the restart an Admin switches the kill switch off on
+  the Guardrails page. Removing the policy files is no longer described as a reset anywhere. The Guardrails page and a
+  new readiness line ("Guardrail policy loaded and recorded", German "Guardrail-Policy geladen und vermerkt") show the reason; after upgrading, check that line once.
+  `--migrate-to-postgres` copies the record and accepts sources of older releases without the table.
+- **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
+  asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
+  host. The labels are now read from the whole `Config`.
+- **MCP SDK 2.4 with sessions bound to their key (contract 0016).** `ModelContextProtocol.AspNetCore` 1.4.1 → 2.4.0.
+  The SDK now defaults to stateless; Whiskers keeps stateful sessions (`initialize` → `Mcp-Session-Id`, GET/DELETE
+  `/mcp`) as before. Each session is bound to the API key that opened it: the key's principal carries the subject
+  `mcp-key:<key record id>` (never the secret, its hash or its hint), and a request with another key on that session
+  is refused with `403` (on 1.4.1 key principals had no subject, so any valid key could send on another key's session
+  if it knew the session id). A key whose record id is empty or shared with another key (only possible by editing the
+  permission file by hand) is refused with `401`. Clients on the `2026-07-28` protocol revision are asked to fall back
+  to the `initialize` handshake. **Behaviour change:** a federated (Google/OIDC) browser session can no longer call
+  `/mcp` directly — the SDK refuses principals without a subject; use an API key.
 
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix

@@ -196,6 +196,8 @@ public class WebhookService : IWebhookService
             var before = AuditView(webhook);
             var secret = GenerateSecret();
             webhook.Secret = ProtectSecret(webhookId, secret);
+            // Contract 0014 (D4): a new generation, so the audit tells deliveries signed before and after apart.
+            webhook.SecretVersion = Math.Max(1, webhook.SecretVersion) + 1;
             await db.SaveChangesAsync();
             Whiskers.Services.Mutations.ConfigChange.Record($"webhook:{webhookId}", before, AuditView(webhook));   // R1-22
             return secret;
@@ -1198,7 +1200,7 @@ public class WebhookService : IWebhookService
     internal static AutomationActor ActorOf(WebhookEntity webhook)
     {
         var owner = string.IsNullOrWhiteSpace(webhook.Owner) ? null : webhook.Owner;
-        return new AutomationActor("webhook:" + webhook.WebhookId, $"Webhook '{webhook.Name}'", owner, owner);
+        return AutomationActor.ForWebhook(webhook.WebhookId, webhook.Name, owner, Math.Max(1, webhook.SecretVersion));
     }
 
     /// <summary>
@@ -1219,7 +1221,8 @@ public class WebhookService : IWebhookService
 
         // The run's operation (R1-18): its decision, run, verification and audit carry the run id. Nested decisions (a
         // deployment's containers and mounts) get ids of their own and the link to it.
-        var actor = ActorOf(webhook);
+        // Contract 0014: every principal of the delivery, nested ones included, names the run as its session.
+        var actor = ActorOf(webhook) with { SessionId = runId };
         var runActor = actor with { OperationId = runId };
         var sid = WebhookTargets.ServerOf(webhook);
         string capability;
@@ -1425,7 +1428,7 @@ public class WebhookService : IWebhookService
             if (webhook is null)
             {
                 await automation.RefuseAsync(
-                    new AutomationActor("webhook:" + webhookId, $"Webhook {webhookId} (removed)", null)
+                    AutomationActor.ForRemovedWebhook(webhookId) with
                         { OperationId = runId, EventKey = KeyOf(runId, refused) },
                     RemovedWebhook, new { webhookId }, reason, bookkeeping.Token);
                 return;
@@ -1532,7 +1535,8 @@ public class WebhookService : IWebhookService
         before.Enabled = wasEnabled;
         var changes = string.Join("; ", Whiskers.Services.Mutations.ConfigChange.Diff(from, to)
             .Select(c => $"{c.Path}: {c.Before} → {c.After}"));
-        await audit.TryLogAsync("system", "system", SuspendAction, "webhook", before.WebhookId, before.Name,
+        await audit.TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.System("authority-check"), SuspendAction, "webhook",
+            before.WebhookId, before.Name,
             $"operation={operationId}; {Whiskers.Services.Mutations.ConfigChange.VersionAction} {from.Version} → {to.Version}" +
             (changes.Length > 0 ? $"; {changes}" : ""), success: true);
     }

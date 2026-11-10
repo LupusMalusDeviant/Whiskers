@@ -113,7 +113,7 @@ public sealed partial class WebhookMutationTests : IDisposable
         Assert.True(Ran(action));
         var principal = Assert.Single(_audit.Requests.Select(r => r.Principal).DistinctBy(p => p.Id),
             p => p.Id == "webhook:" + webhook.WebhookId);
-        Assert.Equal(MutationPrincipalKind.Automation, principal.Kind);
+        Assert.Equal(MutationPrincipalKind.Webhook, principal.Kind);
         Assert.Equal(AdminId, principal.OnBehalfOf?.Id);
     }
 

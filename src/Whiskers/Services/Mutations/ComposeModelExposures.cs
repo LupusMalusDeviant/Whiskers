@@ -168,12 +168,39 @@ public static partial class ComposeModel
             if (!TryInterpolate(rawValue ?? "", env, out var value))
                 throw new ComposePlanException($"A label of '{service}' with an exposure prefix uses a variable that is not set in the .env file.");
             var keyFromVariable = ComposeExposures.HasVariable(rawKey);
+            // Contract 0013, D18: a literal traefik.enable=false is no exposure (one from a variable still is).
+            if (!keyFromVariable && !ComposeExposures.HasVariable(rawValue)
+                && !ComposeExposures.IsRouteLabel(key, value, prefixes)) continue;
             var valueWithheld = ComposeExposures.HasVariable(rawValue) || !ComposeExposures.ShowsLabelValue(key, value);
             found.Add(new ComposeExposure(service, ExposureKind.RouteLabel, keyFromVariable ? "label (withheld)" : key)
             {
                 Key = key, Value = value, KeyWithheld = keyFromVariable, ValueWithheld = valueWithheld,
             });
         }
+        // Contract 0013, D16: what names or configures a proxy or tunnel must be known — an image, entrypoint or command,
+        // or a tool's environment value, from a variable that is not set refuses the plan.
+        foreach (var field in (string[])["image", "entrypoint", "command", "working_dir"])
+            if (source.Children.TryGetValue(new YamlScalarNode(field), out var node))
+                foreach (var raw in node switch
+                         {
+                             YamlScalarNode s => [s.Value ?? ""],
+                             YamlSequenceNode seq => seq.Children.OfType<YamlScalarNode>().Select(s => s.Value ?? ""),
+                             _ => Enumerable.Empty<string>(),
+                         })
+                    Value(raw, $"The {field}");
+        if (source.Children.TryGetValue(new YamlScalarNode("environment"), out var environment))
+            foreach (var (envKey, envValue) in environment switch
+                     {
+                         YamlMappingNode map => map.Children.Select(c => ((c.Key as YamlScalarNode)?.Value ?? "", (c.Value as YamlScalarNode)?.Value)),
+                         YamlSequenceNode seq => seq.Children.OfType<YamlScalarNode>().Select(s => s.Value ?? "")
+                             .Select(e => e.IndexOf('=') is var eq and >= 0 ? (e[..eq], (string?)e[(eq + 1)..]) : (e, null)),
+                         _ => Enumerable.Empty<(string, string?)>(),
+                     })
+                if (envValue is not null && (envKey.StartsWith("TS_", StringComparison.Ordinal)
+                                             || envKey.StartsWith("TUNNEL_", StringComparison.Ordinal)
+                                             || envKey.StartsWith("TRAEFIK_", StringComparison.Ordinal)
+                                             || envKey is "HOME" or "XDG_CONFIG_HOME"))
+                    Value(envValue, $"The environment value {envKey}");
         // label_file: compose reads it (its labels come through `docker compose config`); a relative path is refused,
         // decided after interpolation — the file it names depends on where compose runs (Amendments 10 and 11).
         foreach (var (_, raw) in Entries(source, "label_file"))

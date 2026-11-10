@@ -5,7 +5,12 @@ namespace Whiskers.Services.Terminal;
 
 /// <summary>Who opened a terminal session: the principal id the gateway decided on (<c>user:&lt;email&gt;</c>) and the
 /// name the audit shows.</summary>
-public sealed record TerminalOwner(string Id, string DisplayName);
+public sealed record TerminalOwner(string Id, string DisplayName)
+{
+    /// <summary>The gateway principal of the open (contract 0014): the close is recorded under it, kind, credential and
+    /// session included. Null only for an owner built without one (tests); the close then names a person by <see cref="Id"/>.</summary>
+    public Whiskers.Services.Mutations.MutationPrincipal? Principal { get; init; }
+}
 
 /// <summary>What a session is a shell of: a host (<see cref="ContainerId"/> null) or a container on a server.</summary>
 public sealed record TerminalTarget(string ServerId, string? ContainerId, string Name)
@@ -161,10 +166,12 @@ public sealed class TerminalSession : IAsyncDisposable
 {
     private readonly ITerminalProcess _process;
     private readonly TimeProvider _time;
+    private readonly IAsyncDisposable? _keyLease;
 
     internal TerminalSession(string sessionId, TerminalOwner owner, TerminalTarget target, ITerminalProcess process,
-        DateTime openedAt, string? operationId = null, TimeProvider? time = null)
+        DateTime openedAt, string? operationId = null, TimeProvider? time = null, IAsyncDisposable? keyLease = null)
     {
+        _keyLease = keyLease;
         _time = time ?? TimeProvider.System;
         SessionId = sessionId;
         OperationId = operationId;
@@ -201,5 +208,16 @@ public sealed class TerminalSession : IAsyncDisposable
         await _process.WriteAsync(data);
     }
 
-    public ValueTask DisposeAsync() => _process.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await _process.DisposeAsync();
+        }
+        finally
+        {
+            // Contract 0015: the unsealed SSH key of this shell lives exactly as long as the session.
+            if (_keyLease is not null) await _keyLease.DisposeAsync();
+        }
+    }
 }

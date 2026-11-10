@@ -18,6 +18,12 @@ With `VAULT_KEY` (or `VAULT_KEY_FILE`) set, the archive is encrypted with AES-25
 `VAULT_KEY`. Whiskers restores only an archive sealed with that key. **Without the key a backup cannot be
 restored.** Keep `VAULT_KEY` in a password manager as well as on the host.
 
+The private SSH and mTLS client keys in the archive are themselves sealed with `VAULT_KEY` (contract 0015). After a
+`VAULT_KEY` rotation, older self-backups stay sealed with the **earlier** key; they are not re-sealed (D9). The backup
+list marks them **"earlier key"**. To restore one, set `VAULT_KEY_FILE` to the key it was sealed with. The rotation
+takes a `pre-rotation` backup under the old key and a `post-rotation` backup under the new one. See
+[vault-key-rotation.md](vault-key-rotation.md).
+
 A backup does **not** hold:
 
 - the volumes of your containers (use volume backups for those);

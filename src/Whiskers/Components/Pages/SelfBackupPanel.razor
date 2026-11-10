@@ -92,6 +92,11 @@ else
                 @if (context.Encrypted)
                 {
                     <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Success" Size="Size.Small" title="@L["SelfBackupPanel_Tooltip_Encrypted"]" />
+                    @if (context.SealedWithEarlierKey)
+                    {
+                        @* Contract 0015 (D9): sealed before the last VAULT_KEY rotation — restorable with that earlier key only. *@
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" title="@L["SelfBackupPanel_Tooltip_EarlierKey"]">@L["SelfBackupPanel_Chip_EarlierKey"]</MudChip>
+                    }
                 }
                 else
                 {

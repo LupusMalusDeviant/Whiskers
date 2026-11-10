@@ -54,6 +54,8 @@ public static class FederatedSignIn
             new Claim(ClaimTypes.Email, decision.Account),
             new Claim(ClaimTypes.Name, decision.Account),
             new Claim(AuthConstants.BindingIdClaim, decision.BindingId),
+            // Contract 0014 (D2): the session's own id, so every action of it is attributed to this sign-in.
+            WebSessionClaims.NewSessionClaim(),
         ], AuthConstants.FederatedScheme));
         await authAudit.SignedInAsync(context.HttpContext, method, decision.Account);
     }

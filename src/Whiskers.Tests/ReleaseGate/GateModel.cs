@@ -89,6 +89,8 @@ public sealed record GateInputs
     public required string Contract { get; init; }                // docs/v1/PRODUCT_CONTRACT.md
     public string? PathCapabilities { get; init; }                // docs/v1/PATH_CAPABILITIES.md (D6 b)
     public string? CapabilityInventory { get; init; }             // docs/v1/CAPABILITY_INVENTORY.md (D7, generated)
+    /// <summary>docs/v1/CLAIMS.md (contract 0011, Q3): the tests its claims name are required like a ✅ invariant's (R8).</summary>
+    public string? Claims { get; init; }
     /// <summary>Workflow file name (ci.yml, release.yml, security.yml) → text.</summary>
     public required IReadOnlyDictionary<string, string> Workflows { get; init; }
     /// <summary>Manifest file name (in-process.txt, docker.txt, image-runtime.txt) → text; a missing one is absent.</summary>

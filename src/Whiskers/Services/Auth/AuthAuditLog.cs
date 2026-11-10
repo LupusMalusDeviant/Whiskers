@@ -126,8 +126,8 @@ public sealed class AuthAuditLog : IHostedService, IAuthAuditLog
             await foreach (var row in _queue.Reader.ReadAllAsync(CancellationToken.None))
                 // TryLogAtAsync never throws: a lost row is logged and reported to the audit health check there. A write
                 // that hangs is abandoned once the shutdown's drain time is over.
-                await _audit.TryLogAtAsync(row.OccurredUtc, row.Actor, "web", row.Action, Target, row.Method, row.Method,
-                    row.Details, success: row.Success).WaitAsync(stoppingToken);
+                await _audit.TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.Person(row.Actor), row.Action, Target,
+                    row.Method, row.Method, row.Details, success: row.Success, occurredUtc: row.OccurredUtc).WaitAsync(stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

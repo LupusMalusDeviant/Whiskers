@@ -218,6 +218,14 @@ public sealed class AuditChain : IAuditChain
 
     private bool ValidLink(AuditChainEntry link) => SameMac(link.Mac, SignLink(link.Hash));
 
+    /// <summary>Contract 0015 (VAULT_KEY rotation): the signature this chain's key gives a link, and whether a link's or a
+    /// checkpoint's signature is valid under it. The rotation re-signs every signed link and checkpoint with the new
+    /// key's chain; nothing else uses these.</summary>
+    internal string? LinkSignature(string hash) => SignLink(hash);
+    internal string? CheckpointSignature(AuditCheckpointEntity checkpoint) => Sign(checkpoint);
+    internal bool LinkSignatureValid(AuditChainEntry link) => _key is not null && ValidLink(link);
+    internal bool CheckpointSignatureValid(AuditCheckpointEntity checkpoint) => Valid(checkpoint);
+
     /// <summary>A link whose fields still give its hash and whose signature (when it has one, under the key) is valid —
     /// so its <see cref="AuditChainEntry.RowHash"/> is the one that was written, not one changed in the database.</summary>
     private bool LinkHolds(AuditChainEntry link) =>
@@ -925,6 +933,10 @@ public sealed class AuditChain : IAuditChain
             var record = new AuditLogEntity
             {
                 Timestamp = _time.GetUtcNow().UtcDateTime, Actor = "system", ActorType = "system",
+                // INV-01 (contract 0014, D6): Whiskers itself, by its component id.
+                PrincipalKind = nameof(Whiskers.Services.Mutations.MutationPrincipalKind.System),
+                PrincipalId = Whiskers.Services.Mutations.PrincipalIds.System("audit-retention"),
+                PrincipalSessionId = Whiskers.Services.Mutations.ProcessIdentity.Current,
                 Action = RetentionAction, TargetType = "audit", TargetId = "audit-log", TargetName = "Audit log",
                 Details = string.Create(CultureInfo.InvariantCulture,
                     $"Removed {count} audit row(s) through id {through} and {history} MCP call history row(s), older than {cutoffUtc:O} (retention {retentionDays} days)."),

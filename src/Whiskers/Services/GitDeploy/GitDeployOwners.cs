@@ -13,7 +13,7 @@ public static class GitDeployOwners
     {
         ArgumentNullException.ThrowIfNull(app);
         var owner = string.IsNullOrWhiteSpace(app.Owner) ? null : app.Owner;
-        return new AutomationActor("gitdeploy:" + app.Id, $"Git deployment '{app.Name}'", owner, owner);
+        return AutomationActor.ForGitDeploy(app.Id, app.Name, owner);
     }
 
     /// <summary>

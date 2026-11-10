@@ -14,10 +14,15 @@ public class SshTunnelManager : ISshTunnelManager
     private readonly ILogger<SshTunnelManager> _logger;
     private readonly ConcurrentDictionary<string, SshTunnel> _tunnels = new();
 
-    public SshTunnelManager(IServerConfigService serverConfig, ILogger<SshTunnelManager> logger)
+    // Contract 0015 (D2): the key is sealed at rest; ssh gets a lease in a memory-backed directory for its handshake.
+    private readonly Whiskers.Services.Server.ISshKeyLeases? _keyLeases;
+
+    public SshTunnelManager(IServerConfigService serverConfig, ILogger<SshTunnelManager> logger,
+        Whiskers.Services.Server.ISshKeyLeases? keyLeases = null)
     {
         _serverConfig = serverConfig;
         _logger = logger;
+        _keyLeases = keyLeases;
     }
 
     public async Task<int> EstablishTunnelAsync(Models.ServerConfig server)
@@ -30,26 +35,14 @@ public class SshTunnelManager : ISshTunnelManager
 
         var keyPath = _serverConfig.GetSshKeyPath(server);
 
-        // Validate the key is present and readable by THIS process before spawning ssh, so a
-        // permission/ownership problem surfaces as a clear, actionable error instead of a generic
-        // "connection failed" (ssh would silently die and the tunnel port would just be dead).
-        if (!string.IsNullOrEmpty(server.SshKeyFileName))
-        {
-            if (keyPath == null)
-                throw new InvalidOperationException(
-                    $"SSH key '{server.SshKeyFileName}' for server '{server.Name}' was not found in the ssh-keys directory. Re-upload the key for this server.");
-
-            try
-            {
-                using var _ = File.OpenRead(keyPath);
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-            {
-                throw new InvalidOperationException(
-                    $"SSH key for server '{server.Name}' exists ({keyPath}) but is not readable by the Whiskers process. " +
-                    $"Fix its ownership/permissions (the key must be owned by the app user with mode 600). Underlying error: {ex.Message}");
-            }
-        }
+        // Validate the key is present before spawning ssh, so a missing key surfaces as a clear, actionable error
+        // instead of a generic "connection failed" (ssh would silently die and the tunnel port would just be dead).
+        // Whether it can be opened is said by the lease below (sealed key, vault locked, no memory-backed directory).
+        if (!string.IsNullOrEmpty(server.SshKeyFileName) && keyPath == null)
+            throw new InvalidOperationException(
+                $"SSH key '{server.SshKeyFileName}' for server '{server.Name}' was not found in the ssh-keys directory. Re-upload the key for this server.");
+        if (keyPath is not null && _keyLeases is null)
+            throw new InvalidOperationException("SSH keys are sealed at rest and no key lease service is configured.");
 
         // Picking a free port (GetAvailablePort) releases it again before ssh binds it — a TOCTOU race
         // where another process can grab the port in between. Retry a few times with a fresh port when ssh
@@ -59,12 +52,24 @@ public class SshTunnelManager : ISshTunnelManager
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             var localPort = GetAvailablePort();
-            var process = StartSshProcess(server, keyPath, localPort);
+            // The lease lives until ssh has authenticated (the forward is up) or has given up — never longer.
+            Process process;
+            bool up;
+            var lease = keyPath is null ? null : await _keyLeases!.AcquireAsync(server, CancellationToken.None);
+            try
+            {
+                process = StartSshProcess(server, lease?.Path, localPort);
 
-            // Wait until the forwarded port actually accepts connections (up to ~10s) rather than
-            // guessing with a fixed delay — a slow handshake would otherwise leave us with a client
-            // pointed at a port that isn't listening yet.
-            if (await WaitForPortAsync(localPort, process, TimeSpan.FromSeconds(10)))
+                // Wait until the forwarded port actually accepts connections (up to ~10s) rather than
+                // guessing with a fixed delay — a slow handshake would otherwise leave us with a client
+                // pointed at a port that isn't listening yet. ssh opens a local forward only after it authenticated.
+                up = await WaitForPortAsync(localPort, process, TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                if (lease is not null) await lease.DisposeAsync();
+            }
+            if (up)
             {
                 // Drain stderr for the tunnel's lifetime. Without this the pipe buffer fills on a chatty
                 // ssh (keepalive/known-hosts warnings) and the process blocks on write — the tunnel then

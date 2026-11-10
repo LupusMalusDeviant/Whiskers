@@ -57,8 +57,6 @@ public interface IDockerService
         using var either = CancellationTokenSource.CreateLinkedTokenSource(deadline, callerToken);
         return await GetContainerLogsAsync(containerId, tailLines, serverId, since, either.Token);
     }
-    [MutatingOperation("container.create")]
-    Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null);
     [MutatingOperation("image.pull")]
     Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null);
     Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null);

@@ -13,7 +13,6 @@ using Whiskers.Models.Hetzner;
 using Whiskers.Services.Approvals;
 using Whiskers.Services.Auth;
 using Whiskers.Services.Cloud.Providers;
-using Whiskers.Services.Deployment;
 using Whiskers.Services.Docker;
 using Whiskers.Services.GitDeploy;
 using Whiskers.Services.Hetzner;
@@ -31,7 +30,6 @@ namespace Whiskers.Tests.ComponentTests;
 public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
 {
     private readonly ApprovalDatabase _db = new();
-    private readonly Stub<IDeploymentService> _deploy = new();
     private readonly Stub<IDockerService> _docker = new();
     private readonly Stub<IGitDeployService> _gitDeploy = new();
 
@@ -61,7 +59,6 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IKeyInterceptorService>(new Stub<IKeyInterceptorService>().Object);
         Services.AddSingleton<ICurrentUserService>(new AdminUser());
         Services.AddSingleton<IUiMutationRunner>(new UiMutationRunner(gateway, new CapabilityCatalog(), new AdminUser()));
-        Services.AddSingleton(_deploy.Object);
         Services.AddSingleton(_docker.Object);
         Services.AddSingleton(_gitDeploy.Object);
         Services.AddSingleton(new Stub<IServerConfigService>().Object);
@@ -88,39 +85,6 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
         Assert.Equal(capabilityId, row.Action);
         Assert.Equal("Executed", row.Outcome);
         return row;
-    }
-
-    [Fact]
-    public async Task A_form_deploy_names_the_container_it_created()
-    {
-        _deploy.On(nameof(IDeploymentService.DeployFromFormAsync), _ => Task.FromResult("c0ffee42"));
-        var page = Render<Deploy>();
-        Field<DeploymentRequest>(page, "_formRequest").Image = "nginx:1.27";
-
-        await Invoke(page, "DeployFromForm");
-
-        Assert.Contains("c0ffee42", (await TheEventAsync("app.deploy")).Details);
-    }
-
-    [Fact]
-    public async Task A_compose_deploy_names_the_containers_it_created()
-    {
-        _deploy.On(nameof(IDeploymentService.ValidateCompose), _ => new DeploymentValidationResult
-        {
-            IsValid = true,
-            Services = [new DeploymentRequest { ContainerName = "api" }, new DeploymentRequest { ContainerName = "db" }],
-        });
-        _deploy.On(nameof(IDeploymentService.DeployFromComposeAsync),
-            _ => Task.FromResult<IList<string>>(["id-api", "id-db"]));
-        var page = Render<Deploy>();
-        SetField(page, "_composeYaml", "services:\n  api:\n    image: nginx:1.27\n");
-
-        await Invoke(page, "DeployFromCompose");
-
-        var details = (await TheEventAsync("compose.deploy")).Details;
-        Assert.Contains("2 container(s)", details);
-        Assert.Contains("id-api", details);
-        Assert.Contains("id-db", details);
     }
 
     [Fact]
@@ -196,9 +160,6 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
 
     private static void SetField<T>(IRenderedComponent<T> page, string field, object? value) where T : Microsoft.AspNetCore.Components.IComponent =>
         typeof(T).GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page.Instance, value);
-
-    private static TField Field<TField>(IRenderedComponent<Deploy> page, string field) =>
-        (TField)typeof(Deploy).GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page.Instance)!;
 
     private sealed class AdminUser : ICurrentUserService
     {

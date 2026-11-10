@@ -83,11 +83,9 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Server.INginxService, Whiskers.Services.Server.NoopNginxService>();
         builder.Services.AddSingleton<Whiskers.Services.Server.ISystemdService, Whiskers.Services.Server.NoopSystemdService>();
         builder.Services.AddSingleton<Whiskers.Services.Server.ISslCertService, Whiskers.Services.Server.NoopSslCertService>();
-        // And for deployment/app-store: ContainerTools (mixed: core container ops + deploy_app/deploy_compose) stays
-        // in Core and injects IDeploymentService/ITemplateService per call, and the AppStore page injects
-        // IImageSearchService, so all three need defaults when the Deployment module is off. The module registers the
-        // real services in the loop below and wins. IDeploymentService is scoped, matching the real one. (RoadToSAP §2.1)
-        builder.Services.AddScoped<Whiskers.Services.Deployment.IDeploymentService, Whiskers.Services.Deployment.NoopDeploymentService>();
+        // And for the app store: the AppStore page injects ITemplateService and IImageSearchService, so both need
+        // defaults when the Deployment module is off. The module registers the real services in the loop below and wins.
+        // (RoadToSAP §2.1; contract 0013 removed IDeploymentService: deploy_app and the Deploy page run the compose runner.)
         builder.Services.AddSingleton<Whiskers.Services.Templates.ITemplateService, Whiskers.Services.Templates.NoopTemplateService>();
         builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchService, Whiskers.Services.ImageSearch.NoopImageSearchService>();
         // And for CVE: the findings store + monitor are consumed by Core pages (Dashboard, ContainerDetail, Settings),
@@ -153,7 +151,10 @@ public static class WhiskersHostingExtensions
                     ],
                 };
             })
-            .WithHttpTransport()
+            // Contract 0016: SDK 2.x defaults to stateless. Whiskers keeps the 1.x behaviour — a session per client
+            // from `initialize`, bound by the SDK to the caller's subject (the API key's record id, see
+            // McpBearerAuthMiddleware). StatefulForInitializeClients is a separate, later decision.
+            .WithHttpTransport(transport => transport.SessionMode = ModelContextProtocol.AspNetCore.HttpServerSessionMode.Stateful)
             .WithTools(mcpToolTypes)
             // User-invokable workflows and read-only context about the MCP surface itself (no infrastructure data).
             .WithPrompts<Whiskers.Mcp.Prompts.OperationsPrompts>()
@@ -308,6 +309,10 @@ public static class WhiskersHostingExtensions
 
         // Secret vault
         builder.Services.AddSingleton<Whiskers.Services.Vault.IVaultService, Whiskers.Services.Vault.VaultService>();
+        // Contract 0015 (INV-52): SSH and mTLS client keys are stored sealed by the vault.
+        builder.Services.AddSingleton<Whiskers.Services.Vault.ISealedKeyFiles, Whiskers.Services.Vault.SealedKeyFiles>();
+        builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsClientKeyLoader, Whiskers.Services.Certificates.MtlsClientKeyLoader>();
+        builder.Services.AddSingleton<Whiskers.Services.Server.ISshKeyLeases, Whiskers.Services.Server.SshKeyLeases>();
 
         // Host command execution + server management. IHostCommandExecutor stays in Core (shared by many services).
         builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();
@@ -446,6 +451,11 @@ public static class WhiskersHostingExtensions
         // R1-29: plaintext cloud API keys and the DNS token move into the vault (after the vault and the servers).
         builder.Services.AddSingleton<Whiskers.Services.Vault.CredentialVaultMigration>();
         builder.Services.AddInitializable<Whiskers.Services.Vault.CredentialVaultMigration>();      // 55
+        // Contract 0015: private keys stored in plaintext in the data directory are sealed (after the credentials).
+        builder.Services.AddSingleton<Whiskers.Services.Vault.KeyMaterialMigration>();
+        builder.Services.AddInitializable<Whiskers.Services.Vault.KeyMaterialMigration>();          // 56
+        // Contract 0015: SSH key leases left by a crashed process are removed before anything runs ssh.
+        builder.Services.AddInitializable<Whiskers.Services.Server.ISshKeyLeases>();                // 57
         builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>();           // 70
         // GuardrailStore (80) + AiTriggerStore (90) warm-ups moved to Modules/Agent (RoadToSAP §3.8): the module
         // registers its own AddInitializable when enabled, so they run in Order then and drop out when the agent is off.
