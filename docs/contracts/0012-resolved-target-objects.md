@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 8 November 2026 by the maintainer, with the decisions D1–D15 as written and every question
 Q1–Q7 answered as recommended (see *Answered*). Amendments A1–A4 accepted 10 November 2026, A5–A7 accepted
-10 November 2026.
+10 November 2026, A8–A11 accepted 10 November 2026.
 
 ## Purpose
 
@@ -282,6 +282,27 @@ differ.
   the host's server). `WebhookTargets.ContainerAsync` is **not** deleted: it remains the pre-lock read that chooses
   the lock key and the `ExpectedTarget`, and nothing acts on its result. `ResolvedWebhook.Action` stays `null` for
   webhook management capabilities (`webhook.*`).
+
+## Amendments A8–A11 (accepted by the maintainer, 10 November 2026)
+
+A8–A11 were found while building steps 5 and 6. Each replaces the wording above where they differ.
+
+- **A8 — Kubernetes RBAC.** D8 needs, besides the existing rules, `get` on `replicasets` (the decision reads a
+  ReplicaSet's owner reference to find the Deployment and its UID) and `patch` on `deployments`, `statefulsets` and
+  `daemonsets`. Restart and scale patch the controller itself with a JSON merge patch that carries `metadata.uid` (the
+  API server refuses the patch when the UID differs), not its `scale` subresource; a bare pod is deleted with
+  `DeleteOptions.Preconditions` naming the decided pod UID. Upgrade note in `CHANGELOG.md` and in the Kubernetes
+  documentation and manifest examples (`deploy/k8s/`): a cluster connected with an older or hand-made role must have
+  the role applied again, otherwise start, stop and restart fail with 403.
+- **A9 — New read `IWorkloadProvider.GetWorkloadIdentityAsync`** (`[InventoryLookup]`): the resolver's read of a
+  workload's controller kind, name and UID (and the pod UID for a bare pod). It is used by resolution and
+  confirmation only; a delegate never calls it (D10 item 2).
+- **A10 — `IFirewallService.RemoveRuleAsync(string serverId, [MutationTarget] string ruleNumber)`.** The rule number
+  is passed as a string (was `int`) so that the decided rule's `Id` is the argument `AuthorizesTarget` compares, and it
+  is the operation's `[MutationTarget]`. The service still refuses anything that is not a positive integer.
+- **A11 — New read `ISystemdService.ListUnitNamesAsync(serverId)`** (`[InventoryLookup]`): the host's
+  `systemctl list-unit-files` listing that D11 resolves a systemd unit against. A host whose listing cannot be read
+  refuses the unit with a reason (fail closed).
 
 ## Not in scope
 
