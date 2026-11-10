@@ -1,7 +1,7 @@
 # Contract 0015 — Private keys at rest and `VAULT_KEY` rotation (INV-52)
 
 Status: **Accepted** · 10 November 2026 by the maintainer, with the decisions D1–D10 as recommended (see
-*Decisions of the maintainer* at the end, Q1–Q8).
+*Decisions of the maintainer* at the end, Q1–Q8). Amendment 1 (A1–A6) accepted 2026-11-10.
 
 **Protected layer.** Part A changes how Whiskers stores and loads the **mTLS client keys** — part of the mTLS layer that
 only an explicit approval may change (contract 0007, `common` rules). With Q1 the maintainer **approved** plan steps 2
@@ -374,7 +374,9 @@ All eight questions were decided as recommended.
   right after the rotation.
 - **Q8 — Wrong key cuts mTLS (D10):** accepted as fail-closed, with the cause named and the way back documented.
 
-## Amendment 1 (implementation, 10 November 2026) — needs the maintainer's acceptance
+## Amendment 1 (implementation, 10 November 2026) — accepted 2026-11-10
+
+Accepted by the maintainer on 10 November 2026 (A1–A6).
 
 Deviations found while implementing; none weakens a decision.
 
