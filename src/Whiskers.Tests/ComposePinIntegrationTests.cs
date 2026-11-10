@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text;
-using System.Text.RegularExpressions;
 using Whiskers.Models;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Server;
@@ -11,8 +10,8 @@ namespace Whiskers.Tests;
 /// Contract 0013, D10–D13 on a real daemon: a project with a pulled and a built service goes through the planner and
 /// <see cref="ComposeRunner"/> (write, pull, build, inspect, pin, <c>up --pull never --no-build</c> with the pin file,
 /// re-check): every container runs exactly the inspected id. With both tags moved between the pin file and <c>up</c>,
-/// nothing ever runs another image — on the classic store both start as inspected, on the containerd store <c>up</c>
-/// fails closed because a moved tag takes the repo digest reference along. Commands run locally through
+/// both still start the inspected images — on the classic and on Docker 29's containerd store, since the pin is the image
+/// id (D10 as amended on 2026-11-10; a repo digest pin stopped resolving there). Commands run locally through
 /// <c>bash -c</c>, as the host executor runs them on a server (or, on a Windows machine, inside the container named by
 /// <c>WHISKERS_TEST_SHELL_CONTAINER</c>).
 /// </summary>
@@ -77,12 +76,6 @@ public sealed class ComposePinIntegrationTests
     }
 
     private static string Id(string image) => Bash($"docker image inspect --format '{{{{.Id}}}}' {image}").Out.Trim();
-
-    /// <summary>The containerd image store (Docker 29's default for a fresh install) resolves <c>repo@sha256:…</c> only
-    /// through an image record of that repository that still points to the digest — a moved tag takes it away. The
-    /// classic store keeps the digest reference.</summary>
-    private static bool ContainerdStore() =>
-        Bash("docker info --format '{{.DriverStatus}}'").Out.Contains("io.containerd.snapshotter", StringComparison.Ordinal);
 
     private sealed record Scenario(ComposeRunResult Result, IReadOnlyDictionary<string, string> Inspected, string Pins,
         IReadOnlyDictionary<string, string?> Running);
@@ -174,42 +167,26 @@ public sealed class ComposePinIntegrationTests
         Assert.True(run.Result.Success, $"{run.Result.Refusal}\n{run.Result.Error}\n{string.Join('\n', run.Result.Violations)}\n{run.Result.Output}");
         Assert.Empty(run.Result.Violations);
         Assert.NotEqual(run.Inspected["pulled"], run.Inspected["built"]);
-        // D10: the pulled service by the repo digest of its own repository. The built one by its id (Q6) on the
-        // classic store; the containerd store records a repo digest for a local build too, so rule 1 applies there.
-        Assert.Matches(new Regex("\"pulled\":\\n    image: \"docker\\.io/library/busybox@sha256:[0-9a-f]{64}\""), run.Pins);
-        Assert.Matches(ContainerdStore()
-            ? new Regex("\"built\":\\n    image: \"docker\\.io/library/whiskers-pin-[0-9a-f]{12}-built@sha256:[0-9a-f]{64}\"")
-            : new Regex($"\"built\":\\n    image: \"{run.Inspected["built"]}\""), run.Pins);
+        // D10 as amended: both services by the image id step 4 inspected, whatever the image store.
+        Assert.Contains($"\"pulled\":\n    image: \"{run.Inspected["pulled"]}\"", run.Pins);
+        Assert.Contains($"\"built\":\n    image: \"{run.Inspected["built"]}\"", run.Pins);
         // Every container runs the image step 4 inspected and carries the reference the project names.
         Assert.Equal($"{run.Inspected["pulled"]}|{PulledImage}", run.Running["pulled"]);
         Assert.StartsWith($"{run.Inspected["built"]}|whiskers-pin-", run.Running["built"]);
     }
 
     [SkippableFact]
-    public async Task Moving_both_tags_after_the_inspection_never_starts_another_image()
+    public async Task Moving_both_tags_after_the_inspection_still_starts_the_inspected_images()
     {
         DockerRequirement.SkipUnlessAvailable(DockerAvailable(), "the Docker daemon or the docker compose CLI is not available");
 
         var run = await RunAsync("pulled", "built");
 
-        // Whatever runs, runs the image step 4 inspected for its service.
-        foreach (var (service, running) in run.Running)
-            if (running is not null)
-                Assert.StartsWith(run.Inspected[service] + "|", running);
-        if (!ContainerdStore())
-        {
-            // The classic store keeps the repo digest reference: the run starts both, exactly as inspected.
-            Assert.True(run.Result.Success, $"{run.Result.Error}\n{string.Join('\n', run.Result.Violations)}\n{run.Result.Output}");
-            Assert.NotNull(run.Running["pulled"]);
-            Assert.NotNull(run.Running["built"]);
-        }
-        else
-        {
-            // Containerd store: a moved tag takes the repo digest reference along (a local build has one there too), so
-            // up fails closed instead of starting the image the tag points to now. Only an id pin would start the
-            // inspected image here (contract 0013, D10; an amendment is proposed).
-            Assert.False(run.Result.Success);
-            Assert.Contains("No such image: ", run.Result.Output);
-        }
+        // The tags now point the other way round; the id pins start exactly what step 4 inspected, on the classic and
+        // on the containerd image store (contract 0013, D10 as amended on 2026-11-10).
+        Assert.True(run.Result.Success, $"{run.Result.Refusal}\n{run.Result.Error}\n{string.Join('\n', run.Result.Violations)}\n{run.Result.Output}");
+        Assert.Empty(run.Result.Violations);
+        Assert.Equal($"{run.Inspected["pulled"]}|{PulledImage}", run.Running["pulled"]);
+        Assert.StartsWith($"{run.Inspected["built"]}|whiskers-pin-", run.Running["built"]);
     }
 }

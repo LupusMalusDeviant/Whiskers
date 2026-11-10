@@ -638,18 +638,18 @@ public sealed partial class ProtectedResourceResolutionTests
                 return Mounts.TryGetValue(inspect.Groups[1].Value, out var mounts) ? Done(mounts) : Done("", 1);
             if (command.StartsWith("for i in ", StringComparison.Ordinal) && command.Contains("docker image inspect", StringComparison.Ordinal))
             {
-                // Contract 0006 / 0013: the local images (id, labels and repo digests), or MISSING. A reference is a tag,
-                // an image id or a repo digest, as the daemon resolves them.
+                // Contract 0006 / 0013: the local images (id and Config), or MISSING. A reference is a tag or an image id
+                // (a pin, D10 as amended), as the daemon resolves them.
                 var refs = Regex.Matches(command[..command.IndexOf("; do", StringComparison.Ordinal)], "'([^']*)'")
                     .Select(m => m.Groups[1].Value).ToList();
-                var pins = refs.Any(r => r.StartsWith("sha256:", StringComparison.Ordinal) || r.Contains('@'));
+                var pins = refs.All(r => r.StartsWith("sha256:", StringComparison.Ordinal));
                 if (pins) PinInspections.Add(refs);
                 if (pins && PinInspectFails) return Done("", 1);
                 var lines = string.Concat(refs.Select(r =>
                     pins && PinAnswers.TryGetValue(r, out var answer)
-                        ? answer is null ? $"{r}\t{ComposeExposures.MissingImage}\n" : $"{r}\t{answer}\t{{}}\t[]\n"
+                        ? answer is null ? $"{r}\t{ComposeExposures.MissingImage}\n" : $"{r}\t{answer}\t{{}}\n"
                     : Resolve(r) is { } tag && Images.TryGetValue(tag, out var image)
-                        ? $"{r}\t{image.Id}\t{{\"Labels\":{image.LabelsJson}}}\t{JsonSerializer.Serialize(RepoDigests.GetValueOrDefault(tag) ?? [])}\n"
+                        ? $"{r}\t{image.Id}\t{{\"Labels\":{image.LabelsJson}}}\n"
                         : $"{r}\t{ComposeExposures.MissingImage}\n"));
                 if (!pins) ImageInspected?.Invoke();
                 return Done(lines);
@@ -691,7 +691,7 @@ public sealed partial class ProtectedResourceResolutionTests
             Task.FromResult(new CommandResult { Output = output, ExitCode = exit });
 
         /// <summary>Contract 0013: what the pin verification answers for a pin — an id, or <c>null</c> for missing —
-        /// instead of the daemon model (a multi-arch digest that resolves elsewhere, an image gone meanwhile).</summary>
+        /// instead of the daemon model (an id that resolves to another image, an image gone meanwhile).</summary>
         public Dictionary<string, string?> PinAnswers { get; } = new(StringComparer.Ordinal);
 
         /// <summary>Contract 0013: the pin verification fails as a command.</summary>
@@ -700,25 +700,18 @@ public sealed partial class ProtectedResourceResolutionTests
         /// <summary>Contract 0013: the references of every pin verification.</summary>
         public List<IReadOnlyList<string>> PinInspections { get; } = [];
 
-        /// <summary>The repo digests of a local image, by the tag it is listed under (contract 0013).</summary>
-        public Dictionary<string, string[]> RepoDigests { get; } = new(StringComparer.Ordinal);
-
-        /// <summary>The tag under which <paramref name="reference"/> is listed: the tag itself, the tag of an image with
-        /// that id, or the tag whose repo digests hold that digest of the same repository.</summary>
+        /// <summary>The tag under which <paramref name="reference"/> is listed: the tag itself, or a tag of an image with
+        /// that id.</summary>
         public string? Resolve(string reference)
         {
             if (Images.ContainsKey(reference)) return reference;
-            if (reference.StartsWith("sha256:", StringComparison.Ordinal))
-                return Images.FirstOrDefault(i => i.Value.Id == reference).Key;
-            var at = reference.IndexOf('@');
-            if (at <= 0) return null;
-            var repository = ComposePins.Repository(reference[..at]);
-            return RepoDigests.FirstOrDefault(d => d.Value.Any(e => e.IndexOf('@') is var i and > 0
-                && ComposePins.Repository(e[..i]) == repository && e[(i + 1)..] == reference[(at + 1)..])).Key;
+            return reference.StartsWith("sha256:", StringComparison.Ordinal)
+                ? Images.FirstOrDefault(i => i.Value.Id == reference).Key
+                : null;
         }
 
         /// <summary>The image id a container of <paramref name="service"/> runs after the last pinned <c>up</c>: the pin
-        /// the last pin file names for it, resolved like the daemon does (contract 0013); <c>null</c> without one.</summary>
+        /// the last pin file names for it, an image id (contract 0013, D10 as amended); <c>null</c> without one.</summary>
         public string? PinnedImageId(string service)
         {
             var write = Executed.LastOrDefault(c => c.Contains(ComposePins.FileName, StringComparison.Ordinal)
@@ -727,7 +720,7 @@ public sealed partial class ProtectedResourceResolutionTests
             var b64 = Regex.Match(write, "echo '([^']*)' \\| base64 -d").Groups[1].Value;
             var yaml = Encoding.UTF8.GetString(Convert.FromBase64String(b64));
             var pin = Regex.Match(yaml, "  " + Regex.Escape(JsonSerializer.Serialize(service)) + ":\\n    image: \"([^\"]*)\"");
-            return pin.Success && Resolve(pin.Groups[1].Value) is { } tag ? Images[tag].Id : null;
+            return pin.Success ? pin.Groups[1].Value : null;
         }
     }
 }

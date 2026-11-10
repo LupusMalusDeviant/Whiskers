@@ -154,9 +154,9 @@ or caught only after `up`:
 - **`container.update` and `autopatch.run`** recreate containers from new images without this check — except a
   container a compose run pinned (label `whiskers.image.ref`), which they refuse: it is updated by redeploying its
   project (contract 0013).
-- **Pinned images on the containerd image store**: `up` starts each image by the pin of contract 0013; there a tag
-  moved after the inspection takes a repo digest pin along, so `up` fails (nothing else starts) instead of starting
-  the inspected image.
+- **Pinned containers show an image id**: `up` starts each image by its id (contract 0013, D10 as amended), so the
+  Image column of a container a compose run started shows `sha256:…`; the name the project uses is in the label
+  `whiskers.image.ref`.
 - **Late daemon work after a timeout**: a pull, build or `up` the daemon finishes after Whiskers stopped waiting is not
   re-checked.
 - **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own

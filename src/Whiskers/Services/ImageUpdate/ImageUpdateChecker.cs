@@ -222,7 +222,7 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
     /// <param name="configuredImage">The container's <c>Config.Image</c>, when it had to be looked up.</param>
     /// <param name="runningImageId">The ID of the image the container runs, when known.</param>
     /// <param name="pinnedReference">Contract 0013, D14: the container's <c>whiskers.image.ref</c> label — a Whiskers
-    /// compose run started it from a pin (<c>repo@sha256:…</c> or an id), so the registry is asked about the reference
+    /// compose run started it from a pin (its image id), so the registry is asked about the reference
     /// the project names, and the answer compared with the image that runs.</param>
     public static (string Image, string LocalRef) ResolveCheckRefs(
         string listedImage, string? configuredImage, string? runningImageId, string? pinnedReference = null)

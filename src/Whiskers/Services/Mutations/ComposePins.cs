@@ -4,10 +4,10 @@ using System.Text.RegularExpressions;
 
 namespace Whiskers.Services.Mutations;
 
-/// <summary>The image one active service of a run starts, pinned (contract 0013, D10): <paramref name="Reference"/> is
-/// the service's image as compose resolved it, <paramref name="Pin"/> the reference <c>up</c> uses instead —
-/// <c>&lt;repository&gt;@sha256:…</c> or the image id <c>sha256:…</c> — and <paramref name="ImageId"/> the id step 4
-/// inspected, which the pin must resolve to.</summary>
+/// <summary>The image one active service of a run starts, pinned (contract 0013, D10 as amended on 2026-11-10):
+/// <paramref name="Reference"/> is the service's image as compose resolved it, <paramref name="Pin"/> the reference
+/// <c>up</c> uses instead — the image id <c>sha256:…</c> — and <paramref name="ImageId"/> the id step 4 inspected, which
+/// the pin must resolve to.</summary>
 public sealed record ComposePin(string Service, string Reference, string Pin, string ImageId);
 
 /// <summary>
@@ -52,41 +52,9 @@ public static partial class ComposePins
     private static partial Regex DigestPattern();
 
     /// <summary>
-    /// The repository of an image reference, normalised the way Docker does (<c>nginx</c> =
-    /// <c>docker.io/library/nginx</c>, <c>index.docker.io/x/y</c> = <c>docker.io/x/y</c>), without tag or digest;
-    /// <c>null</c> for an image id or an empty reference.
-    /// </summary>
-    public static string? Repository(string reference)
-    {
-        var name = reference.Trim();
-        if (name.Length == 0 || name.StartsWith("sha256:", StringComparison.Ordinal)) return null;
-        var at = name.IndexOf('@');
-        if (at >= 0) name = name[..at];
-        var slash = name.LastIndexOf('/');
-        var colon = name.LastIndexOf(':');
-        if (colon > slash) name = name[..colon];
-        if (name.Length == 0) return null;
-        var first = name.IndexOf('/');
-        string domain, path;
-        if (first > 0 && (name[..first].Contains('.') || name[..first].Contains(':') || name[..first] == "localhost"))
-        {
-            domain = name[..first];
-            path = name[(first + 1)..];
-        }
-        else
-        {
-            domain = "docker.io";
-            path = name;
-        }
-        if (domain == "index.docker.io") domain = "docker.io";
-        if (domain == "docker.io" && !path.Contains('/')) path = "library/" + path;
-        return path.Length == 0 ? null : $"{domain}/{path}";
-    }
-
-    /// <summary>
-    /// D10: the pin of every active service from what step 4 inspected — a repo digest of the service image's own
-    /// repository, else the image id. Throws (the run is refused) for an id or a digest that is not
-    /// <c>sha256:</c> + 64 hex digits, or a service whose image was not inspected.
+    /// D10 (amended 2026-11-10): the pin of every active service is the image id step 4 inspected — never a repo digest,
+    /// which Docker 29's containerd store stops resolving once the tag is moved. Throws (the run is refused) for an id
+    /// that is not <c>sha256:</c> + 64 hex digits, or a service whose image was not inspected.
     /// </summary>
     public static IReadOnlyList<ComposePin> Choose(IReadOnlyList<ComposeServicePlan> active,
         IReadOnlyDictionary<string, ComposeImage?> inspected)
@@ -98,21 +66,7 @@ public static partial class ComposePins
                 throw new ComposePlanException($"The image of '{service.Name}' could not be pinned; nothing was started.");
             if (!IsDigest(image.Id))
                 throw new ComposePlanException($"The image id of '{service.Name}' is not a sha256 digest; nothing was started.");
-            var pin = image.Id;
-            if (Repository(reference) is { } repository)
-            {
-                var match = image.RepoDigests.FirstOrDefault(d => d.IndexOf('@') is var i and > 0
-                                                                  && Repository(d[..i]) == repository);
-                if (match is not null)
-                {
-                    var digest = match[(match.IndexOf('@') + 1)..];
-                    if (!IsDigest(digest))
-                        throw new ComposePlanException(
-                            $"The repo digest of the image of '{service.Name}' is not a sha256 digest; nothing was started.");
-                    pin = $"{repository}@{digest}";
-                }
-            }
-            pins.Add(new ComposePin(service.Name, reference, pin, image.Id));
+            pins.Add(new ComposePin(service.Name, reference, image.Id, image.Id));
         }
         return pins;
     }
@@ -156,7 +110,7 @@ public static partial class ComposePins
 
     private static string Quote(string value) => JsonSerializer.Serialize(value.Replace("$", "$$", StringComparison.Ordinal));
 
-    /// <summary>What a run notes about its pins: the service and the first 12 digits of the digest — never the
+    /// <summary>What a run notes about its pins: the service and the first 12 digits of the image id — never the
     /// reference, which can come from an <c>.env</c> value.</summary>
     public static string Note(IReadOnlyList<ComposePin> pins) =>
         "pinned images: " + string.Join(", ", pins.Select(p =>

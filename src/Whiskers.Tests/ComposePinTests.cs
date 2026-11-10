@@ -9,8 +9,8 @@ using Whiskers.Services.Server;
 namespace Whiskers.Tests;
 
 /// <summary>
-/// Contract 0013, D10–D13: after step 4 every image a compose run starts is pinned to what was inspected — a repo digest
-/// of the service image's own repository, else the image id — verified on the host, written to
+/// Contract 0013, D10–D13: after step 4 every image a compose run starts is pinned to what was inspected — its image id
+/// (D10 as amended on 2026-11-10, never a repo digest) — verified on the host, written to
 /// <c>.whiskers/pin.override.yml</c> and used by <c>up</c> and the fallback <c>stop</c> only. A failed pin refuses before
 /// <c>up</c>; the planner never plans the pin file; the re-check flags a container that runs another image.
 /// </summary>
@@ -21,7 +21,6 @@ public sealed class ComposePinTests
     private static readonly string Nginx = "sha256:" + new string('1', 64);
     private static readonly string Built = "sha256:" + new string('2', 64);
     private static readonly string Other = "sha256:" + new string('3', 64);
-    private static readonly string IndexDigest = "sha256:" + new string('a', 64);
     private static readonly string[] Confirm = [ExposureClasses.Public, ExposureClasses.Host];
 
     private readonly ProtectedResourceResolutionTests.FakeHost _host = new();
@@ -33,7 +32,6 @@ public sealed class ComposePinTests
     public ComposePinTests()
     {
         _host.Images["nginx"] = (Nginx, "{}");
-        _host.RepoDigests["nginx"] = ["nginx@" + IndexDigest];
         _host.Effect = command =>
         {
             if (!command.Contains(" up -d", StringComparison.Ordinal)) return null;
@@ -101,67 +99,42 @@ public sealed class ComposePinTests
 
     // ---------------------------------------------------------------- D10: where the pin comes from
 
-    [Theory]
-    [InlineData("nginx", "docker.io/library/nginx")]
-    [InlineData("nginx:1.27-alpine", "docker.io/library/nginx")]
-    [InlineData("library/nginx", "docker.io/library/nginx")]
-    [InlineData("docker.io/library/nginx:latest", "docker.io/library/nginx")]
-    [InlineData("index.docker.io/library/nginx", "docker.io/library/nginx")]
-    [InlineData("traefik/whoami:v1", "docker.io/traefik/whoami")]
-    [InlineData("ghcr.io/org/app:1.2@sha256:abc", "ghcr.io/org/app")]
-    [InlineData("localhost:5000/app:1", "localhost:5000/app")]
-    [InlineData("localhost/app", "localhost/app")]
-    [InlineData("registry.example.org:8443/a/b/c", "registry.example.org:8443/a/b/c")]
-    public void A_repository_is_normalised_as_docker_does(string reference, string repository) =>
-        Assert.Equal(repository, ComposePins.Repository(reference));
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("sha256:1111111111111111111111111111111111111111111111111111111111111111")]
-    public void An_image_id_or_nothing_has_no_repository(string reference) => Assert.Null(ComposePins.Repository(reference));
-
     private static ComposeServicePlan Service(string name, string image, bool build = false) =>
         new(name, null) { Active = true, Image = image, Build = build };
 
-    private static ComposeImage Image(string id, params string[] digests) => new(id, new Dictionary<string, string>(), digests);
+    private static ComposeImage Image(string id) => new(id, new Dictionary<string, string>());
 
     [Fact]
-    public void A_pulled_image_pins_to_the_repo_digest_of_its_own_repository_normalised()
+    public void A_pulled_a_built_and_a_loaded_image_all_pin_to_their_image_id()
     {
-        var pins = ComposePins.Choose([Service("web", "nginx:latest")],
-            new Dictionary<string, ComposeImage?> { ["nginx:latest"] = Image(Nginx, "ghcr.io/other/nginx@" + Other, "nginx@" + IndexDigest) });
-
-        var pin = Assert.Single(pins);
-        Assert.Equal("docker.io/library/nginx@" + IndexDigest, pin.Pin);
-        Assert.Equal(Nginx, pin.ImageId);
-        Assert.Equal("nginx:latest", pin.Reference);
-    }
-
-    [Fact]
-    public void A_built_image_and_a_loaded_image_pin_to_their_id()
-    {
-        var pins = ComposePins.Choose([Service("app", "shop-app", build: true), Service("loaded", "mytool:1")],
+        // D10 as amended on 2026-11-10: the id, never a repo digest (Docker 29's containerd store drops a repo digest
+        // reference with a moved tag).
+        var pins = ComposePins.Choose(
+            [Service("web", "nginx:latest"), Service("app", "shop-app", build: true), Service("loaded", "mytool:1")],
             new Dictionary<string, ComposeImage?>
             {
+                ["nginx:latest"] = Image(Nginx),
                 ["shop-app"] = Image(Built),
-                // A locally tagged or docker-loaded image: its repo digests name another repository.
-                ["mytool:1"] = Image(Other, "busybox@" + IndexDigest),
+                ["mytool:1"] = Image(Other),
             });
 
-        Assert.Equal([Built, Other], pins.Select(p => p.Pin));
+        Assert.Equal([Nginx, Built, Other], pins.Select(p => p.Pin));
+        Assert.Equal([Nginx, Built, Other], pins.Select(p => p.ImageId));
+        Assert.Equal(["nginx:latest", "shop-app", "mytool:1"], pins.Select(p => p.Reference));
     }
 
     [Theory]
     [InlineData("sha256:1")]
     [InlineData("sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
     [InlineData("sha512:1111111111111111111111111111111111111111111111111111111111111111")]
-    public void A_digest_that_is_not_sha256_and_64_hex_refuses(string digest)
-    {
+    public void An_id_that_is_not_sha256_and_64_hex_refuses(string id) =>
         Assert.Throws<ComposePlanException>(() => ComposePins.Choose([Service("web", "nginx")],
-            new Dictionary<string, ComposeImage?> { ["nginx"] = Image(Nginx, "nginx@" + digest) }));
+            new Dictionary<string, ComposeImage?> { ["nginx"] = Image(id) }));
+
+    [Fact]
+    public void A_service_whose_image_was_not_inspected_refuses() =>
         Assert.Throws<ComposePlanException>(() => ComposePins.Choose([Service("web", "nginx")],
-            new Dictionary<string, ComposeImage?> { ["nginx"] = Image(digest) }));
-    }
+            new Dictionary<string, ComposeImage?> { ["nginx"] = null }));
 
     [Fact]
     public void The_pin_file_sets_the_pin_and_the_reference_label_and_lets_compose_interpolate_nothing()
@@ -185,8 +158,8 @@ public sealed class ComposePinTests
         var result = await RunAsync(plan);
 
         Assert.True(result.Success, result.Error);
-        Assert.Equal(["docker.io/library/nginx@" + IndexDigest], Assert.Single(_host.PinInspections));
-        Assert.Contains("    image: \"docker.io/library/nginx@" + IndexDigest + "\"", PinFile());
+        Assert.Equal([Nginx], Assert.Single(_host.PinInspections));
+        Assert.Contains("    image: \"" + Nginx + "\"", PinFile());
         Assert.Contains("whiskers.image.ref: \"nginx\"", PinFile());
         Assert.Contains($"-f '{Dir}/docker-compose.yml' -f '{PinPath}' --env-file '{Dir}/.env' up -d --pull never --no-build", Up);
         // Written before up, through the run's own delegate; never used by config, pull or build.
@@ -209,18 +182,19 @@ public sealed class ComposePinTests
 
         Assert.True(result.Success, result.Error);
         var pins = PinFile();
-        Assert.Contains("  \"web\":\n    image: \"docker.io/library/nginx@" + IndexDigest + "\"", pins);
+        Assert.Contains("  \"web\":\n    image: \"" + Nginx + "\"", pins);
+        Assert.Contains("whiskers.image.ref: \"nginx\"", pins);
         Assert.Contains("  \"app\":\n    image: \"" + Built + "\"", pins);
         Assert.Contains("whiskers.image.ref: \"shop-app\"", pins);
         Assert.DoesNotContain(_host.Executed, c => c.Contains(" build --pull", StringComparison.Ordinal) && c.Contains(ComposePins.FileName, StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task A_multi_arch_digest_is_accepted_only_when_it_resolves_to_the_inspected_id()
+    public async Task A_pin_is_accepted_only_when_it_resolves_to_the_inspected_id()
     {
         var plan = await PlanAsync(PlainYaml, PlainConfig);
-        // The index digest the store recorded names another image on this host now.
-        _host.PinAnswers["docker.io/library/nginx@" + IndexDigest] = Other;
+        // The daemon answers another id for the pin than step 4 inspected.
+        _host.PinAnswers[Nginx] = Other;
         using var _ = Decide(plan, agent: true);
 
         var result = await RunAsync(plan);
@@ -230,7 +204,7 @@ public sealed class ComposePinTests
         Assert.Null(Up);
     }
 
-    public static TheoryData<string> PinFailures => new() { "inspect-fails", "missing", "different-id", "write-fails", "bad-digest", "bad-id" };
+    public static TheoryData<string> PinFailures => new() { "inspect-fails", "missing", "different-id", "write-fails", "bad-id" };
 
     [Theory]
     [MemberData(nameof(PinFailures))]
@@ -244,10 +218,7 @@ public sealed class ComposePinTests
         {
             if (command.Contains("docker compose", StringComparison.Ordinal) && command.Contains(" pull", StringComparison.Ordinal)
                 && !command.Contains(" up -d", StringComparison.Ordinal))
-            {
                 _host.Images["nginx"] = (failure == "bad-id" ? "sha256:5" : pulled, "{}");
-                _host.RepoDigests["nginx"] = [failure == "bad-digest" ? "nginx@sha256:abc" : "nginx@" + IndexDigest];
-            }
             if (failure == "write-fails" && command.Contains(ComposePins.FileName, StringComparison.Ordinal))
                 return new CommandResult { ExitCode = 1, Error = "disk full" };
             return effect?.Invoke(command);
@@ -255,8 +226,8 @@ public sealed class ComposePinTests
         switch (failure)
         {
             case "inspect-fails": _host.PinInspectFails = true; break;
-            case "missing": _host.PinAnswers["docker.io/library/nginx@" + IndexDigest] = null; break;
-            case "different-id": _host.PinAnswers["docker.io/library/nginx@" + IndexDigest] = Other; break;
+            case "missing": _host.PinAnswers[pulled] = null; break;
+            case "different-id": _host.PinAnswers[pulled] = Other; break;
         }
         using var _ = Decide(plan, agent: true);
 
@@ -441,9 +412,7 @@ public sealed class ComposePinTests
             if (command.Contains(ComposePins.FileName, StringComparison.Ordinal) && command.Contains("base64 -d", StringComparison.Ordinal))
             {
                 _host.Images["nginx"] = (Other, "{}");
-                _host.RepoDigests["nginx"] = [];
                 _host.Images["nginx-old"] = (Nginx, "{}");
-                _host.RepoDigests["nginx-old"] = ["nginx@" + IndexDigest];
             }
             return effect?.Invoke(command);
         };
@@ -457,12 +426,12 @@ public sealed class ComposePinTests
     }
 
     [Fact]
-    public void The_pins_are_noted_by_service_and_digest_only()
+    public void The_pins_are_noted_by_service_and_image_id_only()
     {
-        // The reference can come from an .env value: the note names the service and the digest's first 12 digits.
-        Assert.Equal("pinned images: web=" + new string('a', 12) + ", app=" + new string('2', 12), ComposePins.Note(
+        // The reference can come from an .env value: the note names the service and the id's first 12 digits.
+        Assert.Equal("pinned images: web=" + new string('1', 12) + ", app=" + new string('2', 12), ComposePins.Note(
         [
-            new ComposePin("web", "registry.example.org/secret-name:1", "registry.example.org/secret-name@" + IndexDigest, Nginx),
+            new ComposePin("web", "registry.example.org/secret-name:1", Nginx, Nginx),
             new ComposePin("app", "shop-app", Built, Built),
         ]));
     }
