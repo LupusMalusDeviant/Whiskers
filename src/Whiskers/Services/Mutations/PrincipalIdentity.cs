@@ -170,8 +170,9 @@ public static class MutationPrincipals
             AgentPrincipalKind.Trigger when PrincipalIds.TriggerIdOf(id) is not null =>
                 new MutationPrincipal(MutationPrincipalKind.Automation, id, p.DisplayName, level,
                     AllowedTools: p.AllowedTools),
+            // Contract 0014 (D2): a person with the credential they signed in with and their web session.
             _ => new MutationPrincipal(MutationPrincipalKind.Human, id, p.DisplayName, level,
-                AllowedTools: p.AllowedTools),
+                CredentialId: p.CredentialId, AllowedTools: p.AllowedTools, SessionId: p.WebSessionId),
         };
     }
 
@@ -179,7 +180,10 @@ public static class MutationPrincipals
     /// identity is the session, its rights and credential are those of the principal it acts for.</summary>
     public static MutationPrincipal Agent(AgentPrincipal p, string sessionId)
     {
-        var source = Of(p) with { SessionId = sessionId };
+        // Contract 0014 (D2): a person keeps their own web session on OnBehalfOf; a key or a trigger, which has none of
+        // its own here, is recorded in the agent session it started.
+        var own = Of(p);
+        var source = own.Kind == MutationPrincipalKind.Human ? own : own with { SessionId = sessionId };
         return new MutationPrincipal(MutationPrincipalKind.Agent, PrincipalIds.Agent(sessionId),
             $"Agent for {source.DisplayName}", source.PermissionLevel, source.CredentialId, OnBehalfOf: source,
             AllowedTools: source.AllowedTools, SessionId: sessionId);
@@ -204,7 +208,7 @@ public static class MutationPrincipals
             MutationPrincipalKind.Webhook => new AgentPrincipal(AgentPrincipalKind.McpKey, p.DisplayName, level,
                 p.AllowedTools, McpKeyId: p.Id),
             _ => new AgentPrincipal(AgentPrincipalKind.WebUser, p.DisplayName, level, p.AllowedTools,
-                UserEmail: PrincipalIds.EmailOf(p.Id)),
+                UserEmail: PrincipalIds.EmailOf(p.Id), CredentialId: p.CredentialId, WebSessionId: p.SessionId),
         };
     }
 }

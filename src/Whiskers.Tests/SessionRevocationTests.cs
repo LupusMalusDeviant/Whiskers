@@ -627,6 +627,7 @@ public sealed class SessionRevocationTests
                 new(ClaimTypes.Email, Ops), new(ClaimTypes.Name, Ops), new(ClaimTypes.NameIdentifier, OpsId),
             };
             if (stamp is not null) claims.Add(new Claim(AuthConstants.SecurityStampClaim, stamp));
+            claims.Add(WebSessionClaims.NewSessionClaim());   // contract 0014: issued by every sign-in
             return new ClaimsPrincipal(new ClaimsIdentity(claims, AuthConstants.LocalPasswordScheme));
         }
 
@@ -634,7 +635,7 @@ public sealed class SessionRevocationTests
         public ClaimsPrincipal RootCookiePrincipal() => new(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.Email, Root), new Claim(ClaimTypes.Name, Root), new Claim(ClaimTypes.NameIdentifier, RootId),
-            new Claim(AuthConstants.SecurityStampClaim, Stamp),
+            new Claim(AuthConstants.SecurityStampClaim, Stamp), WebSessionClaims.NewSessionClaim(),
         ], AuthConstants.LocalPasswordScheme));
 
         public async Task ApplyAsync(Change change)

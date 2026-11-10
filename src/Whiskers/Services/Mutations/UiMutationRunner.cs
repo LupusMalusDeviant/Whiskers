@@ -179,6 +179,9 @@ public sealed class UiMutationRunner : IUiMutationRunner
         var principal = string.IsNullOrWhiteSpace(email)
             ? new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.Anonymous, "unknown", level)
             : new MutationPrincipal(MutationPrincipalKind.Human, PrincipalIds.User(email), email, level);
+        // Contract 0014 (D2): the credential the user signed in with and the web session, beside the account handle.
+        var (credential, webSession) = await _user.GetPrincipalFieldsAsync();
+        principal = principal with { CredentialId = credential, SessionId = webSession };
         return (principal, session);
     }
 
