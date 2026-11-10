@@ -304,8 +304,7 @@ public class JsonFileStoreRecoveryTests : IDisposable
     public async Task Guardrails_with_only_a_previous_generation_stay_fail_closed()
     {
         var path = Path.Combine(_dir, "guardrails.json");
-        var first = new Whiskers.Services.Guardrails.GuardrailStore(filePath: path);
-        await first.InitializeAsync();
+        await GuardrailStoreTestExtensions.FirstStartStore(path).StartAsync();
         await File.WriteAllTextAsync(path + ".bak", await File.ReadAllTextAsync(path));
         File.Delete(path);
 
