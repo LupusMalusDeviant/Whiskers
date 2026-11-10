@@ -120,7 +120,9 @@ server is refused ("deploy_app needs a Docker host").
 logic, `ComposeFileParser` (and `ComposeFileParserPortTests`), `IDockerService.CreateContainerAsync`,
 `ContainerLifecycleOperations.CreateContainerAsync`, the capability `container.create` (catalog, `VerificationContracts`,
 `ContainerCreateVerifier` registration, `MutationGatewayCoverageTests`, `RootEquivalentAdminTests`). `IDeploymentService`
-and `NoopDeploymentService` go; the Deployment module keeps templates and image search and still gates the page.
+and `NoopDeploymentService` go; the Deployment module keeps templates and image search and still gates the page — and,
+by the user's decision of 2026-11-10, every `app.deploy` (MCP `deploy_app`, the agent, the pages): with the module off it
+is refused before it is planned, with a reason that names `Features:deployment:Enabled`.
 
 **D7 — Capabilities, compositions, verification.**
 

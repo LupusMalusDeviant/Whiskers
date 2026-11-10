@@ -25,7 +25,10 @@ All notable changes to Whiskers are documented here. The format follows
   old `Container ID:` line is gone; a refusal answers `Deployment refused: …`. A plan is refused before anything is
   written when a project of that name runs from another directory, when (form and `deploy_app`) the directory holds a
   `docker-compose.yml` without the marker, or when a plain container of the old page has a name the deployment would
-  use — remove it on the container page or choose another name.
+  use — remove it on the container page or choose another name. With the Deployment module off
+  (`Features:deployment:Enabled=false`), `deploy_app` and every other app deployment are refused with
+  `Deployment refused: the Deployment module is disabled …`; before, only the pages were hidden and `deploy_app`
+  still created containers.
 - **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
   asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
   host. The labels are now read from the whole `Config`.

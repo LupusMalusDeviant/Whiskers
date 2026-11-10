@@ -288,6 +288,7 @@ public class ContainerTools
         IComposeRunner composeRunner,
         Whiskers.Services.ServerConfig.IServerConfigService servers,
         IToolAuditLog auditLog,
+        Whiskers.Modules.IModuleRegistry modules,
         [Description("Application name (letters, digits, '.', '-', '_'): compose project, service and container name")] string appName,
         [Description("Docker image to deploy (e.g. 'nginx:latest', 'postgres:17', 'node:22-alpine')")] string image,
         [Description("Server ID to deploy on")] string? serverId = null,
@@ -311,6 +312,9 @@ public class ContainerTools
             return details;
         }
         async Task<string> Refused(string reason) => MutationScope.Fail(await Report(false, $"Deployment refused: {reason}"));
+
+        // INV-62 (user decision 2026-11-10): the Deployment module gates deploy_app, not only the pages.
+        if (DeploymentModuleGate.IsOff(modules)) return await Refused(DeploymentModuleGate.DisabledReason);
 
         // D1: the one mapper the gateway's target used too — a malformed entry refuses the call, nothing is dropped.
         DeploymentComposeFile file;

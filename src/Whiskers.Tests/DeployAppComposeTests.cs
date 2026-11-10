@@ -35,6 +35,10 @@ public sealed class DeployAppComposeTests
     private readonly RecordingToolAudit _toolAudit = new();
     private readonly Dictionary<string, (string Id, string Labels)> _pulls = new(StringComparer.Ordinal);
     private bool _upCreates = true;
+    private Whiskers.Modules.IModuleRegistry _modules = Modules(deploymentOn: true);
+
+    private static Whiskers.Modules.IModuleRegistry Modules(bool deploymentOn) =>
+        new Whiskers.Modules.ModuleRegistry([], [], deploymentOn ? ["core", DeploymentModuleGate.ModuleId] : ["core"]);
 
     public DeployAppComposeTests()
     {
@@ -91,7 +95,7 @@ public sealed class DeployAppComposeTests
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         return new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
             NullLogger<MutationGateway>.Instance,
-            targets: new MutationTargetResolver(new TestServices(_docker, _servers, Planner(), _host)),
+            targets: new MutationTargetResolver(new TestServices(_docker, _servers, Planner(), _host, _modules)),
             approvals: new ApprovalGate(new ApprovalStore(), store));
     }
 
@@ -100,7 +104,7 @@ public sealed class DeployAppComposeTests
             .ToDictionary(p => p.Name, p => p.Value.Clone(), StringComparer.Ordinal);
 
     private Task<string> Tool(string serverId = "local", string? ports = null, string? envVars = null, string appName = "web") =>
-        ContainerTools.DeployApp(Http(), new ToolKeys(), _docker, _host, Planner(), Runner(), _servers, _toolAudit,
+        ContainerTools.DeployApp(Http(), new ToolKeys(), _docker, _host, Planner(), Runner(), _servers, _toolAudit, _modules,
             appName, "nginx", serverId, ports, envVars);
 
     /// <summary>A <c>deploy_app</c> call as <c>McpGuardrailFilter</c> makes it: the gateway decides, the tool runs inside.</summary>
@@ -224,6 +228,53 @@ public sealed class DeployAppComposeTests
         Assert.False(ran);
         Assert.Contains("deploy_app needs a Docker host", outcome.Reason);
         Assert.Contains("deploy_app needs a Docker host", await Tool("k8s"));
+    }
+
+    // ---------------------------------------------------------------- the Deployment module gates deploy_app
+
+    [Fact]
+    public async Task With_the_deployment_module_off_deploy_app_is_refused_with_the_switch_and_nothing_runs()
+    {
+        _modules = Modules(deploymentOn: false);
+
+        var (outcome, ran) = await CallAsync(new { appName = "web", image = "nginx", serverId = "local" }, () => Tool());
+        var direct = await Tool();
+
+        Assert.False(ran);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Contains("Deployment refused: the Deployment module is disabled", outcome.Reason);
+        Assert.Contains("Features:deployment:Enabled=true", outcome.Reason);
+        Assert.Contains("Deployment refused: the Deployment module is disabled", direct);
+        Assert.Empty(_host.Executed);          // nothing written, pulled or started — not even planned
+        Assert.Empty(_host.ConfigCommands);
+        Assert.Single(_toolAudit.Reports);     // the direct call's one report
+        Assert.False(_toolAudit.Reports[0].Success);
+    }
+
+    [Fact]
+    public async Task With_the_deployment_module_off_the_ui_cannot_deploy_an_app_either()
+    {
+        _modules = Modules(deploymentOn: false);
+
+        var (outcome, ran) = await CallAsync(new { appName = "web", image = "nginx", serverId = "local" }, () => Tool(),
+            MutationSurface.Ui);
+
+        Assert.False(ran);
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Contains("the Deployment module is disabled", outcome.Reason);
+    }
+
+    [Fact]
+    public async Task With_the_deployment_module_on_deploy_app_is_planned_and_run()
+    {
+        _modules = Modules(deploymentOn: true);
+
+        var (outcome, ran) = await CallAsync(new { appName = "web", image = "nginx", serverId = "local" }, () => Tool());
+
+        Assert.True(ran);
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.NotEmpty(_host.ConfigCommands);   // planned
+        Assert.True(Started);                    // and run
     }
 
     [Fact]

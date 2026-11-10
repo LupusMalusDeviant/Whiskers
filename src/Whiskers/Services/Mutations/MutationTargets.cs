@@ -317,6 +317,9 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
     private async Task<TargetResolution> AppDeployAsync(MutationRequest request, TargetResolution resolution,
         MutationTarget host, CancellationToken ct)
     {
+        // INV-62 (user decision 2026-11-10): no app deployment while the Deployment module is off, on any surface.
+        if (DeploymentModuleGate.IsOff(_services.GetService<Whiskers.Modules.IModuleRegistry>()))
+            return Refuse($"Deployment refused: {DeploymentModuleGate.DisabledReason}");
         if (request.Surface is MutationSurface.Ui or MutationSurface.Automation) return resolution;
         if (request.Arguments.Keys.FirstOrDefault(k => RefusedFromCallers.Contains(k, StringComparer.OrdinalIgnoreCase)) is { } injected)
             return Refuse($"The argument '{injected}' is set by Whiskers itself for a planned deployment; a call may not bring it.");

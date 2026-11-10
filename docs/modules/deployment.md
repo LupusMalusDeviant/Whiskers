@@ -16,8 +16,10 @@ Hub / GHCR / Harbor).
 | **Services** | `ITemplateService` + `IImageSearchService` (+ 3 providers); the form's mapper `DeploymentCompose` and `DeploymentPathPlanner` need no registration |
 
 When **disabled**: the `deploy` + `apps` nav entries disappear and both pages show a "module disabled" notice.
-The `deploy_app`/`deploy_compose` MCP tools (in Core `ContainerTools`) keep working — they run the Core's compose
-planner and runner (contract 0013) — and template lookups / image searches return empty.
+`deploy_app` (in Core `ContainerTools`) is refused with "Deployment refused: the Deployment module is disabled (set
+Features:deployment:Enabled=true …)" — by the tool and by the gateway's target resolution, on every surface
+(`DeploymentModuleGate`). `deploy_compose` and the `/compose` editor stay Core and keep working. Template lookups /
+image searches return empty.
 
 **`compose` stays Core:** the `/compose` editor uses only Docker + host-command services, so it isn't part of
 this module. `ImageUpdate`/`AutoUpdate` are also out of scope (separate concerns).

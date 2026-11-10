@@ -9,7 +9,9 @@ compose file, both deployed as a compose project through the compose runner, con
   (Docker Hub / GHCR / Harbor) and `IImageSearchService`. Nav: `deploy` + `apps` (group *Deployment*).
 
 **Toggle:** `Features:deployment:Enabled` (`Features__deployment__Enabled=false`), restart-only. When off, the
-`deploy` + `apps` nav entries disappear and both pages show a "module disabled" notice.
+`deploy` + `apps` nav entries disappear and both pages show a "module disabled" notice, and every `app.deploy`
+(MCP `deploy_app`, the agent, the pages) is refused with a reason that names the switch
+(`Services/Deployment/DeploymentModuleGate.cs`); `deploy_compose` stays Core.
 
 **`compose` stays in Core.** The `/compose` editor (`ComposeEditor.razor`) uses only `IDockerService` +
 `IHostCommandExecutor`, not this module's services, so its nav entry stays in `AllInOnePseudoModule`.

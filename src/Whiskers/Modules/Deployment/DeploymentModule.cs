@@ -17,8 +17,8 @@ namespace Whiskers.Modules.Deployment;
 /// <c>IDockerService</c>/<c>IHostCommandExecutor</c>), so its nav entry remains in the pseudo-module.
 ///
 /// No MCP tools of its own: <c>deploy_app</c>/<c>deploy_compose</c> live in the mixed, Core-resident
-/// <c>ContainerTools</c> (which also holds list/restart/logs/…) and run the compose runner, so they need nothing from
-/// this module. Core keeps no-op defaults (<c>NoopTemplateService</c>, <c>NoopImageSearchService</c>) for when this
+/// <c>ContainerTools</c> (which also holds list/restart/logs/…) and run the compose runner. <c>deploy_app</c> is refused
+/// while this module is off (<c>DeploymentModuleGate</c>); <c>deploy_compose</c> belongs to the Core compose editor. Core keeps no-op defaults (<c>NoopTemplateService</c>, <c>NoopImageSearchService</c>) for when this
 /// module is off; the real services registered here win by last-registration when enabled.</summary>
 public sealed class DeploymentModule : IWhiskersModule
 {
