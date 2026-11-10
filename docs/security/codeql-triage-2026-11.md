@@ -11,7 +11,7 @@ Auf GitHub ist nichts geschlossen oder verworfen worden; das entscheidet der Mai
 | `cs/log-forging` | 29 | 27 | 2 | zentral im Logger (`RedactingLoggerFactory` → `LogSafe.OneLine`), dazu `AuditLogService` an der Stelle |
 | `cs/exposure-of-sensitive-information` | 26 | 18 | 8 | zentral im Logger (`LogSafe.Addresses`), dazu `LogSafe.Account`/`LogSafe.Value` an den Stellen, die ein Konto loggen |
 | `cs/cleartext-storage-of-sensitive-information` | 4 | 4 | 0 | `DatabaseService.Withhold` (DB-Passwort als bekanntes Geheimnis), Neo4j-Passwort aus argv in die Umgebung |
-| `cs/web/cookie-secure-not-set` | 3 | – | – | **nicht geändert** (geschützter Auth-Bereich) — Empfehlung unten, der Nutzer entscheidet |
+| `cs/web/cookie-secure-not-set` | 3 | 2 | 1 (#86, trotzdem gehärtet) | **behoben** nach Freigabe des Nutzers (2026-11-10): OIDC-Nonce/-Correlation ohne HTTPS-Metadaten `SameAsRequest`; Sprach-Cookie `Secure` nach Schema, `HttpOnly`, `Lax` |
 
 „Echt“ heisst: ein Wert, der von aussen kommt (Tool-/HTTP-Argument, Webhook-Pfad, Ausgabe eines Hosts, Konto-Adresse),
 erreichte das Anwendungs-Log ohne Bereinigung. Die meisten Log-Forging-Fälle sind in der Praxis schwer auszunutzen
@@ -137,15 +137,21 @@ einer Debug- oder Timeout-Zeile teilweise sichtbar bleiben; ohne Leerzeichen gre
 `SecretRedactor.Redact`, den CodeQL nicht als Bereinigung kennt) → nach Merge mit Verweis auf
 `LogSafeTests.A_database_password_never_stands_in_a_logged_command` als „Won't fix“ schliessen.
 
-### cs/web/cookie-secure-not-set (3) — nur Analyse, nicht geändert
+### cs/web/cookie-secure-not-set (3) — behoben nach Freigabe des Nutzers (2026-11-10)
 
-| # | Ort | Urteil | Begründung |
-|---|---|---|---|
-| 86 | `Startup/WhiskersPipelineExtensions.cs:241` | kein Sicherheitsbefund | Sprach-Cookie `.AspNetCore.Culture` (`c=en\|uic=en`) von `/set-culture`: kein Geheimnis, keine Sitzung. Ohne `Secure`, damit es auch bei HTTP im LAN gesetzt wird |
-| 60 | `Startup/WhiskersAuthenticationExtensions.cs:139` | echt, aber gewollt | OIDC-Nonce-Cookie: `SecurePolicy = None`, **nur** wenn `Oidc:RequireHttpsMetadata=false` (ausdrücklicher Opt-in für LAN über HTTP). Standard ist `true`; dann bleibt der Framework-Standard `Always` |
-| 61 | `Startup/WhiskersAuthenticationExtensions.cs:140` | echt, aber gewollt | OIDC-Correlation-Cookie, wie #60 |
+| # | Ort | Urteil | Begründung | Massnahme |
+|---|---|---|---|---|
+| 86 | `Startup/WhiskersPipelineExtensions.cs:241` | Fehlalarm, trotzdem gehärtet — **behoben** | Sprach-Cookie `.AspNetCore.Culture` (`c=en\|uic=en`) von `/set-culture`: kein Geheimnis, keine Sitzung. War ohne `Secure`, damit es auch bei HTTP im LAN gesetzt wird | `Secure = ctx.Request.IsHttps`, `SameSite = Lax`, `HttpOnly = true` |
+| 60 | `Startup/WhiskersAuthenticationExtensions.cs:139` | echt — **behoben** | OIDC-Nonce-Cookie: `SecurePolicy = None`, **nur** wenn `Oidc:RequireHttpsMetadata=false` (ausdrücklicher Opt-in für LAN über HTTP) — auch bei HTTPS. Standard ist `true`; dann bleibt der Framework-Standard `Always` | `SameAsRequest` im Zweig: über HTTPS `Secure`, über HTTP weiter ohne |
+| 61 | `Startup/WhiskersAuthenticationExtensions.cs:140` | echt — **behoben** | OIDC-Correlation-Cookie, wie #60 | wie #60 |
 
-**Empfehlung (der Nutzer entscheidet):**
+Tests: `HttpSecurityTests.Oidc_nonce_and_correlation_cookies_follow_the_scheme_without_https_metadata` (HTTP und HTTPS)
+und `HttpSecurityTests.The_language_cookie_is_http_only_lax_and_secure_over_https` (HTTP und HTTPS). Middleware,
+Reihenfolge, OAuth-Whitelist und Rollen sind unverändert. Ob CodeQL `SameAsRequest` bzw. `Secure = IsHttps` als
+erledigt erkennt, zeigt der nächste Lauf (das Sitzungs-Cookie mit `SameAsRequest` wird nicht gemeldet); bleibt ein
+Alarm stehen, mit Verweis auf diese Tests schliessen.
+
+**Empfehlung (vom Nutzer am 2026-11-10 freigegeben und so umgesetzt):**
 
 > 1. **#60/#61:** Im Zweig `if (!oidcRequireHttps)` `CookieSecurePolicy.None` durch `CookieSecurePolicy.SameAsRequest`
 >    ersetzen. Über HTTP bleibt das Cookie ohne `Secure` (der LAN-Fall funktioniert wie heute), über HTTPS — direkt oder
@@ -162,7 +168,7 @@ einer Debug- oder Timeout-Zeile teilweise sichtbar bleiben; ohne Leerzeichen gre
 >    Schema wie beim Sitzungs-Cookie. Reine Härtung, kein Sicherheitsgewinn im engeren Sinn. Alternativ den Alarm als
 >    „Won't fix — Sprach-Cookie ohne Geheimnis“ schliessen.
 >
-> Beides berührt die Startup-/Auth-Konfiguration und gehört daher nicht in diesen Branch.
+> Beides berührt die Startup-/Auth-Konfiguration; freigegeben waren nur diese zwei Stellen.
 
 ## Tests
 

@@ -134,10 +134,13 @@ public static class WhiskersAuthenticationExtensions
                     options.CorrelationCookie.SameSite = SameSiteMode.Lax;
                     if (!oidcRequireHttps)
                     {
-                        // Plain-HTTP LAN: these cookies must NOT be Secure, otherwise the browser stores
-                        // but never sends them back over http → "Correlation failed" on the callback.
-                        options.NonceCookie.SecurePolicy = CookieSecurePolicy.None;
-                        options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.None;
+                        // Plain-HTTP LAN: over http these cookies must NOT be Secure, otherwise the browser stores
+                        // but never sends them back → "Correlation failed" on the callback. SameAsRequest keeps that
+                        // working and still marks them Secure over https — directly or behind a trusted proxy
+                        // (CodeQL #60/#61, approved 2026-11-10). The branch stays: outside it the framework's Always
+                        // holds, which SameAsRequest would weaken behind a TLS proxy that is not a trusted one.
+                        options.NonceCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                        options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
                     }
 
                     options.Scope.Clear();
