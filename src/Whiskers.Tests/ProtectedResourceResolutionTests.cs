@@ -642,7 +642,7 @@ public sealed partial class ProtectedResourceResolutionTests
                 var refs = Regex.Matches(command[..command.IndexOf("; do", StringComparison.Ordinal)], "'([^']*)'")
                     .Select(m => m.Groups[1].Value);
                 var lines = string.Concat(refs.Select(r => Images.TryGetValue(r, out var image)
-                    ? $"{r}\t{image.Id}\t{image.LabelsJson}\n"
+                    ? $"{r}\t{image.Id}\t{{\"Labels\":{image.LabelsJson}}}\n"
                     : $"{r}\t{ComposeExposures.MissingImage}\n"));
                 ImageInspected?.Invoke();
                 return Done(lines);
