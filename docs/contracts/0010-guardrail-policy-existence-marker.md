@@ -1,6 +1,7 @@
 # Contract 0010 — Guardrail policy existence marker (INV-25)
 
-Status: **Draft** · 8 November 2026. Not accepted yet; the open questions Q1–Q4 at the end need the maintainer.
+Status: **Accepted (2026-11-10)** · 10 November 2026 by the maintainer, with D1–D8 as written and the questions
+Q1–Q4 decided as recommended (see "Decisions on the open questions").
 
 ## Purpose
 
@@ -147,17 +148,18 @@ migration READMEs (new table), `Services/Mutations/README.md`, `Services/Setup/R
 - [braucht Nutzer/Hardware] upgrade of the live instance: check after the first start that the marker row exists
   (readiness card) before anything else is changed.
 
-## Open questions for the maintainer
+## Decisions on the open questions (maintainer, 10 November 2026)
 
-- **Q1 — Table shape.** Recommended: the generic `InstanceMarkers` key table (reusable for later "has existed" facts,
-  e.g. other stores). Alternative: a dedicated single-row `GuardrailPolicyMarker` table.
-- **Q2 — What `--reset-guardrails` writes.** Recommended: SafeDefault with the kill switch **on**, so a person switches
-  it off deliberately in the UI (audited). Alternative: the plain SafeDefault, as on a first start.
-- **Q3 — Snapshot evidence (D8).** Recommended: yes, `PolicySnapshots` rows count as proof of an earlier policy. It only
-  changes the outcome where both files were already gone before the upgrade. Alternative: marker only.
-- **Q4 — Restore validator.** Recommended: unchanged; the start fails closed and says why. Alternative: the validator
-  refuses a SQLite archive whose database holds the marker but which holds no `guardrails.json` (not possible for a
-  PostgreSQL dump without restoring it).
+All four questions were decided as recommended.
+
+- **Q1 — Table shape: the generic `InstanceMarkers` key table** (reusable for later "has existed" facts, e.g. other
+  stores). Not chosen: a dedicated single-row `GuardrailPolicyMarker` table.
+- **Q2 — What `--reset-guardrails` writes: SafeDefault with the kill switch on**, so a person switches it off
+  deliberately in the UI (audited). Not chosen: the plain SafeDefault, as on a first start.
+- **Q3 — Snapshot evidence (D8): yes**, `PolicySnapshots` rows count as proof of an earlier policy. It only changes the
+  outcome where both files were already gone before the upgrade. Not chosen: marker only.
+- **Q4 — Restore validator: unchanged**; the start fails closed and says why. Not chosen: a validator that refuses a
+  SQLite archive whose database holds the marker but which holds no `guardrails.json`.
 
 ## Not in scope
 
