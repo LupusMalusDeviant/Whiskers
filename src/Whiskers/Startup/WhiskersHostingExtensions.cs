@@ -306,6 +306,8 @@ public static class WhiskersHostingExtensions
 
         // Secret vault
         builder.Services.AddSingleton<Whiskers.Services.Vault.IVaultService, Whiskers.Services.Vault.VaultService>();
+        // Contract 0015 (INV-52): SSH and mTLS client keys are stored sealed by the vault.
+        builder.Services.AddSingleton<Whiskers.Services.Vault.ISealedKeyFiles, Whiskers.Services.Vault.SealedKeyFiles>();
 
         // Host command execution + server management. IHostCommandExecutor stays in Core (shared by many services).
         builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();

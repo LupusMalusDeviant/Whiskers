@@ -127,6 +127,10 @@ Because name and place stay, every path comparison and `File.Exists` of the roll
 // Services/Vault/SealedKeyFiles.cs (new)
 public interface ISealedKeyFiles
 {
+    /// <summary>Why a key cannot be sealed now (vault not configured or locked), or null when it can — lets a caller
+    /// refuse before it makes or signs a key (implementation addendum, 10 November 2026).</summary>
+    string? RefusalReason { get; }
+
     /// <summary>Seals <paramref name="pem"/> for <paramref name="purpose"/> and writes it atomically (tmp + rename, 0600).
     /// Refuses (SealedKeyException, nothing written) when the vault is not usable (D4).</summary>
     void Write(string path, string purpose, ReadOnlySpan<char> pem);
