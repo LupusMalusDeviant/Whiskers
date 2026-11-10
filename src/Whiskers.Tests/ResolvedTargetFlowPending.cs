@@ -146,10 +146,6 @@ internal static class ResolvedTargetFlowPending
         "Whiskers.Services.Vault.VaultBackedSettingsSave.SaveAgentAsync -> config.agent",
         "Whiskers.Services.Vault.VaultBackedSettingsSave.SaveAppSettingsAsync -> config.save",
         "Whiskers.Services.Vault.VaultBackedSettingsSave.StageAsync -> vault.secret_set",
-        "Whiskers.Services.Webhooks.WebhookService.RunAsOwnerAsync -> compose.deploy",
-        "Whiskers.Services.Webhooks.WebhookService.RunAsOwnerAsync -> container.restart",
-        "Whiskers.Services.Webhooks.WebhookService.RunAsOwnerAsync -> container.update",
-        "Whiskers.Services.Webhooks.WebhookService.RunAsOwnerAsync -> gitdeploy.deploy",
     ];
 
     /// <summary><see cref="Whiskers.Services.Mutations.MutatingOperationAttribute"/> methods of an

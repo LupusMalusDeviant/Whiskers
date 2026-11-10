@@ -1224,22 +1224,27 @@ public class WebhookService : IWebhookService
         var sid = WebhookTargets.ServerOf(webhook);
         string capability;
         MutationOutcome<(bool, string)> outcome;
+        // Contract 0012 (D7, A7): each action is decided as its capability and acts only on the object the gateway
+        // resolved under the run's lock. What the run read before it took the lock is the expected target: a
+        // resolution that differs (a container renamed or replaced, an app moved to another server) is refused before
+        // policy as TargetChanged.
         switch (webhook.Action)
         {
             case "restart":
             {
                 capability = "container.restart";
-                // The container the run locked. An unresolved one is decided by its stored name: the resolver refuses
-                // it (audited).
+                // Decided on the stored name (D7); the container the run read before its lock is the expected target,
+                // so one replaced since resolves to another id and is refused. An unresolved one has no expectation:
+                // the resolver refuses it, or the delegate does (audited either way).
                 var (container, error) = (target.Container, target.Error);
-                outcome = await automation.RunAsync(runActor, "container.restart",
-                    new { containerId = container?.Id ?? webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
-                    async _ =>
+                outcome = await automation.RunAsync(ExpectingContainer(runActor, container, sid), "container.restart",
+                    new { containerId = webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
+                    async (ResolvedContainer c, CancellationToken _) =>
                     {
                         EnsureOwned(webhook);
                         if (container is null) throw Unresolved(error ?? $"Container '{webhook.TargetId}' not found");
-                        await _docker.RestartContainerAsync(container.Id, sid);
-                        return (true, $"Container {container.Name} restarted.");
+                        await _docker.RestartContainerAsync(c.Id, c.ServerId);
+                        return (true, $"Container {c.Name} restarted.");
                     }, ct);
                 break;
             }
@@ -1247,14 +1252,14 @@ public class WebhookService : IWebhookService
             {
                 capability = "container.update";
                 var (container, error) = (target.Container, target.Error);
-                outcome = await automation.RunAsync(runActor, "container.update",
-                    new { containerId = container?.Id ?? webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
-                    async _ =>
+                outcome = await automation.RunAsync(ExpectingContainer(runActor, container, sid), "container.update",
+                    new { containerId = webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
+                    async (ResolvedContainer c, CancellationToken _) =>
                     {
                         EnsureOwned(webhook);
                         if (container is null) throw Unresolved(error ?? $"Container '{webhook.TargetId}' not found");
-                        var newId = await _docker.RecreateContainerAsync(container.Id, sid);
-                        return (true, $"Container {container.Name} rebuilt (new ID: {newId[..Math.Min(12, newId.Length)]}).");
+                        var newId = await _docker.RecreateContainerAsync(c.Id, c.ServerId);
+                        return (true, $"Container {c.Name} rebuilt (new ID: {newId[..Math.Min(12, newId.Length)]}).");
                     }, ct);
                 break;
             }
@@ -1265,15 +1270,18 @@ public class WebhookService : IWebhookService
                 // nothing runs.
                 var (plan, error) = (target.Plan, target.Error);
                 var gate = automation.GateFor(actor, "compose.deploy");
-                outcome = await automation.RunAsync(runActor, "compose.deploy",
+                var server = CanonicalServer(sid);
+                outcome = await automation.RunAsync(
+                    runActor with { ExpectedTarget = new MutationTarget("host", server, null, server) }, "compose.deploy",
                     new { projectName = plan?.ProjectNameForAudit, projectDir = webhook.TargetId, serverId = sid },
-                    async token =>
+                    async (ResolvedHostObject h, CancellationToken token) =>
                     {
                         EnsureOwned(webhook);
                         if (plan is null) throw Unresolved(error!);
                         ComposeImpact.ReportProject(plan);
+                        var host = h.ServerId ?? throw Unresolved("The deployment has no server; nothing ran.");
                         (bool, string) result = (false, "The deployment did not run.");
-                        await gate(plan, async () => result = await DeployCompose(webhook, plan.ProjectName, token));
+                        await gate(plan, async () => result = await DeployCompose(webhook, host, plan.ProjectName, token));
                         return result;
                     }, ct);
                 break;
@@ -1285,22 +1293,24 @@ public class WebhookService : IWebhookService
                 // of the app's owner is a refusal of this delivery too.
                 capability = "gitdeploy.deploy";
                 var gitDeploy = scope.ServiceProvider.GetRequiredService<IGitDeployService>();
-                var (app, error) = await LookupAsync(webhook, async () =>
-                    (await gitDeploy.GetAppAsync(webhook.TargetId), (string?)"Git deploy app not found."), ct);
-                outcome = await automation.RunAsync(runActor, "gitdeploy.deploy",
-                    new { appId = app?.Id ?? webhook.TargetId, name = app?.Name, serverId = app?.ServerId, revision = app?.Revision },
-                    async token =>
+                // The app as the run read it before its lock — its server, which the run holds, and its revision: the
+                // decision must meet exactly that revision and server, so an app saved since (moved to another server)
+                // is refused and its next delivery takes the new server. An app the run found no server for is decided
+                // by its id and refused below.
+                var expected = target.Server is { } appServer
+                    ? new MutationTarget("git-deploy-app", webhook.TargetId, null, CanonicalServer(appServer))
+                    : null;
+                outcome = await automation.RunAsync(runActor with { ExpectedTarget = expected }, "gitdeploy.deploy",
+                    new { appId = webhook.TargetId, serverId = target.Server, revision = target.Revision },
+                    async (ResolvedGitApp g, CancellationToken token) =>
                     {
                         EnsureOwned(webhook);
-                        // An app this run found no server for (missing when the run took its lock, maybe saved since)
-                        // is refused: the run holds no server it could deploy on.
-                        if (app is null || target.Revision is null) throw Unresolved(error ?? "Git deploy app not found.");
-                        // Only the app at the revision whose server this run holds: an app saved since (moved to
-                        // another server) is refused, its next delivery takes the new server.
+                        // The run holds no server it could deploy on.
+                        if (target.Revision is null) throw Unresolved("Git deploy app not found.");
                         var (success, output, refused) = await GitDeployOwners.RunAsOwnerAsync(gitDeploy, automation,
-                            app.Id, token, revision: target.Revision);
+                            g.Id, token, revision: g.Revision);
                         if (refused)
-                            throw new MutationRefusedException($"Git deployment '{app.Name}': {output}", MutationStatus.Denied, "");
+                            throw new MutationRefusedException($"Git deployment '{g.Name}': {output}", MutationStatus.Denied, "");
                         return (success, output);
                     }, ct);
                 break;
@@ -1342,6 +1352,17 @@ public class WebhookService : IWebhookService
             $"Webhook \"{webhook.Name}\" was called, but its action did not run. {reason}");
         return (false, $"Refused: {reason}", true);
     }
+
+    /// <summary>The server's canonical id, as its lock names it (<see cref="ResourceLocks.ServerKey"/>): an alias stored
+    /// on the webhook or app is compared as the server it names.</summary>
+    private string CanonicalServer(string serverId) => _locks.ServerKey(serverId)[ResourceLocks.Server("").Length..];
+
+    /// <summary>Contract 0012 (D7, A7): the run with the container it read before its lock as the expected target, so a
+    /// container renamed or replaced since is refused before policy. None when the read found none (the resolver then
+    /// decides on the stored name and refuses it).</summary>
+    private AutomationActor ExpectingContainer(AutomationActor actor, ContainerInfo? container, string serverId) =>
+        container is null ? actor
+            : actor with { ExpectedTarget = new MutationTarget("container", container.Id, container.Name, CanonicalServer(serverId)) };
 
     /// <summary>The capability a webhook action is decided as; <c>null</c> for an action that is none of the four.</summary>
     internal static string? CapabilityOf(string? action) => action switch
@@ -1538,9 +1559,9 @@ public class WebhookService : IWebhookService
         }
     }
 
-    private async Task<(bool, string)> DeployCompose(WebhookEntity webhook, string lockedProject, CancellationToken ct)
+    /// <param name="sid">The server the decision resolved (contract 0012, A7): the deployment runs there.</param>
+    private async Task<(bool, string)> DeployCompose(WebhookEntity webhook, string sid, string lockedProject, CancellationToken ct)
     {
-        var sid = WebhookTargets.ServerOf(webhook);
         // The plan (R1-07) made again right before writing: the compose files of the directory as compose finds them,
         // the project and every existing container `up` touches — then exactly that runs (explicit -p / -f). The owner
         // decided every container of the plan made before (R1-09); one that turns up only now stops it.

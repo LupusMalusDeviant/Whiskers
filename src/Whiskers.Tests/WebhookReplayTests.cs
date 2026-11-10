@@ -2140,7 +2140,8 @@ public sealed class WebhookReplayTests : IDisposable
                 OperationIds.Add(actor.OperationId);
                 Owners.Add(actor.OwnerId);
                 Contexts.Add((Ambient.Value, MutationScope.Current?.OperationId));
-                ContainerIds.Add(arguments.GetType().GetProperty("containerId")?.GetValue(arguments) as string);
+                // Contract 0012 (A7): what the run read under its lock is passed as the expected target.
+                ContainerIds.Add(actor.ExpectedTarget?.Id ?? arguments.GetType().GetProperty("containerId")?.GetValue(arguments) as string);
             }
             var held = _gate;
             var first = Interlocked.Increment(ref _held) == 1;

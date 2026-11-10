@@ -32,6 +32,11 @@ public sealed record AutomationActor(string RunnerId, string DisplayName, string
     /// <summary>The key of the one event a refusal of this run may be (<see cref="MutationRequest.EventKey"/>): a webhook
     /// delivery that did not run is recorded under it from every path that can record it (review round 5).</summary>
     public string? EventKey { get; init; }
+
+    /// <summary>Contract 0012 (D7, A7): what the run read its target as before it took its lock (a webhook delivery).
+    /// Passed as <see cref="MutationRequest.ExpectedTarget"/>: a resolution that differs is refused before policy as
+    /// <see cref="MutationReasonCodes.TargetChanged"/>. Null: no expectation.</summary>
+    public MutationTarget? ExpectedTarget { get; init; }
 }
 
 /// <summary>The owner's authority right now. Re-read on every run (INV-04).</summary>
@@ -302,7 +307,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             ? new MutationTarget("unknown", "")
             : MutationTargets.FromArguments(capability, args);
         var request = new MutationRequest(capabilityId, PrincipalOf(actor, capability), MutationSurface.Automation,
-            target, args, OperationId: actor.OperationId);
+            target, args, OperationId: actor.OperationId) { ExpectedTarget = actor.ExpectedTarget };
         // Contract 0012 (D3): a lambda typed for another kind of object is refused before the gateway decides; the
         // refusal is the run's one event (under its EventKey, INV-45).
         if (UiMutationRunner.TargetTypeMismatch(capability, targetType) is { } mismatch)

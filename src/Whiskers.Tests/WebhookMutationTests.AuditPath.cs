@@ -79,6 +79,40 @@ public sealed partial class WebhookMutationTests
         Assert.StartsWith("unowned:", unowned.PrincipalId);
     }
 
+    /// <summary>Contract 0012 (D7, A7): the container the delivery read before its lock was replaced by the time the
+    /// gateway resolves it (same name, another id). The decision is refused before policy as TargetChanged — one
+    /// Denied event under the run id — and nothing runs on either container.</summary>
+    [Theory]
+    [InlineData("restart", "container.restart")]
+    [InlineData("rebuild", "container.update")]
+    public async Task A_container_replaced_after_the_lock_was_read_is_refused_as_changed(string action, string capability)
+    {
+        _resolverDocker = new FakeDocker(Container("web-1", "ccc333", "running")) { AllowMutations = true };
+        var webhook = Seed(action, "web-1");
+
+        var (rows, delivery) = await DeliverAsync(webhook);
+
+        Assert.Same(delivery, Assert.Single(rows));
+        AuditTrail.AssertComplete(delivery, AuditTrail.Denied, capability, "Automation", decided: false);
+        Assert.Contains("changed after it was read", delivery.Details);
+        Assert.Empty(_docker.Actions);
+        Assert.Empty(_resolverDocker.Actions);
+    }
+
+    /// <summary>Contract 0012 (D7, A7): the delegate acts on the object the gateway resolved — the id and server of the
+    /// decision, never the stored name.</summary>
+    [Fact]
+    public async Task A_restart_acts_on_the_resolved_container_id_and_server()
+    {
+        var webhook = Seed("restart", "web-1");
+
+        var (_, delivery) = await DeliverAsync(webhook);
+
+        AuditTrail.AssertComplete(delivery, AuditTrail.Executed, "container.restart", "Automation");
+        var restart = Assert.Single(_docker.Actions);
+        Assert.Equal(("restart", "aaa111" + new string('0', 58), "local"), (restart.Op, restart.ContainerId, restart.ServerId));
+    }
+
     /// <summary>S-04 (review B-1): the run's deadline passes while the gateway resolves the delivery's target with the
     /// production resolver (the host does not answer). The delivery had asked for its capability, so it is one Denied
     /// event under its run id — "cancelled before its decision", written although the run's token is cancelled — and

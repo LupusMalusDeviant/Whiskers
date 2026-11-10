@@ -11,7 +11,9 @@ All notable changes to Whiskers are documented here. The format follows
   like containers and servers. Right before an object is acted on it is read again: a container, rule or record that
   vanished or was recreated since the decision is refused (`TargetUnknown` / `TargetChanged`), nothing runs and an
   approval given for it stays usable. The runners gain overloads whose action receives the resolved object; the
-  remaining callers move over in the next steps.
+  remaining callers move over in the next steps. A webhook delivery is decided on the target its webhook stores and
+  acts on the container, server or Git app the gateway resolved; a container replaced or an app moved after the
+  delivery read it is refused as changed.
 
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
