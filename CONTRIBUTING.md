@@ -64,7 +64,9 @@ git rm --cached -r -q . && git reset --hard
 ## Coding style
 
 - C# with file-scoped namespaces; match the conventions of the surrounding code.
-- Comments in English; user-facing UI strings are German.
+- Comments in English. User-facing UI strings are localized through `IStringLocalizer<SharedResource>`: English in
+  `SharedResource.resx` (the default), German in `SharedResource.de.resx`; a new string gets both
+  ([src/Whiskers/Resources/README.md](src/Whiskers/Resources/README.md)).
 - Prefer small, composable services behind interfaces over large god-objects.
 
 ## License

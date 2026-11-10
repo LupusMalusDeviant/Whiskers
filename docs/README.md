@@ -15,6 +15,7 @@
 | [project-structure.md](project-structure.md) | Source layout and code conventions |
 | [product/README.md](product/README.md) | **Product strategy** — canonical positioning, the one-liner and pitch, target audience, the three product pillars, and the hero workflow ([product/POSITIONING.md](product/POSITIONING.md)) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The SSH-key-free design, mesh + mTLS, the three planes, PKI, onboarding |
+| [CODEBASE_MAP.md](CODEBASE_MAP.md) | Orientation in the code: projects and areas with their sizes, how a call flows to the host, where state lives, where to start a change, hotspots |
 | [container-hardening.md](container-hardening.md) | Full vs. locked-down container profiles, per-mode privilege matrix, socket-proxy, distroless roadmap |
 | [operations/](operations/README.md) | **Operator guides**: production checklist (with the accepted limits of 1.0), upgrade and rollback, backup and recovery, troubleshooting, observability, and one guide per feature that needs host-side setup |
 | [contracts/](contracts/) | Accepted interface contracts per work package (and proposed ones awaiting the maintainer) |

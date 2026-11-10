@@ -60,9 +60,11 @@ GROUP BY ToolName;   -- compare against docs/mcp-tool-catalog.md
 
 There is no dedicated view for this yet; it is a periodic manual check.
 
-## Subfolder
+## Subfolders
 
 - [`Tools/`](Tools/): the `[McpServerToolType]` classes exposing the actual tools.
+- [`Prompts/`](Prompts/): user-invokable workflow prompts; they return text only and grant nothing.
+- [`Resources/`](Resources/): read-only resources (the tool catalog, the caller's own permissions).
 
 ## Related
 
