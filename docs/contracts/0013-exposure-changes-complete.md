@@ -6,7 +6,7 @@ as recommended (see "Decisions on the open questions" at the end). Extends [cont
 
 **Amendment 1** (10 November 2026, decided by the user on 2026-11-10): D10 pins every image by its **image id**
 (`sha256:…`), never by a repo digest; U2, D9, D11, D12, Q6 and the tests of § 4 follow (see "Amendment 1" at the end).
-**Amendment 2** (10 November 2026, proposed, needs acceptance): the host Traefik of Q1 is recognised by image name only.
+**Amendment 2** (10 November 2026, accepted by the user on 2026-11-10): the host Traefik of Q1 is recognised by image name only.
 
 ## Purpose
 
@@ -349,7 +349,7 @@ start the inspected images, on the classic and on the containerd store. The Imag
 the id; the project's image name stays in `whiskers.image.ref`, which the update check (D14) reads. Q6's fallback tag
 stays a fallback, used only if Compose rejects an id.
 
-## Amendment 2 — host Traefik by image name (10 November 2026, proposed, needs the maintainer's acceptance)
+## Amendment 2 — host Traefik by image name (10 November 2026, accepted 2026-11-10)
 
 **Why.** Recognising a Traefik on the host by argv (`sh -c`, `argv[0]`) would mean a `docker inspect` of every running
 container outside the project on every plan; a container that cannot be inspected would then count as a routing
