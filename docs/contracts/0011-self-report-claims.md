@@ -238,6 +238,20 @@ All five as recommended:
 - **Q5 — Global resx parity: (a).** D7 (all keys of both resx files, keys and placeholders) is part of this pull
   request.
 
+## Amendment 1 (accepted 2026-11-10)
+
+Found during the implementation, accepted by the maintainer on 10 November 2026; no behaviour changes:
+
+- **Test seams and an optional localizer.** `ProductionReadinessService` takes an optional last constructor parameter
+  `IStringLocalizer<SharedResource>?` (default: the resx localizer over `Resources/`, culture at call time) and has
+  internal init seams `PgDumpVersion`, `RecoveredStores` and `IsPrivileged`, so the scenario tests (D6) reach every
+  key without a real `pg_dump`, a damaged store or a root process.
+- **Budgets as constants.** The time budgets the documents quote are single constants the claim tests read:
+  `ComposeImpact.RunBudget` (5 minutes) and `GitDeployService.DeployStepBudget`, `DeployPullBudget`,
+  `DeployBuildBudget`, `DeployUpBudget` (300 / 300 / 600 / 300 seconds). A refactor with the same values.
+- **The register holds 80 claims**, not the initial 30: RM-01..24, SEC-01..28, SA-01..12, PC-01..17, each with its
+  tests; the initial 30 are among them.
+
 ## Not in scope
 
 - The meaning of UI hints outside the readiness card (only key and placeholder parity, D7).
