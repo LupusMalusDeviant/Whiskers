@@ -38,7 +38,6 @@ Highest invariant ID: INV-62
 |---|---|---|---|---|
 | INV-01 | ⚠️ | R1-03 | webhook and system principals come with their packages; humans are keyed by the account handle, not the credential | — |
 | INV-25 | ⚠️ | R1-02 | with neither policy file present the restrictive default is created, so deleting both looks like a first start | — |
-| INV-52 | ⚠️ | WP7 | SSH private keys and mTLS client keys are stored in plaintext; no in-place `VAULT_KEY` rotation | — |
 | INV-56 | ⚠️ | WP7 | readiness lines are German only, and no test compares README/SECURITY.md claims with the code | — |
 | INV-57 | ⚠️ | WP2 | UI and automation delegates, webhooks, workloads, volumes and log alerts do not act on the resolved target object | — |
 | INV-58 | ⚠️ | R1-44 | holds per host only after the migration; hosts on the shared client credential are exposed (D12) | — |
@@ -68,6 +67,7 @@ proven test.
 | Test | Skips when | Runs unskipped in | Why |
 |---|---|---|---|
 | Whiskers.Tests.PerHostCredentialTests.On_windows_a_key_readable_by_everyone_is_exposed | not Windows | — (no Windows CI job) | Windows ACL check |
+| Whiskers.Tests.SshKeyLeaseTests.On_linux_the_real_lease_directory_is_on_tmpfs_with_owner_only_modes | not Linux (no /dev/shm) | ci.yml build-test / Test (in-process) | the lease directory lives on Linux tmpfs |
 
 ## Mandatory suites
 

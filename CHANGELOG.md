@@ -6,6 +6,16 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Private keys sealed at rest, and `VAULT_KEY` rotation (INV-52, contract 0015).** SSH keys and mTLS client keys in
+  the data directory are now sealed with the vault key (same file, `f1:` content); a start-up migration seals existing
+  plaintext keys and removes the plaintext. SSH keys are opened only into a short-lived 0600 lease in memory
+  (`/dev/shm`) and removed after use. **Behaviour change (D4):** without `VAULT_KEY` Whiskers refuses to store new SSH
+  keys or issue new mTLS client keys. **Behaviour change (D10):** with a wrong `VAULT_KEY`, sealed client keys do not
+  open and mTLS hosts become unreachable (fail-closed). New: rotate `VAULT_KEY` at start via `VAULT_KEY_NEW_FILE`,
+  all or nothing, with a journal, crash resume and a refusal when the audit trail does not verify; the trail is
+  re-signed, `pre-rotation` and `post-rotation` self-backups are taken, and older backups are marked "earlier key".
+  See `docs/operations/vault-key-rotation.md`.
+
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
   test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can

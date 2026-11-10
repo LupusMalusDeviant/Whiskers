@@ -28,7 +28,7 @@ public class ReleaseGateTests
     private static readonly Lazy<GateInputs> ViolatedInputs = new(() => Real with
     {
         Invariants = Mutate(Mutate(SetCell(Real.Invariants, "| INV-18 |", 2, "❌"),
-            "| ✅ | 55 |", "| ✅ | 54 |"), "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
+            "| ✅ | 56 |", "| ✅ | 55 |"), "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
         ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-01 |",
             "| INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |"),
     });
@@ -191,8 +191,8 @@ public class ReleaseGateTests
         var example = Real with { Invariants = Mutate(Real.Invariants, "## 11.", "```\n| INV-63 | example |\n```\n\n## 11.") };
         Assert.DoesNotContain(Evaluate(example, GateMode.Development, Dev), f => f.Subject == "INV-63");
 
-        var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 55 |", "| ✅ | 56 |") };
-        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 56, the table has 55"));
+        var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 56 |", "| ✅ | 57 |") };
+        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 57, the table has 56"));
 
         var pipe = Real with { Invariants = Mutate(Real.Invariants, "`docker system\\|container", "`docker system|container") };
         Assert.Contains(Evaluate(pipe, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("cells"));
@@ -203,7 +203,7 @@ public class ReleaseGateTests
     {
         var deleted = Real with
         {
-            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 55 |", "| ✅ | 54 |"), "| **Total** | **62** |", "| **Total** | **61** |"),
+            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 56 |", "| ✅ | 55 |"), "| **Total** | **62** |", "| **Total** | **61** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
