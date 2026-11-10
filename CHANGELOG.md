@@ -6,6 +6,9 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
+  asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
+  host. The labels are now read from the whole `Config`.
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
   test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can

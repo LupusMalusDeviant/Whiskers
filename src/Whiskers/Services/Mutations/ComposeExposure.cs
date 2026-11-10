@@ -533,11 +533,12 @@ public static class ComposeExposures
     /// <summary>The marker <see cref="InspectImagesCommand"/> prints for an image that is not on the host.</summary>
     public const string MissingImage = "MISSING";
 
-    /// <summary>One line per image: <c>&lt;ref&gt;\t&lt;id&gt;\t&lt;labels as JSON&gt;</c>, or <c>&lt;ref&gt;\tMISSING</c>.
-    /// Local only: nothing is pulled.</summary>
+    /// <summary>One line per image: <c>&lt;ref&gt;\t&lt;id&gt;\t&lt;Config as JSON&gt;</c>, or <c>&lt;ref&gt;\tMISSING</c>.
+    /// Local only: nothing is pulled. The labels are read from the whole <c>Config</c>: Docker 29 fails
+    /// <c>.Config.Labels</c> on an image without labels ("map has no entry"), which read as a missing image.</summary>
     public static string InspectImagesCommand(IEnumerable<string> images) =>
         "for i in " + string.Join(' ', images.Select(Whiskers.Utils.ShellUtils.Quote)) +
-        "; do o=$(docker image inspect --format '{{.Id}}{{\"\\t\"}}{{json .Config.Labels}}' \"$i\" 2>/dev/null)" +
+        "; do o=$(docker image inspect --format '{{.Id}}{{\"\\t\"}}{{json .Config}}' \"$i\" 2>/dev/null)" +
         " && printf '%s\\t%s\\n' \"$i\" \"$o\" || printf '%s\\t" + MissingImage + "\\n' \"$i\"; done";
 
     /// <summary>What <see cref="InspectImagesCommand"/> printed, per image: its id and labels, or <c>null</c> when it is
@@ -562,10 +563,16 @@ public static class ComposeExposures
             try
             {
                 using var document = JsonDocument.Parse(parts[2]);
-                if (document.RootElement.ValueKind == JsonValueKind.Object)
-                    foreach (var p in document.RootElement.EnumerateObject())
-                        labels[p.Name] = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.GetRawText();
-                else if (document.RootElement.ValueKind != JsonValueKind.Null)
+                var config = document.RootElement;
+                if (config.ValueKind == JsonValueKind.Object && Property(config, "Labels") is { } found)
+                {
+                    if (found.ValueKind == JsonValueKind.Object)
+                        foreach (var p in found.EnumerateObject())
+                            labels[p.Name] = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.GetRawText();
+                    else if (found.ValueKind != JsonValueKind.Null)
+                        throw new ComposePlanException("The images of the deployment could not be read on the server.");
+                }
+                else if (config.ValueKind is not (JsonValueKind.Object or JsonValueKind.Null))
                     throw new ComposePlanException("The images of the deployment could not be read on the server.");
             }
             catch (JsonException)
