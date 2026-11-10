@@ -285,6 +285,8 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Metrics.MetricsCollectorService", "GetDiskUsageAsync", "df"),
         ("Whiskers.Services.Mutations.ComposePlanner", "ConfigAsync", "docker compose config in a temporary directory (read-only planning, R1-16; contract 0006 reads its JSON)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "DiscoverAsync", "finds compose files"),
+        ("Whiskers.Services.Mutations.ComposePlanner", "HostTraefikAsync", "docker inspect of a running Traefik outside the project (contract 0013, Q1)"),
+        ("Whiskers.Services.Mutations.ComposeThirdParty", "Reader", "reads a proxy's or tunnel's config file as base64, at most 1 MiB (contract 0013, D16)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "InspectContainerAsync", "docker inspect of a container a namespace is shared with (contract 0006)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "InspectImagesAsync", "docker image inspect of the planned images (contract 0006)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "MountsOfContainerAsync", "docker inspect"),
