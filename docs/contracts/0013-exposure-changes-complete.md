@@ -254,7 +254,9 @@ The changed default changes every policy's `VersionHash` (open approvals expire 
 - `ComposePinIntegrationTests` (Docker suite, `docker.txt`): on a real daemon with the minimum Compose (v2.15), a project
   with a pulled and a built service starts exactly the inspected ids under `up --pull never --no-build` with the pin
   file; a re-tag between step 4 and `up` changes nothing — both services still start the inspected images, also on
-  Docker 29's containerd image store (Amendment 1).
+  Docker 29's containerd image store (Amendment 1). CI runs them in the Docker suite on the runner's Compose and once
+  more on the minimum (step "Test (compose pin on the minimum Compose)": the v2.15.1 release binary, pinned by its
+  SHA-256; the tests assert the version through `WHISKERS_TEST_COMPOSE_VERSION`).
 - `ThirdPartyExposureTests`: each tool by image, by argv, by `sh -c`, by env key; every signal row; every source of the
   Traefik rule (CLI, env, YAML, TOML) incl. the default `true`; host Traefik; every "unreadable" case refuses; the
   by-design cases count `public`; `traefik.enable=false` exempts; no value in reason, audit or notification; step 4

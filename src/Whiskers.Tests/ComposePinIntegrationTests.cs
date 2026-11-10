@@ -58,10 +58,23 @@ public sealed class ComposePinIntegrationTests
         return (p.ExitCode, stdout.Result, stderr.Result);
     }
 
+    /// <summary>Contract 0013, § 4: the Compose version this run must use (CI's minimum-Compose step sets it). Unset, any
+    /// Compose runs the test.</summary>
+    private static readonly string? RequiredComposeVersion = Environment.GetEnvironmentVariable("WHISKERS_TEST_COMPOSE_VERSION");
+
     private static bool DockerAvailable()
     {
-        try { return Bash("docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1", 60_000).Exit == 0; }
-        catch (System.ComponentModel.Win32Exception) { return false; }
+        bool available;
+        try { available = Bash("docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1", 60_000).Exit == 0; }
+        catch (System.ComponentModel.Win32Exception) { available = false; }
+        // A run that asked for a version proves nothing on another one: it fails instead of passing on the wrong Compose.
+        if (available && !string.IsNullOrEmpty(RequiredComposeVersion))
+        {
+            var actual = Bash("docker compose version --short", 60_000).Out.Trim().TrimStart('v');
+            Assert.True(actual == RequiredComposeVersion.TrimStart('v'),
+                $"WHISKERS_TEST_COMPOSE_VERSION is {RequiredComposeVersion}, but docker compose is {actual}");
+        }
+        return available;
     }
 
     /// <summary>The host executor: <c>bash -c</c> on this machine.</summary>

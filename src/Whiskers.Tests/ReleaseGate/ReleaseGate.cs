@@ -482,6 +482,8 @@ public static class ReleaseGate
                 @"check-test-results\.sh \S+ [1-9]\d* --require \.github/required-tests/in-process\.txt", "a floor and --require in-process.txt"),
             ("ci.yml", "build-test", "Test (Docker integration, mandatory)",
                 @"check-test-results\.sh \S+ [1-9]\d* --no-skips --require \.github/required-tests/docker\.txt", "a floor, --no-skips and --require docker.txt"),
+            ("ci.yml", "build-test", "Test (compose pin on the minimum Compose)",
+                @"check-test-results\.sh \S+ [1-9]\d* --no-skips", "a TRX file, a floor and --no-skips (contract 0013, § 4)"),
             ("ci.yml", "image-runtime", "Image runtime tests",
                 @"check-test-results\.sh \S+ [1-9]\d* --no-skips --require \.github/required-tests/image-runtime\.txt", "a TRX file, a floor, --no-skips and --require image-runtime.txt (D14)"),
             ("ci.yml", "build-test", "Release gate (compare with the base)",

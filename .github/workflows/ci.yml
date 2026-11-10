@@ -102,6 +102,31 @@ jobs:
             --logger "trx;LogFileName=docker.trx" --results-directory TestResults
           bash .github/scripts/check-test-results.sh TestResults/docker.trx 70 --no-skips --require .github/required-tests/docker.txt
 
+      # Contract 0013, § 4: the compose pin (image id in `image:`) on the minimum Compose, v2.15 — the runner's own Compose
+      # is far newer. The official release binary, checked against its pinned SHA-256 before it runs (a mismatch stops the
+      # job), is the `docker compose` CLI plugin of a separate DOCKER_CONFIG; the test fails on any other version
+      # (WHISKERS_TEST_COMPOSE_VERSION), so a plugin that is not picked up cannot pass as v2.15.
+      - name: Test (compose pin on the minimum Compose)
+        env:
+          COMPOSE_MIN_VERSION: "2.15.1"
+          COMPOSE_MIN_SHA256: "bcfd9ea51dee4c19dccdfaeef0e7956ef68bf14f3d175933742061a7271ef0f5"
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/compose-min"
+          mkdir -p "$config/cli-plugins"
+          curl -fsSL --retry 3 -o "$config/cli-plugins/docker-compose" \
+            "https://github.com/docker/compose/releases/download/v${COMPOSE_MIN_VERSION}/docker-compose-linux-x86_64"
+          echo "${COMPOSE_MIN_SHA256}  $config/cli-plugins/docker-compose" | sha256sum -c - \
+            || { echo "::error::docker-compose v${COMPOSE_MIN_VERSION} does not match its pinned SHA-256"; exit 1; }
+          chmod 755 "$config/cli-plugins/docker-compose"
+          export DOCKER_CONFIG="$config"
+          docker compose version
+          WHISKERS_TEST_COMPOSE_VERSION="$COMPOSE_MIN_VERSION" \
+            dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --no-build --configuration Release \
+            --filter "FullyQualifiedName~Whiskers.Tests.ComposePinIntegrationTests" --logger "console;verbosity=minimal" \
+            --logger "trx;LogFileName=compose-min.trx" --results-directory TestResults
+          bash .github/scripts/check-test-results.sh TestResults/compose-min.trx 2 --no-skips
+
       # R1-51 (contract 0008, D16 and R18): no invariant ID disappears without a retirement, the pinned highest ID never goes
       # down, and an accepted release decision is never edited — compared with the pull request's base commit, or in a
       # release run with the previous release: the highest published GitHub release below the version that is an ancestor

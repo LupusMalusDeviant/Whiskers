@@ -94,6 +94,15 @@ public class ReleaseWorkflowTests
     [InlineData("ci.yml", "      - name: Disclosure self-test\n        run: bash .github/scripts/artifact-checks.sh self-test\n\n      - name: Hardened profile\n        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"\n",
                 "      - name: Hardened profile\n        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"\n\n      - name: Disclosure self-test\n        run: bash .github/scripts/artifact-checks.sh self-test\n")] // self-test after the checks
     [InlineData("release.yml", "        run: bash .github/scripts/artifact-checks.sh hardened \"$ARTIFACT\"", "        run: echo skipped")]
+    // contract 0013, § 4: the compose pin on the minimum Compose
+    [InlineData("ci.yml", "          COMPOSE_MIN_VERSION: \"2.15.1\"", "          COMPOSE_MIN_VERSION: \"2.29.0\"")]          // not the minimum
+    [InlineData("ci.yml", "          COMPOSE_MIN_SHA256: \"bcfd9ea51dee4c19dccdfaeef0e7956ef68bf14f3d175933742061a7271ef0f5\"\n", "")] // no pinned checksum
+    [InlineData("ci.yml", "          echo \"${COMPOSE_MIN_SHA256}  $config/cli-plugins/docker-compose\" | sha256sum -c - \\\n            || { echo \"::error::docker-compose v${COMPOSE_MIN_VERSION} does not match its pinned SHA-256\"; exit 1; }\n", "")] // never compared
+    [InlineData("ci.yml", "does not match its pinned SHA-256\"; exit 1; }", "does not match its pinned SHA-256\"; }")]  // a mismatch goes on
+    [InlineData("ci.yml", "          export DOCKER_CONFIG=\"$config\"\n", "")]                                                // the plugin is never used
+    [InlineData("ci.yml", "          WHISKERS_TEST_COMPOSE_VERSION=\"$COMPOSE_MIN_VERSION\" \\\n", "")]                     // passes on the runner's Compose
+    [InlineData("ci.yml", "TestResults/compose-min.trx 2 --no-skips", "TestResults/compose-min.trx 2")]                         // skipped tests allowed
+    [InlineData("ci.yml", "          chmod 755 \"$config/cli-plugins/docker-compose\"\n", "          curl -fsSL https://example.invalid/install.sh | sh\n          chmod 755 \"$config/cli-plugins/docker-compose\"\n")] // curl | sh
     [InlineData("security.yml", "--exit-code 1", "--exit-code 0")]                                                              // secret findings ignored
     [InlineData("security.yml", "-p:CodeAnalysisTreatWarningsAsErrors=true", "-p:CodeAnalysisTreatWarningsAsErrors=false")]
     [InlineData("security.yml", "          if [ \"$FOUND\" -gt 0 ]; then\n", "          if false; then\n")]                 // vulnerable packages pass
@@ -940,6 +949,7 @@ internal static class WorkflowPolicy
                              && r.Contains("docker info", StringComparison.Ordinal)
                              && Regex.IsMatch(r, @"check-test-results\.sh \S+ [1-9]\d* --no-skips --require \.github/required-tests/docker\.txt\n")))
             violations.Add("ci.yml does not run the Docker-backed suites as mandatory (Docker probe, floor, no skips, required tests)");
+        violations.AddRange(MinimumComposeViolations(ci));
 
         // The artifact on pull requests and pushes: built, Trivy-gated, hardened and N-1 upgrade checks on that image.
         var ciArtifact = ci.Where(j => JobRuns(j.Value).Contains("artifact-checks.sh hardened", StringComparison.Ordinal)).ToList();
@@ -994,6 +1004,40 @@ internal static class WorkflowPolicy
         if (JobsUsing(security, "github/codeql-action/analyze@").Count != 1)
             violations.Add("security.yml does not run CodeQL");
         return violations;
+    }
+
+    /// <summary>Contract 0013, § 4: <c>ComposePinIntegrationTests</c> also run on the minimum Compose (v2.15) — the official
+    /// release binary, downloaded to a file (never piped into a shell), checked against a pinned SHA-256 before it is used,
+    /// made the <c>docker compose</c> plugin of its own DOCKER_CONFIG, and the tests told which version they must see,
+    /// with a TRX check that refuses skips.</summary>
+    private static IEnumerable<string> MinimumComposeViolations(Dictionary<string, YamlMappingNode> ci)
+    {
+        const string what = "ci.yml does not run the compose pin tests on the minimum Compose";
+        var steps = ci.Values.SelectMany(Steps)
+            .Where(s => Scalar(Child(s, "run"))?.Contains("ComposePinIntegrationTests", StringComparison.Ordinal) == true).ToList();
+        if (steps.Count != 1) { yield return $"{what}: expected one step, found {steps.Count}"; yield break; }
+        var step = steps[0];
+        var run = Scalar(Child(step, "run"))!;
+        var env = Child(step, "env");
+        if (Scalar(Child(env, "COMPOSE_MIN_VERSION")) is not { } version || !Regex.IsMatch(version, @"^2\.15\.\d+$"))
+            yield return $"{what}: COMPOSE_MIN_VERSION is not a 2.15.x release";
+        if (Scalar(Child(env, "COMPOSE_MIN_SHA256")) is not { } sha || !Regex.IsMatch(sha, "^[0-9a-f]{64}$"))
+            yield return $"{what}: the binary's SHA-256 is not pinned";
+        if (!run.Contains("curl -fsSL --retry 3 -o \"$config/cli-plugins/docker-compose\"", StringComparison.Ordinal)
+            || !run.Contains("\"https://github.com/docker/compose/releases/download/v${COMPOSE_MIN_VERSION}/docker-compose-linux-x86_64\"", StringComparison.Ordinal))
+            yield return $"{what}: the binary is not the official release asset, downloaded to a file";
+        if (Regex.IsMatch(run, @"\|\s*(sudo\s+)?(ba)?sh\b"))
+            yield return $"{what}: a download is piped into a shell";
+        var check = run.IndexOf("echo \"${COMPOSE_MIN_SHA256}  $config/cli-plugins/docker-compose\" | sha256sum -c -", StringComparison.Ordinal);
+        var used = run.IndexOf("export DOCKER_CONFIG=\"$config\"", StringComparison.Ordinal);
+        if (check < 0 || used < 0 || check > used || !Regex.IsMatch(run[check..used], @"\|\| \{ [^\n]*exit 1; \}"))
+            yield return $"{what}: the checksum is not compared, fail-closed, before the binary is used";
+        if (!run.Contains("WHISKERS_TEST_COMPOSE_VERSION=\"$COMPOSE_MIN_VERSION\"", StringComparison.Ordinal))
+            yield return $"{what}: the tests are not told which Compose version they must see";
+        if (!run.Contains("--filter \"FullyQualifiedName~Whiskers.Tests.ComposePinIntegrationTests\"", StringComparison.Ordinal)
+            || !run.Contains("--logger \"trx", StringComparison.Ordinal)
+            || !Regex.IsMatch(run, @"check-test-results\.sh \S+ [1-9]\d* --no-skips\n"))
+            yield return $"{what}: no TRX check with a floor and --no-skips";
     }
 
     private static IEnumerable<string> ArtifactJobViolations(string file, string id, YamlMappingNode job)

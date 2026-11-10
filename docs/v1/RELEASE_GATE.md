@@ -74,6 +74,7 @@ proven test.
 |---|---|---|---|
 | ci.yml | build-test | Test (in-process) | the in-process suite: no failure, a floor of passed tests, the required tests of `in-process.txt` (generated block included) |
 | ci.yml | build-test | Test (Docker integration, mandatory) | the PostgreSQL and other Docker-backed suites: a floor, no skip, the required tests of `docker.txt` |
+| ci.yml | build-test | Test (compose pin on the minimum Compose) | the compose pin (`ComposePinIntegrationTests`) on Compose v2.15.1, the release binary checked against its pinned SHA-256: a floor, no skip, the version asserted by the tests (contract 0013, § 4) |
 | ci.yml | build-test | Release gate (compare with the base) | no invariant ID or accepted decision lost against the pull request's base or the previous release tag (D16, R18) |
 | ci.yml | build-test | DI boot gate | the application boots with its dependency graph validated |
 | ci.yml | image-runtime | Image runtime tests | the built image's runtime tools, on amd64 and arm64: a floor, no skip, the required tests of `image-runtime.txt` (D14) |

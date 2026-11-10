@@ -29,6 +29,10 @@ All notable changes to Whiskers are documented here. The format follows
   (`Features:deployment:Enabled=false`), `deploy_app` and every other app deployment are refused with
   `Deployment refused: the Deployment module is disabled …`; before, only the pages were hidden and `deploy_app`
   still created containers.
+- **CI: the compose pin on the minimum Compose (contract 0013, § 4).** A new step of the Docker job runs
+  `ComposePinIntegrationTests` on Compose v2.15.1 — the official release binary, checked against a SHA-256 pinned in
+  the workflow before it runs, as the `docker compose` plugin of its own `DOCKER_CONFIG`; the tests fail on any other
+  version (`WHISKERS_TEST_COMPOSE_VERSION`). The step is a mandatory suite of the release gate.
 - **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
   asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
   host. The labels are now read from the whole `Config`.
