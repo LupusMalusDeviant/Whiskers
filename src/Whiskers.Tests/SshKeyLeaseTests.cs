@@ -153,6 +153,7 @@ public sealed class SshKeyLeaseTests : IDisposable
     }
 
     [SkippableFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
     public async Task On_linux_the_real_lease_directory_is_on_tmpfs_with_owner_only_modes()
     {
         Skip.IfNot(OperatingSystem.IsLinux() && Directory.Exists(SshKeyLeases.DefaultBaseDir), "/dev/shm (Linux)");
