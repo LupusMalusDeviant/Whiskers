@@ -1198,7 +1198,7 @@ public class WebhookService : IWebhookService
     internal static AutomationActor ActorOf(WebhookEntity webhook)
     {
         var owner = string.IsNullOrWhiteSpace(webhook.Owner) ? null : webhook.Owner;
-        return new AutomationActor("webhook:" + webhook.WebhookId, $"Webhook '{webhook.Name}'", owner, owner);
+        return AutomationActor.ForWebhook(webhook.WebhookId, webhook.Name, owner);
     }
 
     /// <summary>
@@ -1404,7 +1404,7 @@ public class WebhookService : IWebhookService
             if (webhook is null)
             {
                 await automation.RefuseAsync(
-                    new AutomationActor("webhook:" + webhookId, $"Webhook {webhookId} (removed)", null)
+                    AutomationActor.ForRemovedWebhook(webhookId) with
                         { OperationId = runId, EventKey = KeyOf(runId, refused) },
                     RemovedWebhook, new { webhookId }, reason, bookkeeping.Token);
                 return;

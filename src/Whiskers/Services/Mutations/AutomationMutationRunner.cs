@@ -19,12 +19,63 @@ public sealed class AutomationOptions
 }
 
 /// <summary>
-/// Who an unattended run belongs to. <paramref name="RunnerId"/> names the item (<c>task:&lt;id&gt;</c>,
-/// <c>autoupdate</c>, <c>autopatch</c>); <paramref name="OwnerId"/> is the recorded owner (an email, or
+/// Who an unattended run belongs to. <see cref="RunnerId"/> names the item (<c>task:&lt;id&gt;</c>,
+/// <c>autoupdate</c>, <c>autopatch</c>); <see cref="OwnerId"/> is the recorded owner (<c>user:&lt;email&gt;</c>, or
 /// <c>key:&lt;id&gt;</c> for an MCP key), or <c>null</c> for an item from before owners were recorded.
+/// <para>Contract 0014 (D1): built only by the named factories, so no runner id outside <see cref="PrincipalIds"/> can
+/// be written; the ids are the ones the runners always used, byte for byte.</para>
 /// </summary>
-public sealed record AutomationActor(string RunnerId, string DisplayName, string? OwnerId, string? CreatedVia = null)
+public sealed record AutomationActor
 {
+    internal AutomationActor(string RunnerId, string DisplayName, string? OwnerId, string? CreatedVia = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(RunnerId);
+        this.RunnerId = RunnerId;
+        this.DisplayName = DisplayName ?? throw new ArgumentNullException(nameof(DisplayName));
+        this.OwnerId = OwnerId;
+        this.CreatedVia = CreatedVia;
+    }
+
+    public string RunnerId { get; init; }
+    public string DisplayName { get; init; }
+    public string? OwnerId { get; init; }
+    public string? CreatedVia { get; init; }
+
+    /// <summary>A scheduled task, owned and set up by whoever created it.</summary>
+    public static AutomationActor ForTask(string taskId, string name, string? ownerId, string? createdVia) =>
+        new(PrincipalIds.Task(taskId), $"Scheduled task '{name}'", ownerId, createdVia);
+
+    /// <summary>An endpoint check; only an Admin creates or takes it over in the UI, so its owner is its provenance.</summary>
+    public static AutomationActor ForCheck(string checkId, string name, string? ownerId) =>
+        new(PrincipalIds.Check(checkId), $"Endpoint check '{name}'", ownerId, ownerId);
+
+    /// <summary>A Git deployment's unattended runs; its owner is its provenance.</summary>
+    public static AutomationActor ForGitDeploy(string appId, string name, string? ownerId) =>
+        new(PrincipalIds.GitDeploy(appId), $"Git deployment '{name}'", ownerId, ownerId);
+
+    /// <summary>The nightly AutoUpdate run.</summary>
+    public static AutomationActor ForAutoUpdate(string? ownerId) =>
+        new(PrincipalIds.AutoUpdate, "AutoUpdate", ownerId, ownerId);
+
+    /// <summary>The nightly AutoPatch run.</summary>
+    public static AutomationActor ForAutoPatch(string? ownerId) =>
+        new(PrincipalIds.AutoPatch, "AutoPatch", ownerId, ownerId);
+
+    /// <summary>A preview of AutoPatch, run for the person or key that asked for it.</summary>
+    public static AutomationActor ForAutoPatchPreview(string? onBehalfOf) =>
+        new(PrincipalIds.AutoPatchPreview, "AutoPatch preview", onBehalfOf);
+
+    /// <summary>A webhook delivery on its owner; the owner is its provenance.</summary>
+    public static AutomationActor ForWebhook(string webhookId, string name, string? ownerId) =>
+        new(PrincipalIds.Webhook(webhookId), $"Webhook '{name}'", ownerId, ownerId);
+
+    /// <summary>A delivery for a webhook that was removed meanwhile: no owner, nothing runs.</summary>
+    public static AutomationActor ForRemovedWebhook(string webhookId) =>
+        new(PrincipalIds.Webhook(webhookId), $"Webhook {webhookId} (removed)", null);
+
+    /// <summary>The VPN bring-up at start-up.</summary>
+    public static AutomationActor ForVpnBootstrap(string displayName, string? ownerId) =>
+        new(PrincipalIds.VpnBootstrap, displayName, ownerId, ownerId);
     /// <summary>The operation id of the run (R1-18), when the item has one of its own — a webhook delivery's run id.
     /// Otherwise the gateway assigns one per call.</summary>
     public string? OperationId { get; init; }
@@ -287,7 +338,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         var capability = _catalog.Find(capabilityId);
         var target = capability is null ? new MutationTarget("unknown", "") : MutationTargets.FromArguments(capability, args);
         var principal = string.IsNullOrWhiteSpace(actor.OwnerId)
-            ? new MutationPrincipal(MutationPrincipalKind.Automation, "unowned:" + actor.RunnerId,
+            ? new MutationPrincipal(MutationPrincipalKind.Automation, PrincipalIds.Unowned(actor.RunnerId),
                 $"{actor.DisplayName} (no owner)", McpPermissionLevels.Read)
             : PrincipalOf(actor, capability);
         return _gateway.RefuseAsync(new MutationRequest(capabilityId, principal, MutationSurface.Automation, target, args,
@@ -379,7 +430,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         var level = !_options.CurrentValue.RequireOwner && capability is not null
             ? capability.RequiredLevel
             : McpPermissionLevels.Read;
-        return new MutationPrincipal(MutationPrincipalKind.Automation, "unowned:" + actor.RunnerId,
+        return new MutationPrincipal(MutationPrincipalKind.Automation, PrincipalIds.Unowned(actor.RunnerId),
             $"{actor.DisplayName} (no owner)", level);
     }
 }
