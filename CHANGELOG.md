@@ -9,10 +9,12 @@ All notable changes to Whiskers are documented here. The format follows
 - **CodeQL triage before 1.0 (`docs/security/codeql-triage-2026-11.md`).** Every logged value now reaches the log on
   one line (no value can forge a log line), and an account's address never reaches the application log: the
   redacting logger writes it as a per-process pseudonym `[account:1a2b3c4d]` (contract 0003). The audit rows in the
-  database are unchanged and keep the address. A database password detected from a container's environment is
-  withheld from every logged or stored host command, also when it contains spaces or quotes; the Neo4j database
-  listing passes the password through the environment instead of `-p` on the command line (where the host's
-  process list showed it).
+  database are unchanged and keep the address. A database password detected from a container's environment no
+  longer stands in any host command or command line, whatever its length or characters: the command names the
+  client's variable (`docker exec -e PGPASSWORD` / `MYSQL_PWD` / `REDISCLI_AUTH` / `NEO4J_PASSWORD`) and Whiskers hands
+  the value over beside it — in the environment locally and over mTLS, on standard input over SSH. Neo4j no longer gets
+  `-p <password>` on its command line, and Redis now authenticates when a password is set. MongoDB is unchanged
+  (Whiskers does not authenticate to it).
 - **Cookie flags (CodeQL triage).** With `Oidc:RequireHttpsMetadata=false` the OIDC nonce and correlation cookies now
   follow the request's scheme — `Secure` over HTTPS (also behind a trusted proxy), still without over plain HTTP — instead
   of never being `Secure`. The language cookie (`/set-culture`) is `HttpOnly`, `SameSite=Lax` and `Secure` over HTTPS.

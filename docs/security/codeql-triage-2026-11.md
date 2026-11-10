@@ -10,7 +10,7 @@ Auf GitHub ist nichts geschlossen oder verworfen worden; das entscheidet der Mai
 |---|---:|---:|---:|---|
 | `cs/log-forging` | 29 | 27 | 2 | zentral im Logger (`RedactingLoggerFactory` → `LogSafe.OneLine`), dazu `AuditLogService` an der Stelle |
 | `cs/exposure-of-sensitive-information` | 26 | 18 | 8 | zentral im Logger (`LogSafe.Addresses`), dazu `LogSafe.Account`/`LogSafe.Value` an den Stellen, die ein Konto loggen |
-| `cs/cleartext-storage-of-sensitive-information` | 4 | 4 | 0 | `DatabaseService.Withhold` (DB-Passwort als bekanntes Geheimnis), Neo4j-Passwort aus argv in die Umgebung |
+| `cs/cleartext-storage-of-sensitive-information` | 4 | 4 | 0 | **behoben im Datenfluss:** das DB-Passwort steht in keinem Befehl mehr; der Befehl nennt die Variable (`docker exec -e PGPASSWORD`), der Wert geht über `HostCommandSecrets` beiseite (Umgebung bzw. stdin) |
 | `cs/web/cookie-secure-not-set` | 3 | 2 | 1 (#86, trotzdem gehärtet) | **behoben** nach Freigabe des Nutzers (2026-11-10): OIDC-Nonce/-Correlation ohne HTTPS-Metadaten `SameAsRequest`; Sprach-Cookie `Secure` nach Schema, `HttpOnly`, `Lax` |
 
 „Echt“ heisst: ein Wert, der von aussen kommt (Tool-/HTTP-Argument, Webhook-Pfad, Ausgabe eines Hosts, Konto-Adresse),
@@ -122,20 +122,56 @@ CodeQL hält jeden Bezeichner mit „Email“ im Namen für private Daten — au
 
 | # | Ort | Urteil | Begründung | Massnahme |
 |---|---|---|---|---|
-| 26 | `Services/Server/HostCommandExecutor.cs:340` | echt | Zeitüberschreitung (Warning, wird immer geschrieben) loggt die Argumente des Prozesses. Bei einer Datenbank-Aktion stehen darin DB-Passwörter aus der Container-Umgebung (`DatabaseDetector.GetFirst`, `POSTGRES_PASSWORD` usw.). `SecretRedactor` erkennt `PGPASSWORD=…` nur bis zum ersten Leerzeichen und die zweifach shell-gequotete Form (`'\''…'\''`) nicht vollständig; Neo4j bekam das Passwort als eigenes argv-Element `-p <pw>`, das kein Muster erkennt (und das in der Prozessliste des Hosts stand) | `DatabaseService.Withhold`: das Passwort wird vor dem Aufruf in allen Schreibweisen, in denen es im Befehl steht (roh, einmal und zweimal gequotet), als `KnownSecrets` registriert → `SecretRedactor` schreibt `***`. Neo4j-Datenbankliste nutzt jetzt `NEO4J_PASSWORD` in der Umgebung wie die anderen Neo4j-Aufrufe |
-| 25 | `Services/Server/HostCommandExecutor.cs:181` | echt | wie #26, Debug-Zeile vor einem SSH-Befehl | wie #26 |
-| 24 | `Services/Server/HostCommandExecutor.cs:114` | echt | wie #26, Debug-Zeile vor einem mTLS-Docker-Hostbefehl | wie #26 |
-| 23 | `Services/Server/HostCommandExecutor.cs:97` | echt | wie #26, Debug-Zeile vor einem lokalen nsenter-Befehl | wie #26 |
+| 26 | `Services/Server/HostCommandExecutor.cs:340` (jetzt 357) | echt — **behoben (Datenfluss)** | Zeitüberschreitung (Warning, wird immer geschrieben) loggt die Argumente des Prozesses. Bei einer Datenbank-Aktion standen darin DB-Passwörter aus der Container-Umgebung (`DatabaseDetector.GetFirst`, `POSTGRES_PASSWORD` usw.): `PGPASSWORD='…' pg_dump`, `MYSQL_PWD='…' mysql`, `NEO4J_PASSWORD='…' cypher-shell` in einem `sh -c` und Neo4j als argv `-p <pw>`. `SecretRedactor` erkannte das nur teilweise (bis zum ersten Leerzeichen, nicht in der zweifach gequoteten Form) | Das Passwort gelangt nicht mehr in den Befehl (siehe unten). Die Zeile loggt jetzt z. B. `docker exec -e PGPASSWORD -- 'c0ffee' 'pg_dump' …` |
+| 25 | `Services/Server/HostCommandExecutor.cs:181` (jetzt 189) | echt — **behoben (Datenfluss)** | wie #26, Debug-Zeile vor einem SSH-Befehl | wie #26; vor dem Befehl steht nur `IFS= read -r PGPASSWORD \|\| exit 97; export PGPASSWORD;` |
+| 24 | `Services/Server/HostCommandExecutor.cs:114` (jetzt 118) | echt — **behoben (Datenfluss)** | wie #26, Debug-Zeile vor einem mTLS-Docker-Hostbefehl | wie #26 |
+| 23 | `Services/Server/HostCommandExecutor.cs:97` (jetzt 99) | echt — **behoben (Datenfluss)** | wie #26, Debug-Zeile vor einem lokalen nsenter-Befehl | wie #26 |
+
+**Was an den vier Stellen gespeichert wird.** Alle vier schreiben in das Anwendungs-Log (drei Debug-Zeilen, eine
+Warning bei Zeitüberschreitung); derselbe Befehlstext ist außerdem die argv des `nsenter`-/`ssh`-Prozesses (Prozessliste
+des Whiskers-Hosts) bzw. das `Cmd` des Helfer-Containers, und das `sh -c` im Datenbank-Container stand in dessen
+Prozessliste. In eine Befehls-Historie oder das Audit-Log gehen die DB-Befehle nicht (das Audit der Datenbank-Aktionen
+schreibt die Abfrage, nicht den Befehl).
+
+**Der neue Datenfluss.** Der Befehl nennt nur noch den Namen der Variable, aus der der Client sein Passwort liest:
+`docker exec -e PGPASSWORD -- <container> pg_dump …`. Den Wert reicht `DatabaseService` über
+`HostCommandSecrets.Provide` an genau diesen einen Executor-Aufruf (`AsyncLocal`, die Schnittstelle
+`IHostCommandExecutor` und die Gateway-Regeln auf ihren Aufrufern bleiben unverändert). Der Executor liefert ihn je
+Transport neben dem Befehl aus:
+
+| Transport | Übergabe |
+|---|---|
+| lokal (`nsenter`) | Umgebung des `nsenter`-Prozesses → Host-Shell → `docker exec -e` |
+| mTLS (Helfer-Container) | `Env` des Helfer-Containers → `nsenter` → Host-Shell → `docker exec -e`. Der Wert steht bis zum Entfernen des Helfers in dessen Konfiguration auf diesem Host — auf demselben Host, auf dem er ohnehin in der Konfiguration des Datenbank-Containers steht, aus der er stammt |
+| SSH | Standardeingabe von `ssh`; die entfernte Shell liest ihn mit `IFS= read -r NAME` in die Variable und exportiert sie. Fehlt der Wert, bricht der Befehl vor dem Start ab (Exit 97) |
+
+| Datenbank | Variable | vorher | jetzt |
+|---|---|---|---|
+| PostgreSQL | `PGPASSWORD` | im Befehlstext (nur beim Dump) | `docker exec -e PGPASSWORD`, für jede Aktion |
+| MySQL/MariaDB | `MYSQL_PWD` | im Befehlstext (`sh -c "MYSQL_PWD='…' mysql …"`) | `docker exec -e MYSQL_PWD`, `mysql`/`mysqldump` direkt als argv |
+| Redis | `REDISCLI_AUTH` | gar nicht übergeben | `docker exec -e REDISCLI_AUTH` (authentifiziert jetzt, wenn ein Passwort gesetzt ist) |
+| Neo4j | `NEO4J_PASSWORD` | im Befehlstext bzw. als argv `-p <pw>` | `docker exec -e NEO4J_PASSWORD`, `cypher-shell -u <user>` |
+| MongoDB | – | gar nicht übergeben | weiterhin nicht: `mongosh` liest ein Passwort nur aus argv, einer URI oder einer Eingabeaufforderung, und Whiskers authentifiziert sich bei MongoDB nicht. Sollte das kommen, ginge es ohne argv nur über eine Konfigurationsdatei — offen benannt, nicht gebaut |
+
+**Kurze Passwörter.** Die Lücke für Passwörter unter 8 Zeichen ist strukturell zu: der Wert steht in keinem Text mehr,
+den ein Muster oder `KnownSecrets` bereinigen müsste. Eine zusätzliche Erkennungsregel für kurze Werte gibt es bewusst
+nicht — `KnownSecrets` bleibt bei 8 Zeichen Mindestlänge, weil ein kurzer, häufiger Wert („admin“, „root“) sonst überall
+in fremder Ausgabe zu `***` würde. `DatabaseService.Withhold` registriert Passwörter ab 8 Zeichen weiter als bekanntes
+Geheimnis, als zweite Linie für den Fall, dass ein Client es einmal in einer Fehlermeldung zurückgibt.
+
+**CodeQL.** Der Fluss von `GetFirst` endet jetzt in `ProcessStartInfo.Environment`, im `Env` des Helfers bzw. in der
+Standardeingabe von `ssh` — keine Log-Senke mehr. Ob CodeQL die Standardeingabe als Speicher-Senke wertet, zeigt der
+nächste Lauf; dann wäre das ein neuer Alarm an `HostCommandExecutor.RunProcessAsync` und kein Klartext-Speicher.
+
+Tests: `HostCommandSecretsTests` (je Datenbank-Art und mit Passwörtern aus 3 Zeichen, mit Leerzeichen, Hochkomma,
+Anführungszeichen, `$HOME` und Backticks: weder im Befehl noch als argv, der Wert wird beiseite übergeben; der
+mTLS-Helfer bekommt ihn als `Env`; über SSH liest eine echte `sh` ihn aus der Standardeingabe, lokal aus der Umgebung;
+falsche Namen und Werte mit Zeilenumbruch werden abgelehnt).
 
 **INV-52 / SSH-Schlüssel:** nicht betroffen. Quelle aller vier Alarme ist `DatabaseDetector.GetFirst` (Passwörter aus
 der Umgebung von Datenbank-Containern), nicht der SSH-Schlüssel. Der Schlüssel liegt seit INV-52 versiegelt auf der
 Platte und wird nur als kurzlebige 0600-Lease in `/dev/shm` geöffnet; sein Inhalt wird nie geloggt.
 
-**Rest:** `KnownSecrets` nimmt nur Werte ab 8 Zeichen an. Ein kürzeres Passwort mit Leerzeichen oder Hochkomma kann in
-einer Debug- oder Timeout-Zeile teilweise sichtbar bleiben; ohne Leerzeichen greift weiter das Muster `PGPASSWORD=…` /
-`MYSQL_PWD=…` / `…PASSWORD=…`. CodeQL wird die Alarme voraussichtlich nicht schliessen (der Fluss läuft weiter über
-`SecretRedactor.Redact`, den CodeQL nicht als Bereinigung kennt) → nach Merge mit Verweis auf
-`LogSafeTests.A_database_password_never_stands_in_a_logged_command` als „Won't fix“ schliessen.
 
 ### cs/web/cookie-secure-not-set (3) — behoben nach Freigabe des Nutzers (2026-11-10)
 
@@ -184,3 +220,13 @@ Alarm stehen, mit Verweis auf diese Tests schliessen.
   einzeilig und ohne Adresse — Erfolg und Notfall-Zeile, ohne die Fassade)
 - `A_database_password_never_stands_in_a_logged_command` (PostgreSQL, MySQL, Neo4j; Passwort mit Leerzeichen und
   Hochkomma; kein `-p` als argv-Element)
+
+`src/Whiskers.Tests/HostCommandSecretsTests.cs` (CodeQL #23–#26, Datenfluss):
+
+- `A_database_password_is_passed_beside_the_command_never_in_it` (25 Fälle: PostgreSQL, MySQL, Redis, Neo4j, MongoDB ×
+  5 Passwörter — 3 Zeichen, mit Leerzeichen, Hochkomma, Anführungszeichen, `$HOME` und Backticks)
+- `Without_a_password_no_variable_is_named_or_passed`
+- `The_mtls_helper_gets_the_secret_as_its_environment_and_not_in_its_command`
+- `Over_ssh_the_remote_shell_reads_each_secret_from_standard_input`, `Over_ssh_a_missing_value_stops_the_command_before_it_runs`,
+  `Locally_the_secret_is_in_the_environment_of_the_process_not_its_arguments` (echte `sh`; ohne `sh` übersprungen)
+- `A_name_or_a_value_that_cannot_travel_is_refused` (6 Fälle), `A_scope_ends_with_its_handle_and_restores_the_outer_one`
