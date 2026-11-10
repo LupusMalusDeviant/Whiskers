@@ -70,6 +70,13 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         "aitrigger.save",
     }.ToFrozenSet(StringComparer.Ordinal);
 
+    /// <summary>Host-level capabilities that act on one named object on their server (D11): an nginx site, a systemd
+    /// unit, a firewall rule. Resolved against the host's own listing and confirmed before they run.</summary>
+    public static IReadOnlySet<string> HostObjects { get; } = new[]
+    {
+        "nginx.update", "nginx.site_enable", "nginx.site_disable", "systemd.manage", "firewall.rule_remove",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
     private static readonly TimeSpan Short = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan Normal = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan Long = TimeSpan.FromMinutes(30);
@@ -151,9 +158,8 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
     private static TargetResolutionKind ResolutionOf(string id, string kind) =>
         Creates.Contains(id) || Upserts.Contains(id) ? TargetResolutionKind.Creates
         : Singletons.Contains(id) ? TargetResolutionKind.Singleton
-        // A host-level operation acts on its server; nginx sites, systemd units and firewall rules become objects on
-        // it with contract 0012 step 6 (D11).
-        : kind == "host" ? TargetResolutionKind.Server
+        // A host-level operation acts on its server; nginx sites, systemd units and firewall rules are objects on it (D11).
+        : kind == "host" && !HostObjects.Contains(id) ? TargetResolutionKind.Server
         : TargetResolutionKind.Object;
 
     private static Type TargetTypeOf(string id, string kind, TargetResolutionKind resolution)

@@ -108,6 +108,66 @@ public sealed partial class MutationTargetResolver
     internal static string Hash(params string?[] parts) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\u001f", parts.Select(p => p ?? "")))));
 
+    // ---- Host objects (D11) ----
+
+    /// <summary>
+    /// An nginx site (<c>siteName</c>, exactly a file in sites-available), a systemd unit (<c>serviceName</c>, a unit
+    /// file or loaded unit, <c>.service</c> optional) or a firewall rule (<c>ruleNumber</c>, a rule of the numbered ufw
+    /// list) on the resolved server. Unknown is refused before policy. The fingerprint is the object's identity — for a
+    /// rule its number and text, so a list renumbered between decision and run is refused as changed (D9).
+    /// </summary>
+    private async Task<TargetResolution> HostObjectAsync(MutationRequest request, Capability capability, MutationTarget host)
+    {
+        var serverId = host.ServerId!;
+        switch (capability.Id)
+        {
+            case "nginx.update" or "nginx.site_enable" or "nginx.site_disable":
+            {
+                if (MutationTargets.String(request.Arguments, "siteName") is not { } site)
+                    return Refuse("The nginx site is required.");
+                if (_services.GetService<Whiskers.Services.Server.INginxService>() is not { } nginx)
+                    return Refuse("nginx sites cannot be listed on this Whiskers.");
+                var sites = await nginx.ListSitesAsync(serverId);
+                if (!sites.Any(s => string.Equals(s.Name, site, StringComparison.Ordinal)))
+                    return Refuse($"Unknown nginx site: '{site}'.", site);
+                return Done(host with { Name = site }, t => new ResolvedHostObject(Token, t, Hash(serverId, "nginx", site), site));
+            }
+            case "systemd.manage":
+            {
+                if (MutationTargets.String(request.Arguments, "serviceName") is not { } unit)
+                    return Refuse("The systemd unit is required.");
+                if (_services.GetService<Whiskers.Services.Server.ISystemdService>() is not { } systemd)
+                    return Refuse("systemd units cannot be listed on this Whiskers.");
+                var units = await systemd.ListUnitNamesAsync(serverId);
+                var canonical = units.FirstOrDefault(u => string.Equals(u, unit, StringComparison.Ordinal))
+                                ?? units.FirstOrDefault(u => string.Equals(u, unit + ".service", StringComparison.Ordinal));
+                if (canonical is null)
+                    return Refuse($"Unknown systemd unit: '{unit}'.", unit);
+                return Done(host with { Name = unit, Related = host.Related.Append(canonical).Distinct(StringComparer.Ordinal).ToList() },
+                    t => new ResolvedHostObject(Token, t, Hash(serverId, "systemd", canonical), unit));
+            }
+            case "firewall.rule_remove":
+            {
+                if (!request.Arguments.TryGetValue("ruleNumber", out var value)
+                    || !(value.ValueKind == System.Text.Json.JsonValueKind.Number && value.TryGetInt32(out var number)
+                         || value.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(value.GetString(), out number))
+                    || number <= 0)
+                    return Refuse("The firewall rule number is required.");
+                if (_services.GetService<Whiskers.Services.Server.IFirewallService>() is not { } firewall)
+                    return Refuse("Firewall rules cannot be listed on this Whiskers.");
+                var status = await firewall.GetStatusAsync(serverId);
+                var rule = status.Rules.FirstOrDefault(r => r.Number == number);
+                var named = number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (rule is null)
+                    return Refuse($"Unknown firewall rule: '{named}'.", named);
+                return Done(host with { Name = named, Related = host.Related.Append(rule.Raw.Trim()).Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList() },
+                    t => new ResolvedHostObject(Token, t, Hash(serverId, "ufw", named, rule.Raw.Trim()), named));
+            }
+            default:
+                return Refuse($"'{capability.Id}' acts on a host object Whiskers cannot resolve.");
+        }
+    }
+
     // ---- Volumes (D5) ----
 
     /// <summary>

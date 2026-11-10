@@ -417,7 +417,11 @@ public class MutationScopeGuardTests
         var volumes = MutationScopeProxy<Whiskers.Services.Backup.IVolumeBackupService>.Wrap(inner, WithServers(
             new Whiskers.Models.ServerConfig { Id = "local", Name = "A" },
             new Whiskers.Models.ServerConfig { Id = "server-b", Name = "B", IsDefault = true }));
-        var restoreOnB = DeployOn("server-b", "op-r3a") with { CapabilityId = "volume.restore" };
+        // Contract 0012 (D5): a restore decision names its volume (the resolver records it as the target's name).
+        var restoreOnB = DeployOn("server-b", "op-r3a") with
+        {
+            CapabilityId = "volume.restore", Target = new MutationTarget("volume", "backup-1", "data", "server-b"),
+        };
         using (MutationScope.Begin("volume.restore", "op-r3a", request: restoreOnB))
         {
             await Assert.ThrowsAsync<MutationScopeViolationException>(() => volumes.BackupVolumeAsync("data", "app", serverId: null));
@@ -426,7 +430,10 @@ public class MutationScopeGuardTests
             Assert.Equal(1, inner.Backups);
         }
 
-        var restoreOnLocal = DeployOn("local", "op-r3b") with { CapabilityId = "volume.restore" };
+        var restoreOnLocal = DeployOn("local", "op-r3b") with
+        {
+            CapabilityId = "volume.restore", Target = new MutationTarget("volume", "backup-1", "data", "local"),
+        };
         using (MutationScope.Begin("volume.restore", "op-r3b", request: restoreOnLocal))
             await volumes.BackupVolumeAsync("data", "app", serverId: null);       // omitted = local = the decided server
         Assert.Equal(2, inner.Backups);

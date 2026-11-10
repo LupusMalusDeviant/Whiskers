@@ -67,8 +67,8 @@
             var sessionId = Whiskers.Services.Terminal.TerminalSession.NewId();
             _session = await Mutations.RunAsync("terminal.container_open",
                 new { containerId = ContainerId, serverId = ServerId },
-                ct => SessionManager.OpenContainerShellAsync(
-                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, ServerId, ContainerId), ct));
+                (ResolvedContainer c, CancellationToken ct) => SessionManager.OpenContainerShellAsync(
+                    new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, c.ServerId!, c.Id), ct));
 
             _ = PumpStreamsAsync(_session.Output, _session.Errors, _cts.Token);
         }

@@ -170,13 +170,14 @@ public class FirewallService : IFirewallService
         return await _executor.ExecuteAsync(serverId, command);
     }
 
-    public async Task<CommandResult> RemoveRuleAsync(string serverId, int ruleNumber)
+    public async Task<CommandResult> RemoveRuleAsync(string serverId, string ruleNumber)
     {
-        if (ruleNumber <= 0)
+        if (!int.TryParse(ruleNumber, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number)
+            || number <= 0)
             return new CommandResult { ExitCode = -1, Error = "Rule number must be a positive integer" };
 
-        var command = $"echo y | ufw delete {ruleNumber}";
-        _logger.LogInformation("Removing firewall rule #{RuleNumber} on {ServerId}", ruleNumber, serverId);
+        var command = $"echo y | ufw delete {number}";
+        _logger.LogInformation("Removing firewall rule #{RuleNumber} on {ServerId}", number, serverId);
         return await _executor.ExecuteAsync(serverId, command);
     }
 

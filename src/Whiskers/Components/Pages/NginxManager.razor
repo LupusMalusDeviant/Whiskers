@@ -170,7 +170,7 @@ else
             var siteName = _editingSite;
             var content = _editContent;
             var result = await Mutations.RunAsync("nginx.update", new { serverId, siteName, content },
-                _ => NginxService.UpdateSiteConfigAsync(serverId, siteName, content));
+                (ResolvedHostObject h, CancellationToken _) => NginxService.UpdateSiteConfigAsync(h.ServerId!, h.SubObject!, content));
             if (result.Success)
             {
                 Snackbar.Add(L["NginxManager_Snackbar_SavedReloaded"].Value, Severity.Success);
@@ -194,9 +194,9 @@ else
             var serverId = ServerId;
             var result = enable
                 ? await Mutations.RunAsync("nginx.site_enable", new { serverId, siteName = name },
-                    _ => NginxService.EnableSiteAsync(serverId, name))
+                    (ResolvedHostObject h, CancellationToken _) => NginxService.EnableSiteAsync(h.ServerId!, h.SubObject!))
                 : await Mutations.RunAsync("nginx.site_disable", new { serverId, siteName = name },
-                    _ => NginxService.DisableSiteAsync(serverId, name));
+                    (ResolvedHostObject h, CancellationToken _) => NginxService.DisableSiteAsync(h.ServerId!, h.SubObject!));
             if (result.Success)
             {
                 Snackbar.Add(enable ? L["NginxManager_Snackbar_SiteEnabled", name].Value : L["NginxManager_Snackbar_SiteDisabled", name].Value, Severity.Success);
@@ -230,7 +230,7 @@ else
         {
             var serverId = ServerId;
             var result = await Mutations.RunAsync("nginx.reload", new { serverId },
-                _ => NginxService.ReloadAsync(serverId));
+                (ResolvedHostObject h, CancellationToken _) => NginxService.ReloadAsync(h.ServerId!));
             Snackbar.Add(result.Success ? L["NginxManager_Snackbar_Reloaded"].Value : L["NginxManager_Snackbar_ReloadFailed", result.Error ?? ""].Value,
                 result.Success ? Severity.Success : Severity.Error);
         }

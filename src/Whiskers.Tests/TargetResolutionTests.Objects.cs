@@ -57,6 +57,8 @@ public sealed partial class TargetResolutionTests
         "container" => typeof(ResolvedContainer),
         "workload" => typeof(ResolvedWorkload),
         "network" => typeof(ResolvedNetwork),
+        // D11: an nginx site, a systemd unit or a firewall rule on its server.
+        "host" when CapabilityCatalog.HostObjects.Contains(capability.Id) => typeof(ResolvedHostObject),
         "server" when capability.Id.StartsWith("endpointcheck.", StringComparison.Ordinal) => typeof(ResolvedRecord),
         "server" => typeof(ResolvedServer),
         "cloud-server" => typeof(ResolvedCloudServer),

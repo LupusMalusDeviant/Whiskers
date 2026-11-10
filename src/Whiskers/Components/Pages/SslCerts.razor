@@ -121,7 +121,7 @@ else
         {
             var serverId = ServerId;
             var result = await Mutations.RunAsync("ssl.renew", new { serverId, certName },
-                _ => SslCertService.RenewAsync(serverId, certName));
+                (ResolvedHostObject h, CancellationToken _) => SslCertService.RenewAsync(h.ServerId!, certName));
             Snackbar.Add(result.Success ? L["SslCerts_Snackbar_Renewed", certName].Value : L["SslCerts_Snackbar_Error", result.Error].Value,
                 result.Success ? Severity.Success : Severity.Error);
             await LoadCerts();
@@ -140,7 +140,7 @@ else
         {
             var serverId = ServerId;
             var result = await Mutations.RunAsync("ssl.renew", new { serverId },
-                _ => SslCertService.RenewAllAsync(serverId));
+                (ResolvedHostObject h, CancellationToken _) => SslCertService.RenewAllAsync(h.ServerId!));
             Snackbar.Add(result.Success ? L["SslCerts_Snackbar_AllRenewed"].Value : L["SslCerts_Snackbar_Error", result.Error].Value,
                 result.Success ? Severity.Success : Severity.Error);
             await LoadCerts();

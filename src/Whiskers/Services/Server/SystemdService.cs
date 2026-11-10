@@ -63,6 +63,27 @@ public class SystemdService : ISystemdService
         return units;
     }
 
+    public async Task<IReadOnlyList<string>> ListUnitNamesAsync(string serverId)
+    {
+        // Unit files (enabled, disabled, static, masked, generated) and loaded units without one (transient), active or
+        // not: everything `systemctl start <unit>` could name.
+        var filesTask = _executor.ExecuteAsync(serverId,
+            "systemctl list-unit-files --type=service --no-pager --no-legend --plain 2>/dev/null");
+        var unitsTask = _executor.ExecuteAsync(serverId,
+            "systemctl list-units --all --type=service --no-pager --no-legend --plain 2>/dev/null");
+        var files = await filesTask;
+        var units = await unitsTask;
+        // Fail closed: a host that cannot be asked resolves nothing.
+        if (!files.Success && !units.Success)
+            throw new InvalidOperationException("The host's systemd units could not be listed.");
+        return ParseUnitFiles(files.Success ? files.Output : "").Keys
+            .Concat((units.Success ? units.Output : "").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => l.Trim().TrimStart('●', '*').Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? ""))
+            .Where(n => n.EndsWith(".service", StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
     public async Task<string> GetStatusAsync(string serverId, string serviceName)
     {
         ValidateServiceName(serviceName);

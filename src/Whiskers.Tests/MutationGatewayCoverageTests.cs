@@ -305,6 +305,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Server.SystemdService", "GetJournalAsync", "journalctl"),
         ("Whiskers.Services.Server.SystemdService", "GetStatusAsync", "systemctl status"),
         ("Whiskers.Services.Server.SystemdService", "ListServicesAsync", "systemctl list-units"),
+        ("Whiskers.Services.Server.SystemdService", "ListUnitNamesAsync", "systemctl list-unit-files / list-units --all (contract 0012, D11: the units a target resolves against)"),
         // The primitive's own default body hands the command to the transport: it is the guarded call itself.
         ("Whiskers.Services.Server.IHostCommandExecutor", "ExecuteMutationAsync", "the primitive's body (guarded by [MutationPrimitive])"),
     ];

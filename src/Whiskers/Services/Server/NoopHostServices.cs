@@ -23,7 +23,7 @@ public sealed class NoopFirewallService : IFirewallService
         => Task.FromResult(new FirewallStatus { RawOutput = HostManagementDisabled.Message });
     public Task<CommandResult> AddRuleAsync(string serverId, string port, string protocol = "tcp", string action = "allow", string? from = null)
         => Task.FromResult(HostManagementDisabled.Result());
-    public Task<CommandResult> RemoveRuleAsync(string serverId, int ruleNumber)
+    public Task<CommandResult> RemoveRuleAsync(string serverId, string ruleNumber)
         => Task.FromResult(HostManagementDisabled.Result());
     public Task<CommandResult> SetStatusAsync(string serverId, bool enable)
         => Task.FromResult(HostManagementDisabled.Result());
@@ -46,6 +46,7 @@ public sealed class NoopNginxService : INginxService
 public sealed class NoopSystemdService : ISystemdService
 {
     public Task<List<SystemdUnit>> ListServicesAsync(string serverId) => Task.FromResult(new List<SystemdUnit>());
+    public Task<IReadOnlyList<string>> ListUnitNamesAsync(string serverId) => Task.FromResult<IReadOnlyList<string>>([]);
     public Task<string> GetStatusAsync(string serverId, string serviceName) => Task.FromResult(HostManagementDisabled.Message);
     public Task<string> GetJournalAsync(string serverId, string serviceName, int lines = 100) => Task.FromResult(HostManagementDisabled.Message);
     public Task<CommandResult> StartAsync(string serverId, string serviceName) => Task.FromResult(HostManagementDisabled.Result());

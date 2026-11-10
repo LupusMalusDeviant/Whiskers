@@ -16,7 +16,10 @@ All notable changes to Whiskers are documented here. The format follows
   delivery read it is refused as changed. A Kubernetes start, stop or restart acts on the controller the decision
   read — the patch carries its UID as a precondition, a bare pod is deleted with its UID — and no longer reads the pod
   again; a controller replaced in between is refused. The Kubernetes credentials now need `get` on replicasets and
-  `patch` on deployments and statefulsets (scaling patches the controller instead of its scale subresource).
+  `patch` on deployments and statefulsets (scaling patches the controller instead of its scale subresource). nginx
+  sites, systemd units and a firewall rule to remove are resolved against the host's own listing before policy (an
+  unknown one is refused, a rule list renumbered in between is refused as changed); the container, network, volume,
+  database, deploy, terminal, cloud and host pages act on the object the gateway resolved.
 
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix

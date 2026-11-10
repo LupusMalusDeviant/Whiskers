@@ -227,9 +227,9 @@ else
             var notes = _backupNotes;
             var backup = await Mutations.RunAsync("volume.backup",
                 new { volumeName, containerName, serverId = backupServerId },
-                async _ =>
+                async (ResolvedVolume v, CancellationToken _) =>
                 {
-                    var created = await BackupService.BackupVolumeAsync(volumeName, containerName, backupServerId, notes);
+                    var created = await BackupService.BackupVolumeAsync(v.Id, containerName, v.ServerId, notes);
                     MutationScope.Note($"Backup {created.BackupId}: {created.FileName} ({created.SizeBytes} bytes)");
                     return created;
                 });
@@ -264,7 +264,7 @@ else
         {
             await Mutations.RunAsync("volume.restore",
                 new { volumeName = backup.VolumeName, backupId = backup.BackupId, fileName = backup.FileName, serverId = backup.ServerId },
-                _ => BackupService.RestoreVolumeAsync(backup.BackupId));
+                (ResolvedVolumeBackup b, CancellationToken _) => BackupService.RestoreVolumeAsync(b.Id));
             Snackbar.Add(L["VolumeBackupsView_Snackbar_Restored", backup.VolumeName].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)
@@ -290,7 +290,7 @@ else
         {
             await Mutations.RunAsync("volume.backup_delete",
                 new { volumeName = backup.VolumeName, backupId = backup.BackupId, fileName = backup.FileName, serverId = backup.ServerId },
-                _ => BackupService.DeleteBackupAsync(backup.BackupId));
+                (ResolvedVolumeBackup b, CancellationToken _) => BackupService.DeleteBackupAsync(b.Id));
             Snackbar.Add(L["VolumeBackupsView_Snackbar_Deleted"].Value, Severity.Success);
             await LoadBackups();
         }

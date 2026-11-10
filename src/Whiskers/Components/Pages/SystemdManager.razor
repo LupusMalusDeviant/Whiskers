@@ -171,11 +171,11 @@ else
             var result = action switch
             {
                 "start" => await Mutations.RunAsync("systemd.manage", new { serverId, serviceName = name, action = "start" },
-                    _ => SystemdService.StartAsync(serverId, name)),
+                    (ResolvedHostObject h, CancellationToken _) => SystemdService.StartAsync(h.ServerId!, h.SubObject!)),
                 "stop" => await Mutations.RunAsync("systemd.manage", new { serverId, serviceName = name, action = "stop" },
-                    _ => SystemdService.StopAsync(serverId, name)),
+                    (ResolvedHostObject h, CancellationToken _) => SystemdService.StopAsync(h.ServerId!, h.SubObject!)),
                 "restart" => await Mutations.RunAsync("systemd.manage", new { serverId, serviceName = name, action = "restart" },
-                    _ => SystemdService.RestartAsync(serverId, name)),
+                    (ResolvedHostObject h, CancellationToken _) => SystemdService.RestartAsync(h.ServerId!, h.SubObject!)),
                 _ => throw new ArgumentException($"Unknown action: {action}")
             };
             Snackbar.Add(result.Success ? L["SystemdManager_Snackbar_ActionSuccess", name, action].Value : $"{name}: {result.Error}",

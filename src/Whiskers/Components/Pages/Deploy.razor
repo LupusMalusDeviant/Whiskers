@@ -265,9 +265,9 @@
             var deployName = string.IsNullOrWhiteSpace(request.ContainerName) ? request.Image : request.ContainerName;
             var id = await Mutations.RunAsync("app.deploy", new { serverId = sid, appName = deployName, image = request.Image,
                     volumes = string.Join(",", request.Volumes) },
-                async _ =>
+                async (ResolvedHostObject h, CancellationToken _) =>
                 {
-                    var created = await DeploymentService.DeployFromFormAsync(request, progress, sid);
+                    var created = await DeploymentService.DeployFromFormAsync(request, progress, h.ServerId);
                     // The created container is part of the gateway's event (R1-21).
                     MutationScope.Note($"Container {created}");
                     return created;
@@ -321,9 +321,9 @@
                 // The file goes along (as `yaml`, which the audit withholds) so the gateway checks what it names —
                 // images, volumes, bind mounts — for protected resources (R1-16).
                 () => Mutations.RunAsync("compose.deploy", new { serverId = sid, yaml },
-                    async _ =>
+                    async (ResolvedHostObject h, CancellationToken _) =>
                     {
-                        var created = await DeploymentService.DeployFromComposeAsync(yaml, progress, sid);
+                        var created = await DeploymentService.DeployFromComposeAsync(yaml, progress, h.ServerId);
                         MutationScope.Note($"{created.Count} container(s): {string.Join(", ", created)}");
                         return created;
                     }));

@@ -45,7 +45,15 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
             new AuditLogMutationSink(_db.Scopes), [], NullLogger<MutationGateway>.Instance,
             decisions: new DbPolicyDecisionStore(_db.Scopes),
             approvals: new ApprovalGate(new ApprovalStore(policy: store, persistence: _db.Persistence()), store),
-            journal: new DbOperationJournal(_db.Scopes));
+            journal: new DbOperationJournal(_db.Scopes),
+            // Contract 0012: the pages act on the object the gateway resolved, so the gateway resolves (one server).
+            targets: new MutationTargetResolver(new ServiceCollection()
+                .AddSingleton<IServerConfigService>(new FakeServerConfig(
+                    new Whiskers.Models.ServerConfig { Id = "local", Name = "Local", IsDefault = true }))
+                .AddSingleton(_docker.Object)
+                .AddSingleton(new Stub<Whiskers.Services.Cloud.ICloudControlService>().On("CloudServers",
+                    _ => new List<Whiskers.Models.ServerConfig> { new() { Id = "local", Name = "Local" } }).Object)
+                .BuildServiceProvider()));
 
         Services.AddLogging();
         Services.AddLocalization();
