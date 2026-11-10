@@ -45,6 +45,8 @@ public class MutationGatewayCoverageTests
         "container.env_file_save",   // container page: .env save + compose up
         "container.exec",            // container page: Artisan migrate / rollback
         "endpointcheck.run",         // R1-57: the monitor (as the owner) and "Run now" (as the Admin)
+        "app.deploy",                // contract 0013: deploy_app, the Deploy form, App Store — a planned compose run
+        "compose.deploy",            // deploy_compose, the compose editor and tab, webhooks — a planned compose run
     ];
 
     /// <summary>Who calls the primitive, and under which capability (the scanner sees the caller, the guard the scope).</summary>
@@ -96,7 +98,7 @@ public class MutationGatewayCoverageTests
         // MCP tools and the agent (M-rows) — McpGuardrailFilter / AgentToolInvoker
         ("mcp", "host.exec", "primitive"),
         ("mcp", "container.env_set", "primitive"),
-        ("mcp", "app.deploy", "IDeploymentService.DeployFromFormAsync"),
+        ("mcp", "app.deploy", "primitive"),
         ("mcp", "autopatch.preview", "IAutoPatchService.StartPreview"),
         ("mcp", "image.assess_update", "IUpdateRiskService.AssessAsync"),
         ("mcp", "checks.pause", "ILoopSuspensionService.Suspend"),
@@ -862,11 +864,12 @@ public class MutationGatewayCoverageTests
     [Fact]
     public void Compositions_are_explicit_and_transitive_only_through_the_table()
     {
-        Assert.True(MutationCompositions.Allows("compose.deploy", "container.create"));   // via app.deploy
+        Assert.True(MutationCompositions.Allows("compose.deploy", "container.stop"));
+        Assert.False(MutationCompositions.Allows("compose.deploy", "app.deploy"));   // contract 0013: no longer composed
         Assert.True(MutationCompositions.Allows("workload.start", "container.start"));
         Assert.False(MutationCompositions.Allows("workload.start", "container.stop"));
         Assert.False(MutationCompositions.Allows("container.start", "image.pull"));
-        Assert.False(MutationCompositions.Allows("host.exec", "container.create"));
+        Assert.False(MutationCompositions.Allows("host.exec", "container.stop"));
         Assert.Empty(MutationCompositions.Of("config.whitelist"));
     }
 }

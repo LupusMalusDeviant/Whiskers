@@ -534,6 +534,26 @@ public class ReadBackVerificationTests
         AssertFailed(outcome);
     }
 
+    [Theory]
+    [InlineData("running", "Up 2 seconds", true)]
+    [InlineData("exited", "Exited (1) 1 second ago", false)]
+    public async Task An_app_deployment_reads_back_every_container_of_its_compose_project(string state, string status, bool verified)
+    {
+        // Contract 0013, D7: app.deploy (the form, deploy_app) is a compose project — read back like compose.deploy.
+        var gateway = Gateway(Containers(Member("web", state, status)));
+
+        var outcome = await gateway.ExecuteAsync(Request("app.deploy", new { serverId = "srv1", appName = "web" }, Host("host")),
+            (_, _) =>
+            {
+                MutationScope.ReadBack(ComposeImpact.ProjectFact, "shop");
+                MutationScope.ReadBack(ComposeImpact.ServicesFact, "web");
+                return Task.FromResult("deployed");
+            });
+
+        if (verified) Assert.Equal(VerificationStatus.Verified, outcome.Verification);
+        else AssertFailed(outcome);
+    }
+
     [Fact]
     public async Task An_orphan_of_a_removed_service_does_not_fail_the_redeploy()
     {

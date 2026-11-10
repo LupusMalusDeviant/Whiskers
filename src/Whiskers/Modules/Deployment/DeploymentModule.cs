@@ -10,15 +10,16 @@ using Whiskers.Services.Templates;
 namespace Whiskers.Modules.Deployment;
 
 /// <summary>App deployment + the app store (RoadToSAP Phase 1, the final Phase-1 extraction): the `/deploy`
-/// page (form + compose deploy via <c>IDeploymentService</c>), the `/apps` page (built-in templates via
+/// page (form and compose tab, both a planned compose project through <c>ComposeRunner</c>, contract 0013), the
+/// `/apps` page (built-in templates via
 /// <c>ITemplateService</c> and multi-registry image search via <c>IImageSearchService</c> + its providers).
 /// Registrations are moved <b>verbatim</b> from Program.cs. The `/compose` editor stays in Core (it uses only
 /// <c>IDockerService</c>/<c>IHostCommandExecutor</c>), so its nav entry remains in the pseudo-module.
 ///
 /// No MCP tools of its own: <c>deploy_app</c>/<c>deploy_compose</c> live in the mixed, Core-resident
-/// <c>ContainerTools</c> (which also holds list/restart/logs/…), so it can't be split. Core therefore keeps
-/// no-op defaults (<see cref="NoopDeploymentService"/>, <c>NoopTemplateService</c>, <c>NoopImageSearchService</c>)
-/// for when this module is off; the real services registered here win by last-registration when enabled.</summary>
+/// <c>ContainerTools</c> (which also holds list/restart/logs/…) and run the compose runner, so they need nothing from
+/// this module. Core keeps no-op defaults (<c>NoopTemplateService</c>, <c>NoopImageSearchService</c>) for when this
+/// module is off; the real services registered here win by last-registration when enabled.</summary>
 public sealed class DeploymentModule : IWhiskersModule
 {
     public string Id => "deployment";
@@ -41,7 +42,6 @@ public sealed class DeploymentModule : IWhiskersModule
     {
         // Moved verbatim from Program.cs. Registered after Core's Noop* defaults (the module loop runs after
         // them), so the real services win here by last-registration.
-        services.AddScoped<IDeploymentService, DeploymentService>();
         services.AddSingleton<ITemplateService, TemplateService>();
         services.Configure<ImageSearchSettings>(config.GetSection(ImageSearchSettings.SectionName));
         services.AddSingleton<IImageSearchProvider, DockerHubSearchProvider>();

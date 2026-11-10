@@ -40,7 +40,6 @@ public static class VerificationContracts
             ["container.restart"] = VerificationContract.ReadBack("the container runs again."),
             ["container.update"] = VerificationContract.ReadBack("the recreated container runs."),
             ["container.remove"] = VerificationContract.ReadBack("the container is gone."),
-            ["container.create"] = VerificationContract.ReadBack("the container the call returned runs."),
             ["container.rollback"] = VerificationContract.ReadBack("the container of the snapshot runs again."),
             ["container.disable_restart"] = VerificationContract.None(NestedOnly),
             ["container.env_set"] = VerificationContract.None(
@@ -61,7 +60,7 @@ public static class VerificationContracts
                 "a rollout restart replaces the pods; the old pod id is gone by design."),
 
             // Deployments
-            ["app.deploy"] = VerificationContract.ReadBack("the container the deployment returned runs."),
+            ["app.deploy"] = VerificationContract.ReadBack("every container of the compose project runs."),
             ["compose.deploy"] = VerificationContract.ReadBack("every container of the compose project runs."),
             ["gitdeploy.save"] = VerificationContract.None(OwnRecord),
             ["gitdeploy.set_token"] = VerificationContract.None(OwnRecord),

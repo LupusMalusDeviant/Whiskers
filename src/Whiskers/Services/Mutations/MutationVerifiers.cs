@@ -18,8 +18,7 @@ public static class MutationVerifiers
         sp => new ContainerRestartVerifier(sp),
         sp => new ContainerRemoveVerifier(sp),
         sp => new ContainerUpdateVerifier(sp),
-        sp => new ContainerCreateVerifier(sp),
-        sp => new ContainerCreateVerifier(sp, "app.deploy"),
+        sp => new ComposeDeployVerifier(sp, "app.deploy"),
         sp => new ContainerRollbackVerifier(sp),
         // Deployments and networks
         sp => new ComposeDeployVerifier(sp),

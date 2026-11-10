@@ -27,53 +27,6 @@ internal sealed class ContainerLifecycleOperations
     private async Task<DockerClient> GetClient(string? serverId)
         => await _connectionManager.GetClientAsync(serverId);
 
-    public async Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null)
-    {
-        var client = await GetClient(serverId);
-        var portBindings = new Dictionary<string, IList<PortBinding>>();
-        var exposedPorts = new Dictionary<string, EmptyStruct>();
-
-        foreach (var (hostPort, containerPort) in request.PortMappings)
-        {
-            var key = $"{containerPort}/tcp";
-            exposedPorts[key] = default;
-            portBindings[key] = new List<PortBinding>
-            {
-                // HostIP absent/empty = bind all interfaces (Docker default); a loopback bind from
-                // `ip:host:container` compose syntax restricts publishing to that one interface.
-                new() { HostPort = hostPort, HostIP = request.PortBindIps.GetValueOrDefault(hostPort) }
-            };
-        }
-
-        var restartPolicy = request.RestartPolicy switch
-        {
-            "always" => new RestartPolicy { Name = RestartPolicyKind.Always },
-            "unless-stopped" => new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
-            "on-failure" => new RestartPolicy { Name = RestartPolicyKind.OnFailure, MaximumRetryCount = 5 },
-            _ => new RestartPolicy { Name = RestartPolicyKind.No }
-        };
-
-        var createParams = new CreateContainerParameters
-        {
-            Image = request.Image,
-            Name = request.ContainerName,
-            ExposedPorts = exposedPorts,
-            Env = request.EnvironmentVars.Select(kv => $"{kv.Key}={kv.Value}").ToList(),
-            HostConfig = new HostConfig
-            {
-                PortBindings = portBindings,
-                Binds = request.Volumes,
-                RestartPolicy = restartPolicy,
-                NetworkMode = request.NetworkName ?? "bridge"
-            }
-        };
-
-        var response = await client.Containers.CreateContainerAsync(createParams);
-        await client.Containers.StartContainerAsync(response.ID, new ContainerStartParameters());
-
-        return response.ID;
-    }
-
     /// <summary>Contract 0013, D14: <c>container.update</c> refuses a container a Whiskers compose run pinned (label
     /// <c>whiskers.image.ref</c>) — it is updated by redeploying its project.</summary>
     internal static void RefuseIfPinned(string name, IEnumerable<KeyValuePair<string, string>>? labels)
