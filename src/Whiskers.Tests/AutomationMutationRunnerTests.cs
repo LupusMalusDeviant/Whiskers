@@ -732,7 +732,9 @@ public class AutomationMutationRunnerTests
         Assert.All(log.Entries, e =>
         {
             Assert.IsType<InvalidOperationException>(e.Exception);
-            Assert.Contains(Ops, e.Message);
+            // The owner by its pseudonym: no address in the log (CodeQL triage 2026-11, contract 0003).
+            Assert.Contains(Whiskers.Utils.LogSafe.Account(Ops), e.Message);
+            Assert.DoesNotContain(Ops, e.Message);
             Assert.Contains("task:t1", e.Message);
         });
     }

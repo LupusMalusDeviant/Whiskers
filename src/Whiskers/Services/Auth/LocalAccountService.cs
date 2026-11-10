@@ -187,7 +187,7 @@ public sealed class LocalAccountService : ILocalAccountService
                 throw;
             }
             _owners.RememberLocalAccounts();
-            _logger?.LogInformation("Local account {Email} was created with role {Role}", email, role);
+            _logger?.LogInformation("Local account {Email} was created with role {Role}", Whiskers.Utils.LogSafe.Account(email), role);
             return new LocalAccountResult(true) { RecoveryCode = code, RecoveryExpiresUtc = expires };
         }
         finally { AdminGate.Release(); }
@@ -264,7 +264,7 @@ public sealed class LocalAccountService : ILocalAccountService
                 await RestoreRoleAsync(target, removedRole);
                 return LocalAccountResult.Refused(LocalAccountErrors.Conflict);
             }
-            _logger?.LogInformation("Local account {Email} was deleted", target);
+            _logger?.LogInformation("Local account {Email} was deleted", Whiskers.Utils.LogSafe.Account(target));
             return LocalAccountResult.Ok();
         }
         finally { AdminGate.Release(); }
@@ -300,7 +300,7 @@ public sealed class LocalAccountService : ILocalAccountService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger?.LogError("The role of local account {Email} could not be restored after a failed deletion ({Error})",
-                email, ex.GetType().Name);
+                Whiskers.Utils.LogSafe.Account(email), ex.GetType().Name);
         }
     }
 

@@ -294,7 +294,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         if (ApprovalEligibility.Check(approval, resolver, RequireSecondApprover) is { } refused)
         {
             _logger?.LogWarning("Approval {Id} ({Tool}, level={Level}) not {Decision} by {Resolver} (level {ResolverLevel}): {Reason}",
-                approvalId, approval.ToolName, approval.Level, approved ? "approved" : "rejected", resolver.PrincipalId,
+                approvalId, approval.ToolName, approval.Level, approved ? "approved" : "rejected", Whiskers.Utils.LogSafe.Value(resolver.PrincipalId),
                 resolver.Level, refused);
             return refused;
         }
@@ -319,7 +319,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         }
         if (selfApproved)
             _logger?.LogInformation("Approval {Id} ({Tool}) was {Decision} by its own requester {Resolver}",
-                approvalId, approval.ToolName, approved ? "approved" : "rejected", resolver.PrincipalId);
+                approvalId, approval.ToolName, approved ? "approved" : "rejected", Whiskers.Utils.LogSafe.Value(resolver.PrincipalId));
         await SafeResolve(entry, approved);
         Changed?.Invoke();
         return ApprovalDecisionResult.Decided;

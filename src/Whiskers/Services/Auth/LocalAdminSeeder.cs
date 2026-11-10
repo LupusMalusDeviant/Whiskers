@@ -32,15 +32,15 @@ public static class LocalAdminSeeder
             var result = await users.CreateAsync(
                 new AppUser { UserName = email, Email = email, EmailConfirmed = true }, password);
             if (result.Succeeded)
-                logger.LogInformation("Seeded local admin user {Email} from WHISKERS_ADMIN_PASSWORD_FILE", email);
+                logger.LogInformation("Seeded local admin user {Email} from WHISKERS_ADMIN_PASSWORD_FILE", Whiskers.Utils.LogSafe.Account(email));
             else
                 logger.LogWarning("Could not seed local admin user {Email} (check the password policy): {Errors}",
-                    email, string.Join("; ", result.Errors.Select(e => e.Description)));
+                    Whiskers.Utils.LogSafe.Account(email), string.Join("; ", result.Errors.Select(e => e.Description)));
         }
         catch (Exception ex) when (ex is not SecretFileException)
         {
             // Never brick the boot — the other auth paths must still come up.
-            logger.LogWarning(ex, "Local admin seed failed for {Email}", email);
+            logger.LogWarning(ex, "Local admin seed failed for {Email}", Whiskers.Utils.LogSafe.Account(email));
         }
     }
 }

@@ -6,6 +6,13 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **CodeQL triage before 1.0 (`docs/security/codeql-triage-2026-11.md`).** Every logged value now reaches the log on
+  one line (no value can forge a log line), and an account's address never reaches the application log: the
+  redacting logger writes it as a per-process pseudonym `[account:1a2b3c4d]` (contract 0003). The audit rows in the
+  database are unchanged and keep the address. A database password detected from a container's environment is
+  withheld from every logged or stored host command, also when it contains spaces or quotes; the Neo4j database
+  listing passes the password through the environment instead of `-p` on the command line (where the host's
+  process list showed it).
 - **Mutations act on the object the gateway resolved (INV-57 ✅, contract 0012).** Every capability declares
   how its target resolves; volumes, volume backups, log-alert rules and Whiskers' own records are resolved before policy
   like containers and servers. Right before an object is acted on it is read again: a container, rule or record that

@@ -38,6 +38,7 @@ public class DatabaseService : IDatabaseService
 
     public async Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        Withhold(creds);
         var sw = Stopwatch.StartNew();
         // INV-19: the database the query runs in is an operand of the client (psql -d, mysql -D, mongosh's
         // positional database); an empty one keeps the client's default.
@@ -55,13 +56,16 @@ public class DatabaseService : IDatabaseService
 
     public async Task<List<string>> GetDatabasesAsync(string containerId, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        Withhold(creds);
         var cmd = dbType switch
         {
             DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname" },
             DatabaseType.MySQL => BuildMysqlCmd(creds, "-e", "SHOW DATABASES"),
             DatabaseType.MongoDB => new[] { "mongosh", "--quiet", "--eval", "db.adminCommand('listDatabases').databases.forEach(d => print(d.name))" },
             DatabaseType.Redis => new[] { "redis-cli", "CONFIG", "GET", "databases" },
-            DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, "-p", creds.Password, "SHOW DATABASES YIELD name RETURN name" },
+            // The password through the environment, as every other Neo4j call passes it: as "-p <password>" it stood in the
+            // host's process list and in a logged command, where no redaction pattern recognises a bare value.
+            DatabaseType.Neo4j => new[] { "sh", "-c", $"NEO4J_PASSWORD={Sq(creds.Password)} cypher-shell -u {Sq(creds.User)} {Sq("SHOW DATABASES YIELD name RETURN name")}" },
             _ => Array.Empty<string>()
         };
 
@@ -102,6 +106,7 @@ public class DatabaseService : IDatabaseService
 
     public async Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        Withhold(creds);
         // INV-19: a read listing must not become arbitrary execution — the name is an operand of the client
         // (mongosh would read "--eval=…" as an option and run it), so it is checked before it reaches one.
         CheckDatabaseName(database, dbType);
@@ -139,6 +144,7 @@ public class DatabaseService : IDatabaseService
 
     public async Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        Withhold(creds);
         // INV-19: as in GetTablesAsync, the database name is a client operand of a read.
         CheckDatabaseName(database, dbType);
         // Escape the table identifier before embedding it in the query strings: '' for the
@@ -180,6 +186,7 @@ public class DatabaseService : IDatabaseService
 
     public async Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null, string? containerName = null)
     {
+        Withhold(creds);
         // INV-19: the name is an operand of pg_dump / mysqldump / mongodump (a leading '-' would be an option such as
         // --file=) and part of the dump's file name, which docker cp writes as root on the host (no '/', so it stays in the backup directory).
         CheckDatabaseName(database, dbType);
@@ -247,6 +254,17 @@ public class DatabaseService : IDatabaseService
     /// <see cref="UnsafeOperandException"/>; nothing has run then.</summary>
     public static string CheckDatabaseName(string? database, DatabaseType dbType) =>
         CommandOperands.RequireDatabaseName(database, mongo: dbType == DatabaseType.MongoDB);
+
+    /// <summary>The database password as the commands carry it — as given, single-quoted once (<c>sh -c</c>) and once
+    /// more (an operand of <c>docker exec</c>) — is a known secret from now on (<see cref="KnownSecrets"/>), so a command
+    /// the executor logs or a sink stores shows <c>***</c> for it, also where it contains a space or a quote that the
+    /// <c>PGPASSWORD=…</c> patterns stop at (CodeQL #23–#26). Values under 8 characters are left to those patterns.</summary>
+    internal static void Withhold(DatabaseCredentials creds)
+    {
+        if (string.IsNullOrEmpty(creds.Password)) return;
+        var once = creds.Password.Replace("'", "'\\''");
+        KnownSecrets.Register(creds.Password, once, once.Replace("'", "'\\''"));
+    }
 
     /// <summary>POSIX single-quote escaping for values interpolated into a <c>sh -c</c> string.</summary>
     private static string Sq(string? s) => "'" + (s ?? "").Replace("'", "'\\''") + "'";

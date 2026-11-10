@@ -23,6 +23,7 @@
 | [adr/](adr/) | Architecture decision records |
 | [modules/](modules/) | One page per optional module: what it adds, its toggle, its dependencies |
 | [reviews/](reviews/) | The security-fix history and incident reports, including [the 2026-08-26 log-monitor incident](reviews/2026-08-26-logmonitor-dockerd-cpu-incident.md) that drove the self-protection work |
+| [security/](security/) | Static-analysis triage: [the CodeQL triage before 1.0](security/codeql-triage-2026-11.md) (German) — every alert judged, what was fixed, what is left to close |
 | [mcp-tool-catalog.md](mcp-tool-catalog.md) | **Generated** — every MCP tool this build serves, with its permission level and owning module. Regenerated from the code; `McpToolCatalogSnapshotTests` fails the build if it drifts. Do not edit by hand. |
 | [../deploy/telemetry/README.md](../deploy/telemetry/README.md) | Mesh/mTLS telemetry deploy templates (node_exporter, VictoriaMetrics, Tailscale ACL) |
 

@@ -8,6 +8,8 @@ namespace Whiskers.Utils;
 /// formatted message, each structured value, the message template, the scopes and the exception text. A caller that
 /// logs a raw value cannot write it out, and an entry that cannot be redacted is withheld whole, never written as it
 /// was. The factory behind it keeps the real providers, so their filter rules, scopes and lifetimes are unchanged.
+/// Every structured value is also written on one line, and every account address in an entry as its pseudonym
+/// (<see cref="LogSafe"/>; CodeQL triage 2026-11): no logged value can forge a line, and no address reaches the log.
 /// </summary>
 public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactory
 {
@@ -67,10 +69,12 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
     // writes it next to its name, where no pattern would see a bare value as a secret. Numbers, flags, times and ids
     // stay typed ({InputTokens} is a count); a Guid under a secret's name is withheld like text.
     private static KeyValuePair<string, object?> Redacted(KeyValuePair<string, object?> pair) =>
-        new(pair.Key, Value(pair.Value) is var value && value is string or Guid && pair.Key != "{OriginalFormat}"
-                      && SinkRedaction.IsSecretName(pair.Key)
-            ? "***"
-            : value);
+        pair.Key == "{OriginalFormat}" && pair.Value is string template
+            // The template is code: redacted like any text, but its own line breaks are kept.
+            ? new(pair.Key, Text(template))
+            : new(pair.Key, Value(pair.Value) is var value && value is string or Guid && SinkRedaction.IsSecretName(pair.Key)
+                ? "***"
+                : value);
 
     // Numbers, flags, times and ids carry no secret and stay typed; everything else is redacted as text. A list is
     // joined, its pairs (a dictionary) as key=value, so a secret-named key marks its value for the patterns.
@@ -79,9 +83,9 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
         null => null,
         bool or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal => value,
         Enum or DateTime or DateTimeOffset or TimeSpan or Guid => value,
-        string text => Text(text),
-        IEnumerable items => Text(string.Join(", ", items.Cast<object?>().Select(Item))),
-        _ => Text(value.ToString()),
+        string text => LogSafe.OneLine(Text(text)),
+        IEnumerable items => LogSafe.OneLine(Text(string.Join(", ", items.Cast<object?>().Select(Item)))),
+        _ => LogSafe.OneLine(Text(value.ToString())),
     };
 
     private static string? Item(object? item)
@@ -161,7 +165,9 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
         }
     }
 
-    private static string Text(string? text) => SinkRedaction.Text(text) ?? "";
+    // Secrets first (a URL's user info is gone before an address is looked for), then every address becomes its pseudonym
+    // (contract 0003: no address in a log).
+    internal static string Text(string? text) => LogSafe.Addresses(SinkRedaction.Text(text) ?? "");
 
     /// <summary>A redacted entry: the message and the structured values (the template included) a formatter or a
     /// structured provider reads.</summary>
@@ -194,9 +200,9 @@ public sealed class RedactingLoggerFactory(ILoggerFactory inner) : ILoggerFactor
 /// <summary>An exception as a log provider sees it: its message and its full text — type, stack trace and inner
 /// exceptions — redacted.</summary>
 public sealed class RedactedException(Exception original)
-    : Exception(SinkRedaction.Text(original.Message))
+    : Exception(RedactingLoggerFactory.Text(original.Message))
 {
-    private readonly string _text = SinkRedaction.Text(original.ToString()) ?? "";
+    private readonly string _text = RedactingLoggerFactory.Text(original.ToString());
 
     /// <summary>Part of <see cref="ToString"/>, redacted with it.</summary>
     public override string? StackTrace => null;

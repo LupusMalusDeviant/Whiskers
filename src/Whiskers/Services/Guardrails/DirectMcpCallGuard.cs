@@ -65,7 +65,7 @@ public sealed class DirectMcpCallGuard : IDirectMcpCallGuard
 
             case GuardrailVerdict.Deny:
                 _logger?.LogWarning("Direct MCP call '{Tool}' by {Actor} blocked by guardrails: {Reason}",
-                    toolName, ActorOf(principal), decision.Reason);
+                    toolName, Whiskers.Utils.LogSafe.Value(ActorOf(principal)), decision.Reason);
                 return new DirectCallVerdict(false, GuardrailVerdict.Deny, $"Blocked by guardrails: {decision.Reason}");
         }
 
