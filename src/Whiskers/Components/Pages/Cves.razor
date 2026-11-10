@@ -372,7 +372,7 @@
             try
             {
                 // "Started" only once the cycle holds the scan gate: a click that finds a cycle running hears only that.
-                ran = await Mutations.RunAsync("cve.scan", new { }, ct => Monitor.RunOneCycleAsync(ct,
+                ran = await Mutations.RunAsync("cve.scan", new { }, (ResolvedRecord rt, CancellationToken ct) => Monitor.RunOneCycleAsync(ct,
                     started: () => _ = InvokeAsync(() => Snackbar.Add(L["Cves_Snackbar_ScanStarted"].Value, Severity.Info))));
             }
             catch (MutationRefusedException ex) { refused = ex.Message; }

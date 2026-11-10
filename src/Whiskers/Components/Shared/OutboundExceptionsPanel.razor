@@ -161,7 +161,7 @@ else
         try
         {
             await Mutations.RunAsync("config.save", new { section = "outbound-exceptions" },
-                ct => Exceptions.SaveAsync(entries, ct));
+                (ResolvedRecord rt, CancellationToken ct) => Exceptions.SaveAsync(entries, ct));
             Snackbar.Add(L["OutboundGuard_Snackbar_Saved"].Value, Severity.Success);
             LoadEntries();
             await RecheckAsync();

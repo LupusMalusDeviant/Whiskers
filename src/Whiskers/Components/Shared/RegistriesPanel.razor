@@ -114,7 +114,7 @@ else if (!Vault.IsEnabled)
             }
             await Mutations.RunAsync("registry.save",
                 new { section = "registries", registryId = string.IsNullOrWhiteSpace(form.Id) ? null : form.Id, name = form.Name, host = form.Host },
-                async _ =>
+                async (ResolvedTarget rt, CancellationToken _) =>
                 {
                     var saved = await Registries.SaveRegistryAsync(form, cred);
                     // The saved registry's id (new on create) is part of the gateway's event (R1-22); the credential
@@ -139,7 +139,7 @@ else if (!Vault.IsEnabled)
         try
         {
             await Mutations.RunAsync("registry.delete", new { section = "registries", registryId = reg.Id, name = reg.Name },
-                _ => Registries.DeleteRegistryAsync(reg.Id));
+                (ResolvedRecord rt, CancellationToken _) => Registries.DeleteRegistryAsync(reg.Id));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         Snackbar.Add(L["RegistriesPanel_Snackbar_Deleted"].Value, Severity.Success);

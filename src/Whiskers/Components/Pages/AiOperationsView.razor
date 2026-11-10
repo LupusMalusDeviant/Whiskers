@@ -163,7 +163,7 @@ else
             var name = L["AiOps_KeyName"].Value;
             var cfg = await Mutations.RunAsync("mcp.key_create",
                 new { section = "mcp-api-keys", name, level = McpPermissionLevels.Read },
-                _ => Mcp.AddApiKeyAsync(name, McpPermissionLevels.Read));
+                (ResolvedNew rt, CancellationToken _) => Mcp.AddApiKeyAsync(name, McpPermissionLevels.Read));
             _mcpKey = cfg.Key;   // shown once here; not re-displayed after leaving
             Snackbar.Add(L["AiOps_Key_Created"].Value, Severity.Success);
         }
@@ -188,7 +188,7 @@ else
             presets.Add(new GuardrailPreset { Name = name, Policy = AiOperationsPresets.PolicyFor(name) });
             var principal = await BuildPrincipalAsync();
             await Mutations.RunAsync("guardrails.save", new { section = "guardrails", preset = name },
-                _ => GuardrailStore.SaveConfigAsync(new GuardrailConfig { ActivePreset = name, Presets = presets }, principal));
+                (ResolvedRecord rt, CancellationToken _) => GuardrailStore.SaveConfigAsync(new GuardrailConfig { ActivePreset = name, Presets = presets }, principal));
             _activePreset = name;
             Snackbar.Add(L["AiOps_Preset_Activated", name].Value, Severity.Success);
         }

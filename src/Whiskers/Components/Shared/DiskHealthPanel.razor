@@ -53,7 +53,7 @@
         try
         {
             await Mutations.RunAsync("config.save", new { section = "diskhealth" },
-                ct => DiskHealthSettings.SaveAsync(wanted, ct));
+                (ResolvedRecord rt, CancellationToken ct) => DiskHealthSettings.SaveAsync(wanted, ct));
             Snackbar.Add(L["DiskHealth_Snackbar_Saved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }

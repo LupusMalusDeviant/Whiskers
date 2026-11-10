@@ -31,7 +31,7 @@ public static class ComposeImpact
         ArgumentNullException.ThrowIfNull(composeRunner);
         ArgumentNullException.ThrowIfNull(deployment);
         var plan = await planner.PlanAsync(deployment);
-        return await runner.RunAsync(capabilityId, arguments, _ =>
+        return await runner.RunAsync(capabilityId, arguments, (ResolvedTarget _, CancellationToken _) =>
         {
             ReportProject(plan);
             return runner.RunMountsAsync(plan, () => runner.RunExposuresAsync(plan, () =>
@@ -124,7 +124,7 @@ public static class ComposeImpact
     /// mounts. A person is not asked to confirm their own action (PC-D1): the decision is audited with every exposure.</summary>
     public static Task<T> RunExposuresAsync<T>(this IUiMutationRunner runner, ComposePlan plan, Func<Task<T>> action) =>
         NeedsExposureDecision(plan)
-            ? runner.RunAsync(MountsCapability, ExposureArguments(plan), _ => action())
+            ? runner.RunAsync(MountsCapability, ExposureArguments(plan), (ResolvedHostObject _, CancellationToken _) => action())
             : action();
 
     /// <summary>The read-back key of the compose project a deployment ran under (R1-37).</summary>
@@ -151,7 +151,7 @@ public static class ComposeImpact
     public static Task<T> RunMountsAsync<T>(this IUiMutationRunner runner, ComposePlan plan, Func<Task<T>> action) =>
         plan.Mounts() is { Count: > 0 } mounts
             ? runner.RunAsync(MountsCapability, new { serverId = plan.ServerId, mounts = string.Join('\n', mounts) },
-                _ => action())
+                (ResolvedHostObject _, CancellationToken _) => action())
             : action();
 
     /// <summary>A <see cref="ComposePlanGate"/> that decides each container of the plan under
@@ -193,7 +193,7 @@ public static class ComposeImpact
     private static async Task Nested(IAutomationMutationRunner runner, AutomationActor actor, object arguments, string refused,
         Func<Task> inner)
     {
-        var outcome = await runner.RunAsync(actor, MountsCapability, arguments, _ => inner());
+        var outcome = await runner.RunAsync(actor, MountsCapability, arguments, (ResolvedHostObject _, CancellationToken _) => inner());
         if (outcome.Error is { } error)
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
         if (outcome.Status != MutationStatus.Executed)
@@ -211,7 +211,7 @@ public static class ComposeImpact
         var container = plan.Containers[index];
         var outcome = await runner.RunAsync(actor, capabilityId,
             new { containerId = container.Id, name = container.Name, serverId = plan.ServerId },
-            _ => NextAutomated(runner, actor, capabilityId, plan, proceed, index + 1));
+            (ResolvedTarget _, CancellationToken _) => NextAutomated(runner, actor, capabilityId, plan, proceed, index + 1));
         // A container that was not allowed — by policy, by its owner's authority, or because its audit intent could not
         // be written — is a refusal, whatever error the gateway kept; only an error of the deployment itself (thrown
         // further in) is passed on as it is.
@@ -231,5 +231,5 @@ public static class ComposeImpact
             ? action()
             : runner.RunAsync(capabilityId,
                 new { containerId = containers[index].Id, name = containers[index].Name, serverId },
-                _ => Next(runner, capabilityId, containers, serverId, action, index + 1));
+                (ResolvedTarget _, CancellationToken _) => Next(runner, capabilityId, containers, serverId, action, index + 1));
 }
