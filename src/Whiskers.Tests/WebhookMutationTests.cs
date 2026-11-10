@@ -1054,6 +1054,14 @@ public sealed partial class WebhookMutationTests : IDisposable
     /// <summary>An automation runner whose gateway is built when it runs, so a test's settings apply.</summary>
     private sealed class LateRunner(Func<AutomationMutationRunner> build) : IAutomationMutationRunner
     {
+        public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            build().RunAsync(actor, capabilityId, arguments, action, ct);
+
+        public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            build().RunAsync(actor, capabilityId, arguments, action, ct);
+
         public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
             Func<CancellationToken, Task<T>> action, CancellationToken ct = default) =>
             build().RunAsync(actor, capabilityId, arguments, action, ct);

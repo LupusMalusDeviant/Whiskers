@@ -264,6 +264,14 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
 
     private sealed class PassThrough : IUiMutationRunner
     {
+        public Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
+        public Task RunAsync<TTarget>(string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
         public Task<T> RunAsync<T>(string capabilityId, object arguments, Func<CancellationToken, Task<T>> action,
             CancellationToken ct = default) => action(ct);
         public Task RefuseAsync(string capabilityId, object arguments, string reason, CancellationToken ct = default) =>

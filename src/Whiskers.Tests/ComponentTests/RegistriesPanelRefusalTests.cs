@@ -64,6 +64,14 @@ public class RegistriesPanelRefusalTests : BunitContext, IAsyncLifetime
 
     private sealed class Recording : IUiMutationRunner
     {
+        public Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
+        public Task RunAsync<TTarget>(string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
         public List<(string Capability, string Arguments, string Reason)> Refused { get; } = [];
         public List<string> Ran { get; } = [];
 

@@ -48,7 +48,9 @@ public static class GitDeployOwners
         var actor = ActorOf(app);
         var outcome = await automation.RunAsync(actor, "gitdeploy.deploy",
             new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch, revision = app.Revision },
-            token => gitDeploy.DeployAsync(app, automation.GateFor(actor, "gitdeploy.deploy"), ct: token), ct);
+            (ResolvedGitApp decided, CancellationToken token) => decided.Id == app.Id && decided.Revision == app.Revision
+                ? gitDeploy.DeployAsync(app, automation.GateFor(actor, "gitdeploy.deploy"), ct: token)
+                : throw new InvalidOperationException($"'{app.Name}' changed after it was read; nothing ran."), ct);
         if (outcome.Error is MutationRefusedException refused) return (false, refused.Message, true);
         return outcome.Status is MutationStatus.Executed or MutationStatus.Failed && outcome.Value.Output is not null
             ? (outcome.Value.Success, outcome.Value.Output, false)

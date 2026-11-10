@@ -425,7 +425,8 @@ public sealed partial class TargetResolutionTests : IDisposable
         Assert.True(ok, output);
         var decided = Assert.Single(resolved);
         Assert.Equal(("aaa111local", "local"), (decided.Id, decided.ServerId));
-        Assert.Equal(("restart", "web", (string?)"local"), Assert.Single(_docker.Actions));
+        // Contract 0012: the restart acts on the decided container's id, not on the name the task stored.
+        Assert.Equal(("restart", "aaa111local", (string?)"local"), Assert.Single(_docker.Actions));
         Assert.Equal("local", ScheduledTaskServer.Of(new ScheduledTaskEntity()));
     }
 

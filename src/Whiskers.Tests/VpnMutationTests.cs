@@ -136,7 +136,7 @@ public class VpnMutationTests
         var gateway = trail is not null
             ? AuditTrail.Gateway(trail, store)
             : new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
-                NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+                NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store), targets: TestTargets.Resolver());
         var runner = new AutomationMutationRunner(gateway, new CapabilityCatalog(),
             new AutomationOwnerResolver(roles, whitelist, new AutomationMutationRunnerTests.Keys(),
                 new AutomationMutationRunnerTests.Accounts()),

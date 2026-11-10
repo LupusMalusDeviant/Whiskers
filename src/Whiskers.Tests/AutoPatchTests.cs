@@ -559,6 +559,14 @@ public class AutoPatchTests
     /// container whose name is in <see cref="Refuse"/>. <see cref="Statuses"/> holds what the gateway would audit.</summary>
     private sealed class RecordingAutomation : IAutomationMutationRunner
     {
+        public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
+        public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
         public List<(AutomationActor Actor, string Capability)> Actors { get; } = new();
         public HashSet<string> Refuse { get; } = new();
         public List<MutationStatus> Statuses { get; } = new();

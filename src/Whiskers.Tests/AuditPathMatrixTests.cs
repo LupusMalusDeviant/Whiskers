@@ -1065,6 +1065,14 @@ public sealed class AuditPathMatrixTests : IDisposable
     /// (as its owner resolution can), or after the gateway wrote the run's event or a refusal.</summary>
     private sealed class FaultingRunner(IAutomationMutationRunner inner) : IAutomationMutationRunner
     {
+        public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
+        public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
+
         /// <summary>The next run throws before the gateway sees it — once.</summary>
         public bool ThrowBeforeGatewayOnce { get; set; }
         /// <summary>Thrown once — the first time the gateway has executed a run (its event is written).</summary>

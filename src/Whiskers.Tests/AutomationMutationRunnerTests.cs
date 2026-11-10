@@ -122,7 +122,8 @@ public class AutomationMutationRunnerTests
         gateway ??= trail is not null
             ? AuditTrail.Gateway(trail, store, approvals)
             : new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
-                NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals, store));
+                NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(approvals, store),
+                targets: TestTargets.Resolver());
         var runner = new AutomationMutationRunner(gateway, new CapabilityCatalog(),
             new AutomationOwnerResolver(roles, whitelist, keys, accounts), new StaticOptionsMonitor<AutomationOptions>(options),
             logger: logger);
