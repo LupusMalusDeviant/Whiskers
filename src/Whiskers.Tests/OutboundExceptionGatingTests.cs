@@ -49,13 +49,13 @@ public sealed class OutboundExceptionGatingTests : IDisposable
     {
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
         return new UiMutationRunner(gateway, new CapabilityCatalog(), _user);
     }
 
     // As the Settings panel runs it.
     private static Task Save(UiMutationRunner runner, IOutboundExceptionService service, params OutboundExceptionEntry[] entries) =>
-        runner.RunAsync("config.save", new { section = "outbound-exceptions" }, ct => service.SaveAsync(entries, ct));
+        runner.RunAsync("config.save", new { section = "outbound-exceptions" }, (ResolvedTarget _, CancellationToken ct) => service.SaveAsync(entries, ct));
 
     [Fact]
     public async Task An_admin_save_is_audited_first_then_written_then_published_and_survives_a_restart()
@@ -65,7 +65,7 @@ public sealed class OutboundExceptionGatingTests : IDisposable
         var before = service.Current.Version;
         var intentFirst = false;
 
-        await runner.RunAsync("config.save", new { section = "outbound-exceptions" }, async ct =>
+        await runner.RunAsync("config.save", new { section = "outbound-exceptions" }, async (ResolvedTarget _, CancellationToken ct) =>
         {
             intentFirst = _audit.Events.Contains("begin:config.save:");
             await service.SaveAsync([Ntfy], ct);

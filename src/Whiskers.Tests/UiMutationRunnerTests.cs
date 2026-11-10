@@ -39,7 +39,7 @@ public class UiMutationRunnerTests
         // SafeDefault asks for confirmation on every write — for the agent and keys, not for a person in the UI.
         var (runner, audit) = Runner(AppRole.Operator);
 
-        var result = await runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => Task.FromResult(42));
+        var result = await runner.RunAsync("container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.FromResult(42));
 
         Assert.Equal(42, result);
         Assert.Contains("begin:container.restart:", audit.Events);
@@ -55,7 +55,7 @@ public class UiMutationRunnerTests
         var ran = false;
 
         var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => { ran = true; return Task.CompletedTask; }));
+            runner.RunAsync("container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
 
         Assert.False(ran);
         Assert.Contains("Read-only", refused.Message);
@@ -70,7 +70,7 @@ public class UiMutationRunnerTests
         var ran = false;
 
         await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.RunAsync("container.stop", new { containerId = "whiskers" }, _ => { ran = true; return Task.CompletedTask; }));
+            runner.RunAsync("container.stop", new { containerId = "whiskers" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
 
         Assert.False(ran);
     }
@@ -83,7 +83,7 @@ public class UiMutationRunnerTests
         policy.ToolDenyList = ["restart_container"];
         var (runner, _) = Runner(AppRole.Operator, policy);
 
-        var result = await runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => Task.FromResult("ok"));
+        var result = await runner.RunAsync("container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.FromResult("ok"));
 
         Assert.Equal("ok", result);
     }
@@ -94,7 +94,7 @@ public class UiMutationRunnerTests
         var (runner, _) = Runner(AppRole.Viewer);
 
         var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.RunAsync("container.start", new { containerId = "web-1" }, _ => Task.CompletedTask));
+            runner.RunAsync("container.start", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask));
 
         Assert.Contains("requires 'write'", refused.Message);
     }
@@ -134,7 +134,7 @@ public class UiMutationRunnerTests
         try
         {
             await runner.RunAsync(id, new { containerId = "web-1", serverId = "local", name = "web-1" },
-                _ => { ran = true; return Task.CompletedTask; });
+                (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; });
         }
         catch (MutationRefusedException e) { refused = e; }
 
@@ -162,9 +162,9 @@ public class UiMutationRunnerTests
         var (adminRunner, _) = Runner(AppRole.Admin);
 
         await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            operatorRunner.RunAsync("db.query", new { containerId = "db-1", query = "select 1" }, _ => Task.FromResult("rows")));
+            operatorRunner.RunAsync("db.query", new { containerId = "db-1", query = "select 1" }, (ResolvedTarget _, CancellationToken _) => Task.FromResult("rows")));
         Assert.Equal("rows",
-            await adminRunner.RunAsync("db.query", new { containerId = "db-1", query = "select 1" }, _ => Task.FromResult("rows")));
+            await adminRunner.RunAsync("db.query", new { containerId = "db-1", query = "select 1" }, (ResolvedTarget _, CancellationToken _) => Task.FromResult("rows")));
         Assert.Equal(McpPermissionLevels.Admin, McpPermissionLevels.DefaultToolLevels["execute_query"]);
     }
 
@@ -175,7 +175,7 @@ public class UiMutationRunnerTests
             overrides: new ToolAuthorizationTests.FixedOverrides(new CapabilityAvailability(false, McpPermissionLevels.Write)));
 
         var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask));
+            runner.RunAsync("container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask));
 
         Assert.Contains("disabled", refused.Message);
     }
@@ -186,7 +186,7 @@ public class UiMutationRunnerTests
         var (runner, audit) = Runner(AppRole.Admin);
 
         var thrown = await Assert.ThrowsAsync<IOException>(() =>
-            runner.RunAsync("container.restart", new { containerId = "web-1" }, _ => throw new IOException("docker down")));
+            runner.RunAsync("container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => throw new IOException("docker down")));
 
         Assert.Equal("docker down", thrown.Message);
         Assert.Contains("complete:Failed", audit.Events);
@@ -198,7 +198,7 @@ public class UiMutationRunnerTests
         var (runner, _) = Runner(AppRole.Admin);
 
         await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.RunAsync("no.such.capability", new { }, _ => Task.CompletedTask));
+            runner.RunAsync("no.such.capability", new { }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask));
     }
 
     [Fact]
@@ -216,7 +216,7 @@ public class UiMutationRunnerTests
         var (runner, audit) = Runner(AppRole.Admin);
 
         var result = await runner.RunAsync("host.exec", new { serverId = "local" },
-            _ => Task.FromResult(new Whiskers.Services.Server.CommandResult { ExitCode = 1, Error = "ufw: denied" }));
+            (ResolvedTarget _, CancellationToken _) => Task.FromResult(new Whiskers.Services.Server.CommandResult { ExitCode = 1, Error = "ufw: denied" }));
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("complete:Failed", audit.Events);
@@ -244,7 +244,7 @@ public class UiMutationRunnerTests
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("workload.stop",
             new { workloadId = "default/deployment/web", name = "web", serverId = "k8s" },
-            _ => { ran = true; return Task.CompletedTask; }));
+            (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
 
         Assert.False(ran);
     }
@@ -256,7 +256,7 @@ public class UiMutationRunnerTests
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("workload.restart",
             new { workloadId = "default/deployment/whiskers", name = "whiskers", serverId = "k8s" },
-            _ => Task.CompletedTask));
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask));
     }
 
     [Fact]
@@ -309,7 +309,7 @@ public class UiMutationRunnerTests
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("workload.stop",
             new { workloadId = "shop/payments-7fdc9-abcde", name = "payments", pod = "payments-7fdc9-abcde", serverId = "k8s" },
-            _ => { ran = true; return Task.CompletedTask; }));
+            (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; }));
 
         Assert.False(ran);
     }
@@ -409,7 +409,7 @@ public class UiMutationRunnerTests
             .Select(i => i.Container).ToList();
         await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("compose.deploy",
             new { projectName = "payments", serverId = "local" },
-            _ => runner.RunForEachAsync("compose.deploy", affected, "local", () => { ran = true; return Task.FromResult(0); })));
+            (ResolvedTarget _, CancellationToken _) => runner.RunForEachAsync("compose.deploy", affected, "local", () => { ran = true; return Task.FromResult(0); })));
 
         Assert.Equal(["payments-web", "payments-db"], affected.Select(c => c.Name));
         Assert.False(ran);
@@ -456,7 +456,7 @@ public class UiMutationRunnerTests
         var runner = new UiMutationRunner(gateway, new CapabilityCatalog(), new FixedUser(AppRole.Admin), new GermanText());
 
         var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
-            runner.RunAsync("scheduler.create", new { taskType = "CustomCommand" }, _ => Task.FromResult(true)));
+            runner.RunAsync("scheduler.create", new { taskType = "CustomCommand" }, (ResolvedTarget _, CancellationToken _) => Task.FromResult(true)));
 
         Assert.Contains("ließ sich nicht bestimmen", refused.Message);
     }

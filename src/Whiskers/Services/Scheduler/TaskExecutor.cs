@@ -147,38 +147,15 @@ public class TaskExecutor : ITaskExecutor
     /// <summary>Every gateway run of a scheduled task goes through here: it marks the run as having reached its
     /// decision, so the dispatcher's backstop never records a second event for it (INV-45). Nothing in this class
     /// calls <c>_automation.RunAsync</c> directly (TaskExecutorRefusalInventoryTests). It only forwards to the runner, so
-    /// it is a <see cref="MutationEntryPointAttribute"/> like the runner itself: a lambda handed to it is gated.</summary>
-    [MutationEntryPoint]
-    private Task<MutationOutcome<T>> RunGatedAsync<T>(ScheduledTaskEntity task, string capabilityId, object arguments,
-        Func<CancellationToken, Task<T>> action)
-    {
-        // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
-        // (its argument checks) wrote no event and still reaches the backstop (review round 12); an owner that cannot be
-        // read does not throw — the runner refuses it as a principal without authority (round 13).
-        var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
-        if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
-        return pending;
-    }
-
-    /// <inheritdoc cref="RunGatedAsync{T}"/>
-    [MutationEntryPoint]
-    private Task<MutationOutcome<bool>> RunGatedAsync(ScheduledTaskEntity task, string capabilityId, object arguments,
-        Func<CancellationToken, Task> action)
-    {
-        // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
-        // (its argument checks) wrote no event and still reaches the backstop (review round 12); an owner that cannot be
-        // read does not throw — the runner refuses it as a principal without authority (round 13).
-        var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
-        if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
-        return pending;
-    }
-
-    /// <summary>Contract 0012 (D3): the same forwarding wrapper for a lambda that acts on the decided object.</summary>
+    /// it is a <see cref="MutationEntryPointAttribute"/> like the runner itself: a lambda handed to it is gated.
+    /// Contract 0012 (D3): the lambda acts on the object the gateway decided.</summary>
     [MutationEntryPoint]
     private Task<MutationOutcome<T>> RunGatedAsync<TTarget, T>(ScheduledTaskEntity task, string capabilityId,
         object arguments, Func<TTarget, CancellationToken, Task<T>> action) where TTarget : ResolvedTarget
     {
-        // The flag only once the runner has handed the call to the gateway (see RunGatedAsync{T}).
+        // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
+        // (its argument checks) wrote no event and still reaches the backstop (review round 12); an owner that cannot be
+        // read does not throw — the runner refuses it as a principal without authority (round 13).
         var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
         if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
         return pending;
@@ -189,7 +166,9 @@ public class TaskExecutor : ITaskExecutor
     private Task<MutationOutcome<bool>> RunGatedAsync<TTarget>(ScheduledTaskEntity task, string capabilityId,
         object arguments, Func<TTarget, CancellationToken, Task> action) where TTarget : ResolvedTarget
     {
-        // The flag only once the runner has handed the call to the gateway (see RunGatedAsync{T}).
+        // The flag only once the runner has handed the call to the gateway: what it throws synchronously before that
+        // (its argument checks) wrote no event and still reaches the backstop (review round 12); an owner that cannot be
+        // read does not throw — the runner refuses it as a principal without authority (round 13).
         var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
         if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
         return pending;

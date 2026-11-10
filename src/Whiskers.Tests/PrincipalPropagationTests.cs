@@ -56,7 +56,7 @@ public sealed class PrincipalPropagationTests : IDisposable
         f.Whitelist.Allowed.Add("ops@example.com");
         f.Roles.Map["ops@example.com"] = AppRole.Operator;
         var outcome = await f.Runner.RunAsync(new AutomationActor("task:t1", "Scheduled task 'nightly'", owner, owner),
-            "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+            "container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Executed, outcome.Status);
         var run = Assert.Single(f.Audit.Principals);
@@ -96,7 +96,7 @@ public sealed class PrincipalPropagationTests : IDisposable
         {
             foreach (var task in await check.ScheduledTasks.OrderBy(t => t.TaskId).ToListAsync())
                 await f.Runner.RunAsync(Whiskers.Services.Scheduler.TaskExecutor.ActorOf(task), "container.restart",
-                    new { containerId = "web-1" }, _ => Task.CompletedTask);
+                    new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
         }
 
         Assert.Collection(f.Audit.Principals,

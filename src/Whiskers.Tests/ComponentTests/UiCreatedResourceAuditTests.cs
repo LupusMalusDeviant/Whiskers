@@ -165,7 +165,7 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync(capability,
             new { server = "local" },
-            _ => verb == "snapshot" ? provider.CreateSnapshotAsync(target, "token", "pre-change") : provider.PowerOnAsync(target, "token")));
+            (ResolvedTarget _, CancellationToken _) => verb == "snapshot" ? provider.CreateSnapshotAsync(target, "token", "pre-change") : provider.PowerOnAsync(target, "token")));
 
         Assert.Contains("server is locked", ex.Message);
         using var scope = _db.Scopes.CreateScope();

@@ -14,29 +14,18 @@ namespace Whiskers.Services.Mutations;
 /// </summary>
 public interface IUiMutationRunner
 {
-    /// <summary>Runs <paramref name="action"/> through the gateway and returns its result.</summary>
+    /// <summary>
+    /// Runs <paramref name="action"/> through the gateway and returns its result.
+    /// Contract 0012 (D3): it runs on the object the gateway resolved and confirmed — the page writes its type in the
+    /// lambda (<c>(ResolvedContainer c, CancellationToken ct) =&gt; …</c>) and acts on it, never on an id of its own. A <typeparamref name="TTarget"/> that is not the capability's
+    /// <see cref="Capability.TargetType"/> (or a base of it) is refused before the gateway is asked, and the refusal is
+    /// recorded (INV-45).
+    /// </summary>
     /// <exception cref="MutationRefusedException">The gateway refused the call (level, tool switch, kill switch,
     /// protected resource, unknown target, audit not writable). Nothing ran.</exception>
     /// <exception cref="MutationFailedException">The call ran past its deadline.</exception>
     /// <remarks>An exception thrown by <paramref name="action"/> itself is rethrown unchanged, so a page's existing
     /// error handling keeps working.</remarks>
-    [MutationEntryPoint]
-    Task<T> RunAsync<T>(string capabilityId, object arguments, Func<CancellationToken, Task<T>> action,
-        CancellationToken ct = default);
-
-    /// <inheritdoc cref="RunAsync{T}"/>
-    [MutationEntryPoint]
-    Task RunAsync(string capabilityId, object arguments, Func<CancellationToken, Task> action,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Contract 0012 (D3): runs <paramref name="action"/> on the object the gateway resolved and confirmed — the page
-    /// writes its type in the lambda (<c>(ResolvedContainer c, CancellationToken ct) =&gt; …</c>) and acts on it, never
-    /// on an id of its own. A <typeparamref name="TTarget"/> that is not the capability's
-    /// <see cref="Capability.TargetType"/> (or a base of it) is refused before the gateway is asked, and the refusal is
-    /// recorded (INV-45).
-    /// </summary>
-    /// <inheritdoc cref="RunAsync{T}" path="/exception"/>
     [MutationEntryPoint]
     Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments, Func<TTarget, CancellationToken, Task<T>> action,
         CancellationToken ct = default) where TTarget : ResolvedTarget =>
@@ -90,13 +79,6 @@ public sealed class UiMutationRunner : IUiMutationRunner
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _user = user ?? throw new ArgumentNullException(nameof(user));
-    }
-
-    public Task<T> RunAsync<T>(string capabilityId, object arguments, Func<CancellationToken, Task<T>> action,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-        return RunCoreAsync<T>(capabilityId, arguments, null, (_, token) => action(token), ct);
     }
 
     public Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments,
@@ -221,17 +203,6 @@ public sealed class UiMutationRunner : IUiMutationRunner
         if (_text is null || outcome.ReasonCode is not { } code) return null;
         var text = _text[MutationReasonCodes.KeyOf(code), outcome.ReasonArgs.Cast<object>().ToArray()];
         return text.ResourceNotFound ? null : text.Value;
-    }
-
-    public Task RunAsync(string capabilityId, object arguments, Func<CancellationToken, Task> action,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-        return RunAsync<bool>(capabilityId, arguments, async token =>
-        {
-            await action(token);
-            return true;
-        }, ct);
     }
 
     /// <summary>The signed-in user, with the session re-checked now (R1-26). The current role decides the level; the

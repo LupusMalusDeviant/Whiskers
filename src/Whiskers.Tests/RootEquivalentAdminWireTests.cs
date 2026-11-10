@@ -189,7 +189,7 @@ public class RootEquivalentAdminWireTests
             var mutations = scope.ServiceProvider.GetRequiredService<IUiMutationRunner>();
             foreach (var id in CapabilityCatalog.RootEquivalent.Order(StringComparer.Ordinal))
             {
-                Task Action(CancellationToken ct) => id switch
+                Task Action(ResolvedTarget _, CancellationToken ct) => id switch
                 {
                     "terminal.host_open" => terminals.OpenHostShellAsync(new TerminalOpenRequest(TerminalSession.NewId(), "local"), ct),
                     "terminal.container_open" => terminals.OpenContainerShellAsync(
@@ -206,11 +206,11 @@ public class RootEquivalentAdminWireTests
                 {
                     // Contract 0009 E1: switching the kill switch off is the one write it lets through — for an Admin
                     // in the UI. Here the action is the recorder, so the Admin is seen to get past the level.
-                    await mutations.RunAsync(id, UiArguments(commandTask), Action);
+                    await mutations.RunAsync<ResolvedTarget>(id, UiArguments(commandTask), Action);
                     continue;
                 }
                 var refused = await Assert.ThrowsAsync<MutationRefusedException>(() =>
-                    mutations.RunAsync(id, UiArguments(commandTask), Action));
+                    mutations.RunAsync<ResolvedTarget>(id, UiArguments(commandTask), Action));
                 Assert.Equal(MutationStatus.Denied, refused.Status);
                 if (role == AppRole.Admin)
                     Assert.True(refused.MatchedRules.Contains(KillSwitchRule), $"ui {id} as Admin: {refused.Message}");
@@ -261,7 +261,7 @@ public class RootEquivalentAdminWireTests
             foreach (var id in CapabilityCatalog.RootEquivalent.Order(StringComparer.Ordinal))
             {
                 var outcome = await automation.RunAsync(new AutomationActor($"run:{level}", "test run", PrincipalIds.Key(keyId)),
-                    id, UiArguments(commandTask), _ => { lock (ran) ran.Add(id); return Task.CompletedTask; });
+                    id, UiArguments(commandTask), (ResolvedTarget _, CancellationToken _) => { lock (ran) ran.Add(id); return Task.CompletedTask; });
                 Assert.Equal(MutationStatus.Denied, outcome.Status);
                 if (level == McpPermissionLevels.Admin)
                     Assert.True(outcome.MatchedRules.Contains(KillSwitchRule), $"automation {id} for an admin owner: {outcome.Reason}");

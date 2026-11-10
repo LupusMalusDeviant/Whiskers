@@ -60,7 +60,7 @@ public sealed class UiAuditCompletenessTests : IDisposable
     {
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(_store),
             new AuditLogMutationSink(_db.Scopes), [], NullLogger<MutationGateway>.Instance,
-            targets: targets,
+            targets: targets ?? TestTargets.Resolver(),
             decisions: new DbPolicyDecisionStore(_db.Scopes),
             approvals: new ApprovalGate(new ApprovalStore(policy: _store, persistence: _db.Persistence()), _store),
             journal: new DbOperationJournal(_db.Scopes));
@@ -87,7 +87,7 @@ public sealed class UiAuditCompletenessTests : IDisposable
     [Fact]
     public async Task A_successful_action_is_one_executed_event_with_its_details()
     {
-        await Runner(AppRole.Operator).RunAsync("container.restart", Web, _ =>
+        await Runner(AppRole.Operator).RunAsync("container.restart", Web, (ResolvedTarget _, CancellationToken _) =>
         {
             MutationScope.Note("Restarted after the config change.");
             return Task.FromResult(true);
@@ -172,7 +172,7 @@ public sealed class UiAuditCompletenessTests : IDisposable
         var ran = false;
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => Runner(AppRole.Admin).RunAsync("container.restart", Web,
-            _ => { ran = true; return Task.FromResult(true); }));
+            (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.FromResult(true); }));
 
         Assert.False(ran);
         Assert.Equal("Denied", (await TheEventAsync()).Outcome);
@@ -183,7 +183,7 @@ public sealed class UiAuditCompletenessTests : IDisposable
     {
         // A page that leaves the role to the gateway (the firewall rule dialog): the same single event.
         await Assert.ThrowsAsync<MutationRefusedException>(() => Runner(AppRole.Viewer).RunAsync("container.restart", Web,
-            _ => Task.FromResult(true)));
+            (ResolvedTarget _, CancellationToken _) => Task.FromResult(true)));
 
         Assert.Equal("Denied", (await TheEventAsync()).Outcome);
     }
@@ -200,9 +200,9 @@ public sealed class UiAuditCompletenessTests : IDisposable
         var runner = Runner(AppRole.Operator);
         object answer = shape switch
         {
-            "bool" => await runner.RunAsync("container.restart", Web, _ => Task.FromResult(false)),
-            "tuple" => await runner.RunAsync("container.restart", Web, _ => Task.FromResult((false, "exit 1"))),
-            _ => await runner.RunAsync("container.restart", Web, _ => Task.FromResult(new DeployResult(false, "pull failed"))),
+            "bool" => await runner.RunAsync("container.restart", Web, (ResolvedTarget _, CancellationToken _) => Task.FromResult(false)),
+            "tuple" => await runner.RunAsync("container.restart", Web, (ResolvedTarget _, CancellationToken _) => Task.FromResult((false, "exit 1"))),
+            _ => await runner.RunAsync("container.restart", Web, (ResolvedTarget _, CancellationToken _) => Task.FromResult(new DeployResult(false, "pull failed"))),
         };
 
         Assert.NotNull(answer);   // the page still gets the service's answer to show
@@ -215,7 +215,7 @@ public sealed class UiAuditCompletenessTests : IDisposable
     public async Task Output_noted_by_a_failed_run_is_not_a_successful_result()
     {
         // What GitDeployView does with a deployment that answers (false, output).
-        await Runner(AppRole.Operator).RunAsync("container.restart", Web, _ =>
+        await Runner(AppRole.Operator).RunAsync("container.restart", Web, (ResolvedTarget _, CancellationToken _) =>
         {
             MutationScope.Note("pull failed: manifest unknown", success: false);
             return Task.FromResult((false, "pull failed: manifest unknown"));
@@ -232,7 +232,7 @@ public sealed class UiAuditCompletenessTests : IDisposable
     public async Task A_service_that_throws_is_one_failed_event()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() => Runner(AppRole.Operator).RunAsync("container.restart",
-            Web, _ => throw new InvalidOperationException("docker is gone")));
+            Web, (ResolvedTarget _, CancellationToken _) => throw new InvalidOperationException("docker is gone")));
 
         var row = await TheEventAsync();
         Assert.Equal("Failed", row.Outcome);

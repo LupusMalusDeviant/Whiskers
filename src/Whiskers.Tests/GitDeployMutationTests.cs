@@ -233,7 +233,7 @@ public sealed class GitDeployMutationTests : IDisposable
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => runner.RunAsync("gitdeploy.deploy",
             new { appId = app.Id, name = app.Name, serverId = app.ServerId, revision = app.Revision },
-            _ => git.DeployAsync(app, runner.GateFor("gitdeploy.deploy"))));
+            (ResolvedTarget _, CancellationToken _) => git.DeployAsync(app, runner.GateFor("gitdeploy.deploy"))));
 
         Assert.Empty(_host.Executed);
     }
@@ -247,7 +247,7 @@ public sealed class GitDeployMutationTests : IDisposable
 
         var (success, output) = await runner.RunAsync("gitdeploy.deploy",
             new { appId = app.Id, name = app.Name, serverId = app.ServerId, revision = app.Revision },
-            _ => git.DeployAsync(app, runner.GateFor("gitdeploy.deploy")));
+            (ResolvedTarget _, CancellationToken _) => git.DeployAsync(app, runner.GateFor("gitdeploy.deploy")));
 
         Assert.True(success, output);
         Assert.Contains(_host.Executed, c => c.EndsWith("up -d --remove-orphans --pull never --no-build 2>&1"));

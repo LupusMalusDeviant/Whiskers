@@ -46,13 +46,13 @@ public sealed class MetricRetentionSettingsTests : IDisposable
     {
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
         return new UiMutationRunner(gateway, new CapabilityCatalog(), _user);
     }
 
     // As the Settings panel runs it.
     private static Task Save(UiMutationRunner runner, IMetricRetentionService service, MetricRetention values) =>
-        runner.RunAsync("config.save", new { section = "metrics-retention" }, ct => service.SaveAsync(values, ct));
+        runner.RunAsync("config.save", new { section = "metrics-retention" }, (ResolvedTarget _, CancellationToken ct) => service.SaveAsync(values, ct));
 
     private static readonly MetricRetention Changed = MetricRetention.Default with { RawDays = 3, HourDays = 400, AlertHistoryDays = 90 };
 
@@ -71,7 +71,7 @@ public sealed class MetricRetentionSettingsTests : IDisposable
         var service = Service();
         var intentFirst = false;
 
-        await Runner().RunAsync("config.save", new { section = "metrics-retention" }, async ct =>
+        await Runner().RunAsync("config.save", new { section = "metrics-retention" }, async (ResolvedTarget _, CancellationToken ct) =>
         {
             intentFirst = _audit.Events.Contains("begin:config.save:");
             await service.SaveAsync(Changed, ct);

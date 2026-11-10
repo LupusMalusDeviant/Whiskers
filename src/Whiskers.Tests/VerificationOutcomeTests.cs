@@ -75,7 +75,7 @@ public class VerificationOutcomeTests
         policy.ProtectedResources = [];
         var gateway = new MutationGateway(new CapabilityCatalog(),
             AgentToolTestHelpers.Policy(new AgentToolTestHelpers.FixedGuardrailStore(policy)),
-            new AgentToolTestHelpers.NullMutationAudit(), Verifiers(sp), NullLogger<MutationGateway>.Instance);
+            new AgentToolTestHelpers.NullMutationAudit(), Verifiers(sp), NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver());
         return (gateway, docker);
     }
 
@@ -295,7 +295,7 @@ public class VerificationOutcomeTests
         var runner = new UiMutationRunner(gateway, new CapabilityCatalog(), new AdminUser());
 
         var ex = await Assert.ThrowsAsync<MutationVerificationFailedException>(() =>
-            runner.RunAsync("container.start", new { containerId = "aaaaaaaaaaaa", serverId = "local" }, _ => Task.FromResult("ok")));
+            runner.RunAsync("container.start", new { containerId = "aaaaaaaaaaaa", serverId = "local" }, (ResolvedTarget _, CancellationToken _) => Task.FromResult("ok")));
 
         Assert.Contains("not running", ex.Message);
     }

@@ -390,7 +390,7 @@ public sealed class AuditPathMatrixTests : IDisposable
 
         // Allowed and run.
         var ran = await DecidedAsync(
-            () => As(AppRole.Admin).RunAsync(capabilityId, args, _ => { runs++; return Task.FromResult(true); }), Executed);
+            () => As(AppRole.Admin).RunAsync(capabilityId, args, (ResolvedTarget _, CancellationToken _) => { runs++; return Task.FromResult(true); }), Executed);
         Assert.Equal(capability!.TargetKind, ran.TargetType);
         Assert.Equal(OpsId, ran.PrincipalId);
         Assert.Equal(1, runs);
@@ -399,12 +399,12 @@ public sealed class AuditPathMatrixTests : IDisposable
 
         // Failed: the action threw.
         await DecidedAsync(() => Assert.ThrowsAnyAsync<Exception>(() =>
-            As(AppRole.Admin).RunAsync<bool>(capabilityId, args, _ => throw new InvalidOperationException("the host did not answer"))),
+            As(AppRole.Admin).RunAsync<ResolvedTarget, bool>(capabilityId, args, (_, _) => throw new InvalidOperationException("the host did not answer"))),
             Failed);
 
         // Failed as reported: the action answered with a result that says it did not succeed (a deploy or onboarding
         // result object, R1-21) — not "executed" because the delegate returned.
-        await DecidedAsync(() => As(AppRole.Admin).RunAsync(capabilityId, args, _ => Task.FromResult(new { Success = false })),
+        await DecidedAsync(() => As(AppRole.Admin).RunAsync(capabilityId, args, (ResolvedTarget _, CancellationToken _) => Task.FromResult(new { Success = false })),
             Failed);
 
         // Refused by the page's own role check: nothing runs.
@@ -415,7 +415,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         if (capability.RequiredLevel != McpPermissionLevels.Read)
         {
             var below = await AttemptAsync(_db.Scopes,
-                () => As(AppRole.Viewer).RunAsync(capabilityId, args, _ => { runs++; return Task.FromResult(true); }));
+                () => As(AppRole.Viewer).RunAsync(capabilityId, args, (ResolvedTarget _, CancellationToken _) => { runs++; return Task.FromResult(true); }));
             One(below, Denied, capabilityId, "Ui", decided: false);
         }
         Assert.Equal(1, runs);
@@ -423,7 +423,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         // Refused by the kill switch, for every capability it stops.
         policy.ReadOnlyMode = true;
         var killed = await AttemptAsync(_db.Scopes,
-            () => As(AppRole.Admin).RunAsync(capabilityId, args, _ => { runs++; return Task.FromResult(true); }));
+            () => As(AppRole.Admin).RunAsync(capabilityId, args, (ResolvedTarget _, CancellationToken _) => { runs++; return Task.FromResult(true); }));
         var stopped = Assert.Single(killed);
         // A capability the kill switch leaves (switching it off) runs, or waits for its approval as before.
         AssertComplete(stopped, stopped.Outcome!, capabilityId, "Ui");
@@ -608,7 +608,7 @@ public sealed class AuditPathMatrixTests : IDisposable
 
         var rows = await AttemptAsync(_db.Scopes, async () =>
         {
-            var attempt = ui.RunAsync("container.restart", new { containerId = container, serverId = "local" }, async t =>
+            var attempt = ui.RunAsync("container.restart", new { containerId = container, serverId = "local" }, async (ResolvedTarget _, CancellationToken t) =>
             {
                 ran++;
                 await gone.CancelAsync();
@@ -726,14 +726,14 @@ public sealed class AuditPathMatrixTests : IDisposable
         var opens = 0;
 
         var waiting = await AttemptAsync(_db.Scopes,
-            () => ui.RunAsync("terminal.container_open", args, _ => { opens++; return Task.FromResult(true); }));
+            () => ui.RunAsync("terminal.container_open", args, (ResolvedTarget _, CancellationToken _) => { opens++; return Task.FromResult(true); }));
         var pending = One(waiting, Pending, "terminal.container_open", "Ui");
         Assert.Equal(0, opens);
 
         Assert.Equal(ApprovalDecisionResult.Decided,
             await approvals.DecideAsync(pending.ApprovalId!, true, ApprovalResolver.User("second@example.com", AppRole.Admin)));
         var opened = await AttemptAsync(_db.Scopes,
-            () => ui.RunAsync("terminal.container_open", args, _ => { opens++; return Task.FromResult(true); }));
+            () => ui.RunAsync("terminal.container_open", args, (ResolvedTarget _, CancellationToken _) => { opens++; return Task.FromResult(true); }));
 
         var row = One(opened, Approved, "terminal.container_open", "Ui");
         Assert.Equal(pending.ApprovalId, row.ApprovalId);
@@ -1065,14 +1065,6 @@ public sealed class AuditPathMatrixTests : IDisposable
     /// (as its owner resolution can), or after the gateway wrote the run's event or a refusal.</summary>
     private sealed class FaultingRunner(IAutomationMutationRunner inner) : IAutomationMutationRunner
     {
-        public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
-            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
-            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
-
-        public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
-            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
-            RunAsync(actor, capabilityId, arguments, token => action(TestTargets.Of<TTarget>(capabilityId, arguments), token), ct);
-
         /// <summary>The next run throws before the gateway sees it — once.</summary>
         public bool ThrowBeforeGatewayOnce { get; set; }
         /// <summary>Thrown once — the first time the gateway has executed a run (its event is written).</summary>
@@ -1080,8 +1072,8 @@ public sealed class AuditPathMatrixTests : IDisposable
         /// <summary>Thrown once — the first time the gateway has recorded a refusal: a second refusal would be on record.</summary>
         public Exception? AfterRefusal { get; set; }
 
-        public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
-            Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
+        public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget
         {
             if (ThrowBeforeGatewayOnce)
             {
@@ -1091,8 +1083,8 @@ public sealed class AuditPathMatrixTests : IDisposable
             return Then(inner.RunAsync(actor, capabilityId, arguments, action, ct), Take(() => AfterRun, () => AfterRun = null));
         }
 
-        public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
-            Func<CancellationToken, Task> action, CancellationToken ct = default)
+        public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
+            Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget
         {
             if (ThrowBeforeGatewayOnce)
             {

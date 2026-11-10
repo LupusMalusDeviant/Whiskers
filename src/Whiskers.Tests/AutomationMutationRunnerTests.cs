@@ -147,7 +147,7 @@ public class AutomationMutationRunnerTests
         var f = WithOperator();
 
         var outcome = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" },
-            _ => Task.FromResult(7));
+            (ResolvedTarget _, CancellationToken _) => Task.FromResult(7));
 
         Assert.Equal(MutationStatus.Executed, outcome.Status);
         Assert.Equal(7, outcome.Value);
@@ -165,7 +165,7 @@ public class AutomationMutationRunnerTests
         var ran = false;
 
         var outcome = await f.Runner.RunAsync(Task1, "host.exec", new { serverId = "local", hasCommand = true },
-            _ => { ran = true; return Task.CompletedTask; });
+            (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; });
 
         Assert.False(ran);
         Assert.Equal(MutationStatus.Denied, outcome.Status);
@@ -176,12 +176,12 @@ public class AutomationMutationRunnerTests
     {
         var f = WithOperator();
         Assert.Equal(MutationStatus.Executed,
-            (await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask)).Status);
+            (await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask)).Status);
 
         f.Roles.Map[Ops] = AppRole.Viewer;
         var ran = false;
         var outcome = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" },
-            _ => { ran = true; return Task.CompletedTask; });
+            (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; });
 
         Assert.False(ran);
         Assert.Equal(MutationStatus.Denied, outcome.Status);
@@ -194,7 +194,7 @@ public class AutomationMutationRunnerTests
         f.Whitelist.Allowed.Clear();
 
         var outcome = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" },
-            _ => Task.CompletedTask);
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Contains("no longer allowed", Assert.Single(f.Audit.Principals).DisplayName);
@@ -220,7 +220,7 @@ public class AutomationMutationRunnerTests
         var actor = new AutomationActor("task:t2", "Scheduled task 'ci'", AutomationOwners.IdOf("k1", "ignored@example.com"));
 
         var outcome = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" },
-            _ => Task.CompletedTask);
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(expected, outcome.Status);
         Assert.Equal("key:k1", Assert.Single(f.Audit.Principals).OnBehalfOf?.Id);
@@ -236,7 +236,7 @@ public class AutomationMutationRunnerTests
         var ran = false;
 
         var outcome = await f.Runner.RunAsync(new AutomationActor("task:t2", "Scheduled task 'ci'", "key:k1"),
-            "container.restart", new { containerId = "web-1" }, _ => { ran = true; return Task.CompletedTask; });
+            "container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; });
 
         Assert.False(ran);
         Assert.Equal(MutationStatus.Denied, outcome.Status);
@@ -250,7 +250,7 @@ public class AutomationMutationRunnerTests
         var ran = false;
 
         var outcome = await f.Runner.RunAsync(new AutomationActor("task:t2", "Scheduled task 'ci'", "key:k1"),
-            "container.restart", new { containerId = "web-1" }, _ => { ran = true; return Task.CompletedTask; });
+            "container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; });
 
         Assert.False(ran);
         Assert.Equal(MutationStatus.Denied, outcome.Status);   // terminal, not PendingApproval
@@ -264,16 +264,16 @@ public class AutomationMutationRunnerTests
         f.Keys.Data.ApiKeys.Add(new McpApiKeyConfig { Id = "k1", Name = "ci", PermissionLevel = "admin" });
         var actor = new AutomationActor("task:t9", "Scheduled task 'every 5 min'", "key:k1");
         var runs = 0;
-        Task Restart(CancellationToken _) { runs++; return Task.CompletedTask; }
+        Task Restart(ResolvedTarget _, CancellationToken __) { runs++; return Task.CompletedTask; }
 
-        var first = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" }, Restart);
+        var first = await f.Runner.RunAsync<ResolvedTarget>(actor, "container.restart", new { containerId = "web-1" }, Restart);
         // An admin tries to approve in between: nothing is pending, and an approval id from the refusal (if any had
         // leaked) or a guessed one resolves to nothing.
         Assert.Empty(f.Approvals.GetPending());
         var attempted = await f.Approvals.ResolveAsync(first.ApprovalId ?? first.OperationId, approved: true,
             resolvedBy: "admin@example.com", resolverLevel: "admin");
         Assert.False(attempted);
-        var second = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" }, Restart);
+        var second = await f.Runner.RunAsync<ResolvedTarget>(actor, "container.restart", new { containerId = "web-1" }, Restart);
 
         Assert.Equal(MutationStatus.Denied, first.Status);
         Assert.Equal(MutationStatus.Denied, second.Status);
@@ -306,7 +306,7 @@ public class AutomationMutationRunnerTests
         var f = WithOperator();
 
         var outcome = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" },
-            _ => Task.FromResult((false, "docker said no")));
+            (ResolvedTarget _, CancellationToken _) => Task.FromResult((false, "docker said no")));
 
         Assert.Equal(MutationStatus.Failed, outcome.Status);
         Assert.Contains("complete:Failed", f.Audit.Events);
@@ -319,7 +319,7 @@ public class AutomationMutationRunnerTests
         var actor = new AutomationActor("task:t2", "Scheduled task 'ci'", "key:gone");
 
         var outcome = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" },
-            _ => Task.CompletedTask);
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Contains("(deleted)", Assert.Single(f.Audit.Principals).DisplayName);
@@ -332,7 +332,7 @@ public class AutomationMutationRunnerTests
         var actor = new AutomationActor("task:old", "Scheduled task 'old'", null);
 
         var outcome = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "web-1" },
-            _ => Task.CompletedTask);
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Executed, outcome.Status);
         var principal = Assert.Single(f.Audit.Principals);
@@ -349,7 +349,7 @@ public class AutomationMutationRunnerTests
 
         // SafeDefault protects whiskers*.
         var outcome = await f.Runner.RunAsync(actor, "container.restart", new { containerId = "whiskers" },
-            _ => Task.CompletedTask);
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Denied, outcome.Status);
     }
@@ -361,7 +361,7 @@ public class AutomationMutationRunnerTests
         var ran = false;
 
         var outcome = await f.Runner.RunAsync(new AutomationActor("autoupdate", "AutoUpdate", null),
-            "container.update", new { containerId = "web-1" }, _ => { ran = true; return Task.CompletedTask; });
+            "container.update", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; });
 
         Assert.False(ran);
         Assert.Equal(MutationStatus.Denied, outcome.Status);
@@ -399,7 +399,7 @@ public class AutomationMutationRunnerTests
         MutationPrincipal? seen = null;
 
         await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" },
-            _ => { seen = MutationScope.Current?.Principal; return Task.CompletedTask; });
+            (ResolvedTarget _, CancellationToken _) => { seen = MutationScope.Current?.Principal; return Task.CompletedTask; });
 
         Assert.Equal("task:t1", seen?.Id);
         Assert.Null(MutationScope.Current);
@@ -574,7 +574,7 @@ public class AutomationMutationRunnerTests
         var ran = false;
 
         var outcome = await f.Runner.RunAsync(actor, capability,
-            new { containerId = "web-1", serverId = "local", hasCommand = true }, _ => { ran = true; return Task.CompletedTask; });
+            new { containerId = "web-1", serverId = "local", hasCommand = true }, (ResolvedTarget _, CancellationToken _) => { ran = true; return Task.CompletedTask; });
 
         Assert.False(ran);
         Assert.Equal(MutationStatus.Denied, outcome.Status);
@@ -606,9 +606,9 @@ public class AutomationMutationRunnerTests
     {
         var f = WithOperator();   // SafeDefault: the agent may act autonomously only up to read
 
-        var human = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+        var human = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
         var agent = await f.Runner.RunAsync(AgentCreated(), "container.restart", new { containerId = "web-1" },
-            _ => Task.CompletedTask);
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Executed, human.Status);   // the user scheduled it by hand
         Assert.Equal(MutationStatus.Denied, agent.Status);     // the agent's Confirm, unattended → refused
@@ -628,9 +628,9 @@ public class AutomationMutationRunnerTests
         f.Whitelist.Allowed.Add(Ops);
         f.Roles.Map[Ops] = AppRole.Operator;
 
-        var human = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+        var human = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
         var agent = await f.Runner.RunAsync(AgentCreated(), "container.restart", new { containerId = "web-1" },
-            _ => Task.CompletedTask);
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Executed, human.Status);
         Assert.Equal(MutationStatus.Denied, agent.Status);
@@ -651,11 +651,11 @@ public class AutomationMutationRunnerTests
         f.Roles.Map[Ops] = AppRole.Operator;
 
         var legacy = await f.Runner.RunAsync(Task1 with { CreatedVia = null }, "container.restart",
-            new { containerId = "web-1" }, _ => Task.CompletedTask);
+            new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
         var adopted = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" },
-            _ => Task.CompletedTask);
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
         var ownerless = await Build(policy: policy).Runner.RunAsync(new AutomationActor("task:t2", "old", null),
-            "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+            "container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Denied, legacy.Status);
         Assert.Equal(MutationStatus.Executed, adopted.Status);
@@ -703,7 +703,7 @@ public class AutomationMutationRunnerTests
 
         foreach (var capability in capabilities)
         {
-            var run = await f.Runner.RunAsync(Task1, capability.Id, new { }, _ =>
+            var run = await f.Runner.RunAsync(Task1, capability.Id, new { }, (ResolvedTarget _, CancellationToken _) =>
             {
                 Interlocked.Increment(ref ran);
                 return Task.FromResult(true);
@@ -790,9 +790,9 @@ public class AutomationMutationRunnerTests
         f.Whitelist.Allowed.Add(Ops);
         f.Roles.Map[Ops] = AppRole.Operator;
 
-        var human = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, _ => Task.CompletedTask);
+        var human = await f.Runner.RunAsync(Task1, "container.restart", new { containerId = "web-1" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
         var agent = await f.Runner.RunAsync(AgentCreated(), "container.restart", new { containerId = "web-1" },
-            _ => Task.CompletedTask);
+            (ResolvedTarget _, CancellationToken _) => Task.CompletedTask);
 
         Assert.Equal(MutationStatus.Executed, human.Status);
         Assert.Equal(MutationStatus.Denied, agent.Status);

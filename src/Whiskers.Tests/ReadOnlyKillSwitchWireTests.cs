@@ -137,11 +137,11 @@ public class ReadOnlyKillSwitchWireTests
             var mutations = scope.ServiceProvider.GetRequiredService<IUiMutationRunner>();
             var hostShell = await Assert.ThrowsAsync<MutationRefusedException>(() => mutations.RunAsync("terminal.host_open",
                 new { serverId = "local" },
-                ct => terminals.OpenHostShellAsync(new TerminalOpenRequest(TerminalSession.NewId(), "local"), ct)));
+                (ResolvedTarget _, CancellationToken ct) => terminals.OpenHostShellAsync(new TerminalOpenRequest(TerminalSession.NewId(), "local"), ct)));
             Assert.Equal(MutationStatus.Denied, hostShell.Status);
             var containerShell = await Assert.ThrowsAsync<MutationRefusedException>(() => mutations.RunAsync("terminal.container_open",
                 new { containerId = "web-1", serverId = "local" },
-                ct => terminals.OpenContainerShellAsync(new TerminalOpenRequest(TerminalSession.NewId(), "local", "web-1"), ct)));
+                (ResolvedTarget _, CancellationToken ct) => terminals.OpenContainerShellAsync(new TerminalOpenRequest(TerminalSession.NewId(), "local", "web-1"), ct)));
             Assert.Equal(MutationStatus.Denied, containerShell.Status);
         }
 
@@ -176,7 +176,7 @@ public class ReadOnlyKillSwitchWireTests
             foreach (var capability in ui)
             {
                 var refused = await Assert.ThrowsAsync<MutationRefusedException>(() => mutations.RunAsync(capability.Id,
-                    UiArguments, _ => { ran.Add(capability.Id); return Task.CompletedTask; }));
+                    UiArguments, (ResolvedTarget _, CancellationToken _) => { ran.Add(capability.Id); return Task.CompletedTask; }));
                 Assert.Equal(MutationStatus.Denied, refused.Status);
             }
 
@@ -184,7 +184,7 @@ public class ReadOnlyKillSwitchWireTests
             var config = guardrails.Config;
             config.ActivePolicy().ReadOnlyMode = false;
             await Assert.ThrowsAsync<MutationRefusedException>(() => mutations.RunAsync("guardrails.save",
-                new { section = "guardrails" }, _ => guardrails.SaveConfigAsync(config, AdminEditor)));
+                new { section = "guardrails" }, (ResolvedTarget _, CancellationToken _) => guardrails.SaveConfigAsync(config, AdminEditor)));
         }
 
         Assert.Empty(ran);
@@ -225,7 +225,7 @@ public class ReadOnlyKillSwitchWireTests
         {
             var mutations = scope.ServiceProvider.GetRequiredService<IUiMutationRunner>();
             await Assert.ThrowsAsync<MutationRefusedException>(() => mutations.RunAsync("guardrails.kill_switch_off",
-                new { section = "guardrails" }, _ => guardrails.DisableKillSwitchAsync(AdminEditor)));
+                new { section = "guardrails" }, (ResolvedTarget _, CancellationToken _) => guardrails.DisableKillSwitchAsync(AdminEditor)));
         }
         Assert.True(guardrails.Current.ReadOnlyMode);
 
@@ -246,7 +246,7 @@ public class ReadOnlyKillSwitchWireTests
         {
             var mutations = scope.ServiceProvider.GetRequiredService<IUiMutationRunner>();
             await mutations.RunAsync("guardrails.kill_switch_off", new { section = "guardrails" },
-                _ => guardrails.DisableKillSwitchAsync(AdminEditor));
+                (ResolvedTarget _, CancellationToken _) => guardrails.DisableKillSwitchAsync(AdminEditor));
         }
         Assert.False(guardrails.Current.ReadOnlyMode);
         Assert.Equal(McpPermissionLevels.Admin, guardrails.Current.MaxAutonomousLevel);
@@ -355,10 +355,10 @@ public class ReadOnlyKillSwitchWireTests
         var runner = host.Factory.Services.GetRequiredService<IAutomationMutationRunner>();
         var update = await runner.RunAsync(new AutomationActor("autoupdate", "AutoUpdate", owner, owner), "container.update",
             new { containerId = ContainerId, name = "web-1", serverId = "local" },
-            _ => host.Docker.RecreateContainerAsync(ContainerId, "local"));
+            (ResolvedTarget _, CancellationToken _) => host.Docker.RecreateContainerAsync(ContainerId, "local"));
         var patched = false;
         var patch = await runner.RunAsync(new AutomationActor("autopatch", "AutoPatch", owner, owner), "autopatch.run",
-            new { dryRun = false }, _ => { patched = true; return Task.CompletedTask; });
+            new { dryRun = false }, (ResolvedTarget _, CancellationToken _) => { patched = true; return Task.CompletedTask; });
 
         foreach (var outcome in new[] { update.Status, patch.Status })
             Assert.Equal(MutationStatus.Denied, outcome);
@@ -438,7 +438,7 @@ public class ReadOnlyKillSwitchWireTests
         {
             var mutations = scope.ServiceProvider.GetRequiredService<IUiMutationRunner>();
             var refused = await Assert.ThrowsAsync<MutationRefusedException>(() => mutations.RunAsync("guardrails.save",
-                new { section = "guardrails" }, _ => guardrails.SaveConfigAsync(config, AdminEditor)));
+                new { section = "guardrails" }, (ResolvedTarget _, CancellationToken _) => guardrails.SaveConfigAsync(config, AdminEditor)));
             Assert.Equal(MutationStatus.Denied, refused.Status);
         }
 
@@ -669,7 +669,7 @@ public class ReadOnlyKillSwitchWireTests
             var mutations = scope.ServiceProvider.GetRequiredService<IUiMutationRunner>();
             var accounts = scope.ServiceProvider.GetRequiredService<ILocalAccountService>();
             return await mutations.RunAsync("account.password_change", new { account = AdminEmail },
-                ct => accounts.ChangeOwnPasswordAsync(LocalPassword, "Battery-Staple-34", ct));
+                (ResolvedTarget _, CancellationToken ct) => accounts.ChangeOwnPasswordAsync(LocalPassword, "Battery-Staple-34", ct));
         }
 
         public async Task<bool> PasswordWorksAsync(string email, string password)

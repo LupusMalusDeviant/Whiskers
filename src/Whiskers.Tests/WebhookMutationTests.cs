@@ -791,10 +791,10 @@ public sealed partial class WebhookMutationTests : IDisposable
 
         var created = await runner.RunAsync("webhook.save",
             new { name = entity.Name, action = entity.Action, target = entity.TargetId, serverId = entity.ServerId, owner = AdminId },
-            _ => Service().CreateWebhookAsync(entity));
+            (ResolvedTarget _, CancellationToken _) => Service().CreateWebhookAsync(entity));
         var secret = await runner.RunAsync("webhook.rotate_secret",
             new { webhookId = created.WebhookId, name = created.Name, serverId = created.ServerId },
-            _ => Service().RegenerateSecretAsync(created.WebhookId));
+            (ResolvedTarget _, CancellationToken _) => Service().RegenerateSecretAsync(created.WebhookId));
 
         Assert.Equal(AdminId, Stored(created.WebhookId).Owner);
         Assert.Equal(64, secret.Length);
@@ -852,10 +852,10 @@ public sealed partial class WebhookMutationTests : IDisposable
         var runner = UiRunner(AppRole.Admin);
         Assert.True(await runner.RunAsync("webhook.save",
             new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId, owner = AdminId },
-            _ => Service().SetOwnerAsync(webhook.WebhookId, AdminId, PrincipalIds.User(Gone))));
+            (ResolvedTarget _, CancellationToken _) => Service().SetOwnerAsync(webhook.WebhookId, AdminId, PrincipalIds.User(Gone))));
         await runner.RunAsync("webhook.set_enabled",
             new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId, enabled = true },
-            _ => Service().SetEnabledAsync(webhook.WebhookId, true));
+            (ResolvedTarget _, CancellationToken _) => Service().SetEnabledAsync(webhook.WebhookId, true));
 
         var (after, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
         Assert.True(after, output);
@@ -870,11 +870,11 @@ public sealed partial class WebhookMutationTests : IDisposable
 
         await runner.RunAsync("webhook.set_enabled",
             new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId, enabled = false },
-            _ => Service().SetEnabledAsync(webhook.WebhookId, false));
+            (ResolvedTarget _, CancellationToken _) => Service().SetEnabledAsync(webhook.WebhookId, false));
         Assert.False(Stored(webhook.WebhookId).Enabled);
         await runner.RunAsync("webhook.delete",
             new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId },
-            _ => Service().DeleteWebhookAsync(webhook.WebhookId));
+            (ResolvedTarget _, CancellationToken _) => Service().DeleteWebhookAsync(webhook.WebhookId));
 
         Assert.Equal(0, Count());
     }
@@ -886,9 +886,9 @@ public sealed partial class WebhookMutationTests : IDisposable
 
         await UiRunner(AppRole.Admin).RunAsync("webhook.set_enabled",
             new { webhookId = webhook.WebhookId, name = "renamed-on-the-page", serverId = "elsewhere", enabled = false },
-            _ => Service().SetEnabledAsync(webhook.WebhookId, false));
+            (ResolvedTarget _, CancellationToken _) => Service().SetEnabledAsync(webhook.WebhookId, false));
         await Assert.ThrowsAsync<MutationRefusedException>(() => UiRunner(AppRole.Admin).RunAsync("webhook.delete",
-            new { webhookId = "does-not-exist", name = "x" }, _ => Task.CompletedTask));
+            new { webhookId = "does-not-exist", name = "x" }, (ResolvedTarget _, CancellationToken _) => Task.CompletedTask));
 
         var decided = _audit.Requests.First(r => r.CapabilityId == "webhook.set_enabled").Target;
         Assert.Equal(webhook.Name, decided.Name);
@@ -997,22 +997,22 @@ public sealed partial class WebhookMutationTests : IDisposable
     {
         "create" => runner.RunAsync("webhook.save",
             new { name = "new", action = "restart", target = "web-1", serverId = "local", owner = AdminId },
-            _ => Service().CreateWebhookAsync(new WebhookEntity
+            (ResolvedTarget _, CancellationToken _) => Service().CreateWebhookAsync(new WebhookEntity
             {
                 Name = "new", Action = "restart", TargetId = "web-1", ServerId = "local", Owner = AdminId,
             })),
         "take-over" => runner.RunAsync("webhook.save",
             new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId, owner = "user:x@example.com" },
-            _ => Service().SetOwnerAsync(webhook.WebhookId, "user:x@example.com", webhook.Owner)),
+            (ResolvedTarget _, CancellationToken _) => Service().SetOwnerAsync(webhook.WebhookId, "user:x@example.com", webhook.Owner)),
         "webhook.rotate_secret" => runner.RunAsync("webhook.rotate_secret",
             new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId },
-            _ => Service().RegenerateSecretAsync(webhook.WebhookId)),
+            (ResolvedTarget _, CancellationToken _) => Service().RegenerateSecretAsync(webhook.WebhookId)),
         "webhook.set_enabled" => runner.RunAsync("webhook.set_enabled",
             new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId, enabled = false },
-            _ => Service().SetEnabledAsync(webhook.WebhookId, false)),
+            (ResolvedTarget _, CancellationToken _) => Service().SetEnabledAsync(webhook.WebhookId, false)),
         _ => runner.RunAsync("webhook.delete",
             new { webhookId = webhook.WebhookId, name = webhook.Name, serverId = webhook.ServerId },
-            _ => Service().DeleteWebhookAsync(webhook.WebhookId)),
+            (ResolvedTarget _, CancellationToken _) => Service().DeleteWebhookAsync(webhook.WebhookId)),
     };
 
     private MutationGateway Gateway()
@@ -1060,14 +1060,6 @@ public sealed partial class WebhookMutationTests : IDisposable
 
         public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
             Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
-            build().RunAsync(actor, capabilityId, arguments, action, ct);
-
-        public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
-            Func<CancellationToken, Task<T>> action, CancellationToken ct = default) =>
-            build().RunAsync(actor, capabilityId, arguments, action, ct);
-
-        public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
-            Func<CancellationToken, Task> action, CancellationToken ct = default) =>
             build().RunAsync(actor, capabilityId, arguments, action, ct);
 
         public string? LostAuthority(AutomationActor actor, string capabilityId) =>

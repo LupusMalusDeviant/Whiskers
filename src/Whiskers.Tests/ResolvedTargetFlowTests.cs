@@ -142,13 +142,6 @@ public sealed class ResolvedTargetFlowTests
     }
 
     [Fact]
-    public void An_untyped_lambda_is_seen_as_pending()
-    {
-        Assert.Equal([$"{typeof(ResolvedTargetFlowFixtures).FullName}.Untyped -> container.start: untyped"],
-            FixtureFindings(nameof(ResolvedTargetFlowFixtures.Untyped)));
-    }
-
-    [Fact]
     public void A_resolved_target_cannot_be_built_outside_the_resolver()
     {
         // Every constructor of every ResolvedTarget type needs the resolver's token …
@@ -234,6 +227,4 @@ internal sealed class ResolvedTargetFlowFixtures(IUiMutationRunner runner, IDock
 
     private Task StartOther(ResolvedContainer c, string id) => docker.StartContainerAsync(id, c.ServerId);
 
-    public Task Untyped(string containerId) =>
-        runner.RunAsync("container.start", new { containerId }, _ => docker.StartContainerAsync(containerId, _pageServer));
 }

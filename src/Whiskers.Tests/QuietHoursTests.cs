@@ -495,13 +495,13 @@ public sealed class QuietHoursTests : IDisposable
     {
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
         return new UiMutationRunner(gateway, new CapabilityCatalog(), _user);
     }
 
     // As the Settings panel runs it.
     private static Task Save(UiMutationRunner runner, IQuietHoursService service, params QuietHoursRule[] rules) =>
-        runner.RunAsync("config.save", new { section = "quiet-hours" }, ct => service.SaveAsync(rules, ct));
+        runner.RunAsync("config.save", new { section = "quiet-hours" }, (ResolvedTarget _, CancellationToken ct) => service.SaveAsync(rules, ct));
 
     [Fact]
     public async Task An_admin_save_is_audited_first_then_written_then_published_and_survives_a_restart()
@@ -509,7 +509,7 @@ public sealed class QuietHoursTests : IDisposable
         var service = QuietHours();
         var intentFirst = false;
 
-        await Runner().RunAsync("config.save", new { section = "quiet-hours" }, async ct =>
+        await Runner().RunAsync("config.save", new { section = "quiet-hours" }, async (ResolvedTarget _, CancellationToken ct) =>
         {
             intentFirst = _audit.Events.Contains("begin:config.save:");
             await service.SaveAsync([Night()], ct);

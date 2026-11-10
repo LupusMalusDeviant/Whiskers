@@ -49,7 +49,7 @@ public sealed class LocalAccountLifecycleTests
 
         using var self = world.As(before);
         var result = await self.Mutations.RunAsync("account.password_change", new { account = Viewer },
-            ct => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct));
+            (ResolvedTarget _, CancellationToken ct) => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct));
 
         Assert.True(result.Success, result.ToString());
         // A Viewer may change their own password: the read-level capability ran through the gateway and was recorded.
@@ -113,7 +113,7 @@ public sealed class LocalAccountLifecycleTests
         using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
 
         var reset = await admin.Mutations.RunAsync("account.password_reset", new { account = Ops },
-            ct => admin.Accounts.ResetPasswordAsync(Ops, ct));
+            (ResolvedTarget _, CancellationToken ct) => admin.Accounts.ResetPasswordAsync(Ops, ct));
 
         Assert.True(reset.Success, reset.ToString());
         var code = Assert.IsType<string>(reset.RecoveryCode);
@@ -172,7 +172,7 @@ public sealed class LocalAccountLifecycleTests
         using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
 
         var created = await admin.Mutations.RunAsync("account.create", new { account = "new@local.test", role = "Operator" },
-            ct => admin.Accounts.CreateAsync("new@local.test", AppRole.Operator, ct));
+            (ResolvedTarget _, CancellationToken ct) => admin.Accounts.CreateAsync("new@local.test", AppRole.Operator, ct));
 
         Assert.True(created.Success, created.ToString());
         Assert.Contains("begin:account.create", world.Sink.Events);
@@ -204,7 +204,7 @@ public sealed class LocalAccountLifecycleTests
         using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
 
         var deleted = await admin.Mutations.RunAsync("account.delete", new { account = Ops },
-            ct => admin.Accounts.DeleteAsync(Ops, ct));
+            (ResolvedTarget _, CancellationToken ct) => admin.Accounts.DeleteAsync(Ops, ct));
 
         Assert.True(deleted.Success, deleted.ToString());
         Assert.Equal(SessionRevocationReasons.AccountDeleted, (await world.Validator.CheckAsync(opsSession)).Reason);
@@ -227,7 +227,7 @@ public sealed class LocalAccountLifecycleTests
         Assert.Equal(AppRole.Admin, await stranded.User.GetRoleAsync());
 
         var refused = await stranded.Mutations.RunAsync("account.delete", new { account = LocalAccountWorld.Root },
-            ct => stranded.Accounts.DeleteAsync(LocalAccountWorld.Root, ct));
+            (ResolvedTarget _, CancellationToken ct) => stranded.Accounts.DeleteAsync(LocalAccountWorld.Root, ct));
 
         Assert.Equal(LocalAccountErrors.LastAdmin, refused.Error);
         Assert.True(await world.PasswordWorksAsync(LocalAccountWorld.Root, LocalAccountWorld.Password));
@@ -292,12 +292,12 @@ public sealed class LocalAccountLifecycleTests
 
         using var operatorActing = world.As(await world.SessionOfAsync("op@local.test"));
         await Assert.ThrowsAsync<MutationRefusedException>(() => operatorActing.Mutations.RunAsync("identity.binding_confirm",
-            new { binding = request }, ct => world.Bindings.ConfirmAsync(request, ct)));
+            new { binding = request }, (ResolvedTarget _, CancellationToken ct) => world.Bindings.ConfirmAsync(request, ct)));
         Assert.Empty(world.Bindings.Snapshot().Bindings);
 
         using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
         var confirmed = await admin.Mutations.RunAsync("identity.binding_confirm", new { binding = request },
-            ct => world.Bindings.ConfirmAsync(request, ct));
+            (ResolvedTarget _, CancellationToken ct) => world.Bindings.ConfirmAsync(request, ct));
         Assert.True(confirmed.Success, confirmed.ToString());
         var binding = Assert.Single(world.Bindings.Snapshot().Bindings);
         Assert.Equal(PrincipalIds.User(LocalAccountWorld.Root), binding.BoundBy);
@@ -305,10 +305,10 @@ public sealed class LocalAccountLifecycleTests
             person, null, EmailIsStandardClaim: true))).Admitted);
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => operatorActing.Mutations.RunAsync("identity.binding_remove",
-            new { binding = binding.Id }, ct => world.Bindings.RemoveAsync(binding.Id, ct)));
+            new { binding = binding.Id }, (ResolvedTarget _, CancellationToken ct) => world.Bindings.RemoveAsync(binding.Id, ct)));
         Assert.Single(world.Bindings.Snapshot().Bindings);
         Assert.True((await admin.Mutations.RunAsync("identity.binding_remove", new { binding = binding.Id },
-            ct => world.Bindings.RemoveAsync(binding.Id, ct))).Success);
+            (ResolvedTarget _, CancellationToken ct) => world.Bindings.RemoveAsync(binding.Id, ct))).Success);
         Assert.Empty(world.Bindings.Snapshot().Bindings);
         Assert.Contains("complete:Executed", world.Sink.Events);
     }
@@ -372,11 +372,11 @@ public sealed class LocalAccountLifecycleTests
         using var actor = world.As(await world.SessionOfAsync(caller));
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => actor.Mutations.RunAsync("account.create",
-            new { account = "x@local.test", role = "Admin" }, ct => actor.Accounts.CreateAsync("x@local.test", AppRole.Admin, ct)));
+            new { account = "x@local.test", role = "Admin" }, (ResolvedTarget _, CancellationToken ct) => actor.Accounts.CreateAsync("x@local.test", AppRole.Admin, ct)));
         await Assert.ThrowsAsync<MutationRefusedException>(() => actor.Mutations.RunAsync("account.password_reset",
-            new { account = Ops }, ct => actor.Accounts.ResetPasswordAsync(Ops, ct)));
+            new { account = Ops }, (ResolvedTarget _, CancellationToken ct) => actor.Accounts.ResetPasswordAsync(Ops, ct)));
         await Assert.ThrowsAsync<MutationRefusedException>(() => actor.Mutations.RunAsync("account.delete",
-            new { account = Ops }, ct => actor.Accounts.DeleteAsync(Ops, ct)));
+            new { account = Ops }, (ResolvedTarget _, CancellationToken ct) => actor.Accounts.DeleteAsync(Ops, ct)));
         Assert.Equal(3, world.Sink.Events.Count(e => e.StartsWith("denied:account.", StringComparison.Ordinal)));
 
         // The service refuses as well, also when called past the gateway.
@@ -400,7 +400,7 @@ public sealed class LocalAccountLifecycleTests
 
         await world.Roles.SetRoleAsync(Ops, AppRole.Operator);   // the page may still show the Admin buttons
         await Assert.ThrowsAsync<MutationRefusedException>(() => ops.Mutations.RunAsync("account.password_reset",
-            new { account = Viewer }, ct => ops.Accounts.ResetPasswordAsync(Viewer, ct)));
+            new { account = Viewer }, (ResolvedTarget _, CancellationToken ct) => ops.Accounts.ResetPasswordAsync(Viewer, ct)));
         Assert.Equal(LocalAccountErrors.NotAuthorized, (await ops.Accounts.DeleteAsync(Viewer)).Error);
 
         // A session whose stamp changed (its password was reset elsewhere) decides nothing, not even its own password.
@@ -411,7 +411,7 @@ public sealed class LocalAccountLifecycleTests
         Assert.Equal(LocalAccountErrors.SessionInvalid,
             (await ops.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword)).Error);
         await Assert.ThrowsAsync<MutationRefusedException>(() => ops.Mutations.RunAsync("account.delete",
-            new { account = Viewer }, ct => ops.Accounts.DeleteAsync(Viewer, ct)));
+            new { account = Viewer }, (ResolvedTarget _, CancellationToken ct) => ops.Accounts.DeleteAsync(Viewer, ct)));
         Assert.NotNull(await world.FindAsync(Viewer));
     }
 
@@ -426,9 +426,9 @@ public sealed class LocalAccountLifecycleTests
         using var self = world.As(await world.SessionOfAsync(Viewer));
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => admin.Mutations.RunAsync("account.create",
-            new { account = "x@local.test", role = "Viewer" }, ct => admin.Accounts.CreateAsync("x@local.test", AppRole.Viewer, ct)));
+            new { account = "x@local.test", role = "Viewer" }, (ResolvedTarget _, CancellationToken ct) => admin.Accounts.CreateAsync("x@local.test", AppRole.Viewer, ct)));
         var changed = await self.Mutations.RunAsync("account.password_change", new { account = Viewer },
-            ct => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct));
+            (ResolvedTarget _, CancellationToken ct) => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct));
         Assert.True(changed.Success);
     }
 
@@ -481,11 +481,11 @@ public sealed class LocalAccountLifecycleTests
         var secrets = new List<string> { LocalAccountWorld.Password, LocalAccountWorld.NewPassword };
 
         await self.Mutations.RunAsync("account.password_change", new { account = Viewer },
-            ct => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct));
+            (ResolvedTarget _, CancellationToken ct) => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct));
         var invited = await admin.Mutations.RunAsync("account.create", new { account = "new@local.test", role = "Viewer" },
-            ct => admin.Accounts.CreateAsync("new@local.test", AppRole.Viewer, ct));
+            (ResolvedTarget _, CancellationToken ct) => admin.Accounts.CreateAsync("new@local.test", AppRole.Viewer, ct));
         var reset = await admin.Mutations.RunAsync("account.password_reset", new { account = Viewer },
-            ct => admin.Accounts.ResetPasswordAsync(Viewer, ct));
+            (ResolvedTarget _, CancellationToken ct) => admin.Accounts.ResetPasswordAsync(Viewer, ct));
         var cli = new StringWriter();
         await LocalAccountRecoveryCli.RunAsync(world.Services, ["new@local.test"], cli);
         var hostCode = Regex.Match(cli.ToString(), "([2-9A-HJ-NP-Z]{4}-){5}[2-9A-HJ-NP-Z]{4}").Value;

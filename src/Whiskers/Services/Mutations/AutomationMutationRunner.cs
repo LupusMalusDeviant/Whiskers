@@ -206,14 +206,6 @@ public sealed class AutomationOwnerResolver : IAutomationOwnerResolver
 /// </summary>
 public interface IAutomationMutationRunner
 {
-    [MutationEntryPoint]
-    Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
-        Func<CancellationToken, Task<T>> action, CancellationToken ct = default);
-
-    [MutationEntryPoint]
-    Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
-        Func<CancellationToken, Task> action, CancellationToken ct = default);
-
     /// <summary>Contract 0012 (D3): runs <paramref name="action"/> on the object the gateway resolved and confirmed. A
     /// <typeparamref name="TTarget"/> that is not the capability's <see cref="Capability.TargetType"/> (or a base of
     /// it) is refused — and recorded — before the gateway decides anything.</summary>
@@ -266,13 +258,6 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
-    public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
-        Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-        return RunCoreAsync<T>(actor, capabilityId, arguments, null, (_, token) => action(token), ct);
-    }
-
     public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
         Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget
     {
@@ -323,17 +308,6 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         var refused = await _gateway.RefuseAsync(request, reason, ct);
         return new MutationOutcome<T>(refused.OperationId, MutationStatus.Denied, default, reason, VerificationStatus.NotRun)
             { DecisionId = refused.DecisionId };
-    }
-
-    public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
-        Func<CancellationToken, Task> action, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-        return RunAsync<bool>(actor, capabilityId, arguments, async token =>
-        {
-            await action(token);
-            return true;
-        }, ct);
     }
 
     public Task<MutationOutcome<object?>> RefuseAsync(AutomationActor actor, string capabilityId, object arguments,

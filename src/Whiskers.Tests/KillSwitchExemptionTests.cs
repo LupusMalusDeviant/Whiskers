@@ -140,7 +140,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
             await world.AddUserAsync(LocalOps, AppRole.Viewer);
             using var self = world.As(await world.SessionOfAsync(LocalOps));
             var changed = await self.Mutations.RunAsync("account.password_change", new { account = LocalOps },
-                ct => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct));
+                (ResolvedTarget _, CancellationToken ct) => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct));
             Assert.True(changed.Success);
         }
 
@@ -150,7 +150,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
             using var self = world.As(await world.SessionOfAsync(LocalOps));
             var refused = await Assert.ThrowsAsync<MutationRefusedException>(() => self.Mutations.RunAsync("account.password_change",
                 new { account = LocalOps },
-                ct => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct)));
+                (ResolvedTarget _, CancellationToken ct) => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct)));
             Assert.Equal(MutationStatus.Denied, refused.Status);
             Assert.True(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
             Assert.Equal(["denied:account.password_change:Denied"], world.Sink.Events);
@@ -167,7 +167,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
 
         await Assert.ThrowsAsync<MutationRefusedException>(() => self.Mutations.RunAsync("account.password_change",
             new { account = LocalOps },
-            ct => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct)));
+            (ResolvedTarget _, CancellationToken ct) => self.Accounts.ChangeOwnPasswordAsync(LocalAccountWorld.Password, LocalAccountWorld.NewPassword, ct)));
 
         Assert.True(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
         Assert.Equal(["denied:account.password_change:Denied"], world.Sink.Events);
@@ -483,7 +483,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
         // An Admin's confirmation is a mutation: the kill switch refuses it, and nothing is bound.
         using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
         var refused = await Assert.ThrowsAsync<MutationRefusedException>(() => admin.Mutations.RunAsync(
-            "identity.binding_confirm", new { binding = request }, ct => world.Bindings.ConfirmAsync(request, ct)));
+            "identity.binding_confirm", new { binding = request }, (ResolvedTarget _, CancellationToken ct) => world.Bindings.ConfirmAsync(request, ct)));
         Assert.Equal(MutationStatus.Denied, refused.Status);
         Assert.Contains("denied:identity.binding_confirm:Denied", world.Sink.Events);
         Assert.Empty(world.Bindings.Snapshot().Bindings);
@@ -494,7 +494,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
         // Confirmed with the switch off, the binding signs in under the switch again and its sign-in day is recorded.
         policy.ReadOnlyMode = false;
         Assert.True((await admin.Mutations.RunAsync("identity.binding_confirm", new { binding = request },
-            ct => world.Bindings.ConfirmAsync(request, ct))).Success);
+            (ResolvedTarget _, CancellationToken ct) => world.Bindings.ConfirmAsync(request, ct))).Success);
         policy.ReadOnlyMode = true;
         Assert.True((await admission.AdmitAsync(claims)).Admitted);
         Assert.NotNull(Assert.Single(world.Bindings.Snapshot().Bindings).LastSignInDay);
