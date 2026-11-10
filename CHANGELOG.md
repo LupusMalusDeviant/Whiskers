@@ -18,6 +18,9 @@ All notable changes to Whiskers are documented here. The format follows
   the Guardrails page. Removing the policy files is no longer described as a reset anywhere. The Guardrails page and a
   new readiness line ("Guardrail-Policy geladen und vermerkt") show the reason; after upgrading, check that line once.
   `--migrate-to-postgres` copies the record and accepts sources of older releases without the table.
+- **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
+  asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
+  host. The labels are now read from the whole `Config`.
 - **MCP SDK 2.4 with sessions bound to their key (contract 0016).** `ModelContextProtocol.AspNetCore` 1.4.1 → 2.4.0.
   The SDK now defaults to stateless; Whiskers keeps stateful sessions (`initialize` → `Mcp-Session-Id`, GET/DELETE
   `/mcp`) as before. Each session is bound to the API key that opened it: the key's principal carries the subject
