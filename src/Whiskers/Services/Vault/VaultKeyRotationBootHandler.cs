@@ -95,7 +95,7 @@ public static class VaultKeyRotationBootHandler
             .Build();
         var backup = new BackupService(db.GetRequiredService<IServiceScopeFactory>(), new Whiskers.Services.Maintenance.MaintenanceStateService(),
             new NoLifetime(), withKey, NullLogger<BackupService>.Instance, paths);
-        var info = await backup.CreateBackupAsync(label, ct);
+        var info = await backup.CreateVaultRotationBackupAsync(label, ct);
         return info.Id;
     }
 

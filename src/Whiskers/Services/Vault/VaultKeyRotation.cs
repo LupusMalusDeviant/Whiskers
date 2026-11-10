@@ -289,7 +289,7 @@ public sealed class VaultKeyRotation
             foreach (var entry in entries)
             {
                 ct.ThrowIfCancellationRequested();
-                await fresh.SetSecretAsync(entry.Key, plain[entry.Key], entry.ContainerId, entry.ContainerName, entry.RotateAfterDays);
+                await fresh.ResealForRotationAsync(entry, plain[entry.Key]);
             }
         }
         // The entries keep their dates (rotation reminders count from them).

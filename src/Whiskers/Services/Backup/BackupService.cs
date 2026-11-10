@@ -68,6 +68,12 @@ public sealed class BackupService : IBackupService
 
     public Task<SelfBackupInfo> CreateBackupAsync(string label, CancellationToken ct = default) => CreateCoreAsync(label, ct);
 
+    /// <summary>Contract 0015 D9 (start-up only, like S-09): the <c>pre-rotation</c> / <c>post-rotation</c> backup of a
+    /// <c>VAULT_KEY</c> rotation, taken before the host and the Mutation Gateway exist. Its only caller is
+    /// <see cref="Whiskers.Services.Vault.VaultKeyRotationBootHandler"/> (pinned by VaultKeyRotationTests).</summary>
+    internal Task<SelfBackupInfo> CreateVaultRotationBackupAsync(string label, CancellationToken ct = default) =>
+        CreateCoreAsync(label, ct);
+
     /// <inheritdoc />
     public Task<SelfBackupInfo> CreatePreUpgradeBackupAsync(CancellationToken ct = default) =>
         CreateCoreAsync($"{PreUpgradeLabelPrefix}{DateTime.UtcNow:yyyyMMdd_HHmmss}", ct);

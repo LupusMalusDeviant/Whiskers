@@ -392,3 +392,10 @@ Deviations found while implementing; none weakens a decision.
 - **A5 — Image test.** `SshKeyLeaseImageTests` installs the test sshd into a throw-away container of the built image (the
   image ships only the client) and drives the lease layout by shell, as `SshKeyLeases` makes it; the lease code itself is
   proven by `SshKeyLeaseTests` on Linux (`ci.yml build-test`).
+- **A6 — Start-up write paths outside the Mutation Gateway.** The rotation runs before the host and the gateway exist
+  (like S-09). It therefore does not call the gated `IVaultService.SetSecretAsync` / `IBackupService.CreateBackupAsync`,
+  but two internal, start-up-only methods of the concrete services: `VaultService.ResealForRotationAsync` (writes only
+  the prepared `vault.json.rotating`) and `BackupService.CreateVaultRotationBackupAsync` (the `pre-rotation` /
+  `post-rotation` backups). Each has exactly one pinned caller (`VaultKeyRotationTests`). `ISealedKeyFiles.Write` and
+  `ISshKeyLeases.AcquireAsync` are listed as write-named but not gated (`MutationGatewayCoverageTests`): the first is a
+  storage step inside its caller's decision or the start-up migration, the second a short-lived copy with no state.

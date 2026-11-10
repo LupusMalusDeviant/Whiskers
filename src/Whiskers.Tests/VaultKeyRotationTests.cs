@@ -309,4 +309,22 @@ public sealed class VaultKeyRotationTests : IDisposable
         await Assert.ThrowsAsync<VaultKeyRotationException>(() => new VaultKeyRotation(_paths, _db, "not-the-key", "yet-another").RunAsync());
         Assert.Equal(vaultAfter, await File.ReadAllBytesAsync(_paths.VaultJson));
     }
+
+    /// <summary>The rotation runs before the Mutation Gateway exists, like S-09; its two unmarked write paths (the
+    /// re-sealed vault entry, the rotation backups) have exactly their one start-up caller each.</summary>
+    [Fact]
+    public void The_start_up_rotation_write_paths_have_exactly_their_one_caller_each()
+    {
+        static IReadOnlyList<string> CallersOf(Type type, string method) => MutationCallScanner
+            .Callers(typeof(Program).Assembly, m => m.DeclaringType == type && m.Name == method)
+            .Select(c => c.Owner.FullName!)
+            .Distinct()
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(["Whiskers.Services.Vault.VaultKeyRotation"],
+            CallersOf(typeof(VaultService), nameof(VaultService.ResealForRotationAsync)));
+        Assert.Equal(["Whiskers.Services.Vault.VaultKeyRotationBootHandler"],
+            CallersOf(typeof(Whiskers.Services.Backup.BackupService), nameof(Whiskers.Services.Backup.BackupService.CreateVaultRotationBackupAsync)));
+    }
 }
