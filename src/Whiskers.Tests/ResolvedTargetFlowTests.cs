@@ -17,8 +17,8 @@ namespace Whiskers.Tests;
 /// <item>Negative fixtures compiled into this assembly are found; a <see cref="ResolvedTarget"/> cannot be built
 /// outside the resolver.</item>
 /// </list>
-/// Until contract 0012 step 7 the lambdas still on the old overloads (<c>Func&lt;CancellationToken, …&gt;</c>) are a
-/// pinned <i>pending</i> list that may only shrink (<see cref="ResolvedTargetFlowPending"/>); step 7 requires it empty.
+/// Since contract 0012 step 7 no lambda is untyped (the old <c>Func&lt;CancellationToken, …&gt;</c> overloads are gone)
+/// and the pending lists are empty and deleted.
 /// </summary>
 public sealed class ResolvedTargetFlowTests
 {
@@ -48,21 +48,91 @@ public sealed class ResolvedTargetFlowTests
     }
 
     [Fact]
-    public void The_pending_list_of_untyped_lambdas_only_shrinks()
+    public void Every_lambda_receives_the_resolved_object()
     {
-        var actual = AppSites().Where(s => !s.Typed).Select(s => s.Key).ToHashSet(StringComparer.Ordinal);
-        var pinned = ResolvedTargetFlowPending.Lambdas.ToHashSet(StringComparer.Ordinal);
+        // Step 7 deleted the old Func<CancellationToken, …> overloads: no site can hand over an untyped lambda.
+        var untyped = AppSites().Where(s => !s.Typed).Select(s => s.Key).Order(StringComparer.Ordinal).ToList();
 
-        var added = actual.Except(pinned).Order(StringComparer.Ordinal).ToList();
-        var gone = pinned.Except(actual).Order(StringComparer.Ordinal).ToList();
-        Assert.True(added.Count == 0,
-            "New lambdas on the old runner overloads (use RunAsync<TTarget, T>):\n" + string.Join("\n", added));
-        Assert.True(gone.Count == 0,
-            "Migrated or removed — delete these lines from ResolvedTargetFlowPending.Lambdas:\n" + string.Join("\n", gone));
+        Assert.True(untyped.Count == 0, "Lambdas that do not receive the resolved object:\n" + string.Join("\n", untyped));
     }
 
+    // D4 b / D10 item 3: object operations without a [MutationTarget] parameter, each with its reason.
+    private const string WholeSection =
+        "Saves a whole settings object; the decided target is its config section, which the call does not name.";
+    private const string StoreKey =
+        "Names the store's section key (the file's key), not the closed-list section the decision resolved; " +
+        "ConfigSectionsTests pins the sections the pages pass.";
+    private const string SectionEntry =
+        "Names an entry inside the decided config section (an e-mail, a tool, a container's preferences), not the section.";
+    private const string OwnAccount = "Acts on the signed-in account itself; the call names no account.";
+    private const string ProviderTransport =
+        "Provider transport below ICloudControlService, which marks the decided cloud server; it takes the provider's " +
+        "server record or numeric id.";
+    private const string HetznerId =
+        "Hetzner-only operation on the provider's numeric server or image id; the decided target is the Whiskers server.";
+    private const string Entity =
+        "Takes the stored entity (or the open request), not an id: the delegate passes the object read for the decision.";
+    private const string RollbackRecord = "Takes the numeric rollback record; the decided target is the container.";
+    private const string DerivedSecret =
+        "Composed by server, registry and Git-app removal for a key derived from the decided record, not a decided name.";
+
+    private static readonly IReadOnlyDictionary<string, string> WithoutTargetParameter = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Whiskers.Services.Agent.IAgentSettingsStore.SaveAsync (config.agent)"] = WholeSection,
+        ["Whiskers.Services.Auth.ILocalAccountService.ChangeOwnPasswordAsync (account.password_change)"] = OwnAccount,
+        ["Whiskers.Services.Auth.IRoleService.RemoveRoleAsync (config.roles)"] = SectionEntry,
+        ["Whiskers.Services.Auth.IRoleService.SaveRoleDataAsync (config.roles)"] = WholeSection,
+        ["Whiskers.Services.Auth.IRoleService.SetRoleAsync (config.roles)"] = SectionEntry,
+        ["Whiskers.Services.Auth.IWhitelistService.SaveWhitelistAsync (config.whitelist)"] = WholeSection,
+        ["Whiskers.Services.AutoUpdate.IAutoUpdateService.RollbackAsync (container.rollback)"] = RollbackRecord,
+        ["Whiskers.Services.AutoUpdate.IAutoUpdateService.SetPolicyAsync (autoupdate.policy_set)"] = Entity,
+        ["Whiskers.Services.Cloud.Providers.ICloudProvider.CreateSnapshotAsync (cloud.snapshot_create)"] = ProviderTransport,
+        ["Whiskers.Services.Cloud.Providers.ICloudProvider.HardResetAsync (cloud.hard_reset)"] = ProviderTransport,
+        ["Whiskers.Services.Cloud.Providers.ICloudProvider.PowerOnAsync (cloud.power_on)"] = ProviderTransport,
+        ["Whiskers.Services.Cloud.Providers.ICloudProvider.RebootAsync (cloud.reboot)"] = ProviderTransport,
+        ["Whiskers.Services.Cloud.Providers.ICloudProvider.ShutdownAsync (cloud.shutdown)"] = ProviderTransport,
+        ["Whiskers.Services.Cloud.Providers.IHetznerExtensions.ChangeServerTypeAsync (hetzner.server_type_change)"] = HetznerId,
+        ["Whiskers.Services.Cloud.Providers.IHetznerExtensions.DeleteImageAsync (hetzner.snapshot_delete)"] = HetznerId,
+        ["Whiskers.Services.Cloud.Providers.IHetznerExtensions.DisableBackupsAsync (hetzner.backups_disable)"] = HetznerId,
+        ["Whiskers.Services.Cloud.Providers.IHetznerExtensions.DisableRescueAsync (hetzner.rescue_disable)"] = HetznerId,
+        ["Whiskers.Services.Cloud.Providers.IHetznerExtensions.EnableBackupsAsync (hetzner.backups_enable)"] = HetznerId,
+        ["Whiskers.Services.Cloud.Providers.IHetznerExtensions.EnableRescueAsync (hetzner.rescue_enable)"] = HetznerId,
+        ["Whiskers.Services.GitDeploy.IGitDeployService.DeployAsync (gitdeploy.deploy)"] = Entity,
+        ["Whiskers.Services.Guardrails.IGuardrailStore.SaveAsync (guardrails.save)"] = WholeSection,
+        ["Whiskers.Services.Guardrails.IGuardrailStore.SaveConfigAsync (guardrails.save)"] = WholeSection,
+        ["Whiskers.Services.Hetzner.IHetznerService.ChangeServerTypeAsync (hetzner.server_type_change)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.CreateSnapshotAsync (cloud.snapshot_create)"] = ProviderTransport,
+        ["Whiskers.Services.Hetzner.IHetznerService.DeleteImageAsync (hetzner.snapshot_delete)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.DisableBackupsAsync (hetzner.backups_disable)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.DisableRescueAsync (hetzner.rescue_disable)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.EnableBackupsAsync (hetzner.backups_enable)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.EnableRescueAsync (hetzner.rescue_enable)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.PowerOnAsync (cloud.power_on)"] = ProviderTransport,
+        ["Whiskers.Services.Hetzner.IHetznerService.RebootAsync (cloud.reboot)"] = ProviderTransport,
+        ["Whiskers.Services.Hetzner.IHetznerService.ResetAsync (cloud.hard_reset)"] = ProviderTransport,
+        ["Whiskers.Services.Hetzner.IHetznerService.ShutdownAsync (cloud.shutdown)"] = ProviderTransport,
+        ["Whiskers.Services.Hostinger.IHostingerService.CreateSnapshotAsync (cloud.snapshot_create)"] = ProviderTransport,
+        ["Whiskers.Services.Hostinger.IHostingerService.RestartAsync (cloud.reboot)"] = ProviderTransport,
+        ["Whiskers.Services.Hostinger.IHostingerService.StartAsync (cloud.power_on)"] = ProviderTransport,
+        ["Whiskers.Services.Hostinger.IHostingerService.StopAsync (cloud.shutdown)"] = ProviderTransport,
+        ["Whiskers.Services.Mcp.IMcpPermissionService.SavePermissionDataAsync (config.mcp_permissions)"] = WholeSection,
+        ["Whiskers.Services.Mcp.IMcpPermissionService.SetToolEnabledAsync (config.mcp_permissions)"] = SectionEntry,
+        ["Whiskers.Services.Metrics.DiskHealth.IDiskHealthSettingsService.SaveAsync (config.save)"] = WholeSection,
+        ["Whiskers.Services.Metrics.IMetricRetentionService.SaveAsync (config.save)"] = WholeSection,
+        ["Whiskers.Services.Notifications.IContainerNotificationPrefsService.SavePrefsAsync (config.save)"] = SectionEntry,
+        ["Whiskers.Services.Notifications.IOutboundExceptionService.SaveAsync (config.save)"] = WholeSection,
+        ["Whiskers.Services.Notifications.IQuietHoursService.SaveAsync (config.save)"] = WholeSection,
+        ["Whiskers.Services.Persistence.IAppSettingsStore.SaveSectionAsync (config.save)"] = StoreKey,
+        ["Whiskers.Services.Persistence.IAppSettingsStore.SaveSectionsAsync (config.save)"] = WholeSection,
+        ["Whiskers.Services.Persistence.IAppSettingsStore.UpdateSectionAsync (config.save)"] = StoreKey,
+        ["Whiskers.Services.Persistence.IAppSettingsStore.UpdateSectionsAsync (config.save)"] = WholeSection,
+        ["Whiskers.Services.Scheduler.ISchedulerService.UpdateTaskAsync (scheduler.update)"] = Entity,
+        ["Whiskers.Services.Terminal.ITerminalSessionManager.OpenContainerShellAsync (terminal.container_open)"] = Entity,
+        ["Whiskers.Services.Vault.IVaultService.DeleteSecretAsync (vault.secret_delete)"] = DerivedSecret,
+    };
+
     [Fact]
-    public void Every_object_operation_marks_its_target_or_is_pending()
+    public void Every_object_operation_marks_its_target_or_has_a_reason()
     {
         var catalog = new CapabilityCatalog();
         var actual = new SortedSet<string>(StringComparer.Ordinal);
@@ -73,13 +143,14 @@ public sealed class ResolvedTargetFlowTests
                 var marked = method.GetParameters().Count(p => p.IsDefined(typeof(MutationTargetAttribute), false));
                 if (marked != 1) actual.Add($"{iface.FullName}.{method.Name} ({capabilityId})");
             }
-        var pinned = ResolvedTargetFlowPending.UnmarkedOperations.ToHashSet(StringComparer.Ordinal);
+        var pinned = WithoutTargetParameter.Keys.ToHashSet(StringComparer.Ordinal);
 
         var added = actual.Except(pinned).ToList();
         var gone = pinned.Except(actual).Order(StringComparer.Ordinal).ToList();
         Assert.True(added.Count == 0, "Object operations without exactly one [MutationTarget]:\n" + string.Join("\n", added));
         Assert.True(gone.Count == 0,
-            "Marked or removed — delete these lines from ResolvedTargetFlowPending.UnmarkedOperations:\n" + string.Join("\n", gone));
+            "Marked or removed — delete these entries from WithoutTargetParameter:\n" + string.Join("\n", gone));
+        Assert.All(WithoutTargetParameter.Values, reason => Assert.False(string.IsNullOrWhiteSpace(reason)));
     }
 
     // ---------------------------------------------------------------- the scanner finds what it must (D10 item 4)
