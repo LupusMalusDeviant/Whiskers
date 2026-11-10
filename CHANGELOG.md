@@ -6,6 +6,18 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **A deleted guardrail policy is no first start any more (INV-25, contract 0010).** The database now records that a
+  guardrail policy has existed (new table `InstanceMarkers`, additive migration for SQLite and PostgreSQL; written when
+  the safe default is first created, at every start with a policy file and after saves; never changed or removed). With
+  that record — or with policy decisions on record — missing both `guardrails.json` and `guardrails.json.bak` keeps the
+  guardrails fail-closed instead of creating the weaker default, and so does a record that cannot be read. The start
+  decides this only once the database schema is current; a start that fails earlier never leaves the default behind.
+  **Way back** (host only): put a valid `guardrails.json` back (repaired or restored) and restart, or, with both files
+  missing, run `dotnet Whiskers.dll --reset-guardrails` in the container: it writes the safe default with the kill
+  switch **on** (audited as `guardrails.reset_on_host`), and after the restart an Admin switches the kill switch off on
+  the Guardrails page. Removing the policy files is no longer described as a reset anywhere. The Guardrails page and a
+  new readiness line ("Guardrail-Policy geladen und vermerkt") show the reason; after upgrading, check that line once.
+  `--migrate-to-postgres` copies the record and accepts sources of older releases without the table.
 - **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
   asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
   host. The labels are now read from the whole `Config`.

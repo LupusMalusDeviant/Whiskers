@@ -37,7 +37,6 @@ Highest invariant ID: INV-62
 | Invariant | Status | Package | Why it is open | Reference |
 |---|---|---|---|---|
 | INV-01 | ⚠️ | R1-03 | webhook and system principals come with their packages; humans are keyed by the account handle, not the credential | — |
-| INV-25 | ⚠️ | R1-02 | with neither policy file present the restrictive default is created, so deleting both looks like a first start | — |
 | INV-52 | ⚠️ | WP7 | SSH private keys and mTLS client keys are stored in plaintext; no in-place `VAULT_KEY` rotation | — |
 | INV-56 | ⚠️ | WP7 | readiness lines are German only, and no test compares README/SECURITY.md claims with the code | — |
 | INV-57 | ⚠️ | WP2 | UI and automation delegates, webhooks, workloads, volumes and log alerts do not act on the resolved target object | — |

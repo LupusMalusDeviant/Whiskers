@@ -675,6 +675,12 @@ public static class WhiskersPipelineExtensions
         }
         await upgradeGuard.CompleteAsync();
 
+        // Contract 0010 D4, phase 2: both schemas are current, so the guardrail store reads (or writes) the database's
+        // record that a policy has existed — before anything is served. A start that failed above never left the
+        // SafeDefault behind: phase 1 (Order 80) saves nothing when both policy files are missing.
+        await app.Services.GetRequiredService<Whiskers.Services.Guardrails.GuardrailStore>()
+            .ReconcileMarkerAsync(CancellationToken.None);
+
         // R1-23: on the first start with the audit chain, the rows written before it are sealed (genesis) — before
         // anything else can write an audit row.
         await app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditChain>().SealExistingAsync(CancellationToken.None);

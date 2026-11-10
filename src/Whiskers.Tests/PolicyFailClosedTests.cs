@@ -114,8 +114,7 @@ public sealed class PolicyFailClosedTests : IDisposable
     [InlineData("bad-regex")]        // invalid forbidden-argument pattern
     public async Task An_invalid_configuration_is_refused_on_save(string defect)
     {
-        var store = new GuardrailStore(filePath: FilePath);
-        await store.InitializeAsync();
+        var store = await GuardrailStoreTestExtensions.FirstStartStore(FilePath).StartAsync();
         var config = GuardrailConfig.SafeDefault();
         if (defect == "Missing") config.ActivePreset = "Missing";
         else config.Presets[0].Policy.ForbiddenArgPatterns.Add("[unclosed");
@@ -190,8 +189,7 @@ public sealed class PolicyFailClosedTests : IDisposable
     [Fact]
     public async Task A_file_written_by_the_store_loads_again()
     {
-        var first = new GuardrailStore(filePath: FilePath);
-        await first.InitializeAsync();
+        var first = await GuardrailStoreTestExtensions.FirstStartStore(FilePath).StartAsync();
         var config = first.Config;
         config.Presets.Add(new GuardrailPreset { Name = "Second", Policy = GuardrailPolicy.SafeDefault() });
         config.ActivePreset = "Second";
@@ -229,8 +227,7 @@ public sealed class PolicyFailClosedTests : IDisposable
     [Fact]
     public async Task A_null_entry_in_a_list_is_refused_on_save()
     {
-        var store = new GuardrailStore(filePath: FilePath);
-        await store.InitializeAsync();
+        var store = await GuardrailStoreTestExtensions.FirstStartStore(FilePath).StartAsync();
         var config = GuardrailConfig.SafeDefault();
         config.Presets[0].Policy.ProtectedResources.Add(null!);
 
