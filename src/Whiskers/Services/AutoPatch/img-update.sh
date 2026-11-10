@@ -51,6 +51,9 @@ major() { echo "$1" | grep -oE '^[vV]?[0-9]+' | tr -d vV; }
 
 echo "container=$C project=$PROJ service=$SVC image=$IMG old=$(echo "$OLD_ID" | cut -c8-19) health_before=$PRE_H"
 [ -n "$SVC" ] && [ -n "$DIR" ] || { echo UPD-ABORT no-compose-labels; exit 1; }
+# Pinned by a Whiskers deployment (contract 0013, D14): its project is redeployed to update it, never re-tagged here.
+PIN=$(lbl whiskers.image.ref)
+if [ -n "$PIN" ] && [ "$PIN" != "<no value>" ]; then echo "UPD-ABORT pinned-by-whiskers redeploy the project to update"; exit 0; fi
 
 # Built on this host: there is no registry copy to pull. Not decided by RepoDigests - under the containerd
 # image store a local build has one too.

@@ -48,6 +48,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | RM-22 | `README.md` | `d304424dbc9d` | `PATH_BASE` \| `PathBase` | artifact | `SelfReportClaimTests.The_release_compose_maps_each_env_name_of_the_readme_table_to_its_variable` |
 | RM-12 | `README.md` | `2807a5ff5649` | loopback only by default. | default | `ForwardedHeadersConfigTests.Without_configuration_only_loopback_is_trusted`, `SelfReportClaimTests.The_release_compose_maps_each_env_name_of_the_readme_table_to_its_variable` |
 | RM-13 | `README.md` | `232138d9f27d` | **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own 300 s / 600 s / 300 s. | constant | `SelfReportClaimTests.The_compose_run_budget_is_five_minutes_and_git_deploy_keeps_300_600_300_seconds` |
+| RM-25 | `README.md` | `f8ce97a70a2e` | a deployment that would use one of their names is refused until the container is removed or another name is chosen | behaviour | `DeployAppComposeTests.A_legacy_container_with_the_name_is_refused_with_the_ways_out`, `DeployPageComposeTests.The_form_refuses_a_legacy_container_with_its_name`, `DeployPageComposeTests.The_compose_tab_refuses_a_legacy_container_with_a_name_it_would_use` |
 | RM-23 | `README.md` | `fcbeb0625505` | Apache License 2.0 | artifact | `SelfReportClaimTests.The_stack_is_dotnet_10_under_the_apache_license_2` |
 | SEC-01 | `SECURITY.md` | `7ba4d2988f0e` | Whiskers is currently **beta** (`0.15.x`). | artifact | `SelfReportClaimTests.The_supported_line_is_the_version_of_this_source_tree` |
 | SEC-02 | `SECURITY.md` | `2c3376c66abd` | Helm chart pins `replicas: 1` with a `Recreate` strategy | artifact | `SelfReportClaimTests.The_helm_chart_runs_one_replica_with_recreate` |
@@ -131,14 +132,15 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `README.md` | `3a0cc64255b0` | limit | - **Out-of-band changes are invisible.** |
 | `README.md` | `d5a1a574b44a` | limit | - **No second factor for local accounts. |
 | `README.md` | `a2747be852ac` | limit | Compose deployments are decided on their |
-| `README.md` | `e70fbc7806bb` | limit | - **Traefik `exposedByDefault`**: a Trae |
-| `README.md` | `e1bef697cd7d` | limit | - **Tailscale sidecar `serve`/Funnel** c |
-| `README.md` | `e04381a52e7e` | limit | - **The re-tag window**: an image re-tag |
+| `README.md` | `568319d4e1e3` | limit | - **Proxies and tunnels behind an unreco |
+| `README.md` | `7d874a4c037c` | limit | - **Tailscale serve state** is read from |
+| `README.md` | `ce0710612c8e` | limit | - **A Traefik on the host** outside the |
 | `README.md` | `6d29e54a90ac` | limit | - **The tag race**: putting a tag back a |
-| `README.md` | `8c34cfe1e305` | limit | - **`container.update` and `autopatch.ru |
+| `README.md` | `a7343775105d` | limit | - **`container.update` and `autopatch.ru |
+| `README.md` | `4fa80a44962e` | limit | - **Pinned containers show an image id** |
 | `README.md` | `11f26aced0e7` | limit | - **Late daemon work after a timeout**: |
-| `README.md` | `3b6a2a38a2fa` | limit | - **Out of scope**: the Deploy page's co |
 | `README.md` | `3b05cab3b9c3` | history | **Upgrade note (contract 0006).** The ne |
+| `README.md` | `573b0dab3b01` | history | **Upgrade note (contract 0013).** The de |
 | `README.md` | `f7af4d73bc43` | advice | Requires the .NET SDK version in `global |
 | `README.md` | `2319ae6706c7` | advice | ```bash dotnet build Whiskers.slnx -c Re |
 | `README.md` | `fc3e806e0705` | advice | After changing a package reference: `dot |

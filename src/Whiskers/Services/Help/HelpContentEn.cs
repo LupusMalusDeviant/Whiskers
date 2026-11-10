@@ -238,8 +238,10 @@ internal static class HelpContentEn
             new List<HelpSection>
             {
                 new("Deploying Containers", """
-                    Under **Deployment > Deploy** you launch a new container: image, name, ports,
-                    volumes, environment variables and restart policy — like a guided `docker run`.
+                    Under **Deployment > Deploy** you launch an app from an image: name, ports, volumes,
+                    environment variables and restart policy. Whiskers writes it as a compose project in
+                    `/opt/deployments/<name>`, plans it, decides how it is exposed and starts it with the image
+                    pinned to the inspected image id. The **Compose** tab deploys a whole file the same way.
                     """,
                     Shot("Deploy form")),
                 new("Compose Editor & App Store", """

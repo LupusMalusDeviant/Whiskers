@@ -77,6 +77,20 @@ public sealed class ExposureChangeRule : IGuardrailRule
             ExposureKind.Device => $"{service} gets the host device {key}.",
             ExposureKind.SecurityOpt => $"{service} runs with {key} switched off.",
             ExposureKind.DeviceCgroupRule => $"{service} gets a device cgroup rule.",
+            // Contract 0013, U3: the signal only, never a token, key or URL.
+            ExposureKind.ExternalRoute when key == ComposeThirdParty.TraefikExposedByDefault
+                => $"{service} is a Traefik that routes every container on the server (exposedByDefault).",
+            ExposureKind.ExternalRoute when key == ComposeThirdParty.TraefikHost
+                => $"{service} becomes public through the Traefik on the server, which routes every container (exposedByDefault).",
+            ExposureKind.ExternalRoute when key == ComposeThirdParty.CloudflaredTunnel
+                => $"{service} becomes public through a Cloudflare tunnel (cloudflared).",
+            ExposureKind.ExternalRoute when key == ComposeThirdParty.TailscaleFunnel
+                => $"{service} becomes public through Tailscale Funnel ({key}).",
+            ExposureKind.ExternalRoute when key == ComposeThirdParty.TailscaleServe
+                => $"{service} is served on the tailnet through Tailscale serve ({key}).",
+            ExposureKind.ExternalRoute when key == ComposeThirdParty.TailscaleState
+                => $"{service} runs Tailscale with a serve state that cannot be read; it counts as public ({key}).",
+            ExposureKind.ExternalRoute => $"{service} is published by a proxy or tunnel ({key}).",
             _ => $"{service} changes its exposure (class '{cls}').",
         };
     }

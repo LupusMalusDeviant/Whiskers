@@ -9,6 +9,7 @@ using Whiskers.Services.AuditLog;
 using Whiskers.Utils;
 using Microsoft.AspNetCore.Http;
 using Whiskers.Services.Mutations;
+using Whiskers.Services.Deployment;
 
 namespace Whiskers.Mcp.Tools;
 
@@ -277,87 +278,105 @@ public class ContainerTools
     }
 
     [McpToolLevel(McpPermissionLevels.Admin)]
-    [McpServerTool, Description("Deploy a new application on a server using a standardized template. Supports common app types like web apps, databases, and custom Docker images. Creates the container with sensible defaults and starts it.")]
+    [McpServerTool, Description("Deploy a single-image application on a Docker server. Whiskers writes it as a compose project in /opt/deployments/<name> (service and container named after the app), plans it, decides its exposures and runs it through the compose runner with every image pinned to the inspected image id. A redeploy with the same name updates the project. A malformed port or environment entry refuses the call.")]
     public static async Task<string> DeployApp(
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
+        IHostCommandExecutor executor,
+        IComposePlanner planner,
+        IComposeRunner composeRunner,
+        Whiskers.Services.ServerConfig.IServerConfigService servers,
         IToolAuditLog auditLog,
-        [Description("Application name (used as container name)")] string appName,
+        Whiskers.Modules.IModuleRegistry modules,
+        [Description("Application name (letters, digits, '.', '-', '_'): compose project, service and container name")] string appName,
         [Description("Docker image to deploy (e.g. 'nginx:latest', 'postgres:17', 'node:22-alpine')")] string image,
         [Description("Server ID to deploy on")] string? serverId = null,
         [Description("Port mappings as 'hostPort:containerPort' comma-separated (e.g. '8080:80,8443:443')")] string? ports = null,
         [Description("Environment variables as 'KEY=VALUE' comma-separated (e.g. 'DB_HOST=localhost,DB_PORT=5432')")] string? envVars = null,
-        [Description("Volume mounts as 'hostPath:containerPath' comma-separated (e.g. '/data/myapp:/app/data')")] string? volumes = null,
+        [Description("Volume mounts as 'hostPath:containerPath[:ro]' or 'volumeName:containerPath' comma-separated (e.g. '/data/myapp:/app/data')")] string? volumes = null,
         [Description("Restart policy: 'always', 'unless-stopped', 'on-failure', 'no' (default: 'unless-stopped')")] string restartPolicy = "unless-stopped",
         [Description("Docker network to connect to (default: 'bridge')")] string? network = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "deploy_app");
         if (denied != null) return MutationScope.Fail(denied);
-        // Validate app name
-        if (string.IsNullOrWhiteSpace(appName) || !System.Text.RegularExpressions.Regex.IsMatch(appName, @"^[a-zA-Z0-9._-]+$"))
-            return MutationScope.Fail("Error: Invalid app name. Use only letters, numbers, dots, hyphens, and underscores.");
-
-        if (string.IsNullOrWhiteSpace(image))
-            return MutationScope.Fail("Error: Image is required.");
-
-        var request = new DeploymentRequest
-        {
-            ContainerName = appName,
-            Image = image,
-            RestartPolicy = restartPolicy,
-            NetworkName = network
-        };
-
-        // Parse port mappings
-        if (!string.IsNullOrWhiteSpace(ports))
-        {
-            foreach (var mapping in ports.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                var parts = mapping.Split(':');
-                if (parts.Length == 2)
-                    request.PortMappings[parts[0].Trim()] = parts[1].Trim();
-            }
-        }
-
-        // Parse environment variables
-        if (!string.IsNullOrWhiteSpace(envVars))
-        {
-            foreach (var ev in envVars.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                var eqIdx = ev.IndexOf('=');
-                if (eqIdx > 0)
-                    request.EnvironmentVars[ev[..eqIdx].Trim()] = ev[(eqIdx + 1)..].Trim();
-            }
-        }
-
-        // Parse volumes
-        if (!string.IsNullOrWhiteSpace(volumes))
-        {
-            request.Volumes = volumes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        }
-
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+        var sid = serverId ?? "local";
+
+        // Contract 0013, D8: one report per attempt, which enriches the gateway's event (no row of its own); it never
+        // carries an environment value.
+        async Task<string> Report(bool success, string details, string? project = null)
+        {
+            await auditLog.LogAsync(actor, actorType, "deploy.app", "compose", project ?? appName ?? "", appName ?? "",
+                details: details, serverId: sid, success: success);
+            return details;
+        }
+        async Task<string> Refused(string reason) => MutationScope.Fail(await Report(false, $"Deployment refused: {reason}"));
+
+        // INV-62 (user decision 2026-11-10): the Deployment module gates deploy_app, not only the pages.
+        if (DeploymentModuleGate.IsOff(modules)) return await Refused(DeploymentModuleGate.DisabledReason);
+
+        // D1: the one mapper the gateway's target used too — a malformed entry refuses the call, nothing is dropped.
+        DeploymentComposeFile file;
         try
         {
-            // Pull image first
-            await docker.PullImageAsync(image, null, serverId);
-
-            // Create and start container
-            var containerId = await docker.CreateContainerAsync(request, serverId);
-            await auditLog.LogAsync(actor, actorType, "deploy.app", "container", containerId, appName, details: $"Image: {image}", serverId: serverId);
-            return $"App '{appName}' deployed successfully!\n" +
-                   $"  Container ID: {containerId[..12]}\n" +
-                   $"  Image: {image}\n" +
-                   (request.PortMappings.Any() ? $"  Ports: {string.Join(", ", request.PortMappings.Select(p => $"{p.Key}→{p.Value}"))}\n" : "") +
-                   $"  Restart: {restartPolicy}\n" +
-                   $"  Server: {serverId ?? "local"}";
+            file = DeploymentCompose.ToCompose(DeploymentCompose.FromToolArguments(appName, image, ports, envVars, volumes,
+                restartPolicy, network));
         }
-        catch (Exception ex)
+        catch (DeploymentComposeException ex)
         {
-            await auditLog.LogAsync(actor, actorType, "deploy.app", "container", appName, appName, details: $"Image: {image}; {ex.Message}", serverId: serverId, success: false);
-            return MutationScope.Fail($"Deployment failed: {ex.Message}");
+            return await Refused(ex.Message);
         }
+        if (servers.GetServer(sid) is { ConnectionType: ConnectionType.Kubernetes })
+            return await Refused("deploy_app needs a Docker host.");
+
+        // D5: the plan again (D3/D15 included), checked against what the gateway decided on the same file.
+        ComposePlan plan;
+        try
+        {
+            plan = await new DeploymentPathPlanner(planner, docker, executor, DeploymentPath.AppDeploy)
+                .PlanAsync(file.Deployment(sid));
+            plan.EnsureDecided(MutationScope.Current);
+        }
+        catch (ComposePlanException ex)
+        {
+            return await Refused(ex.Message);
+        }
+        ComposeImpact.ReportProject(plan);
+
+        // Contract 0006 / 0013: write, pull, build, inspect and pin the images, up — then the re-check.
+        var run = await composeRunner.RunAsync(plan,
+            (command, timeout, ct) => executor.ExecuteMutationAsync(sid, command, timeout, ct),
+            new ComposeRunOptions(Pull: true, ComposeImpact.RunBudget));
+        if (!run.Success)
+        {
+            if (run.Refusal is { } refusal)
+                return MutationScope.Fail(await Report(false, $"Deployment refused: {refusal}", plan.ProjectName));
+            var failure = run.Violations.Count > 0
+                ? $"Deployment failed: {string.Join("; ", run.Violations)}"
+                : $"Deployment failed:\n{run.Output}\n{run.Error}";
+            await Report(false, run.Violations.Count > 0 ? failure : "Deployment failed: docker compose up failed.", plan.ProjectName);
+            MutationScope.Fail("Deployment failed.");
+            return failure;
+        }
+
+        // D9: the containers of the project as they run now — the image id each was pinned to and the ports as decided.
+        var containers = (await docker.ListContainersAsync(all: true, serverId: sid))
+            .Where(c => c.Labels.TryGetValue(ComposeModel.ProjectLabel, out var p) && p == plan.ProjectName)
+            .OrderBy(c => c.Name, StringComparer.Ordinal)
+            .ToList();
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"App '{file.Name}' deployed as compose project '{plan.ProjectName}' on {sid}");
+        foreach (var c in containers)
+            sb.AppendLine($"  Container: {c.Name} ({(c.Id.Length > 12 ? c.Id[..12] : c.Id)})");
+        sb.AppendLine($"  Image: {image.Trim()}");
+        foreach (var id in containers.Select(c => c.Image).Where(i => i.StartsWith("sha256:", StringComparison.Ordinal)).Distinct())
+            sb.AppendLine($"  Pinned to image id: {id}");
+        var published = containers.SelectMany(c => c.Ports).Where(p => p.PublicPort is > 0)
+            .Select(p => $"{(string.IsNullOrEmpty(p.IP) ? "" : p.IP + ":")}{p.PublicPort}→{p.PrivatePort}/{p.Type}").Distinct().ToList();
+        if (published.Count > 0) sb.AppendLine($"  Ports: {string.Join(", ", published)}");
+        await Report(true, $"Image: {image.Trim()}; project {plan.ProjectName}; {containers.Count} container(s)", plan.ProjectName);
+        return sb.ToString().TrimEnd();
     }
 
     [McpToolLevel(McpPermissionLevels.Read)]

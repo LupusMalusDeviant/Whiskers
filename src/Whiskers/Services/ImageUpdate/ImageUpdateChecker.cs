@@ -221,10 +221,14 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
     /// <param name="listedImage">The image as the container listing shows it.</param>
     /// <param name="configuredImage">The container's <c>Config.Image</c>, when it had to be looked up.</param>
     /// <param name="runningImageId">The ID of the image the container runs, when known.</param>
+    /// <param name="pinnedReference">Contract 0013, D14: the container's <c>whiskers.image.ref</c> label — a Whiskers
+    /// compose run started it from a pin (its image id), so the registry is asked about the reference
+    /// the project names, and the answer compared with the image that runs.</param>
     public static (string Image, string LocalRef) ResolveCheckRefs(
-        string listedImage, string? configuredImage, string? runningImageId)
+        string listedImage, string? configuredImage, string? runningImageId, string? pinnedReference = null)
     {
-        var image = LooksLikeImageId(listedImage) && !string.IsNullOrWhiteSpace(configuredImage)
+        var image = !string.IsNullOrWhiteSpace(pinnedReference) ? pinnedReference.Trim()
+            : LooksLikeImageId(listedImage) && !string.IsNullOrWhiteSpace(configuredImage)
             ? configuredImage
             : listedImage;
         var localRef = string.IsNullOrWhiteSpace(runningImageId) ? image : runningImageId;
@@ -236,10 +240,11 @@ public class ImageUpdateChecker : Whiskers.Services.FleetBackgroundService
     {
         try
         {
-            var configured = LooksLikeImageId(container.Image)
+            var pinned = container.Labels.GetValueOrDefault(Whiskers.Services.Mutations.ComposePins.ReferenceLabel);
+            var configured = string.IsNullOrWhiteSpace(pinned) && LooksLikeImageId(container.Image)
                 ? await docker.GetConfiguredImageAsync(container.Id, container.ServerId, ct)
                 : null;
-            var (image, localRef) = ResolveCheckRefs(container.Image, configured, container.ImageId);
+            var (image, localRef) = ResolveCheckRefs(container.Image, configured, container.ImageId, pinned);
 
             // Skip digest-pinned images — a pin is a pin, there's no newer version to check. A bare ID that
             // could not be resolved to a name has nothing to ask a registry about either.

@@ -241,8 +241,10 @@ public sealed class HelpContentService : IHelpContentService
             new List<HelpSection>
             {
                 new("Container bereitstellen", """
-                    Unter **Deployment > Bereitstellen** startest du einen neuen Container: Image, Name, Ports,
-                    Volumes, Umgebungsvariablen und Restart-Policy, wie ein geführtes `docker run`.
+                    Unter **Deployment > Bereitstellen** startest du eine App aus einem Image: Name, Ports, Volumes,
+                    Umgebungsvariablen und Restart-Policy. Whiskers schreibt sie als Compose-Projekt nach
+                    `/opt/deployments/<Name>`, plant sie, entscheidet ihre Erreichbarkeit und startet sie mit dem
+                    auf die geprüfte Image-ID festgelegten Image. Der Reiter **Compose** stellt eine ganze Datei genauso bereit.
                     """,
                     Shot("Bereitstellen-Formular")),
                 new("Compose-Editor & App Store", """

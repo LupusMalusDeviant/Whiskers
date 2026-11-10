@@ -6,6 +6,57 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **One way to deploy: the Deploy page and `deploy_app` run compose projects (contract 0013, INV-62 step 3; INV-62
+  is ✅).** The form tab and MCP `deploy_app` map their request through one mapper (`DeploymentCompose`) to a compose
+  file in `/opt/deployments/<name>` (project = service = container name; first line `# whiskers: app.deploy`), and the
+  compose tab deploys its file like the compose editor (a required project name, "Check plan" shows project, services,
+  touched containers and every exposure with its class). All three are planned, have their mounts and exposures
+  decided, run through the compose runner (pinned images, re-check) and are read back per container of the project.
+  The gateway plans `deploy_app` from its arguments, so `ExposureChangeRule` decides its exposures (a Funnel label or a
+  `TUNNEL_TOKEN` asks for a confirmation even under Admin autonomy). Removed: `IDeploymentService`,
+  `ComposeFileParser`, `IDockerService.CreateContainerAsync` and the capability `container.create`; `app.deploy`
+  composes `container.disable_restart` / `container.stop` (no longer `image.pull` / `container.create`).
+  **Behaviour changes:** real compose projects replace single containers (the form and `deploy_app` keep
+  `network_mode: bridge`; a redeploy with the same name updates the project instead of failing on "name already in
+  use"); `build:`, `labels`, `cap_add` and everything else compose knows now work in the compose tab (and are
+  decided) instead of being refused or ignored; `deploy_app` refuses a malformed port or environment entry instead of
+  dropping it, refuses a Kubernetes server, and answers `App '<name>' deployed as compose project '<project>' on
+  <server>` with the containers (name and short id), the image and the pinned image id and the published ports — the
+  old `Container ID:` line is gone; a refusal answers `Deployment refused: …`. A plan is refused before anything is
+  written when a project of that name runs from another directory, when (form and `deploy_app`) the directory holds a
+  `docker-compose.yml` without the marker, or when a plain container of the old page has a name the deployment would
+  use — remove it on the container page or choose another name. With the Deployment module off
+  (`Features:deployment:Enabled=false`), `deploy_app` and every other app deployment are refused with
+  `Deployment refused: the Deployment module is disabled …`; before, only the pages were hidden and `deploy_app`
+  still created containers.
+- **CI: the compose pin on the minimum Compose (contract 0013, § 4).** A new step of the Docker job runs
+  `ComposePinIntegrationTests` on Compose v2.15.1 — the official release binary, checked against a SHA-256 pinned in
+  the workflow before it runs, as the `docker compose` plugin of its own `DOCKER_CONFIG`; the tests fail on any other
+  version (`WHISKERS_TEST_COMPOSE_VERSION`). The step is a mandatory suite of the release gate.
+- **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
+  asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
+  host. The labels are now read from the whole `Config`.
+- **Proxies and tunnels are decided as exposures (contract 0013, INV-62 step 2).** A compose plan recognises Traefik,
+  cloudflared and Tailscale by image name, `argv[0]`, a word of a `sh -c` string or an environment key, and reads
+  Traefik's docker/swarm provider from its CLI, environment and static file (YAML, a TOML subset) and Tailscale's
+  `TS_SERVE_CONFIG`, through bind mounts (at most 1 MiB). A Traefik with `exposedByDefault`, cloudflared, Tailscale
+  Funnel and Tailscale with an unreadable serve state are class `public`, Tailscale serve `published` (new kind
+  `ExternalRoute`, key = the signal, never a value). A running Traefik on the host (by image name) routes every planned
+  service without `traefik.enable=false`. Anything of the plan's own services that cannot be read refuses the plan; step
+  4 checks again with the pulled images and refuses a changed config file; the re-check reads the containers.
+  **Behaviour changes:** the default label prefix `traefik.` replaces the router prefixes (a literal
+  `traefik.enable=false` is no exposure), which changes every policy's version hash (open approvals expire); an `image`,
+  `entrypoint`, `command`, `working_dir` or a `TS_*`/`TUNNEL_*`/`TRAEFIK_*` value from an unset variable refuses the
+  plan.
+- **Compose runs start exactly the inspected images (contract 0013, INV-62 step 1).** After the image inspection every
+  image `up` starts is pinned to its image id (contract 0013, D10 as amended on 2026-11-10) — verified on the host and
+  written to `<project>/.whiskers/pin.override.yml`, which only `up` and the fallback `stop` use; a failed pin refuses
+  the run before `up` (files and tags put back). The planner never plans that file (Git deploy checkouts exclude
+  `.whiskers/`). The re-check counts a container running another image than the inspected one as class `public`.
+  Pinned containers carry `whiskers.image.ref`: `container.update` and AutoPatch refuse them ("redeploy the project to
+  update"), and the update check asks about that reference. Behaviour change: the first redeploy after the upgrade
+  recreates the project's containers (new label, pinned image), and their Image column shows the image id
+  (`sha256:…`) instead of the name, which stays in `whiskers.image.ref`.
 - **Every action names one structured principal (INV-01, contract 0014).** Webhook deliveries are a principal kind of
   their own (`Webhook`, naming the generation of the secret their signature was checked against — a new additive
   column `Webhooks.SecretVersion`, raised by every regeneration) and decide exactly as before; Whiskers' own work is a

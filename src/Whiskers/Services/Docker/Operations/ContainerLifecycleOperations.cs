@@ -27,51 +27,12 @@ internal sealed class ContainerLifecycleOperations
     private async Task<DockerClient> GetClient(string? serverId)
         => await _connectionManager.GetClientAsync(serverId);
 
-    public async Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null)
+    /// <summary>Contract 0013, D14: <c>container.update</c> refuses a container a Whiskers compose run pinned (label
+    /// <c>whiskers.image.ref</c>) — it is updated by redeploying its project.</summary>
+    internal static void RefuseIfPinned(string name, IEnumerable<KeyValuePair<string, string>>? labels)
     {
-        var client = await GetClient(serverId);
-        var portBindings = new Dictionary<string, IList<PortBinding>>();
-        var exposedPorts = new Dictionary<string, EmptyStruct>();
-
-        foreach (var (hostPort, containerPort) in request.PortMappings)
-        {
-            var key = $"{containerPort}/tcp";
-            exposedPorts[key] = default;
-            portBindings[key] = new List<PortBinding>
-            {
-                // HostIP absent/empty = bind all interfaces (Docker default); a loopback bind from
-                // `ip:host:container` compose syntax restricts publishing to that one interface.
-                new() { HostPort = hostPort, HostIP = request.PortBindIps.GetValueOrDefault(hostPort) }
-            };
-        }
-
-        var restartPolicy = request.RestartPolicy switch
-        {
-            "always" => new RestartPolicy { Name = RestartPolicyKind.Always },
-            "unless-stopped" => new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
-            "on-failure" => new RestartPolicy { Name = RestartPolicyKind.OnFailure, MaximumRetryCount = 5 },
-            _ => new RestartPolicy { Name = RestartPolicyKind.No }
-        };
-
-        var createParams = new CreateContainerParameters
-        {
-            Image = request.Image,
-            Name = request.ContainerName,
-            ExposedPorts = exposedPorts,
-            Env = request.EnvironmentVars.Select(kv => $"{kv.Key}={kv.Value}").ToList(),
-            HostConfig = new HostConfig
-            {
-                PortBindings = portBindings,
-                Binds = request.Volumes,
-                RestartPolicy = restartPolicy,
-                NetworkMode = request.NetworkName ?? "bridge"
-            }
-        };
-
-        var response = await client.Containers.CreateContainerAsync(createParams);
-        await client.Containers.StartContainerAsync(response.ID, new ContainerStartParameters());
-
-        return response.ID;
+        if (Whiskers.Services.Mutations.ComposePins.IsPinned(labels))
+            throw new InvalidOperationException($"Container '{name}' is {Whiskers.Services.Mutations.ComposePins.PinnedRefusal}.");
     }
 
     public async Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null)
@@ -85,6 +46,10 @@ internal sealed class ContainerLifecycleOperations
         var hostConfig = inspect.HostConfig;
         var name = inspect.Name.TrimStart('/');
         var image = config.Image;
+
+        // Contract 0013, D14: a container a Whiskers compose run pinned to its inspected image is updated by redeploying
+        // its project, never recreated from a newer image outside the runner. Refused before anything changes.
+        RefuseIfPinned(name, config.Labels);
 
         // 2. Pull latest image
         progress?.Report($"Pulling {image}...");

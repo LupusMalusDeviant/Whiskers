@@ -83,11 +83,9 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Server.INginxService, Whiskers.Services.Server.NoopNginxService>();
         builder.Services.AddSingleton<Whiskers.Services.Server.ISystemdService, Whiskers.Services.Server.NoopSystemdService>();
         builder.Services.AddSingleton<Whiskers.Services.Server.ISslCertService, Whiskers.Services.Server.NoopSslCertService>();
-        // And for deployment/app-store: ContainerTools (mixed: core container ops + deploy_app/deploy_compose) stays
-        // in Core and injects IDeploymentService/ITemplateService per call, and the AppStore page injects
-        // IImageSearchService, so all three need defaults when the Deployment module is off. The module registers the
-        // real services in the loop below and wins. IDeploymentService is scoped, matching the real one. (RoadToSAP §2.1)
-        builder.Services.AddScoped<Whiskers.Services.Deployment.IDeploymentService, Whiskers.Services.Deployment.NoopDeploymentService>();
+        // And for the app store: the AppStore page injects ITemplateService and IImageSearchService, so both need
+        // defaults when the Deployment module is off. The module registers the real services in the loop below and wins.
+        // (RoadToSAP §2.1; contract 0013 removed IDeploymentService: deploy_app and the Deploy page run the compose runner.)
         builder.Services.AddSingleton<Whiskers.Services.Templates.ITemplateService, Whiskers.Services.Templates.NoopTemplateService>();
         builder.Services.AddSingleton<Whiskers.Services.ImageSearch.IImageSearchService, Whiskers.Services.ImageSearch.NoopImageSearchService>();
         // And for CVE: the findings store + monitor are consumed by Core pages (Dashboard, ContainerDetail, Settings),

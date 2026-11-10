@@ -744,12 +744,13 @@ public class ReadOnlyKillSwitchWireTests
 
     /// <summary>The doubles hold one server ("local") and one container ("web-1") and nothing else: a fallback is
     /// allowed only for the other kinds, and for a container action whose compose project the double cannot show
-    /// (its impact is planned before the policy). A capability whose target the doubles hold never falls back.</summary>
+    /// (its impact is planned before the policy), and for a deployment planned as a compose project (app.deploy,
+    /// compose.deploy: the double cannot read the project's .env). A capability whose target the doubles hold never falls back.</summary>
     private static void AssertFallbacksOnlyForUnknownTargets(KillSwitchHost host)
     {
         var fallbacks = host.Resolver!.Fallbacks.ToList();
         Assert.NotEmpty(fallbacks);   // the sweep did meet unknown targets: the decorator is not idle
-        string[] composePlanned = ["container.env_set", "compose.deploy", "container.env_file_save"];
+        string[] composePlanned = ["container.env_set", "compose.deploy", "app.deploy", "container.env_file_save"];
         string[] held = ["container.restart", "container.stop", "container.start", "container.update", "container.remove",
             "container.exec", "terminal.host_open", "terminal.container_open", "host.exec", "config.save", "guardrails.save"];
         Assert.All(fallbacks, f => Assert.True(

@@ -605,6 +605,10 @@ public sealed partial class ProtectedResourceResolutionTests
         /// <summary>The local images by reference (contract 0006); one not listed is reported missing.</summary>
         public Dictionary<string, (string Id, string LabelsJson)> Images { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>Contract 0013, D16: the whole image <c>Config</c> by tag (entrypoint, cmd, env), instead of only the labels
+        /// of <see cref="Images"/>.</summary>
+        public Dictionary<string, string> ImageConfigs { get; } = new(StringComparer.Ordinal);
+
         /// <summary>The full <c>docker inspect</c> JSON object per container id (contract 0006); a missing id fails the read.</summary>
         public Dictionary<string, string> Inspect { get; } = new(StringComparer.Ordinal);
 
@@ -638,13 +642,20 @@ public sealed partial class ProtectedResourceResolutionTests
                 return Mounts.TryGetValue(inspect.Groups[1].Value, out var mounts) ? Done(mounts) : Done("", 1);
             if (command.StartsWith("for i in ", StringComparison.Ordinal) && command.Contains("docker image inspect", StringComparison.Ordinal))
             {
-                // Contract 0006: the local images (id and labels), or MISSING.
+                // Contract 0006 / 0013: the local images (id and Config), or MISSING. A reference is a tag or an image id
+                // (a pin, D10 as amended), as the daemon resolves them.
                 var refs = Regex.Matches(command[..command.IndexOf("; do", StringComparison.Ordinal)], "'([^']*)'")
-                    .Select(m => m.Groups[1].Value);
-                var lines = string.Concat(refs.Select(r => Images.TryGetValue(r, out var image)
-                    ? $"{r}\t{image.Id}\t{{\"Labels\":{image.LabelsJson}}}\n"
-                    : $"{r}\t{ComposeExposures.MissingImage}\n"));
-                ImageInspected?.Invoke();
+                    .Select(m => m.Groups[1].Value).ToList();
+                var pins = refs.All(r => r.StartsWith("sha256:", StringComparison.Ordinal));
+                if (pins) PinInspections.Add(refs);
+                if (pins && PinInspectFails) return Done("", 1);
+                var lines = string.Concat(refs.Select(r =>
+                    pins && PinAnswers.TryGetValue(r, out var answer)
+                        ? answer is null ? $"{r}\t{ComposeExposures.MissingImage}\n" : $"{r}\t{answer}\t{{}}\n"
+                    : Resolve(r) is { } tag && Images.TryGetValue(tag, out var image)
+                        ? $"{r}\t{image.Id}\t{ImageConfigs.GetValueOrDefault(tag) ?? "{\"Labels\":" + image.LabelsJson + "}"}\n"
+                        : $"{r}\t{ComposeExposures.MissingImage}\n"));
+                if (!pins) ImageInspected?.Invoke();
                 return Done(lines);
             }
             if (Regex.Match(command, @"^docker inspect ('[^']*'(?: '[^']*')*)$") is { Success: true } containers)
@@ -682,5 +693,38 @@ public sealed partial class ProtectedResourceResolutionTests
 
         private static Task<CommandResult> Done(string output, int exit = 0) =>
             Task.FromResult(new CommandResult { Output = output, ExitCode = exit });
+
+        /// <summary>Contract 0013: what the pin verification answers for a pin — an id, or <c>null</c> for missing —
+        /// instead of the daemon model (an id that resolves to another image, an image gone meanwhile).</summary>
+        public Dictionary<string, string?> PinAnswers { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Contract 0013: the pin verification fails as a command.</summary>
+        public bool PinInspectFails { get; set; }
+
+        /// <summary>Contract 0013: the references of every pin verification.</summary>
+        public List<IReadOnlyList<string>> PinInspections { get; } = [];
+
+        /// <summary>The tag under which <paramref name="reference"/> is listed: the tag itself, or a tag of an image with
+        /// that id.</summary>
+        public string? Resolve(string reference)
+        {
+            if (Images.ContainsKey(reference)) return reference;
+            return reference.StartsWith("sha256:", StringComparison.Ordinal)
+                ? Images.FirstOrDefault(i => i.Value.Id == reference).Key
+                : null;
+        }
+
+        /// <summary>The image id a container of <paramref name="service"/> runs after the last pinned <c>up</c>: the pin
+        /// the last pin file names for it, an image id (contract 0013, D10 as amended); <c>null</c> without one.</summary>
+        public string? PinnedImageId(string service)
+        {
+            var write = Executed.LastOrDefault(c => c.Contains(ComposePins.FileName, StringComparison.Ordinal)
+                                                    && c.Contains("base64 -d", StringComparison.Ordinal));
+            if (write is null) return null;
+            var b64 = Regex.Match(write, "echo '([^']*)' \\| base64 -d").Groups[1].Value;
+            var yaml = Encoding.UTF8.GetString(Convert.FromBase64String(b64));
+            var pin = Regex.Match(yaml, "  " + Regex.Escape(JsonSerializer.Serialize(service)) + ":\\n    image: \"([^\"]*)\"");
+            return pin.Success ? pin.Groups[1].Value : null;
+        }
     }
 }

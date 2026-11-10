@@ -83,9 +83,11 @@ public class GuardrailPolicy
         ReadOnlyMode && KillSwitchBlockedExemptions?.Contains(exemption, StringComparer.Ordinal) == true;
 
     /// <summary>The label prefixes Whiskers built in for exposure changes (contract 0006): a tool on the host turns a label
-    /// with one of them into a route (Tailscale Funnel or Serve through DockTail, Traefik, caddy-docker-proxy).</summary>
+    /// with one of them into a route (Tailscale Funnel or Serve through DockTail, Traefik, caddy-docker-proxy). Contract
+    /// 0013, D18: every <c>traefik.</c> label (<c>traefik.enable=true</c> alone gets a default router), except a literal
+    /// <c>traefik.enable=false</c>.</summary>
     public static IReadOnlyList<string> DefaultExposureLabelPrefixes { get; } =
-        ["docktail.funnel.", "docktail.service.", "traefik.http.routers.", "traefik.tcp.routers.", "caddy"];
+        ["docktail.funnel.", "docktail.service.", "traefik.", "caddy"];
 
     /// <summary>The exposure classes the agent and API keys need a confirmation for by default (contract 0006, D1).</summary>
     public static IReadOnlyList<string> DefaultExposureConfirmClasses { get; } = ["public", "host"];

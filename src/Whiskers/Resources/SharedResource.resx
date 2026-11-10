@@ -1417,7 +1417,7 @@ Project: {4}</value>
     <value>Deploy all</value>
   </data>
   <data name="Deploy_Button_Validate" xml:space="preserve">
-    <value>Validate</value>
+    <value>Check plan</value>
   </data>
   <data name="Deploy_Header_Subtitle" xml:space="preserve">
     <value>Create and deploy new containers and stacks</value>
@@ -1453,13 +1453,13 @@ Project: {4}</value>
     <value>Paste docker-compose.yml content here...</value>
   </data>
   <data name="Deploy_Progress_ComposeSuccess" xml:space="preserve">
-    <value>Success! {0} container(s) deployed</value>
+    <value>Compose project {0} deployed: {1}</value>
   </data>
   <data name="Deploy_Progress_Error" xml:space="preserve">
     <value>Error: {0}</value>
   </data>
   <data name="Deploy_Progress_Success" xml:space="preserve">
-    <value>Success! Container ID: {0}</value>
+    <value>Deployed as compose project {0}: {1}</value>
   </data>
   <data name="Deploy_RestartPolicy_Always" xml:space="preserve">
     <value>Always</value>
@@ -1483,13 +1483,13 @@ Project: {4}</value>
     <value>Volumes</value>
   </data>
   <data name="Deploy_Snackbar_ComposeDeployed" xml:space="preserve">
-    <value>{0} container(s) deployed</value>
+    <value>Compose project {0} deployed: {1}</value>
   </data>
   <data name="Deploy_Snackbar_DeployFailed" xml:space="preserve">
     <value>Deployment failed: {0}</value>
   </data>
   <data name="Deploy_Snackbar_Deployed" xml:space="preserve">
-    <value>Container deployed: {0}</value>
+    <value>Deployed as compose project {0}: {1}</value>
   </data>
   <data name="Deploy_Snackbar_ImageRequired" xml:space="preserve">
     <value>Image name is required</value>
@@ -1501,10 +1501,10 @@ Project: {4}</value>
     <value>Form</value>
   </data>
   <data name="Deploy_Validation_ErrorsTitle" xml:space="preserve">
-    <value>Validation errors:</value>
+    <value>The plan was refused:</value>
   </data>
   <data name="Deploy_Validation_Valid" xml:space="preserve">
-    <value>Valid! {0} service(s) found:</value>
+    <value>Project {0} on {1}: {2} service(s)</value>
   </data>
   <data name="HealthReports_Button_Refresh" xml:space="preserve">
     <value>Refresh</value>
@@ -4735,6 +4735,30 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Deploy_Snackbar_Duplicate" xml:space="preserve">
     <value>'{0}' appears twice — each host port and each variable may only be set once.</value>
+  </data>
+  <data name="Deploy_Label_ProjectName" xml:space="preserve">
+    <value>Project name</value>
+  </data>
+  <data name="Deploy_Plan_Touches" xml:space="preserve">
+    <value>Existing containers it touches:</value>
+  </data>
+  <data name="Deploy_Plan_Exposures" xml:space="preserve">
+    <value>Exposures:</value>
+  </data>
+  <data name="Deploy_Plan_NoExposures" xml:space="preserve">
+    <value>No exposures.</value>
+  </data>
+  <data name="Deploy_Snackbar_Refused" xml:space="preserve">
+    <value>Deployment refused: {0}</value>
+  </data>
+  <data name="Deploy_Snackbar_Violations" xml:space="preserve">
+    <value>The re-check stopped the deployment: {0}</value>
+  </data>
+  <data name="Deploy_Snackbar_InvalidProjectName" xml:space="preserve">
+    <value>Invalid project name. Use letters, digits, '.', '-' and '_', starting with a letter or digit.</value>
+  </data>
+  <data name="Deploy_Hint_ComposeProjects" xml:space="preserve">
+    <value>Both tabs deploy a compose project in /opt/deployments/&lt;project&gt;: it is planned, its exposures are decided, and it is checked again after it starts.</value>
   </data>
   <data name="ContainerGraph_LoadFailed" xml:space="preserve">
     <value>Could not load the topology: {0}</value>

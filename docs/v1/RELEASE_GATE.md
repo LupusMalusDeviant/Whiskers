@@ -42,7 +42,6 @@ Highest invariant ID: INV-62
 | INV-52 | ⚠️ | WP7 | SSH private keys and mTLS client keys are stored in plaintext; no in-place `VAULT_KEY` rotation | — |
 | INV-57 | ⚠️ | WP2 | UI and automation delegates, webhooks, workloads, volumes and log alerts do not act on the resolved target object | — |
 | INV-58 | ⚠️ | R1-44 | holds per host only after the migration; hosts on the shared client credential are exposed (D12) | — |
-| INV-62 | ⚠️ | 0006 | the Deploy page's compose mode and `deploy_app` are out of scope; a re-tag before `up`, Traefik `exposedByDefault`, Tailscale sidecar `serve` and cloudflared are caught only by the re-check or not at all | — |
 
 ## Retired invariants
 
@@ -75,6 +74,7 @@ proven test.
 |---|---|---|---|
 | ci.yml | build-test | Test (in-process) | the in-process suite: no failure, a floor of passed tests, the required tests of `in-process.txt` (generated block included) |
 | ci.yml | build-test | Test (Docker integration, mandatory) | the PostgreSQL and other Docker-backed suites: a floor, no skip, the required tests of `docker.txt` |
+| ci.yml | build-test | Test (compose pin on the minimum Compose) | the compose pin (`ComposePinIntegrationTests`) on Compose v2.15.1, the release binary checked against its pinned SHA-256: a floor, no skip, the version asserted by the tests (contract 0013, § 4) |
 | ci.yml | build-test | Release gate (compare with the base) | no invariant ID or accepted decision lost against the pull request's base or the previous release tag (D16, R18) |
 | ci.yml | build-test | DI boot gate | the application boots with its dependency graph validated |
 | ci.yml | image-runtime | Image runtime tests | the built image's runtime tools, on amd64 and arm64: a floor, no skip, the required tests of `image-runtime.txt` (D14) |

@@ -20,12 +20,13 @@ public static class MutationCompositions
 {
     private static readonly (string Outer, string[] Inner)[] Table =
     [
-        // Deployments: a form deployment is pull + create; a compose file deploys each of its services as a form.
-        ("app.deploy", ["image.pull", "container.create"]),
+        // Contract 0013, D7: the form and deploy_app run a compose project like compose.deploy — a run decided by the agent
+        // rule set stops a container it created whose exposure was not decided (no restart, then stop).
+        ("app.deploy", ["container.disable_restart", "container.stop"]),
         // Contract 0006: a compose run decided by the agent rule set stops a container it created whose exposure was not
-        // decided (no restart, then stop). The UI-only app.deploy and container.env_file_save are decided for persons
+        // decided (no restart, then stop). The UI-only container.env_file_save is decided for persons
         // only and never stop.
-        ("compose.deploy", ["app.deploy", "container.disable_restart", "container.stop"]),
+        ("compose.deploy", ["container.disable_restart", "container.stop"]),
         ("gitdeploy.deploy", ["container.disable_restart", "container.stop"]),
         ("container.env_set", ["container.disable_restart", "container.stop"]),
         // A volume restore takes a safety backup of the volume first.
@@ -81,7 +82,7 @@ public static class MutationCompositions
         "container.exec",            // container page: Artisan migrate / rollback
         "db.query",                  // container page: SQL file import through the container's client
         "compose.deploy",            // deploy_compose, UI compose deploys, webhook compose deploys
-        "app.deploy",                // UI App Store deploys (a compose deployment planned per container)
+        "app.deploy",                // deploy_app, the Deploy form, App Store deploys (a planned compose deployment)
         "endpointcheck.run",         // R1-57: fixed probe commands of an endpoint check (resolve, curl, nc, openssl)
     }.ToFrozenSet(StringComparer.Ordinal);
 

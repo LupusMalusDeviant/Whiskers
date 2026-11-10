@@ -81,7 +81,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task Deploy_compose_with_its_own_pulled_funnel_image_is_refused_before_up()
     {
         _host.ComposeConfig = PlainConfig;
-        _pulls["nginx"] = ("sha256:9", """{"docktail.funnel.enable":"true"}""");
+        _pulls["nginx"] = ("sha256:9999999999999999999999999999999999999999999999999999999999999999", """{"docktail.funnel.enable":"true"}""");
 
         var (outcome, ran) = await ToolAsync("compose.deploy",
             new { serverId = "local", projectName = "shop", composeContent = PlainYaml }, () => DeployComposeTool(PlainYaml));
@@ -104,7 +104,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task Deploy_compose_that_brings_a_nested_decision_argument_is_refused_before_anything_runs(string name)
     {
         _host.ComposeConfig = PlainConfig;
-        _pulls["nginx"] = ("sha256:9", """{"docktail.funnel.enable":"true"}""");
+        _pulls["nginx"] = ("sha256:9999999999999999999999999999999999999999999999999999999999999999", """{"docktail.funnel.enable":"true"}""");
         var arguments = new Dictionary<string, string>
         {
             ["serverId"] = "local", ["projectName"] = "shop", ["composeContent"] = PlainYaml,

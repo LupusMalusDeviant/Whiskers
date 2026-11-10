@@ -44,7 +44,7 @@ internal sealed class ProtectionHarness
     public int Runs { get; private set; }
 
     public ProtectionHarness(Action<GuardrailPolicy>? configure = null, Func<FakeDocker, IComposePlanner>? planner = null,
-        string serverName = "Local")
+        string serverName = "Local", Whiskers.Services.Server.IHostCommandExecutor? host = null)
     {
         Docker = new FakeDocker(Containers) { DefaultServerId = "local" };
         Policy = GuardrailPolicy.SafeDefault();
@@ -60,7 +60,9 @@ internal sealed class ProtectionHarness
             NullLogger<MutationGateway>.Instance,
             targets: new MutationTargetResolver(planner is null
                 ? new TestServices(Docker, new FakeServerConfig(Server(serverName)))
-                : new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker))),
+                : host is null
+                    ? new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker))
+                    : new TestServices(Docker, new FakeServerConfig(Server(serverName)), planner(Docker), host)),
             approvals: new ApprovalGate(Approvals, store));
     }
 
@@ -125,11 +127,20 @@ public class SelfProtectionTests
 
     private static object Parse(string json) => JsonSerializer.Deserialize<JsonElement>(json);
 
+    /// <summary>Contract 0013, D5: an <c>app.deploy</c> off the UI is planned before the policy, so its harness has a
+    /// planner and a host to plan on; every other case needs neither.</summary>
+    private static ProtectionHarness HarnessFor(string capability)
+    {
+        if (capability != "app.deploy") return new ProtectionHarness();
+        var host = new ProtectedResourceResolutionTests.FakeHost();
+        return new ProtectionHarness(planner: docker => new ComposePlanner(docker, host), host: host);
+    }
+
     [Theory]
     [MemberData(nameof(ControlPlane))]
     public async Task Keys_agents_over_MCP_automations_and_operators_are_refused(string capability, string arguments)
     {
-        var h = new ProtectionHarness();
+        var h = HarnessFor(capability);
         var args = Parse(arguments);
 
         var outcomes = new[]
@@ -152,7 +163,7 @@ public class SelfProtectionTests
     [MemberData(nameof(ControlPlane))]
     public async Task An_interactive_Admin_needs_an_explicit_Admin_approval(string capability, string arguments)
     {
-        var h = new ProtectionHarness();
+        var h = HarnessFor(capability);
         var args = Parse(arguments);
 
         var ui = await h.RunAsync(capability, args, ProtectionHarness.UiAdmin, MutationSurface.Ui);
