@@ -548,7 +548,7 @@ public sealed partial class ProtectedResourceResolutionTests
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
             new AgentToolTestHelpers.NullMutationAudit(), [], NullLogger<MutationGateway>.Instance,
-            approvals: new ApprovalGate(new ApprovalStore(), store));
+            targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
         return new UiMutationRunner(gateway, new CapabilityCatalog(), new AdminUser());
     }
 

@@ -28,7 +28,7 @@ public class UiMutationRunnerTests
         var audit = new AgentToolTestHelpers.NullMutationAudit();
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy ?? GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), audit, [],
-            NullLogger<MutationGateway>.Instance, overrides: overrides,
+            NullLogger<MutationGateway>.Instance, overrides: overrides, targets: TestTargets.Resolver(),
             approvals: new ApprovalGate(new ApprovalStore(), store));
         return (new UiMutationRunner(gateway, new CapabilityCatalog(), new FixedUser(role)), audit);
     }

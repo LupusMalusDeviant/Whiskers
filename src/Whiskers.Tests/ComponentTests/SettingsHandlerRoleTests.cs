@@ -50,7 +50,7 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         var policy = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(policy), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), policy));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), policy));
         Services.AddSingleton<IUiMutationRunner>(new UiMutationRunner(gateway, new CapabilityCatalog(), _user));
         JSInterop.Mode = JSRuntimeMode.Loose;
     }

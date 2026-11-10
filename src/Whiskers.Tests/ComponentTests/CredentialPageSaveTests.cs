@@ -446,7 +446,10 @@ public class CredentialPageSaveTests : BunitContext, IAsyncLifetime
     private static Task Persist(IRenderedComponent<Servers> page)
     {
         var method = typeof(Servers).GetMethod("PersistServerCoreAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        return page.InvokeAsync(() => (Task)method.Invoke(page.Instance, null)!);
+        var arguments = typeof(Servers).GetMethod("SaveArguments", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        // Contract 0012: the core acts on the server the gateway resolved for the save.
+        return page.InvokeAsync(() => (Task)method.Invoke(page.Instance,
+            [TestTargets.Of<ResolvedTarget>("server.save", arguments.Invoke(page.Instance, null)!)])!);
     }
 
     private static void Set(IRenderedComponent<Servers> page, string field, object? value) => SetField(page.Instance, field, value);

@@ -50,7 +50,7 @@ public class ServersPauseResumeRoleTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<ICurrentUserService>(_user);
         var store = new AgentToolTestHelpers.FixedGuardrailStore(GuardrailPolicy.SafeDefault());
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), _audit, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
         Services.AddSingleton<IUiMutationRunner>(new UiMutationRunner(gateway, new CapabilityCatalog(), _user));
         Services.AddSingleton<ILoopSuspensionService>(_suspension);
         Services.AddSingleton(NullProxy<Whiskers.Services.Vault.IVaultService>.Create());

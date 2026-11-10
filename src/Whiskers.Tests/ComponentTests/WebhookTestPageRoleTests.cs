@@ -38,7 +38,7 @@ public sealed class WebhookTestPageRoleTests : BunitContext, IAsyncLifetime
         policy.ForbiddenArgPatterns = [];
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         var gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store),
-            new AuditLogMutationSink(_db.Scopes), [], NullLogger<MutationGateway>.Instance,
+            new AuditLogMutationSink(_db.Scopes), [], NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(),
             decisions: new DbPolicyDecisionStore(_db.Scopes),
             approvals: new ApprovalGate(new ApprovalStore(policy: store, persistence: _db.Persistence()), store),
             journal: new DbOperationJournal(_db.Scopes));

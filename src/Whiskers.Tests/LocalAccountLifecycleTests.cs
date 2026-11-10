@@ -1039,7 +1039,7 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         Validator = new SessionValidator(scopes, whitelist, roles, configuration, bindings: Bindings);
         Owners = new OwnerAccounts(scopes, configuration, paths);
         Gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(store), Sink, [],
-            NullLogger<MutationGateway>.Instance, approvals: new ApprovalGate(new ApprovalStore(), store));
+            NullLogger<MutationGateway>.Instance, targets: TestTargets.Resolver(), approvals: new ApprovalGate(new ApprovalStore(), store));
     }
 
     public static async Task<LocalAccountWorld> CreateAsync(bool seedRoot = true, GuardrailPolicy? policy = null,
