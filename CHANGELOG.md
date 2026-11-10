@@ -6,6 +6,13 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Self-reports are tested against the code (INV-56, contract 0011).** The production-readiness lines come from resx
+  in English (default) and German with stable ids; a parity test keeps keys, placeholders and fact tokens equal across
+  the languages, and every resx key exists in both. README.md, SECURITY.md, `docs/security-architecture.md` and
+  `docs/operations/production-checklist.md` mark each claim; `docs/v1/CLAIMS.md` registers 80 claims with
+  fingerprints and the tests that pin them, and the release gate requires those tests. SECURITY.md and the security
+  architecture now say what onboarding does ("bound to the mesh address") instead of "mesh-bound by design".
+  Readiness titles quoted in the docs are the English ones.
 - **A deleted guardrail policy is no first start any more (INV-25, contract 0010).** The database now records that a
   guardrail policy has existed (new table `InstanceMarkers`, additive migration for SQLite and PostgreSQL; written when
   the safe default is first created, at every start with a policy file and after saves; never changed or removed). With
@@ -16,7 +23,7 @@ All notable changes to Whiskers are documented here. The format follows
   missing, run `dotnet Whiskers.dll --reset-guardrails` in the container: it writes the safe default with the kill
   switch **on** (audited as `guardrails.reset_on_host`), and after the restart an Admin switches the kill switch off on
   the Guardrails page. Removing the policy files is no longer described as a reset anywhere. The Guardrails page and a
-  new readiness line ("Guardrail-Policy geladen und vermerkt") show the reason; after upgrading, check that line once.
+  new readiness line ("Guardrail policy loaded and recorded", German "Guardrail-Policy geladen und vermerkt") show the reason; after upgrading, check that line once.
   `--migrate-to-postgres` copies the record and accepts sources of older releases without the table.
 - **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
   asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the

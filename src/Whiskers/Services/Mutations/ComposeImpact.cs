@@ -10,6 +10,9 @@ namespace Whiskers.Services.Mutations;
 /// </summary>
 public static class ComposeImpact
 {
+    /// <summary>The budget of each command of a compose run (contract 0006; README "The 5-minute budget", claim RM-13).</summary>
+    internal static readonly TimeSpan RunBudget = TimeSpan.FromMinutes(5);
+
     /// <summary>Runs <paramref name="action"/> inside one <paramref name="capabilityId"/> decision per container
     /// (nested), so a single refusal — a protected container, a stricter override — stops the whole action.</summary>
     public static Task<T> RunForEachAsync<T>(this IUiMutationRunner runner, string capabilityId,
@@ -42,7 +45,7 @@ public static class ComposeImpact
                     // Contract 0006: write, pull, build, inspect the images, up — then the re-check after up.
                     var run = await composeRunner.RunAsync(current,
                         (command, timeout, ct) => executor.ExecuteMutationAsync(current.ServerId, command, timeout, ct),
-                        new ComposeRunOptions(pull, TimeSpan.FromMinutes(5)));
+                        new ComposeRunOptions(pull, RunBudget));
                     return new CommandResult
                     {
                         ExitCode = run.Success ? 0 : 1, Output = run.Output,
