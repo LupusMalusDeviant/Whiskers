@@ -329,6 +329,8 @@ public static class WhiskersPipelineExtensions
                     new Claim(ClaimTypes.NameIdentifier, user.Id),
                     // R1-26: the stamp the session is tied to; the cookie check ends it once the stamp changes.
                     new Claim(Whiskers.Services.Auth.AuthConstants.SecurityStampClaim, user.SecurityStamp!),
+                    // Contract 0014 (D2): the session's own id, so every action of it is attributed to this sign-in.
+                    Whiskers.Services.Auth.WebSessionClaims.NewSessionClaim(),
                 }, authenticationType: Whiskers.Services.Auth.AuthConstants.LocalPasswordScheme);
                 await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
                     new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = true });
@@ -410,10 +412,10 @@ public static class WhiskersPipelineExtensions
             var path = backups.ResolveArchivePath(id);
             if (path is null) return Results.NotFound();
             var audit = ctx.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>();
-            var (actor, actorType) = Whiskers.Services.AuditLog.IAuditLogService.GetActorFromHttpContext(ctx);
             var name = Path.GetFileName(path);
             var size = new FileInfo(path).Length;
-            if (!await audit.TryLogAsync(actor, actorType, BackupDownloadAction, "whiskers", id, name,
+            // INV-01 (contract 0014, D7): the reader as a structured principal, with their sign-in credential and session.
+            if (!await audit.TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.OfHttpContext(ctx), BackupDownloadAction, "whiskers", id, name,
                     details: $"{size} bytes; ip={ctx.Connection.RemoteIpAddress}"))
                 return Results.Problem(ctx.RequestServices
                         .GetRequiredService<Microsoft.Extensions.Localization.IStringLocalizer<Whiskers.SharedResource>>()
@@ -437,7 +439,7 @@ public static class WhiskersPipelineExtensions
                 var archive = httpContext.RequestServices.GetRequiredService<Whiskers.Services.Backup.IBackupService>()
                     .ResolveArchivePath(requested);
                 await httpContext.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>()
-                    .LogAsync(email, "web", BackupDownloadAction, "whiskers",
+                    .TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.OfHttpContext(httpContext), BackupDownloadAction, "whiskers",
                         archive is null ? "(unknown archive)" : requested, archive is null ? "" : Path.GetFileName(archive),
                         details: $"Requires the Admin role.; ip={httpContext.Connection.RemoteIpAddress}", success: false);
             }
@@ -451,8 +453,8 @@ public static class WhiskersPipelineExtensions
         app.MapGet("/audit/export", async (HttpContext ctx) =>
         {
             var audit = ctx.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>();
-            var (actor, actorType) = Whiskers.Services.AuditLog.IAuditLogService.GetActorFromHttpContext(ctx);
-            if (!await audit.TryLogAsync(actor, actorType, Whiskers.Services.AuditLog.AuditExport.Action, "audit",
+            if (!await audit.TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.OfHttpContext(ctx),
+                    Whiskers.Services.AuditLog.AuditExport.Action, "audit",
                     "audit-log", "Audit log", details: $"ip={ctx.Connection.RemoteIpAddress}"))
                 return Results.Problem(ctx.RequestServices
                         .GetRequiredService<Microsoft.Extensions.Localization.IStringLocalizer<Whiskers.SharedResource>>()
@@ -489,7 +491,8 @@ public static class WhiskersPipelineExtensions
             if (roles?.GetRole(email) >= Whiskers.Models.AppRole.Admin) return true;
             if (!string.IsNullOrEmpty(email))
                 await httpContext.RequestServices.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>()
-                    .LogAsync(email, "web", Whiskers.Services.AuditLog.AuditExport.Action, "audit", "audit-log", "Audit log",
+                    .TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.OfHttpContext(httpContext),
+                        Whiskers.Services.AuditLog.AuditExport.Action, "audit", "audit-log", "Audit log",
                         details: $"Requires the Admin role.; ip={httpContext.Connection.RemoteIpAddress}", success: false);
             return false;
         }));

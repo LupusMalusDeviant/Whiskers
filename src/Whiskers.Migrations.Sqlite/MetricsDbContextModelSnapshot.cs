@@ -1247,6 +1247,9 @@ namespace Whiskers.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("SecretVersion")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ServerId")
                         .HasColumnType("TEXT");
 

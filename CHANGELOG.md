@@ -6,6 +6,16 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Every action names one structured principal (INV-01, contract 0014).** Webhook deliveries are a principal kind of
+  their own (`Webhook`, naming the generation of the secret their signature was checked against — a new additive
+  column `Webhooks.SecretVersion`, raised by every regeneration) and decide exactly as before; Whiskers' own work is a
+  `System` principal from a closed list; a person keeps their account handle as id and now carries the sign-in
+  credential and the web session; every audit row written outside the gateway (retention, suspensions, terminal
+  close, sign-in and binding rows, restores, recovery codes, backup downloads, audit exports) records the principal.
+  **Behaviour changes:** everyone signs in again once after the update (sessions from before it carry no session id
+  and are ended, as with R1-26); approvals pending at the update can no longer be used (an approval is now bound to the
+  sign-in credential that asked for it) and expire as usual; webhook rows in the audit log say `Webhook` instead of
+  `Automation`; expired or cancelled approvals name `system:approval-expiry` instead of `system`.
 - **Self-reports are tested against the code (INV-56, contract 0011).** The production-readiness lines come from resx
   in English (default) and German with stable ids; a parity test keeps keys, placeholders and fact tokens equal across
   the languages, and every resx key exists in both. README.md, SECURITY.md, `docs/security-architecture.md` and

@@ -192,7 +192,7 @@ public class ReleaseGateDocumentTests
         Assert.Contains(ReleaseGateDocument.Parse(text.Replace("## Platform skips", "## Skips")).Problems, p => p.Contains("Platform skips"));
         Assert.Contains(ReleaseGateDocument.Parse(text + "\nHighest invariant ID: INV-63\n").Problems, p => p.Contains("2 times"));
         Assert.Contains(ReleaseGateDocument.Parse(text.Replace("Highest invariant ID: INV-62", "Highest ID INV-62")).Problems, p => p.Contains("no line"));
-        Assert.Contains(ReleaseGateDocument.Parse(ReleaseGateTests.InsertAfter(text, "| INV-01 |", "| INV-99 | ❌ | WP1 |")).Problems, p => p.Contains("cells"));
+        Assert.Contains(ReleaseGateDocument.Parse(ReleaseGateTests.InsertAfter(text, "| INV-58 |", "| INV-99 | ❌ | WP1 |")).Problems, p => p.Contains("cells"));
     }
 
     [Fact]

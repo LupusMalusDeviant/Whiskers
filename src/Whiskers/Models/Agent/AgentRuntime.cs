@@ -14,7 +14,9 @@ public sealed record AgentPrincipal(
     IReadOnlyList<string>? AllowedTools,      // from McpApiKeyConfig; null = level defaults
     string? UserEmail = null,                 // set for WebUser
     string? McpKeyId = null,                  // set for McpKey
-    string? TriggerId = null);                // set for Trigger
+    string? TriggerId = null,                 // set for Trigger
+    string? CredentialId = null,              // WebUser: the sign-in credential (contract 0014, D2)
+    string? WebSessionId = null);             // WebUser: the web session (whiskers:sid, contract 0014, D2)
 
 public enum AgentPrincipalKind { WebUser, McpKey, Trigger }
 

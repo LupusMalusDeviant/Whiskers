@@ -39,7 +39,8 @@ public sealed partial class WebhookMutationTests
         foreach (var nested in rows.Where(r => !ReferenceEquals(r, delivery)))
         {
             Assert.Contains(rows, r => r.OperationId == nested.ParentOperationId);
-            AuditTrail.AssertComplete(nested, nested.Outcome!, nested.Action, "Automation",
+            AuditTrail.AssertComplete(nested, nested.Outcome!, nested.Action,
+                PrincipalIds.KindOf(nested.PrincipalId) is MutationPrincipalKind.Webhook ? "Webhook" : "Automation",
                 decided: nested.Outcome != AuditTrail.Denied || nestedDenialsDecided);
         }
         return (rows, delivery);
@@ -52,30 +53,30 @@ public sealed partial class WebhookMutationTests
     public async Task Each_webhook_delivery_is_one_complete_event_in_the_audit_log()
     {
         var (_, executed) = await DeliverAsync(Seed("restart", "web-1"));
-        AuditTrail.AssertComplete(executed, AuditTrail.Executed, "container.restart", "Automation");
+        AuditTrail.AssertComplete(executed, AuditTrail.Executed, "container.restart", "Webhook");
         Assert.Equal(AdminId, executed.OnBehalfOfId);
 
         _docker.AllowMutations = false;
         var (_, failed) = await DeliverAsync(Seed("restart", "web-1"));
-        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "container.restart", "Automation");
+        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "container.restart", "Webhook");
         _docker.AllowMutations = true;
 
         _readOnly = true;
         var stopped = Seed("restart", "web-1");
         var (killedRows, _) = await DeliverAsync(stopped);
-        AuditTrail.AssertComplete(Assert.Single(killedRows), AuditTrail.Denied, "container.restart", "Automation");
+        AuditTrail.AssertComplete(Assert.Single(killedRows), AuditTrail.Denied, "container.restart", "Webhook");
         Assert.True(Stored(stopped.WebhookId).Enabled);   // a policy refusal leaves it on
         _readOnly = false;
 
         var demoted = Seed("restart", "web-1");
         _roles.Map[Admin] = AppRole.Viewer;
         var (_, refused) = await DeliverAsync(demoted);
-        AuditTrail.AssertComplete(refused, AuditTrail.Denied, "container.restart", "Automation", decided: false);
+        AuditTrail.AssertComplete(refused, AuditTrail.Denied, "container.restart", "Webhook", decided: false);
         Assert.False(Stored(demoted.WebhookId).Enabled);
         _roles.Map[Admin] = AppRole.Admin;
 
         var (unownedRows, unowned) = await DeliverAsync(Seed("restart", "web-1", owner: null));
-        AuditTrail.AssertComplete(Assert.Single(unownedRows), AuditTrail.Denied, "container.restart", "Automation", owned: false, decided: false);
+        AuditTrail.AssertComplete(Assert.Single(unownedRows), AuditTrail.Denied, "container.restart", "Webhook", owned: false, decided: false);
         Assert.StartsWith("unowned:", unowned.PrincipalId);
     }
 
@@ -109,7 +110,7 @@ public sealed partial class WebhookMutationTests
         } while (DateTime.UtcNow < until);
         Assert.Equal(WebhookDeliveryStore.Failed, delivery.State);
         var row = AuditTrail.One(await AuditTrail.ForOperationAsync(scopes, delivery.RunId), AuditTrail.Denied,
-            "container.restart", "Automation", decided: false);
+            "container.restart", "Webhook", decided: false);
         Assert.Contains(MutationGateway.CancelledBeforeDecision, row.Details);
         Assert.Equal(AdminId, row.OnBehalfOfId);
         Assert.Empty(_docker.Actions);
@@ -122,13 +123,13 @@ public sealed partial class WebhookMutationTests
     {
         var (rows, executed) = await DeliverAsync(Seed("rebuild", "web-1"));
         Assert.Single(rows);
-        AuditTrail.AssertComplete(executed, AuditTrail.Executed, "container.update", "Automation");
+        AuditTrail.AssertComplete(executed, AuditTrail.Executed, "container.update", "Webhook");
         Assert.True(Ran("rebuild"));
 
         _docker.AllowMutations = false;
         var (failedRows, failed) = await DeliverAsync(Seed("rebuild", "web-1"));
         Assert.Single(failedRows);
-        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "container.update", "Automation");
+        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "container.update", "Webhook");
     }
 
     /// <summary>S-04: a compose deployment is the delivery's <c>compose.deploy</c> event and one event per planned
@@ -146,7 +147,7 @@ public sealed partial class WebhookMutationTests
         Assert.True(plan is not null, planError);
         Assert.True(plan.Containers.Count >= 2, $"{plan.Containers.Count} planned containers");
         var (rows, delivery) = await DeliverAsync(webhook);
-        AuditTrail.AssertComplete(delivery, AuditTrail.Executed, "compose.deploy", "Automation");
+        AuditTrail.AssertComplete(delivery, AuditTrail.Executed, "compose.deploy", "Webhook");
         // Each container's decision is nested in the one before it (the deployment runs inside the last): every one is
         // a descendant of the delivery (DeliverAsync checks the links).
         var containers = rows.Where(r => !ReferenceEquals(r, delivery)).ToList();
@@ -161,13 +162,13 @@ public sealed partial class WebhookMutationTests
             ? new Whiskers.Services.Server.CommandResult { ExitCode = 1, Output = "compose up failed" }
             : null;
         var (_, failed) = await DeliverAsync(Seed("deploy", "/opt/duo"));
-        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "compose.deploy", "Automation");
+        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "compose.deploy", "Webhook");
         _host.Effect = null;
 
         _readOnly = true;
         var (killedRows, killed) = await DeliverAsync(Seed("deploy", "/opt/duo"));
         Assert.Single(killedRows);
-        AuditTrail.AssertComplete(killed, AuditTrail.Denied, "compose.deploy", "Automation");
+        AuditTrail.AssertComplete(killed, AuditTrail.Denied, "compose.deploy", "Webhook");
     }
 
     /// <summary>S-04: a stored action none of the four is refused before any decision — one Denied event under the
@@ -179,7 +180,7 @@ public sealed partial class WebhookMutationTests
         var (rows, delivery) = await DeliverAsync(Seed("reboot", "web-1"));
 
         Assert.Single(rows);
-        AuditTrail.AssertComplete(delivery, AuditTrail.Denied, "reboot", "Automation", decided: false, targetId: "");
+        AuditTrail.AssertComplete(delivery, AuditTrail.Denied, "reboot", "Webhook", decided: false, targetId: "");
         Assert.Equal("unknown", delivery.TargetType);
         // Keyed as the worker's own refusal, not as a delivery that did not run (review rounds 6 and 7): a reconciliation
         // settles it as refused and does not log it again.
@@ -196,7 +197,7 @@ public sealed partial class WebhookMutationTests
     public async Task Each_git_deployment_by_webhook_is_one_complete_event_per_decision()
     {
         var (rows, delivery) = await DeliverAsync(Seed("git-deploy", AppId));
-        AuditTrail.AssertComplete(delivery, AuditTrail.Executed, "gitdeploy.deploy", "Automation");
+        AuditTrail.AssertComplete(delivery, AuditTrail.Executed, "gitdeploy.deploy", "Webhook");
         var deployment = Assert.Single(rows, r => r.ParentOperationId == delivery.OperationId && r.Action == "gitdeploy.deploy"
                                                   && r.PrincipalId == "gitdeploy:" + AppId);
         AuditTrail.AssertComplete(deployment, AuditTrail.Executed, "gitdeploy.deploy", "Automation");
@@ -206,12 +207,12 @@ public sealed partial class WebhookMutationTests
             ? new Whiskers.Services.Server.CommandResult { ExitCode = 1, Output = "compose up failed" }
             : null;
         var (_, failed) = await DeliverAsync(Seed("git-deploy", AppId));
-        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "gitdeploy.deploy", "Automation");
+        AuditTrail.AssertComplete(failed, AuditTrail.Failed, "gitdeploy.deploy", "Webhook");
         _host.Effect = null;
 
         _readOnly = true;
         var (killedRows, _) = await DeliverAsync(Seed("git-deploy", AppId));
-        AuditTrail.AssertComplete(Assert.Single(killedRows), AuditTrail.Denied, "gitdeploy.deploy", "Automation");
+        AuditTrail.AssertComplete(Assert.Single(killedRows), AuditTrail.Denied, "gitdeploy.deploy", "Webhook");
         _readOnly = false;
 
         // The app's owner lost Admin, the webhook's owner holds it: the delivery is decided and refused for the app
@@ -225,7 +226,7 @@ public sealed partial class WebhookMutationTests
             nestedDenialsDecided: false);
         Assert.Equal(PrincipalIds.User(Other), appRefused.OnBehalfOfId);
         Assert.NotEqual(AuditTrail.Executed, appRefused.Outcome);
-        AuditTrail.AssertComplete(appRefused, appRefused.Outcome!, "gitdeploy.deploy", "Automation");
+        AuditTrail.AssertComplete(appRefused, appRefused.Outcome!, "gitdeploy.deploy", "Webhook");
         var appDeployment = Assert.Single(appRows, r => r.ParentOperationId == appRefused.OperationId);
         AuditTrail.AssertComplete(appDeployment, AuditTrail.Denied, "gitdeploy.deploy", "Automation", decided: false);
         Assert.Equal(AdminId, appDeployment.OnBehalfOfId);

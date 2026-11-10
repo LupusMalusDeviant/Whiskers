@@ -1284,6 +1284,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("SecretVersion")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ServerId")
                         .HasColumnType("text");
 

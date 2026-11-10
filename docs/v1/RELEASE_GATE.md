@@ -39,7 +39,6 @@ Highest invariant ID: INV-62
 
 | Invariant | Status | Package | Why it is open | Reference |
 |---|---|---|---|---|
-| INV-01 | ⚠️ | R1-03 | webhook and system principals come with their packages; humans are keyed by the account handle, not the credential | — |
 | INV-52 | ⚠️ | WP7 | SSH private keys and mTLS client keys are stored in plaintext; no in-place `VAULT_KEY` rotation | — |
 | INV-57 | ⚠️ | WP2 | UI and automation delegates, webhooks, workloads, volumes and log alerts do not act on the resolved target object | — |
 | INV-58 | ⚠️ | R1-44 | holds per host only after the migration; hosts on the shared client credential are exposed (D12) | — |

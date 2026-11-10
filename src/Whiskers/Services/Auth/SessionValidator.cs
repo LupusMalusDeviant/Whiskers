@@ -74,6 +74,11 @@ public sealed class SessionValidator : ISessionValidator
                 return SessionCheck.Revoked(federatedRefusal);
 
             if (!_whitelist.IsEmailAllowed(email)) return SessionCheck.Revoked(SessionRevocationReasons.NotWhitelisted);
+            // Contract 0014 (D2, Q1): a session issued before the upgrade has no id of its own; it is ended once, as R1-26
+            // did for sessions without a stamp, and the person signs in again. Checked after the account and binding, so
+            // a more specific reason is never hidden by it.
+            if (string.IsNullOrWhiteSpace(user.FindFirstValue(AuthConstants.SessionIdClaim)))
+                return SessionCheck.Revoked(SessionRevocationReasons.SessionIdMissing);
             return SessionCheck.Allowed(_roles.GetRole(email));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

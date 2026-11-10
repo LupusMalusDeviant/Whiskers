@@ -259,7 +259,7 @@ public sealed class MutationTargetResolver : IMutationTargetResolver
         // them from the plan it made. A caller on any other surface (MCP, the agent) could mark an exposure or a shared
         // container as decided with them, so such a call is refused — and so is `mounts` (review N3), which would
         // otherwise reach the target's Related set.
-        if (request.Surface is not (MutationSurface.Ui or MutationSurface.Automation)
+        if (request.Surface != MutationSurface.Ui && !Unattended.IsSurface(request.Surface)
             && request.Arguments.Keys.FirstOrDefault(k => RefusedFromCallers.Contains(k, StringComparer.OrdinalIgnoreCase)) is { } injected)
             return Refuse($"The argument '{injected}' is set by Whiskers itself for a planned deployment; a call may not bring it.");
         // Contract 0006 (Amendment 7): the containers a planned deployment shares a namespace with, from the nested

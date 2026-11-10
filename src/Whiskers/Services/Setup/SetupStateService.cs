@@ -148,7 +148,7 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
             // the setup token's host-level authority — so it is recorded before anything is written, and without its
             // record nothing is (fail closed, as for a backup download, R1-22).
             var kind = req.IsLocal ? "local" : "federated";
-            if (_audit is null || !await _audit.TryLogAsync(email, "setup", FirstAdminAction, "auth", email, email,
+            if (_audit is null || !await _audit.TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.Person(email), FirstAdminAction, "auth", email, email,
                     $"kind={kind}; authority=setup-token", success: true))
                 return SetupCompletionResult.Failed(new[] { "The setup could not be recorded in the audit log; nothing was changed." });
 
@@ -185,7 +185,7 @@ public sealed class SetupStateService : ISetupStateService, IInitializable
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Setup could not create the first administrator");
-                await _audit.TryLogAsync(email, "setup", FirstAdminAction, "auth", email, email,
+                await _audit.TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.Person(email), FirstAdminAction, "auth", email, email,
                     $"kind={kind}; authority=setup-token; error={ex.GetType().Name}", success: false);
                 if (AdminRoleExists()) return SetupCompletionResult.AlreadyComplete;
                 throw;

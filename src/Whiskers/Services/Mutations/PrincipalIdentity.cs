@@ -19,6 +19,90 @@ public static class PrincipalIds
     /// <summary>A principal with no identity (no email, no key): it can be checked, never owned or delegated.</summary>
     public const string Anonymous = "anonymous";
 
+    // Contract 0014 (D1): the ids the automation runners always used, kept byte for byte and registered here.
+    public const string TaskPrefix = "task:";
+    public const string CheckPrefix = "check:";
+    public const string GitDeployPrefix = "gitdeploy:";
+    public const string WebhookPrefix = "webhook:";
+    /// <summary>An automation item without an owner: <c>unowned:&lt;runner id&gt;</c>.</summary>
+    public const string UnownedPrefix = "unowned:";
+    /// <summary>Contract 0014 (D6): a component of Whiskers itself, <c>system:&lt;component&gt;</c>.</summary>
+    public const string SystemPrefix = "system:";
+
+    public const string AutoUpdate = "autoupdate";
+    public const string AutoPatch = "autopatch";
+    public const string AutoPatchPreview = "autopatch-preview";
+    public const string VpnBootstrap = "vpn-bootstrap";
+
+    /// <summary>The automations that exist once per instance; their id is the runner's name.</summary>
+    public static readonly IReadOnlySet<string> AutomationSingletons =
+        global::System.Collections.Frozen.FrozenSet.ToFrozenSet([AutoUpdate, AutoPatch, AutoPatchPreview, VpnBootstrap], StringComparer.Ordinal);
+
+    /// <summary>The <c>host-cli:</c> component prefix: <c>system:host-cli:&lt;command&gt;</c> (contract 0014, Q6).</summary>
+    public const string HostCliComponent = "host-cli:";
+
+    /// <summary>Contract 0014 (D6): the closed list of system components. A new one needs a contract change; the
+    /// host CLIs are <c>host-cli:&lt;command&gt;</c> with the commands in <see cref="HostCliCommands"/>.</summary>
+    public static readonly IReadOnlySet<string> SystemComponents = global::System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        ["audit-retention", "startup", "approval-expiry", "authority-check"], StringComparer.Ordinal);
+
+    /// <summary>The host CLIs (S-10, S-11, S-15 and the guardrail reset of contract 0010), named by their flag without the dashes.</summary>
+    public static readonly IReadOnlySet<string> HostCliCommands = global::System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        ["restore-backup", "recover-local-account", "confirm-identity-binding", "reset-guardrails"], StringComparer.Ordinal);
+
+    public static string Task(string taskId) => Prefixed(TaskPrefix, taskId);
+    public static string Check(string checkId) => Prefixed(CheckPrefix, checkId);
+    public static string GitDeploy(string appId) => Prefixed(GitDeployPrefix, appId);
+    public static string Webhook(string webhookId) => Prefixed(WebhookPrefix, webhookId);
+
+    /// <summary><c>unowned:&lt;runner id&gt;</c>: the id an automation item without an owner is recorded under.</summary>
+    public static string Unowned(string runnerId) => Prefixed(UnownedPrefix, runnerId);
+
+    /// <summary><c>system:&lt;component&gt;</c>; throws for a component outside <see cref="SystemComponents"/> and
+    /// <see cref="HostCliCommands"/>.</summary>
+    public static string System(string component)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(component);
+        if (!IsSystemComponent(component))
+            throw new ArgumentException($"'{component}' is not a registered system component (contract 0014, D6).",
+                nameof(component));
+        return SystemPrefix + component;
+    }
+
+    /// <summary><c>system:host-cli:&lt;command&gt;</c> for a host CLI.</summary>
+    public static string HostCli(string command) => System(HostCliComponent + command);
+
+    private static bool IsSystemComponent(string component) =>
+        SystemComponents.Contains(component)
+        || (component.StartsWith(HostCliComponent, StringComparison.Ordinal)
+            && HostCliCommands.Contains(component[HostCliComponent.Length..]));
+
+    /// <summary>The kind an id of the scheme belongs to, or <c>null</c> for an id outside it. A webhook's id is
+    /// <see cref="MutationPrincipalKind.Webhook"/> also when it runs without an owner.</summary>
+    public static MutationPrincipalKind? KindOf(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        if (id == Anonymous) return MutationPrincipalKind.Human;
+        if (EmailOf(id) is not null) return MutationPrincipalKind.Human;
+        if (KeyIdOf(id) is not null) return MutationPrincipalKind.ApiKey;
+        if (Rest(id, AgentPrefix) is not null) return MutationPrincipalKind.Agent;
+        if (Rest(id, WebhookPrefix) is not null) return MutationPrincipalKind.Webhook;
+        if (Rest(id, SystemPrefix) is { } component) return IsSystemComponent(component) ? MutationPrincipalKind.System : null;
+        if (Rest(id, UnownedPrefix) is { } runner)
+            return KindOf(runner) is MutationPrincipalKind.Webhook ? MutationPrincipalKind.Webhook
+                : KindOf(runner) is MutationPrincipalKind.Automation ? MutationPrincipalKind.Automation : null;
+        if (Rest(id, TaskPrefix) is not null || Rest(id, CheckPrefix) is not null || Rest(id, GitDeployPrefix) is not null
+            || Rest(id, TriggerPrefix) is not null || AutomationSingletons.Contains(id))
+            return MutationPrincipalKind.Automation;
+        return null;
+    }
+
+    private static string Prefixed(string prefix, string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return prefix + id;
+    }
+
     /// <summary><c>user:&lt;email&gt;</c>, the email trimmed and lower-cased (sign-in compares it without case).</summary>
     public static string User(string email)
     {
@@ -86,8 +170,9 @@ public static class MutationPrincipals
             AgentPrincipalKind.Trigger when PrincipalIds.TriggerIdOf(id) is not null =>
                 new MutationPrincipal(MutationPrincipalKind.Automation, id, p.DisplayName, level,
                     AllowedTools: p.AllowedTools),
+            // Contract 0014 (D2): a person with the credential they signed in with and their web session.
             _ => new MutationPrincipal(MutationPrincipalKind.Human, id, p.DisplayName, level,
-                AllowedTools: p.AllowedTools),
+                CredentialId: p.CredentialId, AllowedTools: p.AllowedTools, SessionId: p.WebSessionId),
         };
     }
 
@@ -95,7 +180,10 @@ public static class MutationPrincipals
     /// identity is the session, its rights and credential are those of the principal it acts for.</summary>
     public static MutationPrincipal Agent(AgentPrincipal p, string sessionId)
     {
-        var source = Of(p) with { SessionId = sessionId };
+        // Contract 0014 (D2): a person keeps their own web session on OnBehalfOf; a key or a trigger, which has none of
+        // its own here, is recorded in the agent session it started.
+        var own = Of(p);
+        var source = own.Kind == MutationPrincipalKind.Human ? own : own with { SessionId = sessionId };
         return new MutationPrincipal(MutationPrincipalKind.Agent, PrincipalIds.Agent(sessionId),
             $"Agent for {source.DisplayName}", source.PermissionLevel, source.CredentialId, OnBehalfOf: source,
             AllowedTools: source.AllowedTools, SessionId: sessionId);
@@ -115,8 +203,12 @@ public static class MutationPrincipals
                 new AgentPrincipal(AgentPrincipalKind.Trigger, p.DisplayName, level, p.AllowedTools, TriggerId: triggerId),
             MutationPrincipalKind.Automation => new AgentPrincipal(AgentPrincipalKind.McpKey, p.DisplayName, level,
                 p.AllowedTools, McpKeyId: p.CredentialId ?? p.Id),
+            // Contract 0014 (D3): a webhook delivery is seen by the guardrails as the automation it used to be; its
+            // id, not its secret generation, stands in for the key.
+            MutationPrincipalKind.Webhook => new AgentPrincipal(AgentPrincipalKind.McpKey, p.DisplayName, level,
+                p.AllowedTools, McpKeyId: p.Id),
             _ => new AgentPrincipal(AgentPrincipalKind.WebUser, p.DisplayName, level, p.AllowedTools,
-                UserEmail: PrincipalIds.EmailOf(p.Id)),
+                UserEmail: PrincipalIds.EmailOf(p.Id), CredentialId: p.CredentialId, WebSessionId: p.SessionId),
         };
     }
 }

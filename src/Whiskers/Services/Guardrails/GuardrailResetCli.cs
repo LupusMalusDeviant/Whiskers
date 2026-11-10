@@ -58,7 +58,7 @@ public static class GuardrailResetCli
 
         var audit = services.GetRequiredService<IAuditLogService>();
         // The record first: a policy reset on the host that the trail does not show did not happen.
-        if (!await audit.TryLogAsync(Actor, "system", ResetAction, "guardrails", "guardrails.json", "guardrails.json",
+        if (!await audit.TryLogAsync(AuditPrincipals.HostCli("reset-guardrails", Actor), ResetAction, "guardrails", "guardrails.json", "guardrails.json",
                 "the guardrail policy was reset on the host: the safe default with the kill switch on", success: true))
         {
             await output.WriteLineAsync("The audit log could not be written. Nothing was changed.");
@@ -72,7 +72,7 @@ public static class GuardrailResetCli
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            await audit.TryLogAsync(Actor, "system", ResetAction, "guardrails", "guardrails.json", "guardrails.json",
+            await audit.TryLogAsync(AuditPrincipals.HostCli("reset-guardrails", Actor), ResetAction, "guardrails", "guardrails.json", "guardrails.json",
                 $"the guardrail policy could not be reset ({ex.GetType().Name}); nothing was changed", success: false);
             await output.WriteLineAsync(ex is InvalidOperationException
                 ? $"Refused: {ex.Message} Nothing was changed."
