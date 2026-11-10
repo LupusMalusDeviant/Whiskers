@@ -359,7 +359,7 @@ The open questions of the draft, answered by the maintainer — every one as rec
 - **Q6 — Host CLIs (D6): `System`** with `system:host-cli:<command>`.
 - **Q7 — Webhook secret generation (D4): new additive column** `WebhookEntity.SecretVersion` (SQLite and PostgreSQL).
 
-## Amendment 1 (implementation, 10 November 2026) — needs the maintainer's acceptance
+## Amendment 1 (implementation, 10 November 2026) — accepted 2026-11-10
 
 Found while implementing; none changes an authority decision.
 
