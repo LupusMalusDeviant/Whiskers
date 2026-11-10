@@ -9,6 +9,16 @@ All notable changes to Whiskers are documented here. The format follows
 - **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
   asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
   host. The labels are now read from the whole `Config`.
+- **MCP SDK 2.4 with sessions bound to their key (contract 0016).** `ModelContextProtocol.AspNetCore` 1.4.1 → 2.4.0.
+  The SDK now defaults to stateless; Whiskers keeps stateful sessions (`initialize` → `Mcp-Session-Id`, GET/DELETE
+  `/mcp`) as before. Each session is bound to the API key that opened it: the key's principal carries the subject
+  `mcp-key:<key record id>` (never the secret, its hash or its hint), and a request with another key on that session
+  is refused with `403` (on 1.4.1 key principals had no subject, so any valid key could send on another key's session
+  if it knew the session id). A key whose record id is empty or shared with another key (only possible by editing the
+  permission file by hand) is refused with `401`. Clients on the `2026-07-28` protocol revision are asked to fall back
+  to the `initialize` handshake. **Behaviour change:** a federated (Google/OIDC) browser session can no longer call
+  `/mcp` directly — the SDK refuses principals without a subject; use an API key.
+
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
   test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can
