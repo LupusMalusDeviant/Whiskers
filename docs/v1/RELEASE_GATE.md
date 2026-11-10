@@ -26,6 +26,9 @@ that is what the named tests are for.
 - **Capabilities and paths** (R12–R15). [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTORY.md) is generated from the
   capability table; every capability is named by a §7 row ([`PATH_CAPABILITIES.md`](PATH_CAPABILITIES.md)), every row
   names real tools and capabilities, and §7.6 counts the rows.
+- **Self-report claims** (R8, [contract 0011](../contracts/0011-self-report-claims.md)). Every test that a claim of
+  [`CLAIMS.md`](CLAIMS.md) names is required like a ✅ invariant's, in the generated block of its run's manifest; the
+  register's own rules (markers, fingerprints, quotes) are `ClaimRegisterTests`.
 
 Locally, `WHISKERS_RELEASE_GATE=dry-run dotnet test --filter ReleaseGateTests` shows what a 1.0 release would refuse
 today.
@@ -39,7 +42,6 @@ Highest invariant ID: INV-62
 | INV-01 | ⚠️ | R1-03 | webhook and system principals come with their packages; humans are keyed by the account handle, not the credential | — |
 | INV-25 | ⚠️ | R1-02 | with neither policy file present the restrictive default is created, so deleting both looks like a first start | — |
 | INV-52 | ⚠️ | WP7 | SSH private keys and mTLS client keys are stored in plaintext; no in-place `VAULT_KEY` rotation | — |
-| INV-56 | ⚠️ | WP7 | readiness lines are German only, and no test compares README/SECURITY.md claims with the code | — |
 | INV-57 | ⚠️ | WP2 | UI and automation delegates, webhooks, workloads, volumes and log alerts do not act on the resolved target object | — |
 | INV-58 | ⚠️ | R1-44 | holds per host only after the migration; hosts on the shared client credential are exposed (D12) | — |
 | INV-62 | ⚠️ | 0006 | the Deploy page's compose mode and `deploy_app` are out of scope; a re-tag before `up`, Traefik `exposedByDefault`, Tailscale sidecar `serve` and cloudflared are caught only by the re-check or not at all | — |

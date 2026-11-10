@@ -153,7 +153,17 @@ public static class ReleaseGate
                     methods.AddRange(ResolveReference(t));
                 _named[row.Id] = methods;
             }
+            // Contract 0011 (Q3): every test a registered claim names is required like a ✅ invariant's. The register's own
+            // rules (rows, markers, R4/R7 of its test cells) are ClaimRegisterTests'; here the claim ids only join R7–R9.
+            foreach (var (id, tests) in Whiskers.Tests.Claims.ClaimRegister.TestsOf(inputs.Claims))
+            {
+                if (_named.ContainsKey(id)) continue;
+                _named[id] = tests.Where(t => !t.Planned && t.Class is not null).SelectMany(ResolveReference).ToList();
+                _claims.Add(id);
+            }
         }
+
+        private readonly HashSet<string> _claims = new(StringComparer.Ordinal);
 
         public void Run()
         {
@@ -431,8 +441,9 @@ public static class ReleaseGate
                 [DockerManifest] = new(StringComparer.Ordinal),
                 [ImageRuntimeManifest] = new(StringComparer.Ordinal),
             };
-            foreach (var row in _rows.Where(r => r.Status == InvariantStatus.Holds || excepted.Contains(r.Id)))
-            foreach (var (type, method) in _named[row.Id])
+            var sources = _rows.Where(r => r.Status == InvariantStatus.Holds || excepted.Contains(r.Id)).Select(r => r.Id).Concat(_claims);
+            foreach (var id in sources)
+            foreach (var (type, method) in _named[id])
             {
                 if (inputs.Tests.IsStaticallySkipped(method)) continue;
                 var manifest = TargetManifest(type, method);
@@ -446,9 +457,10 @@ public static class ReleaseGate
             {
                 var sb = new StringBuilder();
                 sb.Append(BlockBegin).Append('\n');
-                sb.Append("# Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md and docs/v1/RELEASE_GATE.md (contract 0008,\n");
-                sb.Append("# R8): one entry per test method named by a ✅ invariant or an accepted exception, the minimum = the cases xUnit\n");
-                sb.Append("# discovers. Do not edit by hand; a difference writes the fresh block to this file's .actual.\n");
+                sb.Append("# Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md, docs/v1/RELEASE_GATE.md and docs/v1/CLAIMS.md\n");
+                sb.Append("# (contract 0008, R8; contract 0011): one entry per test method named by a ✅ invariant, an accepted exception or a\n");
+                sb.Append("# registered claim, the minimum = the cases xUnit discovers. Do not edit by hand; a difference writes the fresh\n");
+                sb.Append("# block to this file's .actual.\n");
                 foreach (var (name, count) in kv.Value) sb.Append(count).Append(' ').Append(name).Append('\n');
                 sb.Append(BlockEnd).Append('\n');
                 return sb.ToString();

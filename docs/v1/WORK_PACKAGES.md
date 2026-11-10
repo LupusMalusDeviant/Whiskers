@@ -1015,6 +1015,10 @@ uses the IdP with MFA" in README, SECURITY.md, `docs/operations/local-accounts.m
 > migrated (U-01). INV-17 stays ⚠️ (no handler-level test for these pages), INV-56 stays ⚠️ (the readiness lines
 > are German only; no test compares README/SECURITY.md claims with the code).
 >
+> **Status (INV-56, contract 0011):** closed — readiness lines in resx (English and German, parity-tested), the
+> governed documents' claims registered in `CLAIMS.md` with markers, fingerprints and claim tests that the release
+> gate requires (R8). INV-56 is ✅.
+>
 > **Status (R1-51 branch, gate part):** contract 0008 accepted on 6 November 2026 (D1–D16 as recommended) and built as
 > specified. `src/Whiskers.Tests/ReleaseGate/`: `ReleaseGateTests` with its parsers (invariant table, §7 path matrix,
 > `RELEASE_GATE.md`, §6.1 release decisions), the xUnit-discovery test catalog, the R1–R18 checks in Development, Line and

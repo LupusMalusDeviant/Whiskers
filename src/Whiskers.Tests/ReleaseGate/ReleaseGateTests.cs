@@ -27,8 +27,8 @@ public class ReleaseGateTests
     /// checks that need a ❌ (R1, R2, R11, R17) use it now that the real table has none.</summary>
     private static readonly Lazy<GateInputs> ViolatedInputs = new(() => Real with
     {
-        Invariants = Mutate(Mutate(SetCell(Real.Invariants, "| INV-18 |", 2, "❌"),
-            "| ✅ | 55 |", "| ✅ | 54 |"), "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
+        Invariants = Mutate(ShiftHolds(SetCell(Real.Invariants, "| INV-18 |", 2, "❌"), -1),
+            "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
         ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-01 |",
             "| INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |"),
     });
@@ -191,8 +191,8 @@ public class ReleaseGateTests
         var example = Real with { Invariants = Mutate(Real.Invariants, "## 11.", "```\n| INV-63 | example |\n```\n\n## 11.") };
         Assert.DoesNotContain(Evaluate(example, GateMode.Development, Dev), f => f.Subject == "INV-63");
 
-        var miscounted = Real with { Invariants = Mutate(Real.Invariants, "| ✅ | 55 |", "| ✅ | 56 |") };
-        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("✅ is 56, the table has 55"));
+        var miscounted = Real with { Invariants = ShiftHolds(Real.Invariants, +1) };
+        Assert.Contains(Evaluate(miscounted, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains($"✅ is {Holds + 1}, the table has {Holds}"));
 
         var pipe = Real with { Invariants = Mutate(Real.Invariants, "`docker system\\|container", "`docker system|container") };
         Assert.Contains(Evaluate(pipe, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("cells"));
@@ -203,7 +203,7 @@ public class ReleaseGateTests
     {
         var deleted = Real with
         {
-            Invariants = Mutate(Mutate(RemoveLine(Real.Invariants, "| INV-61 |"), "| ✅ | 55 |", "| ✅ | 54 |"), "| **Total** | **62** |", "| **Total** | **61** |"),
+            Invariants = Mutate(ShiftHolds(RemoveLine(Real.Invariants, "| INV-61 |"), -1), "| **Total** | **62** |", "| **Total** | **61** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
@@ -670,6 +670,18 @@ public class ReleaseGateTests
     private static string RenderInventory(GateInputs inputs)
         => CapabilityInventoryRenderer.Render(inputs.Capabilities, PathMatrixParser.Parse(inputs.Contract, inputs.PathCapabilities),
             inputs.Surfaces, inputs.Compositions);
+
+    /// <summary>The §11 ✅ count moved by <paramref name="delta"/>, whatever it is today (the count grows as invariants
+    /// close, so the mutations do not pin it).</summary>
+    /// <summary>The ✅ rows of the real invariant table.</summary>
+    private static int Holds => InvariantTableParser.Parse(Real.Invariants).Count(r => r.Status == InvariantStatus.Holds);
+
+    internal static string ShiftHolds(string text, int delta)
+    {
+        var count = new System.Text.RegularExpressions.Regex(@"\| ✅ \| (\d+) \|");
+        Assert.True(count.IsMatch(text), "mutation anchor not found: the §11 ✅ count");
+        return count.Replace(text, m => $"| ✅ | {int.Parse(m.Groups[1].Value) + delta} |", 1);
+    }
 
     internal static string Mutate(string text, string from, string to)
     {

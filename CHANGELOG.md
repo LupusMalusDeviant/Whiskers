@@ -6,6 +6,13 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Self-reports are tested against the code (INV-56, contract 0011).** The production-readiness lines come from resx
+  in English (default) and German with stable ids; a parity test keeps keys, placeholders and fact tokens equal across
+  the languages, and every resx key exists in both. README.md, SECURITY.md, `docs/security-architecture.md` and
+  `docs/operations/production-checklist.md` mark each claim; `docs/v1/CLAIMS.md` registers 80 claims with
+  fingerprints and the tests that pin them, and the release gate requires those tests. SECURITY.md and the security
+  architecture now say what onboarding does ("bound to the mesh address") instead of "mesh-bound by design".
+  Readiness titles quoted in the docs are the English ones.
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
   test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can

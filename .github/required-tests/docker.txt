@@ -30,9 +30,10 @@
 1 Whiskers.Tests.PostgresOverlayComposeTests
 
 # BEGIN release-gate (generated)
-# Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md and docs/v1/RELEASE_GATE.md (contract 0008,
-# R8): one entry per test method named by a ✅ invariant or an accepted exception, the minimum = the cases xUnit
-# discovers. Do not edit by hand; a difference writes the fresh block to this file's .actual.
+# Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md, docs/v1/RELEASE_GATE.md and docs/v1/CLAIMS.md
+# (contract 0008, R8; contract 0011): one entry per test method named by a ✅ invariant, an accepted exception or a
+# registered claim, the minimum = the cases xUnit discovers. Do not edit by hand; a difference writes the fresh
+# block to this file's .actual.
 1 Whiskers.Tests.PostgresBackupRestoreTests.A_backup_holds_the_database_and_a_restore_brings_back_database_and_files_together
 1 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_cut_off_on_the_volume_is_not_committed_half_way
 1 Whiskers.Tests.PostgresBackupRestoreTests.A_dump_missing_a_column_this_version_uses_is_refused_before_the_commit
