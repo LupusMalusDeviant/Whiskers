@@ -366,7 +366,7 @@
         {
             var principal = await BuildPrincipalAsync();
             await Mutations.RunAsync("guardrails.save", new { section = "guardrails" },
-                _ => GuardrailStore.SaveConfigAsync(_config, principal));
+                (ResolvedRecord rt, CancellationToken _) => GuardrailStore.SaveConfigAsync(_config, principal));
             Snackbar.Add(L["GuardrailsView_Saved_Snackbar", _config.ActivePreset].Value, Severity.Success);
         }
         catch (MutationRefusedException ex)
@@ -390,7 +390,7 @@
         {
             var principal = await BuildPrincipalAsync();
             await Mutations.RunAsync("guardrails.kill_switch_off", new { section = "guardrails" },
-                _ => GuardrailStore.DisableKillSwitchAsync(principal));
+                (ResolvedRecord rt, CancellationToken _) => GuardrailStore.DisableKillSwitchAsync(principal));
             // Only ReadOnlyMode of the stored active preset changed; unsaved edits of other fields stay on screen.
             var stored = GuardrailStore.Config.Presets.FirstOrDefault(p => p.Name == GuardrailStore.Config.ActivePreset);
             var shown = _config.Presets.FirstOrDefault(p => p.Name == GuardrailStore.Config.ActivePreset);

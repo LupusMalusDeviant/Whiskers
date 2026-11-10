@@ -27,8 +27,11 @@ public sealed class ResolvedTargetFlowTests
     /// <summary>D10 item 2: inventory reads that stay inside an execution by design, with their reason.</summary>
     private static readonly IReadOnlySet<string> LookupExceptions = new HashSet<string>(StringComparer.Ordinal)
     {
-        // (none yet: the compose re-check runs through ComposePlan.EnsureDecided and verifiers read back outside the
-        // lambda; an entry here names "<site key>: <Type>.<Method>" and why.)
+        // An entry names "<site key>: <Type>.<Method>" and why. (The compose re-check runs through
+        // ComposePlan.EnsureDecided and verifiers read back outside the lambda: neither needs one.)
+        // Not the target: after the server record is saved, whether an old cloud key / kubeconfig is still named by
+        // any server decides only if the vault entry may be tidied up (R1-29).
+        "Whiskers.Components.Pages.Servers.PersistServerAsync -> server.save: IServerConfigService.GetServers",
     };
 
     private static IReadOnlyList<ResolvedTargetFlowScanner.Site> AppSites() =>

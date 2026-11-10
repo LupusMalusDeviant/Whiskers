@@ -322,7 +322,7 @@ else
         try
         {
             var editor = _me!;
-            await Mutations.RunAsync("endpointcheck.save", arguments, ct => Store.SaveAsync(draft, editor, ct));
+            await Mutations.RunAsync("endpointcheck.save", arguments, (ResolvedTarget rt, CancellationToken ct) => Store.SaveAsync(draft, editor, ct));
             Snackbar.Add(L["Checks_Snackbar_Saved"].Value, Severity.Success);
             _editing = null;
             Reload();
@@ -340,7 +340,7 @@ else
         _busy = true;
         try
         {
-            await Mutations.RunAsync("endpointcheck.delete", arguments, ct => Store.DeleteAsync(c.Id, ct));
+            await Mutations.RunAsync("endpointcheck.delete", arguments, (ResolvedRecord rt, CancellationToken ct) => Store.DeleteAsync(c.Id, ct));
             Snackbar.Add(L["Checks_Snackbar_Deleted"].Value, Severity.Success);
             Reload();
         }
@@ -372,7 +372,7 @@ else
                 Reload();
                 return;
             }
-            var run = await Mutations.RunAsync("endpointcheck.run", arguments, ct => Runner.RunInDecisionAsync(checkId, ct));
+            var run = await Mutations.RunAsync("endpointcheck.run", arguments, (ResolvedRecord rt, CancellationToken ct) => Runner.RunInDecisionAsync(checkId, ct));
             // Review n1: a check that is gone or off ran nothing and leaves no result. Review n2: a recorded "Run now"
             // result does not move the monitor's schedule (the run is marked OnDemand).
             if (!run.NothingRan) await Store.RecordAsync(run);

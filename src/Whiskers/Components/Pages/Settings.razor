@@ -912,7 +912,7 @@ else
             // Follow-up (2026-11-03, review R1-41 round 7 NIT 5): an interval out of range is refused before the gateway
             // runs — not recorded as a failed config.save (the store refuses it again on its own).
             Whiskers.Configuration.IntervalValidation.ThrowIfInvalid(health);
-            await Mutations.RunAsync("config.save", new { section = "healthmonitor" }, async _ =>
+            await Mutations.RunAsync("config.save", new { section = "healthmonitor" }, async (ResolvedRecord rt, CancellationToken _) =>
             {
                 await AppSettings.SaveSectionAsync("HealthMonitor", health);
             });
@@ -930,7 +930,7 @@ else
     {
         try
         {
-            await Mutations.RunAsync("config.save", new { section = "metricalert" }, async _ =>
+            await Mutations.RunAsync("config.save", new { section = "metricalert" }, async (ResolvedRecord rt, CancellationToken _) =>
             {
                 await AppSettings.SaveSectionAsync("MetricAlert", new MetricAlertSettings
                 {
@@ -957,7 +957,7 @@ else
                 OsChangelogTimeoutSeconds = cur.OsChangelogTimeoutSeconds,
             };
             Whiskers.Configuration.IntervalValidation.ThrowIfInvalid(cve);   // before the gateway (follow-up 2026-11-03)
-            await Mutations.RunAsync("config.save", new { section = "cvemonitor" }, async _ =>
+            await Mutations.RunAsync("config.save", new { section = "cvemonitor" }, async (ResolvedRecord rt, CancellationToken _) =>
             {
                 await AppSettings.SaveSectionAsync("CveMonitor", cve);
             });
@@ -980,7 +980,7 @@ else
                 Enabled = _iuEnabled, CheckIntervalHours = _iuInterval, NotifyOnUpdate = _iuNotify,
             };
             Whiskers.Configuration.IntervalValidation.ThrowIfInvalid(imageUpdate);   // before the gateway (follow-up 2026-11-03)
-            await Mutations.RunAsync("config.save", new { section = "imageupdate" }, async _ =>
+            await Mutations.RunAsync("config.save", new { section = "imageupdate" }, async (ResolvedRecord rt, CancellationToken _) =>
             {
                 await AppSettings.SaveSectionAsync("ImageUpdate", imageUpdate);
             });
@@ -998,7 +998,7 @@ else
     {
         try
         {
-            await Mutations.RunAsync("config.save", new { section = "terminal" }, async _ =>
+            await Mutations.RunAsync("config.save", new { section = "terminal" }, async (ResolvedRecord rt, CancellationToken _) =>
             {
                 await AppSettings.SaveSectionAsync("Terminal", new TerminalSettings
                 {
@@ -1067,13 +1067,13 @@ else
             {
                 // A vault write of its own (R1-11): decided and audited by name, the token never in the arguments.
                 var key = Whiskers.Services.Vault.CredentialRefs.NewDnsToken();
-                await Mutations.RunAsync("vault.secret_set", new { section = "vault", key }, _ => VaultService.SetSecretAsync(key, token));
+                await Mutations.RunAsync("vault.secret_set", new { section = "vault", key }, (ResolvedTarget rt, CancellationToken _) => VaultService.SetSecretAsync(key, token));
                 newRef = key;   // written: from here on a failure removes it again
             }
             var provider = _dnsProvider;
             var ttl = _dnsDefaultTtl;
             var changedMeanwhile = L["Settings_Dns_Error_ChangedMeanwhile"].Value;
-            previous = await Mutations.RunAsync("config.save", new { section = "dns" }, _ =>
+            previous = await Mutations.RunAsync("config.save", new { section = "dns" }, (ResolvedRecord rt, CancellationToken _) =>
                 AppSettings.UpdateSectionAsync(DnsSettings.SectionName, inLock =>
                 {
                     // Moving a plaintext token read before: only while the file still holds exactly it — another admin
@@ -1119,7 +1119,7 @@ else
                 AllowedZones = current.AllowedZones,
                 DefaultTtl = current.DefaultTtl,
             })!;
-            previous = await Mutations.RunAsync("config.save", new { section = "dns" }, _ =>
+            previous = await Mutations.RunAsync("config.save", new { section = "dns" }, (ResolvedRecord rt, CancellationToken _) =>
                 AppSettings.UpdateSectionAsync(DnsSettings.SectionName, _ => cleared));
         }
         catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException or IOException or UnauthorizedAccessException)
@@ -1144,7 +1144,7 @@ else
         try
         {
             await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key = vaultKey },
-                _ => VaultService.DeleteSecretAsync(vaultKey));
+                (ResolvedRecord rt, CancellationToken _) => VaultService.DeleteSecretAsync(vaultKey));
         }
         catch { /* an unused secret at worst; the settings no longer name it */ }
     }
@@ -1283,7 +1283,7 @@ else
         {
             // Name and level only: the key is generated inside and never travels through the arguments.
             newKey = await Mutations.RunAsync("mcp.key_create", new { section = "mcp-api-keys", name = _newKeyName.Trim(), level = _newKeyLevel },
-                _ => McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel));
+                (ResolvedNew rt, CancellationToken _) => McpPermissionService.AddApiKeyAsync(_newKeyName.Trim(), _newKeyLevel));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         catch (Exception ex)
@@ -1307,7 +1307,7 @@ else
         try
         {
             await Mutations.RunAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name },
-                _ => McpPermissionService.RemoveApiKeyAsync(id));
+                (ResolvedRecord rt, CancellationToken _) => McpPermissionService.RemoveApiKeyAsync(id));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         ReloadApiKeysKeepingPendingToggles();
@@ -1331,7 +1331,7 @@ else
         try
         {
             await Mutations.RunAsync("config.mcp_permissions", new { section = "mcp-permissions" },
-                _ => McpPermissionService.SavePermissionDataAsync(new Whiskers.Models.McpPermissionData
+                (ResolvedRecord rt, CancellationToken _) => McpPermissionService.SavePermissionDataAsync(new Whiskers.Models.McpPermissionData
                 {
                     ApiKeys = _mcpApiKeys,
                     Tools = _mcpTools
@@ -1386,7 +1386,7 @@ else
         try
         {
             await Mutations.RunAsync("config.whitelist", new { section = "whitelist" },
-                _ => WhitelistService.SaveWhitelistAsync(new Whiskers.Models.WhitelistData
+                (ResolvedRecord rt, CancellationToken _) => WhitelistService.SaveWhitelistAsync(new Whiskers.Models.WhitelistData
                 {
                     Enabled = _whitelistEnabled,
                     Emails = _whitelistEmails.ToList()
@@ -1460,7 +1460,7 @@ else
         try
         {
             await Mutations.RunAsync("config.roles", new { section = "roles" },
-                _ => RoleService.SaveRoleDataAsync(new Whiskers.Models.UserRoleData
+                (ResolvedRecord rt, CancellationToken _) => RoleService.SaveRoleDataAsync(new Whiskers.Models.UserRoleData
                 {
                     Roles = _roleEntries.Select(r => new Whiskers.Models.UserRoleEntry { Email = r.Email, Role = r.Role }).ToList(),
                     DefaultRole = _defaultRole,
@@ -1500,7 +1500,7 @@ else
         try
         {
             await Mutations.RunAsync("vault.secret_delete", new { section = "vault", key },
-                _ => VaultService.DeleteSecretAsync(key));
+                (ResolvedRecord rt, CancellationToken _) => VaultService.DeleteSecretAsync(key));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         LoadVault();
@@ -1516,7 +1516,7 @@ else
             // The key name only: the secret value never goes into the arguments the audit keeps.
             var value = _newVaultValue;
             await Mutations.RunAsync("vault.secret_set", new { section = "vault", key },
-                _ => VaultService.SetSecretAsync(key, value));
+                (ResolvedTarget rt, CancellationToken _) => VaultService.SetSecretAsync(key, value));
             Snackbar.Add(L["Settings_Snackbar_SecretSaved", key].Value, Severity.Success);
             _newVaultKey = ""; _newVaultValue = "";
             LoadVault();
@@ -1551,7 +1551,7 @@ else
             try
             {
                 // "Started" only once the cycle holds the scan gate: a click that finds a cycle running hears only that.
-                ran = await Mutations.RunAsync("cve.scan", new { }, ct => CveMonitor.RunOneCycleAsync(ct,
+                ran = await Mutations.RunAsync("cve.scan", new { }, (ResolvedRecord rt, CancellationToken ct) => CveMonitor.RunOneCycleAsync(ct,
                     started: () => _ = InvokeAsync(() => Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info))));
             }
             catch (MutationRefusedException ex) { refused = ex.Message; }

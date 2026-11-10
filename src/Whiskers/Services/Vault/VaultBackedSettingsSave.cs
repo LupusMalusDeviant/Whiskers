@@ -42,7 +42,7 @@ public static class VaultBackedSettingsSave
                 s => s.Key,
                 s => (Func<JsonObject?, JsonObject>)(inLock => Build(s.Value, s.Key, inLock, changes)),
                 StringComparer.OrdinalIgnoreCase);
-            previous = await mutations.RunAsync("config.save", new { section = scope }, _ => store.UpdateSectionsAsync(builds));
+            previous = await mutations.RunAsync("config.save", new { section = scope }, (ResolvedRecord rt, CancellationToken _) => store.UpdateSectionsAsync(builds));
         }
         catch
         {
@@ -63,7 +63,7 @@ public static class VaultBackedSettingsSave
         JsonObject? previous;
         try
         {
-            previous = await mutations.RunAsync("config.agent", arguments, _ => store.SaveAsync(settings, editor, change));
+            previous = await mutations.RunAsync("config.agent", arguments, (ResolvedRecord rt, CancellationToken _) => store.SaveAsync(settings, editor, change));
         }
         catch
         {
@@ -95,7 +95,7 @@ public static class VaultBackedSettingsSave
             {
                 // A vault write of its own (R1-11): decided and audited by name, the value never in the arguments.
                 var key = VaultBackedSettings.NewKey(input.Section, input.Property);
-                await mutations.RunAsync("vault.secret_set", new { section = "vault", key }, _ => vault.SetSecretAsync(key, value));
+                await mutations.RunAsync("vault.secret_set", new { section = "vault", key }, (ResolvedTarget rt, CancellationToken _) => vault.SetSecretAsync(key, value));
                 changes[(input.Section, input.Property)] = moved ? SecretFieldChange.Move(key, value) : SecretFieldChange.Set(key);
             }
         }
@@ -142,7 +142,7 @@ public static class VaultBackedSettingsSave
         {
             try
             {
-                await mutations.RunAsync("vault.secret_delete", new { section = "vault", key }, _ => vault.DeleteSecretAsync(key));
+                await mutations.RunAsync("vault.secret_delete", new { section = "vault", key }, (ResolvedRecord rt, CancellationToken _) => vault.DeleteSecretAsync(key));
             }
             catch { failed++; /* an unused secret at worst; no setting names it */ }
         }

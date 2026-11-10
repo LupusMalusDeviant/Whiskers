@@ -146,7 +146,7 @@
         var role = _newRole;
         _issued = null;
         var result = await RunAsync(() => Mutations.RunAsync("account.create", new { account = email, role = role.ToString() },
-            ct => Accounts.CreateAsync(email, role, ct)));
+            (ResolvedNew rt, CancellationToken ct) => Accounts.CreateAsync(email, role, ct)));
         if (result is { Success: true, RecoveryCode: { } code, RecoveryExpiresUtc: { } expires })
         {
             _issued = new Issued(email, code, expires);
@@ -160,7 +160,7 @@
     {
         _issued = null;
         var result = await RunAsync(() => Mutations.RunAsync("account.password_reset", new { account = email },
-            ct => Accounts.ResetPasswordAsync(email, ct)));
+            (ResolvedRecord rt, CancellationToken ct) => Accounts.ResetPasswordAsync(email, ct)));
         if (result is { Success: true, RecoveryCode: { } code, RecoveryExpiresUtc: { } expires })
         {
             _issued = new Issued(email, code, expires);
@@ -174,7 +174,7 @@
         _issued = null;
         _confirmDelete = null;
         var result = await RunAsync(() => Mutations.RunAsync("account.delete", new { account = email },
-            ct => Accounts.DeleteAsync(email, ct)));
+            (ResolvedRecord rt, CancellationToken ct) => Accounts.DeleteAsync(email, ct)));
         if (result is { Success: true }) Snackbar.Add(L["LocalAccounts_Snackbar_Deleted", email].Value, Severity.Success);
         await LoadAsync();
     }

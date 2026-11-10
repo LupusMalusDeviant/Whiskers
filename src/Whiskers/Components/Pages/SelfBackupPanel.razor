@@ -163,7 +163,7 @@ else
         try
         {
             var info = await Mutations.RunAsync("selfbackup.create", new { trigger = "manual" },
-                async token =>
+                async (ResolvedNew rt, CancellationToken token) =>
                 {
                     var created = await BackupService.CreateBackupAsync("manual", token);
                     // The archive is part of the gateway's event (R1-22): which file, how large, encrypted or not.
@@ -201,7 +201,7 @@ else
         try
         {
             await Mutations.RunAsync("selfbackup.delete", new { archive = info.FileName },
-                _ => BackupService.DeleteBackupAsync(info.Id));
+                (ResolvedRecord rt, CancellationToken _) => BackupService.DeleteBackupAsync(info.Id));
             Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupDeleted"].Value, Severity.Success);
             await LoadBackups();
         }
@@ -278,7 +278,7 @@ else
             await Mutations.RunAsync("selfbackup.restore", new { archive = Path.GetFileName(archivePath) },
                 // The process stops while restoring: the intent the gateway wrote before this runs is the record; the
                 // restore itself names the archive in its arguments (R1-22).
-                _ => BackupService.BeginRestoreAsync(archivePath, actor));
+                (ResolvedRecord rt, CancellationToken _) => BackupService.BeginRestoreAsync(archivePath, actor));
         }
         catch (MutationRefusedException ex)
         {
