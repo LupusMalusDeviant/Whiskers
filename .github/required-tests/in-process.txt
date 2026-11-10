@@ -9,6 +9,10 @@
 1 Whiskers.Tests.LocalAccountLifecycleTests.A_binding_removal_and_a_local_deletion_at_the_same_moment_leave_an_admin_who_can_sign_in
 1 Whiskers.Tests.LocalAccountLifecycleTests.Sign_in_identities_are_confirmed_and_removed_through_the_gateway_by_an_admin_only
 
+# MCP sessions belong to the key that opened them; the key's subject carries no key material, fail closed (contract 0016).
+5 Whiskers.Tests.McpBearerSubjectTests
+1 Whiskers.Tests.McpSessionBindingWireTests.A_session_opened_by_one_key_cannot_be_taken_over_by_another_key
+
 # Container tests stay mandatory on CI, and this manifest stays in step with the test assembly.
 4 Whiskers.Tests.DockerRequirementTests
 7 Whiskers.Tests.RequiredTestsManifestTests
