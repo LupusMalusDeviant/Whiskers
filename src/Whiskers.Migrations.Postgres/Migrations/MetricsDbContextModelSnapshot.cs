@@ -535,6 +535,22 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.ToTable("EndpointCheckResults");
                 });
 
+            modelBuilder.Entity("Whiskers.Models.InstanceMarkerEntity", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Detail")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("InstanceMarkers", (string)null);
+                });
+
             modelBuilder.Entity("Whiskers.Models.LogAlertRuleEntity", b =>
                 {
                     b.Property<long>("Id")

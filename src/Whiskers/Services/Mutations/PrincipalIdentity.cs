@@ -46,9 +46,9 @@ public static class PrincipalIds
     public static readonly IReadOnlySet<string> SystemComponents = global::System.Collections.Frozen.FrozenSet.ToFrozenSet(
         ["audit-retention", "startup", "approval-expiry", "authority-check"], StringComparer.Ordinal);
 
-    /// <summary>The host CLIs (S-10, S-11, S-15), named by their flag without the dashes.</summary>
+    /// <summary>The host CLIs (S-10, S-11, S-15 and the guardrail reset of contract 0010), named by their flag without the dashes.</summary>
     public static readonly IReadOnlySet<string> HostCliCommands = global::System.Collections.Frozen.FrozenSet.ToFrozenSet(
-        ["restore-backup", "recover-local-account", "confirm-identity-binding"], StringComparer.Ordinal);
+        ["restore-backup", "recover-local-account", "confirm-identity-binding", "reset-guardrails"], StringComparer.Ordinal);
 
     public static string Task(string taskId) => Prefixed(TaskPrefix, taskId);
     public static string Check(string checkId) => Prefixed(CheckPrefix, checkId);

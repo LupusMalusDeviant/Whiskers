@@ -14,7 +14,7 @@ public sealed class SystemPrincipalTests
     {
         Assert.Equal(["approval-expiry", "audit-retention", "authority-check", "startup"],
             PrincipalIds.SystemComponents.Order(StringComparer.Ordinal));
-        Assert.Equal(["confirm-identity-binding", "recover-local-account", "restore-backup"],
+        Assert.Equal(["confirm-identity-binding", "recover-local-account", "reset-guardrails", "restore-backup"],
             PrincipalIds.HostCliCommands.Order(StringComparer.Ordinal));
         Assert.Equal("system:host-cli:restore-backup", PrincipalIds.HostCli("restore-backup"));
         Assert.Throws<ArgumentException>(() => PrincipalIds.HostCli("anything"));
@@ -42,7 +42,7 @@ public sealed class SystemPrincipalTests
         }
         // The rows the contract moved to System are there.
         foreach (var expected in new[] { "audit-retention", "authority-check", "startup", "approval-expiry",
-                     "host-cli:recover-local-account", "host-cli:confirm-identity-binding" })
+                     "host-cli:recover-local-account", "host-cli:confirm-identity-binding", "host-cli:reset-guardrails" })
             Assert.Contains(expected, found);
     }
 }

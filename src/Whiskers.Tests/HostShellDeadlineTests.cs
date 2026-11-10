@@ -70,6 +70,22 @@ public sealed class HostShellDeadlineTests
     }
 
     [Fact]
+    public async Task The_helper_is_a_one_shot_privileged_nsenter_container_in_the_host_pid_namespace()
+    {
+        // Contract 0011 (claim SA-05): host control is a one-shot privileged nsenter container, removed after the run.
+        var (result, _) = await Run();
+
+        Assert.Equal(0, result.ExitCode);
+        var helper = Assert.Single(_docker.Parameters);
+        Assert.NotNull(helper.HostConfig);
+        Assert.True(helper.HostConfig.Privileged);
+        Assert.Equal("host", helper.HostConfig.PidMode);
+        Assert.Equal("nsenter", helper.Cmd[0]);
+        Assert.Contains("1", helper.Cmd);                  // -t 1: the host's init
+        Assert.Empty(_docker.Containers);                  // one-shot: removed after the run
+    }
+
+    [Fact]
     public async Task The_helper_carries_its_latest_end_as_a_label()
     {
         _docker.Stall("wait");
@@ -756,6 +772,7 @@ public sealed class HostShellDeadlineTests
 
         public ConcurrentDictionary<string, Container> Containers { get; } = new();
         public ConcurrentQueue<string> Created { get; } = new();
+        public ConcurrentQueue<CreateContainerParameters> Parameters { get; } = new();
         public bool ImageMissing { get; set; }
         public long ExitCode { get; set; }
         public string? FailOn { get; set; }
@@ -812,6 +829,7 @@ public sealed class HostShellDeadlineTests
 
         private async Task<string> CreateSlowlyAsync(CreateContainerParameters parameters)
         {
+            Parameters.Enqueue(parameters);
             await Step("create");
             var id = $"helper{Interlocked.Increment(ref _next)}";
             Containers[id] = new Container(DateTime.UtcNow, false, new Dictionary<string, string>(parameters.Labels));

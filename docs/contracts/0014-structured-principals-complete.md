@@ -384,3 +384,12 @@ Found while implementing; none changes an authority decision.
   `recover-local-account`, `confirm-identity-binding`.
 - **A8 — Legacy approvals (D8).** A request without requesters is refused when it is raised (fail closed), and an
   approval stored before R1-15 without requesters counts against nobody; it is cancelled at the next start as before.
+
+## Amendment 2 (merge of main, 10 November 2026) — needs the maintainer's acceptance
+
+- **A9 — A fourth host CLI.** INV-25 (contract 0010) added `--reset-guardrails`, which writes the audit row
+  `guardrails.reset_on_host` before it changes anything. Its principal is `system:host-cli:reset-guardrails`; the
+  closed list of host CLI commands (D6, A7) gains `reset-guardrails`.
+- **A10 — Key sessions after MCP 2.4 (A6).** Since contract 0016 a session is bound to the key that opened it and a
+  request with another key on it is refused before the tool runs; the `Mcp-Session-Id` a key's principal carries is
+  therefore always a session of that key. Nothing else changes.

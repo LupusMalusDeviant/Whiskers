@@ -520,6 +520,22 @@ namespace Whiskers.Migrations
                     b.ToTable("EndpointCheckResults");
                 });
 
+            modelBuilder.Entity("Whiskers.Models.InstanceMarkerEntity", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Detail")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("InstanceMarkers", (string)null);
+                });
+
             modelBuilder.Entity("Whiskers.Models.LogAlertRuleEntity", b =>
                 {
                     b.Property<long>("Id")

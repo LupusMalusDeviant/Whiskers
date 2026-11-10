@@ -174,7 +174,6 @@ public class ReleaseGateDocumentTests
         var gate = ReleaseGateDocument.Parse(GateFiles.Require(GateFiles.ReleaseGateDoc));
         Assert.Empty(gate.Problems);
         Assert.Equal("INV-62", gate.Pin);
-        // Every invariant that is not ✅ is listed, whatever their number is today.
         Assert.Equal(InvariantTableParser.Parse(GateFiles.Require(GateFiles.Invariants)).Count(r => r.Status != InvariantStatus.Holds),
             gate.Open.Count);
         Assert.Contains(gate.Open, o => o is { Id: "INV-57", Status: InvariantStatus.Partial, Package: "WP2" });

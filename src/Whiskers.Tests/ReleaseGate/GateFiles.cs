@@ -43,6 +43,7 @@ internal static class GateFiles
         Contract = Require(Contract),
         PathCapabilities = Read(PathCapabilities),
         CapabilityInventory = Read(Inventory),
+        Claims = Read(Whiskers.Tests.Claims.ClaimRules.Register),
         Workflows = WorkflowFiles.ToDictionary(f => f, f => Require($".github/workflows/{f}"), StringComparer.Ordinal),
         Manifests = ManifestFiles.Select(f => (f, Text: Read($".github/required-tests/{f}"))).Where(x => x.Text is not null)
             .ToDictionary(x => x.f, x => x.Text!, StringComparer.Ordinal),
