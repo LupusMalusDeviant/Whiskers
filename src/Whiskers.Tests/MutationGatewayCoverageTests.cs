@@ -52,6 +52,7 @@ public class MutationGatewayCoverageTests
     [
         ("Whiskers.Mcp.Tools.ServerTools", "ExecuteCommand", "host.exec"),
         ("Whiskers.Mcp.Tools.ContainerTools", "SetContainerEnv", "container.env_set"),
+        ("Whiskers.Mcp.Tools.ContainerTools", "DeployApp", "app.deploy"),
         ("Whiskers.Mcp.Tools.ContainerTools", "DeployCompose", "compose.deploy"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCustomCommand", "host.exec"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCleanup", "host.prune"),
@@ -59,7 +60,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Mutations.ComposeImpact", "SaveEnvAsync", "container.env_file_save"),
         // The write helper: migrate, rollback and SQL import run the primitive inside their capability decision.
         ("Whiskers.Components.Pages.ContainerDatabasePanel", "ExecInContainerViaHost", "container.exec, db.query"),
-        ("Whiskers.Services.Mutations.ComposeImpact", "DeployAsync", "app.deploy, compose.deploy"),
+        ("Whiskers.Services.Mutations.ComposeImpact", "RunDeploymentAsync", "app.deploy, compose.deploy"),
         ("Whiskers.Services.Webhooks.WebhookService", "DeployCompose", "compose.deploy"),
         ("Whiskers.Services.EndpointChecks.EndpointCheckRunner", "ProbeAsync", "endpointcheck.run"),
     ];
@@ -283,6 +284,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.LogMonitor.Hygiene.LogInventory", "FreeDiskBytesAsync", "df"),
         ("Whiskers.Services.LogMonitor.Hygiene.LogInventory", "ReadSizeAsync", "du / stat of log files"),
         ("Whiskers.Services.Metrics.MetricsCollectorService", "GetDiskUsageAsync", "df"),
+        ("Whiskers.Services.Deployment.DeploymentPathPlanner", "FirstLineAsync", "reads the first line of a deployment directory's compose file (contract 0013, D3)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "ConfigAsync", "docker compose config in a temporary directory (read-only planning, R1-16; contract 0006 reads its JSON)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "DiscoverAsync", "finds compose files"),
         ("Whiskers.Services.Mutations.ComposePlanner", "HostTraefikAsync", "docker inspect of a running Traefik outside the project (contract 0013, Q1)"),

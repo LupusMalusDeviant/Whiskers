@@ -3,6 +3,13 @@ using Whiskers.Services.Server;
 
 namespace Whiskers.Services.Mutations;
 
+/// <summary>A UI compose deployment (contract 0013, D4): the plan it ran and what the runner did. <see cref="Success"/>
+/// is the runner's, so the gateway records a refused or violating run as failed (<see cref="MutationResults"/>).</summary>
+public sealed record ComposeDeployResult(ComposePlan Plan, ComposeRunResult Run)
+{
+    public bool Success => Run.Success;
+}
+
 /// <summary>
 /// UI side of a compose deployment (R1-07): the deployment is decided on its own capability, then once per existing
 /// container its <see cref="ComposePlan"/> touches (nested), so a protected container whose name differs from the
@@ -26,6 +33,24 @@ public static class ComposeImpact
         IComposePlanner planner, IComposeRunner composeRunner, string capabilityId, object arguments,
         ComposeDeployment deployment, bool pull = true)
     {
+        var deployed = await runner.RunDeploymentAsync(executor, planner, composeRunner, capabilityId, arguments, deployment, pull);
+        var run = deployed.Run;
+        return new CommandResult
+        {
+            ExitCode = run.Success ? 0 : 1, Output = run.Output,
+            Error = run.Refusal ?? (run.Violations.Count > 0 ? string.Join("; ", run.Violations) : run.Error),
+        };
+    }
+
+    /// <summary>
+    /// <see cref="DeployAsync"/> with the plan and the runner's own result (contract 0013, D4): a page tells a refusal
+    /// before <c>up</c> (<see cref="ComposeRunResult.Refusal"/>) from a violation of the re-check, shows the project, and
+    /// follows the runner's steps ①–⑤ through <paramref name="progress"/>.
+    /// </summary>
+    public static async Task<ComposeDeployResult> RunDeploymentAsync(this IUiMutationRunner runner,
+        IHostCommandExecutor executor, IComposePlanner planner, IComposeRunner composeRunner, string capabilityId,
+        object arguments, ComposeDeployment deployment, bool pull = true, IProgress<string>? progress = null)
+    {
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(planner);
         ArgumentNullException.ThrowIfNull(composeRunner);
@@ -42,12 +67,8 @@ public static class ComposeImpact
                     // Contract 0006: write, pull, build, inspect the images, up — then the re-check after up.
                     var run = await composeRunner.RunAsync(current,
                         (command, timeout, ct) => executor.ExecuteMutationAsync(current.ServerId, command, timeout, ct),
-                        new ComposeRunOptions(pull, TimeSpan.FromMinutes(5)));
-                    return new CommandResult
-                    {
-                        ExitCode = run.Success ? 0 : 1, Output = run.Output,
-                        Error = run.Refusal ?? (run.Violations.Count > 0 ? string.Join("; ", run.Violations) : run.Error),
-                    };
+                        new ComposeRunOptions(pull, TimeSpan.FromMinutes(5)) { Progress = progress });
+                    return new ComposeDeployResult(current, run);
                 })));
         });
     }
