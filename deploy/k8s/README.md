@@ -51,13 +51,20 @@ EOF
 Paste `whiskers-agent.kubeconfig` into the dialog. Optionally restrict Whiskers further with the
 namespace allowlist field (empty = all namespaces the account can see).
 
+**Upgrading (contract 0012, A8):** start, stop and restart act on the controller the decision read: Whiskers reads a
+pod's ReplicaSet to find its Deployment and that Deployment's UID (`get` on `replicasets`), then patches the controller
+itself with a merge patch that carries `metadata.uid` (`patch` on `deployments`, `statefulsets`, `daemonsets`) — the
+API server refuses the patch when the controller was replaced. A bare pod is deleted with its UID as a precondition.
+If the cluster was connected with an older or hand-made role, apply `whiskers-agent-rbac.yaml` again; otherwise start,
+stop and restart fail with 403.
+
 ## Semantics (honest mapping)
 
 | Whiskers action | Kubernetes effect |
 |---|---|
-| Stop | Scale the owning Deployment/StatefulSet to 0 (bare pod: delete). DaemonSets refuse. |
+| Stop | Scale the owning Deployment/StatefulSet to 0 by a merge patch of the controller that carries its UID (bare pod: delete with its UID as precondition). DaemonSets refuse. |
 | Start | Scale the owner back to 1 (only when currently 0 — multi-replica counts are never stomped). |
-| Restart | Rollout-restart (pod-template annotation patch). Bare pods refuse (no controller to bring them back). |
+| Restart | Rollout-restart (pod-template annotation patch of the decided controller, with its UID). Bare pods refuse (no controller to bring them back). |
 | Stats | Not yet (needs metrics-server — later Track B step). |
 
 Interactive exec and MCP tool coverage for K8s follow in Track B.3.

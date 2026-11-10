@@ -24,15 +24,16 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["delete"]
-  # Start/stop = scale to 1/0; restart = rollout-restart via a pod-template annotation patch.
+  # Start/stop = scale to 1/0 and restart = rollout-restart, each a merge patch of the controller itself that
+  # carries its metadata.uid (the API server refuses it when the controller was replaced).
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
     verbs: ["get", "list", "watch", "patch"]
   - apiGroups: ["apps"]
     resources: ["deployments/scale", "statefulsets/scale"]
     verbs: ["get", "patch"]
-  # Owner resolution for pod grouping happens name-based (no ReplicaSet reads needed), but
-  # allowing reads keeps `kubectl describe`-style debugging with this account possible.
+  # A pod's ReplicaSet is read to find its Deployment and that Deployment's UID, which every start, stop and
+  # restart patch carries as a precondition (contract 0012, A8). An older role without this rule fails with 403.
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["get", "list"]
