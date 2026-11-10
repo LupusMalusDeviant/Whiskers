@@ -11,6 +11,14 @@ public static class PrincipalCredentials
     public const string LocalAccountPrefix = "local:";
     public const string WebhookSecretPrefix = "webhook-secret:";
 
+    /// <summary>An MCP key's id (the credential of a key, or of an agent acting for one): any credential id that is
+    /// not one of the other kinds above.</summary>
+    public static bool IsKeyId(string? credentialId) =>
+        !string.IsNullOrEmpty(credentialId) && credentialId != AuthDisabled
+        && !credentialId.StartsWith(BindingPrefix, StringComparison.Ordinal)
+        && !credentialId.StartsWith(LocalAccountPrefix, StringComparison.Ordinal)
+        && !credentialId.StartsWith(WebhookSecretPrefix, StringComparison.Ordinal);
+
     /// <summary>A person signed in with <c>Auth:Disabled</c>: no credential was checked.</summary>
     public const string AuthDisabled = "auth-disabled";
 

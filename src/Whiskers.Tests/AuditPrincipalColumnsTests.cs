@@ -55,6 +55,31 @@ public sealed class AuditPrincipalColumnsTests : IDisposable
         Assert.Equal("webhook", row.ActorType);
     }
 
+    /// <summary>The credential ids are ids, not secrets: the sinks' redaction keeps them in the column, also a webhook
+    /// secret's generation.</summary>
+    [Theory]
+    [InlineData("webhook-secret:w1@2")]
+    [InlineData("binding:b_0123456789abcdef")]
+    [InlineData("local:9c1f6c1e-1d7a-4c39-9a51-3f0f7d1e2b44")]
+    public async Task Credential_ids_survive_the_sinks_redaction(string credential)
+    {
+        using var trail = new AuditTrailFixture(AuditHashChainTests.VaultKey, redacting: true);
+        var principal = new MutationPrincipal(MutationPrincipalKind.Human, "user:ops@example.com", "ops@example.com",
+            McpPermissionLevels.Write, CredentialId: credential);
+
+        Assert.True(await trail.Audit.TryLogAsync(principal, "test.action", "audit", "x", "x",
+            details: JsonSerializer.Serialize(new { principal = new { signIn = credential } })));
+
+        using var scope = trail.Scope();
+        var row = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking()
+            .OrderByDescending(a => a.Id).FirstAsync();
+        Assert.Equal(credential, row.CredentialId);
+        // In the free-text details the value redactor still blanks anything that reads like "secret:<value>" — the column
+        // is the record of a webhook's secret generation; a person's binding or local account is kept in both.
+        if (!credential.StartsWith(PrincipalCredentials.WebhookSecretPrefix, StringComparison.Ordinal))
+            Assert.Contains(credential, row.Details);
+    }
+
     public static TheoryData<string, string, string> Factories() => new()
     {
         { "retention", "System", "system:audit-retention" },
