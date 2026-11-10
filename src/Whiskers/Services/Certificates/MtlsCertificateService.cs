@@ -74,7 +74,8 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
     internal TimeSpan ConfirmInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     public MtlsCertificateService(IHostCommandExecutor exec, IServerConfigService servers, ILogger<MtlsCertificateService> logger,
-        IMtlsClientCredentialStore? clientCredentials = null, Whiskers.Services.Docker.IDockerConnectionManager? connections = null)
+        IMtlsClientCredentialStore? clientCredentials = null, Whiskers.Services.Docker.IDockerConnectionManager? connections = null,
+        IMtlsClientKeyLoader? keyLoader = null)
     {
         _exec = exec;
         _servers = servers;
@@ -82,8 +83,14 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
         _clientCredentials = clientCredentials;
         _connections = connections;
         FetchPresented = (host, port, ct) => CertificateProbe.FetchServerCertificateAsync(host, port, HandshakeTimeout, ct);
-        ProbeCredential = (server, ct) => MtlsClientProbe.ProbeAsync(server, HandshakeTimeout, ct);
-        RunConfirmation = (server, script, ct) => MtlsClientProbe.RunConfirmationAsync(server, script, StepTimeout, ct);
+        // Contract 0015 [mTLS layer]: the one-off connections open the sealed client key in memory; without a loader
+        // nothing is proven and no confirmation can arrive.
+        ProbeCredential = (server, ct) => keyLoader is null
+            ? Task.FromResult(MtlsProbeOutcome.NotChecked)
+            : MtlsClientProbe.ProbeAsync(server, keyLoader, HandshakeTimeout, ct);
+        RunConfirmation = (server, script, ct) => keyLoader is null
+            ? Task.FromResult(("", "No mTLS client key loader is configured.", 1))
+            : MtlsClientProbe.RunConfirmationAsync(server, keyLoader, script, StepTimeout, ct);
         VerifyConnection = DefaultVerifyConnectionAsync;
     }
 

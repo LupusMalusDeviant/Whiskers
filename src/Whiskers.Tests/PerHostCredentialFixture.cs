@@ -10,6 +10,7 @@ using Whiskers.Services.Certificates;
 using Whiskers.Services.Onboarding;
 using Whiskers.Services.Server;
 using Whiskers.Services.ServerConfig;
+using Whiskers.Services.Vault;
 
 namespace Whiskers.Tests;
 
@@ -199,6 +200,10 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
         Encoding.UTF8.GetString(Convert.FromBase64String(
             Regex.Match(confirmScript, @"echo (\S+) \| base64 -d \| timeout").Groups[1].Value));
 
+    /// <summary>How the credential a client presents is built from a record's paths (contract 0015: the key is sealed at
+    /// rest; the world sets the app's loader). Null: plain PEM files.</summary>
+    public Func<ServerConfig, X509Certificate2>? Loader { get; set; }
+
     /// <summary>ghostunnel's decision for a client credential.</summary>
     public MtlsProbeOutcome Probe(ServerConfig server) => Probe(server, simulateNoAlert: true);
 
@@ -211,9 +216,9 @@ internal sealed class SimulatedProxyHost(TestCa ca, string ip)
         X509Certificate2 cert;
         try
         {
-            cert = X509Certificate2.CreateFromPemFile(server.TcpClientCertPath!, server.TcpClientKeyPath);
+            cert = Loader is { } load ? load(server) : X509Certificate2.CreateFromPemFile(server.TcpClientCertPath!, server.TcpClientKeyPath);
         }
-        catch (Exception ex) when (ex is IOException or CryptographicException or ArgumentException)
+        catch (Exception ex) when (ex is IOException or CryptographicException or ArgumentException or InvalidOperationException)
         {
             return MtlsProbeOutcome.NotChecked;
         }
@@ -355,12 +360,24 @@ internal sealed class CredentialWorld : IDisposable
     public MtlsCertificateService Service { get; }
     public DataPathOptions Paths { get; }
     public string MtlsDir => Paths.MtlsDir;
+    /// <summary>Contract 0015: keys are written sealed by a usable vault and loaded through the app's loader.</summary>
+    public SealedKeyFiles KeyFiles { get; }
+    public MtlsClientKeyLoader KeyLoader { get; }
+
+    /// <summary>The PEM of a key file as the app reads it (a sealed key opened, a plaintext one as it is).</summary>
+    public string ReadKeyPem(string path)
+    {
+        using var material = KeyFiles.Read(path, SealedKeyPurposes.MtlsClientKey(Paths, path));
+        return material.Pem.ToString();
+    }
     private int _run;
 
     public CredentialWorld(bool withSharedCredential = true, params (string Id, string Ip)[] hosts)
     {
         if (hosts.Length == 0) hosts = [("rabenhof", "100.64.0.9")];
         Paths = new DataPathOptions(Root);
+        KeyFiles = new SealedKeyFiles(TestVault.Usable, Paths);
+        KeyLoader = new MtlsClientKeyLoader(KeyFiles, Paths);
         Directory.CreateDirectory(MtlsDir);
         File.WriteAllText(Path.Combine(MtlsDir, "ca.crt"), Ca.BundlePem);
         if (withSharedCredential) WriteShared();
@@ -369,7 +386,7 @@ internal sealed class CredentialWorld : IDisposable
         Servers = new MutableServerConfig();
         foreach (var (id, ip) in hosts)
         {
-            Fleet.Hosts[id] = new SimulatedProxyHost(Ca, ip);
+            Fleet.Hosts[id] = new SimulatedProxyHost(Ca, ip) { Loader = KeyLoader.Load };
             Servers.AddServerAsync(new ServerConfig
             {
                 Id = id, Name = char.ToUpperInvariant(id[0]) + id[1..], ConnectionType = ConnectionType.TCP, TcpHost = ip, TcpPort = 2376,
@@ -381,7 +398,7 @@ internal sealed class CredentialWorld : IDisposable
         }
 
         Fleet.Records = Servers.GetServer;
-        Store = new MtlsClientCredentialStore(Fleet, NullLogger<MtlsClientCredentialStore>.Instance, Paths, Servers);
+        Store = new MtlsClientCredentialStore(Fleet, NullLogger<MtlsClientCredentialStore>.Instance, Paths, Servers, KeyFiles);
         Service = new MtlsCertificateService(Fleet, Servers, NullLogger<MtlsCertificateService>.Instance, Store)
         {
             RestartGrace = TimeSpan.Zero,

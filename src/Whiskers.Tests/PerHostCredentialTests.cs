@@ -568,7 +568,7 @@ public sealed class PerHostCredentialTests
         var g1Copy = Path.Combine(w.Root, "g1");
         Directory.CreateDirectory(g1Copy);
         File.Copy(g1.Cert, Path.Combine(g1Copy, "client.crt"));
-        File.Copy(g1.Key, Path.Combine(g1Copy, "client.key"));
+        File.WriteAllText(Path.Combine(g1Copy, "client.key"), w.ReadKeyPem(g1.Key));   // the key itself, as an attacker would hold it
 
         var result = await w.Service.RenewClientAsync("rabenhof", rotate: true, default);
 
@@ -964,9 +964,9 @@ public sealed class PerHostCredentialTests
     {
         using var w = new CredentialWorld();
         var log = new CapturingLogger<MtlsClientCredentialStore>();
-        var store = new MtlsClientCredentialStore(w.Fleet, log, w.Paths, w.Servers);
+        var store = new MtlsClientCredentialStore(w.Fleet, log, w.Paths, w.Servers, w.KeyFiles);
         var paths = await store.IssueAsync(w.Server("rabenhof"), 1, default);
-        var key = File.ReadAllText(paths.Key);
+        var key = w.ReadKeyPem(paths.Key);
         var body = string.Concat(key.Split('\n').Where(l => !l.StartsWith("-----", StringComparison.Ordinal))).Trim();
 
         Assert.NotEmpty(log.Lines);
@@ -1024,7 +1024,7 @@ public sealed class PerHostCredentialTests
     private static void AssertServerCheck(CredentialWorld w, string id, string ip)
     {
         var record = w.Server(id);
-        var credentials = DockerConnectionManager.BuildMtlsCredentials(record);
+        var credentials = DockerConnectionManager.BuildMtlsCredentials(record, w.KeyLoader);
         var callback = credentials.ServerCertificateValidationCallback!;
         using var right = w.Ca.IssueServer(ip);
         using var wrongIp = w.Ca.IssueServer("100.64.0.99");

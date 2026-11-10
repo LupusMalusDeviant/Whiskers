@@ -36,13 +36,19 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
 
     private readonly Whiskers.Services.ServerConfig.IServerConfigService? _servers;
 
+    // Contract 0015 [mTLS layer]: every key this store makes is written sealed by the vault (D4: refused without one).
+    private readonly Whiskers.Services.Vault.ISealedKeyFiles? _sealedKeys;
+    private readonly DataPathOptions _paths;
+
     public MtlsClientCredentialStore(IHostCommandExecutor exec, ILogger<MtlsClientCredentialStore> logger, DataPathOptions? dataPaths = null,
-        Whiskers.Services.ServerConfig.IServerConfigService? servers = null)
+        Whiskers.Services.ServerConfig.IServerConfigService? servers = null, Whiskers.Services.Vault.ISealedKeyFiles? sealedKeys = null)
     {
         _exec = exec;
         _logger = logger;
         _servers = servers;
-        _mtlsDir = Path.GetFullPath((dataPaths ?? DataPathOptions.Default).MtlsDir);
+        _paths = dataPaths ?? DataPathOptions.Default;
+        _mtlsDir = Path.GetFullPath(_paths.MtlsDir);
+        _sealedKeys = sealedKeys;
     }
 
     private string HostsDir => Path.Combine(_mtlsDir, HostsDirName);
@@ -158,6 +164,9 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
 
         if (!File.Exists(CaPath))
             throw new InvalidOperationException($"The fleet CA bundle {CaPath} is missing; a client certificate cannot be checked against it.");
+        // Contract 0015 D4: a key is only made when it can be stored sealed — refused before anything is signed or written.
+        var sealedKeys = _sealedKeys ?? throw new InvalidOperationException("Client keys are stored sealed by the vault, and no vault is wired.");
+        if (sealedKeys.RefusalReason is { } refused) throw new Whiskers.Services.Vault.SealedKeyException(refused);
         var caPem = await File.ReadAllTextAsync(CaPath, ct);
 
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -181,7 +190,7 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
             var slotDir = Path.GetDirectoryName(proposed.Cert)!;
             slot = Path.GetFileName(slotDir);
             EnsureDirectory(slotDir);
-            WriteAtomic(Path.Combine(slotDir, KeyFile), key.ExportPkcs8PrivateKeyPem(), secret: true);
+            WriteSealedKey(sealedKeys, Path.Combine(slotDir, KeyFile), key);
             WriteAtomic(Path.Combine(slotDir, CertFile), bundlePem, secret: false);
 
             // Every issue is pending until the server record names it and a connection through it is confirmed
@@ -413,6 +422,22 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
         if (Directory.Exists(dir)) return;
         if (OperatingSystem.IsWindows()) Directory.CreateDirectory(dir);
         else Directory.CreateDirectory(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
+
+    /// <summary>Contract 0015: the key's PEM only in a buffer that is zeroed afterwards, written sealed (tmp + rename, 0600).</summary>
+    private void WriteSealedKey(Whiskers.Services.Vault.ISealedKeyFiles sealedKeys, string path, ECDsa key)
+    {
+        var buffer = new char[4096];
+        try
+        {
+            if (!key.TryExportPkcs8PrivateKeyPem(buffer, out var written))
+                throw new InvalidOperationException("The client key could not be exported.");
+            sealedKeys.Write(path, Whiskers.Services.Vault.SealedKeyPurposes.MtlsClientKey(_paths, path), buffer.AsSpan(0, written));
+        }
+        finally
+        {
+            Array.Clear(buffer);
+        }
     }
 
     /// <summary>Writes <paramref name="content"/> to <c>{path}.tmp</c>, created with its final mode (0600 for a key,

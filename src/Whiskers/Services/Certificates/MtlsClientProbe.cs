@@ -33,7 +33,8 @@ public static partial class MtlsClientProbe
 
     /// <summary>Connects with the client credential named by <paramref name="server"/>'s paths and pings Docker through
     /// the host's ghostunnel.</summary>
-    public static async Task<MtlsProbeOutcome> ProbeAsync(Models.ServerConfig server, TimeSpan timeout, CancellationToken ct)
+    public static async Task<MtlsProbeOutcome> ProbeAsync(Models.ServerConfig server, IMtlsClientKeyLoader keyLoader, TimeSpan timeout,
+        CancellationToken ct)
     {
         if (!server.TcpUseTls || string.IsNullOrWhiteSpace(server.TcpHost) || string.IsNullOrWhiteSpace(server.TcpClientCertPath)
             || string.IsNullOrWhiteSpace(server.TcpClientKeyPath) || string.IsNullOrWhiteSpace(server.TcpCaCertPath))
@@ -43,11 +44,12 @@ public static partial class MtlsClientProbe
         var anchors = new X509Certificate2Collection();
         try
         {
-            using var ephemeral = X509Certificate2.CreateFromPemFile(server.TcpClientCertPath, server.TcpClientKeyPath);
-            clientCert = X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pkcs12), null);
+            // Contract 0015 [mTLS layer]: the key is opened from its sealed file in memory.
+            clientCert = keyLoader.Load(server);
             anchors.ImportFromPemFile(server.TcpCaCertPath);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException
+                                       or Whiskers.Services.Vault.SealedKeyException)
         {
             return MtlsProbeOutcome.NotChecked;
         }
@@ -147,9 +149,10 @@ public static partial class MtlsClientProbe
     /// arrive when the host admits the new credential. Nothing is cached; the client is disposed afterwards.
     /// </summary>
     public static async Task<(string Output, string Error, int ExitCode)> RunConfirmationAsync(Models.ServerConfig server,
+        IMtlsClientKeyLoader keyLoader,
         string confirmationScript, TimeSpan timeout, CancellationToken ct)
     {
-        var credentials = DockerConnectionManager.BuildMtlsCredentials(server);
+        var credentials = DockerConnectionManager.BuildMtlsCredentials(server, keyLoader);
         using var configuration = new DockerClientConfiguration(new Uri($"https://{server.TcpHost}:{server.TcpPort}"), credentials, timeout);
         using var client = configuration.CreateClient();
         using var cache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
