@@ -55,10 +55,17 @@ public class MutationBypassArchitectureTests
 
         Assert.Equal(
         [
+            // Contract 0012 (D3): each with its typed overloads (the lambda receives the resolved object).
+            "Whiskers.Services.Mutations.IAutomationMutationRunner.RunAsync",
+            "Whiskers.Services.Mutations.IAutomationMutationRunner.RunAsync",
             "Whiskers.Services.Mutations.IAutomationMutationRunner.RunAsync",
             "Whiskers.Services.Mutations.IAutomationMutationRunner.RunAsync",
             "Whiskers.Services.Mutations.IUiMutationRunner.RunAsync",
             "Whiskers.Services.Mutations.IUiMutationRunner.RunAsync",
+            "Whiskers.Services.Mutations.IUiMutationRunner.RunAsync",
+            "Whiskers.Services.Mutations.IUiMutationRunner.RunAsync",
+            "Whiskers.Services.Scheduler.TaskExecutor.RunGatedAsync",
+            "Whiskers.Services.Scheduler.TaskExecutor.RunGatedAsync",
             "Whiskers.Services.Scheduler.TaskExecutor.RunGatedAsync",
             "Whiskers.Services.Scheduler.TaskExecutor.RunGatedAsync",
         ], entryPoints);
@@ -80,7 +87,7 @@ public class MutationBypassArchitectureTests
         var wrappers = root.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>()
             .Where(m => m.Identifier.Text == "RunGatedAsync").ToList();
 
-        Assert.Equal(2, wrappers.Count);
+        Assert.Equal(4, wrappers.Count);   // contract 0012: plus the two typed overloads
         foreach (var wrapper in wrappers)
         {
             var calls = wrapper.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()

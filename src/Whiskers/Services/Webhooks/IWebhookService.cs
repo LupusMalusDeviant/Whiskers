@@ -18,6 +18,7 @@ public interface IWebhookService
     Task<int> ReconcileAsync(CancellationToken ct = default) => Task.FromResult(0);
 
     /// <summary>One stored webhook, or <c>null</c>.</summary>
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<WebhookEntity?> GetWebhookAsync(string webhookId);
 
     /// <summary>Creates the webhook. An empty <see cref="WebhookEntity.Secret"/> is replaced with a

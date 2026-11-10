@@ -8,7 +8,9 @@ namespace Whiskers.Services.Docker;
 [OmittedServer]
 public interface IDockerService
 {
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<IList<ContainerInfo>> ListAllContainersAsync(bool all = true);
 
     /// <summary>R1-41: the fleet-wide list for a caller with a deadline or a stop of its own (the AutoPatch planning, the
@@ -27,6 +29,7 @@ public interface IDockerService
     /// cancels the work itself.</summary>
     Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all, CancellationToken ct)
         => ListAllContainersDetailedAsync(all).WaitAsync(ct);
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null);
     Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null);
     [MutatingOperation("container.start")]
@@ -108,6 +111,7 @@ public interface IDockerService
     Task<string> RollbackContainerAsync(string containerName, string imageId, string configJson, string? serverId = null, IProgress<string>? progress = null);
 
     // Networks
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null);
     [MutatingOperation("network.create")]
     Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null);

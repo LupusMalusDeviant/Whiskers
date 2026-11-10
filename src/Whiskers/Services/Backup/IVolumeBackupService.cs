@@ -12,6 +12,7 @@ public interface IVolumeBackupService
     Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null);
     [MutatingOperation("volume.restore")]
     Task RestoreVolumeAsync(string backupId, string? targetVolume = null);
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null);
     [MutatingOperation("volume.backup_delete")]
     Task DeleteBackupAsync(string backupId);
@@ -21,6 +22,7 @@ public interface IVolumeBackupService
     /// inventory the gateway resolves a <c>volume.backup</c> against (contract 0012, D5). Unlike
     /// <see cref="ListVolumesAsync"/> a listing that cannot be made throws — a resolution must never read "no volumes"
     /// into a failed read.</summary>
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<IReadOnlyList<VolumeInfo>> ListVolumeInfoAsync(string? serverId, CancellationToken ct = default);
 }
 

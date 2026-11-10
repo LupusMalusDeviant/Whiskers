@@ -46,6 +46,7 @@ public interface IWorkloadProvider
     WorkloadCapabilities Capabilities { get; }
 
     Task<IList<ContainerInfo>> ListWorkloadsAsync(bool all = true, CancellationToken ct = default);
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<ContainerInfo?> GetWorkloadAsync(string id, CancellationToken ct = default);
 
     /// <summary>Docker: start container. Kubernetes: scale the owner back to its previous/1 replica.</summary>

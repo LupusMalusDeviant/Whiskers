@@ -6,6 +6,13 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Mutations act on the object the gateway resolved (INV-57, contract 0012, in progress).** Every capability declares
+  how its target resolves; volumes, volume backups, log-alert rules and Whiskers' own records are resolved before policy
+  like containers and servers. Right before an object is acted on it is read again: a container, rule or record that
+  vanished or was recreated since the decision is refused (`TargetUnknown` / `TargetChanged`), nothing runs and an
+  approval given for it stays usable. The runners gain overloads whose action receives the resolved object; the
+  remaining callers move over in the next steps.
+
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
   test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can

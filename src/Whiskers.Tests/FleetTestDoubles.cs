@@ -295,6 +295,9 @@ internal sealed class FakeDocker : IDockerService
 
     /// <summary>Adds a container, as a compose run would create one (contract 0006).</summary>
     public void Add(ContainerInfo container) => _containers.Add(container);
+
+    /// <summary>Removes the container with <paramref name="id"/>, as a <c>docker rm</c> elsewhere would (contract 0012).</summary>
+    public void Remove(string id) => _containers.RemoveAll(c => c.Id == id);
     public Task RestartContainerAsync(string containerId, string? serverId = null) =>
         Act("restart", containerId, serverId, Task.CompletedTask);
     public Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null) => throw new NotSupportedException();

@@ -209,6 +209,21 @@ public interface IAutomationMutationRunner
     Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,
         Func<CancellationToken, Task> action, CancellationToken ct = default);
 
+    /// <summary>Contract 0012 (D3): runs <paramref name="action"/> on the object the gateway resolved and confirmed. A
+    /// <typeparamref name="TTarget"/> that is not the capability's <see cref="Capability.TargetType"/> (or a base of
+    /// it) is refused — and recorded — before the gateway decides anything.</summary>
+    [MutationEntryPoint]
+    Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
+        Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+        // A runner that cannot obtain a resolved object (a test double) refuses: only the resolver makes one (D4 a).
+        throw new NotSupportedException($"{GetType().Name} cannot run on a resolved target.");
+
+    /// <inheritdoc cref="RunAsync{TTarget, T}"/>
+    [MutationEntryPoint]
+    Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
+        Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget =>
+        throw new NotSupportedException($"{GetType().Name} cannot run on a resolved target.");
+
     /// <summary>Why the item can no longer run on its owner's authority at all — no owner while
     /// <see cref="AutomationOptions.RequireOwner"/> is set, an owner who lost their account, sign-in or key, or a
     /// level below <paramref name="capabilityId"/> — or <c>null</c> when the owner still holds it. A refusal for
@@ -249,10 +264,37 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
     public Task<MutationOutcome<T>> RunAsync<T>(AutomationActor actor, string capabilityId, object arguments,
         Func<CancellationToken, Task<T>> action, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(action);
+        return RunCoreAsync<T>(actor, capabilityId, arguments, null, (_, token) => action(token), ct);
+    }
+
+    public Task<MutationOutcome<T>> RunAsync<TTarget, T>(AutomationActor actor, string capabilityId, object arguments,
+        Func<TTarget, CancellationToken, Task<T>> action, CancellationToken ct = default) where TTarget : ResolvedTarget
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        return RunCoreAsync<T>(actor, capabilityId, arguments, typeof(TTarget),
+            (context, token) => action(UiMutationRunner.ResolvedTargetOf<TTarget>(context), token), ct);
+    }
+
+    public Task<MutationOutcome<bool>> RunAsync<TTarget>(AutomationActor actor, string capabilityId, object arguments,
+        Func<TTarget, CancellationToken, Task> action, CancellationToken ct = default) where TTarget : ResolvedTarget
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        return RunCoreAsync<bool>(actor, capabilityId, arguments, typeof(TTarget), async (context, token) =>
+        {
+            await action(UiMutationRunner.ResolvedTargetOf<TTarget>(context), token);
+            return true;
+        }, ct);
+    }
+
+    /// <summary>Not async: argument checks throw synchronously, before anything reaches the gateway (the scheduler's
+    /// backstop relies on it, INV-45 review round 12).</summary>
+    private Task<MutationOutcome<T>> RunCoreAsync<T>(AutomationActor actor, string capabilityId, object arguments,
+        Type? targetType, Func<MutationContext, CancellationToken, Task<T>> action, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentException.ThrowIfNullOrWhiteSpace(capabilityId);
         ArgumentNullException.ThrowIfNull(arguments);
-        ArgumentNullException.ThrowIfNull(action);
 
         var args = UiMutationRunner.ToArguments(arguments);
         var capability = _catalog.Find(capabilityId);
@@ -261,8 +303,21 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             : MutationTargets.FromArguments(capability, args);
         var request = new MutationRequest(capabilityId, PrincipalOf(actor, capability), MutationSurface.Automation,
             target, args, OperationId: actor.OperationId);
+        // Contract 0012 (D3): a lambda typed for another kind of object is refused before the gateway decides; the
+        // refusal is the run's one event (under its EventKey, INV-45).
+        if (UiMutationRunner.TargetTypeMismatch(capability, targetType) is { } mismatch)
+            return RefuseMismatchAsync<T>(request with { EventKey = actor.EventKey }, mismatch, ct);
         // A failure answered as a value (false, a failed command, (false, …)) is recorded as Failed.
-        return _gateway.ExecuteAsync(request, async (_, token) => MutationResults.Report(await action(token)), ct);
+        return _gateway.ExecuteAsync(request,
+            async (context, token) => MutationResults.Report(await action(context, token)), ct);
+    }
+
+    private async Task<MutationOutcome<T>> RefuseMismatchAsync<T>(MutationRequest request, string reason,
+        CancellationToken ct)
+    {
+        var refused = await _gateway.RefuseAsync(request, reason, ct);
+        return new MutationOutcome<T>(refused.OperationId, MutationStatus.Denied, default, reason, VerificationStatus.NotRun)
+            { DecisionId = refused.DecisionId };
     }
 
     public Task<MutationOutcome<bool>> RunAsync(AutomationActor actor, string capabilityId, object arguments,

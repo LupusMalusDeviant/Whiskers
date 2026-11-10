@@ -255,6 +255,20 @@ Found while building step 1; each replaces the wording above where they differ.
   callers to every intermediate build and bury real warnings; the pending list of `ResolvedTargetFlowTests` tracks them instead and step 7 deletes
   the overloads (Q6 unchanged).
 
+## Proposed amendments (step 2, awaiting the maintainer's acceptance)
+
+- **A5 — `ConfirmAsync` signature and how it reads.** D9 names `ConfirmAsync(ResolvedTarget, ct)`. Built as
+  `ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target, ct)` returning a
+  `TargetResolution`: the confirmation resolves the request **as the caller named it** once more, through the same
+  branch as the decision, and compares the object's type, stable id, server and `Fingerprint`. The resolver needs the
+  capability and the arguments for that (a Git deployment's per-container decision, a restore's target volume, a
+  network's named container); reading the canonical id alone would take another branch for some of them. Outcome as in
+  D9: a different id or fingerprint → `TargetChanged`; no object → `TargetUnknown` (or `TargetChanged` when the
+  resolver now refuses it as ambiguous or changed); a read that throws → refused as `TargetNotResolved`.
+- **A6 — Runner doubles.** The typed overloads are default interface members that throw `NotSupportedException`, so a
+  test double of `IUiMutationRunner` / `IAutomationMutationRunner` without a gateway cannot run a typed lambda (it could
+  not hand out a `ResolvedTarget` anyway, D4 a); the two real runners implement them.
+
 ## Not in scope
 
 The compose re-check after `up` (contract 0006) and verifiers' read-back stay reads by design (D10 exceptions). Per-host

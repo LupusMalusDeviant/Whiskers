@@ -11,6 +11,7 @@ namespace Whiskers.Services.GitDeploy;
 public interface IGitDeployService
 {
     Task<List<GitDeployApp>> GetAppsAsync();
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<GitDeployApp?> GetAppAsync(string appId);
 
     /// <summary>Creates/updates the app. A non-null <paramref name="token"/> is stored in the vault;

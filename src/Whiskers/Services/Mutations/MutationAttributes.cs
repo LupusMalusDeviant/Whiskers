@@ -71,3 +71,15 @@ public sealed class MutationEntryPointAttribute : Attribute
 public sealed class MutationTargetAttribute : Attribute
 {
 }
+
+/// <summary>
+/// Marks a read of the inventory a mutation's target is resolved against (containers, workloads, webhooks, Git apps,
+/// tasks, log-alert rules, backups, volumes, servers). Contract 0012 (D10): an execution lambda handed to a
+/// <see cref="MutationEntryPointAttribute"/> runner acts on the object the gateway resolved and never looks its target
+/// up again — <c>ResolvedTargetFlowTests</c> refuses a call to a method with this attribute inside one, apart from the
+/// named exceptions it pins (the compose re-check after <c>up</c>, verifiers' read-back).
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class InventoryLookupAttribute : Attribute
+{
+}

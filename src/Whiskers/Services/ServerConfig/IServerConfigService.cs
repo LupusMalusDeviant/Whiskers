@@ -11,6 +11,7 @@ public interface IServerConfigService
     /// Backs the <c>/readyz</c> readiness probe.</summary>
     bool IsInitialized { get; }
 
+    [Whiskers.Services.Mutations.InventoryLookup]
     List<Models.ServerConfig> GetServers();
     List<Models.ServerConfig> GetEnabledServers();
     Models.ServerConfig? GetServer(string serverId);

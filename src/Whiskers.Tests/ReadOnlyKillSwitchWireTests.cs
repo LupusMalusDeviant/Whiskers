@@ -717,6 +717,9 @@ public class ReadOnlyKillSwitchWireTests
     /// the sweep's per-call decision check fails).</summary>
     internal sealed class EveryTargetKnown(IMutationTargetResolver inner) : IMutationTargetResolver
     {
+        public Task<TargetResolution> ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target,
+            CancellationToken ct) => inner.ConfirmAsync(request, capability, target, ct);
+
         /// <summary>The kinds the doubles hold (one server, one container, the configuration sections).</summary>
         public static readonly string[] HeldKinds = ["container", "host", "server", "config"];
 

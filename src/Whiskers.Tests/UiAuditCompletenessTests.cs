@@ -117,6 +117,9 @@ public sealed class UiAuditCompletenessTests : IDisposable
     {
         public Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct) =>
             Task.FromResult(new TargetResolution(new MutationTarget("container", "web", "web", "local"), null));
+
+        public Task<TargetResolution> ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target,
+            CancellationToken ct) => Task.FromResult(new TargetResolution(target.Record, null) { Object = target });
     }
 
     [Fact]

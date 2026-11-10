@@ -173,6 +173,28 @@ public class TaskExecutor : ITaskExecutor
         return pending;
     }
 
+    /// <summary>Contract 0012 (D3): the same forwarding wrapper for a lambda that acts on the decided object.</summary>
+    [MutationEntryPoint]
+    private Task<MutationOutcome<T>> RunGatedAsync<TTarget, T>(ScheduledTaskEntity task, string capabilityId,
+        object arguments, Func<TTarget, CancellationToken, Task<T>> action) where TTarget : ResolvedTarget
+    {
+        // The flag only once the runner has handed the call to the gateway (see RunGatedAsync{T}).
+        var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
+        if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
+        return pending;
+    }
+
+    /// <inheritdoc cref="RunGatedAsync{TTarget, T}"/>
+    [MutationEntryPoint]
+    private Task<MutationOutcome<bool>> RunGatedAsync<TTarget>(ScheduledTaskEntity task, string capabilityId,
+        object arguments, Func<TTarget, CancellationToken, Task> action) where TTarget : ResolvedTarget
+    {
+        // The flag only once the runner has handed the call to the gateway (see RunGatedAsync{T}).
+        var pending = _automation.RunAsync(ActorOf(task), capabilityId, arguments, action);
+        if (RefusalOfRun.Value is { } run) run.ReachedGateway = true;
+        return pending;
+    }
+
     private async Task<(bool, string)> ExecuteContainerRestart(ScheduledTaskEntity task)
     {
         if (string.IsNullOrEmpty(task.TargetId))

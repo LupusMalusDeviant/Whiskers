@@ -74,6 +74,33 @@ public sealed partial class MutationTargetResolver
         };
     }
 
+    /// <inheritdoc />
+    public async Task<TargetResolution> ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(capability);
+        ArgumentNullException.ThrowIfNull(target);
+        // Resolved once more the way the decision resolved it; the object must keep its stable identity and fingerprint
+        // (a name that now points to a recreated container resolves to another id: changed).
+        var again = await ResolveAsync(request, capability, ct);
+        var named = target.Name ?? target.Id;
+        if (again.Object is not { } now)
+            return again.Code is MutationReasonCodes.TargetUnknown or null
+                ? new TargetResolution(null, $"{named} no longer exists; nothing ran.", MutationReasonCodes.TargetUnknown, [named])
+                : new TargetResolution(null, $"{named} changed after the decision ({again.Error}); nothing ran.",
+                    MutationReasonCodes.TargetChanged, [named]);
+        var same = now.GetType() == target.GetType()
+                   && string.Equals(now.Kind, target.Kind, StringComparison.Ordinal)
+                   && string.Equals(now.Id, target.Id, StringComparison.Ordinal)
+                   && string.Equals(now.ServerId, target.ServerId, StringComparison.Ordinal)
+                   && string.Equals(now.Fingerprint, target.Fingerprint, StringComparison.Ordinal);
+        return same
+            ? new TargetResolution(target.Record, null) { Object = target }
+            : new TargetResolution(null, $"{named} changed after the decision; nothing ran.",
+                MutationReasonCodes.TargetChanged, [named]);
+    }
+
     private static TargetResolution Done(MutationTarget target, Func<MutationTarget, ResolvedTarget> build) =>
         Done(target) with { Build = build };
 

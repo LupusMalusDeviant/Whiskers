@@ -161,6 +161,9 @@ public class TriggerPromptIsolationTests
     /// <summary>Resolves a container by the name the call gave.</summary>
     private sealed class ByName : IMutationTargetResolver
     {
+        public Task<TargetResolution> ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target,
+            CancellationToken ct) => Task.FromResult(new TargetResolution(target.Record, null) { Object = target });
+
         public Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct)
         {
             var name = request.Arguments.TryGetValue("containerId", out var v) ? v.GetString() ?? "" : "";

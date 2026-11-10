@@ -112,6 +112,18 @@ public sealed record TargetResolution(MutationTarget? Target, string? Error, str
 public interface IMutationTargetResolver
 {
     Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct);
+
+    /// <summary>
+    /// Contract 0012 (D9): reads <paramref name="target"/> again right before it is acted on — resolving
+    /// <paramref name="request"/> (the target as the caller named it) the same way as the decision did — and compares
+    /// the object's stable identity, server and
+    /// <see cref="ResolvedTarget.Fingerprint"/>. Returns a resolution with <see cref="TargetResolution.Target"/> set
+    /// when the object is still the decided one; otherwise a refusal coded
+    /// <see cref="MutationReasonCodes.TargetUnknown"/> (vanished) or <see cref="MutationReasonCodes.TargetChanged"/>
+    /// (replaced or changed). A read that fails throws; the gateway refuses (fail closed).
+    /// </summary>
+    Task<TargetResolution> ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target,
+        CancellationToken ct);
 }
 
 /// <summary>

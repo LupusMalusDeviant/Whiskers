@@ -543,6 +543,9 @@ public sealed partial class TargetResolutionTests : IDisposable
 
     private sealed class RecordingResolver(IMutationTargetResolver inner) : IMutationTargetResolver
     {
+        public Task<TargetResolution> ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target,
+            CancellationToken ct) => inner.ConfirmAsync(request, capability, target, ct);
+
         public List<MutationTarget> Resolved { get; } = [];
 
         public async Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct)

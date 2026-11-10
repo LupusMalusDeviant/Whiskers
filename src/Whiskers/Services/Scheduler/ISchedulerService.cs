@@ -6,6 +6,7 @@ namespace Whiskers.Services.Scheduler;
 /// <summary>Manages cron-scheduled tasks and their run history.</summary>
 public interface ISchedulerService
 {
+    [Whiskers.Services.Mutations.InventoryLookup]
     Task<List<ScheduledTaskEntity>> GetTasksAsync();
     [MutatingOperation("scheduler.create")]
     Task<ScheduledTaskEntity> CreateTaskAsync(ScheduledTaskEntity task);

@@ -8,6 +8,7 @@ namespace Whiskers.Services.Cloud;
 /// per-server cloud credentials (Hetzner/Hostinger).</summary>
 public interface ICloudControlService
 {
+    [Whiskers.Services.Mutations.InventoryLookup]
     List<Whiskers.Models.ServerConfig> CloudServers();
     Whiskers.Models.ServerConfig? ResolveWhiskers(string idOrName);
     Task<CloudServerInfo?> ResolveAsync(Whiskers.Models.ServerConfig sw);

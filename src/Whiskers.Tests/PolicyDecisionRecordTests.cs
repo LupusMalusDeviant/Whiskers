@@ -549,6 +549,9 @@ public sealed class PolicyDecisionRecordTests : IDisposable
     {
         public Task<TargetResolution> ResolveAsync(MutationRequest request, Capability capability, CancellationToken ct) =>
             Task.FromResult(new TargetResolution(target, null));
+
+        public Task<TargetResolution> ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget confirmed,
+            CancellationToken ct) => Task.FromResult(new TargetResolution(confirmed.Record, null) { Object = confirmed });
     }
 
     private sealed class FailingDecisions : IPolicyDecisionStore
