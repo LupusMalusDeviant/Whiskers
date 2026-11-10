@@ -250,6 +250,16 @@ public class VaultService : IVaultService, IInitializable
         await StoreAsync(key, plainValue, containerId, containerName, rotateAfterDays);
     }
 
+    /// <summary>Contract 0015 Part B (start-up only): re-seals one entry into the prepared vault of the new key during a
+    /// <c>VAULT_KEY</c> rotation. It runs before the host and the Mutation Gateway exist, on the authority of whoever
+    /// started the process with <c>VAULT_KEY_NEW_FILE</c>; the live vault is not touched. Its only caller is
+    /// <see cref="VaultKeyRotation"/> (pinned by VaultKeyRotationTests).</summary>
+    internal async Task ResealForRotationAsync(VaultEntry entry, string plainValue)
+    {
+        EnsureWritable();
+        await StoreAsync(entry.Key, plainValue, entry.ContainerId, entry.ContainerName, entry.RotateAfterDays);
+    }
+
     private async Task StoreAsync(string key, string plainValue, string? containerId, string? containerName, int? rotateAfterDays)
     {
         await _lock.WaitAsync();

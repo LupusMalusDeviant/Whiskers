@@ -57,7 +57,7 @@ webhooks, git-deploy apps, log alerts, AI triggers, guardrail policy, keys, role
 | Agent | an in-process agent session | on behalf of a Human or ApiKey principal (ceiling, INV-02) |
 | Automation | scheduled task, AutoUpdate, AutoPatch, AI trigger | on behalf of a recorded owner (INV-04) |
 | Webhook | an inbound CI call; `webhook:<id>` on behalf of its owner, credential `webhook-secret:<id>@<version>`, decided as an automation (contract 0014) | HMAC + freshness + delivery id (INV-42) |
-| System | Whiskers itself, a closed list of components: `system:audit-retention`, `system:startup`, `system:approval-expiry`, `system:authority-check`, `system:host-cli:<command>` for the host CLIs (contract 0014, D6); touches no managed infrastructure | — |
+| System | Whiskers itself, a closed list of components: `system:audit-retention`, `system:startup`, `system:approval-expiry`, `system:authority-check`, `system:vault-rotation` (contract 0015), `system:host-cli:<command>` for the host CLIs (contract 0014, D6); touches no managed infrastructure | — |
 
 **Capability.** A named mutating action with one required level (INV-13), for example `container.restart`,
 `host.exec`, `compose.deploy`. MCP tools, UI handlers and automation map onto capabilities.

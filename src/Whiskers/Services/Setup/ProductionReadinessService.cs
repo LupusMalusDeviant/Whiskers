@@ -59,6 +59,8 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         public const string MtlsIdentity = "mtls-identity";
         public const string MtlsSharedKey = "mtls-shared-key";
         public const string MtlsKeysProtected = "mtls-keys-protected";
+        public const string KeysSealed = "keys-sealed";
+        public const string VaultRotation = "vault-rotation";
     }
 
     private static string? _pgDumpVersion;
@@ -129,6 +131,9 @@ public sealed class ProductionReadinessService : IProductionReadinessService
 
     private static string List(IEnumerable<string> items) => string.Join(", ", items);
 
+    private static string Stamp(DateTime? utc) =>
+        utc is { } at ? at.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " UTC" : "?";
+
     public async Task<IReadOnlyList<ReadinessCheck>> GetChecksAsync(bool isHttps)
     {
         var checks = new List<ReadinessCheck>();
@@ -151,8 +156,11 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             _vault.KeyState switch
             {
                 // INV-56: says which credentials the vault holds — and which it does not hold yet.
+                // Contract 0015 (INV-52): a wrong key after a completed rotation names the rotation.
                 VaultKeyState.Verified => T("Readiness_vault_Ok"),
-                VaultKeyState.Wrong => T("Readiness_vault_Wrong"),
+                VaultKeyState.Wrong => RotationJournal() is { Phase: VaultKeyRotationJournal.Done } done
+                    ? T("Readiness_vault_Wrong") + " " + T("Readiness_vault_WrongAfterRotation", Stamp(done.CompletedAtUtc))
+                    : T("Readiness_vault_Wrong"),
                 _ => T("Readiness_vault_Missing"),
             },
             null, null));
@@ -160,6 +168,10 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         // 2a) Contract 0010 (INV-25): the guardrail policy is enforced as stored, and the database records that it exists.
         if (_guardrails is not null)
             checks.Add(GuardrailPolicyCheck(_guardrails, _text));
+
+        // 2a') Contract 0015 (INV-52): the private keys as they are actually stored, and an unfinished rotation.
+        if (KeyMaterialCheck() is { } keyMaterial) checks.Add(keyMaterial);
+        if (RotationCheck() is { } rotation) checks.Add(rotation);
 
         // 2b) R1-29: the cloud API keys and the DNS token as they are actually stored, not as the vault switch suggests.
         var plaintextCloud = _servers?.GetServers().Count(s => s.HasPlaintextCloudKey()) ?? 0;
@@ -534,6 +546,53 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 null, null));
         }
         return checks;
+    }
+
+    /// <summary>Contract 0015: how many private keys in the data directory are still in plaintext, which keys outside it
+    /// the operator manages (D6), and why sealed keys cannot be used while the vault is locked (D10).</summary>
+    internal ReadinessCheck? KeyMaterialCheck()
+    {
+        if (_dataPaths is null) return null;
+        var (ssh, mtls) = KeyMaterialMigration.CountPlaintext(_dataPaths);
+        var keys = new SealedKeyFiles(_vault, _dataPaths);
+        var operatorManaged = (_servers?.GetServers() ?? [])
+            .Where(s => !string.IsNullOrWhiteSpace(s.TcpClientKeyPath) && !keys.IsInDataDirectory(s.TcpClientKeyPath))
+            .Select(s => s.Id)
+            .ToList();
+        var sealedCount = KeyMaterialMigration.Candidates(_dataPaths).Count - ssh - mtls;
+        var ok = ssh + mtls == 0;
+        var detail = ok
+            ? (sealedCount > 0 ? T("Readiness_keysSealed_OkCount", sealedCount) : T("Readiness_keysSealed_Ok"))
+            : T("Readiness_keysSealed_Plaintext", ssh, mtls) + " "
+              + (_vault.IsEnabled ? T("Readiness_keysSealed_NextStart") : T("Readiness_keysSealed_NeedsKey"));
+        if (sealedCount > 0 && _vault.KeyState == VaultKeyState.Wrong)
+            detail += " " + T("Readiness_keysSealed_VaultLocked");
+        if (operatorManaged.Count > 0)
+            detail += " " + T("Readiness_keysSealed_OperatorManaged", List(operatorManaged));
+        return new ReadinessCheck(Ids.KeysSealed, T("Readiness_keysSealed_Title"), ok, detail, null, null);
+    }
+
+    private VaultKeyRotationJournal? RotationJournal()
+    {
+        if (_dataPaths is null) return null;
+        try { return VaultKeyRotation.ReadJournal(_dataPaths); }
+        catch (VaultKeyRotationException) { return null; }
+    }
+
+    /// <summary>Contract 0015 Part B: a rotation that is done while VAULT_KEY_NEW is still set (the operator has to
+    /// replace the key file), or one that stopped halfway.</summary>
+    internal ReadinessCheck? RotationCheck()
+    {
+        if (RotationJournal() is not { } journal) return null;
+        var newStillSet = !string.IsNullOrWhiteSpace(_config[VaultKeyRotationBootHandler.NewKeyName + "_FILE"])
+                          || !string.IsNullOrWhiteSpace(_config[VaultKeyRotationBootHandler.NewKeyName]);
+        if (journal.Phase == VaultKeyRotationJournal.Done)
+            return newStillSet
+                ? new ReadinessCheck(Ids.VaultRotation, T("Readiness_vaultRotation_Title"), false,
+                    T("Readiness_vaultRotation_Done", Stamp(journal.CompletedAtUtc)), null, null)
+                : null;
+        return new ReadinessCheck(Ids.VaultRotation, T("Readiness_vaultRotation_Title"), false,
+            T("Readiness_vaultRotation_Unfinished", journal.Phase), null, null);
     }
 
     /// <summary>Unix: anything but 0600. Windows: a read grant to Everyone, Users or Authenticated Users.</summary>

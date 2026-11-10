@@ -1667,6 +1667,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="SelfBackupPanel_Tooltip_Encrypted" xml:space="preserve">
     <value>verschlüsselt</value>
   </data>
+  <data name="SelfBackupPanel_Chip_EarlierKey" xml:space="preserve">
+    <value>früherer Schlüssel</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_EarlierKey" xml:space="preserve">
+    <value>Vor der letzten VAULT_KEY-Rotation versiegelt: mit dem Schlüssel wiederherstellen, mit dem es versiegelt wurde (VAULT_KEY_FILE für die Wiederherstellung auf diesen Schlüssel setzen).</value>
+  </data>
   <data name="SelfBackupPanel_Tooltip_Restore" xml:space="preserve">
     <value>Wiederherstellen</value>
   </data>
@@ -6093,13 +6099,49 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Secret-Vault aktiv (VAULT_KEY)</value>
   </data>
   <data name="Readiness_vault_Ok" xml:space="preserve">
-    <value>Der Vault ist aktiv; Backups sind verschlüsselbar. In den Vault gehören Cloud-API-Keys, der DNS-Token, die Zugangsdaten der Benachrichtigungskanäle und der KI (wo sie stehen, sagen die nächsten Punkte), kubeconfigs sowie Registry- und Git-Zugangsdaten; mit einem daraus abgeleiteten Schlüssel verschlüsselt sind die Secrets eingehender Webhooks, die Rollback-Snapshots und die Sitzungsschlüssel. Noch unverschlüsselt gespeichert, nur durch die Dateirechte geschützt: die privaten SSH-Schlüssel (ssh-keys/) und alle mTLS-Client-Schlüssel – der gemeinsame und der eigene jedes Hosts – im Datenverzeichnis. Ob die mTLS-Schlüssel nur für Whiskers lesbar sind, zeigt der Punkt „mTLS-Client-Schlüssel geschützt“; den Modus der SSH-Schlüssel prüft diese Liste nicht. Wer das Datenverzeichnis lesen kann, kann als Whiskers handeln.</value>
+    <value>Der Vault ist aktiv; Backups sind verschlüsselbar. In den Vault gehören Cloud-API-Keys, der DNS-Token, die Zugangsdaten der Benachrichtigungskanäle und der KI (wo sie stehen, sagen die nächsten Punkte), kubeconfigs sowie Registry- und Git-Zugangsdaten; mit einem daraus abgeleiteten Schlüssel verschlüsselt sind die Secrets eingehender Webhooks, die Rollback-Snapshots und die Sitzungsschlüssel. Versiegelt mit einem daraus abgeleiteten Schlüssel liegen auch die privaten SSH-Schlüssel (ssh-keys/) und alle mTLS-Client-Schlüssel – der gemeinsame und der eigene jedes Hosts – im Datenverzeichnis; ob noch einer im Klartext liegt, zeigt der Punkt „Private Schlüssel versiegelt“. Folge: ohne den richtigen VAULT_KEY ist kein mTLS-Host erreichbar.</value>
   </data>
   <data name="Readiness_vault_Wrong" xml:space="preserve">
     <value>VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.</value>
   </data>
   <data name="Readiness_vault_Missing" xml:space="preserve">
     <value>Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Schlüssel setzen und sicher ablegen.</value>
+  </data>
+  <data name="Readiness_vault_WrongAfterRotation" xml:space="preserve">
+    <value>Der VAULT_KEY wurde am {0} rotiert: VAULT_KEY_FILE muss den neuen Schlüssel enthalten.</value>
+  </data>
+  <data name="Readiness_keysSealed_Title" xml:space="preserve">
+    <value>Private Schlüssel versiegelt</value>
+  </data>
+  <data name="Readiness_keysSealed_Ok" xml:space="preserve">
+    <value>Kein privater Schlüssel liegt im Klartext im Datenverzeichnis.</value>
+  </data>
+  <data name="Readiness_keysSealed_OkCount" xml:space="preserve">
+    <value>Kein privater Schlüssel liegt im Klartext im Datenverzeichnis ({0} versiegelt).</value>
+  </data>
+  <data name="Readiness_keysSealed_Plaintext" xml:space="preserve">
+    <value>Im Klartext im Datenverzeichnis: {0} SSH-Schlüssel und {1} mTLS-Client-Schlüssel.</value>
+  </data>
+  <data name="Readiness_keysSealed_NextStart" xml:space="preserve">
+    <value>Sie werden beim nächsten Start versiegelt (scheitert das, nennt das Log den Grund).</value>
+  </data>
+  <data name="Readiness_keysSealed_NeedsKey" xml:space="preserve">
+    <value>Sie werden beim ersten Start mit gültigem VAULT_KEY versiegelt.</value>
+  </data>
+  <data name="Readiness_keysSealed_VaultLocked" xml:space="preserve">
+    <value>Client-Schlüssel versiegelt, Vault gesperrt: mit diesem VAULT_KEY ist kein mTLS-Host erreichbar — den richtigen Schlüssel setzen (Rückweg: docs/operations/per-host-mtls-migration.md).</value>
+  </data>
+  <data name="Readiness_keysSealed_OperatorManaged" xml:space="preserve">
+    <value>Vom Betreiber verwaltet, nicht von Whiskers versiegelt (außerhalb des Datenverzeichnisses): {0}.</value>
+  </data>
+  <data name="Readiness_vaultRotation_Title" xml:space="preserve">
+    <value>VAULT_KEY-Rotation abschließen</value>
+  </data>
+  <data name="Readiness_vaultRotation_Done" xml:space="preserve">
+    <value>Der VAULT_KEY wurde am {0} rotiert. VAULT_KEY_FILE durch den neuen Schlüssel ersetzen und VAULT_KEY_NEW_FILE entfernen, dann neu starten. Ältere Self-Backups bleiben mit dem alten Schlüssel wiederherstellbar (docs/operations/vault-key-rotation.md).</value>
+  </data>
+  <data name="Readiness_vaultRotation_Unfinished" xml:space="preserve">
+    <value>Eine VAULT_KEY-Rotation ist nicht abgeschlossen (Phase {0}): mit VAULT_KEY_NEW_FILE neu starten.</value>
   </data>
   <data name="Readiness_guardrailPolicy_Title" xml:space="preserve">
     <value>Guardrail-Policy geladen und vermerkt</value>

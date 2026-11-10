@@ -30,6 +30,8 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
     private readonly TimeProvider _time;
     private readonly ILogger<TerminalSessionManager> _logger;
     private readonly Timer _sweepTimer;
+    // Contract 0015 (D2): a stored SSH key is sealed; the shell's ssh reads it from a lease that ends with the session.
+    private readonly Whiskers.Services.Server.ISshKeyLeases? _keyLeases;
 
     public TerminalSessionManager(
         IOptionsMonitor<TerminalSettings> settings,
@@ -38,8 +40,10 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         IAuditLogService audit,
         ILogger<TerminalSessionManager> logger,
         ITerminalAuthority authority,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        Whiskers.Services.Server.ISshKeyLeases? keyLeases = null)
     {
+        _keyLeases = keyLeases;
         _settings = settings;
         _serverConfigService = serverConfigService;
         _launcher = launcher;
@@ -51,7 +55,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         _sweepTimer = new Timer(_ => _ = SweepAsync(), null, SweepInterval, SweepInterval);
     }
 
-    public Task<TerminalSession> OpenContainerShellAsync(TerminalOpenRequest request, CancellationToken ct = default)
+    public async Task<TerminalSession> OpenContainerShellAsync(TerminalOpenRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         var scope = DecidedScope("terminal.container_open");
@@ -60,12 +64,15 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         var server = ServerOf(request);
         var containerId = request.ContainerId;
         TerminalLaunch launch;
+        Whiskers.Services.Server.SshKeyLease? lease = null;
         if (server.ConnectionType == ConnectionType.Local)
             launch = TerminalLaunch.Local(_settings.CurrentValue.DefaultShell, containerId);
         else if (server.ConnectionType == ConnectionType.SSH)
-            launch = TerminalLaunch.SshDockerExec(
-                server.SshHost ?? throw new InvalidOperationException("SSH host not configured"),
-                server.SshPort, server.SshUser ?? "root", _serverConfigService.GetSshKeyPath(server), containerId);
+        {
+            var host = server.SshHost ?? throw new InvalidOperationException("SSH host not configured");
+            lease = await LeaseAsync(server, ct);
+            launch = TerminalLaunch.SshDockerExec(host, server.SshPort, server.SshUser ?? "root", lease?.Path, containerId);
+        }
         // Tailscale SSH: keyless tailnet-identity shell (no standing SSH key). This is the path for the SSH-free
         // TCP/mTLS hosts — the Docker proxy can't carry an attach stream, but Tailscale SSH gives a real PTY.
         else if (server.TailscaleSsh)
@@ -76,29 +83,55 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
             throw new InvalidOperationException(MtlsUnavailable);
         else
             throw new InvalidOperationException($"Terminal not supported for connection type {server.ConnectionType}");
-        return Task.FromResult(Start(request, scope, new TerminalTarget(server.Id, containerId, containerId), launch));
+        return await StartWithLeaseAsync(request, scope, new TerminalTarget(server.Id, containerId, containerId), launch, lease);
     }
 
-    public Task<TerminalSession> OpenHostShellAsync(TerminalOpenRequest request, CancellationToken ct = default)
+    public async Task<TerminalSession> OpenHostShellAsync(TerminalOpenRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         var scope = DecidedScope("terminal.host_open");
         var server = ServerOf(request);
         TerminalLaunch launch;
+        Whiskers.Services.Server.SshKeyLease? lease = null;
         // Keyless tailnet-identity shell first: the primary path for the SSH-free TCP/mTLS hosts (root, ACL-gated).
         if (server.TailscaleSsh)
             launch = TerminalLaunch.Ssh(TailscaleHost(server), 22, "root", null);
         else if (server.ConnectionType == ConnectionType.SSH)
-            launch = TerminalLaunch.Ssh(
-                server.SshHost ?? throw new InvalidOperationException("SSH host not configured"),
-                server.SshPort, server.SshUser ?? "root", _serverConfigService.GetSshKeyPath(server));
+        {
+            var host = server.SshHost ?? throw new InvalidOperationException("SSH host not configured");
+            lease = await LeaseAsync(server, ct);
+            launch = TerminalLaunch.Ssh(host, server.SshPort, server.SshUser ?? "root", lease?.Path);
+        }
         else if (server.ConnectionType == ConnectionType.Local)
             launch = TerminalLaunch.Local(_settings.CurrentValue.DefaultShell, null);
         else if (server.ConnectionType == ConnectionType.TCP)
             throw new InvalidOperationException(MtlsUnavailable);
         else
             throw new InvalidOperationException($"Terminal not supported for connection type {server.ConnectionType}");
-        return Task.FromResult(Start(request, scope, new TerminalTarget(server.Id, null, server.Name), launch));
+        return await StartWithLeaseAsync(request, scope, new TerminalTarget(server.Id, null, server.Name), launch, lease);
+    }
+
+    /// <summary>The server's stored key as a lease (contract 0015), or null when it has none.</summary>
+    private async Task<Whiskers.Services.Server.SshKeyLease?> LeaseAsync(Models.ServerConfig server, CancellationToken ct)
+    {
+        if (_serverConfigService.GetSshKeyPath(server) is null) return null;
+        if (_keyLeases is null) throw new InvalidOperationException("SSH keys are sealed at rest and no key lease service is configured.");
+        return await _keyLeases.AcquireAsync(server, ct);
+    }
+
+    /// <summary>Starts the session with the lease bound to it: the lease ends with the session, or now when it does not start.</summary>
+    private async Task<TerminalSession> StartWithLeaseAsync(TerminalOpenRequest request, MutationScope scope, TerminalTarget target,
+        TerminalLaunch launch, Whiskers.Services.Server.SshKeyLease? lease)
+    {
+        try
+        {
+            return Start(request, scope, target, launch, lease);
+        }
+        catch
+        {
+            if (lease is not null) await lease.DisposeAsync();
+            throw;
+        }
     }
 
     /// <summary>The gateway's decision this open runs in: its principal owns the session and its operation id links the
@@ -136,14 +169,14 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
     }
 
     private TerminalSession Start(TerminalOpenRequest request, MutationScope scope, TerminalTarget target,
-        TerminalLaunch launch)
+        TerminalLaunch launch, IAsyncDisposable? keyLease = null)
     {
         // The shell opens on exactly what the gateway decided: the server, and the container or the host.
         if (!scope.Covers(target.ServerId, target.ContainerId ?? target.ServerId))
             throw new InvalidOperationException("This terminal is not the one the gateway decided on.");
         var owner = new TerminalOwner(scope.Principal!.Id, scope.Principal.DisplayName) { Principal = scope.Principal };
         var session = new TerminalSession(request.SessionId, owner, target, _launcher.Start(launch),
-            _time.GetUtcNow().UtcDateTime, scope.OperationId, _time);
+            _time.GetUtcNow().UtcDateTime, scope.OperationId, _time, keyLease);
         RegisterSession(session);
         _logger.LogInformation("Terminal session {SessionId} opened ({Kind} {Target} on {ServerId})",
             session.SessionId, target.Kind, target.Name, target.ServerId);

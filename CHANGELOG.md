@@ -6,6 +6,15 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+- **Private keys sealed at rest, and `VAULT_KEY` rotation (INV-52, contract 0015).** SSH keys and mTLS client keys in
+  the data directory are now sealed with the vault key (same file, `f1:` content); a start-up migration seals existing
+  plaintext keys and removes the plaintext. SSH keys are opened only into a short-lived 0600 lease in memory
+  (`/dev/shm`) and removed after use. **Behaviour change (D4):** without `VAULT_KEY` Whiskers refuses to store new SSH
+  keys or issue new mTLS client keys. **Behaviour change (D10):** with a wrong `VAULT_KEY`, sealed client keys do not
+  open and mTLS hosts become unreachable (fail-closed). New: rotate `VAULT_KEY` at start via `VAULT_KEY_NEW_FILE`,
+  all or nothing, with a journal, crash resume and a refusal when the audit trail does not verify; the trail is
+  re-signed, `pre-rotation` and `post-rotation` self-backups are taken, and older backups are marked "earlier key".
+  See `docs/operations/vault-key-rotation.md`.
 - **One way to deploy: the Deploy page and `deploy_app` run compose projects (contract 0013, INV-62 step 3; INV-62
   is ✅).** The form tab and MCP `deploy_app` map their request through one mapper (`DeploymentCompose`) to a compose
   file in `/opt/deployments/<name>` (project = service = container name; first line `# whiskers: app.deploy`), and the

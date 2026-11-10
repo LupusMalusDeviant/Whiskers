@@ -50,11 +50,16 @@ public class OnboardingService : IOnboardingService
         IDockerService docker,
         IMtlsCertificateService certificates,
         IMtlsClientCredentialStore clientCredentials,
-        ILogger<OnboardingService> logger)
+        ILogger<OnboardingService> logger,
+        IMtlsClientKeyLoader? keyLoader = null)
     {
         _exec = exec;
         _certificates = certificates;
         _clientCredentials = clientCredentials;
+        // Contract 0015 [mTLS layer]: the probe opens the sealed client key in memory. Without a loader nothing is proven.
+        ProbeCredential = (server, ct) => keyLoader is null
+            ? Task.FromResult(MtlsProbeOutcome.NotChecked)
+            : MtlsClientProbe.ProbeAsync(server, keyLoader, TimeSpan.FromSeconds(10), ct);
         _serverConfig = serverConfig;
         _docker = docker;
         _logger = logger;
@@ -279,8 +284,7 @@ public class OnboardingService : IOnboardingService
     }
 
     /// <summary>Seam for tests: a probe of one client credential against the new host (one-off connection).</summary>
-    internal Func<Models.ServerConfig, CancellationToken, Task<MtlsProbeOutcome>> ProbeCredential { get; set; } =
-        (server, ct) => MtlsClientProbe.ProbeAsync(server, TimeSpan.FromSeconds(10), ct);
+    internal Func<Models.ServerConfig, CancellationToken, Task<MtlsProbeOutcome>> ProbeCredential { get; set; }
 
     /// <summary>
     /// R1-44 (D6, amendments 2 and 3): the phase-5-equivalent record of a new host. Its proxy was written with only the

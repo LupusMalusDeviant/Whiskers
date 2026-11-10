@@ -25,14 +25,19 @@ public class DockerConnectionManager : IDockerConnectionManager
     private readonly Budget.IServerCircuitBreaker _circuit;
     private readonly Observability.ILoopSuspensionService _suspension;
 
+    // Contract 0015 [mTLS layer]: the client key is loaded through the vault (sealed at rest), never from a PEM path.
+    private readonly Certificates.IMtlsClientKeyLoader? _keyLoader;
+
     public DockerConnectionManager(
         IServerConfigService serverConfig,
         ISshTunnelManager sshTunnelManager,
         Budget.IServerBudget budget,
         Budget.IServerCircuitBreaker circuit,
         Observability.ILoopSuspensionService suspension,
-        ILogger<DockerConnectionManager> logger)
+        ILogger<DockerConnectionManager> logger,
+        Certificates.IMtlsClientKeyLoader? keyLoader = null)
     {
+        _keyLoader = keyLoader;
         _serverConfig = serverConfig;
         _sshTunnelManager = sshTunnelManager;
         _budget = budget;
@@ -339,7 +344,8 @@ public class DockerConnectionManager : IDockerConnectionManager
                     : $"http://{server.TcpHost}:{server.TcpPort}");
                 // mTLS path: present a client cert and verify the server against the CA. No SSH key.
                 if (server.TcpUseTls && !string.IsNullOrEmpty(server.TcpClientCertPath))
-                    return new DockerClientConfiguration(uri, BuildMtlsCredentials(server)).CreateClient();
+                    return new DockerClientConfiguration(uri, BuildMtlsCredentials(server, _keyLoader
+                        ?? throw new InvalidOperationException("No mTLS client key loader is configured."))).CreateClient();
                 return new DockerClientConfiguration(uri).CreateClient();
             }
 
@@ -357,13 +363,14 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// <summary>
     /// Builds mutual-TLS credentials for the TCP path: presents the client certificate and verifies
     /// the server's certificate chain against the configured CA (custom root trust, no reliance on
-    /// the system trust store). PEM client cert+key are round-tripped through PKCS#12 so the private
+    /// the system trust store). The client certificate and its key come from <paramref name="keyLoader"/> (contract
+    /// 0015: the key is sealed at rest and only ever in memory here), round-tripped through PKCS#12 so the private
     /// key is usable for TLS client auth across platforms.
     /// </summary>
-    internal static CertificateCredentials BuildMtlsCredentials(Models.ServerConfig server)
+    internal static CertificateCredentials BuildMtlsCredentials(Models.ServerConfig server, Certificates.IMtlsClientKeyLoader keyLoader)
     {
-        using var ephemeral = X509Certificate2.CreateFromPemFile(server.TcpClientCertPath!, server.TcpClientKeyPath);
-        var clientCert = X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pkcs12), null);
+        ArgumentNullException.ThrowIfNull(keyLoader);
+        var clientCert = keyLoader.Load(server);
 
         var credentials = new CertificateCredentials(clientCert);
 

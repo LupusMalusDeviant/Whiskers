@@ -563,6 +563,8 @@ public class MutationGatewayCoverageTests
         ("IOutboundHttp.CreatePrimaryHandler", "builds an HTTP handler; no state"),
         ("IOutboundTargetGuard.ConnectAsync", "opens an outbound connection after the target check; no state"),
         ("ISshTunnelManager.CloseTunnel", "connection housekeeping"),
+        ("ISealedKeyFiles.Write", "contract 0015: the storage step of a key the caller writes inside its decision (server.save, mtls.client_*), or the start-up sealing migration of a key already on disk"),
+        ("ISshKeyLeases.AcquireAsync", "contract 0015: a short-lived in-memory copy of a stored key for an SSH connection the caller already runs; no state"),
         // Terminals: opening is decided (terminal.*_open); a session's keystrokes and its end belong to that decision,
         // and the kill switch ends running sessions (R1-17).
         ("ITerminalLauncher.Start", "starts the process of a terminal session the gateway decided to open"),

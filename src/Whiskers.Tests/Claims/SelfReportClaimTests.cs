@@ -268,9 +268,9 @@ public class SelfReportClaimTests
         {
             var paths = new DataPathOptions(root);
             var servers = new ServerConfigService(Options.Create(new DockerSettings { SocketPath = "npipe://test" }),
-                NullLogger<ServerConfigService>.Instance, dataPaths: paths);
+                NullLogger<ServerConfigService>.Instance, dataPaths: paths, sealedKeys: new SealedKeyFiles(TestVault.Usable, paths));
             await servers.InitializeAsync();
-            await servers.SaveSshKeyAsync("edge", "id_ed25519", "key-material"u8.ToArray());
+            await servers.SaveSshKeyAsync("edge", "id_ed25519", Encoding.UTF8.GetBytes(SealedKeyFilesTests.NewPem()));
 
             var key = Directory.GetFiles(paths.SshKeysDir, "id_ed25519", SearchOption.AllDirectories).Single();
             if (!OperatingSystem.IsWindows())
@@ -323,7 +323,7 @@ public class SelfReportClaimTests
 
         Assert.Equal(new SortedSet<string>(StringComparer.Ordinal)
         {
-            "VAULT_KEY_FILE", "WHISKERS_DB_CONNECTION_FILE", "WHISKERS_ADMIN_PASSWORD_FILE",
+            "VAULT_KEY_FILE", "VAULT_KEY_NEW_FILE", "WHISKERS_DB_CONNECTION_FILE", "WHISKERS_ADMIN_PASSWORD_FILE",
             "Vpn:Tailscale:AuthKeyFile", "Vpn:Netbird:SetupKeyFile",
         }, found);
     }

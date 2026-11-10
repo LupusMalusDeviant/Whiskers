@@ -17,16 +17,21 @@ public class ServerConfigService : IServerConfigService, IInitializable
 
     private readonly string _sshKeysBasePath;
 
+    // Contract 0015 (D4): an uploaded SSH key is stored sealed by the vault, and refused without a usable one.
+    private readonly Whiskers.Services.Vault.ISealedKeyFiles? _sealedKeys;
+
     // R1-22: one SSH key write at a time, from reading the replaced key to recording the change.
     private readonly SemaphoreSlim _sshKeys = new(1, 1);
 
-    public ServerConfigService(IOptions<DockerSettings> dockerSettings, ILogger<ServerConfigService> logger, string? storePath = null, DataPathOptions? dataPaths = null)
+    public ServerConfigService(IOptions<DockerSettings> dockerSettings, ILogger<ServerConfigService> logger, string? storePath = null, DataPathOptions? dataPaths = null,
+        Whiskers.Services.Vault.ISealedKeyFiles? sealedKeys = null)
     {
         var paths = dataPaths ?? DataPathOptions.Default;
         // A legacy plaintext cloud key moves into the vault (R1-29); no previous generation keeps it (R1-35).
         _store = new JsonFileStore<ServerConfigData>(storePath ?? paths.ServersJson,
             holdsPlaintextSecret: d => d.Servers.Any(s => s.HasPlaintextCloudKey()));
         _sshKeysBasePath = paths.SshKeysDir;
+        _sealedKeys = sealedKeys;
         _dockerSettings = dockerSettings;
         _logger = logger;
     }
@@ -269,20 +274,25 @@ public class ServerConfigService : IServerConfigService, IInitializable
         if (string.IsNullOrWhiteSpace(fileName))
             throw new ArgumentException("Ungültiger Dateiname");
 
+        // Contract 0015 (D4): the key is stored sealed — without a usable vault it is refused, nothing written.
+        var sealedKeys = _sealedKeys ?? throw new Whiskers.Services.Vault.SealedKeyException(
+            "SSH keys are stored sealed by the vault, and no vault is wired.");
+        if (sealedKeys.RefusalReason is { } refused) throw new Whiskers.Services.Vault.SealedKeyException(refused);
+        string pem;
+        try { pem = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true).GetString(keyData); }
+        catch (System.Text.DecoderFallbackException) { throw new ArgumentException("The SSH key is not a text (PEM/OpenSSH) key."); }
+
         await _sshKeys.WaitAsync();
         try
         {
             var replaced = await ReadSshKeyAsync(GetServer(serverId));
             var keyDir = Path.Combine(_sshKeysBasePath, serverId);
-            Directory.CreateDirectory(keyDir);
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(keyDir);
+            else Directory.CreateDirectory(keyDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
+            // Sealed, written as tmp + rename with mode 0600: the plaintext never reaches the data directory.
             var keyPath = Path.Combine(keyDir, fileName);
-            await File.WriteAllBytesAsync(keyPath, keyData);
-
-            // Set restrictive permissions (SSH requires this). Linux-only API — guarded so the analyzer
-            // and any non-Linux dev build are satisfied; the app itself runs in Linux containers.
-            if (!OperatingSystem.IsWindows())
-                File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            sealedKeys.Write(keyPath, Whiskers.Services.Vault.SealedKeyPurposes.SshKey(serverId, fileName), pem);
             // The key itself is a credential: its replacement is a change, also under the same file name (R1-22).
             RecordSshKey(serverId, replaced, Convert.ToBase64String(keyData));
 
@@ -301,7 +311,19 @@ public class ServerConfigService : IServerConfigService, IInitializable
     private async Task<string?> ReadSshKeyAsync(Models.ServerConfig? server)
     {
         var path = server is null ? null : GetSshKeyPath(server);
-        return path is null ? null : Convert.ToBase64String(await File.ReadAllBytesAsync(path));
+        if (path is null) return null;
+        // Compared by the key itself, not by its sealed form (a fresh nonce each write would always look changed). A key
+        // that cannot be opened is compared by its stored bytes.
+        if (_sealedKeys is not null && Whiskers.Services.Vault.SealedKeyFiles.IsSealedFile(path))
+        {
+            try
+            {
+                using var material = _sealedKeys.Read(path, Whiskers.Services.Vault.SealedKeyPurposes.SshKey(server!.Id, server.SshKeyFileName!));
+                return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(material.Pem.ToString()));
+            }
+            catch (Whiskers.Services.Vault.SealedKeyException) { }
+        }
+        return Convert.ToBase64String(await File.ReadAllBytesAsync(path));
     }
 
     private static void RecordSshKey(string serverId, string? before, string? after) =>

@@ -167,7 +167,7 @@ public class ProductionReadinessServiceTests : IDisposable
         // The vault line names what is still unencrypted instead of "secrets are stored encrypted".
         var vaultCheck = checks.Single(c => c.Id == VaultId);
         Assert.True(vaultCheck.Ok);
-        Assert.Contains("Still stored unencrypted", vaultCheck.Detail);
+        Assert.Contains("Sealed with a key derived from it", vaultCheck.Detail);
         Assert.DoesNotContain("secrets are stored encrypted", vaultCheck.Detail);
     }
 
@@ -270,24 +270,37 @@ public class ProductionReadinessServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task The_vault_line_names_every_plaintext_key_kind_and_claims_no_more_than_file_protection()
+    public async Task The_vault_line_names_every_sealed_key_kind_and_the_key_line_counts_what_is_left()
     {
-        // R1-51 (INV-56): since R1-44 there is one mTLS client key per host besides the shared one, all of them in
-        // plaintext like the SSH keys; the line must not read as if one key were left or as if the vault held them.
+        // Contract 0015 (INV-52): SSH keys and every mTLS client key (shared and per host) are sealed; the vault line
+        // says so and names its consequence, the key line counts what still lies in plaintext.
         var (vault, servers) = await Stores("readiness-test-passphrase");
 
-        var vaultCheck = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Id == VaultId);
-
+        var checks = await Checks("readiness-test-passphrase", vault, servers);
+        var vaultCheck = checks.Single(c => c.Id == VaultId);
         Assert.True(vaultCheck.Ok);
         Assert.Contains("ssh-keys/", vaultCheck.Detail);
         Assert.Contains("all mTLS client keys", vaultCheck.Detail);
         Assert.Contains("each host's own", vaultCheck.Detail);
-        Assert.Contains("file permissions", vaultCheck.Detail);
-        // Whiskers does not write the shared key and does not check the SSH keys' mode: no unconditional "0600".
-        Assert.DoesNotContain("0600", vaultCheck.Detail);
-        Assert.Contains("mTLS client keys protected", vaultCheck.Detail);
-        Assert.DoesNotContain("the mTLS client key in", vaultCheck.Detail);
+        Assert.Contains("no mTLS host is reachable", vaultCheck.Detail);
+        Assert.DoesNotContain("Still stored unencrypted", vaultCheck.Detail);
         Assert.DoesNotContain("all secrets", vaultCheck.Detail);
+        Assert.True(checks.Single(c => c.Id == ProductionReadinessService.Ids.KeysSealed).Ok);
+
+        // A legacy plaintext key and an operator-managed one outside the data directory are named.
+        Directory.CreateDirectory(Path.Combine(_paths.SshKeysDir, "edge"));
+        File.WriteAllText(Path.Combine(_paths.SshKeysDir, "edge", "id_ecdsa"), SealedKeyFilesTests.NewPem());
+        await servers.AddServerAsync(new ServerConfig
+        {
+            Id = "own", Name = "own", ConnectionType = ConnectionType.TCP, TcpHost = "10.0.0.9", TcpUseTls = true,
+            TcpClientCertPath = "/etc/whiskers/own.crt", TcpClientKeyPath = "/etc/whiskers/own.key",
+        });
+        var keyLine = (await Checks("readiness-test-passphrase", vault, servers)).Single(c => c.Id == ProductionReadinessService.Ids.KeysSealed);
+        Assert.False(keyLine.Ok);
+        Assert.Contains("1 SSH keys and 0 mTLS client keys", keyLine.Detail);
+        Assert.Contains("sealed at the next start", keyLine.Detail);
+        Assert.Contains("Managed by the operator", keyLine.Detail);
+        Assert.Contains("own", keyLine.Detail);
     }
 
     // ---------------------------------------------------------------- contract 0006: the own container's exposure

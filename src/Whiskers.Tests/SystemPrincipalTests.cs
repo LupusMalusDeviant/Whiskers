@@ -12,7 +12,7 @@ public sealed class SystemPrincipalTests
     [Fact]
     public void The_component_list_is_the_one_the_contract_names()
     {
-        Assert.Equal(["approval-expiry", "audit-retention", "authority-check", "startup"],
+        Assert.Equal(["approval-expiry", "audit-retention", "authority-check", "startup", "vault-rotation"],
             PrincipalIds.SystemComponents.Order(StringComparer.Ordinal));
         Assert.Equal(["confirm-identity-binding", "recover-local-account", "reset-guardrails", "restore-backup"],
             PrincipalIds.HostCliCommands.Order(StringComparer.Ordinal));
@@ -41,7 +41,7 @@ public sealed class SystemPrincipalTests
             }
         }
         // The rows the contract moved to System are there.
-        foreach (var expected in new[] { "audit-retention", "authority-check", "startup", "approval-expiry",
+        foreach (var expected in new[] { "audit-retention", "authority-check", "startup", "approval-expiry", "vault-rotation",
                      "host-cli:recover-local-account", "host-cli:confirm-identity-binding", "host-cli:reset-guardrails" })
             Assert.Contains(expected, found);
     }

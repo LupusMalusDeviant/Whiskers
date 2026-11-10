@@ -1667,6 +1667,12 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="SelfBackupPanel_Tooltip_Encrypted" xml:space="preserve">
     <value>encrypted</value>
   </data>
+  <data name="SelfBackupPanel_Chip_EarlierKey" xml:space="preserve">
+    <value>earlier key</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_EarlierKey" xml:space="preserve">
+    <value>Sealed before the last VAULT_KEY rotation: restore it with the key it was sealed with (set VAULT_KEY_FILE to that key for the restore).</value>
+  </data>
   <data name="SelfBackupPanel_Tooltip_Restore" xml:space="preserve">
     <value>Restore</value>
   </data>
@@ -6093,13 +6099,49 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Secret vault active (VAULT_KEY)</value>
   </data>
   <data name="Readiness_vault_Ok" xml:space="preserve">
-    <value>The vault is active; backups can be encrypted. The vault holds the cloud API keys, the DNS token, the credentials of the notification channels and of the AI (the next lines say where they are), kubeconfigs and registry and Git credentials; encrypted with a key derived from it are the inbound webhooks' secrets, the rollback snapshots and the session keys. Still stored unencrypted, protected only by file permissions: the private SSH keys (ssh-keys/) and all mTLS client keys — the shared one and each host's own — in the data directory. Whether the mTLS keys are readable by Whiskers only is shown by the line “mTLS client keys protected”; this list does not check the mode of the SSH keys. Whoever can read the data directory can act as Whiskers.</value>
+    <value>The vault is active; backups can be encrypted. The vault holds the cloud API keys, the DNS token, the credentials of the notification channels and of the AI (the next lines say where they are), kubeconfigs and registry and Git credentials; encrypted with a key derived from it are the inbound webhooks' secrets, the rollback snapshots and the session keys. Sealed with a key derived from it are also the private SSH keys (ssh-keys/) and all mTLS client keys — the shared one and each host's own — in the data directory; whether one is still in plaintext is shown by the line “Private keys sealed”. Consequence: without the right VAULT_KEY no mTLS host is reachable.</value>
   </data>
   <data name="Readiness_vault_Wrong" xml:space="preserve">
     <value>VAULT_KEY does not match this vault — secrets are locked, vault.json stays unchanged. Set the right key and restart.</value>
   </data>
   <data name="Readiness_vault_Missing" xml:space="preserve">
     <value>No VAULT_KEY set — the vault and encrypted backups are off. Set a key and keep it safe.</value>
+  </data>
+  <data name="Readiness_vault_WrongAfterRotation" xml:space="preserve">
+    <value>VAULT_KEY was rotated on {0}: VAULT_KEY_FILE must hold the new key.</value>
+  </data>
+  <data name="Readiness_keysSealed_Title" xml:space="preserve">
+    <value>Private keys sealed</value>
+  </data>
+  <data name="Readiness_keysSealed_Ok" xml:space="preserve">
+    <value>No private key is in plaintext in the data directory.</value>
+  </data>
+  <data name="Readiness_keysSealed_OkCount" xml:space="preserve">
+    <value>No private key is in plaintext in the data directory ({0} sealed).</value>
+  </data>
+  <data name="Readiness_keysSealed_Plaintext" xml:space="preserve">
+    <value>In plaintext in the data directory: {0} SSH keys and {1} mTLS client keys.</value>
+  </data>
+  <data name="Readiness_keysSealed_NextStart" xml:space="preserve">
+    <value>They are sealed at the next start (if that fails, the log names the reason).</value>
+  </data>
+  <data name="Readiness_keysSealed_NeedsKey" xml:space="preserve">
+    <value>They are sealed at the first start with a valid VAULT_KEY.</value>
+  </data>
+  <data name="Readiness_keysSealed_VaultLocked" xml:space="preserve">
+    <value>Client keys sealed, vault locked: with this VAULT_KEY no mTLS host is reachable — set the right key (way back: docs/operations/per-host-mtls-migration.md).</value>
+  </data>
+  <data name="Readiness_keysSealed_OperatorManaged" xml:space="preserve">
+    <value>Managed by the operator, not sealed by Whiskers (outside the data directory): {0}.</value>
+  </data>
+  <data name="Readiness_vaultRotation_Title" xml:space="preserve">
+    <value>Finish the VAULT_KEY rotation</value>
+  </data>
+  <data name="Readiness_vaultRotation_Done" xml:space="preserve">
+    <value>VAULT_KEY was rotated on {0}. Replace VAULT_KEY_FILE with the new key and remove VAULT_KEY_NEW_FILE, then restart. Older self-backups stay restorable with the old key (docs/operations/vault-key-rotation.md).</value>
+  </data>
+  <data name="Readiness_vaultRotation_Unfinished" xml:space="preserve">
+    <value>A VAULT_KEY rotation is not finished (phase {0}): restart with VAULT_KEY_NEW_FILE.</value>
   </data>
   <data name="Readiness_guardrailPolicy_Title" xml:space="preserve">
     <value>Guardrail policy loaded and recorded</value>

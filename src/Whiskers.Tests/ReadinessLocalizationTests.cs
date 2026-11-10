@@ -146,6 +146,68 @@ public class ReadinessLocalizationTests
             ["Rabenhof", "Zirkuswagen", "Burgcloud", "whiskers-client-zirkuswagen-g1", "whiskers-client-burgcloud-g1"]);
         yield return new("guardrails: fail-closed, record missing, unconfirmed, recorded", Guardrails,
             ["guardrails.json: unexpected token", "table missing"]);
+        yield return new("keys: sealed, plaintext, locked, operator-managed; rotation done and unfinished", KeysAndRotation,
+            ["own", "1"]);
+    }
+
+    /// <summary>Contract 0015's two lines in each state, and the vault line after a completed rotation.</summary>
+    private static async Task<IReadOnlyList<ReadinessCheck>> KeysAndRotation(IStringLocalizer<SharedResource> text)
+    {
+        const string key = "readiness-l10n-passphrase";
+        var lines = new List<ReadinessCheck>();
+        ProductionReadinessService Service(ReadinessWorld w, IVaultService vault, IServerConfigService servers,
+            Dictionary<string, string?>? config = null)
+            => new(w.Config(config ?? []), vault, w.Scopes, servers, dataPaths: w.Paths, text: text) { RecoveredStores = () => [] };
+        static void Journal(DataPathOptions paths, string phase) => File.WriteAllText(VaultKeyRotation.JournalPath(paths),
+            System.Text.Json.JsonSerializer.Serialize(new VaultKeyRotationJournal
+            {
+                Phase = phase, StartedAtUtc = new DateTime(2026, 11, 10, 8, 0, 0, DateTimeKind.Utc),
+                CompletedAtUtc = phase == VaultKeyRotationJournal.Done ? new DateTime(2026, 11, 10, 8, 5, 0, DateTimeKind.Utc) : null,
+            }));
+
+        // Nothing stored.
+        using (var w = new ReadinessWorld())
+            lines.Add(Service(w, await w.Vault(key), await w.Servers()).KeyMaterialCheck()!);
+
+        // A sealed SSH key and an operator-managed client key; then the wrong key after a completed rotation.
+        using (var w = new ReadinessWorld())
+        {
+            var vault = await w.Vault(key);
+            var servers = new ServerConfigService(Options.Create(new DockerSettings { SocketPath = "unix:///nope.sock" }),
+                NullLogger<ServerConfigService>.Instance, dataPaths: w.Paths, sealedKeys: new SealedKeyFiles(vault, w.Paths));
+            await servers.InitializeAsync();
+            await servers.AddServerAsync(new ServerConfig
+                { Id = "edge", Name = "edge", ConnectionType = ConnectionType.SSH, SshHost = "127.0.0.1", SshPort = 22, SshUser = "probe" });
+            await servers.SaveSshKeyAsync("edge", "id_ecdsa", System.Text.Encoding.UTF8.GetBytes(SealedKeyFilesTests.NewPem()));
+            await servers.AddServerAsync(new ServerConfig
+            {
+                Id = "own", Name = "own", ConnectionType = ConnectionType.TCP, TcpHost = "10.0.0.9", TcpUseTls = true,
+                TcpClientCertPath = "/etc/whiskers/own.crt", TcpClientKeyPath = "/etc/whiskers/own.key",
+            });
+            lines.Add(Service(w, vault, servers).KeyMaterialCheck()!);
+
+            await vault.SetSecretAsync("x", "y");
+            var wrong = await w.Vault(key + "-but-another");
+            Journal(w.Paths, VaultKeyRotationJournal.Done);
+            var service = Service(w, wrong, servers, new() { ["VAULT_KEY_NEW_FILE"] = "/run/secrets/vault_key_new" });
+            lines.Add(service.KeyMaterialCheck()!);
+            lines.Add(service.RotationCheck()!);
+            lines.Add((await service.GetChecksAsync(isHttps: true)).Single(c => c.Id == Ids.Vault));
+        }
+
+        // A plaintext key with the vault on and off; a rotation that stopped halfway.
+        using (var w = new ReadinessWorld())
+        {
+            Directory.CreateDirectory(Path.Combine(w.Paths.SshKeysDir, "edge"));
+            File.WriteAllText(Path.Combine(w.Paths.SshKeysDir, "edge", "id_ecdsa"), SealedKeyFilesTests.NewPem());
+            var servers = await w.Servers();
+            lines.Add(Service(w, await w.Vault(key), servers).KeyMaterialCheck()!);
+            var off = await w.Vault(null);
+            lines.Add(Service(w, off, servers).KeyMaterialCheck()!);
+            Journal(w.Paths, VaultKeyRotationJournal.Prepared);
+            lines.Add(Service(w, off, servers).RotationCheck()!);
+        }
+        return lines;
     }
 
     /// <summary>Contract 0010's line in each of its four states (fail-closed, record not written, unconfirmed, recorded).</summary>

@@ -17,4 +17,5 @@
 # (contract 0008, R8; contract 0011): one entry per test method named by a ✅ invariant, an accepted exception or a
 # registered claim, the minimum = the cases xUnit discovers. Do not edit by hand; a difference writes the fresh
 # block to this file's .actual.
+1 Whiskers.Tests.SshKeyLeaseImageTests.Ssh_authenticates_with_a_lease_in_dev_shm_and_the_lease_is_removed
 # END release-gate

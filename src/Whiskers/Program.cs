@@ -33,7 +33,13 @@ var recoveryCli = Whiskers.Services.Auth.LocalAccountRecoveryCli.Requested(args)
 var bindingCli = Whiskers.Services.Auth.IdentityBindingCli.Requested(args);
 // The guardrail reset CLI (contract 0010) too.
 var guardrailResetCli = Whiskers.Services.Guardrails.GuardrailResetCli.Requested(args);
-if (!restoreCli && !recoveryCli && !bindingCli && !guardrailResetCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
+var hostCli = restoreCli || recoveryCli || bindingCli || guardrailResetCli;
+if (!hostCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
+// Contract 0015 (INV-52): a VAULT_KEY rotation (VAULT_KEY_NEW_FILE) runs here, before the host is built and before
+// anything reads the key (the guardrail store's start comes later, in RunWhiskersStartupAsync); the rest of the
+// process then reads the new one. A host CLI next to the live instance never rotates.
+if (!hostCli && Whiskers.Services.Vault.VaultKeyRotationBootHandler.Apply(dataPaths, builder.Configuration, Console.Out) is { Rotated: true } rotation)
+    builder.Configuration.AddInMemoryCollection(rotation.ConfigurationOverride);
 
 builder.AddWhiskersConfiguration(dataPaths);   // UI-writable config layers + data-protection keys
 // R1-43: the configuration has read the environment; VPN keys leave it now, so no child process inherits them.

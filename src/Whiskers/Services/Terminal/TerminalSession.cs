@@ -166,10 +166,12 @@ public sealed class TerminalSession : IAsyncDisposable
 {
     private readonly ITerminalProcess _process;
     private readonly TimeProvider _time;
+    private readonly IAsyncDisposable? _keyLease;
 
     internal TerminalSession(string sessionId, TerminalOwner owner, TerminalTarget target, ITerminalProcess process,
-        DateTime openedAt, string? operationId = null, TimeProvider? time = null)
+        DateTime openedAt, string? operationId = null, TimeProvider? time = null, IAsyncDisposable? keyLease = null)
     {
+        _keyLease = keyLease;
         _time = time ?? TimeProvider.System;
         SessionId = sessionId;
         OperationId = operationId;
@@ -206,5 +208,16 @@ public sealed class TerminalSession : IAsyncDisposable
         await _process.WriteAsync(data);
     }
 
-    public ValueTask DisposeAsync() => _process.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await _process.DisposeAsync();
+        }
+        finally
+        {
+            // Contract 0015: the unsealed SSH key of this shell lives exactly as long as the session.
+            if (_keyLease is not null) await _keyLease.DisposeAsync();
+        }
+    }
 }

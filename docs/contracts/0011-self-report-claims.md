@@ -41,7 +41,7 @@ code or configuration, and a new claim without a register entry fails a test.
 - **D1 — Stable line id.** `ReadinessCheck` gets a first field `string Id` (kebab-case, e.g. `auth`, `vault`,
   `cloud-dns`, `notify-ai`, `stored-encrypted`, `self-backup`, `pg-tools`, `update-policy`, `stores-readable`,
   `non-root`, `https`, `oidc-https`, `proxy-trusted`, `self-exposure`, `mtls-proxy`, `mtls-shared-live`,
-  `mtls-allow-cn`, `mtls-identity`, `mtls-shared-key`, `mtls-keys-protected`). Ids are not translated; tests and the
+  `mtls-allow-cn`, `mtls-identity`, `mtls-shared-key`, `mtls-keys-protected`; contract 0015 adds `keys-sealed` and `vault-rotation`). Ids are not translated; tests and the
   register refer to lines by id, never by title. `SelfExposureTitle` is removed. The panel shows `Title` as before.
 - **D2 — Keys.** One key per text variant, prefix `Readiness_<Id>_`:
   `…_Title`, `…_Ok`, `…_Fail`, and named variants where a line has more than two outcomes (e.g.

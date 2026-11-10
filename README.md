@@ -26,7 +26,7 @@ to `latest`, no generated vault key, no `VAULT_KEY_FILE`, no setup token); for t
 | Records | Agent History (every tool call) and a hash-chained Audit Log. Checkpoints are signed, and the trail is tamper-evident, only when a vault key (`VAULT_KEY` or `VAULT_KEY_FILE`) is set. <!-- claim:RM-05 --> |
 | Host access | Onboarding uses SSH once. Onboarded hosts then run over a WireGuard mesh (Tailscale/NetBird), the Docker API over mTLS behind a verb-whitelisting socket proxy, and host commands via a one-shot `nsenter` container, with no standing SSH key. A server added as a plain SSH connection and never onboarded keeps using SSH (its key in `ssh-keys/`) until it is migrated. <!-- claim:RM-14 --> |
 | Targets | Docker hosts, k3s/Kubernetes clusters (kubeconfig), Hetzner and Hostinger cloud APIs. <!-- claim:RM-15 --> |
-| Storage | `/app/data` (`WHISKERS_DATA_DIR`). SQLite by default, PostgreSQL optional. Secrets vault AES-256-GCM with `VAULT_KEY` / `VAULT_KEY_FILE`; SSH and mTLS client keys are protected by file permissions only. <!-- claim:RM-06,RM-07 --> |
+| Storage | `/app/data` (`WHISKERS_DATA_DIR`). SQLite by default, PostgreSQL optional. Secrets vault AES-256-GCM with `VAULT_KEY` / `VAULT_KEY_FILE`; SSH and mTLS client keys are sealed with a key derived from it. <!-- claim:RM-06,RM-07 --> |
 | Images | `ghcr.io/lupusmalusdeviant/whiskers`, amd64 + arm64, Trivy-gated, SBOM + provenance, keyless cosign signature. <!-- claim:RM-08 --> |
 | Stack | C# / .NET 10, ASP.NET Core, MudBlazor, EF Core, SignalR. License Apache 2.0. <!-- claim:RM-16 --> |
 

@@ -44,7 +44,7 @@ public static class PrincipalIds
     /// <summary>Contract 0014 (D6): the closed list of system components. A new one needs a contract change; the
     /// host CLIs are <c>host-cli:&lt;command&gt;</c> with the commands in <see cref="HostCliCommands"/>.</summary>
     public static readonly IReadOnlySet<string> SystemComponents = global::System.Collections.Frozen.FrozenSet.ToFrozenSet(
-        ["audit-retention", "startup", "approval-expiry", "authority-check"], StringComparer.Ordinal);
+        ["audit-retention", "startup", "approval-expiry", "authority-check", "vault-rotation"], StringComparer.Ordinal);
 
     /// <summary>The host CLIs (S-10, S-11, S-15 and the guardrail reset of contract 0010), named by their flag without the dashes.</summary>
     public static readonly IReadOnlySet<string> HostCliCommands = global::System.Collections.Frozen.FrozenSet.ToFrozenSet(

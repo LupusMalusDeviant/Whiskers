@@ -55,7 +55,7 @@ rest of the list is not mistaken for more than it is. <!-- claim-free:pointer --
   `MATTERMOST_WEBHOOK_URL` or `HARBOR_PASSWORD` are plain environment variables: they have **no** `…_FILE` variant,
   Whiskers does not put them into the vault, and they are visible in `docker inspect`. Prefer entering such
   credentials in the UI (they are then stored in the vault); where the environment is needed, keep the `.env` mode
-  0600 and out of the image. File variants exist only for `VAULT_KEY_FILE`, `WHISKERS_DB_CONNECTION_FILE`,
+  0600 and out of the image. File variants exist only for `VAULT_KEY_FILE`, `VAULT_KEY_NEW_FILE` (a rotation), `WHISKERS_DB_CONNECTION_FILE`,
   `WHISKERS_ADMIN_PASSWORD_FILE` and the VPN enrollment keys (`TAILSCALE_AUTHKEY_FILE` / `NETBIRD_SETUP_KEY_FILE`,
   read as `Vpn__Tailscale__AuthKeyFile` / `Vpn__Netbird__SetupKeyFile`); a `…_FILE` name invented for any other
   setting is ignored. <!-- claim:PC-02 -->
@@ -65,7 +65,7 @@ rest of the list is not mistaken for more than it is. <!-- claim-free:pointer --
 
 | Encrypted with `VAULT_KEY` (vault) | Encrypted with a key derived from `VAULT_KEY` | Not encrypted — file permissions only |
 |---|---|---|
-| cloud API keys, the DNS token, notification channels' credentials, the AI chat's and the agent's API keys, kubeconfigs, registry and Git credentials | inbound webhooks' signing secrets and rollback snapshots (in the database), the data-protection key ring (`keys/`) | SSH private keys (`ssh-keys/`), all mTLS client keys (`mtls/`: the shared one and one per host), the database (metrics, audit trail, accounts with hashed passwords), the JSON stores (roles, whitelist, servers, MCP key hashes, settings), the VPN state (`tailscale/`, `netbird/`), the setup token until setup is complete <!-- claim:PC-13 --> |
+| cloud API keys, the DNS token, notification channels' credentials, the AI chat's and the agent's API keys, kubeconfigs, registry and Git credentials | inbound webhooks' signing secrets and rollback snapshots (in the database), the data-protection key ring (`keys/`), SSH private keys (`ssh-keys/`), all mTLS client keys (`mtls/`: the shared one and one per host) | the database (metrics, audit trail, accounts with hashed passwords), the JSON stores (roles, whitelist, servers, MCP key hashes, settings), the VPN state (`tailscale/`, `netbird/`), the setup token until setup is complete <!-- claim:PC-13 --> |
 
 Whoever can read the data directory, or run code in the Whiskers container, can act as Whiskers on every managed
 host. Self-backups hold the same data; with `VAULT_KEY` set they are encrypted. <!-- claim:PC-14 -->

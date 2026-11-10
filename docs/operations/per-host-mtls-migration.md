@@ -162,6 +162,12 @@ shared key still opens it.
        for the host, and switches the record back to TCP+mTLS.
     3. Alternatively, on the host (provider console or SSH), put the restored record's name back into `--allow-cn` and
        recreate ghostunnel as under phase 4 above.
+- **A wrong or lost `VAULT_KEY` (contract 0015 D10).** Client keys under `{MtlsDir}` are sealed with the vault key
+  (`f1:` content in the same file). With a wrong key Whiskers cannot open them: every mTLS host is unreachable, the
+  readiness check names the vault key, and nothing falls back to a plain key (fail-closed). Set the right key. If it is
+  lost, the break-glass re-onboarding above (step 1 and 2) issues a new client credential per host; it needs only a
+  transient SSH password or bootstrap key. Rotating the key is described in
+  [vault-key-rotation.md](vault-key-rotation.md).
 
 ## Verifying a host
 

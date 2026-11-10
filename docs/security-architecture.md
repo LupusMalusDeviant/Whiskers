@@ -37,8 +37,8 @@ approvals decide *what* a given caller may do with it. <!-- claim-free:limit -->
 - **MCP API keys** are created in the web UI with an explicit scope; the ServerWatch-era unscoped key file
   `api-keys.json` no longer exists ([mcp.md](mcp.md#api-keys-and-scopes)). <!-- claim:SA-09 -->
 - **Secrets** (`.env`, the encrypted vault, the DB) live under `/app/data` / `.env`, both gitignored and
-  volume-mounted — never baked into the image or committed. Not everything there is encrypted: the SSH private keys
-  and the mTLS client keys are protected by file permissions only
+  volume-mounted — never baked into the image or committed. The SSH private keys and the mTLS client keys are sealed
+  with a key derived from `VAULT_KEY`; not everything there is encrypted
   ([what the data directory holds](operations/production-checklist.md#what-the-data-directory-holds)). <!-- claim:SA-10 -->
 - **Full-repo security review & remediation** ([security-fixes changelog](reviews/2026-07-07-security-fixes-changelog.md)):
   all critical and high findings, plus most medium/low issues, are fixed — per-key RBAC on **every** path (including

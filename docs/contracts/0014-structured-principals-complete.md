@@ -393,3 +393,9 @@ Found while implementing; none changes an authority decision.
 - **A10 — Key sessions after MCP 2.4 (A6).** Since contract 0016 a session is bound to the key that opened it and a
   request with another key on it is refused before the tool runs; the `Mcp-Session-Id` a key's principal carries is
   therefore always a session of that key. Nothing else changes.
+
+## Amendment 3 (contract 0015, 10 November 2026) — needs the maintainer's acceptance
+
+- **A11 — A fifth system component.** The `VAULT_KEY` rotation of contract 0015 (INV-52) writes its audit row
+  `vault.key_rotated` once after the switch, at start. D6 gains the component `system:vault-rotation` for it
+  (`PrincipalIds.SystemComponents`, pinned by `SystemPrincipalTests`). Nothing else changes.

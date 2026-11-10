@@ -108,9 +108,15 @@ built in). <!-- claim:SEC-02 -->
   and token), the AI chat's and the agent's API keys, kubeconfigs, registry and Git credentials. Encrypted with a key
   derived from the vault's: the inbound webhooks' signing secrets and the rollback snapshots (a container's full
   configuration, its environment included) in the database, and the data-protection key ring (`keys/`, sign-in cookies
-  and antiforgery). The SSH private keys (`ssh-keys/`) and the mTLS client keys (`mtls/`, shared and per host) are still stored in plaintext, protected only by file permissions (Whiskers writes the SSH keys and the per-host mTLS keys owner-only; the readiness line "mTLS client keys protected" checks the mTLS keys' modes); those and
-  the other files in the data directory rely on file-system and volume protection. Whoever can read that directory, or run code in the Whiskers
-  container, can act as Whiskers. <!-- claim:SEC-07,SEC-08 -->
+  and antiforgery). Sealed with a key derived from the vault's (contract 0015): the SSH private keys (`ssh-keys/`) and
+  every mTLS client key (`mtls/`, shared and per host); keys stored in plaintext before are sealed at the next start.
+  Whiskers writes the SSH keys and the per-host mTLS keys owner-only; the readiness line "mTLS client keys protected"
+  checks the mTLS keys' modes. mTLS keys are opened in memory only; an SSH key is unsealed for one use into a 0600 file
+  on `/dev/shm` that is removed afterwards. A new key needs `VAULT_KEY`; keys outside the data directory are
+  operator-managed and not sealed. Consequence: with a wrong or missing `VAULT_KEY` no mTLS host is reachable.
+  `VAULT_KEY` can be replaced in place (`docs/operations/vault-key-rotation.md`). The other files in the data directory
+  rely on file-system and volume protection. Whoever can read that directory, or run code in the Whiskers container,
+  can act as Whiskers. <!-- claim:SEC-07,SEC-08,SEC-29,SEC-30,SEC-31,SEC-32 -->
 - **Not covered in 1.0, by design** (product contract §5): roles and key levels are global (no per-server or tenant
   scoping); commands typed inside a terminal session are neither policy-checked nor recorded (the session's opening
   and closing are); changes made on a host, in a cloud console or by another tool outside Whiskers are not governed or

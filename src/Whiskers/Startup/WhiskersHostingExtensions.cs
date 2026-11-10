@@ -307,6 +307,10 @@ public static class WhiskersHostingExtensions
 
         // Secret vault
         builder.Services.AddSingleton<Whiskers.Services.Vault.IVaultService, Whiskers.Services.Vault.VaultService>();
+        // Contract 0015 (INV-52): SSH and mTLS client keys are stored sealed by the vault.
+        builder.Services.AddSingleton<Whiskers.Services.Vault.ISealedKeyFiles, Whiskers.Services.Vault.SealedKeyFiles>();
+        builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsClientKeyLoader, Whiskers.Services.Certificates.MtlsClientKeyLoader>();
+        builder.Services.AddSingleton<Whiskers.Services.Server.ISshKeyLeases, Whiskers.Services.Server.SshKeyLeases>();
 
         // Host command execution + server management. IHostCommandExecutor stays in Core (shared by many services).
         builder.Services.AddSingleton<IHostCommandExecutor, HostCommandExecutor>();
@@ -445,6 +449,11 @@ public static class WhiskersHostingExtensions
         // R1-29: plaintext cloud API keys and the DNS token move into the vault (after the vault and the servers).
         builder.Services.AddSingleton<Whiskers.Services.Vault.CredentialVaultMigration>();
         builder.Services.AddInitializable<Whiskers.Services.Vault.CredentialVaultMigration>();      // 55
+        // Contract 0015: private keys stored in plaintext in the data directory are sealed (after the credentials).
+        builder.Services.AddSingleton<Whiskers.Services.Vault.KeyMaterialMigration>();
+        builder.Services.AddInitializable<Whiskers.Services.Vault.KeyMaterialMigration>();          // 56
+        // Contract 0015: SSH key leases left by a crashed process are removed before anything runs ssh.
+        builder.Services.AddInitializable<Whiskers.Services.Server.ISshKeyLeases>();                // 57
         builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>();           // 70
         // GuardrailStore (80) + AiTriggerStore (90) warm-ups moved to Modules/Agent (RoadToSAP §3.8): the module
         // registers its own AddInitializable when enabled, so they run in Order then and drop out when the agent is off.
