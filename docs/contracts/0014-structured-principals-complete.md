@@ -1,7 +1,9 @@
 # Contract 0014 — Structured principals on every path (INV-01)
 
-Status: **Draft** · 10 November 2026. Not accepted yet; the decisions D1–D9 and the open questions Q1–Q7 at the end
-need the maintainer. Nothing in this contract is implemented.
+Status: **Accepted** · 10 November 2026 by the maintainer, with the decisions D1–D9 as written and every answer to
+Q1–Q7 as recommended (see *Maintainer decisions* at the end). The acceptance is also the maintainer's explicit approval
+for the one change to sign-in code named in D2/Q3: the `whiskers:sid` claim in the two sign-in handlers — nothing else
+in the middleware, its order, the OAuth whitelist or the roles.
 
 ## Purpose
 
@@ -233,7 +235,7 @@ public interface IAuditLogService
 gateway already does (`MutationAudit.cs:280`). `IToolAuditLog` (the MCP tools' enrichment of the gateway event, R1-20) is
 not affected: it writes no row of its own.
 
-## Decisions (D1–D9, recommendation first)
+## Decisions (D1–D9, recommendation first; accepted as written)
 
 - **D1 — Automation ids.** Keep the existing runner ids byte for byte and register them in `PrincipalIds` as a closed
   set; make `AutomationActor` constructible only through factories. *Alternative:* rename to one uniform
@@ -338,23 +340,21 @@ not affected: it writes no row of its own.
 7. [braucht Nutzer] After deployment: sign in once on the live instance (D2) and check in the audit log that a UI action,
    a webhook delivery and the daily retention row carry kind, id, credential and session as the scheme table says.
 
-## Open questions for the maintainer
+## Maintainer decisions (10 November 2026)
 
-- **Q1 — Sessions from before the upgrade (D2).** Recommended: end them once (everyone signs in again after the update),
-  as R1-26 did. Alternative: let them run without a session id until they expire (at most 24 h); INV-01 then has a known
-  gap during that window.
-- **Q2 — Webhook as its own kind (D3).** Recommended: yes, `Kind = Webhook` and `Surface = Webhook`, with the
-  equivalence pinned by tests. Alternative: keep webhooks as automations and change INV-01's wording (one kind fewer).
-- **Q3 — Sign-in code (step 4).** The session claim is added where the two sign-in handlers build the session; the
-  middleware and its order stay. Recommended: allow this change as part of the package. Alternative: no change to sign-in
-  code; then D2 falls back to Q1's alternative permanently and humans have no session id — INV-01 would need an
-  accepted exception for it.
-- **Q4 — Approvals and the credential (D9).** Recommended: bind approvals to the requesting credential (an approval asked
-  for with the Google sign-in is not usable from a local sign-in of the same person); approvals pending at the upgrade
-  expire. Alternative: credential only in the audit, binding unchanged.
-- **Q5 — Recorded reads (D7).** Recommended: every audit row gets the structured principal, also backup downloads,
-  audit exports and sign-in rows. Alternative: only mutations; reads keep their string actor.
-- **Q6 — Host CLIs (D6).** Recommended: `System` with `system:host-cli:<command>`. Alternative: a seventh kind
-  `HostOperator`, which changes INV-01's kind list.
-- **Q7 — Webhook secret generation (D4).** Recommended: a new additive column `SecretVersion`, so the audit names which
-  secret signed a delivery. Alternative: no new column, credential id `webhook-secret:<id>` only.
+The open questions of the draft, answered by the maintainer — every one as recommended.
+
+- **Q1 — Sessions from before the upgrade (D2): end them once.** A cookie without `whiskers:sid` is refused and the
+  session ended, as R1-26 did for cookies without a security stamp; everyone signs in again after the update.
+- **Q2 — Webhook as its own kind (D3): yes.** `Kind = Webhook`, `Surface = Webhook`; the three places that keyed on
+  automation read one shared predicate (`Unattended`), and a test pins that they decide as before.
+- **Q3 — Sign-in code (step 4): allowed, for the session claim only.** `whiskers:sid` is added where the local sign-in
+  (`Startup/WhiskersPipelineExtensions.cs`, the claims built at sign-in) and the federated sign-in
+  (`Services/Auth/FederatedSignIn.cs`) build the session. The middleware, its order, the OAuth whitelist and the roles
+  stay unchanged.
+- **Q4 — Approvals and the credential (D9): bind them.** An approval is usable only by the credential that requested
+  it; approvals pending at the upgrade become unusable and expire as usual.
+- **Q5 — Recorded reads (D7): every audit row** gets the structured principal, also reads (backup downloads, audit
+  exports) and the sign-in rows.
+- **Q6 — Host CLIs (D6): `System`** with `system:host-cli:<command>`.
+- **Q7 — Webhook secret generation (D4): new additive column** `WebhookEntity.SecretVersion` (SQLite and PostgreSQL).
