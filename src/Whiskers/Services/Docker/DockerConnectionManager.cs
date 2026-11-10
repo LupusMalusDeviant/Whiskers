@@ -161,8 +161,10 @@ public class DockerConnectionManager : IDockerConnectionManager
             {
                 // A discarded duplicate is not a health signal — the server never saw it. Neither is a call that
                 // ran out of time in our own queue: blaming the host for our backlog opens circuits across the
-                // whole fleet at once, which is what happened on 2026-08-27.
-                _circuit.RecordFailure(budgetKey, ex);
+                // whole fleet at once, which is what happened on 2026-08-27. Nor is a call whose client Whiskers
+                // replaced while it ran (see IsSupersededClientFailure).
+                if (!IsSupersededClientFailure(budgetKey, client, ex))
+                    _circuit.RecordFailure(budgetKey, ex);
                 throw;
             }
         }
@@ -258,7 +260,8 @@ public class DockerConnectionManager : IDockerConnectionManager
                 // a discarded duplicate or a retry that ran out of time in Whiskers' own queue (R1-41 follow-up). The
                 // first one is exactly the transient the retry exists for; counting both would open the circuit twice
                 // as fast as configured and pause a server that is merely reconnecting.
-                _circuit.RecordFailure(id, retryFailure);
+                if (!IsSupersededClientFailure(id, client, retryFailure))
+                    _circuit.RecordFailure(id, retryFailure);
                 throw;
             }
         }
@@ -291,6 +294,27 @@ public class DockerConnectionManager : IDockerConnectionManager
                 "Call to {Server} ran out of time after a long queue ({Waited:F1}s waiting, {Ran:F1}s running at " +
                 "the server). The request was sent; most of its time went into Whiskers' own queue.",
                 server, ex.Waited.TotalSeconds, ex.Ran.TotalSeconds);
+    }
+
+    /// <summary>True when <paramref name="ex"/> comes from a client Whiskers itself disposed and replaced while the
+    /// call was in flight: an <see cref="ObjectDisposedException"/> in the chain, and <paramref name="used"/> is no
+    /// longer the cached client for <paramref name="serverId"/>. That says nothing about the host. Counting it let one
+    /// <see cref="InvalidateClient"/> (the mTLS switch check rebuilds the connection on purpose) fail every open call
+    /// at once, open the circuit and refuse the very check that caused it (2026-11-10, Infomaniak). A disposed client
+    /// that is still the cached one is not covered: nothing replaced it, so the failure counts as before.</summary>
+    internal bool IsSupersededClientFailure(string serverId, DockerClient used, Exception ex) =>
+        IsSupersededClientFailure(ex, used, _clients.TryGetValue(serverId, out var current) ? current : null);
+
+    /// <summary>The rule of <see cref="IsSupersededClientFailure(string, DockerClient, Exception)"/> with the cached
+    /// client passed in (<c>null</c>: none cached).</summary>
+    internal static bool IsSupersededClientFailure(Exception ex, DockerClient? used, DockerClient? current)
+    {
+        var disposed = false;
+        for (Exception? e = ex; e != null; e = e.InnerException)
+        {
+            if (e is ObjectDisposedException) { disposed = true; break; }
+        }
+        return disposed && (current is null || !ReferenceEquals(current, used));
     }
 
     /// <summary>True when the exception (or any inner exception) is a transport-level failure that a
