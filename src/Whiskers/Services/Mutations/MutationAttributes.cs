@@ -61,8 +61,9 @@ public sealed class MutationEntryPointAttribute : Attribute
 /// <summary>
 /// Marks the parameter of a <see cref="MutatingOperationAttribute"/> method that names the object the call acts on (a
 /// container id, a systemd unit, an nginx site). The scope guard then binds the call to the decision, not only to its
-/// capability: the value must be an identity the open decision covered — its resolved target, a related resource or an
-/// argument value policy saw — on the server it was decided for (<see cref="MutationScope.AuthorizesTarget"/>). An
+/// capability: the value must be an identity the open decision resolved — the object's id, name or alias, and a related
+/// resource only for a composed call or a decision that composes or plans (contract 0012, D4 b) — on the server it was
+/// decided for (<see cref="MutationScope.AuthorizesTarget"/>). An
 /// execution delegate that acts on anything else (a re-resolved name that now points elsewhere, a value captured
 /// before the approval, a different server) is refused before it reaches the implementation, however it got the
 /// value. Put it on the <b>interface</b> method's parameter; at most one per method.
