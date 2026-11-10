@@ -138,7 +138,16 @@ public sealed partial class MutationTargetResolver
                     return Refuse("The systemd unit is required.");
                 if (_services.GetService<Whiskers.Services.Server.ISystemdService>() is not { } systemd)
                     return Refuse("systemd units cannot be listed on this Whiskers.");
-                var units = await systemd.ListUnitNamesAsync(serverId);
+                IReadOnlyList<string> units;
+                try
+                {
+                    units = await systemd.ListUnitNamesAsync(serverId);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Fail closed with a reason: a host that cannot be asked resolves no unit.
+                    return Refuse($"The systemd units on '{serverId}' could not be listed; nothing ran.", unit);
+                }
                 var canonical = units.FirstOrDefault(u => string.Equals(u, unit, StringComparison.Ordinal))
                                 ?? units.FirstOrDefault(u => string.Equals(u, unit + ".service", StringComparison.Ordinal));
                 if (canonical is null)

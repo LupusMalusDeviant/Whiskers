@@ -94,6 +94,23 @@ public sealed class HostObjectResolutionTests
     }
 
     [Fact]
+    public async Task A_host_whose_units_cannot_be_listed_resolves_no_unit()
+    {
+        var services = new ServiceCollection()
+            .AddSingleton<IServerConfigService>(new FakeServerConfig(new ServerConfig { Id = "web", Name = "Web", IsDefault = true }))
+            .AddSingleton(new Stub<ISystemdService>().On(nameof(ISystemdService.ListUnitNamesAsync),
+                _ => Task.FromException<IReadOnlyList<string>>(new InvalidOperationException("unreachable"))).Object)
+            .BuildServiceProvider();
+        var request = Request("systemd.manage", """{"serverId":"web","serviceName":"nginx","action":"restart"}""");
+
+        var resolution = await new MutationTargetResolver(services)
+            .ResolveAsync(request, new CapabilityCatalog().Find("systemd.manage")!, CancellationToken.None);
+
+        Assert.Null(resolution.Target);
+        Assert.Contains("could not be listed", resolution.Error);
+    }
+
+    [Fact]
     public async Task Host_wide_operations_keep_the_server_as_their_object()
     {
         var resolution = await ResolveAsync(Request("nginx.reload", """{"serverId":"web"}"""));
