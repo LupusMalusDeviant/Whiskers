@@ -217,7 +217,7 @@ Rotation steps (journal `vault-rotation.json` in the data directory, no secret i
    Each is read back and opened with the new key.
 4. **Database, one transaction.** Every `f1:` field (webhook secrets, rollback snapshots) re-sealed and every audit link
    and checkpoint re-signed with the new key. SQLite then `secure_delete` + WAL checkpoint, PostgreSQL `VACUUM FULL` on the
-   touched tables (as `ProtectedFieldMigration`). The audit row `vault.key_rotated` (principal `system:startup`, counts,
+   touched tables (as `ProtectedFieldMigration`). The audit row `vault.key_rotated` (principal `system:vault-rotation` (Amendment 2), counts,
    not values) is written at the first start after the switch, on the re-signed chain (Amendment 1, A2).
 5. **Switch files.** Each `*.rotating` is renamed over its original; previous generations (`vault.json.bak` and the like)
    are replaced by the new generation, never left sealed with the old key.
@@ -401,3 +401,18 @@ Deviations found while implementing; none weakens a decision.
   `post-rotation` backups). Each has exactly one pinned caller (`VaultKeyRotationTests`). `ISealedKeyFiles.Write` and
   `ISshKeyLeases.AcquireAsync` are listed as write-named but not gated (`MutationGatewayCoverageTests`): the first is a
   storage step inside its caller's decision or the start-up migration, the second a short-lived copy with no state.
+
+## Amendment 2 (merge of main, 10 November 2026) — needs the maintainer's acceptance
+
+- **A7 — Principal of the rotation row (contract 0014).** Since INV-01 every audit row carries a structured principal
+  from a closed list. The row `vault.key_rotated` is written as the system component `system:vault-rotation` (actor
+  type `system`) instead of the string `system:startup`; contract 0014 D6 gains that component (its Amendment 3).
+- **A8 — Order at start (contract 0010).** The rotation runs in `Program` before the host is built, after a pending
+  restore and never for a host CLI (`--restore-backup`, `--recover-local-account`, `--confirm-identity-binding`,
+  `--reset-guardrails`). The guardrail store's two-phase start (INV-25) runs later, in `RunWhiskersStartupAsync`, on
+  the already rotated key.
+- **A9 — Readiness lines (contract 0011).** The two lines of this contract have the ids `keys-sealed` and
+  `vault-rotation`; their texts are `Readiness_keysSealed_*` / `Readiness_vaultRotation_*` (and
+  `Readiness_vault_WrongAfterRotation`) in `SharedResource.resx` / `.de.resx`. The vault line now says the keys are
+  sealed; README, SECURITY.md, `docs/security-architecture.md` and the production checklist say the same, and
+  `CLAIMS.md` registers it (RM-07, SA-10, PC-13 changed; SEC-29 to SEC-32 new).

@@ -34,6 +34,7 @@ public sealed partial class WebhookMutationTests
                 Labels = new() { [ComposeModel.ProjectLabel] = project, [ComposeModel.ServiceLabel] = service },
             });
             _host.Inspect[id] = "{\"Id\":\"" + id + "\",\"Name\":\"/" + project + "-" + service + "-2\"," +
+                (_host.PinnedImageId(service) is { } image ? "\"Image\":\"" + image + "\"," : "") +
                 "\"Config\":{\"Labels\":{\"com.docker.compose.project\":\"" + project + "\",\"com.docker.compose.service\":\"" +
                 service + "\"" + labels + "}},\"HostConfig\":" + hostConfig + "}";
             return null;
@@ -49,7 +50,7 @@ public sealed partial class WebhookMutationTests
         _composeRunner = new ComposeRunner(_host, _docker, _notify);
         _host.Files["/opt/shop/docker-compose.yml"] = FunnelShop;
         _host.ComposeConfig = """{"services":{"web":{"image":"nginx","labels":{"docktail.funnel.enable":"true"}}}}""";
-        _host.Images["nginx"] = ("sha256:1", "{}");
+        _host.Images["nginx"] = ("sha256:1111111111111111111111111111111111111111111111111111111111111111", "{}");
         UpCreates("shop", "shop-web-new", "web", """{"NetworkMode":"shop_default"}""", ""","docktail.funnel.enable":"true" """);
         var webhook = Seed("deploy", "/opt/shop");
 
@@ -68,7 +69,7 @@ public sealed partial class WebhookMutationTests
     {
         KeyK1();
         _host.ComposeConfig = """{"services":{"web":{"image":"nginx"}}}""";
-        _host.Images["nginx"] = ("sha256:1", "{}");
+        _host.Images["nginx"] = ("sha256:1111111111111111111111111111111111111111111111111111111111111111", "{}");
         UpCreates("shop", "shop-web-new", "web", """{"NetworkMode":"host"}""");
         var webhook = Seed("deploy", "/opt/shop", owner: KeyId);
 
@@ -86,7 +87,7 @@ public sealed partial class WebhookMutationTests
         KeyK1();
         Assert.True(await _git.SetOwnerAsync(AppId, KeyId, expectedOwnerId: AdminId));
         _host.ComposeConfig = """{"services":{"web":{"image":"nginx"}}}""";
-        _host.Images["nginx"] = ("sha256:1", "{}");
+        _host.Images["nginx"] = ("sha256:1111111111111111111111111111111111111111111111111111111111111111", "{}");
         UpCreates("payments", "payments-web-new", "web", """{"Privileged":true}""");
         var webhook = Seed("git-deploy", AppId, owner: KeyId);
 
@@ -109,7 +110,7 @@ public sealed partial class WebhookMutationTests
         {
             if (command.Contains("docker compose", StringComparison.Ordinal) && command.Contains(" build", StringComparison.Ordinal)
                 && !command.Contains("--no-build", StringComparison.Ordinal))
-                _host.Images["payments-web"] = ("sha256:7", """{"docktail.funnel.enable":"true"}""");
+                _host.Images["payments-web"] = ("sha256:7777777777777777777777777777777777777777777777777777777777777777", """{"docktail.funnel.enable":"true"}""");
             return null;
         };
         var webhook = Seed("git-deploy", AppId, owner: KeyId);

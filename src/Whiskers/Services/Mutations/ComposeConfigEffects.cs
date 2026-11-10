@@ -111,6 +111,9 @@ public static class ComposeConfigEffects
     {
         /// <summary>The service sets <c>cgroup</c> (contract 0006, review M1).</summary>
         public bool DeclaresCgroup { get; init; }
+
+        /// <summary>Contract 0013, D16: the inputs of the third-party detection from compose's model.</summary>
+        public ToolSpec Tool { get; init; } = new();
     }
 
     /// <summary>
@@ -148,6 +151,7 @@ public static class ComposeConfigEffects
             {
                 DeclaresCgroup = service.Value.TryGetProperty("cgroup", out var cgroup)
                                  && cgroup.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined),
+                Tool = ComposeThirdParty.FromConfig(image, service.Value),
             });
         }
         return active;

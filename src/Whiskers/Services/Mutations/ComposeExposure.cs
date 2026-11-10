@@ -15,6 +15,11 @@ public enum ExposureKind
     Device,
     SecurityOpt,
     DeviceCgroupRule,
+
+    /// <summary>Contract 0013, U3: a proxy or tunnel publishes the service without a label on it (Traefik
+    /// <c>exposedByDefault</c>, cloudflared, Tailscale serve/Funnel). Key = the signal, value <c>true</c> (a host Traefik:
+    /// its container name).</summary>
+    ExternalRoute,
 }
 
 /// <summary>
@@ -73,6 +78,7 @@ public static class ExposureClasses
     {
         ExposureKind.PublishedPort => Published,
         ExposureKind.RouteLabel => LabelClass(key, prefixes),
+        ExposureKind.ExternalRoute => ComposeThirdParty.ClassOf(key),
         _ => Host,
     };
 
@@ -99,6 +105,7 @@ public static class ExposureClasses
         ExposureKind.Device => "device",
         ExposureKind.SecurityOpt => "security option",
         ExposureKind.DeviceCgroupRule => "device cgroup rule",
+        ExposureKind.ExternalRoute => "external route",
         _ => "exposure",
     };
 }
@@ -148,6 +155,7 @@ public static class ComposeExposures
             ExposureKind.Device => $"{p.Service}: device {p.Key}",
             ExposureKind.SecurityOpt => $"{p.Service}: security_opt {p.Key}={p.Value}",
             ExposureKind.DeviceCgroupRule => $"{p.Service}: device_cgroup_rules {p.Key}",
+            ExposureKind.ExternalRoute => $"{p.Service}: external route {p.Key}",
             _ => $"{p.Service}: {p.Kind}",
         };
     }
@@ -328,8 +336,11 @@ public static class ComposeExposures
 
         if (Property(definition, "labels") is { ValueKind: JsonValueKind.Object } labels)
             foreach (var label in labels.EnumerateObject())
-                if (prefixes.Any(p => label.Name.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
-                    Add(ExposureKind.RouteLabel, label.Name, label.Value.ValueKind == JsonValueKind.String ? label.Value.GetString() ?? "" : label.Value.GetRawText(), "label (withheld)");
+            {
+                var value = label.Value.ValueKind == JsonValueKind.String ? label.Value.GetString() ?? "" : label.Value.GetRawText();
+                if (IsRouteLabel(label.Name, value, prefixes))
+                    Add(ExposureKind.RouteLabel, label.Name, value, "label (withheld)");
+            }
         if (Property(definition, "ports") is { ValueKind: JsonValueKind.Array } ports)
             foreach (var port in ports.EnumerateArray())
             {
@@ -412,7 +423,7 @@ public static class ComposeExposures
         if (Property(container, "Config") is { ValueKind: JsonValueKind.Object } config
             && Property(config, "Labels") is { ValueKind: JsonValueKind.Object } labels)
             foreach (var label in labels.EnumerateObject())
-                if (prefixes.Any(p => label.Name.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                if (IsRouteLabel(label.Name, label.Value.GetString() ?? "", prefixes))
                     Add(ExposureKind.RouteLabel, label.Name, label.Value.GetString() ?? "", label.Name, withheldValue: true);
         if (Property(container, "HostConfig") is not { ValueKind: JsonValueKind.Object } host)
             throw new ComposePlanException("A container's configuration cannot be read.");
@@ -533,57 +544,74 @@ public static class ComposeExposures
     /// <summary>The marker <see cref="InspectImagesCommand"/> prints for an image that is not on the host.</summary>
     public const string MissingImage = "MISSING";
 
-    /// <summary>One line per image: <c>&lt;ref&gt;\t&lt;id&gt;\t&lt;labels as JSON&gt;</c>, or <c>&lt;ref&gt;\tMISSING</c>.
-    /// Local only: nothing is pulled.</summary>
+    /// <summary>One line per image: <c>&lt;ref&gt;\t&lt;id&gt;\t&lt;Config as JSON&gt;</c>, or <c>&lt;ref&gt;\tMISSING</c>.
+    /// Local only: nothing is pulled. The labels are read from the whole <c>Config</c>: Docker 29 fails
+    /// <c>.Config.Labels</c> on an image without labels ("map has no entry"), which read as a missing image.</summary>
     public static string InspectImagesCommand(IEnumerable<string> images) =>
         "for i in " + string.Join(' ', images.Select(Whiskers.Utils.ShellUtils.Quote)) +
-        "; do o=$(docker image inspect --format '{{.Id}}{{\"\\t\"}}{{json .Config.Labels}}' \"$i\" 2>/dev/null)" +
+        "; do o=$(docker image inspect --format '{{.Id}}{{\"\\t\"}}{{json .Config}}' \"$i\" 2>/dev/null)" +
         " && printf '%s\\t%s\\n' \"$i\" \"$o\" || printf '%s\\t" + MissingImage + "\\n' \"$i\"; done";
 
-    /// <summary>What <see cref="InspectImagesCommand"/> printed, per image: its id and labels, or <c>null</c> when it is
-    /// missing. An image without a line, or a line that cannot be read, throws (fail closed).</summary>
-    public static IReadOnlyDictionary<string, (string Id, IReadOnlyDictionary<string, string> Labels)?> ParseImages(
-        string output, IReadOnlyCollection<string> images)
+    /// <summary>What <see cref="InspectImagesCommand"/> printed, per image: its id (the pin, contract 0013, D10) and its
+    /// <c>Config</c>, or <c>null</c> when it is missing. An image without a line, or a line that cannot be read, throws
+    /// (fail closed).</summary>
+    public static IReadOnlyDictionary<string, ComposeImage?> ParseImages(string output, IReadOnlyCollection<string> images)
     {
-        var result = new Dictionary<string, (string, IReadOnlyDictionary<string, string>)?>(StringComparer.Ordinal);
+        const string unreadable = "The images of the deployment could not be read on the server.";
+        var result = new Dictionary<string, ComposeImage?>(StringComparer.Ordinal);
         foreach (var line in output.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = line.Split('\t', 3);
             if (parts.Length < 2 || !images.Contains(parts[0]))
-                throw new ComposePlanException("The images of the deployment could not be read on the server.");
+                throw new ComposePlanException(unreadable);
             if (parts.Length == 2 && parts[1] == MissingImage)
             {
                 result[parts[0]] = null;
                 continue;
             }
             if (parts.Length != 3 || !parts[1].StartsWith("sha256:", StringComparison.Ordinal))
-                throw new ComposePlanException("The images of the deployment could not be read on the server.");
+                throw new ComposePlanException(unreadable);
             var labels = new Dictionary<string, string>(StringComparer.Ordinal);
             try
             {
                 using var document = JsonDocument.Parse(parts[2]);
-                if (document.RootElement.ValueKind == JsonValueKind.Object)
-                    foreach (var p in document.RootElement.EnumerateObject())
-                        labels[p.Name] = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.GetRawText();
-                else if (document.RootElement.ValueKind != JsonValueKind.Null)
-                    throw new ComposePlanException("The images of the deployment could not be read on the server.");
+                var config = document.RootElement;
+                if (config.ValueKind == JsonValueKind.Object && Property(config, "Labels") is { } found)
+                {
+                    if (found.ValueKind == JsonValueKind.Object)
+                        foreach (var p in found.EnumerateObject())
+                            labels[p.Name] = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.GetRawText();
+                    else if (found.ValueKind != JsonValueKind.Null)
+                        throw new ComposePlanException(unreadable);
+                }
+                else if (config.ValueKind is not (JsonValueKind.Object or JsonValueKind.Null))
+                    throw new ComposePlanException(unreadable);
             }
             catch (JsonException)
             {
-                throw new ComposePlanException("The images of the deployment could not be read on the server.");
+                throw new ComposePlanException(unreadable);
             }
-            result[parts[0]] = (parts[1], labels);
+            result[parts[0]] = new ComposeImage(parts[1], labels) { Config = parts[2] };
         }
         if (images.Any(i => !result.ContainsKey(i)))
             throw new ComposePlanException("The images of the deployment could not be read on the server.");
         return result;
     }
 
+    /// <summary>
+    /// Whether a label is a route label under <paramref name="prefixes"/> (case-insensitive). Contract 0013, D18: a literal
+    /// <c>traefik.enable=false</c> is no exposure, although <c>traefik.</c> is a prefix.
+    /// </summary>
+    public static bool IsRouteLabel(string key, string value, IReadOnlyList<string> prefixes) =>
+        prefixes.Any(p => key.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+        && !(string.Equals(key, "traefik.enable", StringComparison.OrdinalIgnoreCase)
+             && string.Equals(value.Trim(), "false", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>The route labels of an image under <paramref name="prefixes"/>, for each service that uses it: the key is
     /// shown, the value never (it is not written in the compose file).</summary>
     public static IEnumerable<ComposeExposure> FromImageLabels(string service, IReadOnlyDictionary<string, string> labels,
         IReadOnlyList<string> prefixes) =>
-        labels.Where(l => prefixes.Any(p => l.Key.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+        labels.Where(l => IsRouteLabel(l.Key, l.Value, prefixes))
             .Select(l => new ComposeExposure(service, ExposureKind.RouteLabel, l.Key)
             {
                 Key = l.Key, Value = l.Value, ValueWithheld = true, FromImage = true,
@@ -615,6 +643,15 @@ public static class ComposeExposures
     public static bool HasVariable(string? raw) => raw is not null && VariablePattern.IsMatch(raw.Replace("$$", ""));
 
     private static readonly Regex VariablePattern = new(@"\$", RegexOptions.CultureInvariant);
+}
+
+/// <summary>A local image as <see cref="ComposeExposures.InspectImagesCommand"/> read it: its id (the pin, contract
+/// 0013, D10 as amended) and its labels.</summary>
+public readonly record struct ComposeImage(string Id, IReadOnlyDictionary<string, string> Labels)
+{
+    /// <summary>The image's whole <c>Config</c> as JSON (contract 0013, D16: <c>Entrypoint</c>, <c>Cmd</c>, <c>Env</c>,
+    /// <c>WorkingDir</c> for the third-party detection). Holds environment values: never written anywhere.</summary>
+    public string? Config { get; init; }
 }
 
 /// <summary>What daemon.json says about <c>default-cgroupns-mode</c> (review N4): not set, <c>host</c>,

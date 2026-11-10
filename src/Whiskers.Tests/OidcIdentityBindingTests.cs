@@ -171,7 +171,8 @@ public sealed class OidcIdentityBindingTests
         Assert.Equal(AuthConstants.FederatedScheme, issued.Identity!.AuthenticationType);
         Assert.Equal("Dev.Lead@Corp.Test", issued.FindFirstValue(ClaimTypes.Email));
         Assert.Equal("Dev.Lead@Corp.Test", issued.Identity.Name);
-        Assert.Equal([ClaimTypes.Email, ClaimTypes.Name, AuthConstants.BindingIdClaim],
+        // Contract 0014 (D2): and the session's own id, nothing else from the provider.
+        Assert.Equal([ClaimTypes.Email, ClaimTypes.Name, AuthConstants.BindingIdClaim, AuthConstants.SessionIdClaim],
             issued.Claims.Select(c => c.Type).Order(StringComparer.Ordinal).ToArray().Order(StringComparer.Ordinal));
         Assert.Equal(AppRole.Operator, (await world.Validator.CheckAsync(issued)).Role);
     }
@@ -1319,7 +1320,7 @@ internal sealed class BindingWorld : IAsyncDisposable
         return new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.Email, decision.Account!), new Claim(ClaimTypes.Name, decision.Account!),
-            new Claim(AuthConstants.BindingIdClaim, decision.BindingId!),
+            new Claim(AuthConstants.BindingIdClaim, decision.BindingId!), WebSessionClaims.NewSessionClaim(),
         ], AuthConstants.FederatedScheme));
     }
 
@@ -1348,7 +1349,7 @@ internal sealed class BindingWorld : IAsyncDisposable
         return new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.Email, row.Email!), new Claim(ClaimTypes.Name, row.Email!),
-            new Claim(ClaimTypes.NameIdentifier, row.Id), new Claim(AuthConstants.SecurityStampClaim, row.SecurityStamp!),
+            new Claim(ClaimTypes.NameIdentifier, row.Id), new Claim(AuthConstants.SecurityStampClaim, row.SecurityStamp!), WebSessionClaims.NewSessionClaim(),
         ], AuthConstants.LocalPasswordScheme));
     }
 

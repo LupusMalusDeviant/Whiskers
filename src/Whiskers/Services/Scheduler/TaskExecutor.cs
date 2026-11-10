@@ -493,7 +493,7 @@ public class TaskExecutor : ITaskExecutor
     }
 
     internal static AutomationActor ActorOf(ScheduledTaskEntity task) =>
-        new("task:" + task.TaskId, $"Scheduled task '{task.Name}'",
+        AutomationActor.ForTask(task.TaskId, task.Name,
             string.IsNullOrWhiteSpace(task.CreatedBy) ? null : task.CreatedBy, task.CreatedVia);
 
     /// <summary>A run refused before its decision — no target or command, a database container that is missing or is

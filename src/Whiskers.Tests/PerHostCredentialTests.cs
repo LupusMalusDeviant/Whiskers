@@ -1083,13 +1083,13 @@ public sealed class PerHostCredentialTests
         using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
         Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
         IReadOnlyList<ReadinessCheck> Checks() =>
-            new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store).MtlsClientCredentialChecks();
+            new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store, text: ReadinessTexts.English).MtlsClientCredentialChecks();
 
         var checks = Checks();
         Assert.True(checks.Single(c => c.Title.EndsWith("Rabenhof", StringComparison.Ordinal)).Ok);
         Assert.False(checks.Single(c => c.Title.EndsWith("Zirkuswagen", StringComparison.Ordinal)).Ok);
-        Assert.False(checks.Single(c => c.Title == "Gemeinsamer mTLS-Client-Schlüssel").Ok);
-        Assert.Contains(checks, c => c.Title == "mTLS-Client-Schlüssel geschützt");
+        Assert.False(checks.Single(c => c.Id == ProductionReadinessService.Ids.MtlsSharedKey).Ok);
+        Assert.Contains(checks, c => c.Id == ProductionReadinessService.Ids.MtlsKeysProtected);
     }
 
     [Fact]
@@ -1097,13 +1097,13 @@ public sealed class PerHostCredentialTests
     {
         using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"), ("burgcloud", "100.64.0.11"));
         Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
-        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store);
+        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store, text: ReadinessTexts.English);
 
         // Everything runs; the two hosts not yet migrated still admit the shared name and are named for it.
         var before = await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync);
-        Assert.True(before.Single(c => c.Title == "mTLS-Proxy (ghostunnel) läuft").Ok);
-        Assert.True(before.Single(c => c.Title == "Laufende --allow-cn-Liste").Ok);
-        var shared = before.Single(c => c.Title == "Gemeinsame Client-Identität im laufenden ghostunnel");
+        Assert.True(before.Single(c => c.Id == ProductionReadinessService.Ids.MtlsProxy).Ok);
+        Assert.True(before.Single(c => c.Id == ProductionReadinessService.Ids.MtlsAllowCn).Ok);
+        var shared = before.Single(c => c.Id == ProductionReadinessService.Ids.MtlsSharedLive);
         Assert.False(shared.Ok);
         Assert.Contains("Zirkuswagen, Burgcloud", shared.Detail);
         Assert.DoesNotContain("Rabenhof", shared.Detail);
@@ -1113,13 +1113,13 @@ public sealed class PerHostCredentialTests
         w.Host("rabenhof").RunningAllow = [SharedCn, "whiskers-client-rabenhof-g1"];
         var checks = await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync);
 
-        var down = checks.Single(c => c.Title == "mTLS-Proxy (ghostunnel) läuft");
+        var down = checks.Single(c => c.Id == ProductionReadinessService.Ids.MtlsProxy);
         Assert.False(down.Ok);
-        Assert.Contains("Zirkuswagen (ghostunnel läuft nicht)", down.Detail);
-        Assert.Contains("Burgcloud (Argumente nicht lesbar)", down.Detail);
-        Assert.Contains("Re-Onboarding per SSH", down.Detail);
+        Assert.Contains("Zirkuswagen (ghostunnel not running)", down.Detail);
+        Assert.Contains("Burgcloud (arguments not readable)", down.Detail);
+        Assert.Contains("re-onboarding over SSH", down.Detail);
         Assert.DoesNotContain("Rabenhof", down.Detail);
-        var list = checks.Single(c => c.Title == "Laufende --allow-cn-Liste");
+        var list = checks.Single(c => c.Id == ProductionReadinessService.Ids.MtlsAllowCn);
         Assert.False(list.Ok);
         Assert.Contains("Rabenhof", list.Detail);
     }
@@ -1138,11 +1138,11 @@ public sealed class PerHostCredentialTests
         record.TcpClientCertPath = Path.Combine(own, "client.crt");
         record.TcpClientKeyPath = Path.Combine(own, "client.key");
         await w.Servers.UpdateServerAsync(record);
-        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store);
+        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store, text: ReadinessTexts.English);
 
         Assert.Equal(MtlsClientCredentialKind.OperatorSupplied, w.Store.StatusOf(w.Server("handmade")).Kind);
         var line = (await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync))
-            .Single(c => c.Title == "Gemeinsame Client-Identität im laufenden ghostunnel");
+            .Single(c => c.Id == ProductionReadinessService.Ids.MtlsSharedLive);
         Assert.False(line.Ok);
         Assert.Contains("Handmade", line.Detail);
         Assert.DoesNotContain("Rabenhof", line.Detail);
@@ -1150,7 +1150,7 @@ public sealed class PerHostCredentialTests
         // Narrowed by hand: the line turns green.
         w.Host("handmade").RunningAllow = ["operator-client"];
         line = (await readiness.LiveAllowListChecksAsync(w.Service.ReadLiveAllowListAsync))
-            .Single(c => c.Title == "Gemeinsame Client-Identität im laufenden ghostunnel");
+            .Single(c => c.Id == ProductionReadinessService.Ids.MtlsSharedLive);
         Assert.True(line.Ok, line.Detail);
     }
 
@@ -1160,9 +1160,9 @@ public sealed class PerHostCredentialTests
         // A real restore brings back the whole mtls/ directory (journals included) together with the records
         // (review r2 A), so only the live read shows that the host no longer admits what the record names.
         using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
-        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store);
+        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store, text: ReadinessTexts.English);
         ReadinessCheck Line(IReadOnlyList<ReadinessCheck> checks, string name) =>
-            checks.Single(c => c.Title == $"mTLS-Client-Identität: {name}");
+            checks.Single(c => c.Id == ProductionReadinessService.Ids.MtlsIdentity && c.Title.EndsWith(": " + name, StringComparison.Ordinal));
 
         // 1) A backup taken before the migration: shared record, no hosts/ directory, no journal.
         var beforeMigration = Snapshot(w.MtlsDir, Path.Combine(w.Root, "backup-1"));
@@ -1177,23 +1177,23 @@ public sealed class PerHostCredentialTests
         var checks = await readiness.MtlsChecksAsync(w.Service.ReadLiveAllowListAsync);
         var line = Line(checks, "Rabenhof");
         Assert.False(line.Ok);
-        Assert.Contains("Notfall-Re-Onboarding per SSH", line.Detail);
-        Assert.Contains("„Migrieren“ erreicht ihn dann nicht", line.Detail);
-        Assert.Contains("nur gerade nicht erreichbar", line.Detail);
+        Assert.Contains("break-glass re-onboarding over SSH", line.Detail);
+        Assert.Contains("“Migrate” cannot reach it then", line.Detail);
+        Assert.Contains("only unreachable right now", line.Detail);
         Assert.Contains("rabenhof", w.Fleet.LockedOut);
-        Assert.Contains("Rabenhof (Argumente nicht lesbar)", checks.Single(c => c.Title == "mTLS-Proxy (ghostunnel) läuft").Detail);
-        // The reachable host still on the shared credential keeps the plain „Migrieren“ advice.
+        Assert.Contains("Rabenhof (arguments not readable)", checks.Single(c => c.Id == ProductionReadinessService.Ids.MtlsProxy).Detail);
+        // The reachable host still on the shared credential keeps the plain “Migrate” advice.
         var zirkuswagen = Line(checks, "Zirkuswagen");
         Assert.False(zirkuswagen.Ok);
-        Assert.Contains("Auf der Server-Seite „Migrieren“", zirkuswagen.Detail);
-        Assert.DoesNotContain("Notfall-Re-Onboarding", zirkuswagen.Detail);
+        Assert.Contains("On the server page, “Migrate”", zirkuswagen.Detail);
+        Assert.DoesNotContain("break-glass re-onboarding", zirkuswagen.Detail);
     }
 
     [Fact]
     public async Task Readiness_points_a_host_behind_a_backup_restored_after_a_rotation_to_the_break_glass_re_onboarding()
     {
         using var w = new CredentialWorld();
-        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store);
+        var readiness = new ProductionReadinessService(null!, null!, null!, w.Servers, clientCredentials: w.Store, text: ReadinessTexts.English);
         Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
 
         // 2) A backup taken after the migration (g1, narrowed), restored after a rotation to g2.
@@ -1206,10 +1206,10 @@ public sealed class PerHostCredentialTests
         Assert.Equal(1, w.Store.ReadJournal("rabenhof")!.Generation);
 
         var line = (await readiness.MtlsChecksAsync(w.Service.ReadLiveAllowListAsync))
-            .Single(c => c.Title == "mTLS-Client-Identität: Rabenhof");
+            .Single(c => c.Id == ProductionReadinessService.Ids.MtlsIdentity && c.Title.EndsWith(": Rabenhof", StringComparison.Ordinal));
         Assert.False(line.Ok);
         Assert.Contains("whiskers-client-rabenhof-g1", line.Detail);
-        Assert.Contains("Notfall-Re-Onboarding per SSH", line.Detail);
+        Assert.Contains("break-glass re-onboarding over SSH", line.Detail);
     }
 
     private static string Snapshot(string source, string target)

@@ -34,7 +34,7 @@ public class RootEquivalentAdminTests
         "host.exec", "container.exec", "terminal.host_open", "terminal.container_open", "endpointcheck.run",
         // Deployments and container definitions (any image, bind mount, command)
         "app.deploy", "compose.deploy", "gitdeploy.deploy", "gitdeploy.save", "gitdeploy.set_token", "webhook.save",
-        "container.create", "container.env_set", "container.env_file_save",
+        "container.env_set", "container.env_file_save",
         // Scheduled custom commands (create, change, run)
         "scheduler.create", "scheduler.update", "scheduler.run",
         // Arbitrary SQL as the database superuser
@@ -151,8 +151,6 @@ public class RootEquivalentAdminTests
         (typeof(IDatabaseService), nameof(IDatabaseService.ExecuteQueryAsync)),
         (typeof(Whiskers.Services.Terminal.ITerminalSessionManager), nameof(Whiskers.Services.Terminal.ITerminalSessionManager.OpenHostShellAsync)),
         (typeof(Whiskers.Services.Terminal.ITerminalSessionManager), nameof(Whiskers.Services.Terminal.ITerminalSessionManager.OpenContainerShellAsync)),
-        (typeof(Whiskers.Services.Deployment.IDeploymentService), nameof(Whiskers.Services.Deployment.IDeploymentService.DeployFromFormAsync)),
-        (typeof(Whiskers.Services.Deployment.IDeploymentService), nameof(Whiskers.Services.Deployment.IDeploymentService.DeployFromComposeAsync)),
         (typeof(Whiskers.Services.GitDeploy.IGitDeployService), nameof(Whiskers.Services.GitDeploy.IGitDeployService.DeployAsync)),
         (typeof(INginxService), nameof(INginxService.UpdateSiteConfigAsync)),
     ];

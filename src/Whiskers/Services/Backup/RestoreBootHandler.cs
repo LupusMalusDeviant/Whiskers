@@ -112,7 +112,12 @@ public static class RestoreBootHandler
             : string.Create(System.Globalization.CultureInfo.InvariantCulture,
                 $"Archive created {applied.SourceCreatedAtUtc:O}; restore committed {applied.CreatedAtUtc:O}; applied {applied.AppliedAtUtc:O}; provider={applied.Provider}. Audit events after the archive was taken are not in this database (the pre-restore safety backup holds them).");
         var actor = string.IsNullOrEmpty(applied?.Actor) ? "(unknown)" : applied.Actor;
-        if (await audit.TryLogAsync(actor, "web", RestoredAction, "whiskers", "self-backup",
+        // INV-01 (contract 0014, D6): applied by Whiskers at its start, for whoever asked for the restore.
+        var requester = actor.Contains('@') ? Whiskers.Services.AuditLog.AuditPrincipals.Person(actor)
+            : actor.StartsWith("cli", StringComparison.Ordinal) ? Whiskers.Services.AuditLog.AuditPrincipals.HostCli("restore-backup", actor)
+            : null;
+        if (await audit.TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.System("startup", actor, requester), RestoredAction,
+                "whiskers", "self-backup",
                 string.IsNullOrEmpty(applied?.Archive) ? "Self-backup" : applied.Archive, details))
             TryDelete(note);
         else

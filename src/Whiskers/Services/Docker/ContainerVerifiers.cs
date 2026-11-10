@@ -154,24 +154,6 @@ public sealed class ContainerUpdateVerifier(IServiceProvider services) : Contain
         => RequireRunningAsync(docker, container, serverId, ct);
 }
 
-/// <summary>container.create / app.deploy (a single-container deployment): the container the call returned runs. A
-/// deployment whose answer names no container (the MCP tool answers with text) records NotVerifiable; compose
-/// deployments are R1-37.</summary>
-public sealed class ContainerCreateVerifier(IServiceProvider services, string capabilityId = "container.create")
-    : ContainerVerifier(services)
-{
-    public override string CapabilityId => capabilityId;
-
-    protected override bool UnnamedIsNotVerifiable => true;
-
-    protected override (string? Container, string? ServerId) Subject(MutationContext context, object? result)
-        => (ReturnedId(result), context.Request.Target.ServerId ?? Argument(context, "serverId"));
-
-    // A deployed job image that already ran to completion (exit code 0) was deployed.
-    protected override Task CheckAsync(IDockerService docker, string container, string? serverId, CancellationToken ct)
-        => RequireRunningAsync(docker, container, serverId, ct, finishedCounts: true);
-}
-
 /// <summary>container.rollback: the container of the snapshot's name runs again on the previous image.</summary>
 public sealed class ContainerRollbackVerifier(IServiceProvider services) : ContainerVerifier(services)
 {

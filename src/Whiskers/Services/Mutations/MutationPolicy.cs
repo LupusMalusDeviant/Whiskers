@@ -92,7 +92,7 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         // task is not a way around them.
         var engine = request.PinnedPolicy is null
                      && ((request.Surface == MutationSurface.Ui && request.Principal.Kind == MutationPrincipalKind.Human)
-                         || (request.Surface == MutationSurface.Automation && request.Principal.Kind == MutationPrincipalKind.Automation
+                         || (Unattended.IsSurface(request.Surface) && Unattended.IsPrincipal(request.Principal)
                              && request.Principal.OnBehalfOf?.Kind is null or MutationPrincipalKind.Human
                              && !CreatedByAgent(request.Principal)))
             ? HumanEngine
@@ -157,7 +157,7 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
     /// acts for, with that key's tool list, exactly as <c>AgentSession</c> evaluates it.</summary>
     private static AgentPrincipal ToAgentPrincipal(MutationPrincipal principal)
     {
-        var p = principal.Kind is MutationPrincipalKind.Agent or MutationPrincipalKind.Automation
+        var p = (principal.Kind == MutationPrincipalKind.Agent || Unattended.IsPrincipal(principal))
                 && principal.OnBehalfOf is { } source ? source : principal;
         return MutationPrincipals.ToAgent(p);
     }

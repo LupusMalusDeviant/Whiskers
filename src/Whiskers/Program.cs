@@ -31,10 +31,14 @@ var restoreCli = RestoreCli.Requested(args);
 var recoveryCli = Whiskers.Services.Auth.LocalAccountRecoveryCli.Requested(args);
 // The identity-binding CLI (R1-27) runs the same way next to the live instance.
 var bindingCli = Whiskers.Services.Auth.IdentityBindingCli.Requested(args);
-if (!restoreCli && !recoveryCli && !bindingCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
-// Contract 0015 (INV-52): a VAULT_KEY rotation (VAULT_KEY_NEW_FILE) runs here, before anything reads the key; the rest of
-// the process then reads the new one.
-if (!restoreCli && !recoveryCli && !bindingCli && Whiskers.Services.Vault.VaultKeyRotationBootHandler.Apply(dataPaths, builder.Configuration, Console.Out) is { Rotated: true } rotation)
+// The guardrail reset CLI (contract 0010) too.
+var guardrailResetCli = Whiskers.Services.Guardrails.GuardrailResetCli.Requested(args);
+var hostCli = restoreCli || recoveryCli || bindingCli || guardrailResetCli;
+if (!hostCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
+// Contract 0015 (INV-52): a VAULT_KEY rotation (VAULT_KEY_NEW_FILE) runs here, before the host is built and before
+// anything reads the key (the guardrail store's start comes later, in RunWhiskersStartupAsync); the rest of the
+// process then reads the new one. A host CLI next to the live instance never rotates.
+if (!hostCli && Whiskers.Services.Vault.VaultKeyRotationBootHandler.Apply(dataPaths, builder.Configuration, Console.Out) is { Rotated: true } rotation)
     builder.Configuration.AddInMemoryCollection(rotation.ConfigurationOverride);
 
 builder.AddWhiskersConfiguration(dataPaths);   // UI-writable config layers + data-protection keys
@@ -71,6 +75,14 @@ if (bindingCli)
 {
     return await Whiskers.Services.Auth.IdentityBindingCli.RunAsync(app.Services,
         Whiskers.Services.Auth.IdentityBindingCli.Arguments(args), Console.Out);
+}
+
+// Contract 0010 D6: `dotnet Whiskers.dll --reset-guardrails` writes the safe default guardrail policy with the kill switch
+// on, when guardrails.json and guardrails.json.bak are both missing, and exits without starting the web host.
+if (guardrailResetCli)
+{
+    return await Whiskers.Services.Guardrails.GuardrailResetCli.RunAsync(app.Services,
+        Whiskers.Services.Guardrails.GuardrailResetCli.Arguments(args), Console.Out);
 }
 
 app.ConfigureWhiskersHttpPipeline();           // forwarded headers → fixed auth middleware chain → endpoints

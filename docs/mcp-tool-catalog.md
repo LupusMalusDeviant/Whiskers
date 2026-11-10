@@ -25,7 +25,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `backup_database` | admin | Create a database backup (dump) for a database container. |
 | `connect_container_to_network` | admin | Connect a container to a Docker network. |
 | `create_network` | admin | Create a new Docker network. |
-| `deploy_app` | admin | Deploy a new application on a server using a standardized template. Supports common app types like web apps, databases, and custom Docker images. Creates the container with sensible defaults and starts it. |
+| `deploy_app` | admin | Deploy a single-image application on a Docker server. Whiskers writes it as a compose project in /opt/deployments/<name> (service and container named after the app), plans it, decides its exposures and runs it through the compose runner with every image pinned to the inspected image id. A redeploy with the same name updates the project. A malformed port or environment entry refuses the call. |
 | `deploy_compose` | admin | Deploy an application using a docker-compose.yml content string. Creates and starts all services defined in the compose file. |
 | `detect_database` | read | Detect the database type of a container. Returns the database engine (PostgreSQL, MySQL, MongoDB, Redis, Neo4j) or 'None'. |
 | `disconnect_container_from_network` | admin | Disconnect a container from a Docker network. |

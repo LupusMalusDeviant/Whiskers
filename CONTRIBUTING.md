@@ -57,6 +57,12 @@ git rm --cached -r -q . && git reset --hard
   every changed `packages.lock.json` (CI restores in locked mode and fails on a stale one). The SDK is the exact
   version in `global.json`; moving it also moves the Dockerfile's SDK image and the lock files
   ([deploy/README.md](deploy/README.md#pinned-build-inputs-r1-52)).
+- **Changed README.md, SECURITY.md, `docs/security-architecture.md` or `docs/operations/production-checklist.md`?**
+  Every claim-shaped block carries `<!-- claim:ID -->` or `<!-- claim-free:reason -->`, and every claim is a row of
+  [`docs/v1/CLAIMS.md`](docs/v1/CLAIMS.md) with a test ([contract 0011](docs/contracts/0011-self-report-claims.md)).
+  A changed block fails `ClaimRegisterTests`, which writes `CLAIMS.md.actual` with the new fingerprints to diff
+  against; check that the claim still holds before you copy it. Readiness texts live in resx (`Readiness_*`) in
+  both languages.
 - **No secrets** in the diff (`.env`, `vault*.json`, `data/`, keys, certificates are gitignored,
   keep it that way).
 - Keep commits focused and write a clear commit message describing the *why*.

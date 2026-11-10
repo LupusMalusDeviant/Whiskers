@@ -163,8 +163,7 @@ public sealed partial class AuditLoggingTests : IDisposable
     [Fact]
     public async Task A_policy_write_records_the_changed_rule()
     {
-        var guardrails = new Whiskers.Services.Guardrails.GuardrailStore(filePath: Path.Combine(_dir, "guardrails.json"));
-        await guardrails.InitializeAsync();
+        var guardrails = await GuardrailStoreTestExtensions.FirstStartStore(Path.Combine(_dir, "guardrails.json")).StartAsync();
         var policy = GuardrailPolicy.SafeDefault();
         policy.MaxAutonomousLevel = McpPermissionLevels.Write;
 

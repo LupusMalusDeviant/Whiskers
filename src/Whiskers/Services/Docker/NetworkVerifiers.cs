@@ -89,13 +89,14 @@ public sealed class NetworkAttachVerifier(IServiceProvider services, bool connec
     }
 }
 
-/// <summary>compose.deploy: every container of the services the deployed files define, in the project the plan resolved,
+/// <summary>compose.deploy and app.deploy (contract 0013, D7): every container of the services the deployed files define, in the project the plan resolved,
 /// exists and runs (a one-shot container may have exited
 /// with 0). Calls that name no project — a page's nested calls per colliding container or for its mounts — are not
 /// verifiable on their own: the deployment they belong to is.</summary>
-public sealed partial class ComposeDeployVerifier(IServiceProvider services) : ServiceVerifier(services)
+public sealed partial class ComposeDeployVerifier(IServiceProvider services, string capabilityId = "compose.deploy")
+    : ServiceVerifier(services)
 {
-    public override string CapabilityId => "compose.deploy";
+    public override string CapabilityId => capabilityId;
 
     protected override async Task CheckAsync(MutationContext context, object? result, CancellationToken ct)
     {

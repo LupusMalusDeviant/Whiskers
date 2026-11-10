@@ -161,9 +161,8 @@ public class MutationBypassArchitectureTests
         Assert.DoesNotContain($"{typeof(UiRunnerProbe).FullName} -> container.restart", bypasses);
         Assert.Contains($"{typeof(UiRunnerProbe).FullName} -> container.stop", bypasses);      // other capability
         Assert.Contains($"{typeof(UiRunnerProbe).FullName} -> container.remove", bypasses);    // outside the lambda
-        // app.deploy composes image.pull and container.create; nothing else.
-        Assert.DoesNotContain($"{typeof(ComposingProbe).FullName} -> image.pull", bypasses);
-        Assert.DoesNotContain($"{typeof(ComposingProbe).FullName} -> container.create", bypasses);
+        // app.deploy composes container.disable_restart and container.stop (contract 0013, D7); nothing else.
+        Assert.DoesNotContain($"{typeof(ComposingProbe).FullName} -> container.stop", bypasses);
         Assert.Contains($"{typeof(ComposingProbe).FullName} -> container.update", bypasses);
     }
 
@@ -211,11 +210,10 @@ public class MutationBypassArchitectureTests
 
     private sealed class ComposingProbe(IUiMutationRunner mutations, Whiskers.Services.Docker.IDockerService docker)
     {
-        public Task DeployAsync(Whiskers.Models.DeploymentRequest request) =>
+        public Task DeployAsync(string id) =>
             mutations.RunAsync("app.deploy", new { serverId = "local" }, async _ =>
             {
-                await docker.PullImageAsync(request.Image);
-                await docker.CreateContainerAsync(request);
+                await docker.StopContainerAsync(id);
                 await docker.RecreateContainerAsync("x");   // container.update: not composed by app.deploy
             });
     }
@@ -547,6 +545,36 @@ internal static class MutationCallScanner
             pos += OperandSize(op, il, pos);
         }
     }
+
+    /// <summary>Every string literal (<c>ldstr</c>) of <paramref name="method"/>'s IL (contract 0013, D7).</summary>
+    internal static IEnumerable<string> StringLiterals(MethodBase method)
+    {
+        byte[]? il;
+        try { il = method.GetMethodBody()?.GetILAsByteArray(); }
+        catch { yield break; }
+        if (il is null) yield break;
+        var pos = 0;
+        while (pos < il.Length)
+        {
+            short value = il[pos++];
+            if (value == 0xFE && pos < il.Length) value = (short)(0xFE00 | il[pos++]);
+            if (!OpCodesByValue.TryGetValue(value, out var op)) yield break;   // unknown byte: stop, never guess
+            if (op.OperandType == OperandType.InlineString)
+            {
+                string? text = null;
+                try { text = method.Module.ResolveString(BitConverter.ToInt32(il, pos)); } catch { }
+                if (text is not null) yield return text;
+            }
+            pos += OperandSize(op, il, pos);
+        }
+    }
+
+    /// <summary>Every method and constructor body of <paramref name="assembly"/> with its owner (closures and state
+    /// machines belong to the type that declared them) and its handler name.</summary>
+    internal static IEnumerable<(Type Owner, string Handler, MethodBase Body)> Bodies(Assembly assembly) =>
+        SafeTypes(assembly)
+            .SelectMany(t => t.GetMethods(All).Cast<MethodBase>().Concat(t.GetConstructors(All))
+                .Select(m => (OwnerOf(t), HandlerName(t, m), m)));
 
     private static string? CapabilityOf(MethodInfo called)
     {

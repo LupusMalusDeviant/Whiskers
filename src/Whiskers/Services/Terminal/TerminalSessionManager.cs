@@ -174,7 +174,7 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
         // The shell opens on exactly what the gateway decided: the server, and the container or the host.
         if (!scope.Covers(target.ServerId, target.ContainerId ?? target.ServerId))
             throw new InvalidOperationException("This terminal is not the one the gateway decided on.");
-        var owner = new TerminalOwner(scope.Principal!.Id, scope.Principal.DisplayName);
+        var owner = new TerminalOwner(scope.Principal!.Id, scope.Principal.DisplayName) { Principal = scope.Principal };
         var session = new TerminalSession(request.SessionId, owner, target, _launcher.Start(launch),
             _time.GetUtcNow().UtcDateTime, scope.OperationId, _time, keyLease);
         RegisterSession(session);
@@ -235,7 +235,12 @@ public class TerminalSessionManager : ITerminalSessionManager, IDisposable
             durationMs = (long)Math.Max(0, duration.TotalMilliseconds),
         });
         var target = session.Target;
-        await _audit.LogAsync(session.Owner.DisplayName, "web", "terminal.close", target.Kind,
+        // INV-01 (contract 0014): the owner's principal, not only its display name.
+        var principal = session.Owner.Principal
+                        ?? new Whiskers.Services.Mutations.MutationPrincipal(
+                            Whiskers.Services.Mutations.PrincipalIds.KindOf(session.Owner.Id) ?? Whiskers.Services.Mutations.MutationPrincipalKind.Human,
+                            session.Owner.Id, session.Owner.DisplayName, Whiskers.Models.McpPermissionLevels.None);
+        await _audit.TryLogAsync(principal, "terminal.close", target.Kind,
             target.ContainerId ?? target.ServerId, target.Name, details, target.ServerId);
     }
 

@@ -231,17 +231,30 @@ public partial class ApprovalSeparationOfDutyTests
 
     // ---- approvals that do not say who asked (raised before R1-15) -----------------------------------------------
 
+    /// <summary>An approval as it was raised before R1-15, without requesters: the store no longer raises one (contract
+    /// 0014, D8), so it is written to the persistence directly.</summary>
+    private static async Task<Approval> LegacyAsync(IApprovalPersistence persistence)
+    {
+        var template = await new ApprovalStore().CreateAsync(Request("mcp-direct", McpPermissionLevels.Write, "legacy"),
+            _ => Task.CompletedTask);
+        typeof(Approval).GetProperty(nameof(Approval.Requesters))!.SetValue(template, Array.Empty<string>());
+        await persistence.InsertAsync(template);
+        return template;
+    }
+
     [Fact]
     public async Task An_approval_that_does_not_say_who_asked_is_decided_by_nobody()
     {
+        // Contract 0014 (D8): none is raised any more — a request without requesters is refused, never counted under
+        // its displayed actor — and one from before is not pending after a start, so nobody can decide it.
+        await Assert.ThrowsAsync<ArgumentException>(() => Raise(Request("mcp-direct", McpPermissionLevels.Read)));
+        var persistence = new InMemoryApprovalPersistence();
+        var legacy = await LegacyAsync(persistence);
+        var store = new ApprovalStore(persistence: persistence);
+        await store.LoadAsync();
         foreach (var approve in new[] { true, false })
-        {
-            var (store, approval, decisions) = await Raise(Request("mcp-direct", McpPermissionLevels.Read));
-            Assert.Empty(approval.Requesters);
-            Assert.Equal(ApprovalDecisionResult.RequesterCannotDecide, await store.DecideAsync(approval.Id, approve, User(Bob)));
-            Assert.Equal(ApprovalStatus.Pending, approval.Status);
-            Assert.Empty(decisions);
-        }
+            Assert.NotEqual(ApprovalDecisionResult.Decided, await store.DecideAsync(legacy.Id, approve, User(Bob)));
+        Assert.NotEqual(ApprovalStatus.Approved, store.Get(legacy.Id)!.Status);
     }
 
     [Fact]
@@ -249,7 +262,7 @@ public partial class ApprovalSeparationOfDutyTests
     {
         var persistence = new InMemoryApprovalPersistence();
         var before = new ApprovalStore(persistence: persistence);
-        var legacy = await before.CreateAsync(Request("mcp-direct", McpPermissionLevels.Write), _ => Task.CompletedTask);
+        var legacy = await LegacyAsync(persistence);
         var current = await before.CreateAsync(Request("mcp-direct", McpPermissionLevels.Write, "key:k1"), _ => Task.CompletedTask);
 
         var after = new ApprovalStore(persistence: persistence);

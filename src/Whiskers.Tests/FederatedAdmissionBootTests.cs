@@ -93,7 +93,7 @@ public class FederatedAdmissionBootTests
             var minted = Mint(factory.Services, new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.Email, LocalEmail), new Claim(ClaimTypes.Name, LocalEmail),
-                new Claim(ClaimTypes.NameIdentifier, row.Id), new Claim(AuthConstants.SecurityStampClaim, row.SecurityStamp!),
+                new Claim(ClaimTypes.NameIdentifier, row.Id), new Claim(AuthConstants.SecurityStampClaim, row.SecurityStamp!), WebSessionClaims.NewSessionClaim(),
             ], AuthConstants.LocalPasswordScheme));
             Assert.Equal(HttpStatusCode.OK, (await NegotiateAsync(anonymous, minted)).StatusCode);
 

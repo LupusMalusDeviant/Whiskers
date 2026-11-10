@@ -329,8 +329,11 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         {
             kind = request.Principal.Kind.ToString(),
             id = request.Principal.Id,
-            // The credential's id (an MCP key's id), not a secret — named so the sinks' secret-key rule keeps it.
-            keyId = request.Principal.CredentialId,
+            // The credential's id, never a secret — named so the sinks' secret-key rule keeps it (a key named
+            // "credential" would be blanked): keyId for an MCP key only, signIn for every other credential (contract 0014,
+            // D9: a person's binding or local account, a webhook's secret generation).
+            keyId = PrincipalCredentials.IsKeyId(request.Principal.CredentialId) ? request.Principal.CredentialId : null,
+            signIn = PrincipalCredentials.IsKeyId(request.Principal.CredentialId) ? null : request.Principal.CredentialId,
             session = request.Principal.SessionId,
             onBehalfOf = request.Principal.OnBehalfOf?.Id,
             onBehalfOfKind = request.Principal.OnBehalfOf?.Kind.ToString(),

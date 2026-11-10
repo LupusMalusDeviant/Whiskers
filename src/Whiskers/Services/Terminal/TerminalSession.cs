@@ -5,7 +5,12 @@ namespace Whiskers.Services.Terminal;
 
 /// <summary>Who opened a terminal session: the principal id the gateway decided on (<c>user:&lt;email&gt;</c>) and the
 /// name the audit shows.</summary>
-public sealed record TerminalOwner(string Id, string DisplayName);
+public sealed record TerminalOwner(string Id, string DisplayName)
+{
+    /// <summary>The gateway principal of the open (contract 0014): the close is recorded under it, kind, credential and
+    /// session included. Null only for an owner built without one (tests); the close then names a person by <see cref="Id"/>.</summary>
+    public Whiskers.Services.Mutations.MutationPrincipal? Principal { get; init; }
+}
 
 /// <summary>What a session is a shell of: a host (<see cref="ContainerId"/> null) or a container on a server.</summary>
 public sealed record TerminalTarget(string ServerId, string? ContainerId, string Name)

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
+using Whiskers.Services.AuditLog;
 using Whiskers.Services.Backup;
 using Whiskers.Services.Persistence;
 
@@ -29,7 +30,7 @@ public static class VaultKeyRotationBootHandler
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(configuration);
-        var newKey = SecretSource.Read(configuration, NewKeyName);
+        var newKey = SecretSource.Read(configuration, "VAULT_KEY_NEW");
         var journal = VaultKeyRotation.ReadJournal(paths);
         if (newKey is null)
         {
@@ -52,7 +53,7 @@ public static class VaultKeyRotationBootHandler
         return new VaultKeyRotationResult(true, Override(configuration));
     }
 
-    /// <summary>The audit row <c>vault.key_rotated</c> (principal <c>system:startup</c>, counts only), written once on the
+    /// <summary>The audit row <c>vault.key_rotated</c> (principal <c>system:vault-rotation</c>, counts only), written once on the
     /// re-signed chain at the first start after a completed rotation; retried at the next start when it fails.</summary>
     public static async Task RecordRotatedAsync(DataPathOptions paths, Whiskers.Services.AuditLog.IAuditLogService audit, ILogger logger)
     {
@@ -68,7 +69,7 @@ public static class VaultKeyRotationBootHandler
             freshBackup = journal.FreshBackupId,
             counts = journal.Counts,
         });
-        if (!await audit.TryLogAsync("system:startup", "system", "vault.key_rotated", "vault", "vault", "VAULT_KEY", details))
+        if (!await audit.TryLogAsync(AuditPrincipals.System("vault-rotation"), "vault.key_rotated", "vault", "vault", "VAULT_KEY", details))
         {
             logger.LogError("The VAULT_KEY rotation could not be recorded in the audit trail; it is retried at the next start");
             return;
@@ -82,7 +83,7 @@ public static class VaultKeyRotationBootHandler
     {
         var file = configuration[NewKeyName + "_FILE"] ?? Environment.GetEnvironmentVariable(NewKeyName + "_FILE");
         if (!string.IsNullOrWhiteSpace(file)) return new() { ["VAULT_KEY_FILE"] = file };
-        return new() { ["VAULT_KEY_FILE"] = "", ["VAULT_KEY"] = SecretSource.Read(configuration, NewKeyName) };
+        return new() { ["VAULT_KEY_FILE"] = "", ["VAULT_KEY"] = SecretSource.Read(configuration, "VAULT_KEY_NEW") };
     }
 
     /// <summary>A self-backup sealed with <paramref name="key"/> through the app's own backup service.</summary>

@@ -345,7 +345,7 @@ public sealed class LocalAccountService : ILocalAccountService
         if (_guardrails.Current.KillSwitchBlocks(Whiskers.Configuration.KillSwitchExemptions.RecoveryCode))
         {
             // The typed address is not recorded: no account was looked up (as for an unknown one).
-            await _audit.TryLogAsync("anonymous", "web", RecoveryRefusedAction, AuthAuditLog.Target, "", "",
+            await _audit.TryLogAsync(AuditPrincipals.Person(null), RecoveryRefusedAction, AuthAuditLog.Target, "", "",
                 $"reason=kill_switch; rule={Whiskers.Configuration.KillSwitchExemptions.RuleId}", success: false);
             return LocalAccountResult.Refused(LocalAccountErrors.KillSwitch);
         }
@@ -391,7 +391,7 @@ public sealed class LocalAccountService : ILocalAccountService
 
         // The record first: a password set anonymously that the trail does not show is not set.
         var account = user.Email ?? email;
-        if (!await _audit.TryLogAsync(account, "web", RecoveryRedeemedAction, AuthAuditLog.Target, account, account,
+        if (!await _audit.TryLogAsync(AuditPrincipals.Person(account), RecoveryRedeemedAction, AuthAuditLog.Target, account, account,
                 "a new password is set with a recovery code", success: true))
         {
             _logger?.LogError("A recovery-code redemption was refused: its audit row could not be written");
@@ -441,7 +441,7 @@ public sealed class LocalAccountService : ILocalAccountService
     /// <summary>The one answer for every refused redemption; the audit row says why (never the code).</summary>
     private async Task<LocalAccountResult> RefusedAsync(string? account, string reason)
     {
-        await _audit.TryLogAsync(string.IsNullOrWhiteSpace(account) ? "anonymous" : account, "web", RecoveryRefusedAction,
+        await _audit.TryLogAsync(AuditPrincipals.Person(account), RecoveryRefusedAction,
             AuthAuditLog.Target, account ?? "", account ?? "", $"reason={reason}", success: false);
         return LocalAccountResult.Refused(LocalAccountErrors.InvalidCode);
     }

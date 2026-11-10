@@ -236,8 +236,8 @@ public sealed class VaultKeyRotationTests : IDisposable
 
         // The readiness check asks to replace the key file while VAULT_KEY_NEW_FILE is set.
         var readiness = new Whiskers.Services.Setup.ProductionReadinessService(running, await Vault(NewKey),
-            _db.GetRequiredService<IServiceScopeFactory>(), dataPaths: _paths);
-        Assert.Contains("VAULT_KEY_FILE durch den neuen Schlüssel", readiness.RotationCheck()!.Detail);
+            _db.GetRequiredService<IServiceScopeFactory>(), dataPaths: _paths, text: ReadinessTexts.English);
+        Assert.Contains("Replace VAULT_KEY_FILE with the new key", readiness.RotationCheck()!.Detail);
 
         // The audit row, once, on the re-signed chain.
         var audit = new AuditLogService(_db.GetRequiredService<IServiceScopeFactory>(), NullLogger<AuditLogService>.Instance);
@@ -245,7 +245,8 @@ public sealed class VaultKeyRotationTests : IDisposable
         await VaultKeyRotationBootHandler.RecordRotatedAsync(_paths, audit, NullLogger.Instance);
         using var scope = _db.CreateScope();
         var row = await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().AuditLog.AsNoTracking().SingleAsync(a => a.Action == "vault.key_rotated");
-        Assert.Equal("system:startup", row.Actor);
+        Assert.Equal("system:vault-rotation", row.PrincipalId);
+        Assert.Equal("system", row.ActorType);
         Assert.DoesNotContain(NewKey, row.Details ?? "");
         Assert.True(VaultKeyRotation.ReadJournal(_paths)!.Audited);
     }
@@ -308,6 +309,25 @@ public sealed class VaultKeyRotationTests : IDisposable
         File.Delete(VaultKeyRotation.JournalPath(_paths));
         await Assert.ThrowsAsync<VaultKeyRotationException>(() => new VaultKeyRotation(_paths, _db, "not-the-key", "yet-another").RunAsync());
         Assert.Equal(vaultAfter, await File.ReadAllBytesAsync(_paths.VaultJson));
+    }
+
+    /// <summary>Contract 0015 A8: the rotation runs after a pending restore and before the host is built, so the
+    /// guardrail store's start (contract 0010, in RunWhiskersStartupAsync) and every other reader see the new key; a host
+    /// CLI next to the live instance — the guardrail reset included — never rotates.</summary>
+    [Fact]
+    public void The_rotation_runs_before_the_host_and_the_guardrail_start_and_never_for_a_host_cli()
+    {
+        var program = File.ReadAllText(Path.Combine(AutomationActorSchemeTests.SourceRoot(), "src", "Whiskers", "Program.cs"));
+        var restore = program.IndexOf("RestoreBootHandler.ApplyPendingRestore(", StringComparison.Ordinal);
+        var rotate = program.IndexOf("VaultKeyRotationBootHandler.Apply(", StringComparison.Ordinal);
+        var build = program.IndexOf("builder.Build()", StringComparison.Ordinal);
+        var startup = program.IndexOf("RunWhiskersStartupAsync()", StringComparison.Ordinal);
+        Assert.True(restore >= 0 && rotate > restore && build > rotate && startup > build,
+            $"restore {restore}, rotation {rotate}, build {build}, startup {startup}");
+
+        var rotationLine = program[program.LastIndexOf('\n', rotate)..program.IndexOf('\n', rotate)];
+        Assert.Contains("!hostCli", rotationLine);
+        Assert.Matches(@"var hostCli = restoreCli \|\| recoveryCli \|\| bindingCli \|\| guardrailResetCli;", program);
     }
 
     /// <summary>The rotation runs before the Mutation Gateway exists, like S-09; its two unmarked write paths (the

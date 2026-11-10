@@ -37,7 +37,8 @@ public sealed class PrincipalPropagationTests : IDisposable
     [Fact]
     public async Task Human_to_agent_to_automation_keeps_user_and_session_identity()
     {
-        var human = User("Ops@Example.com", "Olivia (Ops)");
+        // Contract 0014 (D2): the user signed in locally, in web session web-1.
+        var human = User("Ops@Example.com", "Olivia (Ops)") with { CredentialId = "local:u-1", WebSessionId = "web-1" };
 
         var agent = AgentToolInvoker.PrincipalOf(Context(human, "sess-1", AgentOrigin.WebUi));
 
@@ -46,7 +47,10 @@ public sealed class PrincipalPropagationTests : IDisposable
         Assert.Equal("sess-1", agent.SessionId);
         Assert.Equal(MutationPrincipalKind.Human, agent.OnBehalfOf!.Kind);
         Assert.Equal("user:ops@example.com", agent.OnBehalfOf.Id);
-        Assert.Equal("sess-1", agent.OnBehalfOf.SessionId);
+        // The user keeps their own web session and credential on OnBehalfOf; the agent session is the agent's own.
+        Assert.Equal("web-1", agent.OnBehalfOf.SessionId);
+        Assert.Equal("local:u-1", agent.OnBehalfOf.CredentialId);
+        Assert.Equal("local:u-1", agent.CredentialId);
 
         // A task the agent creates is owned by the user, and its runs act on behalf of that user.
         var owner = AutomationOwners.OfCaller(agent);

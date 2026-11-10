@@ -116,10 +116,7 @@ public class DockerService : IDockerService
     public Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null)
         => _containers.GetContainerEnvAsync(containerId, serverId);
 
-    // === Lifecycle (create/recreate + C12 update-rollback) ===
-
-    public Task<string> CreateContainerAsync(DeploymentRequest request, string? serverId = null)
-        => _lifecycle.CreateContainerAsync(request, serverId);
+    // === Lifecycle (recreate + C12 update-rollback) ===
 
     public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null)
         => _lifecycle.RecreateContainerAsync(containerId, serverId, progress);

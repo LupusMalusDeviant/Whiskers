@@ -30,7 +30,7 @@ everything at the next start, all or nothing, and keeps a journal so a crash at 
    - `VAULT_KEY rotated: … Replace VAULT_KEY_FILE with the new key and remove VAULT_KEY_NEW_FILE.`
 4. Check:
    - the Audit page verifies the trail (it is re-signed under the new key) and shows one `vault.key_rotated` row
-     (`system:startup`, counts only);
+     (`system:vault-rotation`, counts only);
    - the servers answer (mTLS hosts are green, an SSH host's terminal opens);
    - the readiness check shows **"VAULT_KEY-Rotation abschließen"**: the next step is still open.
 5. Replace the content of the `VAULT_KEY_FILE` file with the new key (or point `VAULT_KEY_FILE` at the new file).

@@ -57,6 +57,9 @@ public class WebhookEntity
     // HMAC secret — mandatory (HOCH-12 part 2). Left empty here on purpose: WebhookService is the
     // single generator (256-bit) and rejects triggers for secret-less rows fail-closed.
     public string Secret { get; set; } = "";
+    // Contract 0014 (D4, INV-01): the generation of Secret, raised by every regeneration. A delivery's principal names
+    // the generation its signature was checked against (webhook-secret:<id>@<version>). Rows from before are 1.
+    public int SecretVersion { get; set; } = 1;
     public string TargetType { get; set; } = "container"; // container, compose
     public string TargetId { get; set; } = "";         // Container name or compose project dir
     public string Action { get; set; } = "restart";    // restart, rebuild, deploy

@@ -31,9 +31,24 @@ public class AuditLogService : IAuditLogService
                                   string? details = null, string? serverId = null, bool success = true) =>
         TryLogAtAsync(DateTime.UtcNow, actor, actorType, action, targetType, targetId, targetName, details, serverId, success);
 
-    public async Task<bool> TryLogAtAsync(DateTime occurredUtc, string actor, string actorType, string action,
+    public Task<bool> TryLogAtAsync(DateTime occurredUtc, string actor, string actorType, string action,
                                           string targetType, string targetId, string targetName,
-                                          string? details = null, string? serverId = null, bool success = true)
+                                          string? details = null, string? serverId = null, bool success = true) =>
+        WriteAsync(occurredUtc, actor, actorType, action, targetType, targetId, targetName, details, serverId, success, null);
+
+    /// <inheritdoc />
+    public Task<bool> TryLogAsync(Whiskers.Services.Mutations.MutationPrincipal principal, string action,
+        string targetType, string targetId, string targetName, string? details = null, string? serverId = null,
+        bool success = true, DateTime? occurredUtc = null)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        return WriteAsync(occurredUtc ?? DateTime.UtcNow, principal.DisplayName, AuditPrincipals.ActorTypeOf(principal),
+            action, targetType, targetId, targetName, details, serverId, success, principal);
+    }
+
+    private async Task<bool> WriteAsync(DateTime occurredUtc, string actor, string actorType, string action,
+        string targetType, string targetId, string targetName, string? details, string? serverId, bool success,
+        Whiskers.Services.Mutations.MutationPrincipal? principal)
     {
         try
         {
@@ -54,7 +69,15 @@ public class AuditLogService : IAuditLogService
                     TargetName = targetName,
                     Details = details,
                     ServerId = serverId,
-                    Success = success
+                    Success = success,
+                    // INV-01 (contract 0014): the structured principal, when the caller named one.
+                    PrincipalKind = principal?.Kind.ToString(),
+                    PrincipalId = principal?.Id,
+                    CredentialId = principal?.CredentialId,
+                    PrincipalSessionId = principal?.SessionId,
+                    OnBehalfOfId = principal?.OnBehalfOf?.Id,
+                    OnBehalfOfKind = principal?.OnBehalfOf?.Kind.ToString(),
+                    DelegatedBy = principal?.DelegatedBy,
                 };
                 db.AuditLog.Add(row);
                 await db.SaveChangesAsync(ct);

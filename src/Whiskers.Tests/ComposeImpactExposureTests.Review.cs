@@ -81,7 +81,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task Deploy_compose_with_its_own_pulled_funnel_image_is_refused_before_up()
     {
         _host.ComposeConfig = PlainConfig;
-        _pulls["nginx"] = ("sha256:9", """{"docktail.funnel.enable":"true"}""");
+        _pulls["nginx"] = ("sha256:9999999999999999999999999999999999999999999999999999999999999999", """{"docktail.funnel.enable":"true"}""");
 
         var (outcome, ran) = await ToolAsync("compose.deploy",
             new { serverId = "local", projectName = "shop", composeContent = PlainYaml }, () => DeployComposeTool(PlainYaml));
@@ -104,14 +104,14 @@ public sealed partial class ComposeImpactExposureTests
     public async Task Deploy_compose_that_brings_a_nested_decision_argument_is_refused_before_anything_runs(string name)
     {
         _host.ComposeConfig = PlainConfig;
-        _pulls["nginx"] = ("sha256:9", """{"docktail.funnel.enable":"true"}""");
+        _pulls["nginx"] = ("sha256:9999999999999999999999999999999999999999999999999999999999999999", """{"docktail.funnel.enable":"true"}""");
         var arguments = new Dictionary<string, string>
         {
             ["serverId"] = "local", ["projectName"] = "shop", ["composeContent"] = PlainYaml,
             [name] = name.StartsWith("related", StringComparison.Ordinal) ? "whiskers" : name == "mounts" ? "/var/run/docker.sock" : FunnelIdentity,
         };
 
-        foreach (var surface in new[] { MutationSurface.Mcp, MutationSurface.Agent, MutationSurface.Webhook, MutationSurface.Terminal })
+        foreach (var surface in new[] { MutationSurface.Mcp, MutationSurface.Agent, MutationSurface.Terminal })
         {
             var (outcome, ran) = await ToolAsync("compose.deploy", arguments, () => DeployComposeTool(PlainYaml), surface);
 
@@ -124,12 +124,14 @@ public sealed partial class ComposeImpactExposureTests
     }
 
     [Fact]
+    // Contract 0014 (D3): a webhook delivery runs on its own surface and still brings the arguments as it did when it ran
+    // on the automation surface.
     public async Task The_ui_and_automation_surfaces_still_bring_the_nested_arguments()
     {
         var args = new Dictionary<string, string> { ["serverId"] = "local", ["exposure"] = FunnelIdentity, ["related"] = "helper" };
         _docker.Add(new ContainerInfo { Id = "helper-id", Name = "helper", ServerId = "local" });
 
-        foreach (var surface in new[] { MutationSurface.Ui, MutationSurface.Automation })
+        foreach (var surface in new[] { MutationSurface.Ui, MutationSurface.Automation, MutationSurface.Webhook })
         {
             var (outcome, _) = await ToolAsync("compose.deploy", args, () => Task.FromResult("ok"), surface);
 

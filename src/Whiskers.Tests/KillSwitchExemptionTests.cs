@@ -251,7 +251,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
         var text = output.ToString();
         Assert.Contains("could not be redeemed", text);
         Assert.Contains(failClosed ? "cannot be read" : "kill switch is on", text);
-        Assert.Contains("repair or remove guardrails.json", text);
+        Assert.Contains("put a valid guardrails.json into the data directory", text);
         Assert.Contains("ReadOnlyMode or the recovery_code block", text);
         Assert.Contains(LocalAccountRecoveryCli.ForceFlag, text);
         Assert.DoesNotMatch("([2-9A-HJ-NP-Z]{4}-){5}[2-9A-HJ-NP-Z]{4}", text);
@@ -260,7 +260,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
         var forced = new StringWriter();
         Assert.Equal(0, await LocalAccountRecoveryCli.RunAsync(world.Services, [LocalOps, LocalAccountRecoveryCli.ForceFlag], forced));
         Assert.Contains("Warning (--force)", forced.ToString());
-        Assert.Contains("repair or remove guardrails.json", forced.ToString());
+        Assert.Contains("put a valid guardrails.json into the data directory", forced.ToString());
         Assert.Matches("([2-9A-HJ-NP-Z]{4}-){5}[2-9A-HJ-NP-Z]{4}", forced.ToString());
         Assert.False(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
         // The audit trail shows the issue was forced past the block, and which one.
@@ -325,7 +325,7 @@ public sealed class KillSwitchExemptionTests : IDisposable
         var refused = new StringWriter();
         Assert.Equal(4, await LocalAccountRecoveryCli.RunAsync(services, [LocalOps], refused));
         Assert.Contains("could not be checked", refused.ToString());
-        Assert.Contains("repair or remove guardrails.json", refused.ToString());
+        Assert.Contains("put a valid guardrails.json into the data directory", refused.ToString());
         Assert.Contains(LocalAccountRecoveryCli.ForceFlag, refused.ToString());
         Assert.True(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
         Assert.Empty(world.Audit.Rows.Where(r => r.Action == LocalAccountRecoveryCli.IssuedAction));
@@ -371,12 +371,23 @@ public sealed class KillSwitchExemptionTests : IDisposable
         Assert.True(await world.PasswordWorksAsync(LocalOps, LocalAccountWorld.Password));
         Assert.Equal(before, Snapshot(dir));   // byte-identical, no guardrails.json.unreadable-* copy
 
-        // A missing file is the SafeDefault in memory: the code is issued, and no guardrails.json is written.
+        // A missing file with no record of an earlier policy (contract 0010) is the SafeDefault in memory: the code is
+        // issued, and neither guardrails.json nor the record is written.
         File.Delete(path);
-        await using var fresh = await LocalAccountWorld.CreateAsync(guardrails: new GuardrailStore(filePath: path));
+        var record = new InMemoryGuardrailPolicyMarker();
+        await using var fresh = await LocalAccountWorld.CreateAsync(guardrails: new GuardrailStore(filePath: path, marker: record));
         await fresh.AddUserAsync(LocalOps, AppRole.Admin);
         Assert.Equal(0, await LocalAccountRecoveryCli.RunAsync(fresh.Services, [LocalOps], new StringWriter()));
         Assert.Empty(Directory.GetFiles(dir));
+        Assert.Equal(0, record.Writes);
+
+        // With the record present the missing file is fail-closed: the CLI refuses without --force (contract 0010 D5).
+        var recorded = new InMemoryGuardrailPolicyMarker { RecordedAt = DateTime.UtcNow };
+        await using var existed = await LocalAccountWorld.CreateAsync(guardrails: new GuardrailStore(filePath: path, marker: recorded));
+        await existed.AddUserAsync(LocalOps, AppRole.Admin);
+        Assert.Equal(4, await LocalAccountRecoveryCli.RunAsync(existed.Services, [LocalOps], new StringWriter()));
+        Assert.Empty(Directory.GetFiles(dir));
+        Assert.Equal(0, recorded.Writes);
     }
 
     /// <summary>Every file of <paramref name="dir"/> with its content.</summary>

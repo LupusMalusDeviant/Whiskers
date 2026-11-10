@@ -45,6 +45,8 @@ public class MutationGatewayCoverageTests
         "container.env_file_save",   // container page: .env save + compose up
         "container.exec",            // container page: Artisan migrate / rollback
         "endpointcheck.run",         // R1-57: the monitor (as the owner) and "Run now" (as the Admin)
+        "app.deploy",                // contract 0013: deploy_app, the Deploy form, App Store — a planned compose run
+        "compose.deploy",            // deploy_compose, the compose editor and tab, webhooks — a planned compose run
     ];
 
     /// <summary>Who calls the primitive, and under which capability (the scanner sees the caller, the guard the scope).</summary>
@@ -52,6 +54,7 @@ public class MutationGatewayCoverageTests
     [
         ("Whiskers.Mcp.Tools.ServerTools", "ExecuteCommand", "host.exec"),
         ("Whiskers.Mcp.Tools.ContainerTools", "SetContainerEnv", "container.env_set"),
+        ("Whiskers.Mcp.Tools.ContainerTools", "DeployApp", "app.deploy"),
         ("Whiskers.Mcp.Tools.ContainerTools", "DeployCompose", "compose.deploy"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCustomCommand", "host.exec"),
         ("Whiskers.Services.Scheduler.TaskExecutor", "ExecuteCleanup", "host.prune"),
@@ -59,7 +62,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Mutations.ComposeImpact", "SaveEnvAsync", "container.env_file_save"),
         // The write helper: migrate, rollback and SQL import run the primitive inside their capability decision.
         ("Whiskers.Components.Pages.ContainerDatabasePanel", "ExecInContainerViaHost", "container.exec, db.query"),
-        ("Whiskers.Services.Mutations.ComposeImpact", "DeployAsync", "app.deploy, compose.deploy"),
+        ("Whiskers.Services.Mutations.ComposeImpact", "RunDeploymentAsync", "app.deploy, compose.deploy"),
         ("Whiskers.Services.Webhooks.WebhookService", "DeployCompose", "compose.deploy"),
         ("Whiskers.Services.EndpointChecks.EndpointCheckRunner", "ProbeAsync", "endpointcheck.run"),
     ];
@@ -95,7 +98,7 @@ public class MutationGatewayCoverageTests
         // MCP tools and the agent (M-rows) — McpGuardrailFilter / AgentToolInvoker
         ("mcp", "host.exec", "primitive"),
         ("mcp", "container.env_set", "primitive"),
-        ("mcp", "app.deploy", "IDeploymentService.DeployFromFormAsync"),
+        ("mcp", "app.deploy", "primitive"),
         ("mcp", "autopatch.preview", "IAutoPatchService.StartPreview"),
         ("mcp", "image.assess_update", "IUpdateRiskService.AssessAsync"),
         ("mcp", "checks.pause", "ILoopSuspensionService.Suspend"),
@@ -283,8 +286,11 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.LogMonitor.Hygiene.LogInventory", "FreeDiskBytesAsync", "df"),
         ("Whiskers.Services.LogMonitor.Hygiene.LogInventory", "ReadSizeAsync", "du / stat of log files"),
         ("Whiskers.Services.Metrics.MetricsCollectorService", "GetDiskUsageAsync", "df"),
+        ("Whiskers.Services.Deployment.DeploymentPathPlanner", "FirstLineAsync", "reads the first line of a deployment directory's compose file (contract 0013, D3)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "ConfigAsync", "docker compose config in a temporary directory (read-only planning, R1-16; contract 0006 reads its JSON)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "DiscoverAsync", "finds compose files"),
+        ("Whiskers.Services.Mutations.ComposePlanner", "HostTraefikAsync", "docker inspect of a running Traefik outside the project (contract 0013, Q1)"),
+        ("Whiskers.Services.Mutations.ComposeThirdParty", "Reader", "reads a proxy's or tunnel's config file as base64, at most 1 MiB (contract 0013, D16)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "InspectContainerAsync", "docker inspect of a container a namespace is shared with (contract 0006)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "InspectImagesAsync", "docker image inspect of the planned images (contract 0006)"),
         ("Whiskers.Services.Mutations.ComposePlanner", "MountsOfContainerAsync", "docker inspect"),
@@ -292,6 +298,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Mutations.ComposePlanner", "WorkingDirectoryAsync", "docker inspect labels"),
         ("Whiskers.Services.Mutations.ComposeRunner", "CgroupnsDefaultAsync", "docker info / daemon.json: the daemon's default cgroup namespace mode (contract 0006, review M1)"),
         ("Whiskers.Services.Mutations.ComposeRunner", "InspectImagesAsync", "step 4: docker image inspect of the images the run starts (contract 0006)"),
+        ("Whiskers.Services.Mutations.ComposeRunner", "PinAsync", "docker image inspect of the pins (contract 0013, D11); the pin file is written through the run's mutate delegate"),
         ("Whiskers.Services.Mutations.ComposeRunner", "RecheckAsync", "docker inspect of the containers the run created (contract 0006); the stop goes through ComposeExposureStopper"),
         ("Whiskers.Services.Mutations.ComposeRunner", "RestoreTagsAsync", "docker image inspect before the tags are put back; the docker tag itself runs through the run's mutate delegate"),
         ("Whiskers.Services.Mutations.VerifierSupport", "HostReadAsync", "the verifiers' read-back (R1-37)"),
@@ -509,7 +516,8 @@ public class MutationGatewayCoverageTests
         ("IApprovalGate.OpenApprovalOf", "a lookup of the open approval of an operation, for the event of a cancelled call (no write)"),
         ("IApprovalPersistence.ConsumeAsync", "the gateway uses up an approval (R1-14), its own record"),
         ("IAuditRecovery.RecoverAsync", "settles and re-writes the gateway's own audit events (R1-19)"),
-        ("IApprovalStore.CreateAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
+        ("IGuardrailPolicyMarker.RecordedAtAsync", "contract 0010: reads when the record of a guardrail policy was written (no write)"),
+        ("IApprovalStore.CreateAsync","the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
         ("IAuditChain.PruneAsync", "audit retention (S-08), the audit trail's own housekeeping"),
         ("IAuditChain.UpdateAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
         ("IAuditChain.WriteAsync", "the Mutation Gateway itself, or its own records (decision, approval, audit, journal)"),
@@ -859,11 +867,12 @@ public class MutationGatewayCoverageTests
     [Fact]
     public void Compositions_are_explicit_and_transitive_only_through_the_table()
     {
-        Assert.True(MutationCompositions.Allows("compose.deploy", "container.create"));   // via app.deploy
+        Assert.True(MutationCompositions.Allows("compose.deploy", "container.stop"));
+        Assert.False(MutationCompositions.Allows("compose.deploy", "app.deploy"));   // contract 0013: no longer composed
         Assert.True(MutationCompositions.Allows("workload.start", "container.start"));
         Assert.False(MutationCompositions.Allows("workload.start", "container.stop"));
         Assert.False(MutationCompositions.Allows("container.start", "image.pull"));
-        Assert.False(MutationCompositions.Allows("host.exec", "container.create"));
+        Assert.False(MutationCompositions.Allows("host.exec", "container.stop"));
         Assert.Empty(MutationCompositions.Of("config.whitelist"));
     }
 }

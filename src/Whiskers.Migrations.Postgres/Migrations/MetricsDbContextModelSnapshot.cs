@@ -17,7 +17,7 @@ namespace Whiskers.Migrations.Postgres.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.10")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -533,6 +533,22 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.HasIndex("CheckId", "AtUtc");
 
                     b.ToTable("EndpointCheckResults");
+                });
+
+            modelBuilder.Entity("Whiskers.Models.InstanceMarkerEntity", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Detail")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("InstanceMarkers", (string)null);
                 });
 
             modelBuilder.Entity("Whiskers.Models.LogAlertRuleEntity", b =>
@@ -1267,6 +1283,9 @@ namespace Whiskers.Migrations.Postgres.Migrations
                     b.Property<string>("Secret")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("SecretVersion")
+                        .HasColumnType("integer");
 
                     b.Property<string>("ServerId")
                         .HasColumnType("text");

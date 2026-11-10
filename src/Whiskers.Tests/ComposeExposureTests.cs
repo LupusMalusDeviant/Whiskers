@@ -275,8 +275,27 @@ public sealed class ComposeExposureTests
     {
         Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tnot-an-id\t{}\n", ["nginx"]));
         Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("other\tMISSING\n", ["nginx"]));
-        var parsed = ComposeExposures.ParseImages("nginx\tsha256:1\t{\"caddy\":\"x\"}\nredis\tMISSING\n", ["nginx", "redis"]);
+        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\n", ["nginx"]));
+        // The labels come from the image's whole Config (Docker 29 fails .Config.Labels on an image without labels).
+        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\t{\"Labels\":[1]}\n", ["nginx"]));
+        Assert.Throws<ComposePlanException>(() => ComposeExposures.ParseImages("nginx\tsha256:1\t[]\n", ["nginx"]));
+        var parsed = ComposeExposures.ParseImages(
+            "nginx\tsha256:1\t{\"Env\":[\"A=1\"],\"Labels\":{\"caddy\":\"x\"}}\nredis\tMISSING\n" +
+            "built\tsha256:3\tnull\nbare\tsha256:4\t{\"Cmd\":[\"sh\"]}\n",
+            ["nginx", "redis", "built", "bare"]);
+        Assert.Equal(new Dictionary<string, string> { ["caddy"] = "x" }, parsed["nginx"]!.Value.Labels);
+        Assert.Empty(parsed["bare"]!.Value.Labels);
+        Assert.Empty(parsed["built"]!.Value.Labels);
         Assert.Equal("sha256:1", parsed["nginx"]!.Value.Id);
         Assert.Null(parsed["redis"]);
+    }
+
+    [Fact]
+    public void The_image_inspection_reads_the_whole_config_not_its_labels()
+    {
+        var command = ComposeExposures.InspectImagesCommand(["nginx"]);
+
+        Assert.Contains("{{json .Config}}", command);
+        Assert.DoesNotContain(".Config.Labels", command);
     }
 }
