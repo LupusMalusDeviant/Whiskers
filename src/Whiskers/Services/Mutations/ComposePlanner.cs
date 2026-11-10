@@ -153,6 +153,23 @@ public sealed class ComposePlanner : IComposePlanner
             ? new Dictionary<string, ComposeImage?>()
             : await InspectImagesAsync(plan.ServerId, images, ct);
 
+        // Contract 0013, U3: proxies and tunnels among the services (from compose's model and the local image), and a
+        // Traefik already running on the host (Q1). Unreadable inputs of the plan's own services refuse the plan.
+        var thirdPartyFiles = new Dictionary<string, string>(StringComparer.Ordinal);
+        var reader = ComposeThirdParty.Reader(_executor, plan.ServerId);
+        var thirdParty = new Dictionary<string, List<ComposeExposure>>(StringComparer.Ordinal);
+        var hostTraefik = await HostTraefikAsync(plan, existing, reader, ct);
+        foreach (var service in active)
+        {
+            var spec = ComposeThirdParty.Effective(service.Tool with { Image = service.Image },
+                inspected.GetValueOrDefault(service.Image)?.Config);
+            var found = new List<ComposeExposure>(
+                await ComposeThirdParty.DetectAsync(service.Name, spec, reader, thirdPartyFiles, ct));
+            if (!ComposeThirdParty.OptsOutOfTraefik(spec.Labels))
+                found.AddRange(hostTraefik.Select(name => ComposeThirdParty.Exposure(service.Name, ComposeThirdParty.TraefikHost, name)));
+            thirdParty[service.Name] = found;
+        }
+
         var shared = new List<ComposeSharedContainer>();
         var inspectedContainers = new Dictionary<string, (IReadOnlyList<ComposeExposure>, IReadOnlyList<(string, string)>)>(StringComparer.Ordinal);
 
@@ -161,6 +178,7 @@ public sealed class ComposePlanner : IComposePlanner
             var result = new List<ComposeExposure>(own[service]);
             if (inspected.GetValueOrDefault(byName[service].Image) is { } image)
                 result.AddRange(ComposeExposures.FromImageLabels(service, image.Labels, prefixes));
+            result.AddRange(thirdParty[service]);
             foreach (var (field, reference) in byName[service].Shared)
             {
                 var fromVariable = modelShared.FirstOrDefault(m => m.Service == service && m.Field == field) is not { } read
@@ -198,7 +216,11 @@ public sealed class ComposePlanner : IComposePlanner
         var services = new List<ComposeServicePlan>();
         foreach (var s in plan.Services)
             services.Add(byName.TryGetValue(s.Name, out var a)
-                ? s with { Active = true, Image = a.Image, Build = a.Build, DeclaresCgroup = a.DeclaresCgroup, Exposures = ComposeModel.Distinct(await Resolve(s.Name, 0)) }
+                ? s with
+                {
+                    Active = true, Image = a.Image, Build = a.Build, DeclaresCgroup = a.DeclaresCgroup, Tool = a.Tool with { Image = a.Image },
+                    Exposures = ComposeModel.Distinct(await Resolve(s.Name, 0)),
+                }
                 : s with { Active = false, Exposures = [] });
         return plan with
         {
@@ -208,7 +230,44 @@ public sealed class ComposePlanner : IComposePlanner
                 ? c with { FromVariable = true } : c).ToList(),
             SharesNamespaces = active.Any(a => a.Shared.Count > 0),
             PlannedImages = inspected.ToDictionary(i => i.Key, i => i.Value?.Id, StringComparer.Ordinal),
+            ThirdPartyFiles = thirdPartyFiles,
         };
+    }
+
+    /// <summary>
+    /// Contract 0013, Q1: the names of the running Traefik containers outside the plan's project (by image name) that
+    /// route every container — the docker or swarm provider with <c>exposedByDefault</c> not <c>false</c>, read from their
+    /// inspect. One that cannot be inspected or read counts as routing (confirmed, never a refusal).
+    /// </summary>
+    private async Task<IReadOnlyList<string>> HostTraefikAsync(ComposePlan plan, IList<ContainerInfo> existing,
+        ComposeThirdParty.HostFileReader reader, CancellationToken ct)
+    {
+        var candidates = existing.DistinctBy(c => c.Id)
+            .Where(c => string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase)
+                        && c.Labels.GetValueOrDefault(ComposeModel.ProjectLabel) != plan.ProjectName
+                        && ComposeThirdParty.ImageName(c.Labels.GetValueOrDefault(ComposePins.ReferenceLabel) is { Length: > 0 } r ? r : c.Image) == "traefik")
+            .ToList();
+        if (candidates.Count == 0) return [];
+        IReadOnlyList<System.Text.Json.JsonElement> documents = [];
+        try
+        {
+            var result = await _executor.ExecuteAsync(plan.ServerId, ComposeExposures.InspectContainersCommand(candidates.Select(c => c.Id)),
+                ReadTimeout, ct, MaxFileChars);
+            if (result.Success && !result.OutputTruncated) documents = ComposeExposures.ParseInspect(result.Output);
+        }
+        catch (ComposePlanException)
+        {
+            // Unreadable: every candidate counts as routing.
+        }
+        var names = new List<string>();
+        foreach (var candidate in candidates)
+        {
+            System.Text.Json.JsonElement? document = documents.FirstOrDefault(d => ComposeExposures.IdentityOf(d).Id == candidate.Id) is { ValueKind: System.Text.Json.JsonValueKind.Object } d
+                ? d : null;
+            if (await ComposeThirdParty.HostTraefikExposesAsync(document, candidate.Image, reader, ct))
+                names.Add(candidate.Name.TrimStart('/'));
+        }
+        return names;
     }
 
     /// <summary>The label prefixes a plan looks for: those of every stored preset (a pinned run's preset was one of them),

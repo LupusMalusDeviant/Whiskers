@@ -9,6 +9,18 @@ All notable changes to Whiskers are documented here. The format follows
 - **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
   asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
   host. The labels are now read from the whole `Config`.
+- **Proxies and tunnels are decided as exposures (contract 0013, INV-62 step 2).** A compose plan recognises Traefik,
+  cloudflared and Tailscale by image name, `argv[0]`, a word of a `sh -c` string or an environment key, and reads
+  Traefik's docker/swarm provider from its CLI, environment and static file (YAML, a TOML subset) and Tailscale's
+  `TS_SERVE_CONFIG`, through bind mounts (at most 1 MiB). A Traefik with `exposedByDefault`, cloudflared, Tailscale
+  Funnel and Tailscale with an unreadable serve state are class `public`, Tailscale serve `published` (new kind
+  `ExternalRoute`, key = the signal, never a value). A running Traefik on the host (by image name) routes every planned
+  service without `traefik.enable=false`. Anything of the plan's own services that cannot be read refuses the plan; step
+  4 checks again with the pulled images and refuses a changed config file; the re-check reads the containers.
+  **Behaviour changes:** the default label prefix `traefik.` replaces the router prefixes (a literal
+  `traefik.enable=false` is no exposure), which changes every policy's version hash (open approvals expire); an `image`,
+  `entrypoint`, `command`, `working_dir` or a `TS_*`/`TUNNEL_*`/`TRAEFIK_*` value from an unset variable refuses the
+  plan.
 - **Compose runs start exactly the inspected images (contract 0013, INV-62 step 1).** After the image inspection every
   image `up` starts is pinned to its image id (contract 0013, D10 as amended on 2026-11-10) — verified on the host and
   written to `<project>/.whiskers/pin.override.yml`, which only `up` and the fallback `stop` use; a failed pin refuses

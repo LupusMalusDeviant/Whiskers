@@ -31,8 +31,10 @@ Details: [governance.md](governance.md).
 A compose deployment that changes how a service is reachable or what it may do on its host is decided **as such**
 (contract 0006, INV-62): a published port, the host network, `privileged`, added capabilities, host namespaces
 (`pid`/`ipc`/`uts`/`userns_mode`/`cgroup`), devices, unconfined security options, device cgroup rules, a namespace
-shared with another container, and route labels — Tailscale Funnel/serve (DockTail), Traefik routers and
-caddy-docker-proxy (`ExposureLabelPrefixes` in the guardrail policy). This holds for the Compose editor, the app
+shared with another container, route labels — Tailscale Funnel/serve (DockTail), every `traefik.` label except
+`traefik.enable=false`, caddy-docker-proxy (`ExposureLabelPrefixes` in the guardrail policy) — and proxies or tunnels
+without a label (contract 0013): a Traefik with `exposedByDefault` in the deployment or already on the host, cloudflared,
+Tailscale serve/Funnel; one whose configuration cannot be read refuses the plan. This holds for the Compose editor, the app
 templates, MCP `deploy_compose`, `set_container_env`, the container page's `.env` save, compose webhooks and Git deploy.
 
 - **Agents and API keys** need a confirmation for the classes in `ExposureConfirmClasses` (default `public` and

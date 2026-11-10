@@ -145,10 +145,13 @@ Compose deployments are decided on their exposures (published ports, host networ
 0006, INV-62 — details in [docs/features.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/features.md#compose-deployments-and-exposure-changes)). Not caught,
 or caught only after `up`:
 
-- **Traefik `exposedByDefault`**: a Traefik that routes every container without a label publishes services this check
-  never sees.
-- **Tailscale sidecar `serve`/Funnel** configured inside a sidecar's own state or `serve.json`, and **cloudflared**
-  tunnels, publish without a label on the deployed service.
+- **Proxies and tunnels behind an unrecognisable entrypoint**: Traefik, cloudflared and Tailscale are recognised by
+  image name, `argv[0]`, a word of a `sh -c` string or an environment key (contract 0013); a binary renamed or started
+  some other way is not.
+- **Tailscale serve state** is read from configuration (`TS_SERVE_CONFIG`), never from tailscaled at run time; a
+  sidecar with persistent state and no serve configuration counts as public and is decided.
+- **A Traefik on the host** outside the project is recognised by its image name (`traefik`) only (contract 0013,
+  Amendment 2).
 - **The tag race**: putting a tag back after a refused run checks that it still points where this run left it; a tag
   moved by another run in between is left alone (and so not restored).
 - **`container.update` and `autopatch.run`** recreate containers from new images without this check — except a
@@ -169,6 +172,13 @@ the policy snapshots of pinned runs expire at the upgrade. `docker compose pull 
 Compose v2.15 or newer on every managed host. A label key, a port, a network or a privilege field from an `.env`
 variable that is not set now refuses the plan. Redeploys of projects with `build:` services rebuild with `--pull`, and
 Git deploys now pull images as well.
+
+**Upgrade note (contract 0013).** The default exposure label prefix `traefik.` replaces `traefik.http.routers.` and
+`traefik.tcp.routers.` (a literal `traefik.enable=false` is no exposure), which changes every policy's version hash:
+open approvals expire at the upgrade. A Traefik with `exposedByDefault`, cloudflared and Tailscale serve/Funnel in a
+deployment — and a Traefik already running on the host — are decided as exposures; a proxy or tunnel whose configuration
+cannot be read (a variable that is not set, a config file on a named volume, a file larger than 1 MiB) refuses the
+plan. Containers a compose run starts are pinned to their image id.
 
 ## Operating it
 

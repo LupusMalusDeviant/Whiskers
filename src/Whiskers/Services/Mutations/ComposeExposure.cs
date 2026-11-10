@@ -15,6 +15,11 @@ public enum ExposureKind
     Device,
     SecurityOpt,
     DeviceCgroupRule,
+
+    /// <summary>Contract 0013, U3: a proxy or tunnel publishes the service without a label on it (Traefik
+    /// <c>exposedByDefault</c>, cloudflared, Tailscale serve/Funnel). Key = the signal, value <c>true</c> (a host Traefik:
+    /// its container name).</summary>
+    ExternalRoute,
 }
 
 /// <summary>
@@ -73,6 +78,7 @@ public static class ExposureClasses
     {
         ExposureKind.PublishedPort => Published,
         ExposureKind.RouteLabel => LabelClass(key, prefixes),
+        ExposureKind.ExternalRoute => ComposeThirdParty.ClassOf(key),
         _ => Host,
     };
 
@@ -99,6 +105,7 @@ public static class ExposureClasses
         ExposureKind.Device => "device",
         ExposureKind.SecurityOpt => "security option",
         ExposureKind.DeviceCgroupRule => "device cgroup rule",
+        ExposureKind.ExternalRoute => "external route",
         _ => "exposure",
     };
 }
@@ -148,6 +155,7 @@ public static class ComposeExposures
             ExposureKind.Device => $"{p.Service}: device {p.Key}",
             ExposureKind.SecurityOpt => $"{p.Service}: security_opt {p.Key}={p.Value}",
             ExposureKind.DeviceCgroupRule => $"{p.Service}: device_cgroup_rules {p.Key}",
+            ExposureKind.ExternalRoute => $"{p.Service}: external route {p.Key}",
             _ => $"{p.Service}: {p.Kind}",
         };
     }
@@ -328,8 +336,11 @@ public static class ComposeExposures
 
         if (Property(definition, "labels") is { ValueKind: JsonValueKind.Object } labels)
             foreach (var label in labels.EnumerateObject())
-                if (prefixes.Any(p => label.Name.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
-                    Add(ExposureKind.RouteLabel, label.Name, label.Value.ValueKind == JsonValueKind.String ? label.Value.GetString() ?? "" : label.Value.GetRawText(), "label (withheld)");
+            {
+                var value = label.Value.ValueKind == JsonValueKind.String ? label.Value.GetString() ?? "" : label.Value.GetRawText();
+                if (IsRouteLabel(label.Name, value, prefixes))
+                    Add(ExposureKind.RouteLabel, label.Name, value, "label (withheld)");
+            }
         if (Property(definition, "ports") is { ValueKind: JsonValueKind.Array } ports)
             foreach (var port in ports.EnumerateArray())
             {
@@ -412,7 +423,7 @@ public static class ComposeExposures
         if (Property(container, "Config") is { ValueKind: JsonValueKind.Object } config
             && Property(config, "Labels") is { ValueKind: JsonValueKind.Object } labels)
             foreach (var label in labels.EnumerateObject())
-                if (prefixes.Any(p => label.Name.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                if (IsRouteLabel(label.Name, label.Value.GetString() ?? "", prefixes))
                     Add(ExposureKind.RouteLabel, label.Name, label.Value.GetString() ?? "", label.Name, withheldValue: true);
         if (Property(container, "HostConfig") is not { ValueKind: JsonValueKind.Object } host)
             throw new ComposePlanException("A container's configuration cannot be read.");
@@ -580,18 +591,27 @@ public static class ComposeExposures
             {
                 throw new ComposePlanException(unreadable);
             }
-            result[parts[0]] = new ComposeImage(parts[1], labels);
+            result[parts[0]] = new ComposeImage(parts[1], labels) { Config = parts[2] };
         }
         if (images.Any(i => !result.ContainsKey(i)))
             throw new ComposePlanException("The images of the deployment could not be read on the server.");
         return result;
     }
 
+    /// <summary>
+    /// Whether a label is a route label under <paramref name="prefixes"/> (case-insensitive). Contract 0013, D18: a literal
+    /// <c>traefik.enable=false</c> is no exposure, although <c>traefik.</c> is a prefix.
+    /// </summary>
+    public static bool IsRouteLabel(string key, string value, IReadOnlyList<string> prefixes) =>
+        prefixes.Any(p => key.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+        && !(string.Equals(key, "traefik.enable", StringComparison.OrdinalIgnoreCase)
+             && string.Equals(value.Trim(), "false", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>The route labels of an image under <paramref name="prefixes"/>, for each service that uses it: the key is
     /// shown, the value never (it is not written in the compose file).</summary>
     public static IEnumerable<ComposeExposure> FromImageLabels(string service, IReadOnlyDictionary<string, string> labels,
         IReadOnlyList<string> prefixes) =>
-        labels.Where(l => prefixes.Any(p => l.Key.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+        labels.Where(l => IsRouteLabel(l.Key, l.Value, prefixes))
             .Select(l => new ComposeExposure(service, ExposureKind.RouteLabel, l.Key)
             {
                 Key = l.Key, Value = l.Value, ValueWithheld = true, FromImage = true,
@@ -627,7 +647,12 @@ public static class ComposeExposures
 
 /// <summary>A local image as <see cref="ComposeExposures.InspectImagesCommand"/> read it: its id (the pin, contract
 /// 0013, D10 as amended) and its labels.</summary>
-public readonly record struct ComposeImage(string Id, IReadOnlyDictionary<string, string> Labels);
+public readonly record struct ComposeImage(string Id, IReadOnlyDictionary<string, string> Labels)
+{
+    /// <summary>The image's whole <c>Config</c> as JSON (contract 0013, D16: <c>Entrypoint</c>, <c>Cmd</c>, <c>Env</c>,
+    /// <c>WorkingDir</c> for the third-party detection). Holds environment values: never written anywhere.</summary>
+    public string? Config { get; init; }
+}
 
 /// <summary>What daemon.json says about <c>default-cgroupns-mode</c> (review N4): not set, <c>host</c>,
 /// <c>private</c>, or something that cannot be read (not a JSON object, another value).</summary>

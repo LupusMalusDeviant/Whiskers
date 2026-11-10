@@ -605,6 +605,10 @@ public sealed partial class ProtectedResourceResolutionTests
         /// <summary>The local images by reference (contract 0006); one not listed is reported missing.</summary>
         public Dictionary<string, (string Id, string LabelsJson)> Images { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>Contract 0013, D16: the whole image <c>Config</c> by tag (entrypoint, cmd, env), instead of only the labels
+        /// of <see cref="Images"/>.</summary>
+        public Dictionary<string, string> ImageConfigs { get; } = new(StringComparer.Ordinal);
+
         /// <summary>The full <c>docker inspect</c> JSON object per container id (contract 0006); a missing id fails the read.</summary>
         public Dictionary<string, string> Inspect { get; } = new(StringComparer.Ordinal);
 
@@ -649,7 +653,7 @@ public sealed partial class ProtectedResourceResolutionTests
                     pins && PinAnswers.TryGetValue(r, out var answer)
                         ? answer is null ? $"{r}\t{ComposeExposures.MissingImage}\n" : $"{r}\t{answer}\t{{}}\n"
                     : Resolve(r) is { } tag && Images.TryGetValue(tag, out var image)
-                        ? $"{r}\t{image.Id}\t{{\"Labels\":{image.LabelsJson}}}\n"
+                        ? $"{r}\t{image.Id}\t{ImageConfigs.GetValueOrDefault(tag) ?? "{\"Labels\":" + image.LabelsJson + "}"}\n"
                         : $"{r}\t{ComposeExposures.MissingImage}\n"));
                 if (!pins) ImageInspected?.Invoke();
                 return Done(lines);

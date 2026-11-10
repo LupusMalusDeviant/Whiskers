@@ -90,6 +90,10 @@ public sealed record ComposeServicePlan(string Name, string? ContainerName)
     /// <summary>Contract 0006 (review M1): compose's model of the service sets <c>cgroup</c> — then the re-check compares
     /// the container's cgroup namespace even when it equals the daemon's default.</summary>
     public bool DeclaresCgroup { get; init; }
+
+    /// <summary>Contract 0013, D16: what compose's model says about the service for the third-party detection (image,
+    /// entrypoint, command, environment keys, mounts, labels). Holds no secret value (<see cref="ToolSpec.Env"/>).</summary>
+    public ToolSpec? Tool { get; init; }
 }
 
 /// <summary>A container another service shares a namespace with (<c>network_mode</c> / <c>pid</c> / <c>ipc</c> of the
@@ -273,6 +277,10 @@ public sealed record ComposePlan(
 
     /// <summary>The image id each image of the plan had when it was planned (<c>null</c>: missing on the host then).</summary>
     public IReadOnlyDictionary<string, string?> PlannedImages { get; init; } = new Dictionary<string, string?>();
+
+    /// <summary>Contract 0013, D16: the host files the third-party detection read while planning (path → SHA-256, or
+    /// <c>absent</c>); step 4 reads them again and refuses when one changed.</summary>
+    public IReadOnlyDictionary<string, string> ThirdPartyFiles { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>Every exposure of the services compose will start, in a stable order (contract 0006).</summary>
     public IReadOnlyList<ComposeExposure> Exposures() => Services.SelectMany(s => s.Exposures).ToList();

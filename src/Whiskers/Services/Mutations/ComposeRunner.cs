@@ -198,6 +198,11 @@ public sealed class ComposeRunner : IComposeRunner
                 restoreFiles = true;
                 return Refused(run, refusal);
             }
+            if (await CheckThirdPartyAsync(run, active, inspected, ct) is { } thirdPartyRefusal)
+            {
+                restoreFiles = true;
+                return Refused(run, thirdPartyRefusal);
+            }
 
             // Contract 0013, D10–D11: every image up starts is pinned to what step 4 inspected, verified, and written to
             // the pin file. A failed pin refuses like any step-4 refusal (files and tags put back).
@@ -277,6 +282,45 @@ public sealed class ComposeRunner : IComposeRunner
                 MutationScope.Note($"exposure from the image of {service.Name}: label {exposure.Key} (class '{cls}')");
             }
         }
+        return null;
+    }
+
+    /// <summary>
+    /// Contract 0013, D16 at step 4: the proxies and tunnels again, now with the images as up will start them, and the
+    /// configuration files the plan read compared by hash (a changed one refuses). A signal that was not decided is
+    /// handled like an image label (CheckImages): refused under the agent rule set for a class that needs a
+    /// confirmation, otherwise decided, audited and announced. Anything unreadable refuses.
+    /// </summary>
+    private async Task<string?> CheckThirdPartyAsync(Run run, IReadOnlyList<ComposeServicePlan> active,
+        IReadOnlyDictionary<string, ComposeImage?> inspected, CancellationToken ct)
+    {
+        var files = new Dictionary<string, string>(StringComparer.Ordinal);
+        var reader = ComposeThirdParty.Reader(_reader, run.Plan.ServerId);
+        try
+        {
+            foreach (var service in active)
+            {
+                var spec = ComposeThirdParty.Effective(service.Tool ?? new ToolSpec { Image = service.Image! },
+                    inspected[service.Image!]!.Value.Config);
+                foreach (var exposure in await ComposeThirdParty.DetectAsync(service.Name, spec, reader, files, ct))
+                {
+                    if (run.Decided.Contains(ComposeExposures.ComparisonKey(exposure.Identity))) continue;
+                    var cls = ComposeThirdParty.ClassOf(exposure.Key);
+                    if (run.Agent && run.Confirm.Contains(cls))
+                        return $"'{service.Name}' is published by a proxy or tunnel ({exposure.Key}, class '{cls}'), which was " +
+                               "not decided; nothing was started.";
+                    run.Decided.Add(ComposeExposures.ComparisonKey(exposure.Identity));
+                    run.FromImages.Add(exposure);
+                    MutationScope.Note($"exposure from the image of {service.Name}: external route {exposure.Key} (class '{cls}')");
+                }
+            }
+        }
+        catch (ComposePlanException ex)
+        {
+            return ex.Message.Contains("nothing was started", StringComparison.OrdinalIgnoreCase) ? ex.Message : ex.Message + " Nothing was started.";
+        }
+        if (files.FirstOrDefault(f => run.Plan.ThirdPartyFiles.TryGetValue(f.Key, out var planned) && planned != f.Value) is { Key: not null })
+            return "A configuration file of a proxy or tunnel changed since the deployment was planned; nothing was started.";
         return null;
     }
 
@@ -406,6 +450,17 @@ public sealed class ComposeRunner : IComposeRunner
             {
                 Undecided(container, ExposureClasses.Public, "the container could not be checked (counts as class 'public')");
                 continue;
+            }
+            // Contract 0013, D16: a proxy or tunnel the container runs (from its argv, environment and mounts).
+            try
+            {
+                exposures = [.. exposures, .. await ComposeThirdParty.DetectAsync(service, ComposeThirdParty.FromInspect(doc),
+                    ComposeThirdParty.Reader(_reader, plan.ServerId), new Dictionary<string, string>(StringComparer.Ordinal),
+                    CancellationToken.None)];
+            }
+            catch (ComposePlanException)
+            {
+                Undecided(container, ExposureClasses.Public, "a proxy or tunnel of the container could not be read (counts as class 'public')");
             }
             // Contract 0013, D13: the container runs exactly the image step 4 inspected for its service.
             if (!run.ImageIds.TryGetValue(service, out var inspectedId)
