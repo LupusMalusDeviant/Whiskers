@@ -4,6 +4,9 @@ Status: **Accepted** · 8 November 2026 by the maintainer, with D1–D18 as writ
 as recommended (see "Decisions on the open questions" at the end). Extends [contract 0006](0006-exposure-changes.md)
 (with all its amendments), which stays binding wherever this contract does not change it.
 
+**Amendment 1** (10 November 2026, decided by the user on 2026-11-10): D10 pins every image by its **image id**
+(`sha256:…`), never by a repo digest; U2, D9, D11, D12, Q6 and the tests of § 4 follow (see "Amendment 1" at the end).
+
 ## Purpose
 
 INV-62 is ⚠️ for three reasons (`SECURITY_INVARIANTS.md`, `RELEASE_GATE.md`, README "remaining risks"):
@@ -23,8 +26,8 @@ This contract closes all three, so that INV-62 can become ✅.
   builds the same `DeploymentRequest`) go through the same `ComposePlan` / `ComposeRunner` as every other deployment:
   they write a real compose project; plan, exposure decision, confirmation and re-check apply. Real compose projects
   replace single containers.
-- **U2 — Digest pinning.** After the inspection, Whiskers pins every image `up` starts to `image@sha256:<digest>`
-  (through an override file), so exactly the inspected image starts.
+- **U2 — Digest pinning.** After the inspection, Whiskers pins every image `up` starts to ~~`image@sha256:<digest>`~~
+  its image id `sha256:<id>` (Amendment 1) through an override file, so exactly the inspected image starts.
 - **U3 — Third-party exposure.** The plan detects Traefik with `exposedByDefault`, cloudflared, and Tailscale
   `serve`/Funnel. They count as class `public` and need confirmation; anything unreadable refuses the plan (fail closed).
 
@@ -135,23 +138,22 @@ gateway's event through `IToolAuditLog`, once per attempt, also for a refusal be
 YAML is passed as `yaml` (payload) where an argument carries it.
 
 **D9 — What MCP returns.** `deploy_app` returns: `App '<name>' deployed as compose project '<project>' on <server>`,
-the containers (name and short id), the image and the digest it was pinned to (D10), the published ports as decided.
+the containers (name and short id), the image and the image id it was pinned to (D10, Amendment 1), the published ports as decided.
 A refusal returns `Deployment refused: <reason>`, violations `Deployment failed: <violations>` (as `deploy_compose`).
 The old `Container ID:` line goes; the CHANGELOG names the output change.
 
 ## 2. Digest pinning (U2)
 
-**D10 — Where digests come from.** Step 4 extends `InspectImagesCommand` to print `.Id`, `.RepoDigests` and the labels
-of each image, local only. For each active service the pin is:
+**D10 — The pin is the image id** (Amendment 1, 10 November 2026; replaces the repo-digest rule). Step 4's
+`InspectImagesCommand` prints `.Id` and the labels (read from the whole `Config`) of each image, local only. For each
+active service the pin is the inspected image id itself, `sha256:<id>` — for a pulled, a built, a `docker load`ed and a
+locally tagged image alike. Repo digests are not read.
 
-1. a `RepoDigests` entry whose repository equals the service image's repository after normalisation
-   (`nginx` = `docker.io/library/nginx`), written `<repository>@sha256:<digest>`;
-2. otherwise (a built image, a `docker load`ed or locally tagged image, no matching repository) the image id itself,
-   `sha256:<id>`.
+Consequence: a pinned container's image reference (`Config.Image`, the Image column of the container list) is the id
+`sha256:…`; the name the project uses is kept in the label `whiskers.image.ref` (D11).
 
-**Multi-arch.** The repo digest is what the store recorded at the pull (the index digest on the classic store, the id
-under the containerd store); it is accepted only after verification (D11), so it can never name another image than the
-one inspected.
+**Multi-arch.** No special case any more: the id is the image the store holds locally for the platform it pulled, and
+D11 verifies it.
 
 **D11 — Verify, write, use.** Between step 4 and step 5:
 
@@ -162,11 +164,11 @@ one inspected.
   `build` never use it.
 
 **A failed pin refuses** (before `up`, files and tags put back as for any step-4 refusal): an inspect that fails, an id
-that differs, a digest that is not `sha256:` + 64 hex, a pin file that cannot be written.
+that differs, an id that is not `sha256:` + 64 hex, a pin file that cannot be written.
 
 **D12 — The pin file is Whiskers' own.** It stays after the run (compose records it in
 `com.docker.compose.project.config_files`) and is rewritten by every run. The planner drops a file of that name from
-every file list it finds (directory or labels), so a redeploy plans and pulls the tags, never yesterday's digests. A
+every file list it finds (directory or labels), so a redeploy plans and pulls the tags, never yesterday's pins. A
 Git deploy checkout gets `.whiskers/` in `.git/info/exclude`.
 
 **D13 — Re-check of the image.** The re-check after `up` compares each created container's `Image` (id) with the id
@@ -243,12 +245,13 @@ The changed default changes every policy's `VersionHash` (open approvals expire 
   port refused (no silent drop); a redeploy recreates; one gateway event per attempt; the output of D9.
 - `DeployPageComposeTests` (bUnit): form and compose tab call `ComposeImpact.DeployAsync` with `app.deploy` /
   `compose.deploy`; ownership refusals of D3; legacy refusal of D15; "Check plan" lists exposures.
-- `ComposePinTests`: repo-digest pin, id pin for a built and a loaded image, repository normalisation, multi-arch digest
-  accepted only when it verifies, every refusal of D11, the pin file only in `up`/`stop`, the planner drops it, the
+- `ComposePinTests`: the id pin for a pulled, a built and a loaded image (Amendment 1: never a repo digest), every refusal
+  of D11, the pin file only in `up`/`stop`, the planner drops it, the
   re-check flags a different image id (D13), stop under the agent rule set.
 - `ComposePinIntegrationTests` (Docker suite, `docker.txt`): on a real daemon with the minimum Compose (v2.15), a project
   with a pulled and a built service starts exactly the inspected ids under `up --pull never --no-build` with the pin
-  file; a re-tag between step 4 and `up` changes nothing.
+  file; a re-tag between step 4 and `up` changes nothing — both services still start the inspected images, also on
+  Docker 29's containerd image store (Amendment 1).
 - `ThirdPartyExposureTests`: each tool by image, by argv, by `sh -c`, by env key; every signal row; every source of the
   Traefik rule (CLI, env, YAML, TOML) incl. the default `true`; host Traefik; every "unreadable" case refuses; the
   by-design cases count `public`; `traefik.enable=false` exempts; no value in reason, audit or notification; step 4
@@ -325,10 +328,25 @@ with it. The message names the container and the ways out: remove it on the cont
   is updated by redeploying its project (D14). **Known follow-up:** a contract after 1.0 lets `container.update` and
   AutoPatch run through `ComposeRunner`, so pinned containers can be updated in place again.
 - **Q5 — decided: Traefik label prefix `traefik.`**, except a literal `traefik.enable=false` (D18).
-- **Q6 — decided: a build-only image pins to its image id** (`sha256:<id>`). The Whiskers tag
+- **Q6 — decided: a build-only image pins to its image id** (`sha256:<id>`); since Amendment 1 every image does. The Whiskers tag
   `whiskers-pin/<project>-<service>:<id12>` is used only if Compose rejects the id, and is still verified by id.
 - **Q7 — decided: a Tailscale sidecar without `TS_SERVE_CONFIG` counts as `public` and is confirmed**
   (`tailscale.state`).
+
+## Amendment 1 — pin by image id (10 November 2026, decided by the user on 2026-11-10)
+
+**Why.** Under Docker 29 with the containerd image store (the default of a fresh install) a reference
+`<repository>@sha256:<digest>` resolves only through an image record of that repository that still points to the
+digest. A tag moved after step 4 takes that record along: `up --pull never` then fails with "No such image" instead of
+starting the inspected image. The image id resolves as long as the image exists, whatever its tags.
+
+**Changed.** D10: the pin is always the inspected image id; repo digests are no longer read (`InspectImagesCommand`
+prints the id and the `Config` only). U2, D9 (the MCP output names the image id), D11 (refusal for an id that is not
+`sha256:` + 64 hex), D12 (wording), Q6 and the § 4 tests follow: `ComposePinTests` loses the repo-digest, normalisation
+and multi-arch cases; `ComposePinIntegrationTests` proves that with both tags moved after the inspection both services
+start the inspected images, on the classic and on the containerd store. The Image column of a pinned container shows
+the id; the project's image name stays in `whiskers.image.ref`, which the update check (D14) reads. Q6's fallback tag
+stays a fallback, used only if Compose rejects an id.
 
 ## Open questions (as drafted; answered above)
 
