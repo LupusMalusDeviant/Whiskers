@@ -139,7 +139,7 @@ else if (!Vault.IsEnabled)
         try
         {
             await Mutations.RunAsync("registry.delete", new { section = "registries", registryId = reg.Id, name = reg.Name },
-                (ResolvedRecord rt, CancellationToken _) => Registries.DeleteRegistryAsync(reg.Id));
+                (ResolvedRecord rt, CancellationToken _) => Registries.DeleteRegistryAsync(rt.RecordId));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         Snackbar.Add(L["RegistriesPanel_Snackbar_Deleted"].Value, Severity.Success);

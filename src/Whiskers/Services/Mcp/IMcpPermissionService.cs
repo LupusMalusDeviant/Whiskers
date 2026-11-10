@@ -17,7 +17,7 @@ public interface IMcpPermissionService
     [Whiskers.Services.Mutations.MutatingOperation("mcp.key_create")]
     Task<McpApiKeyConfig> AddApiKeyAsync(string name, string permissionLevel);
     [Whiskers.Services.Mutations.MutatingOperation("mcp.key_delete")]
-    Task RemoveApiKeyAsync(string id);
+    Task RemoveApiKeyAsync([Whiskers.Services.Mutations.MutationTarget] string id);
     [Whiskers.Services.Mutations.MutatingOperation("config.mcp_permissions")]
     Task SetToolEnabledAsync(string toolName, bool enabled);
 }

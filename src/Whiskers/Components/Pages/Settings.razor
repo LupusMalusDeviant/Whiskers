@@ -1307,7 +1307,7 @@ else
         try
         {
             await Mutations.RunAsync("mcp.key_delete", new { section = "mcp-api-keys", keyId = id, name },
-                (ResolvedRecord rt, CancellationToken _) => McpPermissionService.RemoveApiKeyAsync(id));
+                (ResolvedRecord rt, CancellationToken _) => McpPermissionService.RemoveApiKeyAsync(rt.RecordId));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
         ReloadApiKeysKeepingPendingToggles();

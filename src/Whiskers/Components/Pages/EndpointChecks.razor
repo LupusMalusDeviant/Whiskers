@@ -340,7 +340,7 @@ else
         _busy = true;
         try
         {
-            await Mutations.RunAsync("endpointcheck.delete", arguments, (ResolvedRecord rt, CancellationToken ct) => Store.DeleteAsync(c.Id, ct));
+            await Mutations.RunAsync("endpointcheck.delete", arguments, (ResolvedRecord rt, CancellationToken ct) => Store.DeleteAsync(rt.RecordId, ct));
             Snackbar.Add(L["Checks_Snackbar_Deleted"].Value, Severity.Success);
             Reload();
         }

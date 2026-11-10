@@ -15,7 +15,7 @@ public interface IRegistryConfigService
     Task<RegistryConfig> SaveRegistryAsync(RegistryConfig registry, string? credential);
 
     [Whiskers.Services.Mutations.MutatingOperation("registry.delete")]
-    Task DeleteRegistryAsync(string registryId);
+    Task DeleteRegistryAsync([Whiskers.Services.Mutations.MutationTarget] string registryId);
 
     /// <summary>Resolves (username, password, serverAddress) for the image reference's registry,
     /// or null when no configured registry matches / no credential is stored.</summary>

@@ -77,7 +77,7 @@ public interface IMtlsClientCredentialStore
     /// <summary>Removes a server's directory when the server is removed. The parameter is deliberately not named
     /// <c>serverId</c>: the record is already gone when this runs, so it could not be bound to a registered server.</summary>
     [MutatingOperation("server.remove")]
-    Task RemoveAsync(string hostId, CancellationToken ct);
+    Task RemoveAsync([MutationTarget] string hostId, CancellationToken ct);
 
     /// <summary>The in-process lock of one host, shared by every certificate step on it (server-certificate renewal,
     /// client rollout) and by server removal, which refuses while it is held.</summary>

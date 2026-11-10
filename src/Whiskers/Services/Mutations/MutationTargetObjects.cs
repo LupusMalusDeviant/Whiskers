@@ -375,10 +375,15 @@ public sealed partial class MutationTargetResolver
     }
 
     /// <summary>A record that lives under a settings section: the recorded target stays the section (as it was
-    /// decided and audited before), the record's own id is <see cref="ResolvedRecord.RecordId"/>.</summary>
+    /// decided and audited before), the record's own id is <see cref="ResolvedRecord.RecordId"/> — and an alias of the
+    /// target, so an operation that names the record by its id is bound to it (D4 b).</summary>
     private static TargetResolution Section(MutationTarget whiskersWide, string section, string store, string recordId,
         string? name) =>
-        Done(whiskersWide with { Id = NullIfEmpty(whiskersWide.Id) ?? section, Name = whiskersWide.Name ?? name },
+        Done(whiskersWide with
+            {
+                Id = NullIfEmpty(whiskersWide.Id) ?? section, Name = whiskersWide.Name ?? name,
+                Aliases = [.. whiskersWide.Aliases, recordId],
+            },
             t => new ResolvedRecord(Token, t, Hash(store, recordId), store, recordId));
 
     /// <summary>An endpoint check (contract 0004) on the server it is bound to: the recorded target stays the server;
@@ -400,7 +405,12 @@ public sealed partial class MutationTargetResolver
         // An existing check is saved, deleted or run where it is bound — a call naming another server is refused.
         if (capability.Id != "endpointcheck.save" && check.ServerId != onServer.ServerId)
             return Refuse($"The endpoint check '{check.Name}' is bound to '{check.ServerId}', not to '{onServer.ServerId}'.");
-        return server with { Build = t => new ResolvedRecord(Token, t, Hash(check.Id, check.ServerId), "endpoint-check", check.Id) };
+        // The check's id is an alias of the decided target: a delete names it (D4 b).
+        return server with
+        {
+            Target = onServer with { Aliases = [.. onServer.Aliases, check.Id] },
+            Build = t => new ResolvedRecord(Token, t, Hash(check.Id, check.ServerId), "endpoint-check", check.Id),
+        };
     }
 }
 

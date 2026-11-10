@@ -7,5 +7,5 @@ public interface IAutoPatchRunner
     /// <returns>The outcome plus the tail of the host-side log, for the report.</returns>
     [Whiskers.Services.Mutations.MutatingOperation("container.update")]
     Task<(AutoPatchOutcome Outcome, string LogTail)> PatchAsync(
-        string serverId, string containerName, bool dryRun, CancellationToken ct = default);
+        string serverId, [Whiskers.Services.Mutations.MutationTarget] string containerName, bool dryRun, CancellationToken ct = default);
 }
