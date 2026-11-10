@@ -258,7 +258,7 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
         // policy store is fail-closed (D4) — nothing is written; one refusal names the kill switch's rule.
         if (Guardrails.Current.KillSwitchBlocks(KillSwitchExemptions.FederatedBindingAtSignIn))
         {
-            await _audit.TryLogAsync(account, "web", AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, account, account,
+            await _audit.TryLogAsync(AuditPrincipals.Person(account), AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, account, account,
                 $"provider={claims.Provider}; issuer={claims.Issuer}; fingerprint={AccessEntries.Fingerprint(claims.Issuer, claims.Subject)}; " +
                 $"refused: blocked while the kill switch is on; rule={KillSwitchExemptions.RuleId}", success: false);
             _logger?.LogWarning("A {Provider} sign-in binding was refused: blocked while the kill switch is on", claims.Provider);
@@ -283,8 +283,8 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
         var binding = NewBinding(handle, claims.Provider, claims.Issuer, claims.Subject, IdentityBindingMethods.VerifiedEmail,
             "sign-in");
         // The record first: a binding the trail does not show is not written.
-        if (!await _audit.TryLogAsync(handle, "web", AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, handle, handle,
-                BoundDetails(binding), success: true))
+        if (!await _audit.TryLogAsync(AuditPrincipals.Person(handle, credentialId: PrincipalCredentials.Binding(binding.Id)),
+                AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, handle, handle, BoundDetails(binding), success: true))
         {
             _logger?.LogError("An identity binding was refused: its audit row could not be written");
             return IdentityBindingResult.Refused(IdentityBindingErrors.AuditUnavailable);
@@ -295,7 +295,8 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
         next.Pending.RemoveAll(p => Same(p.Account, handle) && p.Issuer == binding.Issuer);
         if (!await PersistAsync(next, lease))
         {
-            await _audit.TryLogAsync(handle, "web", AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, handle, handle,
+            await _audit.TryLogAsync(AuditPrincipals.Person(handle, credentialId: PrincipalCredentials.Binding(binding.Id)),
+                AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, handle, handle,
                 $"binding={binding.Id}; the binding could not be saved; nothing was changed", success: false);
             return IdentityBindingResult.Refused(IdentityBindingErrors.StoreUnavailable);
         }
@@ -331,7 +332,7 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
             next.Pending = next.Pending.OrderByDescending(p => p.RequestedUtc).Take(MaxPending).ToList();
         if (!await PersistAsync(next, lease)) return IdentityBindingResult.Refused(IdentityBindingErrors.StoreUnavailable);
 
-        await _audit.TryLogAsync(handle, "web", AuthAuditLog.IdentityPendingAction, AuthAuditLog.Target, handle, handle,
+        await _audit.TryLogAsync(AuditPrincipals.Person(handle), AuthAuditLog.IdentityPendingAction, AuthAuditLog.Target, handle, handle,
             $"request={request.Id}; provider={request.Provider}; issuer={request.Issuer}; " +
             $"fingerprint={AccessEntries.Fingerprint(request.Issuer, request.Subject)}; reason={reason}; " +
             $"email_verified={(request.EmailVerifiedAsserted ? "true" : "false")}", success: false);
@@ -454,8 +455,8 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
         {
             var binding = NewBinding(handle, request.Provider, request.Issuer, request.Subject, method, boundBy);
             bindingId = binding.Id;
-            if (auditFirst is not null && !await _audit.TryLogAsync(auditFirst, "system", AuthAuditLog.IdentityBoundAction,
-                    AuthAuditLog.Target, handle, handle, BoundDetails(binding), success: true))
+            if (auditFirst is not null && !await _audit.TryLogAsync(AuditPrincipals.HostCli("confirm-identity-binding", auditFirst),
+                    AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, handle, handle, BoundDetails(binding), success: true))
             {
                 _logger?.LogError("A host confirmation of an identity binding was refused: its audit row could not be written");
                 return IdentityBindingResult.Refused(IdentityBindingErrors.AuditUnavailable);
@@ -467,8 +468,8 @@ public sealed class IdentityBindingStore : IIdentityBindingStore, IInitializable
         if (!await PersistAsync(next, lease))
         {
             if (auditFirst is not null)
-                await _audit.TryLogAsync(auditFirst, "system", AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, handle,
-                    handle, $"binding={bindingId}; the binding could not be saved; nothing was changed", success: false);
+                await _audit.TryLogAsync(AuditPrincipals.HostCli("confirm-identity-binding", auditFirst),
+                    AuthAuditLog.IdentityBoundAction, AuthAuditLog.Target, handle, handle, $"binding={bindingId}; the binding could not be saved; nothing was changed", success: false);
             return IdentityBindingResult.Refused(IdentityBindingErrors.StoreUnavailable);
         }
         _logger?.LogInformation("Identity binding {Binding} was confirmed ({Method})", bindingId, method);

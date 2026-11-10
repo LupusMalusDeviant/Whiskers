@@ -116,7 +116,7 @@ public static class LocalAccountRecoveryCli
             var account = user.Email ?? email;
 
             // The record first: a credential handed out on the host that the trail does not show is not handed out.
-            if (!await audit.TryLogAsync(Actor, "system", IssuedAction, AuthAuditLog.Target, account, account,
+            if (!await audit.TryLogAsync(AuditPrincipals.HostCli("recover-local-account", Actor), IssuedAction, AuthAuditLog.Target, account, account,
                     "a recovery code was issued on the host; the password was removed and every session of the account ended"
                     + (forcedPast is null ? "" : $"; forced (--force): redeeming is blocked by {forcedPast}"),
                     success: true))
@@ -129,7 +129,7 @@ public static class LocalAccountRecoveryCli
             var (result, code, expires) = await RecoveryCodes.IssueAsync(users, db, user, time.GetUtcNow(), ct);
             if (!result.Succeeded || code is null)
             {
-                await audit.TryLogAsync(Actor, "system", IssuedAction, AuthAuditLog.Target, account, account,
+                await audit.TryLogAsync(AuditPrincipals.HostCli("recover-local-account", Actor), IssuedAction, AuthAuditLog.Target, account, account,
                     "the recovery code could not be saved; nothing was changed", success: false);
                 await output.WriteLineAsync("The recovery code could not be saved (the account changed at the same time). Nothing was changed; run the command again.");
                 return 1;
@@ -148,7 +148,7 @@ public static class LocalAccountRecoveryCli
         {
             // The row written before announced a code that was not issued: its outcome follows (best effort).
             if (announced is not null)
-                await audit.TryLogAsync(Actor, "system", IssuedAction, AuthAuditLog.Target, announced, announced,
+                await audit.TryLogAsync(AuditPrincipals.HostCli("recover-local-account", Actor), IssuedAction, AuthAuditLog.Target, announced, announced,
                     $"the recovery code could not be saved ({ex.GetType().Name}); nothing was changed", success: false);
             // The type only: a message may carry a connection string.
             await output.WriteLineAsync($"The local account store could not be used ({ex.GetType().Name}). Nothing was changed.");

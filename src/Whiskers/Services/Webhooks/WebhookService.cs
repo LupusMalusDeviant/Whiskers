@@ -1514,7 +1514,8 @@ public class WebhookService : IWebhookService
         before.Enabled = wasEnabled;
         var changes = string.Join("; ", Whiskers.Services.Mutations.ConfigChange.Diff(from, to)
             .Select(c => $"{c.Path}: {c.Before} → {c.After}"));
-        await audit.TryLogAsync("system", "system", SuspendAction, "webhook", before.WebhookId, before.Name,
+        await audit.TryLogAsync(Whiskers.Services.AuditLog.AuditPrincipals.System("authority-check"), SuspendAction, "webhook",
+            before.WebhookId, before.Name,
             $"operation={operationId}; {Whiskers.Services.Mutations.ConfigChange.VersionAction} {from.Version} → {to.Version}" +
             (changes.Length > 0 ? $"; {changes}" : ""), success: true);
     }

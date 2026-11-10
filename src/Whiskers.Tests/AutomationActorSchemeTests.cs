@@ -10,7 +10,7 @@ namespace Whiskers.Tests;
 /// </summary>
 public sealed class AutomationActorSchemeTests
 {
-    public static TheoryData<string, string, string, string?, string?> Factories() => new()
+    public static TheoryData<string, string, string, string, string?> Factories() => new()
     {
         { "task", AutomationActor.ForTask("t1", "nightly", "user:a@example.com", "agent:s1").RunnerId, "task:t1", "Scheduled task 'nightly'", "agent:s1" },
         { "check", AutomationActor.ForCheck("c1", "web", "user:a@example.com").RunnerId, "check:c1", "Endpoint check 'web'", "user:a@example.com" },

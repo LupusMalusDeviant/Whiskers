@@ -71,6 +71,9 @@ public interface IApprovalStore
 
 public sealed class ApprovalStore : IApprovalStore, IDisposable
 {
+    /// <summary>Contract 0014 (D6): who expires and cancels approvals — Whiskers itself, by its component id.</summary>
+    public static readonly string ExpirySystem = Whiskers.Services.Mutations.PrincipalIds.System("approval-expiry");
+
     /// <summary>How long an approval stays usable after it was approved.</summary>
     public static readonly TimeSpan GrantLifetime = TimeSpan.FromMinutes(10);
 
@@ -348,7 +351,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         foreach (var entry in affected)
         {
             if (Interlocked.CompareExchange(ref entry.Resolved, 1, 0) != 0) continue;
-            await PersistAsync(entry, ApprovalStatus.Cancelled, "system");
+            await PersistAsync(entry, ApprovalStatus.Cancelled, ExpirySystem);
             await SafeResolve(entry, false);
         }
         Changed?.Invoke();
@@ -366,7 +369,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
             if (approval.Status == ApprovalStatus.Pending && (approval.Interactive || approval.Requesters.Count == 0))
             {
                 Interlocked.Exchange(ref entry.Resolved, 1);
-                await PersistAsync(entry, ApprovalStatus.Cancelled, "system", ct);
+                await PersistAsync(entry, ApprovalStatus.Cancelled, ExpirySystem, ct);
             }
             else if (approval.Status != ApprovalStatus.Pending)
                 Interlocked.Exchange(ref entry.Resolved, 1);
@@ -386,7 +389,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
             // Expired here at once, so nothing reads it as pending while the record is written.
             entry.Approval.Status = ApprovalStatus.Expired;
             entry.Approval.ResolvedAt = now;
-            entry.Approval.ResolvedBy = "system";
+            entry.Approval.ResolvedBy = ExpirySystem;
             _ = ExpireAsync(entry);
         }
         Changed?.Invoke();
@@ -394,7 +397,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
 
     private async Task ExpireAsync(Entry entry)
     {
-        await PersistAsync(entry, ApprovalStatus.Expired, "system");
+        await PersistAsync(entry, ApprovalStatus.Expired, ExpirySystem);
         await SafeResolve(entry, false); // unblock the waiting session; deny on timeout
     }
 

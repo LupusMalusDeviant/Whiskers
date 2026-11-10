@@ -925,6 +925,10 @@ public sealed class AuditChain : IAuditChain
             var record = new AuditLogEntity
             {
                 Timestamp = _time.GetUtcNow().UtcDateTime, Actor = "system", ActorType = "system",
+                // INV-01 (contract 0014, D6): Whiskers itself, by its component id.
+                PrincipalKind = nameof(Whiskers.Services.Mutations.MutationPrincipalKind.System),
+                PrincipalId = Whiskers.Services.Mutations.PrincipalIds.System("audit-retention"),
+                PrincipalSessionId = Whiskers.Services.Mutations.ProcessIdentity.Current,
                 Action = RetentionAction, TargetType = "audit", TargetId = "audit-log", TargetName = "Audit log",
                 Details = string.Create(CultureInfo.InvariantCulture,
                     $"Removed {count} audit row(s) through id {through} and {history} MCP call history row(s), older than {cutoffUtc:O} (retention {retentionDays} days)."),
