@@ -23,8 +23,10 @@ public sealed partial class AuditLoggingTests
         // The write failed, but the fact survives at Error with the full entry (not a bare message).
         var err = Assert.Single(logger.Entries, e => e.Level == LogLevel.Error);
         Assert.NotNull(err.Exception);
-        foreach (var expected in new[] { "alice@example.com", "web", "vault.delete", "vault", "api-key", "prod-1" })
+        // The actor by its pseudonym, never its address (CodeQL triage 2026-11, contract 0003).
+        foreach (var expected in new[] { Whiskers.Utils.LogSafe.Account("alice@example.com"), "web", "vault.delete", "vault", "api-key", "prod-1" })
             Assert.Contains(expected, err.Message);
+        Assert.DoesNotContain("alice@example.com", err.Message);
     }
 
     [Fact]

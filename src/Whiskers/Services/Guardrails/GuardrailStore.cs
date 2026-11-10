@@ -421,7 +421,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             await AfterSavedAsync();
             RecordChange(before, next);
             _logger?.LogWarning("Guardrails changed by {Editor} ({Count} presets, active={Active}).",
-                editor.DisplayName, next.Presets.Count, next.ActivePreset);
+                Whiskers.Utils.LogSafe.Value(editor.DisplayName), next.Presets.Count, next.ActivePreset);
         }
         finally
         {
@@ -508,7 +508,7 @@ public sealed class GuardrailStore : IGuardrailStore, IInitializable
             _state = new State(next, null);
             await AfterSavedAsync();
             RecordChange(before, next);
-            _logger?.LogWarning("Kill switch switched off by {Editor} (preset {Preset}).", editor.DisplayName, active.Name);
+            _logger?.LogWarning("Kill switch switched off by {Editor} (preset {Preset}).", Whiskers.Utils.LogSafe.Value(editor.DisplayName), active.Name);
         }
         finally
         {

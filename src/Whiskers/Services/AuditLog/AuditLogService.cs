@@ -91,8 +91,11 @@ public class AuditLogService : IAuditLogService
                 _logger.LogInformation("Audit: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} (success={Success})",
                     OneLine(actorType), AccountPlaceholder, OneLine(action), OneLine(targetType), AccountPlaceholder, success);
             else
+                // Any other row: each value on one line, an address in it (a person's actor, an account as target) as
+                // its pseudonym (CodeQL triage 2026-11) — the row keeps it.
                 _logger.LogInformation("Audit: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} (success={Success})",
-                    actorType, actor, action, targetType, targetName, success);
+                    LogSafe.Value(actorType), LogSafe.Value(actor), LogSafe.Value(action), LogSafe.Value(targetType),
+                    LogSafe.Value(targetName), success);
             return true;
         }
         catch (Exception ex) when (IsAccountRow(action))
@@ -116,8 +119,9 @@ public class AuditLogService : IAuditLogService
             _logger.LogError(ex,
                 "AUDIT WRITE FAILED: [{ActorType}] {Actor} → {Action} on {TargetType}/{TargetName} " +
                 "(target={TargetId}, server={ServerId}, success={Success}, details={Details})",
-                actorType, actor, action, targetType,
-                SinkRedaction.Text(targetName), SinkRedaction.Text(targetId), serverId, success, SinkRedaction.Json(details));
+                LogSafe.Value(actorType), LogSafe.Value(actor), LogSafe.Value(action), LogSafe.Value(targetType),
+                LogSafe.Value(SinkRedaction.Text(targetName)), LogSafe.Value(SinkRedaction.Text(targetId)), LogSafe.Value(serverId),
+                success, LogSafe.Value(SinkRedaction.Json(details)));
             _recovery?.LegacyWriteFailed();
             return false;
         }
@@ -143,8 +147,7 @@ public class AuditLogService : IAuditLogService
 
     /// <summary>A value as one log line: CR, LF and the other line breaks become a space, so no value can forge a
     /// line of its own.</summary>
-    public static string OneLine(string? value) => (value ?? "")
-        .Replace("\r", " ").Replace("\n", " ").Replace("\u0085", " ").Replace("\u2028", " ").Replace("\u2029", " ");
+    public static string OneLine(string? value) => LogSafe.OneLine(value);
 
     public async Task<List<AuditLogEntity>> GetRecentAsync(int count = 100, int offset = 0,
                                                             string? actionFilter = null,

@@ -26,25 +26,49 @@ public class DatabaseService : IDatabaseService
     // Run a command in a container via `docker exec` on the HOST shell plane (nsenter / SSH) instead
     // of the Docker API's exec endpoint. The mTLS socket-proxy blocks container exec (EXEC=0), but the
     // host's own docker.sock has full access — so this works uniformly on Local, SSH and TCP+mTLS.
+    // CodeQL #23–#26: the password of the database never stands in the command. The client reads it from its environment
+    // (PasswordVariable), which `docker exec -e NAME` fills from the host shell's environment, which the executor fills
+    // beside the command (HostCommandSecrets) — so the command that is logged, audited or shown in a process list on the
+    // host or in the container names the variable only, whatever the password looks like.
     private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainer(
-        string containerId, string[] cmd, string? serverId = null, TimeSpan? timeout = null)
+        string containerId, string[] cmd, string? serverId = null, TimeSpan? timeout = null,
+        DatabaseType dbType = DatabaseType.None, DatabaseCredentials? creds = null)
     {
+        var secrets = PasswordVariable(dbType) is { } name && !string.IsNullOrEmpty(creds?.Password)
+            ? [new KeyValuePair<string, string>(name, creds.Password)]
+            : Array.Empty<KeyValuePair<string, string>>();
         // The container is an operand of docker (R1-42): checked, and after "--" so it is never read as an option.
-        var dockerCmd = "docker exec -- " + ShellUtils.Quote(CommandOperands.RequireContainerRef(containerId)) + " " +
+        var dockerCmd = "docker exec " + string.Concat(secrets.Select(s => $"-e {s.Key} ")) + "-- " +
+                        ShellUtils.Quote(CommandOperands.RequireContainerRef(containerId)) + " " +
                         string.Join(' ', cmd.Select(ShellUtils.Quote));
+        using var delivered = HostCommandSecrets.Provide(secrets);
         var r = await _hostExec.ExecuteAsync(OmittedServer.For<IDatabaseService>(serverId), dockerCmd, timeout ?? TimeSpan.FromSeconds(30));
         return (r.Output, r.Error, r.ExitCode);
     }
 
+    /// <summary>The environment variable the client of <paramref name="dbType"/> reads its password from: PostgreSQL
+    /// <c>PGPASSWORD</c> (psql, pg_dump), MySQL/MariaDB <c>MYSQL_PWD</c> (mysql, mysqldump), Redis <c>REDISCLI_AUTH</c>,
+    /// Neo4j <c>NEO4J_PASSWORD</c> (cypher-shell). MongoDB: none — mongosh reads a password only from argv, a URI or a
+    /// prompt, and Whiskers does not authenticate to MongoDB (it never passed the password), so nothing is sent.</summary>
+    internal static string? PasswordVariable(DatabaseType dbType) => dbType switch
+    {
+        DatabaseType.PostgreSQL => "PGPASSWORD",
+        DatabaseType.MySQL => "MYSQL_PWD",
+        DatabaseType.Redis => "REDISCLI_AUTH",
+        DatabaseType.Neo4j => "NEO4J_PASSWORD",
+        _ => null,
+    };
+
     public async Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        Withhold(creds);
         var sw = Stopwatch.StartNew();
         // INV-19: the database the query runs in is an operand of the client (psql -d, mysql -D, mongosh's
         // positional database); an empty one keeps the client's default.
         if (!string.IsNullOrEmpty(creds.Database) && dbType is DatabaseType.PostgreSQL or DatabaseType.MySQL or DatabaseType.MongoDB)
             CheckDatabaseName(creds.Database, dbType);
         var cmd = BuildQueryCommand(dbType, creds, query);
-        var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromSeconds(30));
+        var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromSeconds(30), dbType, creds);
         sw.Stop();
 
         if (exitCode != 0)
@@ -55,19 +79,21 @@ public class DatabaseService : IDatabaseService
 
     public async Task<List<string>> GetDatabasesAsync(string containerId, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        Withhold(creds);
         var cmd = dbType switch
         {
             DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname" },
             DatabaseType.MySQL => BuildMysqlCmd(creds, "-e", "SHOW DATABASES"),
             DatabaseType.MongoDB => new[] { "mongosh", "--quiet", "--eval", "db.adminCommand('listDatabases').databases.forEach(d => print(d.name))" },
             DatabaseType.Redis => new[] { "redis-cli", "CONFIG", "GET", "databases" },
-            DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, "-p", creds.Password, "SHOW DATABASES YIELD name RETURN name" },
+            // The password from NEO4J_PASSWORD (ExecInContainer), never "-p <password>" in argv.
+            DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, "SHOW DATABASES YIELD name RETURN name" },
             _ => Array.Empty<string>()
         };
 
         if (cmd.Length == 0) return new();
 
-        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId);
+        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds);
         if (exitCode != 0) return new();
 
         // Redis has no named databases — only numbered logical DBs. Translate the configured count into
@@ -102,6 +128,7 @@ public class DatabaseService : IDatabaseService
 
     public async Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        Withhold(creds);
         // INV-19: a read listing must not become arbitrary execution — the name is an operand of the client
         // (mongosh would read "--eval=…" as an option and run it), so it is checked before it reaches one.
         CheckDatabaseName(database, dbType);
@@ -116,7 +143,7 @@ public class DatabaseService : IDatabaseService
 
         if (cmd.Length == 0) return new();
 
-        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId);
+        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds);
         if (exitCode != 0) return new();
 
         var tables = new List<TableInfo>();
@@ -139,6 +166,7 @@ public class DatabaseService : IDatabaseService
 
     public async Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
     {
+        Withhold(creds);
         // INV-19: as in GetTablesAsync, the database name is a client operand of a read.
         CheckDatabaseName(database, dbType);
         // Escape the table identifier before embedding it in the query strings: '' for the
@@ -155,7 +183,7 @@ public class DatabaseService : IDatabaseService
 
         if (cmd.Length == 0) return new();
 
-        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId);
+        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds);
         if (exitCode != 0) return new();
 
         var columns = new List<ColumnInfo>();
@@ -180,6 +208,7 @@ public class DatabaseService : IDatabaseService
 
     public async Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null, string? containerName = null)
     {
+        Withhold(creds);
         // INV-19: the name is an operand of pg_dump / mysqldump / mongodump (a leading '-' would be an option such as
         // --file=) and part of the dump's file name, which docker cp writes as root on the host (no '/', so it stays in the backup directory).
         CheckDatabaseName(database, dbType);
@@ -188,14 +217,13 @@ public class DatabaseService : IDatabaseService
         var fileName = DbDumpFiles.NewFileName(DbDumpFiles.ContainerKey(containerName, containerId), database, DateTime.UtcNow);
         var backupPath = $"/tmp/{fileName}";
 
-        // Interpolated values run through `sh -c`, so every one is POSIX-single-quoted (Sq) to prevent
-        // shell breakage/injection from passwords or DB names containing spaces or metacharacters.
-        // Passwords are passed via env vars (PGPASSWORD/MYSQL_PWD) instead of argv so they never appear
-        // in the container's process list.
+        // Interpolated values run through `sh -c`, so every one is POSIX-single-quoted (Sq) to prevent shell breakage or
+        // injection from names containing spaces or metacharacters. The password is not among them: pg_dump and mysqldump
+        // read it from PGPASSWORD / MYSQL_PWD, which ExecInContainer passes beside the command (CodeQL #23–#26).
         var cmd = dbType switch
         {
-            DatabaseType.PostgreSQL => new[] { "sh", "-c", $"PGPASSWORD={Sq(creds.Password)} pg_dump -U {Sq(creds.User)} {Sq(database)} > {Sq(backupPath)}" },
-            DatabaseType.MySQL => new[] { "sh", "-c", $"MYSQL_PWD={Sq(creds.Password)} mysqldump -u {Sq(creds.User)} {Sq(database)} > {Sq(backupPath)}" },
+            DatabaseType.PostgreSQL => new[] { "sh", "-c", $"pg_dump -U {Sq(creds.User)} {Sq(database)} > {Sq(backupPath)}" },
+            DatabaseType.MySQL => new[] { "sh", "-c", $"mysqldump -u {Sq(creds.User)} {Sq(database)} > {Sq(backupPath)}" },
             DatabaseType.MongoDB => new[] { "sh", "-c", $"mongodump --db {Sq(database)} --archive={Sq(backupPath + ".gz")} --gzip" },
             _ => Array.Empty<string>()
         };
@@ -203,7 +231,7 @@ public class DatabaseService : IDatabaseService
         if (cmd.Length == 0)
             return (false, "", 0, $"Backup is not supported for {dbType}.");
 
-        var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromMinutes(5));
+        var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromMinutes(5), dbType, creds);
 
         if (exitCode != 0)
             return (false, "", 0, stderr.Trim());
@@ -238,7 +266,7 @@ public class DatabaseService : IDatabaseService
         DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", creds.Database, "-e", query),
         DatabaseType.MongoDB => new[] { "mongosh", "--quiet", creds.Database, "--eval", query },
         DatabaseType.Redis => new[] { "redis-cli" }.Concat(query.Split(' ')).ToArray(),
-        DatabaseType.Neo4j => new[] { "sh", "-c", $"NEO4J_PASSWORD={Sq(creds.Password)} cypher-shell -u {Sq(creds.User)} {Sq(query)}" },
+        DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, query },
         _ => new[] { "echo", "Unsupported database type" }
     };
 
@@ -248,22 +276,23 @@ public class DatabaseService : IDatabaseService
     public static string CheckDatabaseName(string? database, DatabaseType dbType) =>
         CommandOperands.RequireDatabaseName(database, mongo: dbType == DatabaseType.MongoDB);
 
+    /// <summary>The database password as the commands carry it — as given, single-quoted once (<c>sh -c</c>) and once
+    /// more (an operand of <c>docker exec</c>) — is a known secret from now on (<see cref="KnownSecrets"/>), so a command
+    /// the executor logs or a sink stores shows <c>***</c> for it, also where it contains a space or a quote that the
+    /// <c>PGPASSWORD=…</c> patterns stop at (CodeQL #23–#26). Values under 8 characters are left to those patterns.</summary>
+    internal static void Withhold(DatabaseCredentials creds)
+    {
+        if (string.IsNullOrEmpty(creds.Password)) return;
+        var once = creds.Password.Replace("'", "'\\''");
+        KnownSecrets.Register(creds.Password, once, once.Replace("'", "'\\''"));
+    }
+
     /// <summary>POSIX single-quote escaping for values interpolated into a <c>sh -c</c> string.</summary>
     private static string Sq(string? s) => "'" + (s ?? "").Replace("'", "'\\''") + "'";
 
-    private static string[] BuildMysqlCmd(DatabaseCredentials creds, params string[] extraArgs)
-    {
-        // Pass the password via MYSQL_PWD (env), never -p<pw> in argv, so it can't appear in the container's
-        // process list. The whole invocation runs through `sh -c`; every value is Sq-quoted (mirrors
-        // BackupDatabaseAsync).
-        var sb = new System.Text.StringBuilder();
-        if (!string.IsNullOrEmpty(creds.Password))
-            sb.Append($"MYSQL_PWD={Sq(creds.Password)} ");
-        sb.Append($"mysql -u {Sq(creds.User)}");
-        foreach (var arg in extraArgs)
-            sb.Append(' ').Append(Sq(arg));
-        return new[] { "sh", "-c", sb.ToString() };
-    }
+    // The password from MYSQL_PWD (ExecInContainer), never -p<pw> in argv; plain argv elements, no shell.
+    private static string[] BuildMysqlCmd(DatabaseCredentials creds, params string[] extraArgs) =>
+        new[] { "mysql", "-u", creds.User }.Concat(extraArgs).ToArray();
 
     private static QueryResult ParseQueryResult(string output, DatabaseType dbType, double durationMs)
     {

@@ -238,7 +238,13 @@ public static class WhiskersPipelineExtensions
                 ctx.Response.Cookies.Append(
                     CookieRequestCultureProvider.DefaultCookieName,
                     CookieRequestCultureProvider.MakeCookieValue(new RequestCulture(culture)),
-                    new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true, Path = "/" });
+                    // Secure follows the scheme like the session cookie; only the server reads it (CodeQL #86, approved
+                    // 2026-11-10).
+                    new CookieOptions
+                    {
+                        Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true, Path = "/",
+                        Secure = ctx.Request.IsHttps, SameSite = SameSiteMode.Lax, HttpOnly = true,
+                    });
             }
             // R1-50: a redirect that is not local goes home instead of throwing (500); only a local path is followed.
             var target = !string.IsNullOrEmpty(redirect) && IsLocalPath(redirect) ? redirect : "~/";

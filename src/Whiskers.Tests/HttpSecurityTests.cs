@@ -114,6 +114,71 @@ public sealed class HttpSecurityTests
             Assert.Equal(expected, response.Headers.Location!.OriginalString);
         });
 
+    // CodeQL #86 (approved 2026-11-10): the language cookie is HttpOnly and Lax always, Secure over https.
+    [Theory]
+    [InlineData("http://localhost", false)]
+    [InlineData("https://localhost", true)]
+    public async Task The_language_cookie_is_http_only_lax_and_secure_over_https(string baseAddress, bool secure) =>
+        await BootAsync(async (factory, _) =>
+        {
+            using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false, BaseAddress = new Uri(baseAddress),
+            });
+
+            var response = await client.GetAsync("/set-culture?culture=de&redirect=%2F");
+
+            var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"),
+                v => v.StartsWith(".AspNetCore.Culture=", StringComparison.Ordinal));
+            Assert.True(HasAttribute(cookie, "httponly"));
+            Assert.Contains("samesite=lax", cookie, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(secure, HasAttribute(cookie, "secure"));
+        });
+
+    // CodeQL #60/#61 (approved 2026-11-10): with RequireHttpsMetadata=false the OIDC nonce and correlation cookies follow
+    // the request's scheme — Secure over https, without over plain http (the LAN case keeps working).
+    [Theory]
+    [InlineData("http://localhost", false)]
+    [InlineData("https://localhost", true)]
+    public async Task Oidc_nonce_and_correlation_cookies_follow_the_scheme_without_https_metadata(string baseAddress, bool secure) =>
+        await BootAsync(async (factory, _) =>
+        {
+            // A fixed IdP configuration: the challenge needs no discovery document (no network).
+            await using var oidc = factory.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
+                services.PostConfigure<Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectOptions>("oidc", o =>
+                {
+                    o.Configuration = new Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration
+                    {
+                        AuthorizationEndpoint = "http://idp.local.test/authorize",
+                        Issuer = "http://idp.local.test",
+                    };
+                    o.ConfigurationManager = new Microsoft.IdentityModel.Protocols.StaticConfigurationManager<
+                        Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration>(o.Configuration);
+                })));
+            using var client = oidc.CreateClient(new WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false, BaseAddress = new Uri(baseAddress),
+            });
+
+            var response = await client.GetAsync("/login-oidc");
+
+            Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+            var cookies = response.Headers.GetValues("Set-Cookie").ToList();
+            var correlation = Assert.Single(cookies, v => v.StartsWith(".AspNetCore.Correlation.", StringComparison.Ordinal));
+            var nonce = Assert.Single(cookies, v => v.StartsWith(".AspNetCore.OpenIdConnect.Nonce.", StringComparison.Ordinal));
+            Assert.Equal(secure, HasAttribute(correlation, "secure"));
+            Assert.Equal(secure, HasAttribute(nonce, "secure"));
+        },
+        new KeyValuePair<string, string?>("Oidc:Enabled", "true"),
+        new KeyValuePair<string, string?>("Oidc:Authority", "http://idp.local.test"),
+        new KeyValuePair<string, string?>("Oidc:ClientId", "whiskers"),
+        new KeyValuePair<string, string?>("Oidc:ClientSecret", "test-client-secret"),
+        new KeyValuePair<string, string?>("Oidc:RequireHttpsMetadata", "false"));
+
+    /// <summary>Whether a Set-Cookie value carries the attribute (not the value): "; secure".</summary>
+    private static bool HasAttribute(string cookie, string attribute) =>
+        cookie.Split(';').Skip(1).Any(a => a.Trim().Equals(attribute, StringComparison.OrdinalIgnoreCase));
+
     [Theory]
     [InlineData("192.168.1.50")]   // a LAN client: trusted as a proxy before R1-50
     [InlineData("::ffff:10.0.0.5")]   // the same over an IPv4-mapped IPv6 socket

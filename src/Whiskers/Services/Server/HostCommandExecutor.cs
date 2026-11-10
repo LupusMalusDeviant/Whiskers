@@ -75,6 +75,8 @@ public class HostCommandExecutor : IHostCommandExecutor
         //   else  → SSH, if an SSH host is configured (legacy / bootstrap).
         return server.ConnectionType switch
         {
+            // CodeQL #23–#26: the secrets a command names (HostCommandSecrets) travel beside it, never in its text — the
+            // local and the SSH transport deliver them here, the mTLS helper container gets them as its environment.
             ConnectionType.Local => await ExecuteLocalAsync(command, effectiveTimeout, ct, maxOutputChars),
             // The mTLS path reads the output through the Docker API, not through ReadCappedAsync, so the cap
             // does not apply there — it is neither enforced nor needed, and nothing is truncated.
@@ -96,7 +98,9 @@ public class HostCommandExecutor : IHostCommandExecutor
 
         _logger.LogDebug("Executing local command via nsenter: {Command}", SecretRedactor.Redact(command));
 
-        return await RunProcessAsync("nsenter", args, timeout, ct, maxOutputChars: maxOutputChars);
+        // nsenter and the host shell inherit the environment: a secret the command names reaches it there, not in argv.
+        return await RunProcessAsync("nsenter", args, timeout, ct, environment: HostCommandSecrets.Current,
+            maxOutputChars: maxOutputChars);
     }
 
     /// <summary>The <c>nsenter</c> arguments of a local host command: PID 1's namespaces, then <c>sh -c</c> with the
@@ -173,6 +177,11 @@ public class HostCommandExecutor : IHostCommandExecutor
     private async Task<CommandResult> RunSshAsync(Models.ServerConfig server, string? keyPath, string command, bool usePassword,
         TimeSpan timeout, CancellationToken ct, int? maxOutputChars)
     {
+        // The remote shell reads each secret the command names from standard input before it runs it (ssh forwards
+        // no environment by default): the command text carries the names only.
+        var secrets = HostCommandSecrets.Current;
+        if (secrets.Count > 0) command = HostCommandSecrets.SshPrefix(secrets) + command;
+        var input = secrets.Count > 0 ? HostCommandSecrets.StandardInput(secrets) : null;
         var args = BuildSshArguments(server, keyPath, command);
 
         try { Directory.CreateDirectory(ControlDir); } catch { /* best effort; ssh falls back to no mux */ }
@@ -183,9 +192,9 @@ public class HostCommandExecutor : IHostCommandExecutor
         if (usePassword)
             // sshpass -e reads the password from SSHPASS — never on the command line / process list.
             return await RunProcessAsync("sshpass", new[] { "-e", "ssh" }.Concat(args), timeout, ct,
-                env: ("SSHPASS", server.SshPassword!), maxOutputChars: maxOutputChars);
+                environment: [new("SSHPASS", server.SshPassword!)], standardInput: input, maxOutputChars: maxOutputChars);
 
-        return await RunProcessAsync("ssh", args, timeout, ct, maxOutputChars: maxOutputChars);
+        return await RunProcessAsync("ssh", args, timeout, ct, standardInput: input, maxOutputChars: maxOutputChars);
     }
 
     /// <summary>The ssh argument list for one command (R1-42): every option first, then <c>--</c>, then the checked
@@ -236,7 +245,8 @@ public class HostCommandExecutor : IHostCommandExecutor
     /// <summary>Runs a process and collects its output under <paramref name="timeout"/> (internal for
     /// <c>HostShellDeadlineTests</c>, which drives it with a real process).</summary>
     internal async Task<CommandResult> RunProcessAsync(string fileName, IEnumerable<string> arguments, TimeSpan timeout, CancellationToken ct,
-        (string Key, string Value)? env = null, int? maxOutputChars = null)
+        IReadOnlyList<KeyValuePair<string, string>>? environment = null, int? maxOutputChars = null,
+        string? standardInput = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -244,13 +254,14 @@ public class HostCommandExecutor : IHostCommandExecutor
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            RedirectStandardInput = standardInput is not null,
         };
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
         Whiskers.Utils.SecretEnvironment.Scrub(psi);   // R1-43: no VPN key in a child's environment
-        if (env is { } e)
-            psi.Environment[e.Key] = e.Value;
+        foreach (var (key, value) in environment ?? [])
+            psi.Environment[key] = value;
 
         // R1-57: the deadline is set up before the process starts, so a timeout it refuses never leaves a started
         // process behind that is reported as "failed to start".
@@ -269,6 +280,13 @@ public class HostCommandExecutor : IHostCommandExecutor
         {
             process.Start();
             started = true;
+            if (standardInput is not null)
+            {
+                // A few lines (the secrets a command names, HostCommandSecrets): far below a pipe's buffer, so the write
+                // does not wait for the command to read. Closed at once, so a read beyond them ends instead of waiting.
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), cts.Token);
+                process.StandardInput.Close();
+            }
 
             var cap = maxOutputChars is > 0 ? maxOutputChars.Value : MaxOutputChars;
             stdoutTask = ReadCappedAsync(OutputReader(process.StandardOutput), cap, cts.Token);

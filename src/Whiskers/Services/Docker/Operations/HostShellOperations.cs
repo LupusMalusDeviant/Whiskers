@@ -185,6 +185,10 @@ internal sealed class HostShellOperations
             {
                 Image = HostShellImage,
                 Cmd = new List<string> { "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", command },
+                // CodeQL #23–#26: a secret the command names (HostCommandSecrets) is the helper's environment, which nsenter
+                // and the host shell inherit — never part of the command. (The value stands in the helper's configuration on that
+                // host until the helper is removed below; it came from a container of the same host.)
+                Env = Whiskers.Services.Server.HostCommandSecrets.Current.Select(s => $"{s.Key}={s.Value}").ToList(),
                 Labels = new Dictionary<string, string>
                 {
                     [HostShellLabel] = "1",

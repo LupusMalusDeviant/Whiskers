@@ -426,7 +426,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             // Unknown, not lost: the run was refused (PrincipalOf), the item is not suspended for a store that failed.
             _logger.LogWarning(ex, "The owner {OwnerId} of automation {Runner} could not be resolved; its authority is " +
                 "unknown, it is not suspended",
-                actor.OwnerId, actor.RunnerId);
+                Whiskers.Utils.LogSafe.Value(actor.OwnerId), actor.RunnerId);
             return null;
         }
         // Unverified is refused but not suspended: it runs again once the owner signs in (or an admin takes over).
@@ -470,7 +470,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
             {
                 // Logged with its cause (review round 14): a fault in the owner lookup must not read as a refusal.
                 _logger.LogError(ex, "The owner {OwnerId} of automation {Runner} could not be resolved; the run is refused",
-                    actor.OwnerId, actor.RunnerId);
+                    Whiskers.Utils.LogSafe.Value(actor.OwnerId), actor.RunnerId);
                 // The owner's authority cannot be read (INV-45 review round 13): the run is still one event — the
                 // gateway refuses this principal for every capability (McpPermissionLevels.None, never normalised to
                 // read) — and the audit row says why and names the stored owner, itself without authority. Nothing is
