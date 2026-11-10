@@ -41,6 +41,7 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         public const string Auth = "auth";
         public const string SelfExposure = "self-exposure";
         public const string Vault = "vault";
+        public const string GuardrailPolicy = "guardrail-policy";
         public const string CloudDns = "cloud-dns";
         public const string NotifyAi = "notify-ai";
         public const string StoredEncrypted = "stored-encrypted";
@@ -155,6 +156,10 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 _ => T("Readiness_vault_Missing"),
             },
             null, null));
+
+        // 2a) Contract 0010 (INV-25): the guardrail policy is enforced as stored, and the database records that it exists.
+        if (_guardrails is not null)
+            checks.Add(GuardrailPolicyCheck(_guardrails, _text));
 
         // 2b) R1-29: the cloud API keys and the DNS token as they are actually stored, not as the vault switch suggests.
         var plaintextCloud = _servers?.GetServers().Count(s => s.HasPlaintextCloudKey()) ?? 0;
@@ -302,6 +307,27 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         }
 
         return checks;
+    }
+
+    /// <summary>
+    /// Contract 0010 D3/D7: fail-closed with its reason, a record that could not be written, or both fine. The store's
+    /// reason and problem are data and stay untranslated (contract 0011, D3).
+    /// </summary>
+    internal static ReadinessCheck GuardrailPolicyCheck(Whiskers.Services.Guardrails.IGuardrailStore guardrails,
+        IStringLocalizer<SharedResource>? text = null)
+    {
+        text ??= DefaultText;
+        string T(string key, params object[] args) => text[key, args].Value;
+        var title = T("Readiness_guardrailPolicy_Title");
+        if (guardrails.LoadError is { } reason)
+            return new ReadinessCheck(Ids.GuardrailPolicy, title, false, T("Readiness_guardrailPolicy_FailClosed", reason),
+                "/guardrails", T("Readiness_guardrailPolicy_Link"));
+        if (guardrails.MarkerProblem is { } problem)
+            return new ReadinessCheck(Ids.GuardrailPolicy, title, false, T("Readiness_guardrailPolicy_MarkerProblem", problem),
+                "/guardrails", T("Readiness_guardrailPolicy_Link"));
+        return guardrails.MarkerRecorded
+            ? new ReadinessCheck(Ids.GuardrailPolicy, title, true, T("Readiness_guardrailPolicy_Ok"), null, null)
+            : new ReadinessCheck(Ids.GuardrailPolicy, title, false, T("Readiness_guardrailPolicy_Unconfirmed"), null, null);
     }
 
     private static readonly TimeSpan SelfExposureReadTimeout = TimeSpan.FromSeconds(10);

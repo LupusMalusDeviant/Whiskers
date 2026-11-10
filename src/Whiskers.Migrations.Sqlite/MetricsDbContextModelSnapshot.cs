@@ -15,7 +15,7 @@ namespace Whiskers.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
 
             modelBuilder.Entity("Whiskers.Models.ActionOutcomeEntity", b =>
                 {
@@ -518,6 +518,22 @@ namespace Whiskers.Migrations
                     b.HasIndex("CheckId", "AtUtc");
 
                     b.ToTable("EndpointCheckResults");
+                });
+
+            modelBuilder.Entity("Whiskers.Models.InstanceMarkerEntity", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Detail")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("InstanceMarkers", (string)null);
                 });
 
             modelBuilder.Entity("Whiskers.Models.LogAlertRuleEntity", b =>

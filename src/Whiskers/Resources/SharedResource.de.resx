@@ -222,7 +222,7 @@
     <value>Agent</value>
   </data>
   <data name="Nav_Guardrails" xml:space="preserve">
-    <value>Guardrails</value>
+    <value>Guardrails-Seite</value>
   </data>
   <data name="Nav_Approvals" xml:space="preserve">
     <value>Freigaben</value>
@@ -4940,8 +4940,11 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_Snackbar_NoOwner" xml:space="preserve">
     <value>Eine geplante Aufgabe braucht einen Besitzer: Melde dich mit einem Konto an, das eine E-Mail-Adresse hat.</value>
   </data>
+  <data name="GuardrailsView_FailClosed_Reason" xml:space="preserve">
+    <value>Grund: {0}</value>
+  </data>
   <data name="GuardrailsView_FailClosed_Alert" xml:space="preserve">
-    <value>guardrails.json konnte nicht gelesen werden oder ist ungültig. Jede Änderung wird abgelehnt (auch das Speichern dieser Seite), Agenten und MCP-Clients bekommen kein Werkzeug. Reparieren Sie guardrails.json auf dem Host oder entfernen Sie sie zusammen mit guardrails.json.bak, und starten Sie Whiskers neu; ohne beide Dateien wird die sichere Standardkonfiguration angelegt. Die bisherige Datei liegt daneben als guardrails.json.unreadable-&lt;Zeitstempel&gt;.</value>
+    <value>Die Guardrail-Policy ist fail-closed: guardrails.json ist unlesbar oder ungültig, oder sie fehlt, obwohl diese Instanz eine Guardrail-Policy hatte. Jede Änderung wird abgelehnt (auch das Speichern dieser Seite), Agenten und MCP-Clients bekommen kein Werkzeug. Der Weg zurück führt über den Host: eine gültige guardrails.json ins Datenverzeichnis legen (reparieren oder aus einem Self-Backup wiederherstellen; eine unlesbare Datei liegt daneben als guardrails.json.unreadable-&lt;Zeitstempel&gt;) oder, wenn guardrails.json und guardrails.json.bak beide fehlen, --reset-guardrails ausführen. Danach Whiskers neu starten.</value>
   </data>
   <data name="GuardrailsView_FailClosedPreset_Name" xml:space="preserve">
     <value>Gesperrt (Konfiguration unlesbar)</value>
@@ -5988,10 +5991,10 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Endpunkt-Check gelöscht.</value>
   </data>
   <data name="KillSwitch_Blocked_Message" xml:space="preserve">
-    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar oder fehlt sie, eine gültige guardrails.json auf dem Host zurücklegen (oder dort --reset-guardrails ausführen, wenn guardrails.json und guardrails.json.bak beide fehlen; oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
   </data>
   <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
-    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar oder fehlt sie, eine gültige guardrails.json auf dem Host zurücklegen (oder dort --reset-guardrails ausführen, wenn guardrails.json und guardrails.json.bak beide fehlen; oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
   </data>
   <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
     <value>Preset „{0}“: „{1}“ ist keine sperrbare Ausnahme des Kill-Switch. Nichts wurde gespeichert.</value>
@@ -6024,7 +6027,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Kommandozeilen-Werkzeuge auf dem Host</value>
   </data>
   <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
-    <value>Brauchen eine Shell im Container (root-gleich). Solange Wiederherstellungscodes gesperrt sind, verlangt die Wiederherstellungs-CLI --force: stattdessen guardrails.json auf dem Host reparieren.</value>
+    <value>Brauchen eine Shell im Container (root-gleich). Solange Wiederherstellungscodes gesperrt sind, verlangt die Wiederherstellungs-CLI --force: stattdessen eine gültige guardrails.json auf dem Host zurücklegen (oder --reset-guardrails ausführen, wenn sie und guardrails.json.bak beide fehlen).</value>
   </data>
   <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
     <value>Eigenes Passwort ändern</value>
@@ -6073,6 +6076,24 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Readiness_vault_Missing" xml:space="preserve">
     <value>Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Schlüssel setzen und sicher ablegen.</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_Title" xml:space="preserve">
+    <value>Guardrail-Policy geladen und vermerkt</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_FailClosed" xml:space="preserve">
+    <value>Die Guardrails sind fail-closed: jede Änderung wird abgelehnt, Agenten und MCP-Clients bekommen kein Werkzeug. Grund: {0}</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_MarkerProblem" xml:space="preserve">
+    <value>Die Policy gilt, aber der Vermerk in der Datenbank, dass es eine Guardrail-Policy gibt, fehlt: {0}. Ohne ihn würde das Löschen von guardrails.json und guardrails.json.bak wie ein Erststart aussehen. Er wird beim nächsten Speichern der Guardrails oder beim nächsten Start erneut geschrieben.</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_Ok" xml:space="preserve">
+    <value>Die Guardrail-Policy gilt, und die Datenbank vermerkt, dass es sie gibt: fehlen guardrails.json und guardrails.json.bak später, bleibt Whiskers fail-closed, statt die Standard-Policy neu anzulegen.</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_Unconfirmed" xml:space="preserve">
+    <value>Die Guardrail-Policy gilt, der Vermerk in der Datenbank ist aber noch nicht bestätigt (der Start ist noch nicht abgeschlossen).</value>
+  </data>
+  <data name="Readiness_guardrailPolicy_Link" xml:space="preserve">
+    <value>Guardrails-Seite</value>
   </data>
   <data name="Readiness_cloudDns_Title" xml:space="preserve">
     <value>Cloud- und DNS-Zugangsdaten im Vault</value>

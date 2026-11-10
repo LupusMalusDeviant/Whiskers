@@ -175,7 +175,9 @@ public static class LocalAccountRecoveryCli
     /// <summary>The real way back while redeeming is blocked (contract 0009 A1.2).</summary>
     private static async Task WriteWayBackAsync(TextWriter output)
     {
-        await output.WriteLineAsync("The way back: on the host, repair or remove guardrails.json in the data directory, or turn off");
-        await output.WriteLineAsync("ReadOnlyMode or the recovery_code block in it, then restart Whiskers.");
+        // Contract 0010 D6/D7: removing guardrails.json is no way back any more (with a recorded policy it stays fail-closed).
+        await output.WriteLineAsync("The way back: on the host, put a valid guardrails.json into the data directory (repair it, or restore it");
+        await output.WriteLineAsync("from a self-backup), or run --reset-guardrails when guardrails.json and guardrails.json.bak are both");
+        await output.WriteLineAsync("missing; or turn off ReadOnlyMode or the recovery_code block in guardrails.json. Then restart Whiskers.");
     }
 }

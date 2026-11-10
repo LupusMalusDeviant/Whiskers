@@ -13,6 +13,31 @@ All notable changes to Whiskers are documented here. The format follows
   fingerprints and the tests that pin them, and the release gate requires those tests. SECURITY.md and the security
   architecture now say what onboarding does ("bound to the mesh address") instead of "mesh-bound by design".
   Readiness titles quoted in the docs are the English ones.
+- **A deleted guardrail policy is no first start any more (INV-25, contract 0010).** The database now records that a
+  guardrail policy has existed (new table `InstanceMarkers`, additive migration for SQLite and PostgreSQL; written when
+  the safe default is first created, at every start with a policy file and after saves; never changed or removed). With
+  that record — or with policy decisions on record — missing both `guardrails.json` and `guardrails.json.bak` keeps the
+  guardrails fail-closed instead of creating the weaker default, and so does a record that cannot be read. The start
+  decides this only once the database schema is current; a start that fails earlier never leaves the default behind.
+  **Way back** (host only): put a valid `guardrails.json` back (repaired or restored) and restart, or, with both files
+  missing, run `dotnet Whiskers.dll --reset-guardrails` in the container: it writes the safe default with the kill
+  switch **on** (audited as `guardrails.reset_on_host`), and after the restart an Admin switches the kill switch off on
+  the Guardrails page. Removing the policy files is no longer described as a reset anywhere. The Guardrails page and a
+  new readiness line ("Guardrail policy loaded and recorded", German "Guardrail-Policy geladen und vermerkt") show the reason; after upgrading, check that line once.
+  `--migrate-to-postgres` copies the record and accepts sources of older releases without the table.
+- **Fix: images without labels read as missing under Docker 29.** The image inspection of compose plans and runs
+  asked for `.Config.Labels`, which Docker 29 refuses on an image without labels; such an image counted as not on the
+  host. The labels are now read from the whole `Config`.
+- **MCP SDK 2.4 with sessions bound to their key (contract 0016).** `ModelContextProtocol.AspNetCore` 1.4.1 → 2.4.0.
+  The SDK now defaults to stateless; Whiskers keeps stateful sessions (`initialize` → `Mcp-Session-Id`, GET/DELETE
+  `/mcp`) as before. Each session is bound to the API key that opened it: the key's principal carries the subject
+  `mcp-key:<key record id>` (never the secret, its hash or its hint), and a request with another key on that session
+  is refused with `403` (on 1.4.1 key principals had no subject, so any valid key could send on another key's session
+  if it knew the session id). A key whose record id is empty or shared with another key (only possible by editing the
+  permission file by hand) is refused with `401`. Clients on the `2026-07-28` protocol revision are asked to fall back
+  to the `initialize` handshake. **Behaviour change:** a federated (Google/OIDC) browser session can no longer call
+  `/mcp` directly — the SDK refuses principals without a subject; use an API key.
+
 - **One audit event per mutation attempt, proved per path (INV-45).** An attempt begins when the handler asks the
   gateway for the capability; a page returning before that changes nothing (user decision 2026-11-07). A path-matrix
   test reads the rows of `PRODUCT_CONTRACT.md` §7 and proves each against the real audit log for every outcome it can

@@ -144,6 +144,31 @@ public class ReadinessLocalizationTests
             ["Rabenhof", "Handmade", "bad id", "whiskers-client-rabenhof-g1", MtlsCertificateService.SharedClientCommonName]);
         yield return new("mTLS: unfinished switch, unreadable hosts", MtlsUnfinished,
             ["Rabenhof", "Zirkuswagen", "Burgcloud", "whiskers-client-zirkuswagen-g1", "whiskers-client-burgcloud-g1"]);
+        yield return new("guardrails: fail-closed, record missing, unconfirmed, recorded", Guardrails,
+            ["guardrails.json: unexpected token", "table missing"]);
+    }
+
+    /// <summary>Contract 0010's line in each of its four states (fail-closed, record not written, unconfirmed, recorded).</summary>
+    private static Task<IReadOnlyList<ReadinessCheck>> Guardrails(IStringLocalizer<SharedResource> text)
+        => Task.FromResult<IReadOnlyList<ReadinessCheck>>(
+        [
+            ProductionReadinessService.GuardrailPolicyCheck(new GuardrailState(loadError: "guardrails.json: unexpected token"), text),
+            ProductionReadinessService.GuardrailPolicyCheck(new GuardrailState(markerProblem: "table missing"), text),
+            ProductionReadinessService.GuardrailPolicyCheck(new GuardrailState(), text),
+            ProductionReadinessService.GuardrailPolicyCheck(new GuardrailState(markerRecorded: true), text),
+        ]);
+
+    private sealed class GuardrailState(string? loadError = null, string? markerProblem = null, bool markerRecorded = false)
+        : Whiskers.Services.Guardrails.IGuardrailStore
+    {
+        public GuardrailPolicy Current { get; } = new();
+        public GuardrailConfig Config { get; } = new();
+        string? Whiskers.Services.Guardrails.IGuardrailStore.LoadError => loadError;
+        string? Whiskers.Services.Guardrails.IGuardrailStore.MarkerProblem => markerProblem;
+        bool Whiskers.Services.Guardrails.IGuardrailStore.MarkerRecorded => markerRecorded;
+        public Task SaveConfigAsync(GuardrailConfig config, Whiskers.Models.Agent.AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SaveAsync(GuardrailPolicy p, Whiskers.Models.Agent.AgentPrincipal editor, CancellationToken ct = default) => Task.CompletedTask;
+        public event Action? Changed { add { } remove { } }
     }
 
     public static TheoryData<string> ScenarioNames()

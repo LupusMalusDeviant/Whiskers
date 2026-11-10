@@ -119,6 +119,9 @@ public class MetricsDbContext : DbContext
     /// <summary>The execution claim of every mutation, by operation id, never deleted (R1-18, INV-39).</summary>
     public DbSet<OperationRecordEntity> Operations => Set<OperationRecordEntity>();
 
+    /// <summary>Contract 0010: facts this instance records once and never forgets ("a guardrail policy has existed").</summary>
+    public DbSet<InstanceMarkerEntity> InstanceMarkers => Set<InstanceMarkerEntity>();
+
     public MetricsDbContext(DbContextOptions<MetricsDbContext> options) : base(options) { }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -313,6 +316,12 @@ public class MetricsDbContext : DbContext
             e.HasIndex(x => x.ParentId);
             e.HasIndex(x => x.State);
             e.HasIndex(x => x.ClaimedAt);
+        });
+
+        modelBuilder.Entity<InstanceMarkerEntity>(e =>
+        {
+            e.ToTable("InstanceMarkers");
+            e.HasKey(x => x.Key);
         });
 
         modelBuilder.Entity<WebhookEntity>(e =>
