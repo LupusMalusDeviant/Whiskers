@@ -1,6 +1,7 @@
 # Contract 0011 — Self-report claims (INV-56)
 
-Status: **Draft** · 8 November 2026, for the maintainer's acceptance (D1–D12, questions Q1–Q5).
+Status: **Accepted** · 10 November 2026 by the maintainer, with the decisions D1–D12 as written and Q1–Q5 decided as
+recommended (see *Decisions on the open questions*).
 
 ## Purpose
 
@@ -218,23 +219,24 @@ internet by design" (SECURITY.md, `security-architecture.md`) — see Q4.
 ## Plan triage
 
 - [Claude-prüfbar] D1–D12, all tests, gate and document changes.
-- [braucht Nutzer] acceptance of this contract and Q1–Q5; a read of the German readiness wording in the UI.
+- [braucht Nutzer] acceptance of this contract and Q1–Q5 (done, 10 November 2026); a read of the German readiness
+  wording in the UI.
 
-## Open questions for the maintainer
+## Decisions on the open questions (maintainer, 10 November 2026)
 
-- **Q1 — Governed scope.** (a) the four files of D8 *(recommended: they hold the security claims a reader relies on;
-  the rest repeats them)*; (b) also `container-hardening.md`, `configuration.md` and `installation.md` now (about three
-  times the markers; INV-56 ✅ later).
-- **Q2 — Fingerprint claim-free blocks too?** (a) yes *(recommended: otherwise a claim added to an "advice" paragraph
-  passes unnoticed)*; (b) only claim blocks are fingerprinted; claim-free blocks need just the marker.
-- **Q3 — How claim tests become required.** (a) the gate reads `CLAIMS.md` (one new source in R8) *(recommended:
-  one rule, no duplicate list)*; (b) INV-56's test column names every claim test class (no gate change, but a long
-  cell and two lists to keep in step).
-- **Q4 — "Mesh-bound by design."** (a) reword to what onboarding does (the Docker proxy and `node_exporter` bind to the
-  mesh address), and register it against the onboarding artifact *(recommended)*; (b) mark it `limit`/claim-free
-  (depends on the operator's network, so it is not provable here).
-- **Q5 — Global resx parity (D7) in this pull request.** (a) yes *(recommended: both files have 1992 keys today, so it is
-  cheap and covers the other UI hints mechanically)*; (b) only `Readiness_*`, the global check later.
+All five as recommended:
+
+- **Q1 — Governed scope: (a).** Only the four files of D8. `container-hardening.md`, `configuration.md` and
+  `installation.md` stay ungoverned for now; adding one later is one line in `ClaimRules.GovernedFiles` plus its markers.
+- **Q2 — Fingerprints: (a).** Claim-free blocks are fingerprinted too, so a claim added to an "advice" paragraph fails
+  until the register row is re-confirmed.
+- **Q3 — Required claim tests: (a).** The gate reads `docs/v1/CLAIMS.md` as one more source in R8; INV-56's test column
+  does not repeat the claim tests.
+- **Q4 — "Mesh-bound by design": (a).** The sentence in SECURITY.md and `security-architecture.md` is reworded to what
+  onboarding does (the Docker proxy and `node_exporter` bind to the host's mesh address) and registered against the
+  onboarding artifact.
+- **Q5 — Global resx parity: (a).** D7 (all keys of both resx files, keys and placeholders) is part of this pull
+  request.
 
 ## Not in scope
 
