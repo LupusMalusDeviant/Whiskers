@@ -572,16 +572,25 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         if (factory is null)
             return Refuse("No workload runtime is available to resolve the target.");
 
-        // Live, not the label the page rendered: start / stop scale and restart rolls the pod's CURRENT controller.
-        var pod = await factory.GetForServer(server.Id).GetWorkloadAsync(target.Id, ct);
-        if (pod is null) return Refuse($"Workload not found: {target.Id}", target.Id);
-        var controller = pod.ComposeProject is { Length: > 0 } c && c != "Standalone" ? c : pod.Name;
+        // Live, not the label the page rendered: start / stop scale and restart roll the pod's CURRENT controller —
+        // read here with its UID (contract 0012, D8), and acted on exactly as read: the provider reads nothing again.
+        var identity = await factory.GetForServer(server.Id).GetWorkloadIdentityAsync(target.Id, ct);
+        if (identity is null) return Refuse($"Workload not found: {target.Id}", target.Id);
+        var pod = identity.Workload;
+        var controller = identity.ControllerKind is "None" or "Container"
+            ? pod.ComposeProject is { Length: > 0 } c && c != "Standalone" ? c : pod.Name
+            : identity.ControllerName;
+        // D9: a controller replaced under the same name has another UID; a bare pod (or a container) is its own UID.
+        var fingerprint = identity.ControllerKind is "None"
+            ? Hash(pod.Id, identity.PodUid)
+            : Hash(identity.Namespace, identity.ControllerKind, identity.ControllerName, identity.ControllerUid);
         return Done(target with
         {
             Id = pod.Id, Name = controller, ServerId = server.Id,
             Related = new[] { pod.Id, pod.Name }.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
             Aliases = Aliases(pod.Name),
-        });
+        }, t => new ResolvedWorkload(Token, t, fingerprint, pod.Id, identity.ControllerName, identity.Namespace,
+            identity.ControllerKind, identity.ControllerUid, identity.PodUid));
     }
 
     /// <summary>

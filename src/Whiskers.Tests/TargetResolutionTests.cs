@@ -630,9 +630,18 @@ public sealed partial class TargetResolutionTests : IDisposable
                 }, "local", "Local")
                 : null);
 
-        public Task StartAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task StopAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task RestartAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
+        /// <summary>As the real provider reads it: the ReplicaSet's owner reference names the Deployment "api" and its UID.</summary>
+        public async Task<WorkloadIdentity?> GetWorkloadIdentityAsync(string id, CancellationToken ct = default) =>
+            await GetWorkloadAsync(id, ct) is { } pod
+                ? new WorkloadIdentity(pod, "prod", "Deployment", "api", ControllerUid, "pod-uid-1")
+                : null;
+
+        /// <summary>The Deployment's UID: a test replaces the controller by changing it.</summary>
+        public string ControllerUid { get; set; } = "dep-uid-1";
+
+        public Task StartAsync(ResolvedWorkload workload, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task StopAsync(ResolvedWorkload workload, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task RestartAsync(ResolvedWorkload workload, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> GetLogsAsync(string id, int tailLines = 100, DateTime? since = null, CancellationToken ct = default) =>
             throw new NotSupportedException();
         public Task<ContainerStats?> GetStatsAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();

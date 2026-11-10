@@ -827,7 +827,7 @@ public class MutationGatewayCoverageTests
         var provider = factory.GetForServer("local");
 
         Assert.IsAssignableFrom<DispatchProxy>(provider);
-        await Assert.ThrowsAsync<MutationScopeViolationException>(() => provider.StartAsync("c1"));
+        await Assert.ThrowsAsync<MutationScopeViolationException>(() => provider.StartAsync(null!));
     }
 
     // ---------------------------------------------------------------- compositions

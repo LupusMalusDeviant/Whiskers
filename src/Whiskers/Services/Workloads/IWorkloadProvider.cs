@@ -30,6 +30,19 @@ public sealed record WorkloadCapabilities(
         StartStopSemantics: "scale");
 }
 
+/// <summary>A workload as a mutation's target resolves it (contract 0012, D8): the listed workload, its namespace and
+/// the controller a start / stop / restart acts on, with the UIDs that are that action's preconditions.</summary>
+/// <param name="ControllerKind"><c>Deployment</c>, <c>StatefulSet</c>, <c>DaemonSet</c>, <c>ReplicaSet</c>, <c>None</c>
+/// (a bare pod) or <c>Container</c> (Docker).</param>
+/// <param name="ControllerUid">The controller's UID; <c>null</c> when it could not be read (an action then refuses).</param>
+public sealed record WorkloadIdentity(ContainerInfo Workload, string Namespace, string ControllerKind,
+    string ControllerName, string? ControllerUid, string? PodUid)
+{
+    /// <summary>A container that is its own controller (Docker): its id stands for both UIDs.</summary>
+    public static WorkloadIdentity? OfContainer(ContainerInfo? container) =>
+        container is null ? null : new(container, "", "Container", container.Name, container.Id, container.Id);
+}
+
 /// <summary>The backend-neutral workload surface for ONE server (kubernetesImplement Track B.1):
 /// the subset of operations that make sense for both Docker containers and Kubernetes pods, in the
 /// existing container UX vocabulary (<see cref="ContainerInfo"/> stays the shared model — pods map
@@ -49,17 +62,27 @@ public interface IWorkloadProvider
     [Whiskers.Services.Mutations.InventoryLookup]
     Task<ContainerInfo?> GetWorkloadAsync(string id, CancellationToken ct = default);
 
-    /// <summary>Docker: start container. Kubernetes: scale the owner back to its previous/1 replica.</summary>
+    /// <summary>Contract 0012 (D8): the workload with the controller it belongs to and their UIDs, for the gateway to
+    /// resolve a <c>workload.*</c> target. <c>null</c> when it does not exist. A provider without controllers (Docker)
+    /// answers with the container as its own controller (<see cref="WorkloadIdentity.OfContainer"/>).</summary>
+    [Whiskers.Services.Mutations.InventoryLookup]
+    Task<WorkloadIdentity?> GetWorkloadIdentityAsync(string id, CancellationToken ct = default);
+
+    /// <summary>Docker: start container. Kubernetes: scale the decided controller back to 1 replica (only from 0).</summary>
     [Whiskers.Services.Mutations.MutatingOperation("workload.start")]
-    Task StartAsync(string id, CancellationToken ct = default);
+    Task StartAsync([Whiskers.Services.Mutations.MutationTarget] Whiskers.Services.Mutations.ResolvedWorkload workload,
+        CancellationToken ct = default);
 
-    /// <summary>Docker: stop container. Kubernetes: scale the owner to 0 (bare pods: delete).</summary>
+    /// <summary>Docker: stop container. Kubernetes: scale the decided controller to 0 (a bare pod: delete it, with its
+    /// UID as the precondition).</summary>
     [Whiskers.Services.Mutations.MutatingOperation("workload.stop")]
-    Task StopAsync(string id, CancellationToken ct = default);
+    Task StopAsync([Whiskers.Services.Mutations.MutationTarget] Whiskers.Services.Mutations.ResolvedWorkload workload,
+        CancellationToken ct = default);
 
-    /// <summary>Docker: restart container. Kubernetes: rollout-restart the owner.</summary>
+    /// <summary>Docker: restart container. Kubernetes: rollout-restart the decided controller.</summary>
     [Whiskers.Services.Mutations.MutatingOperation("workload.restart")]
-    Task RestartAsync(string id, CancellationToken ct = default);
+    Task RestartAsync([Whiskers.Services.Mutations.MutationTarget] Whiskers.Services.Mutations.ResolvedWorkload workload,
+        CancellationToken ct = default);
 
     Task<string> GetLogsAsync(string id, int tailLines = 100, DateTime? since = null, CancellationToken ct = default);
 

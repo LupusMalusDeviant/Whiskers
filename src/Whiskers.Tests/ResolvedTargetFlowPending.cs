@@ -32,12 +32,9 @@ internal static class ResolvedTargetFlowPending
         "Whiskers.Components.Pages.Cves.TriggerScan -> cve.scan",
         "Whiskers.Components.Pages.Dashboard.RemoveContainer -> container.remove",
         "Whiskers.Components.Pages.Dashboard.RestartContainer -> container.restart",
-        "Whiskers.Components.Pages.Dashboard.RestartContainer -> workload.restart",
         "Whiskers.Components.Pages.Dashboard.RollbackContainer -> container.rollback",
         "Whiskers.Components.Pages.Dashboard.StartContainer -> container.start",
-        "Whiskers.Components.Pages.Dashboard.StartContainer -> workload.start",
         "Whiskers.Components.Pages.Dashboard.StopContainer -> container.stop",
-        "Whiskers.Components.Pages.Dashboard.StopContainer -> workload.stop",
         "Whiskers.Components.Pages.Dashboard.UpdateContainer -> container.update",
         "Whiskers.Components.Pages.Deploy.DeployFromCompose -> compose.deploy",
         "Whiskers.Components.Pages.Deploy.DeployFromForm -> app.deploy",
@@ -248,8 +245,5 @@ internal static class ResolvedTargetFlowPending
         "Whiskers.Services.Webhooks.IWebhookService.DeleteWebhookAsync (webhook.delete)",
         "Whiskers.Services.Webhooks.IWebhookService.RegenerateSecretAsync (webhook.rotate_secret)",
         "Whiskers.Services.Webhooks.IWebhookService.SetEnabledAsync (webhook.set_enabled)",
-        "Whiskers.Services.Workloads.IWorkloadProvider.RestartAsync (workload.restart)",
-        "Whiskers.Services.Workloads.IWorkloadProvider.StartAsync (workload.start)",
-        "Whiskers.Services.Workloads.IWorkloadProvider.StopAsync (workload.stop)",
     ];
 }

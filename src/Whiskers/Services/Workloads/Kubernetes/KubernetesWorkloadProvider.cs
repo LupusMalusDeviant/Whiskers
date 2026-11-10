@@ -81,41 +81,67 @@ public sealed class KubernetesWorkloadProvider : IWorkloadProvider
         });
     }
 
-    public Task StartAsync(string id, CancellationToken ct = default) => ScaleAsync(id, up: true, ct);
-
-    public Task StopAsync(string id, CancellationToken ct = default) => ScaleAsync(id, up: false, ct);
-
-    public async Task RestartAsync(string id, CancellationToken ct = default)
+    /// <summary>Contract 0012 (D8): the pod, its namespace and the controller a start / stop / restart acts on, with
+    /// their UIDs. A ReplicaSet's owning Deployment is read from the ReplicaSet's owner reference (one call), so the
+    /// Deployment's own UID is the precondition — never a name folded from the ReplicaSet's.</summary>
+    public async Task<WorkloadIdentity?> GetWorkloadIdentityAsync(string id, CancellationToken ct = default)
     {
-        var (ns, name) = RequireId(id);
+        if (!TryParseId(id, out var ns, out var name)) return null;
+        return await WithClient(async client =>
+        {
+            V1Pod pod;
+            try
+            {
+                pod = await client.CoreV1.ReadNamespacedPodAsync(name, ns, cancellationToken: ct);
+            }
+            catch (HttpOperationException ex) when (ex.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return (WorkloadIdentity?)null;
+            }
+            var workload = ToWorkload(pod, ServerId, _serverName);
+            var owner = pod.Metadata.OwnerReferences?.FirstOrDefault(o => o.Controller == true)
+                        ?? pod.Metadata.OwnerReferences?.FirstOrDefault();
+            if (owner is null)
+                return new WorkloadIdentity(workload, ns, "None", name, null, pod.Metadata.Uid);
+            if (owner.Kind == "ReplicaSet")
+            {
+                var replicaSet = await client.AppsV1.ReadNamespacedReplicaSetAsync(owner.Name, ns, cancellationToken: ct);
+                var deployment = replicaSet.Metadata.OwnerReferences?.FirstOrDefault(o => o.Controller == true && o.Kind == "Deployment");
+                return deployment is null
+                    ? new WorkloadIdentity(workload, ns, "ReplicaSet", owner.Name, owner.Uid, pod.Metadata.Uid)
+                    : new WorkloadIdentity(workload, ns, "Deployment", deployment.Name, deployment.Uid, pod.Metadata.Uid);
+            }
+            return new WorkloadIdentity(workload, ns, owner.Kind, owner.Name, owner.Uid, pod.Metadata.Uid);
+        });
+    }
+
+    public Task StartAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default) =>
+        ScaleAsync(workload, up: true, ct);
+
+    public Task StopAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default) =>
+        ScaleAsync(workload, up: false, ct);
+
+    /// <summary>Rollout-restart of exactly the decided controller (D8): its pod-template annotation is patched with
+    /// the controller's UID as the precondition, so a controller replaced since the decision is not touched. No pod
+    /// is read here.</summary>
+    public async Task RestartAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default)
+    {
+        var (ns, controller, uid) = Decided(workload);
+        if (workload.ControllerKind is not ("Deployment" or "StatefulSet" or "DaemonSet"))
+            // A bare pod has no controller to bring it back — deleting it would NOT be a
+            // restart. Refuse with an honest message instead of surprising the user.
+            throw new InvalidOperationException(
+                $"Pod '{workload.Name}' hat keinen Controller (Deployment/StatefulSet/DaemonSet) — ein Neustart würde ihn dauerhaft entfernen.");
+        var patch = ControllerPatch(uid,
+            $"\"template\":{{\"metadata\":{{\"annotations\":{{\"kubectl.kubernetes.io/restartedAt\":\"{DateTime.UtcNow:O}\"}}}}}}");
         await WithClient<object?>(async client =>
         {
-            var pod = await client.CoreV1.ReadNamespacedPodAsync(name, ns, cancellationToken: ct);
-            var owner = ResolveOwner(pod);
-
-            // Rollout-restart equivalent: patch the controller's pod-template annotation; the
-            // controller then replaces the pods with zero-downtime semantics where applicable.
-            var patch = new V1Patch(
-                $"{{\"spec\":{{\"template\":{{\"metadata\":{{\"annotations\":{{\"kubectl.kubernetes.io/restartedAt\":\"{DateTime.UtcNow:O}\"}}}}}}}}}}",
-                V1Patch.PatchType.MergePatch);
-
-            switch (owner.Kind)
+            await Preconditioned(workload, () => workload.ControllerKind switch
             {
-                case "Deployment":
-                    await client.AppsV1.PatchNamespacedDeploymentAsync(patch, owner.Name, ns, cancellationToken: ct);
-                    break;
-                case "StatefulSet":
-                    await client.AppsV1.PatchNamespacedStatefulSetAsync(patch, owner.Name, ns, cancellationToken: ct);
-                    break;
-                case "DaemonSet":
-                    await client.AppsV1.PatchNamespacedDaemonSetAsync(patch, owner.Name, ns, cancellationToken: ct);
-                    break;
-                default:
-                    // A bare pod has no controller to bring it back — deleting it would NOT be a
-                    // restart. Refuse with an honest message instead of surprising the user.
-                    throw new InvalidOperationException(
-                        $"Pod '{name}' hat keinen Controller (Deployment/StatefulSet/DaemonSet) — ein Neustart würde ihn dauerhaft entfernen.");
-            }
+                "Deployment" => (Task)client.AppsV1.PatchNamespacedDeploymentAsync(patch, controller, ns, cancellationToken: ct),
+                "StatefulSet" => (Task)client.AppsV1.PatchNamespacedStatefulSetAsync(patch, controller, ns, cancellationToken: ct),
+                _ => (Task)client.AppsV1.PatchNamespacedDaemonSetAsync(patch, controller, ns, cancellationToken: ct),
+            });
             return null;
         });
     }
@@ -140,49 +166,101 @@ public sealed class KubernetesWorkloadProvider : IWorkloadProvider
 
     // ---- scale (start/stop) ----------------------------------------------------------------------
 
-    private async Task ScaleAsync(string id, bool up, CancellationToken ct)
+    /// <summary>Scales exactly the decided controller (D8), with its UID as the patch's precondition; a bare pod is
+    /// deleted with its own UID as <see cref="V1DeleteOptions.Preconditions"/>. No pod is read here.</summary>
+    private async Task ScaleAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, bool up, CancellationToken ct)
     {
-        var (ns, name) = RequireId(id);
-        await WithClient<object?>(async client =>
+        ArgumentNullException.ThrowIfNull(workload);
+        switch (workload.ControllerKind)
         {
-            var pod = await client.CoreV1.ReadNamespacedPodAsync(name, ns, cancellationToken: ct);
-            var owner = ResolveOwner(pod);
-            var patch = new V1Patch($"{{\"spec\":{{\"replicas\":{(up ? 1 : 0)}}}}}", V1Patch.PatchType.MergePatch);
-
-            switch (owner.Kind)
+            case "Deployment" or "StatefulSet":
             {
-                case "Deployment":
-                    // Only scale UP from 0 — never stomp a multi-replica deployment down to 1.
+                var (ns, controller, uid) = Decided(workload);
+                var patch = ControllerPatch(uid, $"\"replicas\":{(up ? 1 : 0)}");
+                await WithClient<object?>(async client =>
+                {
+                    // Only scale UP from 0 — never stomp a multi-replica controller down to 1. The scale read names
+                    // the decided controller; one replaced since (another UID) is refused before anything changes.
                     if (up)
                     {
-                        var scale = await client.AppsV1.ReadNamespacedDeploymentScaleAsync(owner.Name, ns, cancellationToken: ct);
-                        if ((scale.Spec.Replicas ?? 0) > 0) return null;
+                        var scale = workload.ControllerKind == "Deployment"
+                            ? await client.AppsV1.ReadNamespacedDeploymentScaleAsync(controller, ns, cancellationToken: ct)
+                            : await client.AppsV1.ReadNamespacedStatefulSetScaleAsync(controller, ns, cancellationToken: ct);
+                        if (!string.IsNullOrEmpty(scale.Metadata?.Uid) && scale.Metadata.Uid != uid) throw Replaced(workload);
+                        if ((scale.Spec?.Replicas ?? 0) > 0) return null;
                     }
-                    await client.AppsV1.PatchNamespacedDeploymentScaleAsync(patch, owner.Name, ns, cancellationToken: ct);
-                    break;
-                case "StatefulSet":
-                    if (up)
-                    {
-                        var scale = await client.AppsV1.ReadNamespacedStatefulSetScaleAsync(owner.Name, ns, cancellationToken: ct);
-                        if ((scale.Spec.Replicas ?? 0) > 0) return null;
-                    }
-                    await client.AppsV1.PatchNamespacedStatefulSetScaleAsync(patch, owner.Name, ns, cancellationToken: ct);
-                    break;
-                case "DaemonSet":
-                    throw new InvalidOperationException("DaemonSets laufen auf jedem Node und können nicht skaliert werden.");
-                default:
-                    if (up)
-                        throw new InvalidOperationException(
-                            $"Pod '{name}' hat keinen Controller — ein gestoppter (gelöschter) Bare-Pod kann nicht wieder gestartet werden.");
-                    // Stop for a bare pod = delete it (that is the only stop Kubernetes offers here).
-                    await client.CoreV1.DeleteNamespacedPodAsync(name, ns, cancellationToken: ct);
-                    break;
+                    await Preconditioned(workload, () => workload.ControllerKind == "Deployment"
+                        ? (Task)client.AppsV1.PatchNamespacedDeploymentAsync(patch, controller, ns, cancellationToken: ct)
+                        : client.AppsV1.PatchNamespacedStatefulSetAsync(patch, controller, ns, cancellationToken: ct));
+                    return null;
+                });
+                return;
             }
-            return null;
-        });
+            case "DaemonSet":
+                throw new InvalidOperationException("DaemonSets laufen auf jedem Node und können nicht skaliert werden.");
+            case "None":
+            {
+                if (up)
+                    throw new InvalidOperationException(
+                        $"Pod '{workload.Name}' hat keinen Controller — ein gestoppter (gelöschter) Bare-Pod kann nicht wieder gestartet werden.");
+                var (ns, pod) = RequireId(workload.PodId);
+                if (string.IsNullOrEmpty(workload.PodUid))
+                    throw new InvalidOperationException($"The UID of pod '{pod}' was not read with the decision; nothing changed.");
+                // Stop for a bare pod = delete it (that is the only stop Kubernetes offers here) — exactly the decided pod.
+                var options = new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = workload.PodUid } };
+                await WithClient<object?>(async client =>
+                {
+                    await Preconditioned(workload, () => client.CoreV1.DeleteNamespacedPodAsync(pod, ns, options, cancellationToken: ct));
+                    return null;
+                });
+                return;
+            }
+            default:
+                throw new InvalidOperationException(
+                    $"'{workload.Name}' is controlled by a {workload.ControllerKind}, which Whiskers does not scale; nothing changed.");
+        }
     }
 
     // ---- helpers -----------------------------------------------------------------------------------
+
+    /// <summary>Contract 0012 (D8): the decided controller — namespace, name, UID — on this provider's cluster. A
+    /// workload decided on another server, or without a controller UID, is refused before any call.</summary>
+    private (string Ns, string Controller, string Uid) Decided(Whiskers.Services.Mutations.ResolvedWorkload workload)
+    {
+        ArgumentNullException.ThrowIfNull(workload);
+        if (!string.Equals(workload.ServerId, ServerId, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"The workload was decided on '{workload.ServerId}', not on '{ServerId}'; nothing changed.");
+        if (string.IsNullOrEmpty(workload.Namespace) || string.IsNullOrEmpty(workload.ControllerName))
+            throw new InvalidOperationException($"'{workload.Name}' has no decided controller; nothing changed.");
+        if (string.IsNullOrEmpty(workload.ControllerUid))
+            throw new InvalidOperationException(
+                $"The UID of '{workload.ControllerName}' was not read with the decision; nothing changed.");
+        return (workload.Namespace, workload.ControllerName, workload.ControllerUid);
+    }
+
+    /// <summary>A merge patch of the controller's <c>spec</c> that carries <c>metadata.uid</c>: the API server refuses
+    /// it (409 Conflict) when the object under that name has another UID.</summary>
+    internal static V1Patch ControllerPatch(string uid, string spec) =>
+        new($"{{\"metadata\":{{\"uid\":{System.Text.Json.JsonSerializer.Serialize(uid)}}},\"spec\":{{{spec}}}}}",
+            V1Patch.PatchType.MergePatch);
+
+    /// <summary>A precondition the API server refused (the object was replaced since the decision) is reported as
+    /// such: the operation's own failure, nothing changed (D8, D9).</summary>
+    private static async Task Preconditioned(Whiskers.Services.Mutations.ResolvedWorkload workload, Func<Task> call)
+    {
+        try
+        {
+            await call();
+        }
+        catch (HttpOperationException ex) when (ex.Response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            throw Replaced(workload);
+        }
+    }
+
+    private static InvalidOperationException Replaced(Whiskers.Services.Mutations.ResolvedWorkload workload) =>
+        new($"'{workload.ControllerName ?? workload.Name}' was replaced after the decision (TargetChanged); nothing changed.");
 
     private async Task<T> WithClient<T>(Func<IKubernetes, Task<T>> action)
     {

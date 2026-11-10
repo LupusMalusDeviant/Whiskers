@@ -149,21 +149,43 @@ public sealed record ResolvedLogAlertRule : ResolvedTarget
         : base(token, record, fingerprint) { }
 }
 
-/// <summary>A Kubernetes workload (or a Docker container shown as one): the pod and its controller. The controller's
-/// kind, namespace and UID follow with contract 0012 step 5 (D8).</summary>
+/// <summary>A Kubernetes workload (or a Docker container shown as one): the pod and the controller it belongs to, as
+/// the gateway read them (D8). The provider acts on exactly this controller — kind, name and namespace — with its UID
+/// as a precondition; a bare pod is deleted with its own UID as the precondition. Nothing is read again at
+/// execution.</summary>
 public sealed record ResolvedWorkload : ResolvedTarget
 {
     public ResolvedWorkload(MutationTargetResolver.ResolverToken token, MutationTarget record, string? fingerprint,
-        string podId, string? controllerName)
+        string podId, string? controllerName, string? @namespace = null, string? controllerKind = null,
+        string? controllerUid = null, string? podUid = null)
         : base(token, record, fingerprint)
     {
         PodId = podId ?? "";
         ControllerName = controllerName;
+        Namespace = @namespace ?? "";
+        ControllerKind = controllerKind ?? "";
+        ControllerUid = controllerUid;
+        PodUid = podUid;
     }
 
+    /// <summary>The workload id the provider lists (<c>namespace/pod</c> on Kubernetes, the container id on Docker).</summary>
     public string PodId { get; }
 
+    /// <summary>The controller's name (a Deployment, StatefulSet, DaemonSet), or the pod's own name for a bare pod.</summary>
     public string? ControllerName { get; }
+
+    /// <summary>The pod's namespace (empty on Docker).</summary>
+    public string Namespace { get; }
+
+    /// <summary><c>Deployment</c>, <c>StatefulSet</c>, <c>DaemonSet</c>, <c>ReplicaSet</c>, <c>None</c> (a bare pod) or
+    /// <c>Container</c> (Docker).</summary>
+    public string ControllerKind { get; }
+
+    /// <summary>The controller's UID when the decision read it: the precondition of every change to it.</summary>
+    public string? ControllerUid { get; }
+
+    /// <summary>The pod's UID: the precondition of a bare pod's deletion.</summary>
+    public string? PodUid { get; }
 }
 
 /// <summary>A cloud server (the Whiskers server it is bound to).</summary>
