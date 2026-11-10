@@ -161,6 +161,28 @@ All four questions were decided as recommended.
 - **Q4 — Restore validator: unchanged**; the start fails closed and says why. Not chosen: a validator that refuses a
   SQLite archive whose database holds the marker but which holds no `guardrails.json`.
 
+## Amendment 1 (implementation, 10 November 2026) — needs the maintainer's acceptance
+
+Details the implementation had to fix; none relaxes a decision above.
+
+- **A1.1 Marker interface.** `IGuardrailPolicyMarker` has `Task<DateTime?> RecordedAtAsync(ct)` (null = absent, throws on
+  any read error) in addition to D1's two members, because D7's message names `RecordedAt`; `ExistsAsync` is a default
+  member over it. D8's snapshot read is `Task<bool> PolicySnapshotsExistAsync(ct)` on the same interface (throws on any
+  read error). The implementation is `DbGuardrailPolicyMarker`; no member updates or deletes.
+- **A1.2 `Detail` values.** `loaded` when a valid file was loaded at the start that first wrote the row; `backfill` when a
+  file existed but was not loaded (unreadable, a directory, only `.bak`) or a save wrote the row; `created`,
+  `snapshot-evidence`, `reset-cli` as in D1. A save writes the row only while it is not confirmed yet (D3 c).
+- **A1.3 `--reset-guardrails` order and exit codes.** As the other host CLIs (R1-27, R1-49), the audit event
+  `guardrails.reset_on_host` (actor `cli (--reset-guardrails)`) is written **before** the file; no row, no change, and a
+  failed write afterwards adds a `success: false` row. Exit codes: 0 written, 2 usage, 3 refused (a policy file exists),
+  1 failed. The CLI applies no staged restore (as R1-27/R1-49).
+- **A1.4 Status for the UI.** `IGuardrailStore` gets `MarkerRecorded` and `MarkerProblem` (default members for test
+  doubles). The readiness line "Guardrail-Policy geladen und vermerkt" is written in German like the other lines of that
+  card (it has no resx texts); the Guardrails page shows the store's reason under the localized alert
+  (`GuardrailsView_FailClosed_Reason`, EN/DE). The reason itself is the store's English text.
+- **A1.5 A store without a record store** (constructed without `IGuardrailPolicyMarker`) treats the record as unreadable:
+  missing both files is fail-closed. The app always registers `DbGuardrailPolicyMarker`.
+
 ## Not in scope
 
 - Deleting the whole database together with both files (or the data volume): that needs host write access to the data

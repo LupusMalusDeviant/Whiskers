@@ -105,6 +105,10 @@ public sealed class ProductionReadinessService : IProductionReadinessService
             },
             null, null));
 
+        // 2a) Contract 0010 (INV-25): the guardrail policy is enforced as stored, and the database records that it exists.
+        if (_guardrails is not null)
+            checks.Add(GuardrailPolicyCheck(_guardrails));
+
         // 2b) R1-29: the cloud API keys and the DNS token as they are actually stored, not as the vault switch suggests.
         var plaintextCloud = _servers?.GetServers().Count(s => s.HasPlaintextCloudKey()) ?? 0;
         var plaintextDns = await HasPlaintextDnsTokenAsync();
@@ -283,6 +287,32 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         }
 
         return checks;
+    }
+
+    /// <summary>The title of the guardrail line (contract 0010).</summary>
+    internal const string GuardrailPolicyTitle = "Guardrail-Policy geladen und vermerkt";
+
+    /// <summary>Contract 0010 D3/D7: fail-closed with its reason, a record that could not be written, or both fine.</summary>
+    internal static ReadinessCheck GuardrailPolicyCheck(Whiskers.Services.Guardrails.IGuardrailStore guardrails)
+    {
+        if (guardrails.LoadError is { } reason)
+            return new ReadinessCheck(GuardrailPolicyTitle, false,
+                $"Die Guardrails sind fail-closed: jede Änderung wird abgelehnt, Agenten und MCP-Clients bekommen kein Werkzeug. Grund: {reason}",
+                "/guardrails", "Guardrails");
+        if (guardrails.MarkerProblem is { } problem)
+            return new ReadinessCheck(GuardrailPolicyTitle, false,
+                $"Die Policy gilt, aber der Vermerk in der Datenbank, dass es eine Guardrail-Policy gibt, fehlt: {problem}. " +
+                "Ohne ihn würde das Löschen von guardrails.json und guardrails.json.bak wie ein Erststart aussehen. " +
+                "Er wird beim nächsten Speichern der Guardrails oder beim nächsten Start erneut geschrieben.",
+                "/guardrails", "Guardrails");
+        return guardrails.MarkerRecorded
+            ? new ReadinessCheck(GuardrailPolicyTitle, true,
+                "Die Guardrail-Policy gilt, und die Datenbank vermerkt, dass es sie gibt: fehlen guardrails.json und " +
+                "guardrails.json.bak später, bleibt Whiskers fail-closed, statt die Standard-Policy neu anzulegen.",
+                null, null)
+            : new ReadinessCheck(GuardrailPolicyTitle, false,
+                "Die Guardrail-Policy gilt, der Vermerk in der Datenbank ist aber noch nicht bestätigt (der Start ist noch nicht abgeschlossen).",
+                null, null);
     }
 
     /// <summary>The title of the line <see cref="SelfExposureCheckAsync"/> adds (contract 0006).</summary>

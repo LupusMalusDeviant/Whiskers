@@ -36,12 +36,16 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
     [InlineData("DROP TABLE AuditChain; DROP TABLE AuditCheckpoints; DROP TABLE WebhookDeliveries;", "WebhookDeliveries")]  // before R1-10 and R1-23
     [InlineData("", "MetricRollupStates")]                                                                            // before R1-55
     [InlineData("", "QuietHoursSuppressions")]                                                                        // before R1-56
+    [InlineData("", "InstanceMarkers")]                                                                               // before contract 0010
     public async Task A_source_from_an_older_release_migrates_completely(string drop, string absent)
     {
-        // Every release before R1-55 also lacks the roll-up tiers, and every release before R1-56 what quiet hours held.
-        if (absent != "QuietHoursSuppressions")
+        // Every release before R1-55 also lacks the roll-up tiers, every release before R1-56 what quiet hours held, and
+        // every release before contract 0010 the instance markers.
+        if (absent is not ("QuietHoursSuppressions" or "InstanceMarkers"))
             drop += " DROP TABLE ContainerMetricRollups; DROP TABLE ServerMetricRollups; DROP TABLE MetricRollupStates;";
-        drop += " DROP TABLE QuietHoursSuppressions;";
+        if (absent != "InstanceMarkers")
+            drop += " DROP TABLE QuietHoursSuppressions;";
+        drop += " DROP TABLE InstanceMarkers;";
         // A database migrated by an older release lacks the tables of every release after its own.
         var srcPath = NewDbPath();
         var dstPath = NewDbPath();
@@ -65,6 +69,35 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
         Assert.Equal(1, await check.ScheduledTasks.CountAsync());
         Assert.Equal(0, await check.PolicyDecisions.CountAsync());
         Assert.Equal(0, await check.Approvals.CountAsync());
+    }
+
+    [Fact]
+    public async Task The_guardrail_policy_record_is_copied_as_it_is()
+    {
+        // Contract 0010 D2: the record that a guardrail policy existed moves with the data, unchanged.
+        var srcPath = NewDbPath();
+        var dstPath = NewDbPath();
+        var recordedAt = new DateTime(2026, 11, 1, 8, 30, 0, DateTimeKind.Utc);
+        await using (var src = NewDb(srcPath))
+        {
+            src.InstanceMarkers.Add(new InstanceMarkerEntity
+            {
+                Key = Whiskers.Services.Guardrails.DbGuardrailPolicyMarker.Key, RecordedAt = recordedAt, Detail = "loaded",
+            });
+            await src.SaveChangesAsync();
+        }
+
+        int rc;
+        await using (var src = NewDb(srcPath))
+        await using (var dst = NewDb(dstPath))
+            rc = await SqliteToPostgresMigrator.MigrateDataAsync(src, dst, TextWriter.Null);
+
+        Assert.Equal(0, rc);
+        await using var check = NewDb(dstPath);
+        var copied = await check.InstanceMarkers.SingleAsync();
+        Assert.Equal(Whiskers.Services.Guardrails.DbGuardrailPolicyMarker.Key, copied.Key);
+        Assert.Equal(recordedAt, copied.RecordedAt);
+        Assert.Equal("loaded", copied.Detail);
     }
 
     [Fact]
@@ -107,7 +140,7 @@ public sealed class SqliteToPostgresMigratorTests : IDisposable
             await src.SaveChangesAsync();
             await src.Database.ExecuteSqlRawAsync("DROP TABLE WebhookDeliveries; ALTER TABLE Webhooks DROP COLUMN Provider; " +
                 "DROP TABLE ContainerMetricRollups; DROP TABLE ServerMetricRollups; DROP TABLE MetricRollupStates; " +
-                "DROP TABLE QuietHoursSuppressions;");   // nor R1-55's or R1-56's
+                "DROP TABLE QuietHoursSuppressions; DROP TABLE InstanceMarkers;");   // nor R1-55's, R1-56's or contract 0010's
         }
 
         int rc;

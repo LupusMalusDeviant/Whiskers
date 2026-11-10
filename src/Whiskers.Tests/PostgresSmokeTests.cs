@@ -38,6 +38,40 @@ public sealed class PostgresSmokeTests : IAsyncLifetime
             .Options);
 
     [SkippableFact]
+    public async Task The_guardrail_policy_record_exists_after_migration_and_round_trips()
+    {
+        // Contract 0010: the InstanceMarkers table is created by the PostgreSQL migrations, and the record is inserted
+        // once — a second ensure keeps the first row as it is.
+        SkipUnlessUp();
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.EntityFrameworkServiceCollectionExtensions.AddDbContext<MetricsDbContext>(
+            services, o => o.UseNpgsql(_pg.GetConnectionString(), npg =>
+            {
+                npg.EnableRetryOnFailure(3);
+                npg.MigrationsAssembly("Whiskers.Migrations.Postgres");
+            }), Microsoft.Extensions.DependencyInjection.ServiceLifetime.Transient);
+        await using var sp = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions
+            .BuildServiceProvider(services);
+        await using (var db = Pg()) await DatabaseInitializer.InitializeAsync(db, NullLogger.Instance);
+        var marker = new Whiskers.Services.Guardrails.DbGuardrailPolicyMarker(
+            Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(sp));
+
+        Assert.Null(await marker.RecordedAtAsync());
+        Assert.False(await marker.PolicySnapshotsExistAsync());
+        await marker.EnsureAsync("created");
+        var first = await marker.RecordedAtAsync();
+        await marker.EnsureAsync("loaded");
+
+        Assert.NotNull(first);
+        Assert.Equal(DateTimeKind.Utc, first.Value.Kind);
+        Assert.Equal(first, await marker.RecordedAtAsync());
+        await using var check = Pg();
+        var row = await check.InstanceMarkers.AsNoTracking().SingleAsync();
+        Assert.Equal("created", row.Detail);
+    }
+
+    [SkippableFact]
     public async Task Approval_decisions_and_uses_commit_on_real_postgres_with_retries_on()
     {
         SkipUnlessUp();

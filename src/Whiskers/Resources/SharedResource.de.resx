@@ -4940,8 +4940,11 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_Snackbar_NoOwner" xml:space="preserve">
     <value>Eine geplante Aufgabe braucht einen Besitzer: Melde dich mit einem Konto an, das eine E-Mail-Adresse hat.</value>
   </data>
+  <data name="GuardrailsView_FailClosed_Reason" xml:space="preserve">
+    <value>Grund: {0}</value>
+  </data>
   <data name="GuardrailsView_FailClosed_Alert" xml:space="preserve">
-    <value>guardrails.json konnte nicht gelesen werden oder ist ungültig. Jede Änderung wird abgelehnt (auch das Speichern dieser Seite), Agenten und MCP-Clients bekommen kein Werkzeug. Reparieren Sie guardrails.json auf dem Host oder entfernen Sie sie zusammen mit guardrails.json.bak, und starten Sie Whiskers neu; ohne beide Dateien wird die sichere Standardkonfiguration angelegt. Die bisherige Datei liegt daneben als guardrails.json.unreadable-&lt;Zeitstempel&gt;.</value>
+    <value>Die Guardrail-Policy ist fail-closed: guardrails.json ist unlesbar oder ungültig, oder sie fehlt, obwohl diese Instanz eine Guardrail-Policy hatte. Jede Änderung wird abgelehnt (auch das Speichern dieser Seite), Agenten und MCP-Clients bekommen kein Werkzeug. Der Weg zurück führt über den Host: eine gültige guardrails.json ins Datenverzeichnis legen (reparieren oder aus einem Self-Backup wiederherstellen; eine unlesbare Datei liegt daneben als guardrails.json.unreadable-&lt;Zeitstempel&gt;) oder, wenn guardrails.json und guardrails.json.bak beide fehlen, --reset-guardrails ausführen. Danach Whiskers neu starten.</value>
   </data>
   <data name="GuardrailsView_FailClosedPreset_Name" xml:space="preserve">
     <value>Gesperrt (Konfiguration unlesbar)</value>
@@ -5988,10 +5991,10 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Endpunkt-Check gelöscht.</value>
   </data>
   <data name="KillSwitch_Blocked_Message" xml:space="preserve">
-    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar oder fehlt sie, eine gültige guardrails.json auf dem Host zurücklegen (oder dort --reset-guardrails ausführen, wenn guardrails.json und guardrails.json.bak beide fehlen; oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
   </data>
   <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
-    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar, guardrails.json auf dem Host reparieren oder entfernen (oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
+    <value>Gesperrt, solange der Kill-Switch an ist. Der Weg zurück: Ein Admin schaltet ihn auf der Guardrails-Seite aus; ist die Guardrail-Konfiguration unlesbar oder fehlt sie, eine gültige guardrails.json auf dem Host zurücklegen (oder dort --reset-guardrails ausführen, wenn guardrails.json und guardrails.json.bak beide fehlen; oder ReadOnlyMode bzw. die Sperre darin ausschalten) und Whiskers neu starten.</value>
   </data>
   <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
     <value>Preset „{0}“: „{1}“ ist keine sperrbare Ausnahme des Kill-Switch. Nichts wurde gespeichert.</value>
@@ -6024,7 +6027,7 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
     <value>Kommandozeilen-Werkzeuge auf dem Host</value>
   </data>
   <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
-    <value>Brauchen eine Shell im Container (root-gleich). Solange Wiederherstellungscodes gesperrt sind, verlangt die Wiederherstellungs-CLI --force: stattdessen guardrails.json auf dem Host reparieren.</value>
+    <value>Brauchen eine Shell im Container (root-gleich). Solange Wiederherstellungscodes gesperrt sind, verlangt die Wiederherstellungs-CLI --force: stattdessen eine gültige guardrails.json auf dem Host zurücklegen (oder --reset-guardrails ausführen, wenn sie und guardrails.json.bak beide fehlen).</value>
   </data>
   <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
     <value>Eigenes Passwort ändern</value>

@@ -4940,8 +4940,11 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="ScheduledTasksView_Snackbar_NoOwner" xml:space="preserve">
     <value>A scheduled task needs an owner: sign in with an account that has an email address.</value>
   </data>
+  <data name="GuardrailsView_FailClosed_Reason" xml:space="preserve">
+    <value>Reason: {0}</value>
+  </data>
   <data name="GuardrailsView_FailClosed_Alert" xml:space="preserve">
-    <value>guardrails.json could not be read or is invalid. Every change is refused (saving this page included) and agents and MCP clients get no tool. Repair guardrails.json on the host, or remove it together with guardrails.json.bak, and restart Whiskers; without either file the safe default is created. The previous file was kept next to it as guardrails.json.unreadable-&lt;timestamp&gt;.</value>
+    <value>The guardrail policy is fail-closed: guardrails.json is unreadable or invalid, or it is missing although this instance had a guardrail policy. Every change is refused (saving this page included) and agents and MCP clients get no tool. The way back is on the host: put a valid guardrails.json into the data directory (repair it, or restore it from a self-backup; an unreadable file was kept next to it as guardrails.json.unreadable-&lt;timestamp&gt;), or, with guardrails.json and guardrails.json.bak both missing, run --reset-guardrails. Then restart Whiskers.</value>
   </data>
   <data name="GuardrailsView_FailClosedPreset_Name" xml:space="preserve">
     <value>Fail-closed (configuration unreadable)</value>
@@ -5988,10 +5991,10 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Endpoint check deleted.</value>
   </data>
   <data name="KillSwitch_Blocked_Message" xml:space="preserve">
-    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read or is missing, put a valid guardrails.json back on the host (or run --reset-guardrails there when guardrails.json and guardrails.json.bak are both missing; or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
   </data>
   <data name="LocalAccounts_Error_kill_switch" xml:space="preserve">
-    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read, repair or remove guardrails.json on the host (or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
+    <value>Blocked while the kill switch is on. The way back: an Admin switches it off on the Guardrails page; if the guardrail configuration cannot be read or is missing, put a valid guardrails.json back on the host (or run --reset-guardrails there when guardrails.json and guardrails.json.bak are both missing; or turn off ReadOnlyMode or the block in it) and restart Whiskers.</value>
   </data>
   <data name="GuardrailsView_Problem_UnknownKillSwitchExemption" xml:space="preserve">
     <value>Preset '{0}': '{1}' is not a kill-switch exemption that can be blocked. Nothing was saved.</value>
@@ -6024,7 +6027,7 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
     <value>Host command-line tools</value>
   </data>
   <data name="GuardrailsView_Exemption_E3_Reason" xml:space="preserve">
-    <value>Need a shell in the container (root-equivalent). While recovery codes are blocked, the recovery CLI asks for --force: repair guardrails.json on the host instead.</value>
+    <value>Need a shell in the container (root-equivalent). While recovery codes are blocked, the recovery CLI asks for --force: put a valid guardrails.json back on the host instead (or run --reset-guardrails when it and guardrails.json.bak are both missing).</value>
   </data>
   <data name="GuardrailsView_Exemption_password_change_Name" xml:space="preserve">
     <value>Own password change</value>
