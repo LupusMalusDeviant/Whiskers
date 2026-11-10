@@ -756,7 +756,9 @@ public class ReadOnlyKillSwitchWireTests
         // Contract 0012 (D12): records inside a held kind — an MCP key, a vault secret, a registry, an endpoint check —
         // are resolved against stores the sweep does not fill.
         string[] recordsNotHeld = ["mcp.key_delete", "vault.secret_set", "vault.secret_delete", "registry.delete",
-            "endpointcheck.delete", "endpointcheck.run"];
+            "endpointcheck.delete", "endpointcheck.run",
+            // D11: nginx sites, systemd units and firewall rules are resolved against host listings the sweep does not fill.
+            "nginx.update", "nginx.site_enable", "nginx.site_disable", "systemd.manage", "firewall.rule_remove"];
         string[] held = ["container.restart", "container.stop", "container.start", "container.update", "container.remove",
             "container.exec", "terminal.host_open", "terminal.container_open", "host.exec", "config.save", "guardrails.save"];
         Assert.All(fallbacks, f => Assert.True(
