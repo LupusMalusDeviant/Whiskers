@@ -1,7 +1,8 @@
 # Contract 0012 — Resolved target objects (INV-57)
 
 Status: **Accepted** · 8 November 2026 by the maintainer, with the decisions D1–D15 as written and every question
-Q1–Q7 answered as recommended (see *Answered*).
+Q1–Q7 answered as recommended (see *Answered*). Amendments A1–A4 accepted 10 November 2026, A5–A7 accepted
+10 November 2026.
 
 ## Purpose
 
@@ -255,7 +256,10 @@ Found while building step 1; each replaces the wording above where they differ.
   callers to every intermediate build and bury real warnings; the pending list of `ResolvedTargetFlowTests` tracks them instead and step 7 deletes
   the overloads (Q6 unchanged).
 
-## Proposed amendments (step 2, awaiting the maintainer's acceptance)
+## Amendments A5–A7 (accepted by the maintainer, 10 November 2026)
+
+A5 and A6 were found while building step 2; A7 clarifies D7 before step 4. Each replaces the wording above where they
+differ.
 
 - **A5 — `ConfirmAsync` signature and how it reads.** D9 names `ConfirmAsync(ResolvedTarget, ct)`. Built as
   `ConfirmAsync(MutationRequest request, Capability capability, ResolvedTarget target, ct)` returning a
@@ -268,6 +272,16 @@ Found while building step 1; each replaces the wording above where they differ.
 - **A6 — Runner doubles.** The typed overloads are default interface members that throw `NotSupportedException`, so a
   test double of `IUiMutationRunner` / `IAutomationMutationRunner` without a gateway cannot run a typed lambda (it could
   not hand out a `ResolvedTarget` anyway, D4 a); the two real runners implement them.
+- **A7 — Webhook actions get the typed target of their capability (clarifies D7).** A delivery is not decided as one
+  `ResolvedWebhook` whose `Action` it acts on; each webhook action is decided as the capability it runs, and its
+  delegate receives that capability's resolved type: `restart` (`container.restart`) and `rebuild`
+  (`container.update`) a `ResolvedContainer`, `deploy` (`compose.deploy`) the `ResolvedHostObject` of its server,
+  `git-deploy` (`gitdeploy.deploy`) a `ResolvedGitApp`. The read before the lock stays (it chooses the lock key, Q3)
+  and its result is passed as `MutationRequest.ExpectedTarget`; a resolution that differs is refused before policy as
+  `TargetChanged`. The delegate acts only on the resolved object (`c.Id` / `c.ServerId`, the app's id and revision,
+  the host's server). `WebhookTargets.ContainerAsync` is **not** deleted: it remains the pre-lock read that chooses
+  the lock key and the `ExpectedTarget`, and nothing acts on its result. `ResolvedWebhook.Action` stays `null` for
+  webhook management capabilities (`webhook.*`).
 
 ## Not in scope
 
