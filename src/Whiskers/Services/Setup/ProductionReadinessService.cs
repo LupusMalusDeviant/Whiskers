@@ -94,16 +94,18 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                                           + "DNS-Token, die Zugangsdaten der Benachrichtigungskanäle und der KI (wo sie stehen, sagen die "
                                           + "nächsten Punkte), kubeconfigs sowie Registry- und Git-Zugangsdaten; mit einem daraus "
                                           + "abgeleiteten Schlüssel verschlüsselt sind die Secrets eingehender Webhooks, die Rollback-Snapshots "
-                                          + "und die Sitzungsschlüssel. Noch unverschlüsselt gespeichert, nur durch die Dateirechte "
-                                          + "geschützt: die privaten SSH-Schlüssel (ssh-keys/) und alle mTLS-Client-Schlüssel "
-                                          + "– der gemeinsame und der eigene jedes Hosts – im Datenverzeichnis. Ob die mTLS-Schlüssel "
-                                          + "nur für Whiskers lesbar sind, zeigt der Punkt „mTLS-Client-Schlüssel geschützt“; den Modus "
-                                          + "der SSH-Schlüssel prüft diese Liste nicht. Wer das Datenverzeichnis lesen kann, kann als "
-                                          + "Whiskers handeln.",
+                                          + "und die Sitzungsschlüssel. Versiegelt mit einem daraus abgeleiteten Schlüssel liegen auch "
+                                          + "die privaten SSH-Schlüssel (ssh-keys/) und alle mTLS-Client-Schlüssel – der gemeinsame und "
+                                          + "der eigene jedes Hosts – im Datenverzeichnis; ob noch einer im Klartext liegt, zeigt der "
+                                          + "Punkt „Private Schlüssel versiegelt“. Folge: ohne den richtigen VAULT_KEY ist kein "
+                                          + "mTLS-Host erreichbar.",
                 VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.",
                 _ => "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
             },
             null, null));
+
+        // 2a) Contract 0015 (INV-52): the private keys as they are actually stored.
+        if (KeyMaterialCheck() is { } keyMaterial) checks.Add(keyMaterial);
 
         // 2b) R1-29: the cloud API keys and the DNS token as they are actually stored, not as the vault switch suggests.
         var plaintextCloud = _servers?.GetServers().Count(s => s.HasPlaintextCloudKey()) ?? 0;
@@ -513,6 +515,33 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                 null, null));
         }
         return checks;
+    }
+
+    /// <summary>Contract 0015: how many private keys in the data directory are still in plaintext, which keys outside it
+    /// the operator manages (D6), and why sealed keys cannot be used while the vault is locked (D10).</summary>
+    internal ReadinessCheck? KeyMaterialCheck()
+    {
+        if (_dataPaths is null) return null;
+        var (ssh, mtls) = KeyMaterialMigration.CountPlaintext(_dataPaths);
+        var keys = new SealedKeyFiles(_vault, _dataPaths);
+        var operatorManaged = (_servers?.GetServers() ?? [])
+            .Where(s => !string.IsNullOrWhiteSpace(s.TcpClientKeyPath) && !keys.IsInDataDirectory(s.TcpClientKeyPath))
+            .Select(s => s.Id)
+            .ToList();
+        var sealedCount = KeyMaterialMigration.Candidates(_dataPaths).Count - ssh - mtls;
+        var ok = ssh + mtls == 0;
+        var detail = ok
+            ? "Kein privater Schlüssel liegt im Klartext im Datenverzeichnis" + (sealedCount > 0 ? $" ({sealedCount} versiegelt)." : ".")
+            : $"Im Klartext im Datenverzeichnis: {ssh} SSH-Schlüssel und {mtls} mTLS-Client-Schlüssel. "
+              + (_vault.IsEnabled
+                  ? "Sie werden beim nächsten Start versiegelt (scheitert das, nennt das Log den Grund)."
+                  : "Sie werden beim ersten Start mit gültigem VAULT_KEY versiegelt.");
+        if (sealedCount > 0 && _vault.KeyState == VaultKeyState.Wrong)
+            detail += " Client-Schlüssel versiegelt, Vault gesperrt: mit diesem VAULT_KEY ist kein mTLS-Host erreichbar — den richtigen "
+                      + "Schlüssel setzen (Rückweg: docs/operations/per-host-mtls-migration.md).";
+        if (operatorManaged.Count > 0)
+            detail += $" Vom Betreiber verwaltet, nicht von Whiskers versiegelt (außerhalb des Datenverzeichnisses): {string.Join(", ", operatorManaged)}.";
+        return new ReadinessCheck("Private Schlüssel versiegelt", ok, detail, null, null);
     }
 
     /// <summary>Unix: anything but 0600. Windows: a read grant to Everyone, Users or Authenticated Users.</summary>

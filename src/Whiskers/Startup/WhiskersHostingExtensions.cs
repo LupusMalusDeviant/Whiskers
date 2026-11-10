@@ -448,6 +448,9 @@ public static class WhiskersHostingExtensions
         // R1-29: plaintext cloud API keys and the DNS token move into the vault (after the vault and the servers).
         builder.Services.AddSingleton<Whiskers.Services.Vault.CredentialVaultMigration>();
         builder.Services.AddInitializable<Whiskers.Services.Vault.CredentialVaultMigration>();      // 55
+        // Contract 0015: private keys stored in plaintext in the data directory are sealed (after the credentials).
+        builder.Services.AddSingleton<Whiskers.Services.Vault.KeyMaterialMigration>();
+        builder.Services.AddInitializable<Whiskers.Services.Vault.KeyMaterialMigration>();          // 56
         // Contract 0015: SSH key leases left by a crashed process are removed before anything runs ssh.
         builder.Services.AddInitializable<Whiskers.Services.Server.ISshKeyLeases>();                // 57
         builder.Services.AddInitializable<Whiskers.Services.Mcp.IMcpPermissionService>();           // 70
