@@ -41,6 +41,21 @@ public sealed record AutomationActor
     public string? OwnerId { get; init; }
     public string? CreatedVia { get; init; }
 
+    /// <summary>Contract 0014 (D3): <see cref="MutationPrincipalKind.Automation"/>, or
+    /// <see cref="MutationPrincipalKind.Webhook"/> for a webhook delivery (set only by the webhook factories). A
+    /// webhook runs on the <see cref="MutationSurface.Webhook"/> surface and decides as an automation
+    /// (<see cref="Unattended"/>).</summary>
+    public MutationPrincipalKind Kind { get; init; } = MutationPrincipalKind.Automation;
+
+    /// <summary>For a webhook delivery: the secret generation its signature was checked against
+    /// (<see cref="PrincipalCredentials.WebhookSecret"/>). Null for every other run: no credential authenticates an
+    /// unattended run.</summary>
+    public string? CredentialId { get; init; }
+
+    /// <summary>The session the run belongs to (contract 0014): a webhook delivery's run id, also on its nested decisions,
+    /// which have operation ids of their own. Falls back to <see cref="OperationId"/>.</summary>
+    public string? SessionId { get; init; }
+
     /// <summary>A scheduled task, owned and set up by whoever created it.</summary>
     public static AutomationActor ForTask(string taskId, string name, string? ownerId, string? createdVia) =>
         new(PrincipalIds.Task(taskId), $"Scheduled task '{name}'", ownerId, createdVia);
@@ -65,13 +80,18 @@ public sealed record AutomationActor
     public static AutomationActor ForAutoPatchPreview(string? onBehalfOf) =>
         new(PrincipalIds.AutoPatchPreview, "AutoPatch preview", onBehalfOf);
 
-    /// <summary>A webhook delivery on its owner; the owner is its provenance.</summary>
-    public static AutomationActor ForWebhook(string webhookId, string name, string? ownerId) =>
-        new(PrincipalIds.Webhook(webhookId), $"Webhook '{name}'", ownerId, ownerId);
+    /// <summary>A webhook delivery on its owner; the owner is its provenance. <paramref name="secretVersion"/> is the
+    /// generation of the secret the delivery was signed with (contract 0014, D4).</summary>
+    public static AutomationActor ForWebhook(string webhookId, string name, string? ownerId, int secretVersion) =>
+        new(PrincipalIds.Webhook(webhookId), $"Webhook '{name}'", ownerId, ownerId)
+        {
+            Kind = MutationPrincipalKind.Webhook,
+            CredentialId = PrincipalCredentials.WebhookSecret(webhookId, secretVersion),
+        };
 
     /// <summary>A delivery for a webhook that was removed meanwhile: no owner, nothing runs.</summary>
     public static AutomationActor ForRemovedWebhook(string webhookId) =>
-        new(PrincipalIds.Webhook(webhookId), $"Webhook {webhookId} (removed)", null);
+        new(PrincipalIds.Webhook(webhookId), $"Webhook {webhookId} (removed)", null) { Kind = MutationPrincipalKind.Webhook };
 
     /// <summary>The VPN bring-up at start-up.</summary>
     public static AutomationActor ForVpnBootstrap(string displayName, string? ownerId) =>
@@ -310,7 +330,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         var target = capability is null
             ? new MutationTarget("unknown", "")
             : MutationTargets.FromArguments(capability, args);
-        var request = new MutationRequest(capabilityId, PrincipalOf(actor, capability), MutationSurface.Automation,
+        var request = new MutationRequest(capabilityId, Stamped(actor, PrincipalOf(actor, capability)), SurfaceOf(actor),
             target, args, OperationId: actor.OperationId);
         // A failure answered as a value (false, a failed command, (false, …)) is recorded as Failed.
         return _gateway.ExecuteAsync(request, async (_, token) => MutationResults.Report(await action(token)), ct);
@@ -338,12 +358,20 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         var capability = _catalog.Find(capabilityId);
         var target = capability is null ? new MutationTarget("unknown", "") : MutationTargets.FromArguments(capability, args);
         var principal = string.IsNullOrWhiteSpace(actor.OwnerId)
-            ? new MutationPrincipal(MutationPrincipalKind.Automation, PrincipalIds.Unowned(actor.RunnerId),
+            ? new MutationPrincipal(actor.Kind, PrincipalIds.Unowned(actor.RunnerId),
                 $"{actor.DisplayName} (no owner)", McpPermissionLevels.Read)
             : PrincipalOf(actor, capability);
-        return _gateway.RefuseAsync(new MutationRequest(capabilityId, principal, MutationSurface.Automation, target, args,
+        return _gateway.RefuseAsync(new MutationRequest(capabilityId, Stamped(actor, principal), SurfaceOf(actor), target, args,
             OperationId: actor.OperationId) { EventKey = actor.EventKey }, reason, ct);
     }
+
+    /// <summary>A webhook delivery comes in on its own surface; every other run on the automation surface.</summary>
+    private static MutationSurface SurfaceOf(AutomationActor actor) =>
+        actor.Kind == MutationPrincipalKind.Webhook ? MutationSurface.Webhook : MutationSurface.Automation;
+
+    /// <summary>Contract 0014: the credential (a webhook's secret generation) and the run's own id as its session.</summary>
+    private static MutationPrincipal Stamped(AutomationActor actor, MutationPrincipal principal) =>
+        principal with { CredentialId = actor.CredentialId, SessionId = actor.SessionId ?? actor.OperationId };
 
     public string? LostAuthority(AutomationActor actor, string capabilityId)
     {
@@ -416,11 +444,11 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
                 var unreadable = new MutationPrincipal(
                     PrincipalIds.KeyIdOf(actor.OwnerId) is not null ? MutationPrincipalKind.ApiKey : MutationPrincipalKind.Human,
                     actor.OwnerId, $"{actor.OwnerId} (unreadable: {ex.GetType().Name})", McpPermissionLevels.None);
-                return new MutationPrincipal(MutationPrincipalKind.Automation, actor.RunnerId,
+                return new MutationPrincipal(actor.Kind, actor.RunnerId,
                     $"{actor.DisplayName} (owner unreadable)", McpPermissionLevels.None, OnBehalfOf: unreadable,
                     DelegatedBy: actor.CreatedVia);
             }
-            return new MutationPrincipal(MutationPrincipalKind.Automation, actor.RunnerId,
+            return new MutationPrincipal(actor.Kind, actor.RunnerId,
                 $"{actor.DisplayName} (owner {owner.DisplayName})", owner.PermissionLevel,
                 OnBehalfOf: owner, AllowedTools: owner.AllowedTools, DelegatedBy: actor.CreatedVia);
         }
@@ -430,7 +458,7 @@ public sealed class AutomationMutationRunner : IAutomationMutationRunner
         var level = !_options.CurrentValue.RequireOwner && capability is not null
             ? capability.RequiredLevel
             : McpPermissionLevels.Read;
-        return new MutationPrincipal(MutationPrincipalKind.Automation, PrincipalIds.Unowned(actor.RunnerId),
+        return new MutationPrincipal(actor.Kind, PrincipalIds.Unowned(actor.RunnerId),
             $"{actor.DisplayName} (no owner)", level);
     }
 }

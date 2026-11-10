@@ -15,7 +15,7 @@ namespace Whiskers.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
 
             modelBuilder.Entity("Whiskers.Models.ActionOutcomeEntity", b =>
                 {
@@ -1230,6 +1230,9 @@ namespace Whiskers.Migrations
                     b.Property<string>("Secret")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("SecretVersion")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("ServerId")
                         .HasColumnType("TEXT");

@@ -199,6 +199,10 @@ public static class MutationPrincipals
                 new AgentPrincipal(AgentPrincipalKind.Trigger, p.DisplayName, level, p.AllowedTools, TriggerId: triggerId),
             MutationPrincipalKind.Automation => new AgentPrincipal(AgentPrincipalKind.McpKey, p.DisplayName, level,
                 p.AllowedTools, McpKeyId: p.CredentialId ?? p.Id),
+            // Contract 0014 (D3): a webhook delivery is seen by the guardrails as the automation it used to be; its
+            // id, not its secret generation, stands in for the key.
+            MutationPrincipalKind.Webhook => new AgentPrincipal(AgentPrincipalKind.McpKey, p.DisplayName, level,
+                p.AllowedTools, McpKeyId: p.Id),
             _ => new AgentPrincipal(AgentPrincipalKind.WebUser, p.DisplayName, level, p.AllowedTools,
                 UserEmail: PrincipalIds.EmailOf(p.Id)),
         };
