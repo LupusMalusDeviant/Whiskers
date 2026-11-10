@@ -358,3 +358,29 @@ The open questions of the draft, answered by the maintainer — every one as rec
   exports) and the sign-in rows.
 - **Q6 — Host CLIs (D6): `System`** with `system:host-cli:<command>`.
 - **Q7 — Webhook secret generation (D4): new additive column** `WebhookEntity.SecretVersion` (SQLite and PostgreSQL).
+
+## Amendment 1 (implementation, 10 November 2026) — needs the maintainer's acceptance
+
+Found while implementing; none changes an authority decision.
+
+- **A1 — Webhook without an owner.** A delivery of a webhook without an owner is recorded as `unowned:webhook:<id>`
+  with `Kind = Webhook` (the scheme table lists `unowned:` under Automation). `PrincipalIds.KindOf` maps
+  `unowned:webhook:…` to Webhook and every other `unowned:<runner>` to Automation.
+- **A2 — `Auth:Disabled` has no session id.** Its identity is built per request by the `Auth:Disabled` middleware, which
+  Q3 does not open; it carries the credential `auth-disabled` and no session (`SessionId = null`, "no session"). No
+  session exists in that mode to be named.
+- **A3 — No `[Obsolete]` on the string overloads.** `IAuditLogService`'s string overloads are not marked obsolete (13
+  test doubles and the tools' enrichment would warn); `AuditPrincipalColumnsTests` fails any call outside `ToolAuditLog`
+  and the MCP tools that call it instead.
+- **A4 — Audit detail name.** The audit details name a person's or a webhook's credential `signIn` (not `credential`):
+  the sinks blank any key named like `credential`. `keyId` stays for MCP keys (and agents acting for one). The value
+  redactor also blanks `webhook-secret:<id>@<version>` inside free-text details; the `CredentialId` column keeps it.
+- **A5 — Nested decisions of a delivery.** A delivery's own nested decisions (a deployment's containers, mounts,
+  exposures) carry the run id as session too (`AutomationActor.SessionId`); a Git deployment a webhook starts stays the
+  app's own automation (`gitdeploy:<id>`, `Automation`), nested in the delivery's event.
+- **A6 — Key session (D5).** The MCP request's `SessionId` was not recorded before; the key's principal now takes
+  `Mcp-Session-Id` when the transport sends one, the request's `SessionId` stays as it was.
+- **A7 — Host CLI names (D6).** `system:host-cli:<command>` uses the flag without dashes: `restore-backup`,
+  `recover-local-account`, `confirm-identity-binding`.
+- **A8 — Legacy approvals (D8).** A request without requesters is refused when it is raised (fail closed), and an
+  approval stored before R1-15 without requesters counts against nobody; it is cancelled at the next start as before.
