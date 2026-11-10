@@ -32,6 +32,10 @@ var recoveryCli = Whiskers.Services.Auth.LocalAccountRecoveryCli.Requested(args)
 // The identity-binding CLI (R1-27) runs the same way next to the live instance.
 var bindingCli = Whiskers.Services.Auth.IdentityBindingCli.Requested(args);
 if (!restoreCli && !recoveryCli && !bindingCli) RestoreBootHandler.ApplyPendingRestore(dataPaths, builder.Configuration);
+// Contract 0015 (INV-52): a VAULT_KEY rotation (VAULT_KEY_NEW_FILE) runs here, before anything reads the key; the rest of
+// the process then reads the new one.
+if (!restoreCli && !recoveryCli && !bindingCli && Whiskers.Services.Vault.VaultKeyRotationBootHandler.Apply(dataPaths, builder.Configuration, Console.Out) is { Rotated: true } rotation)
+    builder.Configuration.AddInMemoryCollection(rotation.ConfigurationOverride);
 
 builder.AddWhiskersConfiguration(dataPaths);   // UI-writable config layers + data-protection keys
 // R1-43: the configuration has read the environment; VPN keys leave it now, so no child process inherits them.

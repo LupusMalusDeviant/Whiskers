@@ -215,10 +215,10 @@ Rotation steps (journal `vault-rotation.json` in the data directory, no secret i
 3. **Prepare files.** Every file consumer is written re-sealed beside its original as `*.rotating`: `vault.json` (new salt,
    new key check, every entry), the key ring files in `keys/`, the sealed key files of Part A, the audit checkpoint file.
    Each is read back and opened with the new key.
-4. **Database, one transaction.** Every `f1:` field (webhook secrets, rollback snapshots) re-sealed, every audit link and
-   checkpoint re-signed with the new key, and one audit row `vault.key_rotated` (principal `system:startup`, contract
-   0014) naming counts, not values. SQLite then `secure_delete` + WAL checkpoint, PostgreSQL `VACUUM FULL` on the touched
-   tables (as `ProtectedFieldMigration`).
+4. **Database, one transaction.** Every `f1:` field (webhook secrets, rollback snapshots) re-sealed and every audit link
+   and checkpoint re-signed with the new key. SQLite then `secure_delete` + WAL checkpoint, PostgreSQL `VACUUM FULL` on the
+   touched tables (as `ProtectedFieldMigration`). The audit row `vault.key_rotated` (principal `system:startup`, counts,
+   not values) is written at the first start after the switch, on the re-signed chain (Amendment 1, A2).
 5. **Switch files.** Each `*.rotating` is renamed over its original; previous generations (`vault.json.bak` and the like)
    are replaced by the new generation, never left sealed with the old key.
 6. **Done.** The journal records completion; the process runs on with the new key; the log and the readiness check say:
@@ -373,3 +373,22 @@ All eight questions were decided as recommended.
 - **Q7 — Older self-backups (D9):** not re-sealed; marked and restorable with their own key, and a fresh backup is made
   right after the rotation.
 - **Q8 — Wrong key cuts mTLS (D10):** accepted as fail-closed, with the cause named and the way back documented.
+
+## Amendment 1 (implementation, 10 November 2026) — needs the maintainer's acceptance
+
+Deviations found while implementing; none weakens a decision.
+
+- **A1 — `ISealedKeyFiles.RefusalReason`.** The interface gains a property that says why a key cannot be sealed now, so
+  the mTLS store and the SSH upload refuse **before** a key is made or a CSR is signed (D4: nothing written, nothing sent).
+- **A2 — Audit row after the switch.** `vault.key_rotated` is not written inside step 4's transaction: appending a row
+  needs the audit chain's own writer, which only exists once the host is built. The boot handler records the rotation in
+  its journal; the first start after the switch writes the row on the re-signed chain (`RecordRotatedAsync`, right after
+  `SealExistingAsync`) and marks the journal; a failed write is retried at the next start.
+- **A3 — Crash between the commit and its journal entry.** The journal then still reads `prepared`. The resume decides by
+  the database itself: anything keyed that still verifies or opens under the old key means "not committed" (discard and
+  start over); otherwise the prepared files are switched.
+- **A4 — Backup marks (D9).** An encrypted archive created before the last completed rotation (journal `completedAt`) is
+  marked "earlier key" in the backup list; the archive itself is not opened for that.
+- **A5 — Image test.** `SshKeyLeaseImageTests` installs the test sshd into a throw-away container of the built image (the
+  image ships only the client) and drives the lease layout by shell, as `SshKeyLeases` makes it; the lease code itself is
+  proven by `SshKeyLeaseTests` on Linux (`ci.yml build-test`).

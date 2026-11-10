@@ -218,6 +218,14 @@ public sealed class AuditChain : IAuditChain
 
     private bool ValidLink(AuditChainEntry link) => SameMac(link.Mac, SignLink(link.Hash));
 
+    /// <summary>Contract 0015 (VAULT_KEY rotation): the signature this chain's key gives a link, and whether a link's or a
+    /// checkpoint's signature is valid under it. The rotation re-signs every signed link and checkpoint with the new
+    /// key's chain; nothing else uses these.</summary>
+    internal string? LinkSignature(string hash) => SignLink(hash);
+    internal string? CheckpointSignature(AuditCheckpointEntity checkpoint) => Sign(checkpoint);
+    internal bool LinkSignatureValid(AuditChainEntry link) => _key is not null && ValidLink(link);
+    internal bool CheckpointSignatureValid(AuditCheckpointEntity checkpoint) => Valid(checkpoint);
+
     /// <summary>A link whose fields still give its hash and whose signature (when it has one, under the key) is valid —
     /// so its <see cref="AuditChainEntry.RowHash"/> is the one that was written, not one changed in the database.</summary>
     private bool LinkHolds(AuditChainEntry link) =>

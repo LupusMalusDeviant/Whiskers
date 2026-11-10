@@ -683,6 +683,11 @@ public static class WhiskersPipelineExtensions
             app.Services.GetRequiredService<Whiskers.Configuration.DataPathOptions>(),
             app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>(),
             app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Restore"));
+        // Contract 0015: a VAULT_KEY rotation completed at this (or an earlier) start is recorded on the re-signed chain.
+        await Whiskers.Services.Vault.VaultKeyRotationBootHandler.RecordRotatedAsync(
+            app.Services.GetRequiredService<Whiskers.Configuration.DataPathOptions>(),
+            app.Services.GetRequiredService<Whiskers.Services.AuditLog.IAuditLogService>(),
+            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("VaultKeyRotation"));
 
         // R1-31: webhook secrets and rollback snapshots stored in plaintext before are encrypted, now the schema is current.
         using (var scope = app.Services.CreateScope())

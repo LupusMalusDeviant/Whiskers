@@ -267,7 +267,25 @@ public sealed class BackupService : IBackupService
                 _logger.LogWarning(ex, "Skipping unreadable backup sidecar {File}", meta);
             }
         }
+        // Contract 0015 (D9): archives sealed before the last VAULT_KEY rotation need the key they were sealed with.
+        if (VaultRotationCutoff() is { } rotatedAt)
+            foreach (var b in list) b.SealedWithEarlierKey = b.Encrypted && b.CreatedAtUtc < rotatedAt;
         return list.OrderByDescending(b => b.CreatedAtUtc).ToList();
+    }
+
+    /// <summary>When the last VAULT_KEY rotation finished (its fresh backup is the first under the new key), or null.</summary>
+    private DateTime? VaultRotationCutoff()
+    {
+        try
+        {
+            return Whiskers.Services.Vault.VaultKeyRotation.ReadJournal(_dataPaths) is { Phase: Whiskers.Services.Vault.VaultKeyRotationJournal.Done } done
+                ? done.CompletedAtUtc
+                : null;
+        }
+        catch (Whiskers.Services.Vault.VaultKeyRotationException)
+        {
+            return null;
+        }
     }
 
     public string? ResolveArchivePath(string id)

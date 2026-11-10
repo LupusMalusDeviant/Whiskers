@@ -119,7 +119,8 @@ public sealed class KeyMaterialMigration(IVaultService vault, ISealedKeyFiles ke
     }
 
     private static bool IsLeftover(string file) =>
-        file.EndsWith(".tmp", StringComparison.Ordinal) || file.EndsWith(SealingSuffix, StringComparison.Ordinal);
+        file.EndsWith(".tmp", StringComparison.Ordinal) || file.EndsWith(SealingSuffix, StringComparison.Ordinal)
+        || file.EndsWith(VaultKeyRotation.RotatingSuffix, StringComparison.Ordinal);
 
     /// <summary>Removes the <c>.tmp</c>/<c>.sealing</c> leftovers of key files (a crash between write and rename; an older
     /// build's <c>client.key.tmp</c> could hold a key in plaintext).</summary>

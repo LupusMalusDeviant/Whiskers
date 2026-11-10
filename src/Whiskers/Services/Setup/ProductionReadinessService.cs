@@ -99,13 +99,17 @@ public sealed class ProductionReadinessService : IProductionReadinessService
                                           + "der eigene jedes Hosts – im Datenverzeichnis; ob noch einer im Klartext liegt, zeigt der "
                                           + "Punkt „Private Schlüssel versiegelt“. Folge: ohne den richtigen VAULT_KEY ist kein "
                                           + "mTLS-Host erreichbar.",
-                VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten.",
+                VaultKeyState.Wrong => "VAULT_KEY passt nicht zu diesem Vault — Secrets sind gesperrt, vault.json bleibt unverändert. Den richtigen Schlüssel setzen und neu starten."
+                                       + (RotationJournal() is { Phase: VaultKeyRotationJournal.Done } done
+                                           ? $" Der VAULT_KEY wurde am {done.CompletedAtUtc:yyyy-MM-dd HH:mm} UTC rotiert: VAULT_KEY_FILE muss den neuen Schlüssel enthalten."
+                                           : ""),
                 _ => "Kein VAULT_KEY gesetzt — Vault und verschlüsselte Backups sind deaktiviert. Key setzen und sicher ablegen.",
             },
             null, null));
 
         // 2a) Contract 0015 (INV-52): the private keys as they are actually stored.
         if (KeyMaterialCheck() is { } keyMaterial) checks.Add(keyMaterial);
+        if (RotationCheck() is { } rotation) checks.Add(rotation);
 
         // 2b) R1-29: the cloud API keys and the DNS token as they are actually stored, not as the vault switch suggests.
         var plaintextCloud = _servers?.GetServers().Count(s => s.HasPlaintextCloudKey()) ?? 0;
@@ -542,6 +546,31 @@ public sealed class ProductionReadinessService : IProductionReadinessService
         if (operatorManaged.Count > 0)
             detail += $" Vom Betreiber verwaltet, nicht von Whiskers versiegelt (außerhalb des Datenverzeichnisses): {string.Join(", ", operatorManaged)}.";
         return new ReadinessCheck("Private Schlüssel versiegelt", ok, detail, null, null);
+    }
+
+    private VaultKeyRotationJournal? RotationJournal()
+    {
+        if (_dataPaths is null) return null;
+        try { return VaultKeyRotation.ReadJournal(_dataPaths); }
+        catch (VaultKeyRotationException) { return null; }
+    }
+
+    /// <summary>Contract 0015 Part B: a rotation that is done while VAULT_KEY_NEW is still set (the operator has to
+    /// replace the key file), or one that stopped halfway.</summary>
+    internal ReadinessCheck? RotationCheck()
+    {
+        if (RotationJournal() is not { } journal) return null;
+        var newStillSet = !string.IsNullOrWhiteSpace(_config[VaultKeyRotationBootHandler.NewKeyName + "_FILE"])
+                          || !string.IsNullOrWhiteSpace(_config[VaultKeyRotationBootHandler.NewKeyName]);
+        if (journal.Phase == VaultKeyRotationJournal.Done)
+            return newStillSet
+                ? new ReadinessCheck("VAULT_KEY-Rotation abschließen", false,
+                    $"Der VAULT_KEY wurde am {journal.CompletedAtUtc:yyyy-MM-dd HH:mm} UTC rotiert. VAULT_KEY_FILE durch den neuen Schlüssel "
+                    + "ersetzen und VAULT_KEY_NEW_FILE entfernen, dann neu starten. Ältere Self-Backups bleiben mit dem alten Schlüssel "
+                    + "wiederherstellbar (docs/operations/vault-key-rotation.md).", null, null)
+                : null;
+        return new ReadinessCheck("VAULT_KEY-Rotation abschließen", false,
+            $"Eine VAULT_KEY-Rotation ist nicht abgeschlossen (Phase {journal.Phase}): mit VAULT_KEY_NEW_FILE neu starten.", null, null);
     }
 
     /// <summary>Unix: anything but 0600. Windows: a read grant to Everyone, Users or Authenticated Users.</summary>

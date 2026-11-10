@@ -1667,6 +1667,12 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="SelfBackupPanel_Tooltip_Encrypted" xml:space="preserve">
     <value>encrypted</value>
   </data>
+  <data name="SelfBackupPanel_Chip_EarlierKey" xml:space="preserve">
+    <value>earlier key</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_EarlierKey" xml:space="preserve">
+    <value>Sealed before the last VAULT_KEY rotation: restore it with the key it was sealed with (set VAULT_KEY_FILE to that key for the restore).</value>
+  </data>
   <data name="SelfBackupPanel_Tooltip_Restore" xml:space="preserve">
     <value>Restore</value>
   </data>

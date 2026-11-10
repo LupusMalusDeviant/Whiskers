@@ -1667,6 +1667,12 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="SelfBackupPanel_Tooltip_Encrypted" xml:space="preserve">
     <value>verschlüsselt</value>
   </data>
+  <data name="SelfBackupPanel_Chip_EarlierKey" xml:space="preserve">
+    <value>früherer Schlüssel</value>
+  </data>
+  <data name="SelfBackupPanel_Tooltip_EarlierKey" xml:space="preserve">
+    <value>Vor der letzten VAULT_KEY-Rotation versiegelt: mit dem Schlüssel wiederherstellen, mit dem es versiegelt wurde (VAULT_KEY_FILE für die Wiederherstellung auf diesen Schlüssel setzen).</value>
+  </data>
   <data name="SelfBackupPanel_Tooltip_Restore" xml:space="preserve">
     <value>Wiederherstellen</value>
   </data>
