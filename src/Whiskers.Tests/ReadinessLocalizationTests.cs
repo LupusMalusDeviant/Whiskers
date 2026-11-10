@@ -333,6 +333,7 @@ public class ReadinessLocalizationTests
     {
         using var w = new CredentialWorld(true, ("rabenhof", "100.64.0.9"), ("zirkuswagen", "100.64.0.10"));
         Assert.True((await w.Service.MigrateClientAsync("rabenhof", null, default)).Ok);
+        ProtectKeys(w.Root);
         var checks = Mtls(w, text).MtlsClientCredentialChecks().ToList();
         Expose(w.Store.SharedPaths.Key);
         checks.AddRange(Mtls(w, text).MtlsClientCredentialChecks().Where(c => c.Id == Ids.MtlsKeysProtected));
@@ -391,6 +392,16 @@ public class ReadinessLocalizationTests
         w.Host("rabenhof").Unreachable = true;
         w.Host("burgcloud").Unreachable = true;
         return await Mtls(w, text).MtlsChecksAsync(w.Service.ReadLiveAllowListAsync);
+    }
+
+    /// <summary>Gives every key file under <paramref name="root"/> mode 0600 on Unix, as the store writes them. The
+    /// fixture writes the shared key with the process umask (0644 on a CI runner), which reads as exposed. On Windows
+    /// the files inherit the profile's private ACL already.</summary>
+    private static void ProtectKeys(string root)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        foreach (var key in Directory.EnumerateFiles(root, "*.key", SearchOption.AllDirectories))
+            File.SetUnixFileMode(key, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
     /// <summary>Makes a key file readable by everybody: mode 0644 on Unix, a read grant to Everyone on Windows.</summary>
