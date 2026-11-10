@@ -243,7 +243,7 @@ else
         {
             await Mutations.RunAsync("logalert.toggle",
                 new { name = rule.Name, ruleId = rule.RuleId, containerName = rule.ContainerName, enabled },
-                (ResolvedLogAlertRule rt, CancellationToken _) => MonitorService.ToggleRuleAsync(rule.RuleId, enabled));
+                (ResolvedLogAlertRule rt, CancellationToken _) => MonitorService.ToggleRuleAsync(rt.Id, enabled));
         }
         catch (MutationRefusedException ex)
         {
@@ -262,7 +262,7 @@ else
         {
             await Mutations.RunAsync("logalert.delete",
                 new { name = rule.Name, ruleId = rule.RuleId, containerName = rule.ContainerName },
-                (ResolvedLogAlertRule rt, CancellationToken _) => MonitorService.DeleteRuleAsync(rule.RuleId));
+                (ResolvedLogAlertRule rt, CancellationToken _) => MonitorService.DeleteRuleAsync(rt.Id));
             Snackbar.Add(L["LogSearchView_Snackbar_RuleDeleted"].Value, Severity.Success);
             _rules = await MonitorService.GetRulesAsync();
         }

@@ -51,7 +51,7 @@ public interface IAutomationOwnerStore
     /// replaced (also a suspended one; <c>null</c>: none), read under the same lock as the write, so a takeover is
     /// audited with the assignment it actually replaced. Throws when the file cannot be written.</summary>
     [MutatingOperation("automation.owner_set")]
-    Task<string?> SetAsync(string feature, string ownerId, CancellationToken ct = default);
+    Task<string?> SetAsync([MutationTarget] string feature, string ownerId, CancellationToken ct = default);
 
     /// <summary>Suspends the feature because its owner lost their authority (PC-D6): it is blocked, keeps the owner
     /// for the record and stays refused across restarts until an admin takes it over. Only ever lowers authority, so

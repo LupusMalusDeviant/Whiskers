@@ -63,12 +63,12 @@ public interface IIdentityBindingStore
     /// <summary>Admin: turns a pending request into a binding; an older binding of the same account and issuer is
     /// replaced.</summary>
     [MutatingOperation("identity.binding_confirm")]
-    Task<IdentityBindingResult> ConfirmAsync(string pendingId, CancellationToken ct = default);
+    Task<IdentityBindingResult> ConfirmAsync([MutationTarget] string pendingId, CancellationToken ct = default);
 
     /// <summary>Admin: removes a binding or a pending request. Refuses to remove the last way the last Admin who can sign
     /// in has (<see cref="IdentityBindingErrors.LastAdmin"/>).</summary>
     [MutatingOperation("identity.binding_remove")]
-    Task<IdentityBindingResult> RemoveAsync(string id, CancellationToken ct = default);
+    Task<IdentityBindingResult> RemoveAsync([MutationTarget] string id, CancellationToken ct = default);
 
     /// <summary>The host CLI (<c>--confirm-identity-binding</c>): confirms the newest pending request of
     /// <paramref name="account"/>, of <paramref name="issuer"/> when several issuers wait

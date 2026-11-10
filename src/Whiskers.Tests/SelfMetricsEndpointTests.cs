@@ -103,13 +103,13 @@ public class SelfMetricsEndpointTests
         // one. The pause has to be a series somebody can alert on, or the emergency stop becomes a way to hide
         // a server rather than protect it.
         var suspension = services.GetRequiredService<Whiskers.Services.Observability.ILoopSuspensionService>();
-        GatewayArrange.Run("checks.pause", () => suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "test", automatic: true));
+        GatewayArrange.Run("checks.pause", new Whiskers.Services.Mutations.MutationTarget("server", "badwolf", ServerId: "badwolf"), () => suspension.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "test", automatic: true));
 
         var body = await ScrapeAsync(client);
 
         Assert.Contains("whiskers_loops_paused{server=\"badwolf\",automatic=\"true\"} 1", body);
 
-        GatewayArrange.Run("checks.resume", () => suspension.Resume("badwolf"));
+        GatewayArrange.Run("checks.resume", new Whiskers.Services.Mutations.MutationTarget("server", "badwolf", ServerId: "badwolf"), () => suspension.Resume("badwolf"));
         Assert.DoesNotContain("whiskers_loops_paused{server=\"badwolf\"", await ScrapeAsync(client));
     });
 

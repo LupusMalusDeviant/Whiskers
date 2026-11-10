@@ -201,7 +201,7 @@ else
         try
         {
             await Mutations.RunAsync("selfbackup.delete", new { archive = info.FileName },
-                (ResolvedRecord rt, CancellationToken _) => BackupService.DeleteBackupAsync(info.Id));
+                (ResolvedRecord rt, CancellationToken _) => BackupService.DeleteBackupAsync(rt.Id));
             Snackbar.Add(L["SelfBackupPanel_Snackbar_BackupDeleted"].Value, Severity.Success);
             await LoadBackups();
         }

@@ -27,7 +27,7 @@ public interface ILogMonitorService
     [MutatingOperation("logalert.create")]
     Task<LogAlertRuleEntity> CreateRuleAsync(LogAlertRuleEntity rule);
     [MutatingOperation("logalert.delete")]
-    Task DeleteRuleAsync(string ruleId);
+    Task DeleteRuleAsync([MutationTarget] string ruleId);
     [MutatingOperation("logalert.toggle")]
-    Task ToggleRuleAsync(string ruleId, bool enabled);
+    Task ToggleRuleAsync([MutationTarget] string ruleId, bool enabled);
 }

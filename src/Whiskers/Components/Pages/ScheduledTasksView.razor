@@ -520,7 +520,7 @@ else
     private Task<(bool Success, string Output)> RunScheduledAsync(Whiskers.Models.ScheduledTaskEntity task) =>
         Mutations.RunAsync("scheduler.run",
             new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId },
-            (ResolvedScheduledTask rt, CancellationToken _) => Scheduler.RunNowAsync(task.TaskId));
+            (ResolvedScheduledTask rt, CancellationToken _) => Scheduler.RunNowAsync(rt.Id));
 
     private async Task RunNow(Whiskers.Models.ScheduledTaskEntity task)
     {
@@ -632,7 +632,7 @@ else
                 new { taskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId, owner },
                 async (ResolvedScheduledTask rt, CancellationToken _) =>
                 {
-                    var adopted = await Scheduler.SetOwnerAsync(taskId, owner, task.CreatedBy);
+                    var adopted = await Scheduler.SetOwnerAsync(rt.Id, owner, task.CreatedBy);
                     if (adopted)
                         MutationScope.Note($"Owner: previous={previousAuthority}; new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");
                     return adopted;
@@ -669,7 +669,7 @@ else
         {
             await Mutations.RunAsync("scheduler.delete",
                 new { taskId = task.TaskId, name = task.Name, taskType = task.TaskType.ToString(), serverId = task.ServerId },
-                (ResolvedScheduledTask rt, CancellationToken _) => Scheduler.DeleteTaskAsync(task.TaskId));
+                (ResolvedScheduledTask rt, CancellationToken _) => Scheduler.DeleteTaskAsync(rt.Id));
             Snackbar.Add(L["ScheduledTasksView_Snackbar_TaskDeleted", task.Name].Value, Severity.Success);
             await LoadData();
         }

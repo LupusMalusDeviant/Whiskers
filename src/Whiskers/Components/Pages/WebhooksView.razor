@@ -446,7 +446,7 @@ else
             // The new secret is the action's result for the one-time display, never an argument of the decision.
             var secret = await Mutations.RunAsync("webhook.rotate_secret",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId },
-                (ResolvedWebhook rt, CancellationToken _) => WebhookService.RegenerateSecretAsync(wh.WebhookId));
+                (ResolvedWebhook rt, CancellationToken _) => WebhookService.RegenerateSecretAsync(rt.Id));
             ShowSecretOnce(wh.WebhookId, secret);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }
@@ -463,7 +463,7 @@ else
             var enable = !wh.Enabled;
             await Mutations.RunAsync("webhook.set_enabled",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId, enabled = enable },
-                (ResolvedWebhook rt, CancellationToken _) => WebhookService.SetEnabledAsync(wh.WebhookId, enable));
+                (ResolvedWebhook rt, CancellationToken _) => WebhookService.SetEnabledAsync(rt.Id, enable));
             Snackbar.Add(wh.Enabled ? L["WebhooksView_Snackbar_Disabled"].Value : L["WebhooksView_Snackbar_Enabled"].Value, Severity.Success);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }
@@ -501,7 +501,7 @@ else
         {
             await Mutations.RunAsync("webhook.delete",
                 new { webhookId = wh.WebhookId, name = wh.Name, serverId = wh.ServerId },
-                (ResolvedWebhook rt, CancellationToken _) => WebhookService.DeleteWebhookAsync(wh.WebhookId));
+                (ResolvedWebhook rt, CancellationToken _) => WebhookService.DeleteWebhookAsync(rt.Id));
             Snackbar.Add(L["WebhooksView_Snackbar_Deleted"].Value, Severity.Success);
             _webhooks = await WebhookService.GetWebhooksAsync();
         }

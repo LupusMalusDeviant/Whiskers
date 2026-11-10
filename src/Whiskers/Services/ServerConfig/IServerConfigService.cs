@@ -22,7 +22,7 @@ public interface IServerConfigService
     [Whiskers.Services.Mutations.MutatingOperation("server.save")]
     Task UpdateServerAsync(Models.ServerConfig server);
     [Whiskers.Services.Mutations.MutatingOperation("server.remove")]
-    Task RemoveServerAsync(string serverId);
+    Task RemoveServerAsync([Whiskers.Services.Mutations.MutationTarget] string serverId);
 
     /// <summary>
     /// Updates a server and decides its kubeconfig reference in the same step (R1-11): <paramref name="newKubeconfigRef"/>
@@ -63,7 +63,7 @@ public interface IServerConfigService
     /// <summary>Removes a server and returns the record that was removed, as stored at that moment (R1-11): its
     /// kubeconfig reference is the one to clean up, not that of an older copy. The default is for test doubles.</summary>
     [Whiskers.Services.Mutations.MutatingOperation("server.remove")]
-    async Task<Models.ServerConfig?> TakeServerAsync(string serverId)
+    async Task<Models.ServerConfig?> TakeServerAsync([Whiskers.Services.Mutations.MutationTarget] string serverId)
     {
         var current = GetServer(serverId);
         await RemoveServerAsync(serverId);

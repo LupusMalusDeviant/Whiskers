@@ -26,7 +26,7 @@ public interface IGitDeployService
     /// <see cref="GitDeployConflictException"/>; a missing app throws <see cref="KeyNotFoundException"/>. Like a save,
     /// whoever sets it becomes the owner (<paramref name="ownerId"/>, R1-08): the inputs a deployment runs with changed.</summary>
     [MutatingOperation("gitdeploy.set_token")]
-    Task<GitDeployApp> SetTokenAsync(string appId, int revision, string token, string ownerId);
+    Task<GitDeployApp> SetTokenAsync([MutationTarget] string appId, int revision, string token, string ownerId);
 
     /// <summary>Takes the app over (R1-08): sets <paramref name="ownerId"/> only while the stored owner is still
     /// <paramref name="expectedOwnerId"/> (empty = no owner). False when someone else changed it first.</summary>
@@ -35,7 +35,7 @@ public interface IGitDeployService
 
     /// <summary>Deletes the app, its vault token and its workspace on the target server.</summary>
     [MutatingOperation("gitdeploy.delete")]
-    Task DeleteAppAsync(string appId);
+    Task DeleteAppAsync([MutationTarget] string appId);
 
     /// <summary>Runs a full deploy (fetch → plan → build → up) of <paramref name="app"/> — the snapshot the
     /// deployment was decided on (R1-08) — streaming human-readable progress lines. Returns success + the deployed

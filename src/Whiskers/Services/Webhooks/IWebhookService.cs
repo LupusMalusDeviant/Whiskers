@@ -33,17 +33,17 @@ public interface IWebhookService
     Task<bool> SetOwnerAsync(string webhookId, string ownerId, string? expectedOwnerId);
 
     [Whiskers.Services.Mutations.MutatingOperation("webhook.delete")]
-    Task DeleteWebhookAsync(string webhookId);
+    Task DeleteWebhookAsync([Whiskers.Services.Mutations.MutationTarget] string webhookId);
 
     /// <summary>Replaces the webhook's HMAC secret with a freshly generated one and returns it
     /// (one-time display — it is not retrievable afterwards).</summary>
     [Whiskers.Services.Mutations.MutatingOperation("webhook.rotate_secret")]
-    Task<string> RegenerateSecretAsync(string webhookId);
+    Task<string> RegenerateSecretAsync([Whiskers.Services.Mutations.MutationTarget] string webhookId);
 
     /// <summary>Enables/disables a webhook. Enabling a webhook without a secret is rejected
     /// (legacy pre-F11 rows) — regenerate its secret first.</summary>
     [Whiskers.Services.Mutations.MutatingOperation("webhook.set_enabled")]
-    Task SetEnabledAsync(string webhookId, bool enabled);
+    Task SetEnabledAsync([Whiskers.Services.Mutations.MutationTarget] string webhookId, bool enabled);
 
     /// <summary>Takes an incoming delivery (R1-10, INV-42). Bounded first (request rates, body size), then checked
     /// against the webhook's provider rule (<see cref="WebhookSignatures"/>): a valid HMAC is required, and for a

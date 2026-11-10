@@ -38,12 +38,12 @@ public interface ILocalAccountService
     /// <summary>Admin: removes another account's password, ends its sessions and hands out a recovery code. An Admin
     /// changes their own password with <see cref="ChangeOwnPasswordAsync"/>.</summary>
     [MutatingOperation("account.password_reset")]
-    Task<LocalAccountResult> ResetPasswordAsync(string email, CancellationToken ct = default);
+    Task<LocalAccountResult> ResetPasswordAsync([MutationTarget] string email, CancellationToken ct = default);
 
     /// <summary>Admin: deletes another local account and its explicit role entry. Refused for the caller's own
     /// account and for the last Admin who can still sign in.</summary>
     [MutatingOperation("account.delete")]
-    Task<LocalAccountResult> DeleteAsync(string email, CancellationToken ct = default);
+    Task<LocalAccountResult> DeleteAsync([MutationTarget] string email, CancellationToken ct = default);
 
     /// <summary>Anonymous: sets a new password with a recovery code. A wrong, used or expired code, an unknown email and
     /// a locked account all give the same answer; a wrong code counts towards the lockout (trying a code for an account

@@ -123,7 +123,7 @@
             var previous = await Mutations.RunAsync("automation.owner_set", new { feature = featureId, owner },
                 async (ResolvedRecord rt, CancellationToken _) =>
                 {
-                    var replaced = await Owners.SetAsync(featureId, owner);
+                    var replaced = await Owners.SetAsync(rt.Id, owner);
                     // Who held the feature before is part of the gateway's event (R1-22).
                     MutationScope.Note($"Owner: previous={AutomationOwners.AuthorityOf(OwnerResolver, replaced)}; " +
                                        $"new={AutomationOwners.AuthorityOf(OwnerResolver, owner)}");

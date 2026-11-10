@@ -276,7 +276,7 @@ else
         {
             await Mutations.RunAsync("gitdeploy.delete",
                 new { appId = app.Id, name = app.Name, serverId = app.ServerId, branch = app.Branch, revision = app.Revision },
-                (ResolvedGitApp rt, CancellationToken _) => GitDeploy.DeleteAppAsync(app.Id));
+                (ResolvedGitApp rt, CancellationToken _) => GitDeploy.DeleteAppAsync(rt.Id));
             Snackbar.Add(L["GitDeployView_Snackbar_Deleted"].Value, Severity.Success);
             _apps = await GitDeploy.GetAppsAsync();
         }

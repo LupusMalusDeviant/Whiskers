@@ -26,4 +26,15 @@ internal static class GatewayArrange
         using (MutationScope.Begin(capabilityId, "test-arrange"))
             arrange();
     }
+
+    /// <summary>Contract 0012 (D4 b): an operation that marks its target acts only on the decided object — the arrange
+    /// scope decides <paramref name="target"/>.</summary>
+    public static void Run(string capabilityId, MutationTarget target, Action arrange)
+    {
+        var principal = new MutationPrincipal(MutationPrincipalKind.Human, "user:test", "test",
+            Whiskers.Models.McpPermissionLevels.Admin);
+        using (MutationScope.Begin(capabilityId, "test-arrange", principal, new MutationRequest(capabilityId, principal,
+                   MutationSurface.Ui, target, new Dictionary<string, System.Text.Json.JsonElement>())))
+            arrange();
+    }
 }
