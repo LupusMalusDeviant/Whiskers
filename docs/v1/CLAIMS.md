@@ -50,7 +50,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | RM-13 | `README.md` | `232138d9f27d` | **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own 300 s / 600 s / 300 s. | constant | `SelfReportClaimTests.The_compose_run_budget_is_five_minutes_and_git_deploy_keeps_300_600_300_seconds` |
 | RM-25 | `README.md` | `f8ce97a70a2e` | a deployment that would use one of their names is refused until the container is removed or another name is chosen | behaviour | `DeployAppComposeTests.A_legacy_container_with_the_name_is_refused_with_the_ways_out`, `DeployPageComposeTests.The_form_refuses_a_legacy_container_with_its_name`, `DeployPageComposeTests.The_compose_tab_refuses_a_legacy_container_with_a_name_it_would_use` |
 | RM-23 | `README.md` | `fcbeb0625505` | Apache License 2.0 | artifact | `SelfReportClaimTests.The_stack_is_dotnet_10_under_the_apache_license_2` |
-| SEC-01 | `SECURITY.md` | `7ba4d2988f0e` | Whiskers is currently **beta** (`0.15.x`). | artifact | `SelfReportClaimTests.The_supported_line_is_the_version_of_this_source_tree` |
+| SEC-01 | `SECURITY.md` | `27ce9a2b15eb` | Whiskers is currently **stable** (`1.0.x`). | artifact | `SelfReportClaimTests.The_supported_line_is_the_version_of_this_source_tree` |
 | SEC-02 | `SECURITY.md` | `2c3376c66abd` | Helm chart pins `replicas: 1` with a `Recreate` strategy | artifact | `SelfReportClaimTests.The_helm_chart_runs_one_replica_with_recreate` |
 | SEC-15 | `SECURITY.md` | `be2a1ac9b3fe` | roll out the mTLS certificates, the Docker proxy and telemetry | artifact | `OnboardingCommandsTests.DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off`, `OnboardingCommandsTests.NodeExporterCompose_binds_to_the_tailnet_ip_only` |
 | SEC-16 | `SECURITY.md` | `2bb11d69e4f0` | the Docker API (Docker Engine API over mutual TLS, client CN pinned, behind a verb-whitelisting socket proxy) | artifact + behaviour | `OnboardingCommandsTests.The_socket_proxy_whitelist_is_exactly_the_approved_one_in_both_places`, `OnboardingCommandsTests.The_ghostunnel_command_is_exactly_the_approved_one`, `DockerMtlsHostnameTests` |
@@ -115,7 +115,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 
 | File | Block | Reason | Starts with |
 | --- | --- | --- | --- |
-| `README.md` | `8b32f73f6969` | policy | **Status: beta.** Not API-stable before |
+| `README.md` | `c13702a701d0` | policy | **Status: stable (1.0).** Run it on a tr |
 | `README.md` | `941b3da88f96` | history | **Scope of this README:** `main`, i.e. t |
 | `README.md` | `323ff41f5965` | advice | ```bash VER=X.Y.Z # a release from https |
 | `README.md` | `8e38830acb63` | advice | ```bash VER=X.Y.Z docker run -d --name w |
@@ -157,8 +157,8 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `SECURITY.md` | `e24b21437c3c` | policy | \| Fix released for **critical / high** \| |
 | `SECURITY.md` | `586ef6d8f8ba` | policy | \| Fix released for **medium / low** \| wi |
 | `SECURITY.md` | `abca188454fb` | policy | If a target slips, you will hear so — wi |
-| `SECURITY.md` | `b108b07f15e7` | policy | \| `0.15.x` (beta) \| ✅ latest only \| |
-| `SECURITY.md` | `9aa5214daa71` | policy | \| `< 0.15` \| ❌ \| |
+| `SECURITY.md` | `9bf87d10b106` | policy | \| `1.0.x` (stable) \| ✅ latest only \| |
+| `SECURITY.md` | `5ab8016d2397` | policy | \| `< 1.0` (beta) \| ❌ \| |
 | `SECURITY.md` | `e1ade1a68e7d` | limit | - **The Docker-API and host-control plan |
 | `SECURITY.md` | `7bd63b63bc53` | limit | - **Not covered in 1.0, by design** (pro |
 | `SECURITY.md` | `a223f82ae23f` | advice | - **Local accounts have no MFA in 1.0.** |

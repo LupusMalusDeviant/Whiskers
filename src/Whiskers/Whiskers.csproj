@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
-    <Version>0.15.0</Version>
+    <Version>1.0.0</Version>
     <Product>Whiskers</Product>
     <!-- R1-52: the SDK adds the framework web-assets package only when it sees .razor files. Said explicitly, so a
          restore of the project file alone (the Dockerfile's cached restore layer) resolves the same packages as a full

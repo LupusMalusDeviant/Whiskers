@@ -8,5 +8,5 @@ sources:
   - https://github.com/LupusMalusDeviant/Whiskers
 # version = chart version, appVersion = image tag. The release pipeline stamps both from the
 # git tag (v* → X.Y.Z); the values here are the fallbacks for local `helm install` from source.
-version: 0.15.0
-appVersion: "0.15.0"
+version: 1.0.0
+appVersion: "1.0.0"

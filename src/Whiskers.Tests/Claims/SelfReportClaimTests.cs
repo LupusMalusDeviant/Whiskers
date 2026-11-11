@@ -172,9 +172,11 @@ public class SelfReportClaimTests
     public void The_supported_line_is_the_version_of_this_source_tree()
     {
         var version = ReleaseGate.ReleaseGate.ReadVersion(Read("src/Whiskers/Whiskers.csproj"));
-        var line = Regex.Match(Read("SECURITY.md"), @"\*\*beta\*\* \(`(?<line>\d+\.\d+)\.x`\)");
+        var line = Regex.Match(Read("SECURITY.md"), @"\*\*(?<stage>beta|stable)\*\* \(`(?<line>\d+\.\d+)\.x`\)");
         Assert.True(line.Success, "SECURITY.md names no supported line");
         Assert.Equal($"{version.Major}.{version.Minor}", line.Groups["line"].Value);
+        // From 1.0 on the line is stable; a 0.x line is beta.
+        Assert.Equal(version.Major >= 1 ? "stable" : "beta", line.Groups["stage"].Value);
     }
 
     /// <summary>SEC-03: every role maps to its scope — Viewer → Read, Operator → Write, Admin → Admin — through
