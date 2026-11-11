@@ -17,7 +17,7 @@ set -euo pipefail
 
 # The release this installer installs by default. The release pipeline accepts only vX.Y.Z tags and refuses one whose
 # version differs from this line (release.yml, prepare), so the install.sh of release X.Y.Z installs X.Y.Z.
-WHISKERS_RELEASE="0.15.0"
+WHISKERS_RELEASE="1.0.0"
 REPOSITORY="ghcr.io/lupusmalusdeviant/whiskers"
 # The identity the release workflow signs with (keyless cosign, see docs/security-architecture.md "Supply chain"). For a release X.Y.Z the
 # installer requires exactly the run of tag vX.Y.Z (signer_identity below), so an older signed image re-tagged as

@@ -39,7 +39,7 @@ Highest invariant ID: INV-62
 
 | Invariant | Status | Package | Why it is open | Reference |
 |---|---|---|---|---|
-| INV-58 | ⚠️ | R1-44 | holds per host only after the migration; hosts on the shared client credential are exposed (D12) | — |
+| INV-58 | ⚠️ | R1-44 | holds per host only after the migration; hosts on the shared client credential are exposed (D12) | https://github.com/LupusMalusDeviant/Whiskers/issues/184 |
 
 ## Retired invariants
 

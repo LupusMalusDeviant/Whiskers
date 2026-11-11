@@ -9,7 +9,7 @@ of holding SSH keys or the Docker socket. Every call is authenticated, scope-che
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/LupusMalusDeviant/Whiskers/blob/main/LICENSE)
 [![MCP Badge](https://lobehub.com/badge/mcp/lupusmalusdeviant-whiskers)](https://lobehub.com/mcp/lupusmalusdeviant-whiskers)
 
-**Status: beta.** Not API-stable before 1.0. Run it on a trusted network and read [SECURITY.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md). <!-- claim-free:policy -->
+**Status: stable (1.0).** Run it on a trusted network and read [SECURITY.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md). <!-- claim-free:policy -->
 
 **Scope of this README:** `main`, i.e. the first release after 0.15.0. Releases up to 0.15.0 differ (installer defaults
 to `latest`, no generated vault key, no `VAULT_KEY_FILE`, no setup token); for those use the

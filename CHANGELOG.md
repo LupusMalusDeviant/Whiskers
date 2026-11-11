@@ -6,6 +6,55 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-11-11
+
+Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in
+`docs/v1/SECURITY_INVARIANTS.md` is proven by named tests, which CI requires one by one. The exception is INV-58, which
+holds per host once that host is migrated (#184). Every change, whether from the UI, MCP, the agent, a webhook or a
+scheduled task, runs through one Mutation Gateway. The gateway resolves the target, decides on a structured principal,
+asks for approval where the policy says so, and writes one audit event per attempt. From 1.0.0 on, every pull request
+runs the gate in Line mode.
+
+### Upgrading from 0.15.0
+
+Check these before or right after the update. Details are in the entries below.
+
+- **Vault key.**
+  - Set `VAULT_KEY_FILE` (recommended) or `VAULT_KEY` before the update.
+  - On start, Whiskers seals the SSH and mTLS client keys in the data directory with it.
+  - Without a vault key, Whiskers refuses to store new SSH keys or issue mTLS client keys.
+  - Keep the key outside the data directory, for example in a password manager.
+- **Self-backup at the first start.** Before migrating, Whiskers writes a backup of its own data. With a large metrics
+  database this takes a while: a 741 MB SQLite file took about 17 minutes. Readiness stays red until it is done; do not
+  restart the container in between.
+- **Sign in again.** Every session from before the update ends, and approvals pending at the update can no longer be
+  used.
+- **Google/OIDC sign-in.**
+  - A generic OIDC provider (Authentik, Keycloak, …) is not trusted to verify addresses unless
+    `Oidc__TrustEmailVerified=true` is set.
+  - Without that setting, the first federated sign-in of an account waits for confirmation. Confirm it under
+    Settings → Sign-in identities, or on the host:
+    `docker compose exec whiskers dotnet Whiskers.dll --confirm-identity-binding <email>`.
+  - Use the second way when the only Admin signs in through OIDC.
+- **Reverse proxy.** Forwarded headers are trusted from loopback only. Behind a proxy on another address, name it with
+  `ForwardedHeaders__TrustedNetworks__0`.
+- **MCP clients.**
+  - Sessions are bound to their key; clients reconnect once.
+  - A federated browser session can no longer call `/mcp`; use an API key.
+  - Several tools now need Admin.
+  - A gateway that pins tool definitions (for example Bifröst) holds back the tools whose definition changed until
+    you accept them.
+- **Webhooks and Git deploy apps** created before this release have no owner and do not run until an admin takes them
+  over (Owner column).
+- **Per-host mTLS identities.** Existing hosts keep the shared client certificate until you migrate them one at a time:
+  key icon on the server page, then the approval, then the key icon again. Retire the shared key after the last host.
+  A host whose ghostunnel is managed by more than one compose file is refused by the preflight; merge the files first.
+  See `docs/operations/per-host-mtls-migration.md`.
+- **Kubernetes.** Apply `deploy/k8s/whiskers-agent-rbac.yaml` again on every connected cluster.
+- **PostgreSQL overlay users.** The overlay moves to PostgreSQL 18; follow `docs/operations/postgres-18-upgrade.md`.
+
+### All changes since 0.15.0
+
 - **CodeQL triage before 1.0 (`docs/security/codeql-triage-2026-11.md`).** Every logged value now reaches the log on
   one line (no value can forge a log line), and an account's address never reaches the application log: the
   redacting logger writes it as a per-process pseudonym `[account:1a2b3c4d]` (contract 0003). The audit rows in the
