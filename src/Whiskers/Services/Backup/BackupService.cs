@@ -13,7 +13,8 @@ namespace Whiskers.Services.Backup;
 /// Creates and restores consistent snapshots of Whiskers' own <c>/app/data</c> (F3). Runs IN-PROCESS
 /// (System.Formats.Tar + GZip) — unlike <see cref="VolumeBackupService"/> which shells a helper container for
 /// foreign Docker volumes — because the app can read its own data directory directly. The SQLite database is
-/// captured with <c>VACUUM INTO</c> (a consistent online snapshot with the WAL folded in), a PostgreSQL database with
+/// captured with SQLite's online backup API (a consistent online snapshot with the WAL folded in,
+/// <see cref="SnapshotSqliteAsync"/>), a PostgreSQL database with
 /// <c>pg_dump</c> (R1-33, <see cref="PostgresDumpTool"/>; restored at the start in one transaction), the archive is
 /// optionally AES-256-GCM encrypted with a VAULT_KEY-derived key, and restore is a crash-safe deferred swap.
 /// </summary>
@@ -148,18 +149,9 @@ public sealed class BackupService : IBackupService
 
                 if (isSqlite)
                 {
-                    // Consistent online snapshot: VACUUM INTO produces a compacted single file with the WAL
-                    // folded in (no -wal/-shm sidecars) — exactly what belongs in the archive. Both DbContexts
-                    // share this one physical file, so this captures metrics AND identity data together.
+                    // Both DbContexts share this one physical file, so this captures metrics AND identity data together.
                     stagedDb = Path.Combine(buildDir, SelfBackupFormat.DbEntryName);
-                    // VACUUM INTO's destination is a path literal that SQLite does NOT allow as a bound
-                    // parameter, so it cannot go through the parameterized ExecuteSqlAsync. The path is
-                    // app-controlled (our backups/self build dir, never user input) and single-quotes are
-                    // doubled, so the raw statement is safe.
-                    var escaped = stagedDb.Replace("'", "''");
-#pragma warning disable EF1002 // unparameterizable VACUUM INTO target; app-controlled + quoted path
-                    await metrics.Database.ExecuteSqlRawAsync($"VACUUM INTO '{escaped}'", ct);
-#pragma warning restore EF1002
+                    await SnapshotSqliteAsync(metrics, stagedDb, ct);
                 }
                 else
                 {
@@ -246,6 +238,44 @@ public sealed class BackupService : IBackupService
         finally
         {
             TryDeleteDir(buildDir);
+        }
+    }
+
+    /// <summary>
+    /// A consistent online snapshot of the live SQLite database as one self-contained file at <paramref name="destination"/>:
+    /// the committed state with the WAL folded in, no <c>-wal</c>/<c>-shm</c> sidecars.
+    /// <para>SQLite's online backup API copies the pages in file order, in one step under one read transaction, so it sees
+    /// exactly one committed state while writers go on. It replaced <c>VACUUM INTO</c>, which rebuilds the database in
+    /// b-tree order and reads the file out of order: on a spinning disk with a cold cache, a 780 MB database took 1089 s
+    /// that way and 52 s with the backup API (Badwolf, 2026-11-12). The pre-upgrade backup runs before the app is ready, so
+    /// that was the time the first start of an upgrade stood still.</para>
+    /// <para>The copy is not compacted (free pages travel along; gzip shrinks them to almost nothing). Its header still says
+    /// WAL from the source, so it is switched to a rollback journal to leave a single file a restore can use as it is.</para>
+    /// </summary>
+    internal static async Task SnapshotSqliteAsync(MetricsDbContext metrics, string destination, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var source = (Microsoft.Data.Sqlite.SqliteConnection)metrics.Database.GetDbConnection();
+        await metrics.Database.OpenConnectionAsync(ct);
+        try
+        {
+            // Pooling off: the archiver opens the file right after, and a pooled handle would keep it open (Windows).
+            var target = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = destination, Pooling = false };
+            await using var dest = new Microsoft.Data.Sqlite.SqliteConnection(target.ToString());
+            await dest.OpenAsync(ct);
+            // BackupDatabase runs sqlite3_backup_step(-1): every page in one step, so the snapshot is consistent. It is
+            // synchronous on the caller's thread, like every Microsoft.Data.Sqlite call (VACUUM INTO's async call was
+            // too); no Task.Run, so no background work starts outside the caller's decision.
+            source.BackupDatabase(dest);
+            await using (var journal = dest.CreateCommand())
+            {
+                journal.CommandText = "PRAGMA journal_mode=DELETE;";
+                await journal.ExecuteScalarAsync(ct);
+            }
+        }
+        finally
+        {
+            await metrics.Database.CloseConnectionAsync();
         }
     }
 

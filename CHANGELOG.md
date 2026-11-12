@@ -24,9 +24,9 @@ Check these before or right after the update. Details are in the entries below.
   - On start, Whiskers seals the SSH and mTLS client keys in the data directory with it.
   - Without a vault key, Whiskers refuses to store new SSH keys or issue mTLS client keys.
   - Keep the key outside the data directory, for example in a password manager.
-- **Self-backup at the first start.** Before migrating, Whiskers writes a backup of its own data. With a large metrics
-  database this takes a while: a 741 MB SQLite file took about 17 minutes. Readiness stays red until it is done; do not
-  restart the container in between.
+- **Self-backup at the first start.** Before migrating, Whiskers writes a backup of its own data. Readiness stays red
+  until it is done; do not restart the container in between. With a 780 MB SQLite file on a spinning disk this takes
+  about a minute.
 - **Sign in again.** Every session from before the update ends, and approvals pending at the update can no longer be
   used.
 - **Google/OIDC sign-in.**
@@ -54,6 +54,14 @@ Check these before or right after the update. Details are in the entries below.
 - **PostgreSQL overlay users.** The overlay moves to PostgreSQL 18; follow `docs/operations/postgres-18-upgrade.md`.
 
 ### All changes since 0.15.0
+
+- **Fix: the SQLite self-backup is fast on spinning disks.** A self-backup, and so the pre-upgrade backup at the first
+  start of an upgrade, copied the database with `VACUUM INTO`. That rebuilds the file in b-tree order and reads it out
+  of order. On a spinning disk with a cold cache, a 780 MB database took 1089 s that way; the pre-upgrade backup of the
+  reference deployment took 1032 s. The snapshot now uses SQLite's online backup API, which copies the pages in file
+  order in one step under one read transaction: 52 s for the same file. The archive format is unchanged. The database
+  entry is still one self-contained file (WAL folded in, rollback journal); it is no longer compacted, which gzip
+  absorbs.
 
 - **CodeQL triage before 1.0 (`docs/security/codeql-triage-2026-11.md`).** Every logged value now reaches the log on
   one line (no value can forge a log line), and an account's address never reaches the application log: the

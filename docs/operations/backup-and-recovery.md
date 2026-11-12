@@ -11,7 +11,7 @@ archive holds the database **and** the files from the same moment, so they alway
 
 | Instance | Database in the archive | Files in the archive |
 |---|---|---|
-| SQLite (default) | `metrics.db`, a `VACUUM INTO` snapshot | the stores and directories of the data directory (`/app/data`): roles, whitelist, vault, servers, settings, keys, SSH keys, mTLS material, chat history and so on |
+| SQLite (default) | `metrics.db`, a snapshot through SQLite's online backup API (consistent, with the WAL folded in) | the stores and directories of the data directory (`/app/data`): roles, whitelist, vault, servers, settings, keys, SSH keys, mTLS material, chat history and so on |
 | PostgreSQL | `database.pgdump`, a `pg_dump` (custom format) of the `public` schema. That schema holds the metrics tables and the sign-in tables, each with its migration history. | the same files |
 
 With `VAULT_KEY` (or `VAULT_KEY_FILE`) set, the archive is encrypted with AES-256-GCM, using a key derived from
