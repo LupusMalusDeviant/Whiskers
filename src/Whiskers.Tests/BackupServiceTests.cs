@@ -150,7 +150,7 @@ public class BackupServiceTests
     [Fact]
     public async Task The_audit_checkpoint_file_is_archived_once_as_taken_before_the_database()
     {
-        // R1-23: staged before VACUUM INTO, so a restored database always reaches the restored checkpoint.
+        // R1-23: staged before the database snapshot, so a restored database always reaches the restored checkpoint.
         var (svc, paths, root, sp) = NewService(vaultKey: null);
         try
         {
