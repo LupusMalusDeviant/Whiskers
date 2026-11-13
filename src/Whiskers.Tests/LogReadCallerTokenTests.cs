@@ -76,6 +76,7 @@ public class LogReadCallerTokenTests
     public class HangingConnections : NullProxy<IDockerConnectionManager>
     {
         public List<CancellationToken> CallerTokens { get; } = [];
+        public List<CancellationToken> Deadlines { get; } = [];
 
         public static (IDockerConnectionManager Service, HangingConnections Recorder) New()
         {
@@ -88,12 +89,14 @@ public class LogReadCallerTokenTests
             if (method!.Name is not (nameof(IDockerConnectionManager.ExecuteAsync) or nameof(IDockerConnectionManager.ExecuteGuardedAsync)))
                 return base.Invoke(method, args);
             var token = (CancellationToken)args![Array.FindIndex(method.GetParameters(), p => p.Name == "callerToken")];
-            lock (CallerTokens) CallerTokens.Add(token);
+            var deadline = (CancellationToken)args[Array.FindIndex(method.GetParameters(), p => p.Name == "deadline")];
+            lock (CallerTokens) { CallerTokens.Add(token); Deadlines.Add(deadline); }
+            var either = CancellationTokenSource.CreateLinkedTokenSource(token, deadline).Token;
             var result = method.ReturnType.GetGenericArguments()[0];
             var never = Activator.CreateInstance(typeof(TaskCompletionSource<>).MakeGenericType(result))!;
             var task = (Task)never.GetType().GetProperty("Task")!.GetValue(never)!;
             // The task completes only as cancelled, through WaitAsync on the caller's token.
-            return typeof(Task<>).MakeGenericType(result).GetMethod("WaitAsync", [typeof(CancellationToken)])!.Invoke(task, [token]);
+            return typeof(Task<>).MakeGenericType(result).GetMethod("WaitAsync", [typeof(CancellationToken)])!.Invoke(task, [either]);
         }
     }
 
@@ -114,6 +117,41 @@ public class LogReadCallerTokenTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read.WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.Equal(caller.Token, Assert.Single(recorder.CallerTokens));
+    }
+
+    [Fact]
+    public async Task The_fleet_sweeps_own_timeout_is_a_deadline_not_a_caller_stopping()
+    {
+        // The fleet-wide probe's 8 s bound is our own deadline on the server: it must not reach the Docker call as the
+        // caller's token, or a hanging host would never count against its circuit (R1-41).
+        var (connections, recorder) = HangingConnections.New();
+        var servers = OneServer.Create();
+        var ops = new SystemInfoOperations(connections, servers,
+            NullProxy<Whiskers.Services.Metrics.IPrometheusMetricsSource>.Create(), null!,
+            NullLogger<DockerService>.Instance, new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+            NullProxy<Whiskers.Services.Observability.IFleetSnapshotCache>.Create());
+
+        var all = await ops.GetAllServerSystemInfoAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.False(all["srv"].IsReachable);
+        Assert.Equal(CancellationToken.None, Assert.Single(recorder.CallerTokens));
+        Assert.True(recorder.Deadlines.Single().IsCancellationRequested);
+    }
+
+    /// <summary>A fleet of one TCP server.</summary>
+    public class OneServer : NullProxy<Whiskers.Services.ServerConfig.IServerConfigService>
+    {
+        public static new Whiskers.Services.ServerConfig.IServerConfigService Create() =>
+            DispatchProxy.Create<Whiskers.Services.ServerConfig.IServerConfigService, OneServer>();
+
+        private static readonly ServerConfig Server = new() { Id = "srv", Name = "srv", ConnectionType = ConnectionType.TCP, Enabled = true };
+
+        protected override object? Invoke(MethodInfo? method, object?[]? args) => method!.Name switch
+        {
+            nameof(Whiskers.Services.ServerConfig.IServerConfigService.GetEnabledServers) => new List<ServerConfig> { Server },
+            nameof(Whiskers.Services.ServerConfig.IServerConfigService.GetServer) => Server,
+            _ => base.Invoke(method, args),
+        };
     }
 
     [Fact]
