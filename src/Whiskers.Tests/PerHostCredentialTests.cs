@@ -1042,10 +1042,11 @@ public sealed class PerHostCredentialTests
     }
 
     [Fact]
-    public async Task A_save_that_moves_a_server_to_another_host_waits_for_no_running_onboarding()
+    public async Task A_save_of_a_server_waits_for_no_running_onboarding()
     {
-        // INV-59 (#187, Codex round 4): the page's save holds the per-host lock when it changes the connection, so it is
-        // refused while an onboarding (or a certificate step) holds the host; an edit of a name or group is not.
+        // INV-59 (#187, Codex rounds 4 and 5): the page's save holds the per-host lock, so it is refused while an
+        // onboarding (or a certificate step) holds the host — a save that moves the record and a save of a name alike:
+        // both write the whole record, and the second may carry a host read before another admin's change.
         using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
         var stored = await SshRecordAsync(w, "neuhof");
         var moved = stored.Clone();
@@ -1060,13 +1061,36 @@ public sealed class PerHostCredentialTests
         try
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() => MtlsOnboardingState.SaveAsync(w.Store, stored, moved, Save));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => MtlsOnboardingState.SaveAsync(w.Store, stored, renamed, Save));
             Assert.Equal(0, saves);
-            Assert.Equal(1, await MtlsOnboardingState.SaveAsync(w.Store, stored, renamed, Save));
         }
         finally { gate.Release(); }
 
-        Assert.Equal(2, await MtlsOnboardingState.SaveAsync(w.Store, stored, moved, Save));
+        Assert.Equal(1, await MtlsOnboardingState.SaveAsync(w.Store, stored, moved, Save));
+        Assert.Equal(2, await MtlsOnboardingState.SaveAsync(w.Store, stored, renamed, Save));
         Assert.Equal(1, gate.CurrentCount);   // released after the save
+    }
+
+    [Fact]
+    public async Task A_save_that_keeps_the_connection_holds_the_host_until_it_is_written()
+    {
+        // Codex round 5: a save of a name, read before another admin moved the record, is still waiting for its write.
+        // Without the lock an onboarding could start on the new host meanwhile and the save would write the old host back
+        // under it. With it, no onboarding starts until that save has been written.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var stored = await SshRecordAsync(w, "neuhof");
+        var renamed = stored.Clone();
+        renamed.Name = "Neuhof (alt)";
+        var written = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var saving = MtlsOnboardingState.SaveAsync(w.Store, stored, renamed, () => written.Task);
+        var gate = w.Store.HostLock("neuhof");
+        Assert.False(await gate.WaitAsync(0));   // an onboarding cannot take the host while the save is pending
+
+        written.SetResult(1);
+        Assert.Equal(1, await saving);
+        Assert.True(await gate.WaitAsync(0));
+        gate.Release();
     }
 
     private static async Task<ServerConfig> SshRecordAsync(CredentialWorld w, string id)

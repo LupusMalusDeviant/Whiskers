@@ -707,8 +707,8 @@
 
             // The store decides the kubeconfig reference when it writes (R1-11): the new one, or whatever the server
             // has at that moment — a save queued behind another admin's rotation keeps the rotated kubeconfig.
-            // INV-59 (#187): a save that moves the record to another host waits for no onboarding or certificate step of
-            // it — it holds their per-host lock, or is refused while one runs.
+            // INV-59 (#187): a save waits for no onboarding or certificate step of the server — it holds their per-host
+            // lock, or is refused while one runs (the whole record is written, so a name save counts as well).
             var updated = Record();
             var previous = await Whiskers.Services.Certificates.MtlsOnboardingState.SaveAsync(ClientCredentials,
                 ServerConfigService.GetServer(_editingServer.Id) is { } stored && stored.Id == _editingServer.Id ? stored : null,

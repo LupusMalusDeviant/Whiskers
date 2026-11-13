@@ -328,9 +328,12 @@ A8–A11 were found while building steps 5 and 6. Each replaces the wording abov
   credentials). It is part of the approval binding (`targetConnection`), so an approval given for one host is unusable
   once the record reaches another. The onboarding receives it (`OnboardServerAsync(serverId, mayReplaceMtlsState,
   decidedConnection, …)`) and refuses, under the host lock, at its start and again before the certificate step, when
-  the record no longer reaches that host (or none was passed). A save on the Servers page that changes the connection
+  the record no longer reaches that host (or none was passed). Every save of an existing server on the Servers page
   holds the same per-host lock (`MtlsOnboardingState.SaveAsync`) and is refused while an onboarding or a certificate
-  step holds it; a save that changes only names, groups or tags is not. **Known limit:** the protection follows
+  step holds it — also a save that keeps the connection, because it writes the whole record and may carry a host read
+  before another admin's change. A cached Docker client is bound to the connection it was built for
+  (`DockerConnectionManager.CacheIdentityOf`): a client for the record's earlier host is never handed out, and a client
+  whose build finished after the record moved is not published. **Known limit:** the protection follows
   Whiskers' records, not the physical host — a second record for the same host has no mTLS state of its own, so its
   first onboarding needs no approval. Creating that record is an Admin action (`server.save`) and is audited.
 

@@ -14,7 +14,19 @@ public class DockerConnectionManager : IDockerConnectionManager
     private readonly IServerConfigService _serverConfig;
     private readonly ISshTunnelManager _sshTunnelManager;
     private readonly ILogger<DockerConnectionManager> _logger;
-    private readonly ConcurrentDictionary<string, DockerClient> _clients = new();
+    // INV-59 (#187): a cached client is bound to the connection it was built for (CacheIdentityOf). A record that now
+    // reaches another host never gets the old host's client, even when that client was published after the edit.
+    private readonly ConcurrentDictionary<string, CachedClient> _clients = new();
+
+    private sealed record CachedClient(DockerClient Client, string Identity);
+
+    /// <summary>What a cached client is bound to: the host the record reaches
+    /// (<see cref="Certificates.MtlsOnboardingState.ConnectionOf"/>) plus the transport settings the client was built
+    /// with (TLS material, SSH user). Any difference means the cached client is not this record's client.</summary>
+    internal static string CacheIdentityOf(Models.ServerConfig server) =>
+        string.Join('\u001e', Certificates.MtlsOnboardingState.ConnectionOf(server),
+            server.TcpUseTls ? "tls" : "", server.TcpClientCertPath ?? "", server.TcpClientKeyPath ?? "",
+            server.TcpCaCertPath ?? "", server.SshUser ?? "");
 
     // Serializes client/tunnel creation per server so concurrent callers (the several background
     // pollers) can't each spawn a tunnel for the same server at once — that would leak orphaned
@@ -53,6 +65,19 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// <summary>Tests only: awaited inside the budget slot, with the call's deadline, before a retried operation reaches
     /// the client — stands in for a server that was sent the request and does not answer. Null in the app.</summary>
     internal Func<CancellationToken, Task>? SentRequestForTests { get; init; }
+
+    /// <summary>Tests only: builds the client in place of <c>CreateClientAsync</c>, and disposes one (the test project
+    /// cannot load the Docker client configuration). Null in the app.</summary>
+    internal Func<Models.ServerConfig, Task<DockerClient>>? BuildClientForTests { get; init; }
+
+    /// <inheritdoc cref="BuildClientForTests"/>
+    internal Action<DockerClient>? DisposeClientForTests { get; init; }
+
+    private void DisposeClient(DockerClient client)
+    {
+        if (DisposeClientForTests is { } dispose) dispose(client);
+        else client.Dispose();
+    }
 
     private Task<DockerClient> AcquireClientAsync(string? serverId) =>
         ClientSourceForTests?.Invoke(serverId) ?? GetClientAsync(serverId);
@@ -108,11 +133,24 @@ public class DockerConnectionManager : IDockerConnectionManager
             if (TryGetLiveClient(server, out var live2))
                 return live2!;
 
-            // Tear down any stale client + dead tunnel before rebuilding.
+            // Tear down any stale client + dead tunnel before rebuilding. The tunnel goes even without a cached client:
+            // the tunnel manager reuses a live tunnel by server id, whatever host it leads to (INV-59).
             InvalidateClient(server.Id);
+            _sshTunnelManager?.CloseTunnel(server.Id);
 
-            var client = await CreateClientAsync(server);
-            _clients[server.Id] = client;
+            var identity = CacheIdentityOf(server);
+            var client = await (BuildClientForTests?.Invoke(server) ?? CreateClientAsync(server));
+            // The record may have moved to another host while the client was built (an edit's invalidation found
+            // nothing to drop then). Such a client is never published; the caller retries against the current record.
+            var current = _serverConfig.GetServer(server.Id);
+            if (current is null || !string.Equals(CacheIdentityOf(current), identity, StringComparison.Ordinal))
+            {
+                DisposeClient(client);
+                _sshTunnelManager?.CloseTunnel(server.Id);
+                throw new InvalidOperationException(
+                    $"The connection of server '{server.Name}' changed while its client was built; try again.");
+            }
+            _clients[server.Id] = new CachedClient(client, identity);
             return client;
         }
         finally
@@ -130,8 +168,16 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// </summary>
     private bool TryGetLiveClient(Models.ServerConfig server, out DockerClient? client)
     {
-        if (_clients.TryGetValue(server.Id, out client))
+        if (_clients.TryGetValue(server.Id, out var cached))
         {
+            // INV-59 (#187): a client built for another connection than the record's is not this record's client.
+            if (!string.Equals(cached.Identity, CacheIdentityOf(server), StringComparison.Ordinal))
+            {
+                _logger.LogInformation("Connection of '{ServerName}' changed; its client will be rebuilt", server.Name);
+                client = null;
+                return false;
+            }
+            client = cached.Client;
             if (server.ConnectionType != ConnectionType.SSH || _sshTunnelManager.IsTunnelActive(server.Id))
                 return true;
             _logger.LogWarning("SSH tunnel for '{ServerName}' is no longer alive; connection will be rebuilt", server.Name);
@@ -303,7 +349,7 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// at once, open the circuit and refuse the very check that caused it (2026-11-10, Infomaniak). A disposed client
     /// that is still the cached one is not covered: nothing replaced it, so the failure counts as before.</summary>
     internal bool IsSupersededClientFailure(string serverId, DockerClient used, Exception ex) =>
-        IsSupersededClientFailure(ex, used, _clients.TryGetValue(serverId, out var current) ? current : null);
+        IsSupersededClientFailure(ex, used, _clients.TryGetValue(serverId, out var current) ? current.Client : null);
 
     /// <summary>The rule of <see cref="IsSupersededClientFailure(string, DockerClient, Exception)"/> with the cached
     /// client passed in (<c>null</c>: none cached).</summary>
@@ -338,18 +384,19 @@ public class DockerConnectionManager : IDockerConnectionManager
     {
         if (ifCurrent is null)
         {
-            if (_clients.TryRemove(serverId, out var client))
+            if (_clients.TryRemove(serverId, out var cached))
             {
-                client.Dispose();
+                DisposeClient(cached.Client);
                 _sshTunnelManager.CloseTunnel(serverId);
             }
             return;
         }
 
         // Only remove+dispose when the cached value is still the instance the caller used.
-        if (_clients.TryRemove(new KeyValuePair<string, DockerClient>(serverId, ifCurrent)))
+        if (_clients.TryGetValue(serverId, out var current) && ReferenceEquals(current.Client, ifCurrent)
+            && _clients.TryRemove(new KeyValuePair<string, CachedClient>(serverId, current)))
         {
-            ifCurrent.Dispose();
+            DisposeClient(ifCurrent);
             _sshTunnelManager.CloseTunnel(serverId);
         }
     }
@@ -437,8 +484,8 @@ public class DockerConnectionManager : IDockerConnectionManager
 
     public void Dispose()
     {
-        foreach (var client in _clients.Values)
-            client.Dispose();
+        foreach (var cached in _clients.Values)
+            DisposeClient(cached.Client);
         _clients.Clear();
 
         foreach (var gate in _locks.Values)

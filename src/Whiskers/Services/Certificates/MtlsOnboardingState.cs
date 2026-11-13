@@ -40,22 +40,23 @@ public static class MtlsOnboardingState
     }
 
     /// <summary>
-    /// Saves <paramref name="updated"/> over <paramref name="stored"/>. When the save changes the connection
-    /// (<see cref="ConnectionOf"/>), it holds the per-host lock that onboarding and every certificate step hold, so a
-    /// running onboarding never continues on another host; a busy lock refuses the save before anything is written.
+    /// Saves <paramref name="updated"/> over <paramref name="stored"/>. Every save of an existing record holds the
+    /// per-host lock that onboarding and every certificate step hold, so a running onboarding never continues on
+    /// another host; a busy lock refuses the save before anything is written. The lock is taken for saves that keep
+    /// the connection too: the save writes the whole record, and a form read before another admin's connection change
+    /// would otherwise write the old host back while an onboarding runs on the new one (Codex round 5).
     /// </summary>
     public static async Task<T> SaveAsync<T>(IMtlsClientCredentialStore? store, Models.ServerConfig? stored,
         Models.ServerConfig updated, Func<Task<T>> save)
     {
         ArgumentNullException.ThrowIfNull(updated);
         ArgumentNullException.ThrowIfNull(save);
-        if (store is null || stored is null
-            || string.Equals(ConnectionOf(stored), ConnectionOf(updated), StringComparison.Ordinal))
+        if (store is null || stored is null)
             return await save();
         var gate = store.HostLock(stored.Id);
         if (!await gate.WaitAsync(0))
             throw new InvalidOperationException(
-                $"An onboarding or certificate step for {stored.Name} is running; change its connection once it has finished.");
+                $"An onboarding or certificate step for {stored.Name} is running; save the server once it has finished.");
         try
         {
             return await save();
