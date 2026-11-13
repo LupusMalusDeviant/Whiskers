@@ -105,9 +105,9 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 
 | Tool | Level | Description |
 |---|---|---|
-| `delete_dns_record` | write | Delete the DNS record(s) with the given name and type in a zone at the configured provider. Only A, AAAA, CNAME and TXT can be deleted. Answers what was removed; nothing there = no-op. |
+| `delete_dns_record` | write | Delete the DNS record(s) with the given name and type in a zone at the configured provider — all of them, or with 'value' only the record(s) holding that value (e.g. one TXT value among SPF and verification records). Only A, AAAA, CNAME and TXT can be deleted. Answers what was removed; nothing there = no-op. |
 | `list_dns_records` | read | List the DNS records of a zone (e.g. 'lupusmalus.dev') at the configured DNS provider. Names are relative to the zone ('@' = the zone itself). Optionally filter by name and/or type. Read-only. |
-| `set_dns_record` | write | Create or update one DNS record at the configured provider — idempotent: an existing record with the same name and type is updated (never duplicated), and an identical value answers 'unchanged'. Types: A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Name is relative to the zone ('holler.app' → holler.app.<zone>, '@' = zone apex). Returns before/after. |
+| `set_dns_record` | write | Create or update one DNS record at the configured provider — idempotent: A, AAAA and CNAME: an existing record with the same name and type is updated (never duplicated), further records of that name and type are removed and listed in the answer. TXT: the value is added next to the other TXT records of the name (SPF, verifications), which stay untouched; an existing record with that value only gets its TTL adjusted. An identical record answers 'unchanged'. Types: A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Name is relative to the zone ('holler.app' → holler.app.<zone>, '@' = zone apex). Returns before/after. |
 
 ## Module `gitdeploy`
 

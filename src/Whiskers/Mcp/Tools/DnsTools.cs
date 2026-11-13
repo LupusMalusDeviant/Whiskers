@@ -62,7 +62,7 @@ public class DnsTools
     }
 
     [McpToolLevel(McpPermissionLevels.Write)]
-    [McpServerTool, Description("Create or update one DNS record at the configured provider — idempotent: an existing record with the same name and type is updated (never duplicated), and an identical value answers 'unchanged'. Types: A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Name is relative to the zone ('holler.app' → holler.app.<zone>, '@' = zone apex). Returns before/after.")]
+    [McpServerTool, Description("Create or update one DNS record at the configured provider — idempotent: A, AAAA and CNAME: an existing record with the same name and type is updated (never duplicated), further records of that name and type are removed and listed in the answer. TXT: the value is added next to the other TXT records of the name (SPF, verifications), which stay untouched; an existing record with that value only gets its TTL adjusted. An identical record answers 'unchanged'. Types: A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Name is relative to the zone ('holler.app' → holler.app.<zone>, '@' = zone apex). Returns before/after.")]
     public static async Task<string> SetDnsRecord(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
         IDnsRecordService dns, IToolAuditLog auditLog,
@@ -93,9 +93,28 @@ public class DnsTools
             return result.Action switch
             {
                 DnsSetAction.Unchanged => $"Unverändert: {Fqdn(result.After.Name, z)} {result.After.Type} {result.After.Value} (TTL {result.After.Ttl}) existiert bereits so.",
-                DnsSetAction.Created => $"Angelegt: {Fqdn(result.After.Name, z)} {result.After.Type} {result.After.Value} (TTL {result.After.Ttl})\nVorher: kein {result.After.Type}-Eintrag unter diesem Namen.",
-                _ => $"Aktualisiert: {Fqdn(result.After.Name, z)} {result.After.Type}\nVorher: {result.Before!.Value} (TTL {result.Before.Ttl})\nNachher: {result.After.Value} (TTL {result.After.Ttl})",
+                DnsSetAction.Created => $"Angelegt: {Fqdn(result.After.Name, z)} {result.After.Type} {result.After.Value} (TTL {result.After.Ttl})\n" +
+                    (result.After.Type == "TXT"
+                        ? "Vorher: kein TXT-Eintrag mit diesem Wert; andere TXT-Einträge unter dem Namen bleiben unverändert."
+                        : $"Vorher: kein {result.After.Type}-Eintrag unter diesem Namen."),
+                _ => $"Aktualisiert: {Fqdn(result.After.Name, z)} {result.After.Type}\nVorher: {result.Before!.Value} (TTL {result.Before.Ttl})\nNachher: {result.After.Value} (TTL {result.After.Ttl})"
+                     + RemovedLines(result, z),
             };
+        }
+        catch (DnsPartialSetException partial)
+        {
+            // The zone changed even though the set failed: the audit and the answer name what was changed, what went
+            // and what is still there (Fable review).
+            var z = DnsRecordService.NormalizeZone(zone);
+            var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+            await auditLog.LogAsync(actor, actorType, "dns.record_updated", "dns-zone", z,
+                $"{partial.After.Name} {partial.After.Type}",
+                $"partial: updated {partial.Before} -> {partial.After}; removed {Join(partial.Removed)}; still there or unclear {Join(partial.Remaining)}; error {partial.InnerException?.Message}", success: false);
+            return MutationScope.Fail(
+                $"Fehler: nur teilweise ausgeführt ({partial.InnerException?.Message}).\n" +
+                $"Aktualisiert: {Fqdn(partial.After.Name, z)} {partial.After.Type} {partial.Before.Value} → {partial.After.Value} (TTL {partial.After.Ttl})\n" +
+                (partial.Removed.Count > 0 ? "Entfernt:\n" + Lines(partial.Removed, z) + "\n" : "") +
+                "Noch vorhanden oder unklar (erneut ausführen):\n" + Lines(partial.Remaining, z));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or DnsProviderException)
         {
@@ -104,13 +123,14 @@ public class DnsTools
     }
 
     [McpToolLevel(McpPermissionLevels.Write)]
-    [McpServerTool, Description("Delete the DNS record(s) with the given name and type in a zone at the configured provider. Only A, AAAA, CNAME and TXT can be deleted. Answers what was removed; nothing there = no-op.")]
+    [McpServerTool, Description("Delete the DNS record(s) with the given name and type in a zone at the configured provider — all of them, or with 'value' only the record(s) holding that value (e.g. one TXT value among SPF and verification records). Only A, AAAA, CNAME and TXT can be deleted. Answers what was removed; nothing there = no-op.")]
     public static async Task<string> DeleteDnsRecord(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
         IDnsRecordService dns, IToolAuditLog auditLog,
         [Description("Zone / domain, e.g. lupusmalus.dev")] string zone,
         [Description("Record name relative to the zone, e.g. 'holler.app' or '@'")] string name,
-        [Description("Record type: A, AAAA, CNAME or TXT")] string type)
+        [Description("Record type: A, AAAA, CNAME or TXT")] string type,
+        [Description("Optional: delete only the record(s) with this value; without it every record of name and type goes")] string? value = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "delete_dns_record");
         if (denied != null) return MutationScope.Fail(denied);
@@ -119,9 +139,11 @@ public class DnsTools
         try
         {
             var z = DnsRecordService.NormalizeZone(zone);
-            var removed = await dns.DeleteAsync(z, name, type);
+            var removed = await dns.DeleteAsync(z, name, type, value);
             if (removed.Count == 0)
-                return $"Nichts zu löschen: kein {type.Trim().ToUpperInvariant()}-Eintrag '{name}' in Zone {z}.";
+                return string.IsNullOrEmpty(value)
+                    ? $"Nichts zu löschen: kein {type.Trim().ToUpperInvariant()}-Eintrag '{name}' in Zone {z}."
+                    : $"Nichts zu löschen: kein {type.Trim().ToUpperInvariant()}-Eintrag '{name}' mit diesem Wert in Zone {z}.";
 
             var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
             await auditLog.LogAsync(actor, actorType, "dns.record_deleted", "dns-zone",
@@ -140,10 +162,18 @@ public class DnsTools
 
     private static string Fqdn(string name, string zone) => name == "@" ? zone : $"{name}.{zone}";
 
+    private static string Join(IEnumerable<DnsRecord> records) => string.Join("; ", records);
+
+    private static string Lines(IEnumerable<DnsRecord> records, string zone) =>
+        string.Join('\n', records.Select(x => $"- {Fqdn(x.Name, zone)} {x.Type} {x.Value} (TTL {x.Ttl})"));
+
+    private static string RemovedLines(DnsSetResult r, string zone) => r.Removed.Count == 0 ? "" :
+        "\nEntfernt (weitere Einträge gleichen Namens und Typs):\n" + Lines(r.Removed, zone);
+
     private static string Describe(DnsSetResult r) => r.Action switch
     {
         DnsSetAction.Created => $"created {r.After}",
-        DnsSetAction.Updated => $"updated {r.Before} -> {r.After}",
+        DnsSetAction.Updated => $"updated {r.Before} -> {r.After}" + (r.Removed.Count > 0 ? $"; removed {string.Join("; ", r.Removed)}" : ""),
         _ => $"unchanged {r.After}",
     };
 }

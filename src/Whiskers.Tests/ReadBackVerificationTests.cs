@@ -351,6 +351,52 @@ public class ReadBackVerificationTests
     }
 
     [Fact]
+    public async Task An_a_record_set_that_left_a_second_record_fails_the_outcome()
+    {
+        // The provider answered the delete of the round-robin duplicate but still lists it (Fable review).
+        var gateway = Gateway(Dns(() => [new DnsRecord("1", "blog", "A", "203.0.113.7", 300), new DnsRecord("2", "blog", "A", "203.0.113.8", 300)]));
+
+        var outcome = await gateway.ExecuteAsync(Request("dns.record_set",
+            new { zone = "example.org", name = "blog", type = "A", value = "203.0.113.7" }, new MutationTarget("dns-zone", "example.org")),
+            (_, _) => Task.FromResult("Aktualisiert"));
+
+        AssertFailed(outcome);
+    }
+
+    [Fact]
+    public async Task Txt_values_side_by_side_are_verified_and_the_ttl_is_compared()
+    {
+        var records = new List<DnsRecord> { new("1", "@", "TXT", "v=spf1 -all", 300), new("2", "@", "TXT", "verify=abc", 300) };
+        var gateway = Gateway(Dns(() => records));
+
+        var kept = await gateway.ExecuteAsync(Request("dns.record_set",
+            new { zone = "example.org", name = "@", type = "TXT", value = "verify=abc", ttl = 300 }, new MutationTarget("dns-zone", "example.org")),
+            (_, _) => Task.FromResult("Unverändert"));
+        Assert.Equal(VerificationStatus.Verified, kept.Verification);
+
+        var ttlNotApplied = await gateway.ExecuteAsync(Request("dns.record_set",
+            new { zone = "example.org", name = "@", type = "TXT", value = "verify=abc", ttl = 600 }, new MutationTarget("dns-zone", "example.org")),
+            (_, _) => Task.FromResult("Aktualisiert"));
+        AssertFailed(ttlNotApplied);
+    }
+
+    [Fact]
+    public async Task A_delete_of_one_txt_value_is_verified_while_the_others_stay()
+    {
+        var gateway = Gateway(Dns(() => [new DnsRecord("1", "@", "TXT", "v=spf1 -all", 300)]));
+
+        var gone = await gateway.ExecuteAsync(Request("dns.record_delete",
+            new { zone = "example.org", name = "@", type = "TXT", value = "verify=abc" }, new MutationTarget("dns-zone", "example.org")),
+            (_, _) => Task.FromResult("Gelöscht"));
+        Assert.Equal(VerificationStatus.Verified, gone.Verification);
+
+        var stillThere = await gateway.ExecuteAsync(Request("dns.record_delete",
+            new { zone = "example.org", name = "@", type = "TXT", value = "v=spf1 -all" }, new MutationTarget("dns-zone", "example.org")),
+            (_, _) => Task.FromResult("Gelöscht"));
+        AssertFailed(stillThere);
+    }
+
+    [Fact]
     public async Task A_zone_the_provider_cannot_list_fails_the_outcome_with_the_state_unknown()
     {
         var gateway = Gateway(Dns(() => throw new DnsProviderException("503 Service Unavailable", 503)));
@@ -880,6 +926,79 @@ public class ReadBackVerificationTests
         Assert.Equal(MutationStatus.Failed, outcome.Status);
         Assert.Equal(VerificationStatus.NotRun, outcome.Verification);
         Assert.Contains("quota exceeded", outcome.Value);
+    }
+
+    private sealed class RecordingAudit : Whiskers.Services.AuditLog.IToolAuditLog
+    {
+        public List<(string Action, string? Details, bool Success)> Entries { get; } = [];
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId, string targetName,
+            string? details = null, string? serverId = null, bool success = true)
+        {
+            Entries.Add((action, details, success));
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task The_set_answer_and_audit_name_every_record_a_collapse_removed()
+    {
+        var (dns, script) = Scripted<IDnsRecordService>.Create();
+        script.On["get_" + nameof(IDnsRecordService.IsConfigured)] = _ => true;
+        script.On[nameof(IDnsRecordService.SetAsync)] = _ => Task.FromResult(
+            new DnsSetResult(DnsSetAction.Updated, new DnsRecord("1", "blog", "A", "203.0.113.1", 300), new DnsRecord("1", "blog", "A", "203.0.113.7", 300))
+            {
+                Removed = [new DnsRecord("2", "blog", "A", "203.0.113.2", 300)],
+            });
+        var audit = new RecordingAudit();
+
+        var answer = await DnsTools.SetDnsRecord(Admin(), null!, dns, audit, "example.org", "blog", "A", "203.0.113.7");
+
+        Assert.Contains("Entfernt", answer);
+        Assert.Contains("203.0.113.2", answer);
+        var entry = Assert.Single(audit.Entries);
+        Assert.Contains("removed blog A 203.0.113.2", entry.Details);
+    }
+
+    [Fact]
+    public async Task A_set_that_stopped_half_way_is_audited_with_what_changed_and_what_is_left()
+    {
+        var (dns, script) = Scripted<IDnsRecordService>.Create();
+        script.On["get_" + nameof(IDnsRecordService.IsConfigured)] = _ => true;
+        script.On[nameof(IDnsRecordService.SetAsync)] = _ => Task.FromException<DnsSetResult>(new DnsPartialSetException(
+            new DnsRecord("1", "blog", "A", "203.0.113.1", 300), new DnsRecord("1", "blog", "A", "203.0.113.7", 300),
+            [new DnsRecord("2", "blog", "A", "203.0.113.2", 300)], [new DnsRecord("3", "blog", "A", "203.0.113.3", 300)],
+            new DnsProviderException("429 Too Many Requests", 429)));
+        var audit = new RecordingAudit();
+
+        var answer = await DnsTools.SetDnsRecord(Admin(), null!, dns, audit, "example.org", "blog", "A", "203.0.113.7");
+
+        Assert.Contains("teilweise", answer);
+        Assert.Contains("203.0.113.2", answer);   // removed
+        Assert.Contains("203.0.113.3", answer);   // still there
+        var entry = Assert.Single(audit.Entries);
+        Assert.Equal("dns.record_updated", entry.Action);
+        Assert.StartsWith("partial:", entry.Details);
+        Assert.False(entry.Success);
+        Assert.Contains("203.0.113.3", entry.Details);
+    }
+
+    [Fact]
+    public async Task Delete_dns_record_hands_its_value_to_the_service()
+    {
+        // Without it every TXT record of the name would go, and the read-back (which checks only the value) would pass.
+        var (dns, script) = Scripted<IDnsRecordService>.Create();
+        script.On["get_" + nameof(IDnsRecordService.IsConfigured)] = _ => true;
+        string? seen = "unset";
+        script.On[nameof(IDnsRecordService.DeleteAsync)] = a =>
+        {
+            seen = (string?)a![3];
+            return Task.FromResult(new List<DnsRecord> { new("1", "@", "TXT", "verify=abc", 300) });
+        };
+
+        var answer = await DnsTools.DeleteDnsRecord(Admin(), null!, dns, new RecordingAudit(), "example.org", "@", "TXT", "verify=abc");
+
+        Assert.Equal("verify=abc", seen);
+        Assert.Contains("verify=abc", answer);
     }
 
     [Fact]
