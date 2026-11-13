@@ -66,8 +66,6 @@ Fixes from the full review of `main` after 1.0.0 (data).
 - **Log alerts.** A log-alert regex that runs into its time limit now skips only its own rule for that cycle, with a
   warning naming the rule. Before, it silently turned off every other rule for that container.
 
-### Fixed
-
 Fixes from the full review of `main` after 1.0.0 (agent).
 
 - **Git deploys.** When an app's repository URL changes, the next update now fetches from the new URL. Before, it
