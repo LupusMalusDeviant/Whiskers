@@ -27,6 +27,19 @@ public class GitDeployCommandsTests
     }
 
     [Fact]
+    public void An_update_fetches_from_the_configured_repository_not_the_one_first_cloned()
+    {
+        // Fable review H2: with the URL changed, the checkout kept fetching its first origin — the new token went to the
+        // old host, and approval and audit named a repository that was not the one deployed.
+        var cmd = GitDeployCommands.CloneOrUpdateCommand(AppId, "https://git.example.org/org/new.git", "main", withToken: true);
+        var setUrl = cmd.IndexOf("git remote set-url origin 'https://git.example.org/org/new.git'", StringComparison.Ordinal);
+        var fetch = cmd.IndexOf("git fetch origin", StringComparison.Ordinal);
+        Assert.True(setUrl >= 0, cmd);
+        Assert.True(setUrl < fetch, "origin is pointed at the configured URL before the fetch (and before the token is offered)");
+        Assert.True(cmd.IndexOf("GIT_ASKPASS", StringComparison.Ordinal) > setUrl, "set-url itself runs without the token");
+    }
+
+    [Fact]
     public void Update_spells_every_ref_in_full_so_no_operand_can_be_an_option()
     {
         var cmd = GitDeployCommands.CloneOrUpdateCommand(AppId, "https://github.com/org/app.git", "release/1.2", withToken: false);

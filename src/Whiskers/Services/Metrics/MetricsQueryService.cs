@@ -57,17 +57,19 @@ public class MetricsQueryService : IMetricsQueryService
         _time = time ?? TimeProvider.System;
     }
 
-    public Task<List<MetricPoint>> GetContainerCpuHistoryAsync(string containerId, string serverId, TimeSpan period) =>
-        QueryAsync(new ContainerSeries(), new SeriesKey(serverId, containerId), Cpu, period);
+    public Task<List<MetricPoint>> GetContainerCpuHistoryAsync(string containerId, string serverId, TimeSpan period,
+        CancellationToken ct = default) =>
+        QueryAsync(new ContainerSeries(), new SeriesKey(serverId, containerId), Cpu, period, ct);
 
-    public Task<List<MetricPoint>> GetContainerMemoryHistoryAsync(string containerId, string serverId, TimeSpan period) =>
-        QueryAsync(new ContainerSeries(), new SeriesKey(serverId, containerId), MemoryPercent, period);
+    public Task<List<MetricPoint>> GetContainerMemoryHistoryAsync(string containerId, string serverId, TimeSpan period,
+        CancellationToken ct = default) =>
+        QueryAsync(new ContainerSeries(), new SeriesKey(serverId, containerId), MemoryPercent, period, ct);
 
-    public Task<List<MetricPoint>> GetServerCpuHistoryAsync(string serverId, TimeSpan period) =>
-        QueryAsync(new ServerSeries(), new SeriesKey(serverId, ""), Cpu, period);
+    public Task<List<MetricPoint>> GetServerCpuHistoryAsync(string serverId, TimeSpan period, CancellationToken ct = default) =>
+        QueryAsync(new ServerSeries(), new SeriesKey(serverId, ""), Cpu, period, ct);
 
-    public Task<List<MetricPoint>> GetServerMemoryHistoryAsync(string serverId, TimeSpan period) =>
-        QueryAsync(new ServerSeries(), new SeriesKey(serverId, ""), MemoryPercent, period);
+    public Task<List<MetricPoint>> GetServerMemoryHistoryAsync(string serverId, TimeSpan period, CancellationToken ct = default) =>
+        QueryAsync(new ServerSeries(), new SeriesKey(serverId, ""), MemoryPercent, period, ct);
 
     /// <summary>The tier a range is read from by preference: the coarsest whose window is no longer than the range divided
     /// by the point budget (raw for 1 h and 6 h, 10 min for 24 h, 1 h for 7 and 30 days).</summary>
@@ -83,17 +85,18 @@ public class MetricsQueryService : IMetricsQueryService
     /// <summary>One stretch of the range read from one tier: entries at [<see cref="From"/>, <see cref="To"/>).</summary>
     internal sealed record Segment(int Tier, DateTime From, DateTime To);
 
-    private async Task<List<MetricPoint>> QueryAsync(MetricSeriesKind kind, SeriesKey key, int value, TimeSpan period)
+    private async Task<List<MetricPoint>> QueryAsync(MetricSeriesKind kind, SeriesKey key, int value, TimeSpan period,
+        CancellationToken ct)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var now = _time.GetUtcNow().UtcDateTime;
         var since = now - period;
 
-        var segments = await PlanAsync(db, kind, key, since, now, PreferredTier(period), CancellationToken.None);
+        var segments = await PlanAsync(db, kind, key, since, now, PreferredTier(period), ct);
         var points = new List<MetricPoint>();
         foreach (var s in segments)
-            await foreach (var e in kind.ReadAsync(db, s.Tier, key, s.From, s.To, CancellationToken.None))
+            await foreach (var e in kind.ReadAsync(db, s.Tier, key, s.From, s.To, ct))
                 points.Add(new MetricPoint { Timestamp = e.At, Value = e.Avg[value], Max = e.Max[value], Samples = e.Count });
         return Thin(points, MaxPoints);
     }

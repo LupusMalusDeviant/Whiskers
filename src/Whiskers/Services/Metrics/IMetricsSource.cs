@@ -16,4 +16,9 @@ public interface IMetricsSource
 
     /// <summary>Per-server host system info, keyed by server id (enabled servers only).</summary>
     Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync();
+
+    /// <summary>INV-40: the same for a caller that can be stopped (the <c>get_host_load</c> read tool): the caller is
+    /// released at its cancellation; the per-server reads keep their own bounds (the default only stops waiting).</summary>
+    Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync(CancellationToken ct)
+        => GetAllServerSystemInfoAsync().WaitAsync(ct);
 }

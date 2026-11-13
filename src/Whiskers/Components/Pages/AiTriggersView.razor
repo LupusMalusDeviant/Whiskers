@@ -258,13 +258,7 @@
         _triggers = Store.Triggers.Select(Clone).ToList();
     }
 
-    private async Task<Models.Agent.AgentPrincipal> BuildPrincipalAsync()
-    {
-        var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
-        var role = await CurrentUser.GetRoleAsync();
-        var level = CapabilityCatalog.LevelFor(role);
-        return new Models.Agent.AgentPrincipal(Models.Agent.AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
-    }
+    private Task<Models.Agent.AgentPrincipal> BuildPrincipalAsync() => Whiskers.Services.Agent.AgentPrincipalResolver.ForWebUserAsync(CurrentUser);
 
     private static AiTrigger Clone(AiTrigger s) => new()
     {

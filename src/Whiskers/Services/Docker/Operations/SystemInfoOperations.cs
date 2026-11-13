@@ -39,8 +39,18 @@ internal sealed class SystemInfoOperations
         _snapshots = snapshots;
     }
 
-    public async Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default)
+    public Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default) =>
+        GetServerSystemInfoAsync(serverId, callerToken: ct, deadline: CancellationToken.None);
+
+    /// <summary>R1-41 / INV-40: <paramref name="callerToken"/> is the caller stopping (a closed chat, a stopped trigger) —
+    /// never held against the server, answered with its cancellation; <paramref name="deadline"/> is our own bound on
+    /// the server (the fleet sweep's per-server timeout) — it expiring at the host counts against it, as R1-41 says.
+    /// Both end the request.</summary>
+    internal async Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId, CancellationToken callerToken,
+        CancellationToken deadline)
     {
+        using var either = CancellationTokenSource.CreateLinkedTokenSource(callerToken, deadline);
+        var ct = either.Token;
         var server = serverId != null
             ? _serverConfigService.GetServer(serverId)
             : _serverConfigService.GetDefaultServer();
@@ -56,7 +66,7 @@ internal sealed class SystemInfoOperations
             // Probe reachability through the retrying executor so a tunnel that died between polls
             // is rebuilt on this very call instead of reporting the server as unreachable.
             var (sysInfo, version) = await _connectionManager.ExecuteAsync(serverId, async c =>
-                (await c.System.GetSystemInfoAsync(), await c.System.GetVersionAsync()));
+                (await c.System.GetSystemInfoAsync(ct), await c.System.GetVersionAsync(ct)), callerToken: callerToken, deadline: deadline);
 
             info.OperatingSystem = sysInfo.OperatingSystem ?? "";
             info.OsVersion = sysInfo.OSVersion ?? "";
@@ -95,17 +105,17 @@ internal sealed class SystemInfoOperations
                     // taking a bare client, invisible to both the cap and the circuit breaker.
                     var (hostCpu, hostMem) = await _connectionManager.ExecuteGuardedAsync(
                         serverId, c => GetHostResourceUsageAsync(c, serverId),
-                        singleFlightKey: $"hostres:{serverId}");
+                        singleFlightKey: $"hostres:{serverId}", callerToken: callerToken, deadline: deadline);
                     info.CpuUsagePercent = hostCpu;
                     info.MemoryUsedBytes = hostMem;
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException || !(callerToken.IsCancellationRequested || deadline.IsCancellationRequested))
                 {
                     // Fallback: aggregate from running containers (cached stats)
                     var containers = await _connectionManager.ExecuteGuardedAsync(
                         serverId,
                         c => c.Containers.ListContainersAsync(new ContainersListParameters { All = false }),
-                        singleFlightKey: $"sysinfo-list:{serverId}");
+                        singleFlightKey: $"sysinfo-list:{serverId}", callerToken: callerToken, deadline: deadline);
                     long totalMemUsed = 0;
                     double totalCpu = 0;
                     var statsTasks = containers.Select(async c =>
@@ -133,8 +143,9 @@ internal sealed class SystemInfoOperations
             else
                 info.IpAddress = sysInfo.Name ?? "localhost";
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !(callerToken.IsCancellationRequested || deadline.IsCancellationRequested))
         {
+            // A caller that stopped is not an unreachable server (INV-40): its cancellation goes back to it.
             info.IsReachable = false;
             info.Error = ex.Message;
             _logger.LogWarning(ex, "Failed to get system info for server {ServerId}", serverId);
@@ -167,7 +178,8 @@ internal sealed class SystemInfoOperations
             using var timeout = new CancellationTokenSource(perServerTimeout);
             try
             {
-                var probed = await GetServerSystemInfoAsync(s.Id, timeout.Token);
+                // Our own bound on the server, not a caller stopping: it counts against a host that hangs (R1-41).
+                var probed = await GetServerSystemInfoAsync(s.Id, callerToken: CancellationToken.None, deadline: timeout.Token);
                 Remember(s.Id, probed);
                 return (s.Id, info: probed);
             }

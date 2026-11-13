@@ -25,7 +25,8 @@ public class AgentTools
         IAgentService agentService,
         IAgentPrincipalResolver principalResolver,
         IGuardrailStore guardrailStore,
-        [Description("The task for the agent, in natural language (e.g. 'restart the unhealthy containers on Badwolf').")] string prompt)
+        [Description("The task for the agent, in natural language (e.g. 'restart the unhealthy containers on Badwolf').")] string prompt,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "instruct_agent");
         if (denied != null) return denied;
@@ -42,36 +43,67 @@ public class AgentTools
         var context = new AgentContext(
             Guid.NewGuid().ToString("N"), principal, AgentOrigin.McpTool, guardrailStore.Current);
 
-        var session = await agentService.StartSessionAsync(context);
+        // INV-40 (Fable review): the call ends with its caller — a closed MCP request stops the agent and the tools it
+        // runs — and never outlives its deadline, so a run that loops cannot hold the hosts for good.
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(Deadline);
+        var ct = deadline.Token;
+
+        var session = await agentService.StartSessionAsync(context, ct: ct);
         var sb = new StringBuilder();
 
-        await foreach (var ev in session.SendAsync(prompt))
+        try
         {
-            switch (ev)
+            await foreach (var ev in session.SendAsync(prompt, ct: ct))
             {
-                case AgentEvent.AssistantDelta d:
-                    sb.Append(d.Text);
-                    break;
-                case AgentEvent.ToolExecuted t:
-                    sb.AppendLine();
-                    sb.AppendLine($"[{(t.Result.IsError ? "Tool-Fehler" : "Tool")}] {Truncate(t.Result.Content)}");
-                    break;
-                case AgentEvent.ConfirmationRequired c:
-                    // A Confirm verdict marks an action above the caller's autonomous level. There is no
-                    // interactive human on the MCP path, so it is denied — never auto-approved. The caller
-                    // must perform the action explicitly (e.g. via the web UI) if it is intended.
-                    await session.ResolveConfirmationAsync(c.Call.CorrelationId, false);
-                    sb.AppendLine($"[Bestätigung erforderlich, nicht autonom ausgeführt: {c.Call.Name}]");
-                    break;
-                case AgentEvent.Failed f:
-                    sb.AppendLine($"[Fehler] {f.Message}");
-                    break;
+                switch (ev)
+                {
+                    case AgentEvent.AssistantDelta d:
+                        sb.Append(d.Text);
+                        break;
+                    case AgentEvent.ToolExecuted t:
+                        sb.AppendLine();
+                        sb.AppendLine($"[{(t.Result.IsError ? "Tool-Fehler" : "Tool")}] {Truncate(t.Result.Content)}");
+                        break;
+                    case AgentEvent.ConfirmationRequired c:
+                        // A Confirm verdict marks an action above the caller's autonomous level. There is no
+                        // interactive human on the MCP path, so it is denied — never auto-approved. The caller
+                        // must perform the action explicitly (e.g. via the web UI) if it is intended.
+                        await session.ResolveConfirmationAsync(c.Call.CorrelationId, false, ct);
+                        sb.AppendLine($"[Bestätigung erforderlich, nicht autonom ausgeführt: {c.Call.Name}]");
+                        break;
+                    case AgentEvent.Failed f:
+                        sb.AppendLine($"[Fehler] {f.Message}");
+                        break;
+                }
             }
         }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            sb.AppendLine(DeadlineMarker());
+            return Answer(sb);
+        }
 
+        // A session may also end quietly on cancellation (AgentSession: `if (ct.IsCancellationRequested) yield break;`):
+        // no exception escapes, yet the run was stopped. A closed request still ends as a cancellation, and a passed
+        // deadline still says so — an answer cut short must never read as a complete one.
+        cancellationToken.ThrowIfCancellationRequested();
+        if (deadline.IsCancellationRequested)
+            sb.AppendLine(DeadlineMarker());
+
+        return Answer(sb);
+    }
+
+    private static string DeadlineMarker() => $"[Abgebrochen: Frist von {Deadline.TotalMinutes:0} Minuten überschritten]";
+
+    private static string Answer(StringBuilder sb)
+    {
         var result = sb.ToString().Trim();
         return result.Length == 0 ? "(keine Ausgabe)" : result;
     }
+
+    /// <summary>How long one instruct_agent call may run (tests shorten it).</summary>
+    internal static TimeSpan Deadline { get; set; } = TimeSpan.FromMinutes(10);
 
     private static string Truncate(string s) => s.Length > 1500 ? s[..1500] + "…" : s;
 }

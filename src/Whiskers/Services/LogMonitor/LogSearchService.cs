@@ -28,7 +28,8 @@ public class LogSearchService : ILogSearchService
     /// <paramref name="serverId"/> this searches the WHOLE fleet — the container picker offers containers
     /// from every server, so a default-server-only search silently returned nothing for the others.</summary>
     public async Task<List<LogSearchResult>> SearchAsync(string pattern, bool isRegex = false,
-        string? containerId = null, string? serverId = null, int tailLines = 500, int maxResults = 200)
+        string? containerId = null, string? serverId = null, int tailLines = 500, int maxResults = 200,
+        CancellationToken ct = default)
     {
         var results = new List<LogSearchResult>();
         Regex? regex = null;
@@ -40,8 +41,8 @@ public class LogSearchService : ILogSearchService
         }
 
         var containers = serverId != null
-            ? await _docker.ListContainersAsync(all: false, serverId: serverId)
-            : await _docker.ListAllContainersAsync(all: false);
+            ? await _docker.ListContainersAsync(all: false, serverId: serverId, ct: ct)
+            : await _docker.ListAllContainersAsync(false, ct);
         var targets = containerId != null
             ? containers.Where(c => c.Id == containerId || c.Name == containerId).ToList()
             : containers.ToList();
@@ -53,7 +54,9 @@ public class LogSearchService : ILogSearchService
             try
             {
                 // Always fetch from the container's OWN server — with a fleet-wide list, `serverId` is null.
-                var logs = await _docker.GetContainerLogsAsync(container.Id, tailLines, container.ServerId);
+                // R1-41: the caller's stop is the callerToken (no circuit failure for the server), not the plain read's token.
+                var logs = await _docker.GetContainerLogsAsync(container.Id, tailLines, container.ServerId, since: null,
+                    deadline: CancellationToken.None, callerToken: ct);
                 var lines = logs.Split('\n');
 
                 for (int i = 0; i < lines.Length && results.Count < maxResults; i++)
@@ -78,7 +81,8 @@ public class LogSearchService : ILogSearchService
                     }
                 }
             }
-            catch (Exception ex)
+            // A stopped caller (INV-40) ends the search; only a failing container is skipped.
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
                 _logger.LogDebug(ex, "Failed to search logs for {Container}", container.Name);
             }

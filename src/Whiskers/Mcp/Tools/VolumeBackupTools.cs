@@ -23,12 +23,13 @@ public class VolumeBackupTools
         IMcpPermissionService permissionService,
         IVolumeBackupService backups,
         [Description("Server ID to filter by (optional, omit for all servers)")] string? serverId = null,
-        [Description("Volume name to filter by (optional)")] string? volumeName = null)
+        [Description("Volume name to filter by (optional)")] string? volumeName = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_volume_backups");
         if (denied != null) return denied;
 
-        var entries = await backups.ListBackupsAsync(serverId, volumeName);
+        var entries = await backups.ListBackupsAsync(serverId, volumeName, cancellationToken);
         if (entries.Count == 0)
             return volumeName is null
                 ? "No volume backups found."
@@ -56,12 +57,13 @@ public class VolumeBackupTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IVolumeBackupService backups,
-        [Description("Server ID (optional, omit for the default server)")] string? serverId = null)
+        [Description("Server ID (optional, omit for the default server)")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_volumes");
         if (denied != null) return denied;
 
-        var volumes = await backups.ListVolumesAsync(serverId);
+        var volumes = await backups.ListVolumesAsync(serverId, cancellationToken);
         if (volumes.Count == 0) return "No Docker volumes found.";
 
         return $"Docker volumes ({volumes.Count}):\n{string.Join('\n', volumes.Select(v => $"- {v}"))}";

@@ -32,6 +32,11 @@ public interface IDockerService
     [Whiskers.Services.Mutations.InventoryLookup]
     Task<ContainerInfo?> GetContainerAsync(string id, string? serverId = null);
     Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId = null);
+
+    /// <summary>INV-40: <see cref="GetContainerStatsAsync(string, string?)"/> for a caller that can be stopped (a read
+    /// tool). The default only stops waiting; the stats request itself is bounded by its own five-second timeout.</summary>
+    Task<ContainerStats?> GetContainerStatsAsync(string containerId, string? serverId, CancellationToken ct)
+        => GetContainerStatsAsync(containerId, serverId).WaitAsync(ct);
     [MutatingOperation("container.start")]
     Task StartContainerAsync([MutationTarget] string containerId, string? serverId = null);
     [MutatingOperation("container.stop")]
@@ -67,6 +72,11 @@ public interface IDockerService
         => InspectContainerStateAsync(containerId, serverId).WaitAsync(ct);
     Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default);
     Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync();
+
+    /// <summary>INV-40: the fleet-wide system info for a caller that can be stopped (a read tool): the caller is released
+    /// at its cancellation. The fan-out keeps its own per-server bounds (the default only stops waiting).</summary>
+    Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync(CancellationToken ct)
+        => GetAllServerSystemInfoAsync().WaitAsync(ct);
     Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null);
 
     /// <summary>R1-41: <see cref="GetImageDigestAsync(string, string?)"/> whose cancellation reaches the inspect and the
@@ -105,6 +115,11 @@ public interface IDockerService
 
     Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null);
 
+    /// <summary>INV-40: <see cref="GetContainerEnvAsync(string, string?)"/> whose cancellation reaches the inspect (the
+    /// default only stops waiting; <c>DockerService</c> cancels the request).</summary>
+    Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId, CancellationToken ct)
+        => GetContainerEnvAsync(containerId, serverId).WaitAsync(ct);
+
     // C12 update-rollback: capture the pre-update snapshot (old image ID + full container config as JSON) so a
     // failed update can be undone; RollbackContainerAsync recreates the container from that snapshot's old image.
     Task<(string ImageId, string ConfigJson)> CaptureRollbackSnapshotAsync(string containerId, string? serverId = null);
@@ -114,6 +129,11 @@ public interface IDockerService
     // Networks
     [Whiskers.Services.Mutations.InventoryLookup]
     Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null);
+
+    /// <summary>INV-40: <see cref="ListNetworksAsync(string?)"/> whose cancellation reaches the request (the default
+    /// only stops waiting; <c>DockerService</c> cancels the request).</summary>
+    Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId, CancellationToken ct)
+        => ListNetworksAsync(serverId).WaitAsync(ct);
     [MutatingOperation("network.create")]
     Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null);
     [MutatingOperation("network.remove")]

@@ -237,19 +237,22 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
         public (string, string, string?) LastTables { get; private set; }
         public (string, string, string?) LastQuery { get; private set; }
 
-        public Task<List<string>> GetDatabasesAsync(string containerId, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+        public Task<List<string>> GetDatabasesAsync(string containerId, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+            CancellationToken ct = default)
         {
             DatabaseListings++;
             return Task.FromResult(new List<string> { "appdb", "postgres" });
         }
 
-        public Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+        public Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+            CancellationToken ct = default)
         {
             LastTables = (containerId, database, serverId);
             return Task.FromResult(new List<TableInfo> { new() { Name = "users", RowCount = 3 } });
         }
 
-        public Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null) =>
+        public Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+            CancellationToken ct = default) =>
             Task.FromResult(new List<ColumnInfo>());
 
         public Task<QueryResult> ExecuteQueryAsync(string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)

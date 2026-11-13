@@ -434,13 +434,13 @@ public class AutomationMutationRunnerTests
         public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null,
             string? notes = null) => Task.FromResult(new VolumeBackupEntity { VolumeName = volumeName, FileName = "new.tar.gz" });
         public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => throw new NotSupportedException();
-        public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null) =>
+        public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null, CancellationToken ct = default) =>
             Task.FromResult(Enumerable.Range(0, 3).Select(i => new VolumeBackupEntity
             {
                 BackupId = $"b{i}", VolumeName = volumeName ?? "", CreatedAt = DateTime.UtcNow.AddDays(-i),
             }).ToList());
         public Task DeleteBackupAsync(string backupId) { Deleted.Add(backupId); return Task.CompletedTask; }
-        public Task<List<string>> ListVolumesAsync(string? serverId = null) => throw new NotSupportedException();
+        public Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<Whiskers.Services.Backup.VolumeInfo>> ListVolumeInfoAsync(string? serverId, CancellationToken ct = default) =>
             throw new NotSupportedException();
     }

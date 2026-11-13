@@ -11,8 +11,9 @@ public interface ICloudControlService
     [Whiskers.Services.Mutations.InventoryLookup]
     List<Whiskers.Models.ServerConfig> CloudServers();
     Whiskers.Models.ServerConfig? ResolveWhiskers(string idOrName);
-    Task<CloudServerInfo?> ResolveAsync(Whiskers.Models.ServerConfig sw);
-    Task<List<CloudServerInfo>> ListAllAsync();
+    // INV-40: the reads take the caller's token (a read tool's); it reaches the provider's HTTP calls.
+    Task<CloudServerInfo?> ResolveAsync(Whiskers.Models.ServerConfig sw, CancellationToken ct = default);
+    Task<List<CloudServerInfo>> ListAllAsync(CancellationToken ct = default);
     [MutatingOperation("cloud.power_on")]
     Task<string> PowerOnAsync([MutationTarget] string idOrName);
     [MutatingOperation("cloud.shutdown")]
@@ -23,6 +24,6 @@ public interface ICloudControlService
     Task<string> HardResetAsync([MutationTarget] string idOrName);
     [MutatingOperation("cloud.snapshot_create")]
     Task<string> CreateSnapshotAsync([MutationTarget] string idOrName, string? description);
-    Task<string> MetricsAsync(string idOrName, string type);
-    Task<(string token, HetznerServer server)?> HetznerContextAsync(string idOrName);
+    Task<string> MetricsAsync(string idOrName, string type, CancellationToken ct = default);
+    Task<(string token, HetznerServer server)?> HetznerContextAsync(string idOrName, CancellationToken ct = default);
 }

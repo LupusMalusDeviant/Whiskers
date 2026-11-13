@@ -32,7 +32,7 @@ public class DatabaseService : IDatabaseService
     // host or in the container names the variable only, whatever the password looks like.
     private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainer(
         string containerId, string[] cmd, string? serverId = null, TimeSpan? timeout = null,
-        DatabaseType dbType = DatabaseType.None, DatabaseCredentials? creds = null)
+        DatabaseType dbType = DatabaseType.None, DatabaseCredentials? creds = null, CancellationToken ct = default)
     {
         var secrets = PasswordVariable(dbType) is { } name && !string.IsNullOrEmpty(creds?.Password)
             ? [new KeyValuePair<string, string>(name, creds.Password)]
@@ -42,7 +42,7 @@ public class DatabaseService : IDatabaseService
                         ShellUtils.Quote(CommandOperands.RequireContainerRef(containerId)) + " " +
                         string.Join(' ', cmd.Select(ShellUtils.Quote));
         using var delivered = HostCommandSecrets.Provide(secrets);
-        var r = await _hostExec.ExecuteAsync(OmittedServer.For<IDatabaseService>(serverId), dockerCmd, timeout ?? TimeSpan.FromSeconds(30));
+        var r = await _hostExec.ExecuteAsync(OmittedServer.For<IDatabaseService>(serverId), dockerCmd, timeout ?? TimeSpan.FromSeconds(30), ct);
         return (r.Output, r.Error, r.ExitCode);
     }
 
@@ -77,7 +77,8 @@ public class DatabaseService : IDatabaseService
         return ParseQueryResult(stdout, dbType, sw.Elapsed.TotalMilliseconds);
     }
 
-    public async Task<List<string>> GetDatabasesAsync(string containerId, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    public async Task<List<string>> GetDatabasesAsync(string containerId, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+        CancellationToken ct = default)
     {
         Withhold(creds);
         var cmd = dbType switch
@@ -93,7 +94,7 @@ public class DatabaseService : IDatabaseService
 
         if (cmd.Length == 0) return new();
 
-        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds);
+        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds, ct: ct);
         if (exitCode != 0) return new();
 
         // Redis has no named databases — only numbered logical DBs. Translate the configured count into
@@ -126,7 +127,8 @@ public class DatabaseService : IDatabaseService
         return Enumerable.Range(0, count).Select(i => i.ToString()).ToList();
     }
 
-    public async Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    public async Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+        CancellationToken ct = default)
     {
         Withhold(creds);
         // INV-19: a read listing must not become arbitrary execution — the name is an operand of the client
@@ -143,7 +145,7 @@ public class DatabaseService : IDatabaseService
 
         if (cmd.Length == 0) return new();
 
-        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds);
+        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds, ct: ct);
         if (exitCode != 0) return new();
 
         var tables = new List<TableInfo>();
@@ -164,7 +166,8 @@ public class DatabaseService : IDatabaseService
         return tables;
     }
 
-    public async Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null)
+    public async Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+        CancellationToken ct = default)
     {
         Withhold(creds);
         // INV-19: as in GetTablesAsync, the database name is a client operand of a read.
@@ -183,7 +186,7 @@ public class DatabaseService : IDatabaseService
 
         if (cmd.Length == 0) return new();
 
-        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds);
+        var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds, ct: ct);
         if (exitCode != 0) return new();
 
         var columns = new List<ColumnInfo>();

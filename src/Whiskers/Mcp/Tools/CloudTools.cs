@@ -23,12 +23,13 @@ public class CloudTools
     public static async Task<string> ListCloudServers(
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
-        ICloudControlService cloud)
+        ICloudControlService cloud,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_cloud_servers");
         if (denied != null) return denied;
 
-        var servers = await cloud.ListAllAsync();
+        var servers = await cloud.ListAllAsync(cancellationToken);
         if (servers.Count == 0) return "Keine Server mit konfiguriertem Cloud-Provider gefunden.";
 
         var lines = servers.Select(s =>
@@ -48,7 +49,8 @@ public class CloudTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ICloudControlService cloud,
-        [Description("Whiskers server name or id")] string server)
+        [Description("Whiskers server name or id")] string server,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "cloud_status");
         if (denied != null) return denied;
@@ -59,7 +61,7 @@ public class CloudTools
             return $"Für '{sw.Name}' ist kein Cloud-Provider/API-Key konfiguriert.";
 
         Whiskers.Models.Cloud.CloudServerInfo? info;
-        try { info = await cloud.ResolveAsync(sw); }
+        try { info = await cloud.ResolveAsync(sw, cancellationToken); }
         // R1-29: a key kept in a disabled or locked vault — the reason, not a tool exception.
         catch (InvalidOperationException ex) { return $"Fehler: {ex.Message}"; }
         if (info == null) return $"Kein passender {sw.CloudProvider}-Server zu '{sw.Name}' gefunden (IP-Abgleich).";
@@ -119,17 +121,24 @@ public class CloudTools
     public static async Task<string> CloudMetrics(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService, ICloudControlService cloud,
         [Description("Whiskers server name or id")] string server,
-        [Description("Metric type for Hetzner: cpu, disk, or network")] string type = "cpu")
-        => await Guarded(httpContextAccessor, permissionService, "cloud_metrics", () => cloud.MetricsAsync(server, type));
+        [Description("Metric type for Hetzner: cpu, disk, or network")] string type = "cpu",
+        CancellationToken cancellationToken = default)
+        => await Guarded(httpContextAccessor, permissionService, "cloud_metrics",
+            () => cloud.MetricsAsync(server, type, cancellationToken), cancellationToken);
 
     private static async Task<string> Guarded(
-        IHttpContextAccessor http, IMcpPermissionService perm, string toolName, Func<Task<string>> action)
+        IHttpContextAccessor http, IMcpPermissionService perm, string toolName, Func<Task<string>> action,
+        CancellationToken ct = default)
     {
         var denied = McpPermissionCheck.CheckAccess(http, perm, toolName);
         // R1-37: a refusal fails a mutating call (outside a gateway scope, the cloud_metrics read, it is just the text).
         if (denied != null) return MutationScope.Fail(denied);
         try { return await action(); }
-        // Inside a cloud_shutdown / cloud_reboot call this marks the gateway's operation as failed.
-        catch (Exception ex) { return MutationScope.Fail($"Fehler: {ex.Message}"); }
+        // Inside a cloud_shutdown / cloud_reboot call this marks the gateway's operation as failed. A read whose caller
+        // stopped (INV-40; only cloud_metrics passes its token) ends as that cancellation, not as an error text.
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            return MutationScope.Fail($"Fehler: {ex.Message}");
+        }
     }
 }

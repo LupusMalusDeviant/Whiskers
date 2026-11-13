@@ -571,15 +571,15 @@ public sealed partial class TargetResolutionTests : IDisposable
 
         public List<ServerConfig> CloudServers() => _servers;
         public ServerConfig? ResolveWhiskers(string idOrName) => throw new NotSupportedException();
-        public Task<CloudServerInfo?> ResolveAsync(ServerConfig sw) => throw new NotSupportedException();
-        public Task<List<CloudServerInfo>> ListAllAsync() => throw new NotSupportedException();
+        public Task<CloudServerInfo?> ResolveAsync(ServerConfig sw, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<List<CloudServerInfo>> ListAllAsync(CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> PowerOnAsync(string idOrName) => throw new NotSupportedException();
         public Task<string> ShutdownAsync(string idOrName) => throw new NotSupportedException();
         public Task<string> RebootAsync(string idOrName) => throw new NotSupportedException();
         public Task<string> HardResetAsync(string idOrName) => throw new NotSupportedException();
         public Task<string> CreateSnapshotAsync(string idOrName, string? description) => throw new NotSupportedException();
-        public Task<string> MetricsAsync(string idOrName, string type) => throw new NotSupportedException();
-        public Task<(string token, HetznerServer server)?> HetznerContextAsync(string idOrName) => throw new NotSupportedException();
+        public Task<string> MetricsAsync(string idOrName, string type, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<(string token, HetznerServer server)?> HetznerContextAsync(string idOrName, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class Scheduler : ISchedulerService

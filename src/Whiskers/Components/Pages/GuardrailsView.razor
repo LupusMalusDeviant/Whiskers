@@ -416,13 +416,7 @@
             ? L["GuardrailsView_FailClosedPreset_Name"].Value
             : name;
 
-    private async Task<Models.Agent.AgentPrincipal> BuildPrincipalAsync()
-    {
-        var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
-        var role = await CurrentUser.GetRoleAsync();
-        var level = CapabilityCatalog.LevelFor(role);
-        return new Models.Agent.AgentPrincipal(Models.Agent.AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
-    }
+    private Task<Models.Agent.AgentPrincipal> BuildPrincipalAsync() => Whiskers.Services.Agent.AgentPrincipalResolver.ForWebUserAsync(CurrentUser);
 
     private static List<string> SplitCsv(string? csv) =>
         (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();

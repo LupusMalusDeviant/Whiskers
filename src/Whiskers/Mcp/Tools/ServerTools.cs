@@ -106,7 +106,8 @@ public class ServerTools
         IMcpPermissionService permissionService,
         IDockerService docker,
         IServerConfigService serverConfig,
-        [Description("Optional group name or tag to filter by (case-insensitive). Omit to list all servers.")] string? tag = null)
+        [Description("Optional group name or tag to filter by (case-insensitive). Omit to list all servers.")] string? tag = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_servers");
         if (denied != null) return denied;
@@ -119,7 +120,7 @@ public class ServerTools
                             || s.Tags.Any(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
         }
-        var infos = await docker.GetAllServerSystemInfoAsync();
+        var infos = await docker.GetAllServerSystemInfoAsync(cancellationToken);
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine(string.IsNullOrWhiteSpace(tag)
@@ -149,14 +150,15 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        [Description("Server ID")] string serverId)
+        [Description("Server ID")] string serverId,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_server_info");
         if (denied != null) return denied;
         if (string.IsNullOrWhiteSpace(serverId))
             return "Server ID is required.";
 
-        var info = await docker.GetServerSystemInfoAsync(serverId);
+        var info = await docker.GetServerSystemInfoAsync(serverId, cancellationToken);
         if (!info.IsReachable) return $"Server unreachable: {info.Error}";
 
         var sb = new System.Text.StringBuilder();
@@ -220,14 +222,15 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IFirewallService firewall,
-        [Description("Server ID")] string serverId)
+        [Description("Server ID")] string serverId,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_firewall_rules");
         if (denied != null) return denied;
         if (string.IsNullOrWhiteSpace(serverId))
             return "Server ID is required.";
 
-        var status = await firewall.GetStatusAsync(serverId);
+        var status = await firewall.GetStatusAsync(serverId, cancellationToken);
         if (!status.Active) return "Firewall is inactive.";
 
         var sb = new System.Text.StringBuilder();
@@ -307,14 +310,15 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         INginxService nginx,
-        [Description("Server ID")] string serverId)
+        [Description("Server ID")] string serverId,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_nginx_sites");
         if (denied != null) return denied;
         if (string.IsNullOrWhiteSpace(serverId))
             return "Server ID is required.";
 
-        var sites = await nginx.ListSitesAsync(serverId);
+        var sites = await nginx.ListSitesAsync(serverId, cancellationToken);
         var lines = sites.Select(s => $"- {s.Name} [{(s.Enabled ? "enabled" : "available")}]");
         return $"Nginx sites:\n{string.Join('\n', lines)}";
     }
@@ -326,7 +330,8 @@ public class ServerTools
         IMcpPermissionService permissionService,
         INginxService nginx,
         [Description("Server ID")] string serverId,
-        [Description("Site name (filename in sites-available)")] string siteName)
+        [Description("Site name (filename in sites-available)")] string siteName,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_nginx_config");
         if (denied != null) return denied;
@@ -335,7 +340,7 @@ public class ServerTools
         if (string.IsNullOrWhiteSpace(siteName))
             return "Site name is required.";
 
-        var config = await nginx.GetSiteConfigAsync(serverId, siteName);
+        var config = await nginx.GetSiteConfigAsync(serverId, siteName, cancellationToken);
         return $"Nginx config for {siteName}:\n```nginx\n{config}\n```";
     }
 
@@ -371,14 +376,15 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISystemdService systemd,
-        [Description("Server ID")] string serverId)
+        [Description("Server ID")] string serverId,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_systemd_services");
         if (denied != null) return denied;
         if (string.IsNullOrWhiteSpace(serverId))
             return "Server ID is required.";
 
-        var services = await systemd.ListServicesAsync(serverId);
+        var services = await systemd.ListServicesAsync(serverId, cancellationToken);
         var lines = services.Take(50).Select(s => $"- {s.Name} [{s.ActiveState}/{s.SubState}] {(s.Enabled ? "enabled" : "disabled")} — {s.Description}");
         return $"systemd services ({services.Count} total, showing first 50):\n{string.Join('\n', lines)}";
     }
@@ -427,14 +433,15 @@ public class ServerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         ISslCertService ssl,
-        [Description("Server ID")] string serverId)
+        [Description("Server ID")] string serverId,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_ssl_certificates");
         if (denied != null) return denied;
         if (string.IsNullOrWhiteSpace(serverId))
             return "Server ID is required.";
 
-        var certs = await ssl.ListCertificatesAsync(serverId);
+        var certs = await ssl.ListCertificatesAsync(serverId, cancellationToken);
         if (!certs.Any()) return "No SSL certificates found.";
 
         var lines = certs.Select(c => c.ExpiresAt is { } exp

@@ -27,7 +27,8 @@ public class DnsTools
         IDnsRecordService dns,
         [Description("Zone / domain, e.g. lupusmalus.dev")] string zone,
         [Description("Optional: only records with this name (relative, e.g. 'holler.app' or '@')")] string? name = null,
-        [Description("Optional: only records of this type (A, AAAA, CNAME, TXT, …)")] string? type = null)
+        [Description("Optional: only records of this type (A, AAAA, CNAME, TXT, …)")] string? type = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_dns_records");
         if (denied != null) return denied;
@@ -36,7 +37,7 @@ public class DnsTools
         try
         {
             var z = DnsRecordService.NormalizeZone(zone);
-            var records = await dns.ListAsync(z);
+            var records = await dns.ListAsync(z, cancellationToken);
             if (!string.IsNullOrWhiteSpace(name))
             {
                 var n = DnsRecordService.NormalizeName(name, z);

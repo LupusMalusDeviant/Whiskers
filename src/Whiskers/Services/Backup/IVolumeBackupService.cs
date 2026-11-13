@@ -13,10 +13,11 @@ public interface IVolumeBackupService
     [MutatingOperation("volume.restore")]
     Task RestoreVolumeAsync([MutationTarget] string backupId, string? targetVolume = null);
     [Whiskers.Services.Mutations.InventoryLookup]
-    Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null);
+    Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null, CancellationToken ct = default);
     [MutatingOperation("volume.backup_delete")]
     Task DeleteBackupAsync([MutationTarget] string backupId);
-    Task<List<string>> ListVolumesAsync(string? serverId = null);
+    /// <summary>INV-40: the caller's token (a read tool's) reaches the <c>docker volume ls</c> on the host.</summary>
+    Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default);
 
     /// <summary>The volumes of a server with their driver and labels (<c>docker volume ls --format json</c>): the
     /// inventory the gateway resolves a <c>volume.backup</c> against (contract 0012, D5). Unlike

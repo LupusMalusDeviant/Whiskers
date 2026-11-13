@@ -18,12 +18,13 @@ public class NetworkTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        [Description("Server ID (optional, defaults to local)")] string? serverId = null)
+        [Description("Server ID (optional, defaults to local)")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_networks");
         if (denied != null) return denied;
 
-        var networks = await docker.ListNetworksAsync(serverId);
+        var networks = await docker.ListNetworksAsync(serverId, cancellationToken);
         if (!networks.Any()) return "No networks found.";
 
         var lines = networks.Select(n =>
