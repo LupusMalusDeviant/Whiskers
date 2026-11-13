@@ -170,7 +170,37 @@ public class OnboardingCommandsTests
     public void The_socket_proxy_whitelist_is_exactly_the_approved_one_in_both_places()
     {
         Assert.Equal(Whitelist, EnvironmentOf(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7", HostClientCn), "socket-proxy")));
-        Assert.Equal(Whitelist, EnvironmentOf(Service(HardenedCompose(), "socket-proxy")));
+        // The hardened profile adds exactly one entry: where the proxy listens (review of main: a Unix socket in a volume
+        // shared with the app, not a loopback port every local process could reach).
+        Assert.Equal(Whitelist.Append("BIND_CONFIG=" + HardenedProxyBind).Order(StringComparer.Ordinal),
+            EnvironmentOf(Service(HardenedCompose(), "socket-proxy")));
+    }
+
+    private const string HardenedProxySocket = "/var/run/whiskers-proxy/docker.sock";
+    private const string HardenedProxyBind = HardenedProxySocket + " mode 666";
+
+    [Fact]
+    public void The_hardened_socket_proxy_listens_on_a_socket_shared_only_with_the_app()
+    {
+        // Review of main: a loopback port is open to every process and host-networked container on the host, and the
+        // API behind it can create containers. The proxy listens on a Unix socket in a named volume instead, which only
+        // the two services mount; the app waits for the socket and is pointed at it.
+        var proxy = KeysOf(Service(HardenedCompose(), "socket-proxy"));
+        Assert.False(proxy.ContainsKey("ports"));
+        Assert.Contains("docker-proxy:/var/run/whiskers-proxy", proxy["volumes"].Select(v => v.TrimStart('-', ' ')));
+        Assert.Contains(proxy["healthcheck"], l => l.Contains("test -S " + HardenedProxySocket, StringComparison.Ordinal));
+
+        var appBlock = Service(HardenedCompose(), "serverwatch");
+        var topLevel = appBlock.IndexOf("\nvolumes:", StringComparison.Ordinal);   // the last service runs into it
+        var app = KeysOf(topLevel < 0 ? appBlock : appBlock[..topLevel]);
+        Assert.Contains("docker-proxy:/var/run/whiskers-proxy", app["volumes"].Select(v => v.TrimStart('-', ' ')));
+        Assert.Contains("- Docker__SocketPath=unix://" + HardenedProxySocket, app["environment"]);
+        Assert.Contains("condition: service_healthy", app["depends_on"]);
+
+        // No other service mounts the socket volume.
+        var mounts = HardenedCompose().Replace("\r\n", "\n").Split('\n')
+            .Count(l => l.Trim().StartsWith("- docker-proxy:", StringComparison.Ordinal));
+        Assert.Equal(2, mounts);
     }
 
     [Fact]
@@ -180,7 +210,7 @@ public class OnboardingCommandsTests
         // lists, so the keys of each boundary service are pinned too.
         Assert.Equal(["container_name", "environment", "image", "restart", "volumes"],
             KeysOf(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7", HostClientCn), "socket-proxy")).Keys.Order(StringComparer.Ordinal));
-        Assert.Equal(["cap_drop", "container_name", "environment", "image", "ports", "read_only", "restart", "security_opt", "tmpfs", "volumes"],
+        Assert.Equal(["cap_drop", "container_name", "environment", "healthcheck", "image", "read_only", "restart", "security_opt", "tmpfs", "volumes"],
             KeysOf(Service(HardenedCompose(), "socket-proxy")).Keys.Order(StringComparer.Ordinal));
         Assert.Equal(["command", "container_name", "depends_on", "image", "ports", "restart", "volumes"],
             KeysOf(Service(OnboardingCommands.DockerProxyCompose("100.64.0.7", HostClientCn), "ghostunnel")).Keys.Order(StringComparer.Ordinal));
@@ -241,7 +271,7 @@ public class OnboardingCommandsTests
     /// quoted key) is kept as it is written, so it can never be skipped and the comparison fails on it.</summary>
     private static string[] EnvironmentOf(string service) =>
         KeysOf(service)["environment"].Select(line =>
-            System.Text.RegularExpressions.Regex.Match(line, @"^([A-Z_]+): *(\S+)$") is { Success: true } m
+            System.Text.RegularExpressions.Regex.Match(line, @"^([A-Z_]+): *(\S.*)$") is { Success: true } m
                 ? $"{m.Groups[1].Value}={Unquoted(m.Groups[2].Value)}"
                 : "<unexpected: " + line + ">").Order(StringComparer.Ordinal).ToArray();
 

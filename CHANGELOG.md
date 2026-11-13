@@ -26,6 +26,45 @@ Fixes from the full review of `main` after 1.0.0 (host access).
 - **Firewall rules.** A port or source address with a trailing line break is refused instead of reaching `ufw`.
 - **nginx.** If `nginx -t` refuses an edited site config, Whiskers now restores the previous file. For a new site, it
   removes the new file, so no refused config stays in place for the next reload.
+- **Auth:Disabled and `Origin: null`.** With authentication disabled, a request with `Origin: null` (a sandboxed frame,
+  a `data:` or `file:` page) now counts as cross-site and is refused, like any other origin that does not match the
+  host.
+- **Hardened profile: socket proxy.** The Docker socket proxy no longer publishes `127.0.0.1:2375`, which every
+  process and host-networked container on the host could reach. It listens on a Unix socket in a volume that only the
+  proxy and Whiskers mount. Whiskers waits for the socket and gets it as `Docker__SocketPath`. The verb whitelist is
+  unchanged. **Upgrade:** at the next start, a stored server that still points at `127.0.0.1:2375` (local, or TCP
+  without TLS) is moved to the socket as a local server and a warning is logged. Its host commands (deploy, `.env`,
+  database panel, `execute_command`, firewall, nginx) are then not available, as for any local server in the hardened
+  profile; a TCP server ran them in a privileged helper container through the proxy before.
+- **Database panel.** The database password reaches `docker exec` as an environment variable delivered beside the
+  command (`-e NAME`), never in the command line, so it no longer appears in the host's process list.
+- **Container `.env` editor.** A `.env` that could not be read (host unreachable, permission denied) is shown as an
+  error and saving is blocked, instead of looking like a missing file whose save would replace the real one. Saving
+  keeps comments, blank lines and other lines the editor does not show.
+
+### Fixed
+
+Fixes from the full review of `main` after 1.0.0 (data).
+
+- **DNS TXT records.**
+  - `set_dns_record` adds a TXT value next to the other TXT records of the name instead of replacing all of them.
+    SPF and verification records at the apex stay untouched.
+  - A TXT value that already exists only gets its TTL adjusted.
+  - When an A, AAAA or CNAME set merges several records into one, the answer and the audit entry name every record
+    it removed.
+  - A set whose extra records lack an ID is refused before anything is written.
+  - If a merge stops half way (a provider error on one of the deletes), the answer and the audit entry name what
+    was changed, what was removed and what is still there.
+  - A merge keeps the record that already holds the value instead of rewriting another one into a duplicate.
+  - `delete_dns_record` takes an optional `value`, so one TXT value can be removed without the others.
+  - The read-back after a set now requires exactly one A, AAAA or CNAME record and checks the TTL that was set.
+- **CVE findings during a slow scan.**
+  - A server whose container listing failed or timed out keeps its stored container findings and their ages.
+  - Before, it read as a server without containers and all of its findings were dropped. Every finding was then
+    reported as new on the next good scan.
+  - That server's scan cycle is now recorded as no success, so its "last success" age keeps growing.
+- **Log alerts.** A log-alert regex that runs into its time limit now skips only its own rule for that cycle, with a
+  warning naming the rule. Before, it silently turned off every other rule for that container.
 
 ### Fixed
 

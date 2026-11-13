@@ -46,11 +46,20 @@ services:
       SYSTEM: 0
       AUTH: 0
       PLUGINS: 0
+      # Listen on a Unix socket in a volume shared only with the app, not on a TCP port: a loopback port is open to
+      # every process and host-networked container on the host, and the API behind it can create containers. The
+      # volume lives under /var/lib/docker (root only), so mode 666 reaches no one else; no chown needed, which the
+      # dropped capabilities would refuse.
+      BIND_CONFIG: /var/run/whiskers-proxy/docker.sock mode 666
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      # Bound to loopback so the host-networked app reaches it at 127.0.0.1:2375 and nothing else can.
-      - "127.0.0.1:2375:2375"
+      - docker-proxy:/var/run/whiskers-proxy
+    healthcheck:
+      # The app creates its local server only when the socket exists, so it waits for it.
+      test: ["CMD-SHELL", "test -S /var/run/whiskers-proxy/docker.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     read_only: true
     tmpfs:
       - /run
@@ -69,7 +78,8 @@ services:
     # image: ${WHISKERS_IMAGE:-ghcr.io/lupusmalusdeviant/whiskers:latest}
     container_name: serverwatch
     depends_on:
-      - socket-proxy
+      socket-proxy:
+        condition: service_healthy
     # Host networking so the app can reach mesh (tailnet) IPs of managed hosts. Not a privilege
     # escalation; it shares the host net namespace only. The app listens on 8080 — set HOST_BIND
     # via your reverse proxy / firewall since `ports:` is ignored under host networking.
@@ -85,6 +95,7 @@ services:
       - /var/tmp
     volumes:
       - serverwatch-data:/app/data
+      - docker-proxy:/var/run/whiskers-proxy
     environment:
       - ASPNETCORE_URLS=http://127.0.0.1:8080
       - TZ=${TZ:-Europe/Berlin}
@@ -97,8 +108,9 @@ services:
       - WHISKERS_ADMIN_EMAIL=${WHISKERS_ADMIN_EMAIL:-}
       # Local login (F1): path to a mounted secret file with the admin password → unattended local admin.
       - WHISKERS_ADMIN_PASSWORD_FILE=${WHISKERS_ADMIN_PASSWORD_FILE:-}
-      # Point the built-in "local" server at the proxy (Settings → Servers, or servers.json):
-      #   SocketPath = http://127.0.0.1:2375 . Or manage only remote (mTLS) hosts and ignore local.
+      # The built-in "local" server talks to the proxy socket. On start, a stored server still on the old
+      # 127.0.0.1:2375 is moved to it (and logged). Or manage only remote (mTLS) hosts.
+      - Docker__SocketPath=unix:///var/run/whiskers-proxy/docker.sock
       - GoogleAuth__ClientId=${GOOGLE_CLIENT_ID:-}
       - GoogleAuth__ClientSecret=${GOOGLE_CLIENT_SECRET:-}
       - GoogleAuth__AllowedEmails__0=${GOOGLE_ADMIN_EMAIL:-}
@@ -155,3 +167,5 @@ services:
 
 volumes:
   serverwatch-data:
+  # The proxy socket; shared by socket-proxy and the app only.
+  docker-proxy:

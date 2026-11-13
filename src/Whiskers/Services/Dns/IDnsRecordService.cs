@@ -17,7 +17,9 @@ public interface IDnsRecordService
     [MutatingOperation("dns.record_set")]
     Task<DnsSetResult> SetAsync([MutationTarget] string zone, string name, string type, string value, int? ttl, CancellationToken ct = default);
 
-    /// <summary>Deletes every record with this name and type; returns what was removed (empty = nothing there).</summary>
+    /// <summary>Deletes every record with this name and type — or, with <paramref name="value"/>, only the records holding
+    /// that value (one TXT value among several, Fable review). Returns what was removed (empty = nothing there).</summary>
     [MutatingOperation("dns.record_delete")]
-    Task<List<DnsRecord>> DeleteAsync([MutationTarget] string zone, string name, string type, CancellationToken ct = default);
+    Task<List<DnsRecord>> DeleteAsync([MutationTarget] string zone, string name, string type, string? value = null,
+        CancellationToken ct = default);
 }

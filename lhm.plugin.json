@@ -422,7 +422,7 @@
     },
     {
       "name": "delete_dns_record",
-      "description": "Delete the DNS record(s) with the given name and type in a zone at the configured provider. Only A, AAAA, CNAME and TXT can be deleted. Answers what was removed; nothing there = no-op.",
+      "description": "Delete the DNS record(s) with the given name and type in a zone at the configured provider — all of them, or with 'value' only the record(s) holding that value (e.g. one TXT value among SPF and verification records). Only A, AAAA, CNAME and TXT can be deleted. Answers what was removed; nothing there = no-op.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -437,6 +437,14 @@
           "type": {
             "description": "Record type: A, AAAA, CNAME or TXT",
             "type": "string"
+          },
+          "value": {
+            "description": "Optional: delete only the record(s) with this value; without it every record of name and type goes",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           }
         },
         "required": [
@@ -815,7 +823,7 @@
     },
     {
       "name": "set_dns_record",
-      "description": "Create or update one DNS record at the configured provider — idempotent: an existing record with the same name and type is updated (never duplicated), and an identical value answers 'unchanged'. Types: A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Name is relative to the zone ('holler.app' → holler.app.<zone>, '@' = zone apex). Returns before/after.",
+      "description": "Create or update one DNS record at the configured provider — idempotent: A, AAAA and CNAME: an existing record with the same name and type is updated (never duplicated), further records of that name and type are removed and listed in the answer. TXT: the value is added next to the other TXT records of the name (SPF, verifications), which stay untouched; an existing record with that value only gets its TTL adjusted. An identical record answers 'unchanged'. Types: A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Name is relative to the zone ('holler.app' → holler.app.<zone>, '@' = zone apex). Returns before/after.",
       "inputSchema": {
         "type": "object",
         "properties": {

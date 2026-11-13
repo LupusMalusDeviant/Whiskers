@@ -47,6 +47,11 @@ public class AuthDisabledAccessPolicyTests
     }
 
     [Fact]
+    public void Opaque_origin_null_counts_as_cross_site() =>
+        // A sandboxed iframe or a data: page sends "Origin: null"; it cannot be matched to the Host.
+        Assert.NotNull(Default.Check(IPAddress.Parse("192.168.1.20"), "192.168.1.5:5100", "null"));
+
+    [Fact]
     public void Narrowed_networks_replace_the_defaults()
     {
         var policy = new AuthDisabledAccessPolicy(new[] { "127.0.0.0/8" }, null);

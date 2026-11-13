@@ -25,6 +25,7 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
     private readonly CannedDatabase _db = new();
     private readonly Recording _mutations = new();
     private readonly List<(string ContainerId, string? ServerId)> _envReads = [];
+    private readonly SecretsRecordingHost _host = new();
 
     public ContainerDatabasePanelTests()
     {
@@ -34,7 +35,7 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<IKeyInterceptorService>(ServersKubeconfigSaveTests.NullProxy<IKeyInterceptorService>.Create());
         Services.AddSingleton<IDockerService>(EnvDocker.Create(_envReads));
         Services.AddSingleton<IDatabaseService>(_db);
-        Services.AddSingleton<IHostCommandExecutor>(ServersKubeconfigSaveTests.NullProxy<IHostCommandExecutor>.Create());
+        Services.AddSingleton<IHostCommandExecutor>(_host);
         Services.AddSingleton<IUiMutationRunner>(_mutations);
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
@@ -145,6 +146,89 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
         Assert.Equal(("abc123", "select count(*) from users", (string?)"srv-1"), _db.LastQuery);
         Assert.Empty(_mutations.Refused);
         Assert.True(state.DbResult?.Success);
+    }
+
+    /// <summary>Records each command with the secrets delivered beside it (what the real executor would hand on).</summary>
+    private sealed class SecretsRecordingHost : IHostCommandExecutor
+    {
+        public List<(string Command, IReadOnlyList<KeyValuePair<string, string>> Secrets)> Calls { get; } = [];
+
+        public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
+            CancellationToken ct = default, int? maxOutputChars = null)
+        {
+            Calls.Add((command, Whiskers.Services.Server.HostCommandSecrets.Current.ToList()));
+            return Task.FromResult(new CommandResult { ExitCode = 0, Output = "" });
+        }
+
+        public Task<CommandResult> ExecuteMutationAsync(string serverId, string command, TimeSpan? timeout = null,
+            CancellationToken ct = default, int? maxOutputChars = null) => ExecuteAsync(serverId, command, timeout, ct, maxOutputChars);
+    }
+
+    [Fact]
+    public async Task An_import_names_the_database_password_and_delivers_it_beside_the_command()
+    {
+        // Fable review: the SQL import and seed put the password into the host's command line
+        // (PGPASSWORD='…' psql), visible in its process list and in every log of the command.
+        var state = new ContainerDatabaseState();
+        var panel = RenderPanel(AppRole.Admin, state);
+        await panel.InvokeAsync(panel.Instance.EnsureLoadedAsync);
+
+        var secret = (IReadOnlyList<KeyValuePair<string, string>>)typeof(ContainerDatabasePanel)
+            .GetMethod("DbPasswordSecret", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(panel.Instance, null)!;
+        Assert.Equal([new KeyValuePair<string, string>("PGPASSWORD", "pw")], secret);
+
+        var exec = typeof(ContainerDatabasePanel).GetMethod("ExecInContainerViaHost", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await panel.InvokeAsync(() => (Task)exec.Invoke(panel.Instance,
+            ["db.query", new[] { "sh", "-c", "psql -U 'appuser' -d 'appdb'" }, TimeSpan.FromMinutes(1), null, "select 1", "appdb", null, secret])!);
+
+        var (command, delivered) = Assert.Single(_host.Calls);
+        Assert.StartsWith("docker exec -e PGPASSWORD -- 'abc123' ", command);
+        Assert.DoesNotContain("pw'", command);
+        Assert.Equal(secret, delivered);
+        Assert.Empty(Whiskers.Services.Server.HostCommandSecrets.Current);   // only for that one call
+    }
+
+    /// <summary>Answers every confirmation with yes, so the flows behind one can run.</summary>
+    private class ConfirmingDialogs : ServersKubeconfigSaveTests.NullProxy<IDialogService>
+    {
+        public static new IDialogService Create() => DispatchProxy.Create<IDialogService, ConfirmingDialogs>();
+
+        protected override object? Invoke(MethodInfo? method, object?[]? args) =>
+            method!.Name == nameof(IDialogService.ShowMessageBoxAsync)
+                ? Task.FromResult<bool?>(true)
+                : base.Invoke(method, args);
+    }
+
+    [Theory]
+    [InlineData("ExecuteMigrationFile")]
+    [InlineData("ExecuteSeedFile")]
+    public async Task Running_a_sql_file_delivers_the_database_password_beside_the_command(string flow)
+    {
+        Services.AddSingleton(ConfirmingDialogs.Create());
+        var state = new ContainerDatabaseState
+        {
+            MigrationFileData = "select 1;"u8.ToArray(), MigrationFileName = "m.sql",
+            SeedFileData = "insert into t values (1);"u8.ToArray(), SeedFileName = "seed.sql",
+        };
+        var panel = RenderPanel(AppRole.Admin, state);
+        await panel.InvokeAsync(panel.Instance.EnsureLoadedAsync);
+
+        await InvokePrivate(panel, flow);
+
+        var (command, delivered) = Assert.Single(_host.Calls);
+        Assert.StartsWith("docker exec -e PGPASSWORD -- 'abc123' ", command);
+        Assert.Equal([new KeyValuePair<string, string>("PGPASSWORD", "pw")], delivered);
+    }
+
+    [Fact]
+    public void No_command_on_the_database_panel_carries_the_password_itself()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Whiskers.slnx"))) dir = dir.Parent;
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "src", "Whiskers", "Components", "Pages", "ContainerDatabasePanel.razor"));
+
+        Assert.DoesNotMatch(@"(PGPASSWORD|MYSQL_PWD|REDISCLI_AUTH|NEO4J_PASSWORD)=", source);
+        Assert.DoesNotMatch(@"\{Quote\(State\.DbCreds\.Password\)\}", source);
     }
 
     private sealed class CannedDatabase : IDatabaseService
