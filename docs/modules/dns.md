@@ -33,8 +33,10 @@ Without a token every tool answers a one-line hint and calls nothing.
 - **Types:** A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Values are validated per type before any call.
   MX/SRV/CAA (structured extras) and NS/SOA (the zone's skeleton) are deliberately out of reach.
 - **`set_dns_record` is idempotent:** an existing record of the same name + type is updated in place, an
-  identical value + TTL answers "Unverändert" without writing, several records of that name + type (round-robin)
-  are collapsed onto one. A CNAME next to other data at the same name — or the reverse — is refused (RFC 1034).
+  identical value + TTL answers "Unverändert" without writing. For A, AAAA and CNAME, several records of that name +
+  type (round-robin) are collapsed onto one, and the answer and the audit entry name each record removed. TXT is the
+  exception: a set adds its value next to the other TXT records of the name (SPF, verifications) and only adjusts the
+  TTL of a record that already holds that value. A CNAME next to other data at the same name — or the reverse — is refused (RFC 1034).
 - **`delete_dns_record`** removes every record of that name + type; nothing there is a no-op. It is *write*,
   not *admin*: it undoes what `set_dns_record` can do and reaches the same four types only.
 - **Zone fence:** with `AllowedZones` set, any other zone is refused before the provider is contacted.

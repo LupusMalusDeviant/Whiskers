@@ -80,6 +80,9 @@ public sealed class DnsRecordService : IDnsRecordService
                 throw new ArgumentException($"Unter '{n}' existiert bereits ein CNAME ({cname.Value}); daneben darf kein {t}-Eintrag stehen. Erst den CNAME löschen.");
         }
 
+        if (t == "TXT")
+            return await SetTxtAsync(client, token, z, wanted, existing, ct);
+
         if (existing.Count == 0)
         {
             var created = await client.CreateRecordAsync(token, z, wanted, ct);
@@ -97,14 +100,52 @@ public sealed class DnsRecordService : IDnsRecordService
         if (string.IsNullOrEmpty(primary.Id))
             throw new DnsProviderException($"Der bestehende Eintrag {primary} hat keine ID — Aktualisierung nicht möglich.");
 
+        // Every further record goes, so each needs an ID before anything is written: a half-collapsed set is refused up front.
+        var extras = existing.Skip(1).ToList();
+        var noId = extras.FirstOrDefault(e => string.IsNullOrEmpty(e.Id));
+        if (noId is not null)
+            throw new DnsProviderException($"Der weitere Eintrag {noId} hat keine ID — Zusammenführen nicht möglich.");
+
         var updated = await client.UpdateRecordAsync(token, z, primary.Id, wanted, ct);
-        foreach (var extra in existing.Skip(1).Where(e => !string.IsNullOrEmpty(e.Id)))
+        foreach (var extra in extras)
             await client.DeleteRecordAsync(token, z, extra.Id!, ct);
 
         _logger.LogInformation("DNS record updated: {Zone} {Name} {Type} (TTL {Ttl}), {Removed} duplicate(s) removed",
-            z, n, t, effectiveTtl, existing.Count - 1);
+            z, n, t, effectiveTtl, extras.Count);
         return new DnsSetResult(DnsSetAction.Updated, primary,
-            updated with { Id = updated.Id ?? primary.Id, Name = n, Type = t, Value = v, Ttl = effectiveTtl });
+            updated with { Id = updated.Id ?? primary.Id, Name = n, Type = t, Value = v, Ttl = effectiveTtl })
+        {
+            Removed = extras,
+        };
+    }
+
+    /// <summary>
+    /// TXT records under one name are independent of each other — SPF, site verifications and DKIM keys share the apex —
+    /// so a set adds the value or adjusts the TTL of the record that already holds it, and never touches the others
+    /// (Fable review H3: a set used to replace every TXT record of the name).
+    /// </summary>
+    private async Task<DnsSetResult> SetTxtAsync(IDnsProviderClient client, string token, string z, DnsRecord wanted,
+        List<DnsRecord> existing, CancellationToken ct)
+    {
+        var match = existing.FirstOrDefault(r => ValuesEqual("TXT", r.Value, wanted.Value));
+        if (match is null)
+        {
+            var created = await client.CreateRecordAsync(token, z, wanted, ct);
+            _logger.LogInformation("DNS record created: {Zone} {Name} TXT (TTL {Ttl}), {Others} other TXT record(s) kept",
+                z, wanted.Name, wanted.Ttl, existing.Count);
+            return new DnsSetResult(DnsSetAction.Created, null, created with { Name = wanted.Name, Type = "TXT", Value = wanted.Value, Ttl = wanted.Ttl });
+        }
+
+        if (match.Ttl == wanted.Ttl)
+            return new DnsSetResult(DnsSetAction.Unchanged, match, match);
+
+        if (string.IsNullOrEmpty(match.Id))
+            throw new DnsProviderException($"Der bestehende Eintrag {match} hat keine ID — Aktualisierung nicht möglich.");
+
+        var updated = await client.UpdateRecordAsync(token, z, match.Id, wanted, ct);
+        _logger.LogInformation("DNS record updated: {Zone} {Name} TXT (TTL {Ttl})", z, wanted.Name, wanted.Ttl);
+        return new DnsSetResult(DnsSetAction.Updated, match,
+            updated with { Id = updated.Id ?? match.Id, Name = wanted.Name, Type = "TXT", Value = wanted.Value, Ttl = wanted.Ttl });
     }
 
     public async Task<List<DnsRecord>> DeleteAsync(string zone, string name, string type, CancellationToken ct = default)

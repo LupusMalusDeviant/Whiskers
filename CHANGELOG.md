@@ -6,6 +6,24 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+Fixes from the full review of `main` after 1.0.0 (data).
+
+- **DNS TXT records.**
+  - `set_dns_record` adds a TXT value next to the other TXT records of the name instead of replacing all of them.
+    SPF and verification records at the apex stay untouched.
+  - A TXT value that already exists only gets its TTL adjusted.
+  - When an A, AAAA or CNAME set merges several records into one, the answer and the audit entry name every record
+    it removed.
+  - A set whose extra records lack an ID is refused before anything is written.
+- **CVE findings during a slow scan.**
+  - A server whose container listing failed or timed out keeps its stored container findings and their ages.
+  - Before, it read as a server without containers and all of its findings were dropped. Every finding was then
+    reported as new on the next good scan.
+- **Log alerts.** A log-alert regex that runs into its time limit now skips only its own rule for that cycle, with a
+  warning naming the rule. Before, it silently turned off every other rule for that container.
+
 ## [1.0.0] — 2026-11-11
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in

@@ -227,14 +227,27 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
 
                 if (settings.ScanContainers)
                 {
+                    // The detailed listing, not the plain one: a server that timed out or failed answers there as a
+                    // failure, while the plain list shows it as a server without containers — and the prune below
+                    // then dropped every stored finding of it, restarting the ages and re-reporting all of them as
+                    // new on the next good scan (Fable review H4). Only a server that answered is scanned and pruned.
                     List<ContainerInfo> containers;
                     try
                     {
-                        containers = (await _docker.ListAllContainersAsync(all: false))
-                            .Where(c => c.ServerId == server.Id)
+                        var listing = await _docker.ListAllContainersDetailedAsync(all: false, ct);
+                        if (!listing.RespondedServerIds.Any(id => string.Equals(id, server.Id, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            var failure = listing.FailedServers.FirstOrDefault(f =>
+                                string.Equals(f.ServerId, server.Id, StringComparison.OrdinalIgnoreCase));
+                            _logger.LogWarning("Container listing of {Server} did not answer ({Error}) — keeping previous container results",
+                                server.Id, failure?.Error ?? "not in the listing");
+                            continue;
+                        }
+                        containers = listing.Containers
+                            .Where(c => string.Equals(c.ServerId, server.Id, StringComparison.OrdinalIgnoreCase))
                             .ToList();
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                     {
                         _logger.LogWarning(ex, "Failed to list containers on {Server}", server.Id);
                         continue;

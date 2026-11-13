@@ -135,6 +135,51 @@ public class DnsRecordServiceTests
         var only = Assert.Single(p.Records);
         Assert.Equal("3.3.3.3", only.Value);
         Assert.Contains("delete lupusmalus.dev #2", p.Calls);
+        // What went away is named in the result (Fable review H3).
+        Assert.Equal("2.2.2.2", Assert.Single(r.Removed).Value);
+    }
+
+    [Fact]
+    public async Task A_txt_set_adds_its_value_and_leaves_the_other_txt_records_of_the_name_alone()
+    {
+        var (svc, p) = Make();
+        p.Records.Add(new DnsRecord("1", "@", "TXT", "\"v=spf1 include:mail.example -all\"", 300));
+        p.Records.Add(new DnsRecord("2", "@", "TXT", "google-site-verification=abc", 300));
+
+        var r = await svc.SetAsync("lupusmalus.dev", "@", "TXT", "whiskers-verify=xyz", 300);
+
+        Assert.Equal(DnsSetAction.Created, r.Action);
+        Assert.Empty(r.Removed);
+        Assert.Equal(3, p.Records.Count(x => x.Type == "TXT"));
+        Assert.DoesNotContain(p.Calls, c => c.StartsWith("delete", StringComparison.Ordinal) || c.StartsWith("update", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_txt_set_of_a_present_value_only_adjusts_that_records_ttl()
+    {
+        var (svc, p) = Make();
+        p.Records.Add(new DnsRecord("1", "@", "TXT", "v=spf1 -all", 300));
+        p.Records.Add(new DnsRecord("2", "@", "TXT", "google-site-verification=abc", 300));
+
+        var same = await svc.SetAsync("lupusmalus.dev", "@", "TXT", "google-site-verification=abc", 300);
+        Assert.Equal(DnsSetAction.Unchanged, same.Action);
+
+        var r = await svc.SetAsync("lupusmalus.dev", "@", "TXT", "google-site-verification=abc", 600);
+        Assert.Equal(DnsSetAction.Updated, r.Action);
+        Assert.Contains("update lupusmalus.dev #2", p.Calls[^1]);
+        Assert.Equal(300, p.Records.Single(x => x.Id == "1").Ttl);
+        Assert.Equal(2, p.Records.Count);
+    }
+
+    [Fact]
+    public async Task A_collapse_with_a_record_lacking_an_id_writes_nothing()
+    {
+        var (svc, p) = Make();
+        p.Records.Add(new DnsRecord("1", "rr", "A", "1.1.1.1", 300));
+        p.Records.Add(new DnsRecord(null, "rr", "A", "2.2.2.2", 300));
+
+        await Assert.ThrowsAsync<DnsProviderException>(() => svc.SetAsync("lupusmalus.dev", "rr", "A", "3.3.3.3", 300));
+        Assert.Equal(["list lupusmalus.dev"], p.Calls);
     }
 
     [Fact]

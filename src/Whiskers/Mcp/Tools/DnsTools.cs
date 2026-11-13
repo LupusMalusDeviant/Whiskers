@@ -62,7 +62,7 @@ public class DnsTools
     }
 
     [McpToolLevel(McpPermissionLevels.Write)]
-    [McpServerTool, Description("Create or update one DNS record at the configured provider — idempotent: an existing record with the same name and type is updated (never duplicated), and an identical value answers 'unchanged'. Types: A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Name is relative to the zone ('holler.app' → holler.app.<zone>, '@' = zone apex). Returns before/after.")]
+    [McpServerTool, Description("Create or update one DNS record at the configured provider — idempotent: A, AAAA and CNAME: an existing record with the same name and type is updated (never duplicated), further records of that name and type are removed and listed in the answer. TXT: the value is added next to the other TXT records of the name (SPF, verifications), which stay untouched; an existing record with that value only gets its TTL adjusted. An identical record answers 'unchanged'. Types: A (IPv4), AAAA (IPv6), CNAME (hostname), TXT. Name is relative to the zone ('holler.app' → holler.app.<zone>, '@' = zone apex). Returns before/after.")]
     public static async Task<string> SetDnsRecord(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
         IDnsRecordService dns, IToolAuditLog auditLog,
@@ -93,8 +93,12 @@ public class DnsTools
             return result.Action switch
             {
                 DnsSetAction.Unchanged => $"Unverändert: {Fqdn(result.After.Name, z)} {result.After.Type} {result.After.Value} (TTL {result.After.Ttl}) existiert bereits so.",
-                DnsSetAction.Created => $"Angelegt: {Fqdn(result.After.Name, z)} {result.After.Type} {result.After.Value} (TTL {result.After.Ttl})\nVorher: kein {result.After.Type}-Eintrag unter diesem Namen.",
-                _ => $"Aktualisiert: {Fqdn(result.After.Name, z)} {result.After.Type}\nVorher: {result.Before!.Value} (TTL {result.Before.Ttl})\nNachher: {result.After.Value} (TTL {result.After.Ttl})",
+                DnsSetAction.Created => $"Angelegt: {Fqdn(result.After.Name, z)} {result.After.Type} {result.After.Value} (TTL {result.After.Ttl})\n" +
+                    (result.After.Type == "TXT"
+                        ? "Vorher: kein TXT-Eintrag mit diesem Wert; andere TXT-Einträge unter dem Namen bleiben unverändert."
+                        : $"Vorher: kein {result.After.Type}-Eintrag unter diesem Namen."),
+                _ => $"Aktualisiert: {Fqdn(result.After.Name, z)} {result.After.Type}\nVorher: {result.Before!.Value} (TTL {result.Before.Ttl})\nNachher: {result.After.Value} (TTL {result.After.Ttl})"
+                     + RemovedLines(result, z),
             };
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or DnsProviderException)
@@ -140,10 +144,14 @@ public class DnsTools
 
     private static string Fqdn(string name, string zone) => name == "@" ? zone : $"{name}.{zone}";
 
+    private static string RemovedLines(DnsSetResult r, string zone) => r.Removed.Count == 0 ? "" :
+        "\nEntfernt (weitere Einträge gleichen Namens und Typs):\n" +
+        string.Join('\n', r.Removed.Select(x => $"- {Fqdn(x.Name, zone)} {x.Type} {x.Value} (TTL {x.Ttl})"));
+
     private static string Describe(DnsSetResult r) => r.Action switch
     {
         DnsSetAction.Created => $"created {r.After}",
-        DnsSetAction.Updated => $"updated {r.Before} -> {r.After}",
+        DnsSetAction.Updated => $"updated {r.Before} -> {r.After}" + (r.Removed.Count > 0 ? $"; removed {string.Join("; ", r.Removed)}" : ""),
         _ => $"unchanged {r.After}",
     };
 }
