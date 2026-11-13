@@ -326,7 +326,7 @@ else
 
                     @if (_dotEnvError != null)
                     {
-                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">@_dotEnvError</MudAlert>
+                        <MudAlert Severity="@(_dotEnvReadFailed ? Severity.Error : Severity.Info)" Dense="true" Class="mb-3">@_dotEnvError</MudAlert>
                     }
 
                     @for (var i = 0; i < _dotEnvEntries.Count; i++)
@@ -394,7 +394,7 @@ else
                         @* Writing .env and restarting is Admin-only in SaveEnvAndRestart; Operators may read here. *@
                         @if (_role >= AppRole.Admin)
                         {
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_envSaving"
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_envSaving || _dotEnvReadFailed)"
                                    StartIcon="@Icons.Material.Filled.Save" OnClick="SaveEnvAndRestart">
                             @if (_envSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
                             @L["ContainerDetail_Env_SaveAndRestart"]
@@ -531,6 +531,8 @@ else
     private List<EnvEntry> _dotEnvEntries = new();
     private string? _composeWorkingDir;
     private string? _dotEnvError;
+    private bool _dotEnvReadFailed;
+    private IReadOnlyList<Whiskers.Utils.DotEnvLine> _dotEnvLines = Array.Empty<Whiskers.Utils.DotEnvLine>();
 
     // The database tab lives in ContainerDatabasePanel; loaded when the tab is first opened. Its state is held here,
     // for the life of the page, because MudTabs disposes the panel whenever another tab is active
@@ -552,6 +554,7 @@ else
         public string Key { get; set; } = "";
         public string Value { get; set; } = "";
         public string OriginalValue { get; set; } = ""; // stored server-side, never shown for sensitive keys
+        public int? Line { get; set; }        // its line in the .env as read; null for a variable added here
         public bool IsNew { get; set; }
         public bool IsEditing { get; set; }
         public bool ShowValue { get; set; }
@@ -905,41 +908,44 @@ else
             if (_composeWorkingDir != null)
             {
                 var sid = _resolvedServerId ?? "local";
-                var result = await HostCommandExecutor.ExecuteAsync(sid,
-                    $"cat {Quote(_composeWorkingDir + "/.env")} 2>/dev/null",
-                    TimeSpan.FromSeconds(5));
-
+                // The first line says whether the file exists, so a missing file and a failed read are told apart: a
+                // read that failed must not look like an empty file, or saving would replace the real one (review of main).
+                var envPath = Quote(_composeWorkingDir + "/.env");
                 _dotEnvEntries.Clear();
+                _dotEnvLines = Array.Empty<Whiskers.Utils.DotEnvLine>();
                 _dotEnvError = null;
+                _dotEnvReadFailed = true;   // until the read below has answered
 
-                if (result.Success && !string.IsNullOrWhiteSpace(result.Output))
+                var result = await HostCommandExecutor.ExecuteAsync(sid,
+                    Whiskers.Utils.DotEnvDocument.ReadCommand(envPath), TimeSpan.FromSeconds(5));
+                var read = Whiskers.Utils.DotEnvDocument.FromRead(result.Success, result.Output, out var missing);
+                _dotEnvReadFailed = read is null;
+                if (missing)
                 {
-                    foreach (var line in result.Output.Split('\n'))
+                    _dotEnvError = L["ContainerDetail_Env_NoDotEnvFound"].Value;
+                }
+                else if (read is not null)
+                {
+                    _dotEnvLines = read;
+                    for (var line = 0; line < _dotEnvLines.Count; line++)
                     {
-                        var trimmed = line.Trim();
-                        if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#'))
-                            continue;
-
-                        var idx = trimmed.IndexOf('=');
-                        if (idx > 0)
+                        if (_dotEnvLines[line] is not { Key: { } key, Value: { } val }) continue;
+                        _dotEnvEntries.Add(new EnvEntry
                         {
-                            var key = trimmed[..idx];
-                            var val = trimmed[(idx + 1)..];
-                            _dotEnvEntries.Add(new EnvEntry
-                            {
-                                Key = key,
-                                Value = "",
-                                OriginalValue = val,
-                                IsNew = false,
-                                IsEditing = false,
-                                IsSensitive = Whiskers.Utils.EnvMasking.ShouldMask(key, val)
-                            });
-                        }
+                            Key = key,
+                            Value = "",
+                            OriginalValue = val,
+                            Line = line,
+                            IsNew = false,
+                            IsEditing = false,
+                            IsSensitive = Whiskers.Utils.EnvMasking.ShouldMask(key, val)
+                        });
                     }
                 }
                 else
                 {
-                    _dotEnvError = L["ContainerDetail_Env_NoDotEnvFound"].Value;
+                    _dotEnvReadFailed = true;
+                    _dotEnvError = L["ContainerDetail_Env_DotEnvReadFailed"].Value;
                 }
             }
         }
@@ -958,6 +964,7 @@ else
         if (!await RequireAsync("container.env_file_save",
                 new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId })) return;
         if (_composeWorkingDir == null) return;
+        if (_dotEnvReadFailed) return;   // the file could not be read: writing would replace what we never saw
         var confirmed = await DialogService.ShowMessageBoxAsync(
             L["ContainerDetail_Dialog_SaveEnvTitle"].Value,
             L["ContainerDetail_Dialog_SaveEnvMessage"].Value,
@@ -969,19 +976,15 @@ else
         {
             var sid = _resolvedServerId ?? "local";
 
-            // Build .env content
-            var sb = new System.Text.StringBuilder();
-            foreach (var entry in _dotEnvEntries)
-            {
-                if (!string.IsNullOrWhiteSpace(entry.Key))
-                    sb.AppendLine($"{entry.Key}={entry.EffectiveValue}");
-            }
+            // Build .env content: every line the editor does not show (comments, blank lines) stays where it was.
+            var envText = Whiskers.Utils.DotEnvDocument.Render(_dotEnvLines,
+                _dotEnvEntries.Select(e => new Whiskers.Utils.DotEnvEdit(e.Line, e.Key, e.EffectiveValue)));
 
             if (_container is null) return;   // container not loaded: nothing to decide on, so nothing is written
             // The plan (R1-07): the new .env for this container's project and every existing container `compose up`
             // then recreates or collides with — each is decided (protected resources, kill switch) before anything is
             // written, and exactly the planned .env and files are used. The content stays inside the delegate.
-            var envContent = sb.ToString();
+            var envContent = envText;
             // Mounts, exposures (contract 0006, audited, nothing to confirm — PC-D1), then each affected container,
             // planned again before writing, run and re-checked (ComposeImpact.SaveEnvAsync).
             var restartResult = await Mutations.SaveEnvAsync(HostCommandExecutor, ComposePlanner, ComposeRunner,

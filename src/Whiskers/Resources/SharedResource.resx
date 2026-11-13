@@ -971,6 +971,9 @@
   <data name="ContainerDetail_Env_NoDotEnvFound" xml:space="preserve">
     <value>No .env file found. You can create a new one.</value>
   </data>
+  <data name="ContainerDetail_Env_DotEnvReadFailed" xml:space="preserve">
+    <value>The .env file could not be read. Saving is blocked so the existing file is not replaced.</value>
+  </data>
   <data name="ContainerDetail_Env_RemoveVariable" xml:space="preserve">
     <value>Remove variable</value>
   </data>

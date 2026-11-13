@@ -747,13 +747,17 @@ else
     // missing framework, an unsupported file): the gateway then records it Failed, not Executed (R1-21).
     private async Task<(string StdOut, string StdErr, int ExitCode)> ExecInContainerViaHost(string capability,
         string[] cmd, TimeSpan timeout, string? command = null, string? query = null, string? database = null,
-        Func<string, string?>? failedWhen = null)
+        Func<string, string?>? failedWhen = null, IReadOnlyList<KeyValuePair<string, string>>? secrets = null)
     {
+        secrets ??= [];
         var r = await Mutations.RunAsync(capability,
             new { containerId = ContainerId, name = _container?.Name, serverId = _resolvedServerId, database, command, query },
             async (ResolvedContainer c, CancellationToken _) =>
             {
-                var result = await HostCommandExecutor.ExecuteMutationAsync(c.ServerId!, DockerExecCommand(cmd, c.Id), timeout);
+                // The database password never stands in the command (Fable review, as DatabaseService since CodeQL #23–#26):
+                // `docker exec -e NAME` takes it from the host shell's environment, which the executor fills beside the command.
+                using var delivered = Whiskers.Services.Server.HostCommandSecrets.Provide(secrets);
+                var result = await HostCommandExecutor.ExecuteMutationAsync(c.ServerId!, DockerExecCommand(cmd, c.Id, secrets.Select(s => s.Key)), timeout);
                 if (result.ExitCode != 0) MutationScope.Fail($"Command exited with {result.ExitCode}.");
                 else if (failedWhen?.Invoke(result.Output ?? "") is { } failure) MutationScope.Fail(failure);
                 return result;
@@ -770,13 +774,22 @@ else
         return (read.Output, read.Error, read.ExitCode);
     }
 
+    /// <summary>The database password as the one host command secret of an import or migration: named in the command
+    /// (<c>-e PGPASSWORD</c>), delivered beside it (<see cref="Whiskers.Services.Server.HostCommandSecrets"/>).</summary>
+    private IReadOnlyList<KeyValuePair<string, string>> DbPasswordSecret() =>
+        _container is not null
+        && Whiskers.Services.Database.DatabaseService.PasswordVariable(_container.DatabaseType) is { } name
+        && !string.IsNullOrEmpty(State.DbCreds?.Password)
+            ? [new KeyValuePair<string, string>(name, State.DbCreds.Password)]
+            : [];
+
     // R1-42 (INV-41): the container reference comes from the route; it is checked and follows `--`.
     private string DockerExecCommand(string[] cmd) => DockerExecCommand(cmd, ContainerId);
 
     /// <summary>The `docker exec` line for <paramref name="containerRef"/> — inside a decision the resolved container's id
     /// (contract 0012), never the route parameter.</summary>
-    private static string DockerExecCommand(string[] cmd, string containerRef) =>
-        "docker exec -- " +
+    private static string DockerExecCommand(string[] cmd, string containerRef, IEnumerable<string>? environment = null) =>
+        "docker exec " + string.Concat((environment ?? []).Select(name => $"-e {name} ")) + "-- " +
         Whiskers.Utils.ShellUtils.Quote(Whiskers.Utils.CommandOperands.RequireContainerRef(containerRef)) + " " +
         string.Join(' ', cmd.Select(Whiskers.Utils.ShellUtils.Quote));
 
@@ -889,14 +902,15 @@ else
             if (!string.IsNullOrEmpty(db)) Whiskers.Services.Database.DatabaseService.CheckDatabaseName(db, _container.DatabaseType);
             var cmd = _container.DatabaseType switch
             {
-                DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(State.DbCreds.Password)} psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
-                DatabaseType.MySQL => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(State.DbCreds.Password)} mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
+                DatabaseType.PostgreSQL => $"echo '{b64}' | base64 -d | psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
+                DatabaseType.MySQL => $"echo '{b64}' | base64 -d | mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
                 _ => "echo 'Not supported'"
             };
             var supported = _container.DatabaseType is DatabaseType.PostgreSQL or DatabaseType.MySQL;
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
                 query: System.Text.Encoding.UTF8.GetString(State.MigrationFileData), database: db,
-                failedWhen: _ => supported ? null : "This database type does not take SQL files here.");
+                failedWhen: _ => supported ? null : "This database type does not take SQL files here.",
+                secrets: DbPasswordSecret());
             State.MigrationOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ExecutedSuccess"].Value : result.StdOut;
             State.MigrationSuccess = result.ExitCode == 0;
             if (State.MigrationSuccess) await LoadDatabaseInfo();
@@ -933,9 +947,9 @@ else
             var ext = System.IO.Path.GetExtension(State.SeedFileName)?.ToLower();
             var cmd = (_container.DatabaseType, ext) switch
             {
-                (DatabaseType.PostgreSQL, ".sql") => $"echo '{b64}' | base64 -d | PGPASSWORD={Quote(State.DbCreds.Password)} psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
-                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && PGPASSWORD={Quote(State.DbCreds.Password)} psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV import: please specify the table name in the query editor'",
-                (DatabaseType.MySQL, ".sql") => $"echo '{b64}' | base64 -d | MYSQL_PWD={Quote(State.DbCreds.Password)} mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
+                (DatabaseType.PostgreSQL, ".sql") => $"echo '{b64}' | base64 -d | psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} 2>&1",
+                (DatabaseType.PostgreSQL, ".csv") => $"echo '{b64}' | base64 -d > /tmp/seed.csv && psql -U {Quote(State.DbCreds.User)} -d {Quote(db)} -c \"\\COPY (SELECT 1) FROM '/tmp/seed.csv' CSV HEADER\" 2>&1 || echo 'CSV import: please specify the table name in the query editor'",
+                (DatabaseType.MySQL, ".sql") => $"echo '{b64}' | base64 -d | mysql -u {Quote(State.DbCreds.User)} {Quote(db)} 2>&1",
                 (DatabaseType.MongoDB, ".json") => $"echo '{b64}' | base64 -d > /tmp/seed.json && mongoimport --db {Quote(db)} --file /tmp/seed.json 2>&1",
                 _ => $"echo '{b64}' | base64 -d | head -c 100 && echo '... file format {ext} is not supported for {_container.DatabaseType} here - use the SQL pipe instead'"
             };
@@ -944,7 +958,8 @@ else
                 or (DatabaseType.MongoDB, ".json");
             var result = await ExecInContainerViaHost("db.query", new[] { "sh", "-c", cmd }, TimeSpan.FromMinutes(5),
                 query: System.Text.Encoding.UTF8.GetString(State.SeedFileData), database: db,
-                failedWhen: _ => imports ? null : $"Files of type {ext} are not imported for {_container.DatabaseType}.");
+                failedWhen: _ => imports ? null : $"Files of type {ext} are not imported for {_container.DatabaseType}.",
+                secrets: DbPasswordSecret());
             State.SeedOutput = string.IsNullOrWhiteSpace(result.StdOut) ? L["ContainerDetail_Db_ImportSuccess"].Value : result.StdOut;
             State.SeedSuccess = result.ExitCode == 0;
             if (State.SeedSuccess) { State.DbLoaded = false; await LoadDatabaseInfo(); }

@@ -10,7 +10,7 @@ container is allowed to do to the host it runs on** — not on a generic "more s
 | `pid: host` | yes | no |
 | Linux caps | all (privileged) | all dropped + `no-new-privileges` |
 | Root filesystem | writable | read-only (+ tmpfs, `/app/data` volume) |
-| Docker access | raw `/var/run/docker.sock` | restricted socket-proxy (TCP, verb whitelist) |
+| Docker access | raw `/var/run/docker.sock` | restricted socket-proxy (Unix socket in a shared volume, verb whitelist) |
 | VPN | in-container daemon | on the host / a sidecar (`Vpn__Provider=none`) |
 | Local host-shell (nsenter) | ✅ firewall/nginx/systemd/`execute_command` | ❌ disabled |
 | Remote hosts (mesh + mTLS) | ✅ | ✅ |
@@ -67,11 +67,14 @@ Mounting `/var/run/docker.sock` into a container is root-equivalent on the host:
 to it can start a privileged container and own the box. The hardened profile never gives the app the
 raw socket. Instead a [`tecnativa/docker-socket-proxy`](https://github.com/Tecnativa/docker-socket-proxy)
 sidecar holds the socket (read-only) and exposes a **verb-whitelisted** HTTP API; the app talks to it
-over loopback TCP.
+over a Unix socket in a named volume that only the proxy and the app mount. The proxy publishes no
+port: a loopback port would be open to every process and every host-networked container on the host.
 
 The whitelist keeps `exec`, `swarm`, `secrets` and `configs` **off** while allowing the
 container/image/network/volume operations Whiskers needs. Point the built-in **local** server at
-the proxy (Settings → Servers, or `servers.json`): set its `SocketPath` to `http://127.0.0.1:2375`.
+the proxy: the compose file sets `Docker__SocketPath=unix:///var/run/whiskers-proxy/docker.sock`, which a new
+install uses for its local server. An install that already has a local server keeps the stored `SocketPath`;
+set it to that value in Settings → Servers (it was `http://127.0.0.1:2375` before).
 
 > **Residual risk, stated honestly:** container *create* must stay enabled so deploys work, and the
 > proxy does not filter the `privileged` flag on creation — so a fully compromised app could still
