@@ -19,7 +19,7 @@ public class DockerClientConnectionBindingTests
 {
     private sealed class NoTunnels : ISshTunnelManager
     {
-        public Task<int> EstablishTunnelAsync(ServerConfig server) => throw new InvalidOperationException("not used");
+        public Task<Uri> EstablishTunnelAsync(ServerConfig server) => throw new InvalidOperationException("not used");
         public void CloseTunnel(string serverId) { }
         public bool IsTunnelActive(string serverId) => true;
         public void Dispose() { }
