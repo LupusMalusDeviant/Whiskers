@@ -76,7 +76,7 @@ public class HostRuleSafetyTests
 
         Assert.True(result.Success);
         Assert.Contains(host.Commands, c => c == "rm -f '/etc/nginx/sites-available/shop.whiskers-prev'");
-        Assert.DoesNotContain(host.Commands, c => c.Contains("mv -f", StringComparison.Ordinal));
+        Assert.DoesNotContain(host.Commands.Skip(1), c => c.Contains("mv -f", StringComparison.Ordinal));   // no restore after a passed test
     }
 
     [Fact]
@@ -89,8 +89,72 @@ public class HostRuleSafetyTests
         var result = await new NginxService(host, NullLogger<NginxService>.Instance).UpdateSiteConfigAsync("srv", "shop", "server {}");
 
         Assert.False(result.Success);
-        Assert.Contains(host.Commands, c => c == "if [ -e '/etc/nginx/sites-available/shop.whiskers-prev' ]; then mv -f '/etc/nginx/sites-available/shop.whiskers-prev' '/etc/nginx/sites-available/shop'; fi");
-        Assert.DoesNotContain(host.Commands, c => c.StartsWith("nginx -t", StringComparison.Ordinal) || c.Contains("reload", StringComparison.Ordinal));
+        // The restore is decided inside the write itself, where the failing step is known — nothing runs after it.
+        var write = Assert.Single(host.Commands);
+        Assert.Contains("if cat '/etc/nginx/sites-available/shop.whiskers-next' > '/etc/nginx/sites-available/shop'; then", write);
+        Assert.Contains("cp -p '/etc/nginx/sites-available/shop' '/etc/nginx/sites-available/shop.whiskers-keep' && mv -f", write);
+    }
+
+    /// <summary>A host that runs each command in a real <c>sh</c>, sites-available mapped to <paramref name="dir"/>;
+    /// <paramref name="failing"/> names a command replaced by one that fails (a full disk at that step).</summary>
+    private static RecordingHost RealShell(string dir, string? failing = null) => new(c =>
+    {
+        if (c.StartsWith("nginx -t", StringComparison.Ordinal)) return new CommandResult { ExitCode = 1, Error = "emerg" };
+        var psi = new System.Diagnostics.ProcessStartInfo("sh") { RedirectStandardError = true };
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add(c.Replace("/etc/nginx/sites-available", dir, StringComparison.Ordinal));
+        if (failing is not null)
+        {
+            var bin = Path.Combine(dir + "-bin");
+            Directory.CreateDirectory(bin);
+            var stub = Path.Combine(bin, failing);
+            File.WriteAllText(stub, "#!/bin/sh\n: > \"$(eval echo \\${$#})\" 2>/dev/null\nexit 1\n");   // truncates its target, then fails
+            File.SetUnixFileMode(stub, (UnixFileMode)0b111_101_101);
+            psi.Environment["PATH"] = bin + ":" + Environment.GetEnvironmentVariable("PATH");
+        }
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        p.WaitForExit();
+        return new CommandResult { ExitCode = p.ExitCode };
+    });
+
+    [SkippableFact]
+    public async Task On_a_real_shell_a_copy_that_fails_on_a_full_disk_leaves_the_site_intact()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "needs a POSIX shell");
+        var dir = Path.Combine(Path.GetTempPath(), "nginx-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "shop"), "old");
+
+            var result = await new NginxService(RealShell(dir, failing: "cp"), NullLogger<NginxService>.Instance)
+                .UpdateSiteConfigAsync("srv", "shop", "server {}");
+
+            Assert.False(result.Success);
+            Assert.Equal("old", File.ReadAllText(Path.Combine(dir, "shop")));
+            Assert.Equal(["shop"], Directory.GetFiles(dir).Select(Path.GetFileName));
+        }
+        finally { Directory.Delete(dir, true); if (Directory.Exists(dir + "-bin")) Directory.Delete(dir + "-bin", true); }
+    }
+
+    [SkippableFact]
+    public async Task On_a_real_shell_a_site_write_that_fails_restores_the_old_file_or_removes_a_new_one()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "needs a POSIX shell");
+        var dir = Path.Combine(Path.GetTempPath(), "nginx-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "shop"), "old");
+            var nginx = new NginxService(RealShell(dir, failing: "cat"), NullLogger<NginxService>.Instance);
+
+            Assert.False((await nginx.UpdateSiteConfigAsync("srv", "shop", "server {}")).Success);
+            Assert.False((await nginx.UpdateSiteConfigAsync("srv", "blog", "server {}")).Success);
+
+            Assert.Equal("old", File.ReadAllText(Path.Combine(dir, "shop")));
+            Assert.Equal(["shop"], Directory.GetFiles(dir).Select(Path.GetFileName));   // no half-written new site
+        }
+        finally { Directory.Delete(dir, true); if (Directory.Exists(dir + "-bin")) Directory.Delete(dir + "-bin", true); }
     }
 
     [Fact]

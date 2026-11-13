@@ -28,7 +28,17 @@ public class SshTunnelManager : ISshTunnelManager
     /// the fix, M1). Removed on dispose.</remarks>
     internal string SocketDir
     {
-        get { lock (_socketDirGate) return _socketDir ??= PrepareSocketDir(); }
+        get
+        {
+            lock (_socketDirGate)
+            {
+                // A tmp cleaner may have removed an idle directory (bare metal, weeks without a tunnel): a fresh one
+                // then, never the old name again (Fable delta review).
+                if (_socketDir is not null && SocketRoot is null && !Directory.Exists(_socketDir))
+                    _socketDir = null;
+                return _socketDir ??= PrepareSocketDir();
+            }
+        }
     }
 
     /// <summary>Tests only: a fixed directory instead of a fresh random one. It is created 0700 when absent; an existing

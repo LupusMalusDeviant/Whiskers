@@ -108,8 +108,15 @@ public sealed class SshTunnelForwardTests : IDisposable
         Assert.NotEqual(dirA, dirB);
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(dirA));
 
+        // A tmp cleaner removed the idle directory: the next forward gets a fresh one instead of a bind that fails.
+        Directory.Delete(dirA, recursive: true);
+        var again = Path.GetDirectoryName(a.NewForward("neuhof").SocketPath)!;
+        Assert.NotEqual(dirA, again);
+        Assert.True(Directory.Exists(again));
+
         a.Dispose();
         b.Dispose();
+        Assert.False(Directory.Exists(again));
         Assert.False(Directory.Exists(dirA));
         Assert.False(Directory.Exists(dirB));
     }
