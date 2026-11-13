@@ -16,7 +16,7 @@ internal sealed class HostShellOperations
     private readonly MemoryCache _statsCache;
     private readonly ILogger _logger;
 
-    private const string HostShellImage = "alpine:latest";
+    internal const string HostShellImage = HelperImages.Alpine;   // pinned by digest (Fable review H5)
     // Label stamped on every one-shot host-shell helper container so leaked ones (from a run that
     // was interrupted before its finally-remove) can be identified and swept later. The pre-rebrand
     // (ServerWatch) name is kept on purpose: renaming it would hide helpers leaked by older versions from the sweep.
@@ -175,7 +175,7 @@ internal sealed class HostShellOperations
             if (!_statsCache.TryGetValue(imageKey, out _))
             {
                 if (!await Within(docker.HasImageAsync(HostShellImage, token), token))
-                    await Within(docker.PullImageAsync("alpine", "latest", token), token);
+                    await Within(docker.PullImageAsync(HelperImages.AlpineRepository, HelperImages.AlpineDigest, token), token);
                 _statsCache.Set(imageKey, true, TimeSpan.FromHours(1));
             }
 

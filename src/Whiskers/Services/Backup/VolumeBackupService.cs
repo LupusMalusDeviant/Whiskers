@@ -18,7 +18,7 @@ public class VolumeBackupService : IVolumeBackupService
 
     // Throwaway helper container for backup/restore, pinned by digest (supply-chain hardening) so a
     // moved 'alpine' tag can't swap in a different image. Re-pin via: docker manifest inspect alpine:3.22
-    private const string BackupImage = "alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce";
+    private const string BackupImage = Whiskers.Services.Docker.HelperImages.Alpine;
 
     // Docker volume/container names and backup file names: must start alphanumeric, then
     // alphanumerics plus _ . - only. Rejects anything that could break out of the shell command.
@@ -127,7 +127,7 @@ public class VolumeBackupService : IVolumeBackupService
         //    The inner `sh -c` script is single-quoted for the host shell; the file name is validated above.
         var innerScript = $"find /data -mindepth 1 -delete && tar xzf {quotedFile} -C /data";
         var result = await _executor.ExecuteAsync(backup.ServerId,
-            $"docker run --rm -v {ShellUtils.Quote(volume + ":/data")} -v {quotedBackupRo} alpine sh -c {ShellUtils.Quote(innerScript)} 2>&1",
+            $"docker run --rm -v {ShellUtils.Quote(volume + ":/data")} -v {quotedBackupRo} {BackupImage} sh -c {ShellUtils.Quote(innerScript)} 2>&1",
             TimeSpan.FromMinutes(10));
 
         if (!result.Success)

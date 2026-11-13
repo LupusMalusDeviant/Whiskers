@@ -436,8 +436,8 @@ public class DockerConnectionManager : IDockerConnectionManager
 
             case ConnectionType.SSH:
             {
-                var localPort = await _sshTunnelManager.EstablishTunnelAsync(server);
-                return new DockerClientConfiguration(new Uri($"http://127.0.0.1:{localPort}")).CreateClient();
+                var endpoint = await _sshTunnelManager.EstablishTunnelAsync(server);
+                return new DockerClientConfiguration(endpoint).CreateClient();
             }
 
             default:
@@ -480,10 +480,15 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// hostname check any certificate our CA signed would be accepted, letting a MITM impersonate the
     /// Docker host. Fails closed on an empty expected host.</summary>
     public static bool ValidateMtlsServerCert(
-        X509Certificate2 serverCert, X509Certificate2Collection trustAnchors, X509Chain? presentedChain, string? expectedHost)
+        X509Certificate2 serverCert, X509Certificate2Collection trustAnchors, X509Chain? presentedChain, string? expectedHost,
+        bool ignoreValidityPeriod = false)
     {
         using var chain = new X509Chain();
         chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+        // Only the renewal asks "did the fleet CA issue this for that address?" of a certificate that may have run out —
+        // the case renewal exists for. A connection never sets it.
+        if (ignoreValidityPeriod)
+            chain.ChainPolicy.VerificationFlags = X509VerificationFlags.IgnoreNotTimeValid;
         chain.ChainPolicy.CustomTrustStore.AddRange(trustAnchors);
         chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
         // Also trust any intermediates the server presents, so the chain can build to the root.

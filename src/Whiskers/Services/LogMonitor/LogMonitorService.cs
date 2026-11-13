@@ -83,6 +83,9 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
     // `since` filter, this is the real ceiling on how much of a burst we can still match in one cycle.
     private const int TailLines = 200;
 
+    /// <summary>How long one rule may spend on one log line before it is skipped for the cycle (tests shorten it).</summary>
+    internal TimeSpan RegexTimeout { get; init; } = TimeSpan.FromSeconds(1);
+
     public LogMonitorService(
         IServiceScopeFactory scopeFactory,
         IDockerService docker,
@@ -152,7 +155,7 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
         foreach (var r in rules.Where(r => r.IsRegex))
         {
             if (compiledRegexes.ContainsKey(r.Pattern)) continue;
-            try { compiledRegexes[r.Pattern] = new Regex(r.Pattern, RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1)); }
+            try { compiledRegexes[r.Pattern] = new Regex(r.Pattern, RegexOptions.IgnoreCase, RegexTimeout); }
             catch (ArgumentException ex) { _logger.LogWarning(ex, "Invalid log-alert regex '{Pattern}' — skipped", r.Pattern); }
         }
 
@@ -309,9 +312,23 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
 
                     foreach (var line in lines)
                     {
-                        bool hit = rule.IsRegex
-                            ? compiledRegexes.TryGetValue(rule.Pattern, out var rx) && rx.IsMatch(line)
-                            : line.Contains(rule.Pattern, StringComparison.OrdinalIgnoreCase);
+                        bool hit;
+                        try
+                        {
+                            hit = rule.IsRegex
+                                ? compiledRegexes.TryGetValue(rule.Pattern, out var rx) && rx.IsMatch(line)
+                                : line.Contains(rule.Pattern, StringComparison.OrdinalIgnoreCase);
+                        }
+                        catch (RegexMatchTimeoutException)
+                        {
+                            // One slow pattern ends its own rule for this container and cycle, not the scan: the
+                            // exception used to reach the container's catch below and silently skip every other rule
+                            // (Fable review). The rule is named, so the slow pattern can be found and fixed.
+                            _selfMetrics.Count("log_rule_regex_timeouts", container.ServerId);
+                            _logger.LogWarning("Log-alert rule {Rule} timed out on a line of {Container} on {Server}; the rule is skipped for this cycle",
+                                rule.RuleId, container.Name, container.ServerName);
+                            break;
+                        }
 
                         if (hit)
                         {

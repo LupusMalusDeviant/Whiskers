@@ -207,8 +207,8 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-14 | `renew_mtls_certificate` | admin | ⚠️ validator in service; `NotVerifiable` + reason (R1-37) | GW ✅ + details | INV-58 |
 | M-15 | `execute_query` | **admin** (PC-D3) | `NotVerifiable` + reason (arbitrary SQL, R1-37) | GW ✅ | INV-19 (PC-D3), 24, 43 |
 | M-16 | `backup_database` | admin (R1-05) | ✅ dump file on the host, not empty (R1-37) | GW ✅ + details | INV-43 |
-| M-17 | `set_dns_record` | write | ✅ provider lists the record with the value (R1-37) | GW ✅ + details | INV-43, 52 (DNS token) |
-| M-18 | `delete_dns_record` | write | ✅ provider no longer lists the record (R1-37) | GW ✅ + details | INV-43, 52 |
+| M-17 | `set_dns_record` | write | ✅ provider lists the record with the value, an A/AAAA/CNAME once (R1-37) | GW ✅ + details | INV-43, 52 (DNS token) |
+| M-18 | `delete_dns_record` | write | ✅ provider no longer lists the record, or the one with the given value (R1-37) | GW ✅ + details | INV-43, 52 |
 | M-19 | `create_network` | **admin** (R1-05; was write) | ✅ listed with its driver (R1-37) | GW ✅ + details | — |
 | M-20 | `remove_network` | **admin** (R1-05; was write) | ✅ no longer listed (R1-37) | GW ✅ + details | — |
 | M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ✅ container attached (R1-37) | GW ✅ | — |
