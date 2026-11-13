@@ -930,11 +930,11 @@ public class ReadBackVerificationTests
 
     private sealed class RecordingAudit : Whiskers.Services.AuditLog.IToolAuditLog
     {
-        public List<(string Action, string? Details)> Entries { get; } = [];
+        public List<(string Action, string? Details, bool Success)> Entries { get; } = [];
         public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId, string targetName,
             string? details = null, string? serverId = null, bool success = true)
         {
-            Entries.Add((action, details));
+            Entries.Add((action, details, success));
             return Task.CompletedTask;
         }
     }
@@ -978,7 +978,27 @@ public class ReadBackVerificationTests
         var entry = Assert.Single(audit.Entries);
         Assert.Equal("dns.record_updated", entry.Action);
         Assert.StartsWith("partial:", entry.Details);
+        Assert.False(entry.Success);
         Assert.Contains("203.0.113.3", entry.Details);
+    }
+
+    [Fact]
+    public async Task Delete_dns_record_hands_its_value_to_the_service()
+    {
+        // Without it every TXT record of the name would go, and the read-back (which checks only the value) would pass.
+        var (dns, script) = Scripted<IDnsRecordService>.Create();
+        script.On["get_" + nameof(IDnsRecordService.IsConfigured)] = _ => true;
+        string? seen = "unset";
+        script.On[nameof(IDnsRecordService.DeleteAsync)] = a =>
+        {
+            seen = (string?)a![3];
+            return Task.FromResult(new List<DnsRecord> { new("1", "@", "TXT", "verify=abc", 300) });
+        };
+
+        var answer = await DnsTools.DeleteDnsRecord(Admin(), null!, dns, new RecordingAudit(), "example.org", "@", "TXT", "verify=abc");
+
+        Assert.Equal("verify=abc", seen);
+        Assert.Contains("verify=abc", answer);
     }
 
     [Fact]

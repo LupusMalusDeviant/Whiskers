@@ -110,8 +110,8 @@ public static class VerificationContracts
             ["selfbackup.prune"] = VerificationContract.ReadBack("no more than the kept number of self-backups remain."),
 
             // DNS
-            ["dns.record_set"] = VerificationContract.ReadBack("the provider lists the record with the requested value."),
-            ["dns.record_delete"] = VerificationContract.ReadBack("the provider no longer lists the record."),
+            ["dns.record_set"] = VerificationContract.ReadBack("the provider lists the record with the requested value (and TTL, when one was named); an A, AAAA or CNAME exactly once."),
+            ["dns.record_delete"] = VerificationContract.ReadBack("the provider no longer lists the record (with a value: no longer the record holding it)."),
 
             // Servers and Whiskers itself
             ["server.onboard"] = VerificationContract.None(

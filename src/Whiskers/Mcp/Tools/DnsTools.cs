@@ -109,12 +109,12 @@ public class DnsTools
             var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
             await auditLog.LogAsync(actor, actorType, "dns.record_updated", "dns-zone", z,
                 $"{partial.After.Name} {partial.After.Type}",
-                $"partial: updated {partial.Before} -> {partial.After}; removed {Join(partial.Removed)}; still there {Join(partial.Remaining)}; error {partial.InnerException?.Message}");
+                $"partial: updated {partial.Before} -> {partial.After}; removed {Join(partial.Removed)}; still there or unclear {Join(partial.Remaining)}; error {partial.InnerException?.Message}", success: false);
             return MutationScope.Fail(
                 $"Fehler: nur teilweise ausgeführt ({partial.InnerException?.Message}).\n" +
                 $"Aktualisiert: {Fqdn(partial.After.Name, z)} {partial.After.Type} {partial.Before.Value} → {partial.After.Value} (TTL {partial.After.Ttl})\n" +
                 (partial.Removed.Count > 0 ? "Entfernt:\n" + Lines(partial.Removed, z) + "\n" : "") +
-                "Noch vorhanden (erneut ausführen):\n" + Lines(partial.Remaining, z));
+                "Noch vorhanden oder unklar (erneut ausführen):\n" + Lines(partial.Remaining, z));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or DnsProviderException)
         {
