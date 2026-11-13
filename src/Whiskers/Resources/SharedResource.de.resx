@@ -971,6 +971,9 @@
   <data name="ContainerDetail_Env_NoDotEnvFound" xml:space="preserve">
     <value>Keine .env-Datei gefunden. Sie können eine neue erstellen.</value>
   </data>
+  <data name="ContainerDetail_Env_DotEnvReadFailed" xml:space="preserve">
+    <value>Die .env-Datei konnte nicht gelesen werden. Speichern ist gesperrt, damit die vorhandene Datei nicht ersetzt wird.</value>
+  </data>
   <data name="ContainerDetail_Env_RemoveVariable" xml:space="preserve">
     <value>Variable entfernen</value>
   </data>

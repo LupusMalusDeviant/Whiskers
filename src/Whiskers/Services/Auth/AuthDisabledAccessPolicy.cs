@@ -67,7 +67,9 @@ public sealed class AuthDisabledAccessPolicy
         if (hostName is null || !(IPAddress.TryParse(hostName, out _) || _hosts.Contains(hostName)))
             return "Host header is neither an IP address nor listed in Auth:DisabledAllowedHosts";
 
-        if (!string.IsNullOrEmpty(origin) && !string.Equals(origin, "null", StringComparison.Ordinal))
+        // An opaque origin ("null": sandboxed frame, data: or file: page, some redirects) cannot be matched to the
+        // Host, so it counts as cross-site (Fable review of main).
+        if (!string.IsNullOrEmpty(origin))
         {
             if (!Uri.TryCreate(origin, UriKind.Absolute, out var o)
                 || !string.Equals(o.Authority, host, StringComparison.OrdinalIgnoreCase))
