@@ -997,6 +997,38 @@ public sealed class PerHostCredentialTests
         Assert.True(MtlsClientIdentity.IsValidCommonName(new MtlsClientIdentity(longId, slug, 9999).CommonName));
     }
 
+    // 1.0 review: two first issues for ids with the same slug, both past the name choice before either is stored, must
+    // never leave two hosts admitting the same name.
+    [Fact]
+    public async Task Concurrent_first_issues_never_store_the_same_name_for_two_servers()
+    {
+        using var w = new CredentialWorld(true, ("rabe-hof", "100.64.0.9"), ("rabe_hof", "100.64.0.10"));
+        var bothChose = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiting = 0;
+        w.Fleet.BeforeSign = () =>
+        {
+            if (Interlocked.Increment(ref waiting) == 2) bothChose.TrySetResult();
+            return bothChose.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        };
+
+        var a = Task.Run(() => w.Store.IssueAsync(w.Server("rabe-hof"), 1, default));
+        var b = Task.Run(() => w.Store.IssueAsync(w.Server("rabe_hof"), 1, default));
+        var outcomes = await Task.WhenAll(a.ContinueWith(t => t.Exception?.GetBaseException()), b.ContinueWith(t => t.Exception?.GetBaseException()));
+
+        Assert.Equal(2, w.Fleet.Signed);   // both chose a name and were signed before either stored one
+        var failure = Assert.Single(outcomes, e => e is not null);
+        Assert.IsType<InvalidOperationException>(failure);
+        Assert.Contains("client name stem", failure!.Message);
+        var stored = new[] { "rabe-hof", "rabe_hof" }.Select(id => w.Store.IdentityOf(id)?.CommonName).Where(n => n is not null).ToList();
+        Assert.Equal("whiskers-client-rabe-hof-g1", Assert.Single(stored));
+
+        // The refused one simply issues again and gets a name of its own.
+        w.Fleet.BeforeSign = null;
+        var loser = outcomes[0] is null ? "rabe_hof" : "rabe-hof";
+        await w.Store.IssueAsync(w.Server(loser), 1, default);
+        Assert.NotEqual(w.Store.IdentityOf("rabe-hof")!.CommonName, w.Store.IdentityOf("rabe_hof")!.CommonName);
+    }
+
     [Theory]
     [InlineData("../evil")]
     [InlineData("a/b")]

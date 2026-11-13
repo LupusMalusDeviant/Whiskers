@@ -35,13 +35,17 @@ internal sealed class ContainerLifecycleOperations
             throw new InvalidOperationException($"Container '{name}' is {Whiskers.Services.Mutations.ComposePins.PinnedRefusal}.");
     }
 
-    public async Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null)
+    /// <summary>Cancellation (the caller, or the gateway's deadline for <c>container.update</c>) is honoured through the
+    /// inspect and the pull and checked once more before the old container is stopped; from that step on the update
+    /// runs to its end or rolls back, so a cancel never leaves a container stopped or renamed (1.0 review).</summary>
+    public async Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null,
+        CancellationToken ct = default)
     {
         var client = await GetClient(serverId);
 
         // 1. Inspect current container to capture all settings
         progress?.Report("Inspecting container...");
-        var inspect = await client.Containers.InspectContainerAsync(containerId);
+        var inspect = await client.Containers.InspectContainerAsync(containerId, ct);
         var config = inspect.Config;
         var hostConfig = inspect.HostConfig;
         var name = inspect.Name.TrimStart('/');
@@ -53,7 +57,10 @@ internal sealed class ContainerLifecycleOperations
 
         // 2. Pull latest image
         progress?.Report($"Pulling {image}...");
-        await _imageOperations.PullImageAsync(image, progress, serverId);
+        await _imageOperations.PullImageAsync(image, progress, serverId, ct);
+
+        // The last point at which nothing has changed: a cancel that arrived during the pull ends the update here.
+        ct.ThrowIfCancellationRequested();
 
         // 3. Stop container
         progress?.Report("Stopping container...");

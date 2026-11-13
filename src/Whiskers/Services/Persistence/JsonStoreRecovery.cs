@@ -30,12 +30,26 @@ public static class JsonStoreRecovery
 
 /// <summary>A JSON store whose file and previous generation are both unreadable: the start stops instead of carrying
 /// on with an empty (for roles, whitelist or permissions: more permissive) store. The file is left as it is.</summary>
-public sealed class JsonStoreCorruptException(string path, string preservedAs, Exception inner)
-    : Exception(preservedAs == JsonStoreRecovery.Missing
-        ? $"{path} is missing and its previous generation {path}.bak cannot be read ({inner.Message}); repair or remove " +
-          "the .bak, or restore a backup."
-        : $"{path} cannot be read and has no readable previous generation ({inner.Message}). The file is unchanged " +
-          $"(a copy is at {preservedAs}); repair it, remove it together with {path}.bak, or restore a backup.", inner)
+public sealed class JsonStoreCorruptException : Exception
 {
-    public string Path { get; } = path;
+    public JsonStoreCorruptException(string path, string preservedAs, Exception inner)
+        : this(path, inner, preservedAs == JsonStoreRecovery.Missing
+            ? $"{path} is missing and its previous generation {path}.bak cannot be read ({inner.Message}); repair or remove " +
+              "the .bak, or restore a backup."
+            : $"{path} cannot be read and has no readable previous generation ({inner.Message}). The file is unchanged " +
+              $"(a copy is at {preservedAs}); repair it, remove it together with {path}.bak, or restore a backup.")
+    {
+    }
+
+    private JsonStoreCorruptException(string path, Exception inner, string message) : base(message, inner) => Path = path;
+
+    /// <summary>A store that grants access, whose previous generation is readable but is not used on its own: it may
+    /// still hold what the last save revoked (1.0 review).</summary>
+    internal static JsonStoreCorruptException PreviousGenerationNotRestored(string path, string preservedAs, Exception inner) =>
+        new(path, inner, (preservedAs == JsonStoreRecovery.Missing ? $"{path} is missing" : $"{path} cannot be read ({inner.Message}; a copy is at {preservedAs})") +
+            $". It grants access, so its previous generation {path}.bak is not restored automatically: it may still hold " +
+            "an API key, role or address removed since. Check the .bak against what was revoked after it was written, then " +
+            "put it in place by hand, or restore a backup.");
+
+    public string Path { get; }
 }

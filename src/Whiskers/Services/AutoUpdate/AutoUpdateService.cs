@@ -217,7 +217,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                 updateActor = actor;
                 var outcome = await _automation.RunAsync(actor,
                     "container.update", new { containerId = container.Id, name = container.Name, serverId = sid },
-                    async (ResolvedContainer decided, CancellationToken _) =>
+                    async (ResolvedContainer decided, CancellationToken token) =>
                     {
                         // C12: capture + PERSIST the pre-update snapshot BEFORE the recreate pulls the new image and
                         // drops the old container, so a failed update can be rolled back (and the snapshot survives
@@ -234,7 +234,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
                             _logger.LogWarning(cex, "Rollback snapshot capture failed for {Container}", container.Name);
                             noRollback = true;
                         }
-                        var recreated = await _docker.RecreateContainerAsync(decided.Id, decided.ServerId, progress);
+                        var recreated = await _docker.RecreateContainerAsync(decided.Id, decided.ServerId, progress, token);
                         recreateReturned = true;
                         return recreated;
                     }, ct);

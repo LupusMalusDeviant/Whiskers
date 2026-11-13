@@ -183,6 +183,12 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
         await _write.WaitAsync(ct);
         try
         {
+            // The name was chosen before signing, outside this lock: another server's first issue may have stored the
+            // same stem since (two ids with one slug, issued at once). Checked again where stems are stored, so two
+            // hosts never admit the same name; the signed certificate is dropped and nothing is written (1.0 review).
+            if (state is null && SlugTakenByAnother(server.Id)(identity.Slug))
+                throw new InvalidOperationException(
+                    $"Another server stored the client name stem {identity.Stem} while this one was being signed; issue again.");
             EnsureDirectory(HostsDir);
             EnsureDirectory(dir);
             // The same proposal callers see (amendment 6); taken under the write lock so two issues never share a slot.

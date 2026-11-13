@@ -11,7 +11,8 @@ namespace Whiskers.Services.Persistence;
 /// <item>A file that cannot be parsed (torn by a power loss, edited by hand) is copied aside as
 /// <c>&lt;file&gt;.corrupt-&lt;time&gt;</c> and the previous generation is used and written back — recorded in
 /// <see cref="JsonStoreRecovery"/> and shown by the readiness check. Without a readable previous generation the load
-/// throws <see cref="JsonStoreCorruptException"/>: never an empty, possibly more permissive, store.</item>
+/// throws <see cref="JsonStoreCorruptException"/>: never an empty, possibly more permissive, store. A store that grants
+/// access (<c>restorePreviousGeneration: false</c>) throws even with a readable previous generation (1.0 review).</item>
 /// <item>A file that cannot be opened (permissions, a lock) throws as it is: it is not missing.</item>
 /// <item>A store may name a structural check (<c>problem</c>, R1-40): a file that parses but breaks it (a <c>null</c>
 /// entry, a missing required member) is handled exactly like one that cannot be parsed.</item>
@@ -27,6 +28,7 @@ public class JsonFileStore<T> where T : class, new()
     private readonly SemaphoreSlim _semaphore;
     private readonly Func<T, bool>? _holdsPlaintextSecret;
     private readonly Func<T, string?>? _problem;
+    private readonly bool _restorePreviousGeneration;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -34,11 +36,17 @@ public class JsonFileStore<T> where T : class, new()
     };
 
     /// <param name="problem">R1-40: what makes a parsed file unusable (<c>null</c> when it is fine).</param>
-    public JsonFileStore(string filePath, Func<T, bool>? holdsPlaintextSecret = null, Func<T, string?>? problem = null)
+    /// <param name="restorePreviousGeneration">false for a store that grants access (roles, whitelist, MCP permissions):
+    /// its previous generation may still hold what the last save revoked (a deleted API key, a removed role), so an
+    /// unreadable or missing file is never replaced by it automatically — the load throws
+    /// <see cref="JsonStoreCorruptException"/> and the operator decides (1.0 review).</param>
+    public JsonFileStore(string filePath, Func<T, bool>? holdsPlaintextSecret = null, Func<T, string?>? problem = null,
+        bool restorePreviousGeneration = true)
     {
         _filePath = filePath;
         _holdsPlaintextSecret = holdsPlaintextSecret;
         _problem = problem;
+        _restorePreviousGeneration = restorePreviousGeneration;
         _semaphore = Locks.GetOrAdd(Path.GetFullPath(filePath), _ => new SemaphoreSlim(1, 1));
         var dir = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(dir))
@@ -153,6 +161,8 @@ public class JsonFileStore<T> where T : class, new()
         try
         {
             if (!File.Exists(backup)) throw cause;
+            if (!_restorePreviousGeneration)
+                throw JsonStoreCorruptException.PreviousGenerationNotRestored(_filePath, preservedAs, cause);
             recovered = Parse(await File.ReadAllTextAsync(backup));
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException or FileNotFoundException)

@@ -21,7 +21,9 @@ public class McpPermissionService : IMcpPermissionService, IInitializable
         _dataPaths = dataPaths ?? DataPathOptions.Default;
         // A legacy plaintext API key is replaced by its hash; no previous generation keeps it (R1-35).
         _store = new JsonFileStore<McpPermissionData>(_dataPaths.McpPermissionsJson,
-            holdsPlaintextSecret: d => d.ApiKeys.Any(k => !string.IsNullOrEmpty(k.Key)));
+            holdsPlaintextSecret: d => d.ApiKeys.Any(k => !string.IsNullOrEmpty(k.Key)),
+            // A key deleted by the last save must not authenticate again from the previous generation (1.0 review).
+            restorePreviousGeneration: false);
     }
 
     public int Order => 70;

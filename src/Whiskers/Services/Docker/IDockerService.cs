@@ -58,7 +58,7 @@ public interface IDockerService
         return await GetContainerLogsAsync(containerId, tailLines, serverId, since, either.Token);
     }
     [MutatingOperation("image.pull")]
-    Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null);
+    Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null, CancellationToken ct = default);
     Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null);
 
     /// <summary>R1-41: <see cref="InspectContainerStateAsync(string, string?)"/> whose cancellation reaches the inspect
@@ -95,7 +95,10 @@ public interface IDockerService
     Task<ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId, CancellationToken ct)
         => GetImageContractAsync(imageRef, serverId).WaitAsync(ct);
     [MutatingOperation("container.update")]
-    Task<string> RecreateContainerAsync([MutationTarget] string containerId, string? serverId = null, IProgress<string>? progress = null);
+    /// <remarks>Cancellation (the caller, or the gateway's deadline) is honoured until the old container is stopped; from
+    /// there the update completes or rolls back (1.0 review).</remarks>
+    Task<string> RecreateContainerAsync([MutationTarget] string containerId, string? serverId = null, IProgress<string>? progress = null,
+        CancellationToken ct = default);
     /// <summary>The container's log-driver configuration and log file path, or null when Docker reports
     /// none. Used by the log-hygiene inventory (Plan-0007 WP3).</summary>
     Task<ContainerLogConfiguration?> GetLogConfigurationAsync(string containerId, string? serverId = null);

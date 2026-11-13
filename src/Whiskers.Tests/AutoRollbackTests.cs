@@ -309,6 +309,25 @@ public sealed class AutoRollbackTests : IDisposable
         Assert.False(history.RolledBack);
     }
 
+    // 1.0 review: the recreate gets the gateway's token (its deadline for container.update), not CancellationToken.None.
+    [Fact]
+    public async Task The_recreate_runs_under_the_gateways_token()
+    {
+        FailingUpdate();
+        var inner = _docker.On[nameof(IDockerService.RecreateContainerAsync)];
+        CancellationToken? passed = null;
+        _docker.On[nameof(IDockerService.RecreateContainerAsync)] = args =>
+        {
+            passed = Assert.IsType<CancellationToken>(args[3]);
+            return inner(args);
+        };
+        var service = await ServiceAsync(autoRollback: true);
+
+        await service.CheckAndUpdateAsync(CancellationToken.None);
+
+        Assert.True(passed?.CanBeCanceled, "the recreate must be cancellable by the gateway's deadline");
+    }
+
     [Fact]
     public async Task Without_a_usable_vault_the_update_runs_without_a_way_back_and_is_not_rolled_back()
     {

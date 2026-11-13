@@ -49,7 +49,7 @@ public sealed class UpdatePinnedContainerTests
         var body = source[source.IndexOf("public async Task<string> RecreateContainerAsync(", StringComparison.Ordinal)..];
         body = body[..body.IndexOf("\n    }\n", StringComparison.Ordinal)];
 
-        var inspect = body.IndexOf("InspectContainerAsync(containerId)", StringComparison.Ordinal);
+        var inspect = body.IndexOf("InspectContainerAsync(containerId", StringComparison.Ordinal);
         var guard = body.IndexOf("RefuseIfPinned(name, config.Labels);", StringComparison.Ordinal);
         Assert.InRange(inspect, 0, guard);
         foreach (var change in new[] { "PullImageAsync(", "StopContainerAsync(", "RenameContainerAsync(", "CreateContainerAsync(", "RemoveContainerAsync(" })
@@ -57,6 +57,29 @@ public sealed class UpdatePinnedContainerTests
             var at = body.IndexOf(change, StringComparison.Ordinal);
             Assert.True(at < 0 || guard < at, $"the pin guard must come before {change}");
         }
+    }
+
+    /// <summary>1.0 review: a cancel (the caller, or the gateway's deadline) reaches the inspect and the pull, and is
+    /// checked once more before the first change (the stop); after it the update completes or rolls back. Read from the
+    /// source for the reason above.</summary>
+    [Fact]
+    public void The_recreate_honours_cancellation_until_the_stop()
+    {
+        var source = Source("Services", "Docker", "Operations", "ContainerLifecycleOperations.cs");
+        var body = source[source.IndexOf("public async Task<string> RecreateContainerAsync(", StringComparison.Ordinal)..];
+        body = body[..body.IndexOf("\n    }\n", StringComparison.Ordinal)];
+
+        Assert.Contains("CancellationToken ct = default)", body);
+        Assert.Contains("InspectContainerAsync(containerId, ct)", body);
+        var pull = body.IndexOf("PullImageAsync(image, progress, serverId, ct)", StringComparison.Ordinal);
+        var check = body.IndexOf("ct.ThrowIfCancellationRequested();", StringComparison.Ordinal);
+        var stop = body.IndexOf("StopContainerAsync(", StringComparison.Ordinal);
+        Assert.True(pull >= 0 && pull < check && check < stop, "pull with the token, then the check, then the stop");
+
+        var images = Source("Services", "Docker", "Operations", "ImageOperations.cs");
+        var pullBody = images[images.IndexOf("public async Task PullImageAsync(", StringComparison.Ordinal)..];
+        pullBody = pullBody[..pullBody.IndexOf("\n    }\n", StringComparison.Ordinal)];
+        Assert.Contains("}), ct);", pullBody);   // CreateImageAsync gets the token
     }
 
     // ---------------------------------------------------------------- AutoPatch
