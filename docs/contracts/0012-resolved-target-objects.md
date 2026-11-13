@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 8 November 2026 by the maintainer, with the decisions D1–D15 as written and every question
 Q1–Q7 answered as recommended (see *Answered*). Amendments A1–A4 accepted 10 November 2026, A5–A7 accepted
-10 November 2026, A8–A11 accepted 10 November 2026.
+10 November 2026, A8–A11 accepted 10 November 2026. A12 follows the decision on #187 (13 November 2026).
 
 ## Purpose
 
@@ -303,6 +303,15 @@ A8–A11 were found while building steps 5 and 6. Each replaces the wording abov
 - **A11 — New read `ISystemdService.ListUnitNamesAsync(serverId)`** (`[InventoryLookup]`): the host's
   `systemctl list-unit-files` listing that D11 resolves a systemd unit against. A host whose listing cannot be read
   refuses the unit with a reason (fail closed).
+
+## Amendment A12 (follows the maintainer's decision on #187, option 2, 13 November 2026)
+
+- **A12 — `MutationTarget.HasControlPlaneState`.** For `server.onboard` the resolver records whether the existing
+  server already holds mTLS state: TLS client material in its record (`TcpUseTls`, a client certificate, key or CA
+  path) or an active or pending identity in `IMtlsClientCredentialStore`. A store that cannot be read counts as state
+  (fail closed). The gateway passes it to the rules as `__resolvedControlPlaneState`; a caller's own `__…` arguments
+  never reach them. `ProtectedResourceRule` then treats the re-onboarding as a control-plane capability (INV-59). No
+  other capability sets or reads it.
 
 ## Not in scope
 

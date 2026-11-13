@@ -169,7 +169,8 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             "server" when capability.Id.StartsWith("endpointcheck.", StringComparison.Ordinal) =>
                 await RecordAsync(request, capability, target, ct),
             "server" => Server(target, NullIfEmpty(target.Id) ?? target.ServerId,
-                mustExist: capability.Id is not ("server.onboard" or "server.save")),
+                mustExist: capability.Id is not ("server.onboard" or "server.save"),
+                onboard: capability.Id == "server.onboard"),
             "network" => await NetworkAsync(request, capability, target, ct),
             "cloud-server" => CloudServer(target),
             "scheduled-task" => Creates.Contains(capability.Id) ? Pass(target) : await TaskAsync(target),
@@ -476,7 +477,26 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         }
     }
 
-    private TargetResolution Server(MutationTarget target, string? idOrName, bool mustExist)
+    /// <summary>INV-59 (#187): whether a server already holds mTLS state that an onboarding would replace — TLS client
+    /// material in its record, or an identity (active or pending) in the per-host credential store. A store that
+    /// cannot be read counts as state: the onboarding then needs the approval (fail closed).</summary>
+    private bool HasMtlsState(Models.ServerConfig server)
+    {
+        if (server.TcpUseTls || !string.IsNullOrWhiteSpace(server.TcpClientCertPath)
+            || !string.IsNullOrWhiteSpace(server.TcpClientKeyPath) || !string.IsNullOrWhiteSpace(server.TcpCaCertPath))
+            return true;
+        try
+        {
+            return _services.GetService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>()?.IdentityOf(server.Id)
+                   is not null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return true;
+        }
+    }
+
+    private TargetResolution Server(MutationTarget target, string? idOrName, bool mustExist, bool onboard = false)
     {
         if (!mustExist)
         {
@@ -488,7 +508,11 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
                            ?? servers?.FirstOrDefault(s => string.Equals(s.Id, idOrName, StringComparison.OrdinalIgnoreCase));
             return existing is null
                 ? Pass(target)
-                : Done(target with { Id = existing.Id, Name = target.Name ?? existing.Name, ServerId = existing.Id });
+                : Done(target with
+                {
+                    Id = existing.Id, Name = target.Name ?? existing.Name, ServerId = existing.Id,
+                    HasControlPlaneState = onboard && HasMtlsState(existing),
+                });
         }
         var (server, error) = ResolveServer(idOrName);
         if (server is not null)

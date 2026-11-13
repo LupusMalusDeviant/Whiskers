@@ -55,6 +55,13 @@ Check these before or right after the update. Details are in the entries below.
 
 ### All changes since 0.15.0
 
+- **Fix: re-onboarding a host needs the control-plane approval (INV-59, #187).** Onboarding issues mTLS material,
+  writes the proxy configuration and starts ghostunnel. For a host that already holds mTLS state (TLS client material
+  in its record, or an identity in the per-host credential store) that replaces it, and it ran without the Admin
+  approval that INV-59 requires when the same material is issued or migrated directly. Such a re-onboarding now waits
+  for an Admin approval (four-eyes when *Require a second approver* is on); a key, an automation or an agent instructed
+  over MCP is refused. A first onboarding of a host without that state runs as before. A credential store that cannot
+  be read counts as state.
 - **Fix: the SQLite self-backup is fast on spinning disks.** A self-backup, and so the pre-upgrade backup at the first
   start of an upgrade, copied the database with `VACUUM INTO`. That rebuilds the file in b-tree order and reads it out
   of order. On a spinning disk with a cold cache, a 780 MB database took 1089 s that way; the pre-upgrade backup of the
