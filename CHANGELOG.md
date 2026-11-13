@@ -53,7 +53,11 @@ Check these before or right after the update. Details are in the entries below.
 - **Kubernetes.** Apply `deploy/k8s/whiskers-agent-rbac.yaml` again on every connected cluster.
 - **Hardened profile (`docker-compose.hardened.yml`).** Take the new compose file: the socket proxy listens on a Unix
   socket in a shared volume instead of `127.0.0.1:2375`. A stored server on the old port is moved to the socket at the
-  first start (logged); as a former TCP server it then has no host commands, like any local server in this profile.
+  first start (logged), if it has no TLS and the new compose file is in use. If it was a TCP server, it then has no
+  host commands (deploy, `.env`, database panel, `execute_command`, firewall, nginx), like any local server in this
+  profile.
+- **mTLS proxy certificates.** Renewal now works only for a certificate the fleet CA issued for the address Whiskers
+  connects to; renew any other by hand.
 - **PostgreSQL overlay users.** The overlay moves to PostgreSQL 18; follow `docs/operations/postgres-18-upgrade.md`.
 
 ### All changes since 0.15.0
@@ -123,6 +127,8 @@ Fixes from the full review of `main` before the tag (#190, #191, #192, #193):
     The agent no longer waits for a read whose caller has stopped, even one that cannot be cancelled at its source.
   - `instruct_agent` ends with the MCP request that started it and after 10 minutes at the latest, answering with
     what it had and saying that the deadline cut it short.
+
+Earlier changes in 1.0.0:
 
 - **Fix: re-onboarding a host needs the control-plane approval (INV-59, #187).** Onboarding issues mTLS material,
   writes the proxy configuration and starts ghostunnel. For a host that already holds mTLS state (TLS client material
