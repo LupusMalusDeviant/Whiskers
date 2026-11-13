@@ -57,5 +57,10 @@ public sealed class LogRuleRegexTimeoutTests : IDisposable
 
         var alert = Assert.Single(notifications.Events, e => e.EventType == Whiskers.Services.Notifications.NotificationEventTypes.LogAlert("error"));
         Assert.StartsWith("fatal ·", alert.ImageInfo);
+        // Counted as a rule's timeout, never as the container's unreadable logs (no fetch timeout, no suspension streak).
+        var counters = metrics.Counters();
+        Assert.Equal(1, counters["log_rule_regex_timeouts"]["local"]);
+        Assert.False(counters.ContainsKey("log_fetch_timeouts"));
+        Assert.DoesNotContain(notifications.Events, e => e.EventType == Whiskers.Services.Notifications.NotificationEventTypes.LogScanSuspended);
     }
 }

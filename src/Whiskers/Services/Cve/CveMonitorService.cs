@@ -177,6 +177,10 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
             var scanStartedAt = DateTime.UtcNow;
             var threshold = ParseSeverity(settings.NotifySeverity);
 
+            // Servers whose container listing did not answer this cycle: their findings are kept, but the cycle is no
+            // success for them, or the "last success" age would stay fresh while those findings go stale (Fable review).
+            var skippedServers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             // Aggregate "new since last scan" per scan target, used for notifications.
             var newPerTarget = new ConcurrentBag<(CveScanResult Target, List<CveFinding> News)>();
 
@@ -241,6 +245,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                                 string.Equals(f.ServerId, server.Id, StringComparison.OrdinalIgnoreCase));
                             _logger.LogWarning("Container listing of {Server} did not answer ({Error}) — keeping previous container results",
                                 server.Id, failure?.Error ?? "not in the listing");
+                            skippedServers.Add(server.Id);
                             continue;
                         }
                         containers = listing.Containers
@@ -250,6 +255,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                     {
                         _logger.LogWarning(ex, "Failed to list containers on {Server}", server.Id);
+                        skippedServers.Add(server.Id);
                         continue;
                     }
 
@@ -359,7 +365,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
             foreach (var server in servers)
                 _selfMetrics.RecordCycle(
                     Whiskers.Services.Observability.SelfMetrics.SelfMetricsFleetExtensions.Loops.Cve,
-                    server.Id, DateTime.UtcNow - scanStartedAt, success: true,
+                    server.Id, DateTime.UtcNow - scanStartedAt, success: !skippedServers.Contains(server.Id),
                     interval: _interval.Interval);
         }
         finally

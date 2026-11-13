@@ -39,8 +39,13 @@ public sealed class DnsRecordVerifier(IServiceProvider services, bool set) : Ser
                                           && string.Equals(r.Type, type, StringComparison.OrdinalIgnoreCase)).ToList();
         if (!set)
         {
-            if (matching.Count > 0)
-                throw new MutationVerificationFailedException($"{name} {type} is still listed in '{zone}'.");
+            // A delete that named a value removed only the records holding it; the others of the name stay by design.
+            var deletedValue = VerifierSupport.Arg(context, "value");
+            var left = string.IsNullOrEmpty(deletedValue)
+                ? matching
+                : matching.Where(r => DnsRecordService.ValuesEqual(type, r.Value, SafeValue(type, deletedValue))).ToList();
+            if (left.Count > 0)
+                throw new MutationVerificationFailedException($"{name} {type} {(string.IsNullOrEmpty(deletedValue) ? "" : "with that value ")}is still listed in '{zone}'.");
             return;
         }
 
@@ -58,5 +63,21 @@ public sealed class DnsRecordVerifier(IServiceProvider services, bool set) : Ser
             throw new MutationVerificationFailedException(matching.Count == 0
                 ? $"{name} {type} is not listed in '{zone}'."
                 : $"{name} {type} in '{zone}' holds '{matching[0].Value}', not '{value}'.");
+
+        // A, AAAA and CNAME are collapsed onto one record (Fable review): a delete the provider answered but did not
+        // carry out leaves a second record that still resolves. TXT values stand side by side.
+        if (type != "TXT" && matching.Count != 1)
+            throw new MutationVerificationFailedException($"{name} {type} in '{zone}' is listed {matching.Count} times, not once.");
+
+        // A set that named a TTL is read back with it (a TXT set of a present value changes only that).
+        if (VerifierSupport.LongArg(context, "ttl") is { } ttl
+            && !matching.Any(r => DnsRecordService.ValuesEqual(type, r.Value, value) && r.Ttl == ttl))
+            throw new MutationVerificationFailedException($"{name} {type} '{value}' in '{zone}' is not listed with TTL {ttl}.");
+    }
+
+    private static string SafeValue(string type, string value)
+    {
+        try { return DnsRecordService.NormalizeValue(type, value); }
+        catch (ArgumentException ex) { throw new MutationNotVerifiableException($"the call named no valid value ({ex.Message})."); }
     }
 }

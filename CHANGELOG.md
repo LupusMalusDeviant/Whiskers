@@ -17,10 +17,16 @@ Fixes from the full review of `main` after 1.0.0 (data).
   - When an A, AAAA or CNAME set merges several records into one, the answer and the audit entry name every record
     it removed.
   - A set whose extra records lack an ID is refused before anything is written.
+  - If a merge stops half way (a provider error on one of the deletes), the answer and the audit entry name what
+    was changed, what was removed and what is still there.
+  - A merge keeps the record that already holds the value instead of rewriting another one into a duplicate.
+  - `delete_dns_record` takes an optional `value`, so one TXT value can be removed without the others.
+  - The read-back after a set now requires exactly one A, AAAA or CNAME record and checks the TTL that was set.
 - **CVE findings during a slow scan.**
   - A server whose container listing failed or timed out keeps its stored container findings and their ages.
   - Before, it read as a server without containers and all of its findings were dropped. Every finding was then
     reported as new on the next good scan.
+  - That server's scan cycle is now recorded as no success, so its "last success" age keeps growing.
 - **Log alerts.** A log-alert regex that runs into its time limit now skips only its own rule for that cycle, with a
   warning naming the rule. Before, it silently turned off every other rule for that container.
 

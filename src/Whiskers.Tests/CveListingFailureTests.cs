@@ -53,8 +53,14 @@ public class CveListingFailureTests
 
     private static T Null<T>() where T : class => NullProxy<T>.Create();
 
-    private static (CveMonitorService Monitor, RecordingStore Store, List<string> Scanned) Monitor(FleetContainerListing listing)
+    private static (CveMonitorService Monitor, RecordingStore Store, List<string> Scanned, List<(string Server, bool Success)> Cycles) Monitor(
+        FleetContainerListing listing)
     {
+        var cycles = new List<(string Server, bool Success)>();
+        var metrics = ScriptedProxy<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>.Create(new()
+        {
+            ["RecordCycle"] = a => { lock (cycles) cycles.Add(((string)a![1]!, (bool)a[3]!)); return null; },
+        });
         var servers = new List<ServerConfig>
         {
             new() { Id = "slow", Name = "slow", ConnectionType = ConnectionType.SSH },
@@ -83,10 +89,10 @@ public class CveListingFailureTests
         var monitor = new CveMonitorService(store,
             new StaticOptionsMonitor<CveMonitorSettings>(new CveMonitorSettings { Enabled = true, ScanOs = false, ScanContainers = true, NotifyOnFinding = false }),
             NullLogger<CveMonitorService>.Instance,
-            Null<Whiskers.Services.Observability.SelfMetrics.ISelfMetrics>(), config, docker, Null<IOsCveScanner>(), trivy,
+            metrics, config, docker, Null<IOsCveScanner>(), trivy,
             Null<Whiskers.Services.Notifications.INotificationService>(), Null<ICveAgeStore>(),
             Null<Microsoft.AspNetCore.SignalR.IHubContext<Whiskers.Hubs.ContainerHub>>(), Null<Whiskers.Services.Metrics.IMetricsSource>());
-        return (monitor, store, scanned);
+        return (monitor, store, scanned, cycles);
     }
 
     [Fact]
@@ -98,12 +104,15 @@ public class CveListingFailureTests
             RespondedServerIds = new HashSet<string> { "fine" },
             FailedServers = [new FleetServerFailure("slow", "slow", "timed out after 8 s")],
         };
-        var (monitor, store, scanned) = Monitor(listing);
+        var (monitor, store, scanned, cycles) = Monitor(listing);
 
         Assert.True(await monitor.RunOneCycleAsync());
 
         Assert.Equal(["fine"], store.Pruned);           // never "slow": its findings stay
         Assert.Equal(["fine"], scanned);
+        // The skipped server is no success this cycle: its "last success" age keeps growing while its findings wait.
+        Assert.Contains(("slow", false), cycles);
+        Assert.Contains(("fine", true), cycles);
     }
 
     [Fact]
@@ -113,7 +122,7 @@ public class CveListingFailureTests
         {
             RespondedServerIds = new HashSet<string> { "fine" },
         };
-        var (monitor, store, _) = Monitor(listing);
+        var (monitor, store, _, _) = Monitor(listing);
 
         Assert.True(await monitor.RunOneCycleAsync());
 

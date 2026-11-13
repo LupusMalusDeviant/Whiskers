@@ -91,8 +91,12 @@ public sealed class DnsRecordService : IDnsRecordService
         }
 
         // Idempotent update: one record of this name+type is the norm. Several (round-robin A records) are
-        // collapsed onto the first and the rest removed, so the result is exactly what the caller asked for.
-        var primary = existing[0];
+        // collapsed onto one and the rest removed, so the result is exactly what the caller asked for. The one kept is
+        // the record that already holds the value, if any — never a rewrite of another record into its duplicate,
+        // which a provider refusing exact duplicates would turn down every time (Fable review).
+        var primary = existing.FirstOrDefault(r => ValuesEqual(t, r.Value, v)) ?? existing[0];
+        existing.Remove(primary);
+        existing.Insert(0, primary);
         var same = ValuesEqual(t, primary.Value, v) && primary.Ttl == effectiveTtl && existing.Count == 1;
         if (same)
             return new DnsSetResult(DnsSetAction.Unchanged, primary, primary);
@@ -107,15 +111,32 @@ public sealed class DnsRecordService : IDnsRecordService
             throw new DnsProviderException($"Der weitere Eintrag {noId} hat keine ID — Zusammenführen nicht möglich.");
 
         var updated = await client.UpdateRecordAsync(token, z, primary.Id, wanted, ct);
+        var removed = new List<DnsRecord>();
         foreach (var extra in extras)
-            await client.DeleteRecordAsync(token, z, extra.Id!, ct);
+        {
+            try
+            {
+                await client.DeleteRecordAsync(token, z, extra.Id!, ct);
+            }
+            catch (Exception ex)
+            {
+                // Half collapsed: the primary is rewritten and some records are gone. The caller and the audit learn
+                // all of it — what was changed, what went, what is still there (Fable review: a failure here used to
+                // surface as a bare provider error).
+                var remaining = extras.Except(removed).ToList();
+                _logger.LogWarning(ex, "DNS set on {Zone} {Name} {Type} stopped half way: updated {Primary}, removed {Removed}, still there {Remaining}",
+                    z, n, t, primary, removed.Count, remaining.Count);
+                throw new DnsPartialSetException(primary, wanted with { Id = primary.Id }, removed, remaining, ex);
+            }
+            removed.Add(extra);
+        }
 
         _logger.LogInformation("DNS record updated: {Zone} {Name} {Type} (TTL {Ttl}), {Removed} duplicate(s) removed",
-            z, n, t, effectiveTtl, extras.Count);
+            z, n, t, effectiveTtl, removed.Count);
         return new DnsSetResult(DnsSetAction.Updated, primary,
             updated with { Id = updated.Id ?? primary.Id, Name = n, Type = t, Value = v, Ttl = effectiveTtl })
         {
-            Removed = extras,
+            Removed = removed,
         };
     }
 
@@ -148,19 +169,22 @@ public sealed class DnsRecordService : IDnsRecordService
             updated with { Id = updated.Id ?? match.Id, Name = wanted.Name, Type = "TXT", Value = wanted.Value, Ttl = wanted.Ttl });
     }
 
-    public async Task<List<DnsRecord>> DeleteAsync(string zone, string name, string type, CancellationToken ct = default)
+    public async Task<List<DnsRecord>> DeleteAsync(string zone, string name, string type, string? value = null,
+        CancellationToken ct = default)
     {
         var (client, token, z) = Resolve(zone);
         var t = NormalizeType(type);
         var n = NormalizeName(name, z);
+        var v = string.IsNullOrEmpty(value) ? null : NormalizeValue(t, value);
 
-        var victims = (await client.ListRecordsAsync(token, z, ct)).Where(r => Matches(r, n, t)).ToList();
+        var victims = (await client.ListRecordsAsync(token, z, ct))
+            .Where(r => Matches(r, n, t) && (v is null || ValuesEqual(t, r.Value, v)))
+            .ToList();
+        // Every ID is checked before the first delete, so a missing one never leaves the name half deleted.
+        if (victims.FirstOrDefault(r => string.IsNullOrEmpty(r.Id)) is { } noId)
+            throw new DnsProviderException($"Der Eintrag {noId} hat keine ID — Löschen nicht möglich.");
         foreach (var r in victims)
-        {
-            if (string.IsNullOrEmpty(r.Id))
-                throw new DnsProviderException($"Der Eintrag {r} hat keine ID — Löschen nicht möglich.");
-            await client.DeleteRecordAsync(token, z, r.Id, ct);
-        }
+            await client.DeleteRecordAsync(token, z, r.Id!, ct);
         if (victims.Count > 0)
             _logger.LogInformation("DNS record(s) deleted: {Zone} {Name} {Type} ({Count})", z, n, t, victims.Count);
         return victims;

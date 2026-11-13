@@ -101,6 +101,21 @@ public class DnsTools
                      + RemovedLines(result, z),
             };
         }
+        catch (DnsPartialSetException partial)
+        {
+            // The zone changed even though the set failed: the audit and the answer name what was changed, what went
+            // and what is still there (Fable review).
+            var z = DnsRecordService.NormalizeZone(zone);
+            var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
+            await auditLog.LogAsync(actor, actorType, "dns.record_updated", "dns-zone", z,
+                $"{partial.After.Name} {partial.After.Type}",
+                $"partial: updated {partial.Before} -> {partial.After}; removed {Join(partial.Removed)}; still there {Join(partial.Remaining)}; error {partial.InnerException?.Message}");
+            return MutationScope.Fail(
+                $"Fehler: nur teilweise ausgeführt ({partial.InnerException?.Message}).\n" +
+                $"Aktualisiert: {Fqdn(partial.After.Name, z)} {partial.After.Type} {partial.Before.Value} → {partial.After.Value} (TTL {partial.After.Ttl})\n" +
+                (partial.Removed.Count > 0 ? "Entfernt:\n" + Lines(partial.Removed, z) + "\n" : "") +
+                "Noch vorhanden (erneut ausführen):\n" + Lines(partial.Remaining, z));
+        }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or DnsProviderException)
         {
             return MutationScope.Fail("Fehler: " + ex.Message);
@@ -108,13 +123,14 @@ public class DnsTools
     }
 
     [McpToolLevel(McpPermissionLevels.Write)]
-    [McpServerTool, Description("Delete the DNS record(s) with the given name and type in a zone at the configured provider. Only A, AAAA, CNAME and TXT can be deleted. Answers what was removed; nothing there = no-op.")]
+    [McpServerTool, Description("Delete the DNS record(s) with the given name and type in a zone at the configured provider — all of them, or with 'value' only the record(s) holding that value (e.g. one TXT value among SPF and verification records). Only A, AAAA, CNAME and TXT can be deleted. Answers what was removed; nothing there = no-op.")]
     public static async Task<string> DeleteDnsRecord(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
         IDnsRecordService dns, IToolAuditLog auditLog,
         [Description("Zone / domain, e.g. lupusmalus.dev")] string zone,
         [Description("Record name relative to the zone, e.g. 'holler.app' or '@'")] string name,
-        [Description("Record type: A, AAAA, CNAME or TXT")] string type)
+        [Description("Record type: A, AAAA, CNAME or TXT")] string type,
+        [Description("Optional: delete only the record(s) with this value; without it every record of name and type goes")] string? value = null)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "delete_dns_record");
         if (denied != null) return MutationScope.Fail(denied);
@@ -123,9 +139,11 @@ public class DnsTools
         try
         {
             var z = DnsRecordService.NormalizeZone(zone);
-            var removed = await dns.DeleteAsync(z, name, type);
+            var removed = await dns.DeleteAsync(z, name, type, value);
             if (removed.Count == 0)
-                return $"Nichts zu löschen: kein {type.Trim().ToUpperInvariant()}-Eintrag '{name}' in Zone {z}.";
+                return string.IsNullOrEmpty(value)
+                    ? $"Nichts zu löschen: kein {type.Trim().ToUpperInvariant()}-Eintrag '{name}' in Zone {z}."
+                    : $"Nichts zu löschen: kein {type.Trim().ToUpperInvariant()}-Eintrag '{name}' mit diesem Wert in Zone {z}.";
 
             var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
             await auditLog.LogAsync(actor, actorType, "dns.record_deleted", "dns-zone",
@@ -144,9 +162,13 @@ public class DnsTools
 
     private static string Fqdn(string name, string zone) => name == "@" ? zone : $"{name}.{zone}";
 
+    private static string Join(IEnumerable<DnsRecord> records) => string.Join("; ", records);
+
+    private static string Lines(IEnumerable<DnsRecord> records, string zone) =>
+        string.Join('\n', records.Select(x => $"- {Fqdn(x.Name, zone)} {x.Type} {x.Value} (TTL {x.Ttl})"));
+
     private static string RemovedLines(DnsSetResult r, string zone) => r.Removed.Count == 0 ? "" :
-        "\nEntfernt (weitere Einträge gleichen Namens und Typs):\n" +
-        string.Join('\n', r.Removed.Select(x => $"- {Fqdn(x.Name, zone)} {x.Type} {x.Value} (TTL {x.Ttl})"));
+        "\nEntfernt (weitere Einträge gleichen Namens und Typs):\n" + Lines(r.Removed, zone);
 
     private static string Describe(DnsSetResult r) => r.Action switch
     {

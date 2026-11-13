@@ -34,3 +34,19 @@ public sealed class DnsProviderException : Exception
     public DnsProviderException(string message, int? statusCode = null, Exception? inner = null)
         : base(message, inner) => StatusCode = statusCode;
 }
+
+/// <summary>
+/// A set that collapsed several records and stopped half way: <see cref="Before"/> was rewritten to
+/// <see cref="After"/>, <see cref="Removed"/> are gone, <see cref="Remaining"/> are still there. The provider's error
+/// (or the cancellation) is the inner exception. The zone is changed, so the answer and the audit name all of it.
+/// </summary>
+public sealed class DnsPartialSetException(
+    Whiskers.Models.Dns.DnsRecord before, Whiskers.Models.Dns.DnsRecord after,
+    IReadOnlyList<Whiskers.Models.Dns.DnsRecord> removed, IReadOnlyList<Whiskers.Models.Dns.DnsRecord> remaining, Exception inner)
+    : Exception($"Nur teilweise ausgeführt: {before} → {after}; entfernt {removed.Count}, noch vorhanden {remaining.Count} ({inner.Message})", inner)
+{
+    public Whiskers.Models.Dns.DnsRecord Before { get; } = before;
+    public Whiskers.Models.Dns.DnsRecord After { get; } = after;
+    public IReadOnlyList<Whiskers.Models.Dns.DnsRecord> Removed { get; } = removed;
+    public IReadOnlyList<Whiskers.Models.Dns.DnsRecord> Remaining { get; } = remaining;
+}
