@@ -54,7 +54,9 @@ public class LogSearchService : ILogSearchService
             try
             {
                 // Always fetch from the container's OWN server — with a fleet-wide list, `serverId` is null.
-                var logs = await _docker.GetContainerLogsAsync(container.Id, tailLines, container.ServerId, ct: ct);
+                // R1-41: the caller's stop is the callerToken (no circuit failure for the server), not the plain read's token.
+                var logs = await _docker.GetContainerLogsAsync(container.Id, tailLines, container.ServerId, since: null,
+                    deadline: CancellationToken.None, callerToken: ct);
                 var lines = logs.Split('\n');
 
                 for (int i = 0; i < lines.Length && results.Count < maxResults; i++)

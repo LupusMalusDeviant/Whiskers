@@ -101,7 +101,8 @@ public class ContainerTools
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
         if (container is null) return resolveError ?? $"Container not found: {containerId}";
         var id = container.Id;
-        var logs = await docker.GetContainerLogsAsync(id, lines, serverId, ct: cancellationToken);
+        // R1-41: the caller's stop goes in as callerToken, so it ends the waits and is never held against the server.
+        var logs = await docker.GetContainerLogsAsync(id, lines, serverId, since: null, deadline: CancellationToken.None, callerToken: cancellationToken);
         return $"Logs for {container?.Name ?? containerId} (last {lines} lines):\n{logs}";
     }
 

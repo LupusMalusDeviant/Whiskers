@@ -56,7 +56,7 @@ internal sealed class SystemInfoOperations
             // Probe reachability through the retrying executor so a tunnel that died between polls
             // is rebuilt on this very call instead of reporting the server as unreachable.
             var (sysInfo, version) = await _connectionManager.ExecuteAsync(serverId, async c =>
-                (await c.System.GetSystemInfoAsync(), await c.System.GetVersionAsync()));
+                (await c.System.GetSystemInfoAsync(ct), await c.System.GetVersionAsync(ct)), callerToken: ct);
 
             info.OperatingSystem = sysInfo.OperatingSystem ?? "";
             info.OsVersion = sysInfo.OSVersion ?? "";
@@ -95,17 +95,17 @@ internal sealed class SystemInfoOperations
                     // taking a bare client, invisible to both the cap and the circuit breaker.
                     var (hostCpu, hostMem) = await _connectionManager.ExecuteGuardedAsync(
                         serverId, c => GetHostResourceUsageAsync(c, serverId),
-                        singleFlightKey: $"hostres:{serverId}");
+                        singleFlightKey: $"hostres:{serverId}", callerToken: ct);
                     info.CpuUsagePercent = hostCpu;
                     info.MemoryUsedBytes = hostMem;
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
                     // Fallback: aggregate from running containers (cached stats)
                     var containers = await _connectionManager.ExecuteGuardedAsync(
                         serverId,
                         c => c.Containers.ListContainersAsync(new ContainersListParameters { All = false }),
-                        singleFlightKey: $"sysinfo-list:{serverId}");
+                        singleFlightKey: $"sysinfo-list:{serverId}", callerToken: ct);
                     long totalMemUsed = 0;
                     double totalCpu = 0;
                     var statsTasks = containers.Select(async c =>
@@ -133,8 +133,9 @@ internal sealed class SystemInfoOperations
             else
                 info.IpAddress = sysInfo.Name ?? "localhost";
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // A caller that stopped is not an unreachable server (INV-40): its cancellation goes back to it.
             info.IsReachable = false;
             info.Error = ex.Message;
             _logger.LogWarning(ex, "Failed to get system info for server {ServerId}", serverId);
