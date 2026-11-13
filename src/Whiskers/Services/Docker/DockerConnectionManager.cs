@@ -436,8 +436,8 @@ public class DockerConnectionManager : IDockerConnectionManager
 
             case ConnectionType.SSH:
             {
-                var localPort = await _sshTunnelManager.EstablishTunnelAsync(server);
-                return new DockerClientConfiguration(new Uri($"http://127.0.0.1:{localPort}")).CreateClient();
+                var endpoint = await _sshTunnelManager.EstablishTunnelAsync(server);
+                return new DockerClientConfiguration(endpoint).CreateClient();
             }
 
             default:

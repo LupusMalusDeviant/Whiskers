@@ -145,13 +145,23 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
             if (!string.IsNullOrWhiteSpace(guards.Output))
                 return new(false, $"A Whiskers guard timer is armed on {server.Name} ({guards.Output.Trim()}); try again once it has fired, at most 3 minutes from its start.");
 
-            // Keep the identity the proxy has today: its name was chosen at onboarding and need not match the
-            // display name any more, and Whiskers checks the IP SAN against TcpHost on every connection.
+            // Keep the name the proxy has today: it was chosen at onboarding and need not match the display name any
+            // more. The presented certificate is the host's word, so it counts only when the fleet CA issued it for the
+            // address Whiskers connects to; the renewal then names that address alone (Fable review H1: a host that
+            // presented its own certificate could otherwise have the CA sign any IP or a client name).
             using var current = await FetchPresented(server.TcpHost, server.TcpPort, ct)
                 ?? throw new InvalidOperationException($"{server.Name} presented no certificate.");
-            var identity = IdentityOf(current);
-            if (!identity.IpAddresses.Contains(server.TcpHost))
-                return new(false, $"The current certificate of {server.Name} does not name {server.TcpHost}; renew it by hand.");
+            var caPem = FromB64((await RunAsync("local", MtlsCertificateCommands.ReadCaBundle(), ct)).Output.Trim(), "CA bundle");
+            var anchors = new X509Certificate2Collection();
+            anchors.ImportFromPem(caPem);
+            if (!Whiskers.Services.Docker.DockerConnectionManager.ValidateMtlsServerCert(current, anchors, null, server.TcpHost))
+                return new(false, $"The current certificate of {server.Name} is not one the fleet CA issued for {server.TcpHost}; renew it by hand.");
+            MtlsIdentity identity;
+            try { identity = MtlsIdentity.ForRenewal(current, server.TcpHost); }
+            catch (ArgumentException ex)
+            {
+                return new(false, $"The current certificate of {server.Name} cannot be renewed as it is ({ex.Message}); renew it by hand.");
+            }
 
             using var issued = await IssueAndStageAsync(serverId, identity, ct);
 
@@ -213,15 +223,6 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
 
         await RunAsync(serverId, MtlsCertificateCommands.StageCertificate(bundleB64, caB64), ct);
         return issued;
-    }
-
-    internal static MtlsIdentity IdentityOf(X509Certificate2 cert)
-    {
-        var san = cert.Extensions.OfType<X509SubjectAlternativeNameExtension>().SingleOrDefault();
-        return new MtlsIdentity(
-            cert.GetNameInfo(X509NameType.SimpleName, false),
-            san?.EnumerateDnsNames() ?? [],
-            san?.EnumerateIPAddresses().Select(i => i.ToString()) ?? []);
     }
 
     private async Task<CommandResult> RunAsync(string serverId, string command, CancellationToken ct)

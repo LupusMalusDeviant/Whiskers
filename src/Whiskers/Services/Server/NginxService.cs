@@ -16,6 +16,9 @@ public class NginxService : INginxService
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<NginxService> _logger;
 
+    /// <summary>Where an update keeps the file it replaces until nginx -t has passed (sites-available is not included by nginx).</summary>
+    internal const string PreviousSuffix = ".whiskers-prev";
+
     public NginxService(IHostCommandExecutor executor, ILogger<NginxService> logger)
     {
         _executor = executor;
@@ -94,8 +97,13 @@ public class NginxService : INginxService
         var base64Content = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
         var destPath = $"/etc/nginx/sites-available/{siteName}";
 
-        // Write the file, then test the nginx config, and reload only if the test passes
-        var writeCmd = $"echo '{base64Content}' | base64 -d | tee {ShellUtils.Quote(destPath)} > /dev/null";
+        // Keep the current file, write the new one, then test the nginx config: reload only if the test passes, and put
+        // the previous file back if it fails — a refused config must not stay live for the next reload, a certbot hook
+        // or a reboot to pick up (Fable review). A site that did not exist before is removed again.
+        var dest = ShellUtils.Quote(destPath);
+        var prev = ShellUtils.Quote(destPath + PreviousSuffix);
+        var writeCmd = $"if [ -e {dest} ]; then cp -p {dest} {prev}; else rm -f {prev}; fi && " +
+                       $"echo '{base64Content}' | base64 -d | tee {dest} > /dev/null";
         var writeResult = await _executor.ExecuteAsync(serverId, writeCmd);
 
         if (!writeResult.Success)
@@ -108,14 +116,19 @@ public class NginxService : INginxService
         if (!testResult.Success)
         {
             _logger.LogWarning("nginx config test failed after updating '{SiteName}' on {ServerId}: {Error}", siteName, serverId, testResult.Error);
+            var restore = await _executor.ExecuteAsync(serverId,
+                $"if [ -e {prev} ]; then mv -f {prev} {dest}; else rm -f {dest}; fi");
             return new CommandResult
             {
                 ExitCode = testResult.ExitCode,
                 Output = testResult.Output,
-                Error = $"nginx config test failed: {testResult.Error}"
+                Error = restore.Success
+                    ? $"nginx config test failed; the previous file was put back: {testResult.Error}"
+                    : $"nginx config test failed, and putting the previous file back failed too ({restore.Error}); check {destPath} before the next reload: {testResult.Error}"
             };
         }
 
+        await _executor.ExecuteAsync(serverId, $"rm -f {prev}");
         return await ReloadAsync(serverId);
     }
 
