@@ -353,8 +353,13 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() => Persist(page));
             Assert.Empty(recorder.Uploads);
+            Assert.Null(_servers.GetServer(server.Id));   // nothing created while refused (Codex round 8)
         }
         finally { gate.Release(); }
+
+        await Persist(page);   // the retry creates the server and uploads its key
+        Assert.Equal(server.Id, _servers.GetServer(server.Id)!.Id);
+        Assert.Equal([server.Id], recorder.Uploads);
     }
 
     private static Task Persist(IRenderedComponent<Servers> page)

@@ -734,16 +734,19 @@
         }
         else
         {
-            await ServerConfigService.AddServerAsync(Record());
-
-            // INV-59 (#187): the key upload writes the whole record — under the host lock, like every save of it.
-            if (_sshKeyData != null && _sshKeyFileName != null)
-                await Whiskers.Services.Certificates.MtlsOnboardingState.HoldHostAsync(ClientCredentials, _form.Id, _form.Name,
-                    async () => { await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData); return true; });
-
-            // The server now exists: if the connection probe fails and the user fixes the form and
-            // saves again, that retry must UPDATE this entry instead of adding a duplicate id.
-            _editingServer = ServerConfigService.GetServer(_form.Id);
+            // INV-59 (#187): creating the record and uploading its key (which writes the whole record) both hold the host
+            // lock; while a step holds it, nothing is created, so the retry adds the server as before.
+            await Whiskers.Services.Certificates.MtlsOnboardingState.HoldHostAsync(ClientCredentials, _form.Id, _form.Name,
+                async () =>
+                {
+                    await ServerConfigService.AddServerAsync(Record());
+                    // The server now exists: if the connection probe (or the key upload) fails and the user fixes the
+                    // form and saves again, that retry must UPDATE this entry instead of adding a duplicate id.
+                    _editingServer = ServerConfigService.GetServer(_form.Id);
+                    if (_sshKeyData != null && _sshKeyFileName != null)
+                        await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
+                    return true;
+                });
 
         }
 
