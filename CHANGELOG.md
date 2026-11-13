@@ -53,9 +53,10 @@ Check these before or right after the update. Details are in the entries below.
 - **Kubernetes.** Apply `deploy/k8s/whiskers-agent-rbac.yaml` again on every connected cluster.
 - **Hardened profile (`docker-compose.hardened.yml`).** Take the new compose file: the socket proxy listens on a Unix
   socket in a shared volume instead of `127.0.0.1:2375`. A stored server on the old port is moved to the socket at the
-  first start (logged), if it has no TLS and the new compose file is in use. If it was a TCP server, it then has no
-  host commands (deploy, `.env`, database panel, `execute_command`, firewall, nginx), like any local server in this
-  profile.
+  first start (logged), if it has no TLS and the new compose file is in use. If it was a TCP server, nothing that
+  runs on the host works for it any more, like for any local server in this profile. Among them: deploy, `.env`,
+  database panel, `execute_command`, firewall, nginx, volume backups, CVE scans, systemd, SSL certificates, Git
+  deploy and AutoPatch scripts.
 - **mTLS proxy certificates.** Renewal now works only for a certificate the fleet CA issued for the address Whiskers
   connects to; renew any other by hand.
 - **PostgreSQL overlay users.** The overlay moves to PostgreSQL 18; follow `docs/operations/postgres-18-upgrade.md`.
@@ -87,9 +88,10 @@ Fixes from the full review of `main` before the tag (#190, #191, #192, #193):
   process and host-networked container on the host could reach. It listens on a Unix socket in a volume that only the
   proxy and Whiskers mount. Whiskers waits for the socket and gets it as `Docker__SocketPath`. The verb whitelist is
   unchanged. **Upgrade:** at the next start, a stored server that still points at `127.0.0.1:2375` (local, or TCP
-  without TLS) is moved to the socket as a local server and a warning is logged. Its host commands (deploy, `.env`,
-  database panel, `execute_command`, firewall, nginx) are then not available, as for any local server in the hardened
-  profile; a TCP server ran them in a privileged helper container through the proxy before.
+  without TLS) is moved to the socket as a local server and a warning is logged. Nothing that runs on the host
+  then works for it any more (among them deploy, `.env`, database panel, `execute_command`, firewall, nginx, volume
+  backups, CVE scans, systemd, SSL certificates, Git deploy and AutoPatch scripts), as for any local server in the
+  hardened profile; a TCP server ran them in a privileged helper container through the proxy before.
 - **Database panel.** The database password reaches `docker exec` as an environment variable delivered beside the
   command (`-e NAME`), never in the command line, so it no longer appears in the host's process list.
 - **Container `.env` editor.** A `.env` that could not be read (host unreachable, permission denied) is shown as an
