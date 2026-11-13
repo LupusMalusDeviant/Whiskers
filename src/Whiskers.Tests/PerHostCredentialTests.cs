@@ -709,7 +709,7 @@ public sealed class PerHostCredentialTests
                 : MtlsProbeOutcome.NotChecked),
         };
 
-        var result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         var saved = w.Server("neuhof");
@@ -756,7 +756,7 @@ public sealed class PerHostCredentialTests
             },
         };
 
-        var result = await onboarding.OnboardServerAsync("rabenhof", new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("rabenhof", true, new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         Assert.False(migration!.Ok);
@@ -787,7 +787,7 @@ public sealed class PerHostCredentialTests
         var gate = w.Store.HostLock("neuhof");
         Assert.True(await gate.WaitAsync(0));   // e.g. a removal or a migration of the same id
         OnboardingResult result;
-        try { result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default); }
+        try { result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default); }
         finally { gate.Release(); }
 
         Assert.False(result.Success);
@@ -795,6 +795,58 @@ public sealed class PerHostCredentialTests
         Assert.Contains("Zertifikatsschritt", result.Error);
         Assert.False(Directory.Exists(Path.Combine(w.MtlsDir, "hosts", "neuhof")));   // no key issued
         Assert.Equal(ConnectionType.SSH, w.Server("neuhof").ConnectionType);
+    }
+
+    [Fact]
+    public async Task A_first_onboarding_is_refused_when_the_host_got_mtls_state_meanwhile()
+    {
+        // INV-59 (#187, Codex review): two first onboardings admitted while the host had no state; the one that finished
+        // first created it. The other re-checks under the host lock and issues nothing without the approval.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var hostDir = Path.Combine(w.MtlsDir, "hosts", "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        exec.OnCommand = command =>
+        {
+            if (!command.Contains("BackendState", StringComparison.Ordinal) || Directory.Exists(hostDir)) return;
+            Directory.CreateDirectory(hostDir);
+            File.WriteAllText(Path.Combine(hostDir, MtlsClientCredentialStore.IdentityFile), "{}");
+        };
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.Certificate, result.FailedStep);
+        Assert.Contains("Freigabe", result.Error);
+        Assert.Equal([MtlsClientCredentialStore.IdentityFile],
+            Directory.EnumerateFileSystemEntries(hostDir).Select(Path.GetFileName).ToArray());   // nothing issued
+        Assert.Equal(ConnectionType.SSH, w.Server("neuhof").ConnectionType);
+        Assert.Equal(1, w.Store.HostLock("neuhof").CurrentCount);   // released
+    }
+
+    [Theory]
+    [InlineData("not json at all")]
+    [InlineData("{\"ServerId\":\"neuhof\",\"Stem\":\"neuhof\",\"ActiveSlot\":\"../../etc\"}")]
+    public async Task A_damaged_identity_file_still_counts_as_mtls_state(string content)
+    {
+        // INV-59 (#187, Codex review): the store reads a damaged file as "no identity"; for the onboarding decision it is
+        // state all the same.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var record = await SshRecordAsync(w, "neuhof");
+        var hostDir = Path.Combine(w.MtlsDir, "hosts", "neuhof");
+        Assert.False(MtlsOnboardingState.Holds(record, w.Store));
+
+        Directory.CreateDirectory(hostDir);
+        File.WriteAllText(Path.Combine(hostDir, MtlsClientCredentialStore.IdentityFile), content);
+
+        Assert.Null(w.Store.IdentityOf("neuhof"));
+        Assert.True(w.Store.HoldsState("neuhof"));
+        Assert.True(MtlsOnboardingState.Holds(record, w.Store));
+        // An id the store cannot place counts as state too.
+        Assert.True(MtlsOnboardingState.Holds(new ServerConfig { Id = "../neuhof" }, w.Store));
     }
 
     private static async Task<ServerConfig> SshRecordAsync(CredentialWorld w, string id)
@@ -821,7 +873,7 @@ public sealed class PerHostCredentialTests
             ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
 
-        var result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         Assert.True(exec.ServerCertificateActivated);
@@ -851,7 +903,7 @@ public sealed class PerHostCredentialTests
             ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
 
-        var result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         Assert.True(changed);

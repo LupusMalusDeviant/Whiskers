@@ -168,9 +168,9 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             "host" => await HostAsync(request, capability, target, ct),
             "server" when capability.Id.StartsWith("endpointcheck.", StringComparison.Ordinal) =>
                 await RecordAsync(request, capability, target, ct),
+            "server" when capability.Id == "server.onboard" => OnboardTarget(target),
             "server" => Server(target, NullIfEmpty(target.Id) ?? target.ServerId,
-                mustExist: capability.Id is not ("server.onboard" or "server.save"),
-                onboard: capability.Id == "server.onboard"),
+                mustExist: capability.Id != "server.save"),
             "network" => await NetworkAsync(request, capability, target, ct),
             "cloud-server" => CloudServer(target),
             "scheduled-task" => Creates.Contains(capability.Id) ? Pass(target) : await TaskAsync(target),
@@ -477,26 +477,36 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         }
     }
 
-    /// <summary>INV-59 (#187): whether a server already holds mTLS state that an onboarding would replace — TLS client
-    /// material in its record, or an identity (active or pending) in the per-host credential store. A store that
-    /// cannot be read counts as state: the onboarding then needs the approval (fail closed).</summary>
-    private bool HasMtlsState(Models.ServerConfig server)
+    /// <summary>
+    /// <c>server.onboard</c> (INV-59, #187): onboarding works on a server that is already in the inventory, so the
+    /// decision is on exactly that server — by its id, then by its id in another case — never on the default server or
+    /// a display name, and an unknown or ambiguous id is refused. The onboarding then runs on the canonical id, so
+    /// policy and execution cannot name two different servers. The resolver records whether the server already holds
+    /// mTLS state (<see cref="Whiskers.Services.Certificates.MtlsOnboardingState"/>): re-onboarding it is a control-plane
+    /// change.
+    /// </summary>
+    private TargetResolution OnboardTarget(MutationTarget target)
     {
-        if (server.TcpUseTls || !string.IsNullOrWhiteSpace(server.TcpClientCertPath)
-            || !string.IsNullOrWhiteSpace(server.TcpClientKeyPath) || !string.IsNullOrWhiteSpace(server.TcpCaCertPath))
-            return true;
-        try
+        var id = NullIfEmpty(target.Id) ?? target.ServerId;
+        if (string.IsNullOrWhiteSpace(id)) return Refuse("Onboarding names no server.");
+        var servers = _services.GetService<IServerConfigService>()?.GetServers() ?? [];
+        var existing = servers.FirstOrDefault(s => s.Id == id);
+        if (existing is null)
         {
-            return _services.GetService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>()?.IdentityOf(server.Id)
-                   is not null;
+            var folded = servers.Where(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (folded.Count > 1) return Refuse($"Ambiguous server '{id}'.", id);
+            existing = folded.SingleOrDefault();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        if (existing is null) return Refuse($"Unknown server '{id}'.", id);
+        return Done(target with
         {
-            return true;
-        }
+            Id = existing.Id, Name = target.Name ?? existing.Name, ServerId = existing.Id,
+            HasControlPlaneState = Whiskers.Services.Certificates.MtlsOnboardingState.Holds(existing,
+                _services.GetService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>()),
+        });
     }
 
-    private TargetResolution Server(MutationTarget target, string? idOrName, bool mustExist, bool onboard = false)
+    private TargetResolution Server(MutationTarget target, string? idOrName, bool mustExist)
     {
         if (!mustExist)
         {
@@ -508,11 +518,7 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
                            ?? servers?.FirstOrDefault(s => string.Equals(s.Id, idOrName, StringComparison.OrdinalIgnoreCase));
             return existing is null
                 ? Pass(target)
-                : Done(target with
-                {
-                    Id = existing.Id, Name = target.Name ?? existing.Name, ServerId = existing.Id,
-                    HasControlPlaneState = onboard && HasMtlsState(existing),
-                });
+                : Done(target with { Id = existing.Id, Name = target.Name ?? existing.Name, ServerId = existing.Id });
         }
         var (server, error) = ResolveServer(idOrName);
         if (server is not null)

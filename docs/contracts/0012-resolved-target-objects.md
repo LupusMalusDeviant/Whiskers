@@ -306,12 +306,18 @@ A8–A11 were found while building steps 5 and 6. Each replaces the wording abov
 
 ## Amendment A12 (follows the maintainer's decision on #187, option 2, 13 November 2026)
 
-- **A12 — `MutationTarget.HasControlPlaneState`.** For `server.onboard` the resolver records whether the existing
-  server already holds mTLS state: TLS client material in its record (`TcpUseTls`, a client certificate, key or CA
-  path) or an active or pending identity in `IMtlsClientCredentialStore`. A store that cannot be read counts as state
-  (fail closed). The gateway passes it to the rules as `__resolvedControlPlaneState`; a caller's own `__…` arguments
-  never reach them. `ProtectedResourceRule` then treats the re-onboarding as a control-plane capability (INV-59). No
-  other capability sets or reads it.
+- **A12 — `MutationTarget.HasControlPlaneState`.** `server.onboard` resolves exactly a server of the inventory: by
+  its id, then by its id in another case; never the default server or a display name. An empty, unknown or ambiguous
+  id is refused, so the decision and the onboarding (which runs on the canonical id) cannot name two different servers.
+  The resolver records whether that server already holds mTLS state (`MtlsOnboardingState.Holds`): TLS client material
+  in its record (`TcpUseTls`, a client certificate, key or CA path), or anything in the per-host credential store
+  (new `IMtlsClientCredentialStore.HoldsState`: false only for a missing or empty host directory, so a damaged or half
+  written identity file counts). Whatever cannot be read counts as state (fail closed). The gateway passes it to the
+  rules as `__resolvedControlPlaneState`; a caller's own `__…` arguments never reach them. `ProtectedResourceRule`
+  then treats the re-onboarding as a control-plane capability (INV-59). The onboarding receives what was decided
+  (`IOnboardingService.OnboardServerAsync(serverId, mayReplaceMtlsState, …)`) and checks the state again under the
+  per-host lock: a run admitted as a first onboarding refuses before anything is issued when the host holds state by
+  then. No other capability sets or reads it.
 
 ## Not in scope
 

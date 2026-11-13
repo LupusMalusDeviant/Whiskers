@@ -131,6 +131,12 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
             ? MtlsClientIdentity.FromStem(serverId, s.Stem, GenerationOf(slot))
             : null;
 
+    public bool HoldsState(string serverId)
+    {
+        var dir = HostDir(serverId);
+        return Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any();
+    }
+
     public MtlsClientIdentity? PendingIdentityOf(string serverId) =>
         ReadState(serverId) is { PendingSlot: { } p } s ? MtlsClientIdentity.FromStem(serverId, s.Stem, GenerationOf(p)) : null;
 

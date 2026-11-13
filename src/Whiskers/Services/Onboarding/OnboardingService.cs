@@ -65,7 +65,8 @@ public class OnboardingService : IOnboardingService
         _logger = logger;
     }
 
-    public async Task<OnboardingResult> OnboardServerAsync(string serverId, IProgress<string> progress, CancellationToken ct = default)
+    public async Task<OnboardingResult> OnboardServerAsync(string serverId, bool mayReplaceMtlsState, IProgress<string> progress,
+        CancellationToken ct = default)
     {
         var completed = new List<OnboardingStep>();
         var step = OnboardingStep.Bootstrap;
@@ -189,6 +190,12 @@ public class OnboardingService : IOnboardingService
             if (_serverConfig.GetServer(serverId)?.Clone() is not { } current)
                 return Fail(progress, completed, step, $"{server.Name} wurde inzwischen entfernt.");
             server = current;
+            // INV-59 (#187): admitted as a first onboarding, but the host holds mTLS state now (another onboarding
+            // finished during steps 0–4): replacing it needs the control-plane approval, so nothing is issued here.
+            if (!mayReplaceMtlsState && MtlsOnboardingState.Holds(server, _clientCredentials))
+                return Fail(progress, completed, step,
+                    $"{server.Name} hat inzwischen mTLS-Zustand (ein anderes Onboarding ist fertig geworden). " +
+                    "Erneutes Onboarding braucht die Freigabe eines Admins; bitte neu starten.");
             progress.Report("⑥ Server-Zertifikat ausstellen (Schlüssel auf dem Host, step-ca signiert)…");
             await _certificates.IssueForNewHostAsync(serverId, MtlsIdentity.ForNewHost(slug, tsIp), ct);
             // R1-44 (D6): the host gets its own client identity right away (generation 1); its proxy never admits the

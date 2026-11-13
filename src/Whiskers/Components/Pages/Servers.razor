@@ -935,7 +935,8 @@
         {
             // Root installs on the target host: through the gateway like every other root-equivalent action.
             _onboardResult = await Mutations.RunAsync("server.onboard", new { serverId = server.Id, name = server.Name },
-                (ResolvedTarget rt, CancellationToken token) => Onboarding.OnboardServerAsync(rt.ServerId ?? rt.Id, progress, token));
+                (ResolvedTarget rt, CancellationToken token) =>
+                    Onboarding.OnboardServerAsync(rt.ServerId ?? rt.Id, rt.Record.HasControlPlaneState, progress, token));
         }
         catch (MutationRefusedException ex)
         {

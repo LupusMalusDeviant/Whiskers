@@ -29,8 +29,10 @@ public class OnboardingControlPlaneTests
         public ApprovalStore Approvals { get; }
         public MutationGateway Gateway { get; }
         public int Runs { get; private set; }
+        public MutationTarget? Seen { get; private set; }
 
-        public Harness(ServerConfig server, IMtlsClientCredentialStore? store = null, bool secondApprover = false)
+        public Harness(ServerConfig server, IMtlsClientCredentialStore? store = null, bool secondApprover = false,
+            params ServerConfig[] others)
         {
             var policy = GuardrailPolicy.SafeDefault();
             policy.ProtectedResources = [];
@@ -41,8 +43,8 @@ public class OnboardingControlPlaneTests
             var guardrails = new AgentToolTestHelpers.FixedGuardrailStore(policy);
             Approvals = new ApprovalStore(policy: guardrails);
             var services = store is null
-                ? new TestServices(new FakeServerConfig(server))
-                : new TestServices(new FakeServerConfig(server), store);
+                ? new TestServices(new FakeServerConfig([server, .. others]))
+                : new TestServices(new FakeServerConfig([server, .. others]), store);
             Gateway = new MutationGateway(new CapabilityCatalog(), AgentToolTestHelpers.Policy(guardrails),
                 new AgentToolTestHelpers.NullMutationAudit(), [], NullLogger<MutationGateway>.Instance,
                 targets: new MutationTargetResolver(services), approvals: new ApprovalGate(Approvals, guardrails));
@@ -55,24 +57,24 @@ public class OnboardingControlPlaneTests
                 JsonSerializer.Serialize(new { serverId, name = "Edge" }))!;
             var request = new MutationRequest("server.onboard", who, surface,
                 MutationTargets.FromArguments(capability, args), args);
-            return Gateway.ExecuteAsync(request, (_, _) => Task.FromResult(++Runs));
+            return Gateway.ExecuteAsync(request, (context, _) => { Seen = context.Target?.Record; return Task.FromResult(++Runs); });
         }
     }
 
-    /// <summary>A credential store that answers <see cref="IMtlsClientCredentialStore.IdentityOf"/> only.</summary>
+    /// <summary>A credential store that answers <see cref="IMtlsClientCredentialStore.HoldsState"/> only.</summary>
     private class StoreProxy : DispatchProxy
     {
-        public Func<string, MtlsClientIdentity?> Identity { get; set; } = _ => null;
+        public Func<string, bool> State { get; set; } = _ => false;
 
         protected override object? Invoke(MethodInfo? method, object?[]? args) =>
-            method?.Name == nameof(IMtlsClientCredentialStore.IdentityOf)
-                ? Identity((string)args![0]!)
+            method?.Name == nameof(IMtlsClientCredentialStore.HoldsState)
+                ? State((string)args![0]!)
                 : throw new NotSupportedException(method?.Name);
 
-        public static IMtlsClientCredentialStore With(Func<string, MtlsClientIdentity?> identity)
+        public static IMtlsClientCredentialStore With(Func<string, bool> state)
         {
             var store = Create<IMtlsClientCredentialStore, StoreProxy>();
-            ((StoreProxy)(object)store).Identity = identity;
+            ((StoreProxy)(object)store).State = state;
             return store;
         }
     }
@@ -82,7 +84,7 @@ public class OnboardingControlPlaneTests
     [Fact]
     public async Task A_first_onboarding_runs_without_an_approval()
     {
-        var h = new Harness(Plain(), StoreProxy.With(_ => null));
+        var h = new Harness(Plain(), StoreProxy.With(_ => false));
 
         var outcome = await h.OnboardAsync("edge01", UiAdmin, MutationSurface.Ui);
 
@@ -95,7 +97,7 @@ public class OnboardingControlPlaneTests
     private static Harness WithState(string kind, bool secondApprover = false)
     {
         var server = Plain();
-        IMtlsClientCredentialStore store = StoreProxy.With(_ => null);
+        IMtlsClientCredentialStore store = StoreProxy.With(_ => false);
         switch (kind)
         {
             case "tls-record":
@@ -106,7 +108,7 @@ public class OnboardingControlPlaneTests
                 server.TcpClientCertPath = "/app/data/mtls/clients/edge01/1/client.crt";
                 break;
             case "store-identity":
-                store = StoreProxy.With(id => MtlsClientIdentity.FromStem(id, "edge", 1));
+                store = StoreProxy.With(_ => true);
                 break;
             case "unreadable-store":
                 store = StoreProxy.With(_ => throw new IOException("state file is damaged"));
@@ -188,5 +190,58 @@ public class OnboardingControlPlaneTests
         Assert.False(ControlPlaneResources.ChangesControlPlane("server.onboard", new Dictionary<string, JsonElement>()));
         Assert.False(ControlPlaneResources.ChangesControlPlane("server.save", withState));
         Assert.True(ControlPlaneResources.ChangesControlPlane("certificate.issue_mtls", new Dictionary<string, JsonElement>()));
+    }
+
+    [Theory]
+    [InlineData("gone")]      // a stale row of a removed server
+    [InlineData("")]          // no server named: never the default server
+    public async Task An_unknown_server_is_refused_and_nothing_runs(string serverId)
+    {
+        var h = new Harness(Plain(), StoreProxy.With(_ => false));
+
+        var outcome = await h.OnboardAsync(serverId, UiAdmin, MutationSurface.Ui);
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Equal(0, h.Runs);
+    }
+
+    [Fact]
+    public async Task A_display_name_never_selects_another_server()
+    {
+        // Codex review of #187: a removed id "edge" while another, protected server is displayed as "edge". The decision
+        // must not take "edge" for a new server while execution reaches the protected one by its name.
+        var protectedHost = new ServerConfig { Id = "prod7", Name = "edge", ConnectionType = ConnectionType.TCP, TcpUseTls = true };
+        var h = new Harness(Plain(), StoreProxy.With(_ => false), others: protectedHost);
+
+        var outcome = await h.OnboardAsync("edge", UiAdmin, MutationSurface.Ui);
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Equal(0, h.Runs);
+        Assert.Empty(h.Approvals.GetPending());
+    }
+
+    [Fact]
+    public async Task The_onboarding_runs_on_the_canonical_id_with_the_state_it_was_decided_on()
+    {
+        var h = new Harness(Plain(), StoreProxy.With(_ => false));
+
+        var outcome = await h.OnboardAsync("EDGE01", UiAdmin, MutationSurface.Ui);
+
+        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal("edge01", h.Seen!.Id);
+        Assert.Equal("edge01", h.Seen.ServerId);
+        Assert.False(h.Seen.HasControlPlaneState);
+    }
+
+    [Fact]
+    public async Task Two_ids_differing_only_in_case_are_ambiguous()
+    {
+        var twin = new ServerConfig { Id = "EDGE01", Name = "Edge twin" };
+        var h = new Harness(Plain(), StoreProxy.With(_ => false), others: twin);
+
+        var outcome = await h.OnboardAsync("Edge01", UiAdmin, MutationSurface.Ui);
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Equal(0, h.Runs);
     }
 }
