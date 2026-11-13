@@ -48,6 +48,9 @@ public static class ApprovalBinding
                 foreach (var exposure in target.Exposures.Order(StringComparer.Ordinal)) w.WriteStringValue(exposure);
                 w.WriteEndArray();
             }
+            // INV-59 (#187): an onboarding approval is bound to the host the record reached when it was given.
+            if (target.Connection is { } connection)
+                w.WriteString("targetConnection", connection);
             w.WriteString("policy", policyVersion);
         });
     }

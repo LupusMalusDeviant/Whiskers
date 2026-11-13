@@ -64,7 +64,10 @@ Check these before or right after the update. Details are in the entries below.
   state that cannot be read, counts as state. Onboarding is decided on exactly the server its id names (an unknown or
   ambiguous id is refused, a display name never selects a server), and a run admitted as a first onboarding refuses
   before issuing anything when another onboarding of the same host finished in the meantime. The run holds the host's
-  certificate lock from its first step, so the server cannot be removed while it is being onboarded.
+  certificate lock from its first step, so the server cannot be removed while it is being onboarded. The decision and
+  its approval are bound to the host the record reaches: after the record's connection was changed, the run is refused
+  and the approval no longer applies, and a save that changes the connection waits for no running onboarding. The
+  protection follows Whiskers' records: a second record for the same host has no mTLS state of its own.
 - **Fix: access stores are never restored from their previous generation.** A damaged or missing `roles.json`,
   `whitelist.json` or `mcp-permissions.json` used to be replaced automatically by its `.bak`, which may still hold what
   the last save revoked: a deleted MCP API key authenticated again, a removed role or address came back. These three

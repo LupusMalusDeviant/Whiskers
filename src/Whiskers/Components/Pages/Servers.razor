@@ -707,7 +707,12 @@
 
             // The store decides the kubeconfig reference when it writes (R1-11): the new one, or whatever the server
             // has at that moment — a save queued behind another admin's rotation keeps the rotated kubeconfig.
-            var previous = await ServerConfigService.UpdateServerAsync(Record(), _newKubeconfigKey, cloudKey);
+            // INV-59 (#187): a save that moves the record to another host waits for no onboarding or certificate step of
+            // it — it holds their per-host lock, or is refused while one runs.
+            var updated = Record();
+            var previous = await Whiskers.Services.Certificates.MtlsOnboardingState.SaveAsync(ClientCredentials,
+                ServerConfigService.GetServer(_editingServer.Id) is { } stored && stored.Id == _editingServer.Id ? stored : null,
+                updated, () => ServerConfigService.UpdateServerAsync(updated, _newKubeconfigKey, cloudKey));
             if (_newKubeconfigKey is not null && previous is { ConnectionType: Whiskers.Models.ConnectionType.Kubernetes })
                 _oldKubeconfigKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(previous);
             if ((cloudKey.NewRef is not null || cloudKey.Clears) && previous?.CloudKeyRef is { } oldRef && oldRef != cloudKey.NewRef)
@@ -936,7 +941,8 @@
             // Root installs on the target host: through the gateway like every other root-equivalent action.
             _onboardResult = await Mutations.RunAsync("server.onboard", new { serverId = server.Id, name = server.Name },
                 (ResolvedTarget rt, CancellationToken token) =>
-                    Onboarding.OnboardServerAsync(rt.ServerId ?? rt.Id, rt.Record.HasControlPlaneState, progress, token));
+                    Onboarding.OnboardServerAsync(rt.ServerId ?? rt.Id, rt.Record.HasControlPlaneState, rt.Record.Connection,
+                        progress, token));
         }
         catch (MutationRefusedException ex)
         {

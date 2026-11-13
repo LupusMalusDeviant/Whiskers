@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 8 November 2026 by the maintainer, with the decisions D1–D15 as written and every question
 Q1–Q7 answered as recommended (see *Answered*). Amendments A1–A4 accepted 10 November 2026, A5–A7 accepted
-10 November 2026, A8–A11 accepted 10 November 2026. A12 follows the decision on #187 (13 November 2026).
+10 November 2026, A8–A11 accepted 10 November 2026. A12 follows the decision on #187, A13 the decision to bind the connection (both 13 November 2026).
 
 ## Purpose
 
@@ -322,6 +322,17 @@ A8–A11 were found while building steps 5 and 6. Each replaces the wording abov
   10), so the server cannot be removed during the run. Under the lock it checks the state again: a run admitted as a
   first onboarding refuses before anything runs when the host holds state by then. No other capability sets or reads
   it.
+- **A13 — `MutationTarget.Connection` (follows the maintainer's decision of 13 November 2026, "bind the connection").**
+  For `server.onboard` the resolver also records which host the record reaches (`MtlsOnboardingState.ConnectionOf`:
+  connection type, SSH and TCP endpoint, socket, Tailscale SSH, Kubernetes context; not names, groups, tags or
+  credentials). It is part of the approval binding (`targetConnection`), so an approval given for one host is unusable
+  once the record reaches another. The onboarding receives it (`OnboardServerAsync(serverId, mayReplaceMtlsState,
+  decidedConnection, …)`) and refuses, under the host lock, at its start and again before the certificate step, when
+  the record no longer reaches that host (or none was passed). A save on the Servers page that changes the connection
+  holds the same per-host lock (`MtlsOnboardingState.SaveAsync`) and is refused while an onboarding or a certificate
+  step holds it; a save that changes only names, groups or tags is not. **Known limit:** the protection follows
+  Whiskers' records, not the physical host — a second record for the same host has no mTLS state of its own, so its
+  first onboarding needs no approval. Creating that record is an Admin action (`server.save`) and is audited.
 
 ## Not in scope
 

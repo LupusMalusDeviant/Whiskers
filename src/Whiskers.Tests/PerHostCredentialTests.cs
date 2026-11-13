@@ -709,7 +709,7 @@ public sealed class PerHostCredentialTests
                 : MtlsProbeOutcome.NotChecked),
         };
 
-        var result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         var saved = w.Server("neuhof");
@@ -756,7 +756,7 @@ public sealed class PerHostCredentialTests
             },
         };
 
-        var result = await onboarding.OnboardServerAsync("rabenhof", true, new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("rabenhof", true, Decided(w, "rabenhof"), new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         Assert.False(migration!.Ok);
@@ -787,7 +787,7 @@ public sealed class PerHostCredentialTests
         var gate = w.Store.HostLock("neuhof");
         Assert.True(await gate.WaitAsync(0));   // e.g. a removal or a migration of the same id
         OnboardingResult result;
-        try { result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default); }
+        try { result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default); }
         finally { gate.Release(); }
 
         Assert.False(result.Success);
@@ -816,7 +816,7 @@ public sealed class PerHostCredentialTests
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
             NullLogger<OnboardingService>.Instance);
 
-        var result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
         Assert.False(result.Success);
         Assert.Equal(OnboardingStep.Certificate, result.FailedStep);
@@ -895,7 +895,7 @@ public sealed class PerHostCredentialTests
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
             NullLogger<OnboardingService>.Instance);
 
-        await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
+        await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
         Assert.NotEmpty(lookups);
         Assert.All(lookups, held => Assert.Equal(0, held));   // the lock was taken at every lookup
@@ -948,7 +948,7 @@ public sealed class PerHostCredentialTests
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
             NullLogger<OnboardingService>.Instance);
 
-        var result = await onboarding.OnboardServerAsync("neuhof", true, new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", true, Decided(w, "neuhof"), new Progress<string>(), default);
 
         Assert.False(result.Success);
         Assert.Equal(OnboardingStep.Bootstrap, result.FailedStep);
@@ -977,11 +977,96 @@ public sealed class PerHostCredentialTests
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
             NullLogger<OnboardingService>.Instance);
 
-        await Record.ExceptionAsync(() => onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default));
+        await Record.ExceptionAsync(() => onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default));
 
         Assert.IsType<InvalidOperationException>(removal);
         Assert.NotNull(w.Servers.GetServer("neuhof"));
         Assert.Equal(1, w.Store.HostLock("neuhof").CurrentCount);   // released after the run
+    }
+
+    /// <summary>The connection a run was decided on (INV-59, #187): the record's as it is now; a removed server has none.</summary>
+    private static string Decided(CredentialWorld w, string id) =>
+        w.Servers.GetServer(id) is { } server ? MtlsOnboardingState.ConnectionOf(server) : "gone";
+
+    [Fact]
+    public async Task A_run_whose_record_reaches_another_host_than_decided_is_refused_before_any_command()
+    {
+        // INV-59 (#187, Codex round 4): approved for the host the record reached then; the record was edited since.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var record = await SshRecordAsync(w, "neuhof");
+        record.SshHost = "10.0.0.5";
+        await w.Servers.UpdateServerAsync(record);
+        var decided = Decided(w, "neuhof");
+        var moved = record.Clone();
+        moved.SshHost = "10.0.0.66";
+        await w.Servers.UpdateServerAsync(moved);
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", true, decided, new Progress<string>(), default);
+        var unknown = await onboarding.OnboardServerAsync("neuhof", true, null, new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.Bootstrap, result.FailedStep);
+        Assert.False(unknown.Success);
+        Assert.Empty(exec.Scripts);   // not one command reached any host
+    }
+
+    [Fact]
+    public async Task A_record_moved_to_another_host_during_bootstrap_gets_no_certificate()
+    {
+        // INV-59 (#187, Codex round 4): a writer that edits the record during steps 0–4 (the page's save waits for the
+        // lock, see below) — the run stops at the certificate step, before anything is issued.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var decided = Decided(w, "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        exec.OnCommand = command =>
+        {
+            if (!command.Contains("BackendState", StringComparison.Ordinal)) return;
+            var moved = w.Server("neuhof").Clone();
+            moved.SshHost = "10.0.0.66";
+            w.Servers.UpdateServerAsync(moved).GetAwaiter().GetResult();
+        };
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", false, decided, new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.Certificate, result.FailedStep);
+        Assert.False(Directory.Exists(Path.Combine(w.MtlsDir, "hosts", "neuhof")));   // nothing issued
+    }
+
+    [Fact]
+    public async Task A_save_that_moves_a_server_to_another_host_waits_for_no_running_onboarding()
+    {
+        // INV-59 (#187, Codex round 4): the page's save holds the per-host lock when it changes the connection, so it is
+        // refused while an onboarding (or a certificate step) holds the host; an edit of a name or group is not.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var stored = await SshRecordAsync(w, "neuhof");
+        var moved = stored.Clone();
+        moved.SshHost = "10.0.0.66";
+        var renamed = stored.Clone();
+        renamed.Group = "Produktion";
+        var saves = 0;
+        Task<int> Save() => Task.FromResult(++saves);
+
+        var gate = w.Store.HostLock("neuhof");
+        Assert.True(await gate.WaitAsync(0));   // a running onboarding
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => MtlsOnboardingState.SaveAsync(w.Store, stored, moved, Save));
+            Assert.Equal(0, saves);
+            Assert.Equal(1, await MtlsOnboardingState.SaveAsync(w.Store, stored, renamed, Save));
+        }
+        finally { gate.Release(); }
+
+        Assert.Equal(2, await MtlsOnboardingState.SaveAsync(w.Store, stored, moved, Save));
+        Assert.Equal(1, gate.CurrentCount);   // released after the save
     }
 
     private static async Task<ServerConfig> SshRecordAsync(CredentialWorld w, string id)
@@ -1008,7 +1093,7 @@ public sealed class PerHostCredentialTests
             ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
 
-        var result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         Assert.True(exec.ServerCertificateActivated);
@@ -1038,7 +1123,7 @@ public sealed class PerHostCredentialTests
             ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
 
-        var result = await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         Assert.True(changed);

@@ -501,6 +501,7 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         return Done(target with
         {
             Id = existing.Id, Name = target.Name ?? existing.Name, ServerId = existing.Id,
+            Connection = Whiskers.Services.Certificates.MtlsOnboardingState.ConnectionOf(existing),
             HasControlPlaneState = Whiskers.Services.Certificates.MtlsOnboardingState.Holds(existing,
                 _services.GetService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>()),
         });

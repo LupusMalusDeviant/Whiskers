@@ -10,7 +10,11 @@ public interface IOnboardingService
     /// (<see cref="Whiskers.Services.Mutations.MutationTarget.HasControlPlaneState"/>), which needs the control-plane
     /// approval. When false and the host holds such state by the time the run takes the host lock (another onboarding
     /// finished meanwhile), the run is refused before anything is issued.</param>
+    /// <param name="decidedConnection">INV-59 (#187): the host the record reached when the run was decided
+    /// (<see cref="Whiskers.Services.Mutations.MutationTarget.Connection"/>). Under the host lock the record must still
+    /// reach exactly that host, otherwise the run is refused; null is refused too.</param>
     [Whiskers.Services.Mutations.MutatingOperation("server.onboard")]
-    Task<OnboardingResult> OnboardServerAsync(string serverId, bool mayReplaceMtlsState, IProgress<string> progress,
+    Task<OnboardingResult> OnboardServerAsync(string serverId, bool mayReplaceMtlsState, string? decidedConnection,
+        IProgress<string> progress,
         CancellationToken ct = default);
 }

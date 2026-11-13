@@ -144,6 +144,34 @@ public class OnboardingControlPlaneTests
     }
 
     [Fact]
+    public async Task An_approval_for_one_host_is_never_used_after_the_record_moved_to_another()
+    {
+        // INV-59 (#187, Codex round 4): the approval is bound to the host the record reached when it was given.
+        var server = Plain();
+        var h = new Harness(server, StoreProxy.With(_ => true), secondApprover: true);
+        var asked = await h.OnboardAsync("edge01", UiAdmin, MutationSurface.Ui);
+        Assert.Equal(ApprovalDecisionResult.Decided, await h.Approvals.DecideAsync(asked.ApprovalId!, true,
+            ApprovalResolver.User("second@example.com", AppRole.Admin)));
+
+        server.SshHost = "10.0.0.66";   // edited after the approval
+        var moved = await h.OnboardAsync("edge01", UiAdmin, MutationSurface.Ui);
+
+        Assert.Equal(MutationStatus.PendingApproval, moved.Status);   // a new approval, for the new host
+        Assert.NotEqual(asked.ApprovalId, moved.ApprovalId);
+        Assert.Equal(0, h.Runs);
+    }
+
+    [Fact]
+    public async Task The_decision_carries_the_host_the_record_reaches()
+    {
+        var h = new Harness(Plain(), StoreProxy.With(_ => false));
+
+        await h.OnboardAsync("edge01", UiAdmin, MutationSurface.Ui);
+
+        Assert.Equal(MtlsOnboardingState.ConnectionOf(Plain()), h.Seen!.Connection);
+    }
+
+    [Fact]
     public async Task Re_onboarding_runs_once_after_a_second_Admin_approves_it()
     {
         var h = WithState("store-identity", secondApprover: true);

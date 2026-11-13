@@ -65,7 +65,8 @@ public class OnboardingService : IOnboardingService
         _logger = logger;
     }
 
-    public async Task<OnboardingResult> OnboardServerAsync(string serverId, bool mayReplaceMtlsState, IProgress<string> progress,
+    public async Task<OnboardingResult> OnboardServerAsync(string serverId, bool mayReplaceMtlsState, string? decidedConnection,
+        IProgress<string> progress,
         CancellationToken ct = default)
     {
         var completed = new List<OnboardingStep>();
@@ -96,6 +97,8 @@ public class OnboardingService : IOnboardingService
             }
             server = found;
             slug = OnboardingCommands.Slug(server.Name);
+            if (ChangedHost(server, decidedConnection) is { } moved)
+                return Fail(progress, completed, step, moved);
             // INV-59 (#187): admitted as a first onboarding, but the host holds mTLS state now (another onboarding
             // finished since the decision): replacing it needs the control-plane approval, so nothing runs.
             if (!mayReplaceMtlsState && MtlsOnboardingState.Holds(server, _clientCredentials))
@@ -202,6 +205,8 @@ public class OnboardingService : IOnboardingService
             if (Exact(serverId)?.Clone() is not { } current)
                 return Fail(progress, completed, step, $"{server.Name} wurde inzwischen entfernt.");
             server = current;
+            if (ChangedHost(server, decidedConnection) is { } movedMeanwhile)
+                return Fail(progress, completed, step, movedMeanwhile);
             if (!mayReplaceMtlsState && MtlsOnboardingState.Holds(server, _clientCredentials))
                 return Fail(progress, completed, step,
                     $"{server.Name} hat inzwischen mTLS-Zustand (ein anderes Onboarding ist fertig geworden). " +
@@ -344,6 +349,15 @@ public class OnboardingService : IOnboardingService
     /// id in another case and a display name, which could select another server once this one is gone.</summary>
     private Models.ServerConfig? Exact(string serverId) =>
         _serverConfig.GetServer(serverId) is { } s && string.Equals(s.Id, serverId, StringComparison.Ordinal) ? s : null;
+
+    /// <summary>INV-59 (#187): why the run may not go on when the record no longer reaches the host it was decided on
+    /// (or that host is unknown); null when it still does.</summary>
+    private static string? ChangedHost(Models.ServerConfig server, string? decidedConnection) =>
+        decidedConnection is not null
+        && string.Equals(MtlsOnboardingState.ConnectionOf(server), decidedConnection, StringComparison.Ordinal)
+            ? null
+            : $"Die Verbindung von {server.Name} wurde seit der Entscheidung geändert; das Onboarding gilt nur für den " +
+              "Host, für den es entschieden (und ggf. freigegeben) wurde. Bitte neu starten.";
 
     private async Task<CommandResult> Sh(string serverId, string command, TimeSpan timeout, CancellationToken ct)
     {
