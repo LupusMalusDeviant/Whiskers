@@ -331,9 +331,11 @@ A8–A11 were found while building steps 5 and 6. Each replaces the wording abov
   the record no longer reaches that host (or none was passed). Every save of an existing server on the Servers page
   holds the same per-host lock (`MtlsOnboardingState.SaveAsync`) and is refused while an onboarding or a certificate
   step holds it — also a save that keeps the connection, because it writes the whole record and may carry a host read
-  before another admin's change. A cached Docker client is bound to the connection it was built for
+  before another admin's change; an SSH key upload, which writes the record too, runs under the same lock, for a new
+  server as well. A cached Docker client is bound to the connection it was built for
   (`DockerConnectionManager.CacheIdentityOf`): a client for the record's earlier host is never handed out, and a client
-  whose build finished after the record moved is not published. **Known limit:** the protection follows
+  whose build finished after the record moved is not published; a caller re-reads the record under the build lock, so one
+  that read the earlier host neither drops the current client nor builds one for that host. **Known limit:** the protection follows
   Whiskers' records, not the physical host — a second record for the same host has no mTLS state of its own, so its
   first onboarding needs no approval. Creating that record is an Admin action (`server.save`) and is audited.
 

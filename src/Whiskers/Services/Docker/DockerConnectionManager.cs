@@ -129,6 +129,14 @@ public class DockerConnectionManager : IDockerConnectionManager
         await gate.WaitAsync();
         try
         {
+            // The record as it is now: a caller that read it before the wait must neither drop a client another caller
+            // built for the record's current connection nor build one for its earlier connection (Codex round 6).
+            server = _serverConfig.GetServer(server.Id)
+                ?? throw new InvalidOperationException($"Server '{serverId ?? "default"}' not found");
+            if (server.ConnectionType == ConnectionType.Kubernetes)
+                throw new InvalidOperationException(
+                    $"Server '{server.Name}' is a Kubernetes cluster — handled by the workload seam, not the Docker connection manager.");
+
             // Re-check under the lock — another caller may have just built it.
             if (TryGetLiveClient(server, out var live2))
                 return live2!;

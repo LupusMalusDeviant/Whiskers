@@ -51,15 +51,28 @@ public static class MtlsOnboardingState
     {
         ArgumentNullException.ThrowIfNull(updated);
         ArgumentNullException.ThrowIfNull(save);
-        if (store is null || stored is null)
+        if (stored is null)
             return await save();
-        var gate = store.HostLock(stored.Id);
+        return await HoldHostAsync(store, stored.Id, stored.Name, save);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="write"/> holding the per-host lock of <paramref name="serverId"/>, or refuses before it runs
+    /// while an onboarding or a certificate step holds it. For every write of a server record, such as an SSH key
+    /// upload, which writes the whole record as well (Codex round 6).
+    /// </summary>
+    public static async Task<T> HoldHostAsync<T>(IMtlsClientCredentialStore? store, string serverId, string name,
+        Func<Task<T>> write)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+        if (store is null) return await write();
+        var gate = store.HostLock(serverId);
         if (!await gate.WaitAsync(0))
             throw new InvalidOperationException(
-                $"An onboarding or certificate step for {stored.Name} is running; save the server once it has finished.");
+                $"An onboarding or certificate step for {name} is running; save the server once it has finished.");
         try
         {
-            return await save();
+            return await write();
         }
         finally
         {
