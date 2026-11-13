@@ -178,11 +178,14 @@ public sealed partial class TargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public async Task A_new_server_does_not_have_to_exist_yet()
+    public async Task A_server_to_onboard_must_exist_while_a_saved_one_need_not()
     {
-        var (outcome, _) = await RunAsync("server.onboard", new { serverId = "new-box", name = "New box" });
+        // INV-59 (#187): onboarding works on a server in the inventory; saving adds one.
+        var (onboard, _) = await RunAsync("server.onboard", new { serverId = "new-box", name = "New box" });
+        var (save, _) = await RunAsync("server.save", new { serverId = "new-box", name = "New box" });
 
-        Assert.Equal(MutationStatus.Executed, outcome.Status);
+        Assert.Equal(MutationStatus.Denied, onboard.Status);
+        Assert.Equal(MutationStatus.Executed, save.Status);
     }
 
     // ---------------------------------------------------------------- cloud servers

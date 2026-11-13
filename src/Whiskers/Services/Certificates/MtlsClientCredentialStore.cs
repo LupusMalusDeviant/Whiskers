@@ -131,6 +131,50 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
             ? MtlsClientIdentity.FromStem(serverId, s.Stem, GenerationOf(slot))
             : null;
 
+    public bool HoldsState(string serverId)
+    {
+        var dir = HostDir(serverId);
+        // Not Directory.Exists: it answers false for a directory it cannot inspect, too. And a DirectoryNotFoundException
+        // alone proves nothing either: on Linux .NET raises it for ENOTDIR as well (a file where a directory belongs, here
+        // or above). Only a directory that is positively missing means no state; everything else throws.
+        try
+        {
+            return Directory.EnumerateFileSystemEntries(dir).Any();
+        }
+        catch (DirectoryNotFoundException)
+        {
+            ConfirmMissing(dir);
+            return false;
+        }
+    }
+
+    /// <summary>Returns only when <paramref name="path"/> is positively missing: the nearest ancestor that can be listed
+    /// does not list the next component, and no component on the way is a file. Throws otherwise.</summary>
+    private static void ConfirmMissing(string path)
+    {
+        var current = path;
+        while (true)
+        {
+            if (File.Exists(current))
+                throw new IOException($"'{current}' is a file where a credential directory belongs.");
+            var parent = Path.GetDirectoryName(current)
+                         ?? throw new IOException($"Cannot tell whether '{path}' exists.");
+            var name = Path.GetFileName(current);
+            try
+            {
+                // An entry of that name (in any case) that could not be read as a directory: not missing.
+                if (Directory.EnumerateFileSystemEntries(parent)
+                    .Any(e => string.Equals(Path.GetFileName(e), name, StringComparison.OrdinalIgnoreCase)))
+                    throw new IOException($"'{current}' exists but cannot be read as a directory.");
+                return;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                current = parent;
+            }
+        }
+    }
+
     public MtlsClientIdentity? PendingIdentityOf(string serverId) =>
         ReadState(serverId) is { PendingSlot: { } p } s ? MtlsClientIdentity.FromStem(serverId, s.Stem, GenerationOf(p)) : null;
 

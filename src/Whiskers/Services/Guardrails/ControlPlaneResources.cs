@@ -61,6 +61,25 @@ public static class ControlPlaneResources
         "mtls.shared_client_retire",
     };
 
+    /// <summary>INV-59 (#187): capabilities that change the control plane only when their target already holds
+    /// control-plane state. Onboarding a new host creates its mTLS state; re-onboarding one replaces it.</summary>
+    public static readonly IReadOnlySet<string> CapabilitiesWhenStateExists = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "server.onboard",
+    };
+
+    /// <summary>Set by the gateway (never by a caller) when the resolved target holds control-plane state
+    /// (<see cref="Whiskers.Services.Mutations.MutationTarget.HasControlPlaneState"/>).</summary>
+    public const string ResolvedStateKey = "__resolvedControlPlaneState";
+
+    /// <summary>Whether <paramref name="capability"/> changes the control plane by what it is: always for
+    /// <see cref="Capabilities"/>, and for <see cref="CapabilitiesWhenStateExists"/> when the gateway resolved
+    /// existing state.</summary>
+    public static bool ChangesControlPlane(string capability, IReadOnlyDictionary<string, System.Text.Json.JsonElement> arguments) =>
+        Capabilities.Contains(capability)
+        || (CapabilitiesWhenStateExists.Contains(capability)
+            && arguments.TryGetValue(ResolvedStateKey, out var state) && state.ValueKind == System.Text.Json.JsonValueKind.True);
+
     /// <summary>Arguments that name a container, volume or network directly (the agent's own calls carry them raw).</summary>
     private static readonly HashSet<string> IdentityArguments = new(StringComparer.OrdinalIgnoreCase)
     {

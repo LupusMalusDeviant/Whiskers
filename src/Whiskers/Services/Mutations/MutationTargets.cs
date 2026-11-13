@@ -168,8 +168,9 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             "host" => await HostAsync(request, capability, target, ct),
             "server" when capability.Id.StartsWith("endpointcheck.", StringComparison.Ordinal) =>
                 await RecordAsync(request, capability, target, ct),
+            "server" when capability.Id == "server.onboard" => OnboardTarget(target),
             "server" => Server(target, NullIfEmpty(target.Id) ?? target.ServerId,
-                mustExist: capability.Id is not ("server.onboard" or "server.save")),
+                mustExist: capability.Id != "server.save"),
             "network" => await NetworkAsync(request, capability, target, ct),
             "cloud-server" => CloudServer(target),
             "scheduled-task" => Creates.Contains(capability.Id) ? Pass(target) : await TaskAsync(target),
@@ -474,6 +475,36 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         {
             return Refuse($"The compose deployment's impact cannot be determined: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// <c>server.onboard</c> (INV-59, #187): onboarding works on a server that is already in the inventory, so the
+    /// decision is on exactly that server — by its id, then by its id in another case — never on the default server or
+    /// a display name, and an unknown or ambiguous id is refused. The onboarding then runs on the canonical id, so
+    /// policy and execution cannot name two different servers. The resolver records whether the server already holds
+    /// mTLS state (<see cref="Whiskers.Services.Certificates.MtlsOnboardingState"/>): re-onboarding it is a control-plane
+    /// change.
+    /// </summary>
+    private TargetResolution OnboardTarget(MutationTarget target)
+    {
+        var id = NullIfEmpty(target.Id) ?? target.ServerId;
+        if (string.IsNullOrWhiteSpace(id)) return Refuse("Onboarding names no server.");
+        var servers = _services.GetService<IServerConfigService>()?.GetServers() ?? [];
+        var existing = servers.FirstOrDefault(s => s.Id == id);
+        if (existing is null)
+        {
+            var folded = servers.Where(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (folded.Count > 1) return Refuse($"Ambiguous server '{id}'.", id);
+            existing = folded.SingleOrDefault();
+        }
+        if (existing is null) return Refuse($"Unknown server '{id}'.", id);
+        return Done(target with
+        {
+            Id = existing.Id, Name = target.Name ?? existing.Name, ServerId = existing.Id,
+            Connection = Whiskers.Services.Certificates.MtlsOnboardingState.ConnectionOf(existing),
+            HasControlPlaneState = Whiskers.Services.Certificates.MtlsOnboardingState.Holds(existing,
+                _services.GetService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>()),
+        });
     }
 
     private TargetResolution Server(MutationTarget target, string? idOrName, bool mustExist)

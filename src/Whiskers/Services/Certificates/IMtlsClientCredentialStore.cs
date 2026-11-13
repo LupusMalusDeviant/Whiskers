@@ -40,6 +40,12 @@ public interface IMtlsClientCredentialStore
     /// <summary>The active identity of <paramref name="serverId"/>, or null before the first issue.</summary>
     MtlsClientIdentity? IdentityOf(string serverId);
 
+    /// <summary>INV-59 (#187): false only when the store holds nothing at all for <paramref name="serverId"/> (no
+    /// directory, or an empty one). An identity file or slot of any content — readable, damaged or half written —
+    /// counts as state. Throws when the store cannot tell (an id that cannot be a directory name, an I/O error); a
+    /// caller treats that as state.</summary>
+    bool HoldsState(string serverId);
+
     /// <summary>The identity of the pending (issued, not yet active) certificate, or null.</summary>
     MtlsClientIdentity? PendingIdentityOf(string serverId);
 

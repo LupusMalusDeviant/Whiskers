@@ -69,6 +69,28 @@ public sealed class SshKeyLeaseTests : IDisposable
     }
 
     [Fact]
+    public async Task A_key_for_a_removed_server_never_reaches_a_server_named_like_its_id()
+    {
+        // INV-59 (#187, Codex round 7): the registry finds a server by its display name as a fallback. An upload for a
+        // removed id must not be written for, or rewrite the record of, another server whose name equals that id.
+        var keys = new SealedKeyFiles(TestVault.Usable, _paths);
+        var servers = new ServerConfigService(Options.Create(new DockerSettings { SocketPath = "unix:///nope.sock" }),
+            NullLogger<ServerConfigService>.Instance, dataPaths: _paths, sealedKeys: keys);
+        await servers.InitializeAsync();
+        await servers.AddServerAsync(new ServerConfig
+        {
+            Id = "zirkus", Name = "edge", ConnectionType = ConnectionType.SSH, SshHost = "127.0.0.1", SshPort = 22, SshUser = "probe"
+        });
+        Assert.Equal("zirkus", servers.GetServer("edge")!.Id);   // the fallback this test is about
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            servers.SaveSshKeyAsync("edge", "id_ecdsa", System.Text.Encoding.UTF8.GetBytes(SealedKeyFilesTests.NewPem())));
+
+        Assert.Null(servers.GetServer("zirkus")!.SshKeyFileName);
+        Assert.False(Directory.Exists(Path.Combine(_paths.SshKeysDir, "edge")));
+    }
+
+    [Fact]
     public async Task A_directory_that_is_not_memory_backed_is_refused_and_nothing_is_unsealed()
     {
         var (servers, keys, server, _) = await WithStoredKeyAsync();

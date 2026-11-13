@@ -105,6 +105,17 @@ public sealed record MutationTarget(string Kind, string Id, string? Name = null,
     /// <summary>The resolver found the target in the inventory and <see cref="Id"/> is canonical. False for a
     /// target that is created by the operation or whose kind is resolved by its own service.</summary>
     public bool Resolved { get; init; }
+
+    /// <summary>INV-59 (#187): the server being onboarded already holds mTLS state — client material in its record or
+    /// an identity in the per-host credential store — so the onboarding replaces it (a re-onboarding). Set by the
+    /// resolver for <c>server.onboard</c> only, and also when that state cannot be read (fail closed).</summary>
+    public bool HasControlPlaneState { get; init; }
+
+    /// <summary>INV-59 (#187): for <c>server.onboard</c>, the identity of the host the server record reaches
+    /// (<see cref="Whiskers.Services.Certificates.MtlsOnboardingState.ConnectionOf"/>) when it was decided. Part of the
+    /// approval binding, and checked again by the onboarding under the host lock: an approval given for one host is
+    /// never used on another after the record was edited. Null for every other capability.</summary>
+    public string? Connection { get; init; }
 }
 
 /// <summary>Everything the gateway needs to decide on and record one mutation.</summary>

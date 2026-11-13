@@ -702,12 +702,29 @@
             _form.IsDefault = _editingServer.IsDefault;
             _form.Enabled = _editingServer.Enabled;
 
-            if (_sshKeyData != null && _sshKeyFileName != null)
-                await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
-
             // The store decides the kubeconfig reference when it writes (R1-11): the new one, or whatever the server
             // has at that moment — a save queued behind another admin's rotation keeps the rotated kubeconfig.
-            var previous = await ServerConfigService.UpdateServerAsync(Record(), _newKubeconfigKey, cloudKey);
+            // INV-59 (#187): a save waits for no onboarding or certificate step of the server — it holds their per-host
+            // lock, or is refused while one runs (the whole record is written, so a name save counts as well). The SSH
+            // key upload writes the record too, so it runs under the same lock, and nothing is written when refused.
+            // The record edited is exactly this id (never another server by its display name, Codex round 7); a record
+            // removed since the dialog opened is not written again, checked before and under the lock.
+            var editedId = _editingServer.Id;
+            Whiskers.Models.ServerConfig? Edited() =>
+                ServerConfigService.GetServer(editedId) is { } found && string.Equals(found.Id, editedId, StringComparison.Ordinal)
+                    ? found : null;
+            var stored = Edited() ?? throw new InvalidOperationException(
+                $"Server '{_editingServer.Name}' was removed meanwhile; nothing was saved.");
+            var updated = Record();
+            var previous = await Whiskers.Services.Certificates.MtlsOnboardingState.SaveAsync(ClientCredentials,
+                stored, updated, async () =>
+                {
+                    if (Edited() is null)
+                        throw new InvalidOperationException($"Server '{_editingServer.Name}' was removed meanwhile; nothing was saved.");
+                    if (_sshKeyData != null && _sshKeyFileName != null)
+                        await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
+                    return await ServerConfigService.UpdateServerAsync(updated, _newKubeconfigKey, cloudKey);
+                });
             if (_newKubeconfigKey is not null && previous is { ConnectionType: Whiskers.Models.ConnectionType.Kubernetes })
                 _oldKubeconfigKey = Whiskers.Services.Workloads.Kubernetes.KubernetesClientCache.KubeconfigKeyOf(previous);
             if ((cloudKey.NewRef is not null || cloudKey.Clears) && previous?.CloudKeyRef is { } oldRef && oldRef != cloudKey.NewRef)
@@ -717,14 +734,19 @@
         }
         else
         {
-            await ServerConfigService.AddServerAsync(Record());
-
-            if (_sshKeyData != null && _sshKeyFileName != null)
-                await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
-
-            // The server now exists: if the connection probe fails and the user fixes the form and
-            // saves again, that retry must UPDATE this entry instead of adding a duplicate id.
-            _editingServer = ServerConfigService.GetServer(_form.Id);
+            // INV-59 (#187): creating the record and uploading its key (which writes the whole record) both hold the host
+            // lock; while a step holds it, nothing is created, so the retry adds the server as before.
+            await Whiskers.Services.Certificates.MtlsOnboardingState.HoldHostAsync(ClientCredentials, _form.Id, _form.Name,
+                async () =>
+                {
+                    await ServerConfigService.AddServerAsync(Record());
+                    // The server now exists: if the connection probe (or the key upload) fails and the user fixes the
+                    // form and saves again, that retry must UPDATE this entry instead of adding a duplicate id.
+                    _editingServer = ServerConfigService.GetServer(_form.Id);
+                    if (_sshKeyData != null && _sshKeyFileName != null)
+                        await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
+                    return true;
+                });
 
         }
 
@@ -935,7 +957,9 @@
         {
             // Root installs on the target host: through the gateway like every other root-equivalent action.
             _onboardResult = await Mutations.RunAsync("server.onboard", new { serverId = server.Id, name = server.Name },
-                (ResolvedTarget rt, CancellationToken token) => Onboarding.OnboardServerAsync(rt.ServerId ?? rt.Id, progress, token));
+                (ResolvedTarget rt, CancellationToken token) =>
+                    Onboarding.OnboardServerAsync(rt.ServerId ?? rt.Id, rt.Record.HasControlPlaneState, rt.Record.Connection,
+                        progress, token));
         }
         catch (MutationRefusedException ex)
         {

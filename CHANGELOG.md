@@ -55,6 +55,21 @@ Check these before or right after the update. Details are in the entries below.
 
 ### All changes since 0.15.0
 
+- **Fix: re-onboarding a host needs the control-plane approval (INV-59, #187).** Onboarding issues mTLS material,
+  writes the proxy configuration and starts ghostunnel. For a host that already holds mTLS state (TLS client material
+  in its record, or anything in the per-host credential store) that replaces it, and it ran without the Admin
+  approval that INV-59 requires when the same material is issued or migrated directly. Such a re-onboarding now waits
+  for an Admin approval (four-eyes when *Require a second approver* is on); a key, an automation or an agent instructed
+  over MCP is refused. A first onboarding of a host without that state runs as before. A damaged identity file, or a
+  state that cannot be read, counts as state. Onboarding is decided on exactly the server its id names (an unknown or
+  ambiguous id is refused, a display name never selects a server), and a run admitted as a first onboarding refuses
+  before issuing anything when another onboarding of the same host finished in the meantime. The run holds the host's
+  certificate lock from its first step, so the server cannot be removed while it is being onboarded. The decision and
+  its approval are bound to the host the record reaches: after the record's connection was changed, the run is refused
+  and the approval no longer applies, no save of the server (an SSH key upload included) runs
+  while an onboarding holds the host, and a Docker client built for the earlier host is never used again. A removed server is never
+  replaced by another one named like its id. The protection follows Whiskers' records:
+  a second record for the same host has no mTLS state of its own.
 - **Fix: access stores are never restored from their previous generation.** A damaged or missing `roles.json`,
   `whitelist.json` or `mcp-permissions.json` used to be replaced automatically by its `.bak`, which may still hold what
   the last save revoked: a deleted MCP API key authenticated again, a removed role or address came back. These three

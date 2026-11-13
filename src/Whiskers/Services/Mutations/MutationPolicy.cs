@@ -134,6 +134,9 @@ public sealed class GuardrailMutationPolicy : IMutationPolicy
         var args = request.Arguments.Where(a => !a.Key.StartsWith("__", StringComparison.Ordinal))
             .ToDictionary(a => a.Key, a => a.Value);
         args["__resolvedKind"] = JsonSerializer.SerializeToElement(t.Kind);
+        // INV-59 (#187): a re-onboarding replaces the host's mTLS state.
+        if (t.HasControlPlaneState)
+            args[ControlPlaneResources.ResolvedStateKey] = JsonSerializer.SerializeToElement(true);
         // Contract 0006: the exposures of the resolved target, for ExposureChangeRule only (the other rules skip them); a
         // withheld one under a prefix of its own.
         // Review m1: an entry whose value only is withheld under a prefix of its own, so the reason can name its key.

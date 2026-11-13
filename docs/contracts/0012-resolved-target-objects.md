@@ -2,7 +2,7 @@
 
 Status: **Accepted** · 8 November 2026 by the maintainer, with the decisions D1–D15 as written and every question
 Q1–Q7 answered as recommended (see *Answered*). Amendments A1–A4 accepted 10 November 2026, A5–A7 accepted
-10 November 2026, A8–A11 accepted 10 November 2026.
+10 November 2026, A8–A11 accepted 10 November 2026. A12 follows the decision on #187, A13 the decision to bind the connection (both 13 November 2026).
 
 ## Purpose
 
@@ -303,6 +303,43 @@ A8–A11 were found while building steps 5 and 6. Each replaces the wording abov
 - **A11 — New read `ISystemdService.ListUnitNamesAsync(serverId)`** (`[InventoryLookup]`): the host's
   `systemctl list-unit-files` listing that D11 resolves a systemd unit against. A host whose listing cannot be read
   refuses the unit with a reason (fail closed).
+
+## Amendment A12 (follows the maintainer's decision on #187, option 2, 13 November 2026)
+
+- **A12 — `MutationTarget.HasControlPlaneState`.** `server.onboard` resolves exactly a server of the inventory: by
+  its id, then by its id in another case; never the default server or a display name. An empty, unknown or ambiguous
+  id is refused, so the decision and the onboarding (which runs on the canonical id) cannot name two different servers.
+  The resolver records whether that server already holds mTLS state (`MtlsOnboardingState.Holds`): TLS client material
+  in its record (`TcpUseTls`, a client certificate, key or CA path), or anything in the per-host credential store
+  (new `IMtlsClientCredentialStore.HoldsState`: false only for a host directory that is empty or positively missing —
+  the nearest listable ancestor does not list it and no component on the way is a file; an
+  access or I/O error throws, and a damaged or half written identity file counts). Whatever cannot be read counts as
+  state (fail closed). The gateway passes it to the rules as `__resolvedControlPlaneState`; a caller's own `__…`
+  arguments never reach them. `ProtectedResourceRule` then treats the re-onboarding as a control-plane capability
+  (INV-59). The onboarding receives what was decided (`IOnboardingService.OnboardServerAsync(serverId,
+  mayReplaceMtlsState, …)`), works only on the server whose id is exactly that id (never a display name or another
+  case), and holds the per-host lock from before it looks the server up to its end (replaces "steps 5–9" of contract 0007, amendment
+  10), so the server cannot be removed during the run. Under the lock it checks the state again: a run admitted as a
+  first onboarding refuses before anything runs when the host holds state by then. No other capability sets or reads
+  it.
+- **A13 — `MutationTarget.Connection` (follows the maintainer's decision of 13 November 2026, "bind the connection").**
+  For `server.onboard` the resolver also records which host the record reaches (`MtlsOnboardingState.ConnectionOf`:
+  connection type, SSH and TCP endpoint, socket, Tailscale SSH, Kubernetes context; not names, groups, tags or
+  credentials). It is part of the approval binding (`targetConnection`), so an approval given for one host is unusable
+  once the record reaches another. The onboarding receives it (`OnboardServerAsync(serverId, mayReplaceMtlsState,
+  decidedConnection, …)`) and refuses, under the host lock, at its start and again before the certificate step, when
+  the record no longer reaches that host (or none was passed). Every save of an existing server on the Servers page
+  holds the same per-host lock (`MtlsOnboardingState.SaveAsync`) and is refused while an onboarding or a certificate
+  step holds it — also a save that keeps the connection, because it writes the whole record and may carry a host read
+  before another admin's change; an SSH key upload, which writes the record too, runs under the same lock, for a new
+  server as well. A cached Docker client is bound to the connection it was built for
+  (`DockerConnectionManager.CacheIdentityOf`): a client for the record's earlier host is never handed out, and a client
+  whose build finished after the record moved is not published; a caller re-reads the record under the build lock, so one
+  that read the earlier host neither drops the current client nor builds one for that host. These steps find a record
+  by its exact id only, never by the registry's display-name fallback: a save, a key upload or a client build for a
+  removed server is refused and never reaches another server named like its id. **Known limit:** the protection follows
+  Whiskers' records, not the physical host — a second record for the same host has no mTLS state of its own, so its
+  first onboarding needs no approval. Creating that record is an Admin action (`server.save`) and is audited.
 
 ## Not in scope
 

@@ -709,7 +709,7 @@ public sealed class PerHostCredentialTests
                 : MtlsProbeOutcome.NotChecked),
         };
 
-        var result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         var saved = w.Server("neuhof");
@@ -756,7 +756,7 @@ public sealed class PerHostCredentialTests
             },
         };
 
-        var result = await onboarding.OnboardServerAsync("rabenhof", new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("rabenhof", true, Decided(w, "rabenhof"), new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         Assert.False(migration!.Ok);
@@ -787,14 +787,333 @@ public sealed class PerHostCredentialTests
         var gate = w.Store.HostLock("neuhof");
         Assert.True(await gate.WaitAsync(0));   // e.g. a removal or a migration of the same id
         OnboardingResult result;
-        try { result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default); }
+        try { result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default); }
         finally { gate.Release(); }
 
         Assert.False(result.Success);
-        Assert.Equal(OnboardingStep.Certificate, result.FailedStep);
+        Assert.Equal(OnboardingStep.Bootstrap, result.FailedStep);
         Assert.Contains("Zertifikatsschritt", result.Error);
         Assert.False(Directory.Exists(Path.Combine(w.MtlsDir, "hosts", "neuhof")));   // no key issued
         Assert.Equal(ConnectionType.SSH, w.Server("neuhof").ConnectionType);
+    }
+
+    [Fact]
+    public async Task A_first_onboarding_runs_no_command_when_the_host_got_mtls_state_before_it_started()
+    {
+        // INV-59 (#187, Codex round 7): admitted as a first onboarding, but by the time it takes the host lock the host
+        // already holds mTLS state. The run refuses at its start, before a single command reaches the host.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var hostDir = Path.Combine(w.MtlsDir, "hosts", "neuhof");
+        Directory.CreateDirectory(hostDir);
+        File.WriteAllText(Path.Combine(hostDir, MtlsClientCredentialStore.IdentityFile), "{}");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Contains("Freigabe", result.Error);
+        Assert.Empty(exec.Scripts);   // nothing ran on the host
+        Assert.Equal(1, w.Store.HostLock("neuhof").CurrentCount);
+    }
+
+    [Fact]
+    public async Task A_first_onboarding_is_refused_when_the_host_got_mtls_state_meanwhile()
+    {
+        // INV-59 (#187, Codex review): two first onboardings admitted while the host had no state; the one that finished
+        // first created it. The other re-checks under the host lock and issues nothing without the approval.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var hostDir = Path.Combine(w.MtlsDir, "hosts", "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        exec.OnCommand = command =>
+        {
+            if (!command.Contains("BackendState", StringComparison.Ordinal) || Directory.Exists(hostDir)) return;
+            Directory.CreateDirectory(hostDir);
+            File.WriteAllText(Path.Combine(hostDir, MtlsClientCredentialStore.IdentityFile), "{}");
+        };
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.Certificate, result.FailedStep);
+        Assert.Contains("Freigabe", result.Error);
+        Assert.Equal([MtlsClientCredentialStore.IdentityFile],
+            Directory.EnumerateFileSystemEntries(hostDir).Select(Path.GetFileName).ToArray());   // nothing issued
+        Assert.Equal(ConnectionType.SSH, w.Server("neuhof").ConnectionType);
+        Assert.Equal(1, w.Store.HostLock("neuhof").CurrentCount);   // released
+    }
+
+    [Theory]
+    [InlineData("not json at all")]
+    [InlineData("{\"ServerId\":\"neuhof\",\"Stem\":\"neuhof\",\"ActiveSlot\":\"../../etc\"}")]
+    public async Task A_damaged_identity_file_still_counts_as_mtls_state(string content)
+    {
+        // INV-59 (#187, Codex review): the store reads a damaged file as "no identity"; for the onboarding decision it is
+        // state all the same.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var record = await SshRecordAsync(w, "neuhof");
+        var hostDir = Path.Combine(w.MtlsDir, "hosts", "neuhof");
+        Assert.False(MtlsOnboardingState.Holds(record, w.Store));
+
+        Directory.CreateDirectory(hostDir);
+        File.WriteAllText(Path.Combine(hostDir, MtlsClientCredentialStore.IdentityFile), content);
+
+        Assert.Null(w.Store.IdentityOf("neuhof"));
+        Assert.True(w.Store.HoldsState("neuhof"));
+        Assert.True(MtlsOnboardingState.Holds(record, w.Store));
+        // An id the store cannot place counts as state too.
+        Assert.True(MtlsOnboardingState.Holds(new ServerConfig { Id = "../neuhof" }, w.Store));
+    }
+
+    [Fact]
+    public async Task A_credential_directory_that_cannot_be_inspected_counts_as_mtls_state()
+    {
+        // INV-59 (#187, Codex re-review): Directory.Exists answers false for a path it cannot inspect. Here a file
+        // stands where the host's directory belongs: the store cannot tell what it holds, so it is state.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var record = await SshRecordAsync(w, "neuhof");
+        Directory.CreateDirectory(Path.Combine(w.MtlsDir, "hosts"));
+        File.WriteAllText(Path.Combine(w.MtlsDir, "hosts", "neuhof"), "");
+
+        Assert.ThrowsAny<IOException>(() => w.Store.HoldsState("neuhof"));
+        Assert.True(MtlsOnboardingState.Holds(record, w.Store));
+    }
+
+    [Fact]
+    public void A_file_above_the_credential_directory_counts_as_mtls_state_and_a_missing_one_does_not()
+    {
+        // INV-59 (#187, Codex round 3): on Linux .NET reports ENOTDIR (a file where a directory belongs, here or above)
+        // as DirectoryNotFoundException; only a directory positively missing means no state.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var hosts = Path.Combine(w.MtlsDir, "hosts");
+        if (Directory.Exists(hosts)) Directory.Delete(hosts, recursive: true);
+        Assert.False(w.Store.HoldsState("neuhof"));   // nothing stored at all: missing, positively
+
+        File.WriteAllText(hosts, "");
+        Assert.ThrowsAny<IOException>(() => w.Store.HoldsState("neuhof"));
+        Assert.True(MtlsOnboardingState.Holds(new ServerConfig { Id = "neuhof" }, w.Store));
+    }
+
+    [Fact]
+    public async Task The_server_is_looked_up_only_under_the_host_lock()
+    {
+        // INV-59 (#187, Codex round 3): a removal finished between the lookup and the lock could let the id select
+        // another server; the lookup runs while the run holds the lock that removal needs.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var lookups = new List<int>();
+        var servers = NameFallbackServers.Over(w.Servers, id =>
+        {
+            if (id == "neuhof") lookups.Add(w.Store.HostLock("neuhof").CurrentCount);
+        });
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20") { OnCommand = _ => throw new OperationCanceledException() };
+        var onboarding = new OnboardingService(exec, servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
+
+        Assert.NotEmpty(lookups);
+        Assert.All(lookups, held => Assert.Equal(0, held));   // the lock was taken at every lookup
+    }
+
+    /// <summary>The production lookup of <see cref="Whiskers.Services.ServerConfig.IServerConfigService.GetServer"/>: the
+    /// id, then the id in another case, then the display name — over <see cref="MutableServerConfig"/>.</summary>
+    public class NameFallbackServers : DispatchProxy
+    {
+        private MutableServerConfig _inner = null!;
+        private Action<string>? _onLookup;
+
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            if (method!.Name == nameof(Whiskers.Services.ServerConfig.IServerConfigService.GetServer))
+            {
+                var id = (string)args![0]!;
+                _onLookup?.Invoke(id);
+                var all = _inner.GetServers();
+                return all.FirstOrDefault(s => s.Id == id)
+                       ?? all.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase))
+                       ?? all.FirstOrDefault(s => string.Equals(s.Name, id, StringComparison.OrdinalIgnoreCase));
+            }
+            try { return method.Invoke(_inner, args); }
+            catch (TargetInvocationException ex) when (ex.InnerException is not null) { throw ex.InnerException; }
+        }
+
+        internal static Whiskers.Services.ServerConfig.IServerConfigService Over(MutableServerConfig inner,
+            Action<string>? onLookup = null)
+        {
+            var proxy = Create<Whiskers.Services.ServerConfig.IServerConfigService, NameFallbackServers>();
+            ((NameFallbackServers)(object)proxy)._inner = inner;
+            ((NameFallbackServers)(object)proxy)._onLookup = onLookup;
+            return proxy;
+        }
+    }
+
+    [Fact]
+    public async Task An_onboarding_never_moves_to_a_server_that_bears_its_id_as_a_display_name()
+    {
+        // INV-59 (#187, Codex re-review): the decided server is gone when the run starts; another one is displayed with
+        // its id. The run refuses instead of onboarding that other server.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"), ("rabenhof", "100.64.0.9"));
+        var other = w.Server("rabenhof").Clone();
+        other.Name = "neuhof";
+        await w.Servers.UpdateServerAsync(other);
+        await w.Servers.RemoveServerAsync("neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.9");
+        var onboarding = new OnboardingService(exec, NameFallbackServers.Over(w.Servers), ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", true, Decided(w, "neuhof"), new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.Bootstrap, result.FailedStep);
+        Assert.Empty(exec.Scripts);   // not one command reached any host
+    }
+
+    [Fact]
+    public async Task A_server_being_onboarded_cannot_be_removed_until_the_run_ends()
+    {
+        // INV-59 (#187, Codex re-review): the run holds the host lock from its first step, so the server cannot vanish
+        // during bootstrap and let its id select another server.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        Exception? removal = null;
+        exec.OnCommand = command =>
+        {
+            if (removal is not null || !command.Contains("echo ok", StringComparison.Ordinal)) return;
+            removal = Record.Exception(() => Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(w.Servers,
+                ComponentTests.ServersKubeconfigSaveTests.NullProxy<Whiskers.Services.Vault.IVaultService>.Create(),
+                w.Server("neuhof"), w.Store).GetAwaiter().GetResult());
+            // Stop the run here: the point is the refused removal during bootstrap.
+            throw new OperationCanceledException();
+        };
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        await Record.ExceptionAsync(() => onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default));
+
+        Assert.IsType<InvalidOperationException>(removal);
+        Assert.NotNull(w.Servers.GetServer("neuhof"));
+        Assert.Equal(1, w.Store.HostLock("neuhof").CurrentCount);   // released after the run
+    }
+
+    /// <summary>The connection a run was decided on (INV-59, #187): the record's as it is now; a removed server has none.</summary>
+    private static string Decided(CredentialWorld w, string id) =>
+        w.Servers.GetServer(id) is { } server ? MtlsOnboardingState.ConnectionOf(server) : "gone";
+
+    [Fact]
+    public async Task A_run_whose_record_reaches_another_host_than_decided_is_refused_before_any_command()
+    {
+        // INV-59 (#187, Codex round 4): approved for the host the record reached then; the record was edited since.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var record = await SshRecordAsync(w, "neuhof");
+        record.SshHost = "10.0.0.5";
+        await w.Servers.UpdateServerAsync(record);
+        var decided = Decided(w, "neuhof");
+        var moved = record.Clone();
+        moved.SshHost = "10.0.0.66";
+        await w.Servers.UpdateServerAsync(moved);
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", true, decided, new Progress<string>(), default);
+        var unknown = await onboarding.OnboardServerAsync("neuhof", true, null, new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.Bootstrap, result.FailedStep);
+        Assert.False(unknown.Success);
+        Assert.Empty(exec.Scripts);   // not one command reached any host
+    }
+
+    [Fact]
+    public async Task A_record_moved_to_another_host_during_bootstrap_gets_no_certificate()
+    {
+        // INV-59 (#187, Codex round 4): a writer that edits the record during steps 0–4 (the page's save waits for the
+        // lock, see below) — the run stops at the certificate step, before anything is issued.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var decided = Decided(w, "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        exec.OnCommand = command =>
+        {
+            if (!command.Contains("BackendState", StringComparison.Ordinal)) return;
+            var moved = w.Server("neuhof").Clone();
+            moved.SshHost = "10.0.0.66";
+            w.Servers.UpdateServerAsync(moved).GetAwaiter().GetResult();
+        };
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", false, decided, new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.Certificate, result.FailedStep);
+        Assert.False(Directory.Exists(Path.Combine(w.MtlsDir, "hosts", "neuhof")));   // nothing issued
+    }
+
+    [Fact]
+    public async Task A_save_of_a_server_waits_for_no_running_onboarding()
+    {
+        // INV-59 (#187, Codex rounds 4 and 5): the page's save holds the per-host lock, so it is refused while an
+        // onboarding (or a certificate step) holds the host — a save that moves the record and a save of a name alike:
+        // both write the whole record, and the second may carry a host read before another admin's change.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var stored = await SshRecordAsync(w, "neuhof");
+        var moved = stored.Clone();
+        moved.SshHost = "10.0.0.66";
+        var renamed = stored.Clone();
+        renamed.Group = "Produktion";
+        var saves = 0;
+        Task<int> Save() => Task.FromResult(++saves);
+
+        var gate = w.Store.HostLock("neuhof");
+        Assert.True(await gate.WaitAsync(0));   // a running onboarding
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => MtlsOnboardingState.SaveAsync(w.Store, stored, moved, Save));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => MtlsOnboardingState.SaveAsync(w.Store, stored, renamed, Save));
+            Assert.Equal(0, saves);
+        }
+        finally { gate.Release(); }
+
+        Assert.Equal(1, await MtlsOnboardingState.SaveAsync(w.Store, stored, moved, Save));
+        Assert.Equal(2, await MtlsOnboardingState.SaveAsync(w.Store, stored, renamed, Save));
+        Assert.Equal(1, gate.CurrentCount);   // released after the save
+    }
+
+    [Fact]
+    public async Task A_save_that_keeps_the_connection_holds_the_host_until_it_is_written()
+    {
+        // Codex round 5: a save of a name, read before another admin moved the record, is still waiting for its write.
+        // Without the lock an onboarding could start on the new host meanwhile and the save would write the old host back
+        // under it. With it, no onboarding starts until that save has been written.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var stored = await SshRecordAsync(w, "neuhof");
+        var renamed = stored.Clone();
+        renamed.Name = "Neuhof (alt)";
+        var written = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var saving = MtlsOnboardingState.SaveAsync(w.Store, stored, renamed, () => written.Task);
+        var gate = w.Store.HostLock("neuhof");
+        Assert.False(await gate.WaitAsync(0));   // an onboarding cannot take the host while the save is pending
+
+        written.SetResult(1);
+        Assert.Equal(1, await saving);
+        Assert.True(await gate.WaitAsync(0));
+        gate.Release();
     }
 
     private static async Task<ServerConfig> SshRecordAsync(CredentialWorld w, string id)
@@ -821,7 +1140,7 @@ public sealed class PerHostCredentialTests
             ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
 
-        var result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         Assert.True(exec.ServerCertificateActivated);
@@ -851,7 +1170,7 @@ public sealed class PerHostCredentialTests
             ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
 
-        var result = await onboarding.OnboardServerAsync("neuhof", new Progress<string>(), default);
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
         Assert.True(result.Success, result.Error);
         Assert.True(changed);

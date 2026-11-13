@@ -65,7 +65,8 @@ public sealed class AuditPathMatrixTests : IDisposable
 
     internal static bool NeedsApproval(PathRow row, IReadOnlyDictionary<string, string> approvalCells)
     {
-        if (row.Class is "A" or "T" or "U" && row.Capabilities.Any(ControlPlaneResources.Capabilities.Contains)) return true;
+        if (row.Class is "A" or "T" or "U" && row.Capabilities.Any(c => ControlPlaneResources.Capabilities.Contains(c)
+                || ControlPlaneResources.CapabilitiesWhenStateExists.Contains(c))) return true;
         // Review MINOR-5: the explicit marker §7 defines, not the wording — a cell that begins with ✅ is a path on which
         // a person gives an approval; anything else ("none", "n/a", "Confirm → Deny …", a ✅ further on) is not.
         return approvalCells.TryGetValue(row.Id, out var cell) && cell.TrimStart().StartsWith(ApprovalMarker, StringComparison.Ordinal);
@@ -359,6 +360,7 @@ public sealed class AuditPathMatrixTests : IDisposable
     // run after the second Admin's approval names it (asserted above for exactly those capabilities).
     [AuditPath("U-25", Pending, Approved)]
     [AuditPath("U-37", Pending, Approved)]
+    [AuditPath("U-21", Pending, Approved)]
     public async Task Every_ui_and_terminal_capability_is_one_complete_event_per_attempt(string row, string capabilityId)
     {
         var capability = new CapabilityCatalog().Find(capabilityId);
@@ -366,7 +368,8 @@ public sealed class AuditPathMatrixTests : IDisposable
         var policy = Permissive();
         var store = new AgentToolTestHelpers.FixedGuardrailStore(policy);
         var approvals = new ApprovalStore(policy: store, persistence: _db.Persistence());
-        var gateway = AuditTrail.Gateway(_db.Scopes, store, approvals);
+        // INV-59 (#187): onboarding waits for the approval on a host that already holds mTLS state — driven here on one.
+        var gateway = AuditTrail.Gateway(_db.Scopes, store, approvals, targets: ReOnboarding(capabilityId) ? HostWithMtlsState() : null);
         UiMutationRunner As(AppRole role) => new(gateway, new CapabilityCatalog(), new Person(role));
         var args = ArgumentsFor();
         var runs = 0;
@@ -395,7 +398,7 @@ public sealed class AuditPathMatrixTests : IDisposable
         Assert.Equal(OpsId, ran.PrincipalId);
         Assert.Equal(1, runs);
         // Exactly the capabilities no setting lifts the second Admin's approval from wait for it (RequiredOutcomesOf).
-        Assert.Equal(ControlPlaneResources.Capabilities.Contains(capabilityId), waits > 0);
+        Assert.Equal(ControlPlaneResources.Capabilities.Contains(capabilityId) || ReOnboarding(capabilityId), waits > 0);
 
         // Failed: the action threw.
         await DecidedAsync(() => Assert.ThrowsAnyAsync<Exception>(() =>
@@ -536,6 +539,18 @@ public sealed class AuditPathMatrixTests : IDisposable
     }
 
     // ------------------------------------------------------------------------------------------------ cancelled attempts
+
+    /// <summary>INV-59 (#187): a capability that waits for the control-plane approval only on a host that already holds
+    /// control-plane state (re-onboarding).</summary>
+    private static bool ReOnboarding(string capabilityId) =>
+        ControlPlaneResources.CapabilitiesWhenStateExists.Contains(capabilityId);
+
+    /// <summary>The production target resolver over the server "local", which already holds mTLS state.</summary>
+    private static MutationTargetResolver HostWithMtlsState() =>
+        new(new TestServices(new FakeDocker(), new FakeServerConfig(new ServerConfig
+        {
+            Id = "local", Name = "Local", IsDefault = true, ConnectionType = ConnectionType.TCP, TcpUseTls = true,
+        })));
 
     /// <summary>A host whose container listing does not answer until its caller gives up, behind the production target
     /// resolver.</summary>

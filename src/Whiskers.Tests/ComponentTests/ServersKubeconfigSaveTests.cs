@@ -227,6 +227,141 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
         Assert.Null(_servers.GetServer(server.Id));
     }
 
+    /// <summary>Forwards to the real registry and records SSH key uploads instead of sealing them (no vault here).</summary>
+    public class KeyUploadRecorder : DispatchProxy
+    {
+        public IServerConfigService Inner { get; set; } = null!;
+        public List<string> Uploads { get; } = [];
+
+        public static (IServerConfigService Service, KeyUploadRecorder Recorder) Over(IServerConfigService inner)
+        {
+            var service = DispatchProxy.Create<IServerConfigService, KeyUploadRecorder>();
+            var recorder = (KeyUploadRecorder)(object)service;
+            recorder.Inner = inner;
+            return (service, recorder);
+        }
+
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            if (method!.Name == nameof(IServerConfigService.SaveSshKeyAsync))
+            {
+                lock (Uploads) Uploads.Add((string)args![0]!);
+                return Task.CompletedTask;
+            }
+            try { return method.Invoke(Inner, args); }
+            catch (TargetInvocationException e) when (e.InnerException is not null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e.InnerException).Throw();
+                throw;
+            }
+        }
+    }
+
+    // The recorder never reads the key; any bytes stand for an uploaded key file.
+    private static readonly byte[] UploadedKey = "placeholder"u8.ToArray();
+
+    [Fact]
+    public async Task A_key_upload_while_an_onboarding_holds_the_host_writes_nothing()
+    {
+        // INV-59 (#187, Codex round 6): the SSH key upload writes the whole server record. It runs under the per-host
+        // lock with the rest of the save, so while an onboarding holds the host nothing is written, the key included.
+        var (service, recorder) = KeyUploadRecorder.Over(_servers);
+        Services.AddSingleton(service);
+        var page = Render<Servers>();
+        var server = new ServerConfig
+        {
+            Name = "edge", ConnectionType = ConnectionType.SSH, SshUser = "root", SshHost = "host.example.com", SshPort = 22
+        };
+        Set(page, "_form", server);
+        await Persist(page);
+
+        Set(page, "_editingServer", _servers.GetServer(server.Id)!.Clone());
+        var edited = _servers.GetServer(server.Id)!.Clone();
+        edited.Name = "edge (neu)";
+        Set(page, "_form", edited);
+        Set(page, "_sshKeyData", UploadedKey);
+        Set(page, "_sshKeyFileName", "id_ed25519");
+
+        var gate = Services.GetRequiredService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>().HostLock(server.Id);
+        Assert.True(await gate.WaitAsync(0));   // a running onboarding
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Persist(page));
+            Assert.Empty(recorder.Uploads);
+            Assert.Equal("edge", _servers.GetServer(server.Id)!.Name);
+        }
+        finally { gate.Release(); }
+
+        await Persist(page);
+        Assert.Equal([server.Id], recorder.Uploads);
+        Assert.Equal("edge (neu)", _servers.GetServer(server.Id)!.Name);
+    }
+
+    [Fact]
+    public async Task A_dialog_for_a_removed_server_writes_nothing_to_a_server_named_like_its_id()
+    {
+        // Codex round 7: the dialog for "edge" stays open, "edge" is removed, and another server is named like its id
+        // while an onboarding holds that server. Saving the stale dialog with a key upload writes nothing anywhere.
+        var (service, recorder) = KeyUploadRecorder.Over(_servers);
+        Services.AddSingleton(service);
+        var page = Render<Servers>();
+        var removed = new ServerConfig
+        {
+            Id = "edge", Name = "edge", ConnectionType = ConnectionType.SSH, SshUser = "root", SshHost = "host.example.com", SshPort = 22
+        };
+        await _servers.AddServerAsync(removed);
+        Set(page, "_editingServer", removed.Clone());
+        Set(page, "_form", removed.Clone());
+        Set(page, "_sshKeyData", UploadedKey);
+        Set(page, "_sshKeyFileName", "id_ed25519");
+
+        await _servers.RemoveServerAsync("edge");
+        await _servers.AddServerAsync(new ServerConfig
+        {
+            Id = "zirkus", Name = "edge", ConnectionType = ConnectionType.SSH, SshUser = "root", SshHost = "other.example.com", SshPort = 22
+        });
+        var gate = Services.GetRequiredService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>().HostLock("zirkus");
+        Assert.True(await gate.WaitAsync(0));   // an onboarding of the other server
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Persist(page));
+        }
+        finally { gate.Release(); }
+
+        Assert.Empty(recorder.Uploads);
+        Assert.DoesNotContain(_servers.GetServers(), s => s.Id == "edge");   // not written back
+        Assert.Equal("other.example.com", _servers.GetServer("zirkus")!.SshHost);
+    }
+
+    [Fact]
+    public async Task A_key_upload_for_a_new_server_waits_for_no_step_holding_its_host()
+    {
+        var (service, recorder) = KeyUploadRecorder.Over(_servers);
+        Services.AddSingleton(service);
+        var page = Render<Servers>();
+        var server = new ServerConfig
+        {
+            Name = "edge", ConnectionType = ConnectionType.SSH, SshUser = "root", SshHost = "host.example.com", SshPort = 22
+        };
+        Set(page, "_form", server);
+        Set(page, "_sshKeyData", UploadedKey);
+        Set(page, "_sshKeyFileName", "id_ed25519");
+
+        var gate = Services.GetRequiredService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>().HostLock(server.Id);
+        Assert.True(await gate.WaitAsync(0));
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Persist(page));
+            Assert.Empty(recorder.Uploads);
+            Assert.Null(_servers.GetServer(server.Id));   // nothing created while refused (Codex round 8)
+        }
+        finally { gate.Release(); }
+
+        await Persist(page);   // the retry creates the server and uploads its key
+        Assert.Equal(server.Id, _servers.GetServer(server.Id)!.Id);
+        Assert.Equal([server.Id], recorder.Uploads);
+    }
+
     private static Task Persist(IRenderedComponent<Servers> page)
     {
         var method = typeof(Servers).GetMethod("PersistServerCoreAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
