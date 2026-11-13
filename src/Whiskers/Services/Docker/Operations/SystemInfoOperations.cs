@@ -109,7 +109,7 @@ internal sealed class SystemInfoOperations
                     info.CpuUsagePercent = hostCpu;
                     info.MemoryUsedBytes = hostMem;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                catch (Exception ex) when (ex is not OperationCanceledException || !(callerToken.IsCancellationRequested || deadline.IsCancellationRequested))
                 {
                     // Fallback: aggregate from running containers (cached stats)
                     var containers = await _connectionManager.ExecuteGuardedAsync(
@@ -143,7 +143,7 @@ internal sealed class SystemInfoOperations
             else
                 info.IpAddress = sysInfo.Name ?? "localhost";
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !(callerToken.IsCancellationRequested || deadline.IsCancellationRequested))
         {
             // A caller that stopped is not an unreachable server (INV-40): its cancellation goes back to it.
             info.IsReachable = false;

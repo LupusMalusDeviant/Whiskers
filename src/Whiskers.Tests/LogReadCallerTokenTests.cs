@@ -113,9 +113,11 @@ public class LogReadCallerTokenTests
         using var caller = new CancellationTokenSource();
 
         var read = ops.GetServerSystemInfoAsync("srv", caller.Token);
-        await caller.CancelAsync();
+        // Cancel synchronously, so the cancellation runs through the read inline: under a loaded full suite a thread-pool
+        // hop once let the 10 s bound below expire first (a TimeoutException, not the read's fault).
+        caller.Cancel();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read.WaitAsync(TimeSpan.FromSeconds(10)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read.WaitAsync(TimeSpan.FromSeconds(60)));
         Assert.Equal(caller.Token, Assert.Single(recorder.CallerTokens));
     }
 
