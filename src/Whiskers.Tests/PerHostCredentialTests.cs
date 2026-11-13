@@ -791,7 +791,7 @@ public sealed class PerHostCredentialTests
         finally { gate.Release(); }
 
         Assert.False(result.Success);
-        Assert.Equal(OnboardingStep.Certificate, result.FailedStep);
+        Assert.Equal(OnboardingStep.Bootstrap, result.FailedStep);
         Assert.Contains("Zertifikatsschritt", result.Error);
         Assert.False(Directory.Exists(Path.Combine(w.MtlsDir, "hosts", "neuhof")));   // no key issued
         Assert.Equal(ConnectionType.SSH, w.Server("neuhof").ConnectionType);
@@ -847,6 +847,99 @@ public sealed class PerHostCredentialTests
         Assert.True(MtlsOnboardingState.Holds(record, w.Store));
         // An id the store cannot place counts as state too.
         Assert.True(MtlsOnboardingState.Holds(new ServerConfig { Id = "../neuhof" }, w.Store));
+    }
+
+    [Fact]
+    public async Task A_credential_directory_that_cannot_be_inspected_counts_as_mtls_state()
+    {
+        // INV-59 (#187, Codex re-review): Directory.Exists answers false for a path it cannot inspect. Here a file
+        // stands where the host's directory belongs: the store cannot tell what it holds, so it is state.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var record = await SshRecordAsync(w, "neuhof");
+        Directory.CreateDirectory(Path.Combine(w.MtlsDir, "hosts"));
+        File.WriteAllText(Path.Combine(w.MtlsDir, "hosts", "neuhof"), "");
+
+        Assert.ThrowsAny<IOException>(() => w.Store.HoldsState("neuhof"));
+        Assert.True(MtlsOnboardingState.Holds(record, w.Store));
+    }
+
+    /// <summary>The production lookup of <see cref="Whiskers.Services.ServerConfig.IServerConfigService.GetServer"/>: the
+    /// id, then the id in another case, then the display name — over <see cref="MutableServerConfig"/>.</summary>
+    public class NameFallbackServers : DispatchProxy
+    {
+        private MutableServerConfig _inner = null!;
+
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            if (method!.Name == nameof(Whiskers.Services.ServerConfig.IServerConfigService.GetServer))
+            {
+                var id = (string)args![0]!;
+                var all = _inner.GetServers();
+                return all.FirstOrDefault(s => s.Id == id)
+                       ?? all.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase))
+                       ?? all.FirstOrDefault(s => string.Equals(s.Name, id, StringComparison.OrdinalIgnoreCase));
+            }
+            try { return method.Invoke(_inner, args); }
+            catch (TargetInvocationException ex) when (ex.InnerException is not null) { throw ex.InnerException; }
+        }
+
+        internal static Whiskers.Services.ServerConfig.IServerConfigService Over(MutableServerConfig inner)
+        {
+            var proxy = Create<Whiskers.Services.ServerConfig.IServerConfigService, NameFallbackServers>();
+            ((NameFallbackServers)(object)proxy)._inner = inner;
+            return proxy;
+        }
+    }
+
+    [Fact]
+    public async Task An_onboarding_never_moves_to_a_server_that_bears_its_id_as_a_display_name()
+    {
+        // INV-59 (#187, Codex re-review): the decided server is gone when the run starts; another one is displayed with
+        // its id. The run refuses instead of onboarding that other server.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"), ("rabenhof", "100.64.0.9"));
+        var other = w.Server("rabenhof").Clone();
+        other.Name = "neuhof";
+        await w.Servers.UpdateServerAsync(other);
+        await w.Servers.RemoveServerAsync("neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.9");
+        var onboarding = new OnboardingService(exec, NameFallbackServers.Over(w.Servers), ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", true, new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.Bootstrap, result.FailedStep);
+        Assert.Empty(exec.Scripts);   // not one command reached any host
+    }
+
+    [Fact]
+    public async Task A_server_being_onboarded_cannot_be_removed_until_the_run_ends()
+    {
+        // INV-59 (#187, Codex re-review): the run holds the host lock from its first step, so the server cannot vanish
+        // during bootstrap and let its id select another server.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        Exception? removal = null;
+        exec.OnCommand = command =>
+        {
+            if (removal is not null || !command.Contains("echo ok", StringComparison.Ordinal)) return;
+            removal = Record.Exception(() => Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(w.Servers,
+                ComponentTests.ServersKubeconfigSaveTests.NullProxy<Whiskers.Services.Vault.IVaultService>.Create(),
+                w.Server("neuhof"), w.Store).GetAwaiter().GetResult());
+            // Stop the run here: the point is the refused removal during bootstrap.
+            throw new OperationCanceledException();
+        };
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        await Record.ExceptionAsync(() => onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default));
+
+        Assert.IsType<InvalidOperationException>(removal);
+        Assert.NotNull(w.Servers.GetServer("neuhof"));
+        Assert.Equal(1, w.Store.HostLock("neuhof").CurrentCount);   // released after the run
     }
 
     private static async Task<ServerConfig> SshRecordAsync(CredentialWorld w, string id)

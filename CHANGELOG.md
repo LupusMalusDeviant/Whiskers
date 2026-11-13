@@ -63,7 +63,8 @@ Check these before or right after the update. Details are in the entries below.
   over MCP is refused. A first onboarding of a host without that state runs as before. A damaged identity file, or a
   state that cannot be read, counts as state. Onboarding is decided on exactly the server its id names (an unknown or
   ambiguous id is refused, a display name never selects a server), and a run admitted as a first onboarding refuses
-  before issuing anything when another onboarding of the same host finished in the meantime.
+  before issuing anything when another onboarding of the same host finished in the meantime. The run holds the host's
+  certificate lock from its first step, so the server cannot be removed while it is being onboarded.
 - **Fix: access stores are never restored from their previous generation.** A damaged or missing `roles.json`,
   `whitelist.json` or `mcp-permissions.json` used to be replaced automatically by its `.bak`, which may still hold what
   the last save revoked: a deleted MCP API key authenticated again, a removed role or address came back. These three

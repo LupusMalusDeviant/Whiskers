@@ -134,7 +134,16 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
     public bool HoldsState(string serverId)
     {
         var dir = HostDir(serverId);
-        return Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any();
+        // Not Directory.Exists: it answers false for a directory it cannot inspect, too. Only a directory that is
+        // confirmed missing means no state; an access or I/O error (or a file where the directory belongs) throws.
+        try
+        {
+            return Directory.EnumerateFileSystemEntries(dir).Any();
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
     }
 
     public MtlsClientIdentity? PendingIdentityOf(string serverId) =>

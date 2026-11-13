@@ -71,7 +71,9 @@ public class OnboardingService : IOnboardingService
         var completed = new List<OnboardingStep>();
         var step = OnboardingStep.Bootstrap;
 
-        var server = _serverConfig.GetServer(serverId)?.Clone();   // edited below, saved once at the switchover
+        // INV-59 (#187): exactly the server the decision named, by its id — never another server that a display name
+        // or an id in another case would select.
+        var server = Exact(serverId)?.Clone();   // edited below, saved once at the switchover
         if (server == null)
         {
             progress.Report("❌ Server nicht gefunden.");
@@ -82,6 +84,23 @@ public class OnboardingService : IOnboardingService
         SemaphoreSlim? hostLock = null;
         try
         {
+            // R1-44 (contract 0007, amendment 10; review r3 MAJOR 1) and INV-59 (#187, contract 0012 A12): the whole run
+            // holds the store's per-host lock, the one every certificate step and server removal take. A running
+            // migration, renewal, rotation or removal makes onboarding refuse instead of interleaving slots, and while
+            // the run holds it the server cannot be removed, so its id cannot come to select another server.
+            var gate = _clientCredentials.HostLock(serverId);
+            if (!await gate.WaitAsync(0, ct))
+                return Fail(progress, completed, step,
+                    $"Für {server.Name} läuft gerade ein Zertifikatsschritt (Migration, Erneuerung, Rotation oder Entfernen); " +
+                    "Onboarding erneut starten, sobald er fertig ist.");
+            hostLock = gate;
+            // INV-59 (#187): admitted as a first onboarding, but the host holds mTLS state now (another onboarding
+            // finished since the decision): replacing it needs the control-plane approval, so nothing runs.
+            if (!mayReplaceMtlsState && MtlsOnboardingState.Holds(server, _clientCredentials))
+                return Fail(progress, completed, step,
+                    $"{server.Name} hat inzwischen mTLS-Zustand (ein anderes Onboarding ist fertig geworden). " +
+                    "Erneutes Onboarding braucht die Freigabe eines Admins; bitte neu starten.");
+
             // 0) Bootstrap reachability ------------------------------------------------------------
             step = OnboardingStep.Bootstrap;
             progress.Report("① Bootstrap-Verbindung prüfen…");
@@ -176,22 +195,11 @@ public class OnboardingService : IOnboardingService
             // the CSR travels to step-ca (on local) and the signed certificate travels back. It used to be the
             // other way round — key made on Badwolf, shipped base64 through the command channel.
             step = OnboardingStep.Certificate;
-            // R1-44 (contract 0007, amendment 10; review r3 MAJOR 1): steps 5–9 — from the server certificate to the
-            // journal — hold the store's per-host lock, the one every certificate step and server removal take. A
-            // running migration, renewal, rotation or removal makes onboarding refuse instead of interleaving slots.
-            var gate = _clientCredentials.HostLock(serverId);
-            if (!await gate.WaitAsync(0, ct))
-                return Fail(progress, completed, step,
-                    $"Für {server.Name} läuft gerade ein Zertifikatsschritt (Migration, Erneuerung, Rotation oder Entfernen); " +
-                    "Onboarding erneut starten, sobald er fertig ist.");
-            hostLock = gate;
-            // Steps 0–4 can take minutes (Tailscale login): continue with the record as it is now, under the lock, so a
-            // change finished meanwhile (a rotation, an edit) is not overwritten at the switchover (review r4 MINOR 2).
-            if (_serverConfig.GetServer(serverId)?.Clone() is not { } current)
+            // Steps 0–4 can take minutes (Tailscale login): continue with the record as it is now, so a change finished
+            // meanwhile (an edit) is not overwritten at the switchover (review r4 MINOR 2).
+            if (Exact(serverId)?.Clone() is not { } current)
                 return Fail(progress, completed, step, $"{server.Name} wurde inzwischen entfernt.");
             server = current;
-            // INV-59 (#187): admitted as a first onboarding, but the host holds mTLS state now (another onboarding
-            // finished during steps 0–4): replacing it needs the control-plane approval, so nothing is issued here.
             if (!mayReplaceMtlsState && MtlsOnboardingState.Holds(server, _clientCredentials))
                 return Fail(progress, completed, step,
                     $"{server.Name} hat inzwischen mTLS-Zustand (ein anderes Onboarding ist fertig geworden). " +
@@ -329,6 +337,11 @@ public class OnboardingService : IOnboardingService
     }
 
     // ---- helpers -------------------------------------------------------------------------------
+
+    /// <summary>The server whose id is exactly <paramref name="serverId"/> (INV-59, #187): <c>GetServer</c> also matches an
+    /// id in another case and a display name, which could select another server once this one is gone.</summary>
+    private Models.ServerConfig? Exact(string serverId) =>
+        _serverConfig.GetServer(serverId) is { } s && string.Equals(s.Id, serverId, StringComparison.Ordinal) ? s : null;
 
     private async Task<CommandResult> Sh(string serverId, string command, TimeSpan timeout, CancellationToken ct)
     {
