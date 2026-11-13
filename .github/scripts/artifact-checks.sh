@@ -300,6 +300,15 @@ hardened() {
     docker exec "$app" sh -c 'test -s /app/data/metrics.db' || fail "the database was not created in /app/data"
     say "ok: uid 10001, read-only root, no capabilities, no-new-privileges, data on the volume"
 
+    step "the Docker socket proxy is reached through its socket only"
+    # Review of main: the proxy listens on a Unix socket in a volume only proxy and app mount, no longer on 127.0.0.1:2375.
+    [ "$(docker exec "$app" curl -fsS --max-time 5 --unix-socket /var/run/whiskers-proxy/docker.sock http://proxy/_ping)" = "OK" ] \
+        || fail "the app (uid 10001) cannot reach the socket proxy through its socket"
+    if curl -fsS --max-time 3 http://127.0.0.1:2375/_ping >/dev/null 2>&1; then fail "the socket proxy still answers on 127.0.0.1:2375"; fi
+    docker exec "$app" grep -q 'unix:///var/run/whiskers-proxy/docker.sock' /app/data/servers.json \
+        || fail "the fresh install did not seed its local server on the proxy socket"
+    say "ok: the proxy answers on its socket to uid 10001, not on 127.0.0.1:2375, and the local server uses it"
+
     step "health, readiness and the HTTP surface"
     wait_ready "$base"
     check_anonymous_surface "$base"

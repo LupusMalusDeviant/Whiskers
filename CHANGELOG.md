@@ -32,8 +32,8 @@ Fixes from the full review of `main` after 1.0.0 (host access).
 - **Hardened profile: socket proxy.** The Docker socket proxy no longer publishes `127.0.0.1:2375`, which every
   process and host-networked container on the host could reach. It listens on a Unix socket in a volume that only the
   proxy and Whiskers mount. Whiskers waits for the socket and gets it as `Docker__SocketPath`. The verb whitelist is
-  unchanged. **Upgrade:** an install that already has a local server keeps its stored `SocketPath`; set it to
-  `unix:///var/run/whiskers-proxy/docker.sock` in Settings → Servers.
+  unchanged. **Upgrade:** at the next start, a stored server that still points at `127.0.0.1:2375` (local, or TCP
+  without TLS) is moved to the socket and a warning is logged; nothing else changes.
 - **Database panel.** The database password reaches `docker exec` as an environment variable delivered beside the
   command (`-e NAME`), never in the command line, so it no longer appears in the host's process list.
 - **Container `.env` editor.** A `.env` that could not be read (host unreachable, permission denied) is shown as an

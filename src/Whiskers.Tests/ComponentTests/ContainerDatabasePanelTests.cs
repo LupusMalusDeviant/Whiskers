@@ -191,7 +191,7 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
     /// <summary>Answers every confirmation with yes, so the flows behind one can run.</summary>
     private class ConfirmingDialogs : ServersKubeconfigSaveTests.NullProxy<IDialogService>
     {
-        public static IDialogService Create() => DispatchProxy.Create<IDialogService, ConfirmingDialogs>();
+        public static new IDialogService Create() => DispatchProxy.Create<IDialogService, ConfirmingDialogs>();
 
         protected override object? Invoke(MethodInfo? method, object?[]? args) =>
             method!.Name == nameof(IDialogService.ShowMessageBoxAsync)

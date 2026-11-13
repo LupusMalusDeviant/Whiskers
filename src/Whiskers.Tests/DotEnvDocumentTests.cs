@@ -60,6 +60,8 @@ public class DotEnvDocumentTests
         Assert.Null(DotEnvDocument.FromRead(true, "", out _));
         Assert.Null(DotEnvDocument.FromRead(true, null, out _));
         Assert.Null(DotEnvDocument.FromRead(true, "cat: /x/.env: Permission denied\n", out _));
+        // Cut at the executor's output cap: saving would drop the rest of the file.
+        Assert.Null(DotEnvDocument.FromRead(true, "present\nA=1\n… (Ausgabe gekürzt)", out _, truncated: true));
     }
 
     [Fact]

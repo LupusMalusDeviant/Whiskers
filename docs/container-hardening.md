@@ -73,8 +73,10 @@ port: a loopback port would be open to every process and every host-networked co
 The whitelist keeps `exec`, `swarm`, `secrets` and `configs` **off** while allowing the
 container/image/network/volume operations Whiskers needs. Point the built-in **local** server at
 the proxy: the compose file sets `Docker__SocketPath=unix:///var/run/whiskers-proxy/docker.sock`, which a new
-install uses for its local server. An install that already has a local server keeps the stored `SocketPath`;
-set it to that value in Settings → Servers (it was `http://127.0.0.1:2375` before).
+install uses for its local server. On an upgrade, a stored server that still points at the proxy's old address
+(a local server on `http://127.0.0.1:2375`, or a TCP server on `127.0.0.1`/`localhost` port 2375 without TLS) is moved
+to the socket at the next start, logged as a warning. This happens only when `Docker__SocketPath` is exactly that
+socket and it exists, so a proxy you run yourself on port 2375 elsewhere is left alone.
 
 > **Residual risk, stated honestly:** container *create* must stay enabled so deploys work, and the
 > proxy does not filter the `privileged` flag on creation — so a fully compromised app could still

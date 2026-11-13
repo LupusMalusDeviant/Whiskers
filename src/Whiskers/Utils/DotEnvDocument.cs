@@ -23,10 +23,11 @@ public static class DotEnvDocument
     /// <summary>What <see cref="ReadCommand"/> returned: the file's lines; an empty list with <c>Missing</c> when there
     /// is no file; null when the read failed — then nothing may be written, or saving would replace a file nobody saw.
     /// </summary>
-    public static IReadOnlyList<DotEnvLine>? FromRead(bool success, string? output, out bool missing)
+    public static IReadOnlyList<DotEnvLine>? FromRead(bool success, string? output, out bool missing, bool truncated = false)
     {
         missing = false;
-        if (!success || output is null) return null;
+        // Cut at the executor's output cap: writing it back would drop the rest of the file.
+        if (!success || truncated || output is null) return null;
         var firstBreak = output.IndexOf('\n');
         var head = (firstBreak < 0 ? output : output[..firstBreak]).Trim();
         if (head == "absent")

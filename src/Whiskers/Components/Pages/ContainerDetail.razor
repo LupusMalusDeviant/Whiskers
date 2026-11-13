@@ -918,7 +918,7 @@ else
 
                 var result = await HostCommandExecutor.ExecuteAsync(sid,
                     Whiskers.Utils.DotEnvDocument.ReadCommand(envPath), TimeSpan.FromSeconds(5));
-                var read = Whiskers.Utils.DotEnvDocument.FromRead(result.Success, result.Output, out var missing);
+                var read = Whiskers.Utils.DotEnvDocument.FromRead(result.Success, result.Output, out var missing, result.OutputTruncated);
                 _dotEnvReadFailed = read is null;
                 if (missing)
                 {

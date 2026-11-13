@@ -108,8 +108,8 @@ services:
       - WHISKERS_ADMIN_EMAIL=${WHISKERS_ADMIN_EMAIL:-}
       # Local login (F1): path to a mounted secret file with the admin password → unattended local admin.
       - WHISKERS_ADMIN_PASSWORD_FILE=${WHISKERS_ADMIN_PASSWORD_FILE:-}
-      # The built-in "local" server talks to the proxy socket. An install that already has a local server keeps its
-      # stored SocketPath: set it to this value in Settings → Servers. Or manage only remote (mTLS) hosts.
+      # The built-in "local" server talks to the proxy socket. On start, a stored server still on the old
+      # 127.0.0.1:2375 is moved to it (and logged). Or manage only remote (mTLS) hosts.
       - Docker__SocketPath=unix:///var/run/whiskers-proxy/docker.sock
       - GoogleAuth__ClientId=${GOOGLE_CLIENT_ID:-}
       - GoogleAuth__ClientSecret=${GOOGLE_CLIENT_SECRET:-}

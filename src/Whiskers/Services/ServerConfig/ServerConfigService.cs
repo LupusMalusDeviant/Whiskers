@@ -47,6 +47,8 @@ public class ServerConfigService : IServerConfigService, IInitializable
         {
             _cached = await _store.LoadAsync();
             _logger.LogInformation("Loaded {Count} server configs", _cached.Servers.Count);
+            if (MoveToHardenedProxySocket(_cached))
+                await _store.SaveAsync(_cached);
         }
         else if (ShouldCreateDefaultLocalServer())
         {
@@ -81,6 +83,50 @@ public class ServerConfigService : IServerConfigService, IInitializable
         IsInitialized = true;
     }
 
+    /// <summary>How a socket path is probed; a test stands in for the file system.</summary>
+    internal Func<string, bool> FileExists { get; init; } = File.Exists;
+
+    /// <summary>Review of main: the hardened profile's socket proxy moved from 127.0.0.1:2375 to a Unix socket in a
+    /// shared volume, and the UI cannot change a stored server's socket path. So when this instance runs the hardened
+    /// profile — <c>Docker:SocketPath</c> is exactly the proxy socket and it exists — a stored server that still
+    /// points at the old loopback port (a Local server on <c>http://127.0.0.1:2375</c>, or a plain-TCP server on
+    /// 127.0.0.1/localhost:2375 without TLS) is moved to the socket. Any other configuration is left alone: a proxy
+    /// someone runs on 2375 themselves is never pointed at a different daemon socket.</summary>
+    private bool MoveToHardenedProxySocket(ServerConfigData data)
+    {
+        var socket = _dockerSettings.Value.SocketPath;
+        if (!string.Equals(socket, DockerSettings.HardenedProxySocketPath, StringComparison.Ordinal)
+            || !FileExists(socket["unix://".Length..]))
+            return false;
+
+        var moved = false;
+        foreach (var server in data.Servers.Where(PointsAtLegacyProxy))
+        {
+            _logger.LogWarning(
+                "Server {ServerId} pointed at the hardened socket proxy's old port 127.0.0.1:{Port}; it now uses {Socket}",
+                server.Id, DockerSettings.LegacyHardenedProxyPort, socket);
+            server.ConnectionType = ConnectionType.Local;
+            server.SocketPath = socket;
+            moved = true;
+        }
+        return moved;
+    }
+
+    private static bool PointsAtLegacyProxy(Models.ServerConfig s)
+    {
+        static bool Loopback(string? host) =>
+            string.Equals(host, "127.0.0.1", StringComparison.Ordinal)
+            || string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase);
+
+        if (s.ConnectionType == ConnectionType.TCP)
+            return !s.TcpUseTls && s.TcpPort == DockerSettings.LegacyHardenedProxyPort && Loopback(s.TcpHost);
+        if (s.ConnectionType == ConnectionType.Local
+            && Uri.TryCreate(s.SocketPath, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "tcp")
+            return uri.Port == DockerSettings.LegacyHardenedProxyPort && Loopback(uri.Host);
+        return false;
+    }
+
     /// <summary>V4 (kubernetesImplement Track A): whether a fresh install should seed the default
     /// "local" Docker server. On Kubernetes there is no meaningful local Docker host — the socket
     /// isn't mounted — so a first boot without one starts with an empty fleet instead of a
@@ -93,7 +139,7 @@ public class ServerConfigService : IServerConfigService, IInitializable
 
         var socketPath = _dockerSettings.Value.SocketPath ?? "";
         if (socketPath.StartsWith("unix://", StringComparison.OrdinalIgnoreCase))
-            return File.Exists(socketPath["unix://".Length..]);
+            return FileExists(socketPath["unix://".Length..]);
 
         // npipe:// (Windows dev) or tcp:// values: keep the historical behaviour — create the
         // entry; reachability is probed at runtime anyway.
