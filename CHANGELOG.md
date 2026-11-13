@@ -6,6 +6,27 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+Fixes from the full review of `main` after 1.0.0 (host access).
+
+- **mTLS renewal.**
+  - Whiskers now renews a proxy certificate only if the fleet CA issued it for the address Whiskers connects to.
+  - The renewed certificate names only that address, plus the current certificate's name and DNS names.
+  - A proxy certificate named like a Whiskers client certificate (`serverwatch-client`, `whiskers-client-*`) is never
+    renewed.
+  - A certificate that has run out is still renewed; the check ignores only its validity period.
+  - Renew any other certificate by hand.
+- **Helper containers pinned.**
+  - The host-shell helper and the volume backup/restore helpers run `alpine:3.22`, pinned by digest.
+  - A moved tag, a changed registry, or a different image tagged `alpine` on the host no longer runs in their place.
+- **SSH tunnels.** The local end of an SSH tunnel to a host's Docker socket is now a Unix socket (owner-only, in a
+  private directory) instead of a port on 127.0.0.1 that any local process could connect to. The directory gets a random name when it is created, so no other local user can prepare it in advance. On Windows the loopback
+  port stays.
+- **Firewall rules.** A port or source address with a trailing line break is refused instead of reaching `ufw`.
+- **nginx.** If `nginx -t` refuses an edited site config, Whiskers now restores the previous file. For a new site, it
+  removes the new file, so no refused config stays in place for the next reload.
+
 ## [1.0.0] — 2026-11-11
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in

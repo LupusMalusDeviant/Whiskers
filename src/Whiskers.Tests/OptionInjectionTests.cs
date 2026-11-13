@@ -189,7 +189,7 @@ public class OptionInjectionTests
     public void The_tunnel_puts_the_destination_after_double_dash()
     {
         var server = new ServerConfig { SshUser = "root", SshHost = "10.0.0.5", SshPort = 22 };
-        var args = SshTunnelManager.BuildTunnelArguments(server, keyPath: null, localPort: 40000);
+        var args = SshTunnelManager.BuildTunnelArguments(server, keyPath: null, localForward: "40000");
 
         Assert.Equal(["--", "root@10.0.0.5"], args.TakeLast(2).ToArray());
         Assert.Equal(1, args.Count(a => a == "--"));
@@ -202,7 +202,7 @@ public class OptionInjectionTests
     [InlineData("root", "h", 0)]
     public void The_tunnel_refuses_an_unsafe_target(string user, string host, int port)
         => Assert.Throws<UnsafeOperandException>(() => SshTunnelManager.BuildTunnelArguments(
-            new ServerConfig { SshUser = user, SshHost = host, SshPort = port }, keyPath: null, localPort: 40000));
+            new ServerConfig { SshUser = user, SshHost = host, SshPort = port }, keyPath: null, localForward: "40000"));
 
     // ---- SSH and docker: terminal ----------------------------------------------------------------------------------
 

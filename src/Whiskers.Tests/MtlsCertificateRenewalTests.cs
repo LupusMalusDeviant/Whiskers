@@ -123,7 +123,7 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
         var result = await svc.RenewAsync("rabenhof", CancellationToken.None);
 
         Assert.True(result.Success, result.Message);
-        Assert.Equal(["keygen", "sign", "ca", "stage", "activate-guarded", "confirm"], host.Steps);
+        Assert.Equal(["ca", "keygen", "sign", "ca", "stage", "activate-guarded", "confirm"], host.Steps);
         Assert.Equal("local", host.ServerOf("sign"));
         Assert.Equal("rabenhof", host.ServerOf("keygen"));
     }
@@ -173,6 +173,99 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
         Assert.Empty(host.Steps);
     }
 
+    // ---- Fable review H1: the presented certificate is the host's word ----
+
+    [Fact]
+    public async Task A_certificate_the_fleet_ca_did_not_issue_is_never_renewed()
+    {
+        // A compromised host presents its own certificate naming another host's IP. Nothing is signed.
+        var host = new SimulatedFleet(_ca) { PresentedToday = SelfSigned("rabenhof-dockerproxy", [Ip, "100.64.0.10"]) };
+        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("not one the fleet CA issued", result.Message);
+        Assert.DoesNotContain("keygen", host.Steps);
+        Assert.DoesNotContain("sign", host.Steps);
+    }
+
+    [Fact]
+    public async Task A_renewal_names_only_the_address_whiskers_connects_to()
+    {
+        // The proxy's current certificate (from the fleet CA) carries a second IP. The renewal does not carry it on.
+        var host = new SimulatedFleet(_ca) { PresentedToday = Signed("rabenhof-dockerproxy", ["rabenhof"], [Ip, "100.64.0.10"]) };
+        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+
+        Assert.True(result.Success, result.Message);
+        var san = host.Issued!.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single();
+        Assert.Equal([Ip], san.EnumerateIPAddresses().Select(i => i.ToString()));
+    }
+
+    [Fact]
+    public async Task A_certificate_that_has_run_out_is_still_renewed()
+    {
+        // The case renewal exists for: the fleet CA issued it for this address, and its time is up.
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        _ca.Sign(Csr(key, "rabenhof-dockerproxy", ["rabenhof"], [Ip]), out var expired, notAfter: DateTimeOffset.UtcNow.AddHours(-1));
+        var host = new SimulatedFleet(_ca) { PresentedToday = expired };
+
+        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains("sign", host.Steps);
+    }
+
+    [Fact]
+    public async Task A_fleet_certificate_for_another_address_is_never_renewed()
+    {
+        // Issued by the fleet CA, but for a different host's address: not this host's identity to carry on.
+        var host = new SimulatedFleet(_ca) { PresentedToday = Signed("rabenhof-dockerproxy", [], ["100.64.0.10"]) };
+
+        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("not one the fleet CA issued", result.Message);
+        Assert.DoesNotContain("sign", host.Steps);
+    }
+
+    [Theory]
+    [InlineData("serverwatch-client")]
+    [InlineData("whiskers-client-zirkus-g1")]
+    public async Task A_proxy_certificate_named_like_a_client_is_never_renewed(string cn)
+    {
+        var host = new SimulatedFleet(_ca) { PresentedToday = Signed(cn, [], [Ip]) };
+        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("client name", result.Message);
+        Assert.DoesNotContain("sign", host.Steps);
+    }
+
+    [Theory]
+    [InlineData("serverwatch-client", "rabenhof")]
+    [InlineData("whiskers-client-rabenhof-g2", "rabenhof")]
+    [InlineData("rabenhof-dockerproxy", "whiskers-client-zirkus-g1")]
+    public void A_proxy_identity_never_carries_a_client_name(string cn, string dns)
+    {
+        Assert.Throws<ArgumentException>(() => new MtlsIdentity(cn, [dns], [Ip]));
+    }
+
+    private X509Certificate2 Signed(string cn, string[] dns, string[] ips)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        _ca.Sign(Csr(key, cn, dns, ips), out var leaf);
+        return leaf;
+    }
+
+    private static X509Certificate2 SelfSigned(string cn, string[] ips)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var req = new CertificateRequest($"CN={cn}", key, HashAlgorithmName.SHA256);
+        var san = new SubjectAlternativeNameBuilder();
+        foreach (var i in ips) san.AddIpAddress(System.Net.IPAddress.Parse(i));
+        req.CertificateExtensions.Add(san.Build());
+        return req.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(30));
+    }
+
     private MtlsCertificateService Service(SimulatedFleet host) =>
         new(host, new FakeServerConfig(host.Server), NullLogger<MtlsCertificateService>.Instance)
         {
@@ -206,7 +299,8 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     private sealed class SimulatedFleet(TestCa ca) : IHostCommandExecutor
     {
         private readonly ECDsa _hostKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        private readonly X509Certificate2 _current = CurrentCert(ca);
+        /// <summary>The certificate the proxy presents before the renewal (default: one the fleet CA issued for it).</summary>
+        public X509Certificate2 PresentedToday { get; init; } = CurrentCert(ca);
         private X509Certificate2? _issued;
         private bool _activated;
         private readonly List<(string Step, string Server)> _log = new();
@@ -223,8 +317,13 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
         public List<string> Steps => _log.Select(l => l.Step).ToList();
         public string ServerOf(string step) => _log.First(l => l.Step == step).Server;
 
+        public X509Certificate2? Issued => _issued;
+        // A copy each time: the service disposes what the probe hands it, as it does with a real handshake's certificate.
         public X509Certificate2? Presented() =>
-            _activated ? (ProxyComesBack ? _issued : null) : _current;
+            Copy(_activated ? (ProxyComesBack ? _issued : null) : PresentedToday);
+
+        private static X509Certificate2? Copy(X509Certificate2? cert) =>
+            cert is null ? null : X509CertificateLoader.LoadCertificate(cert.RawData);
 
         public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
             CancellationToken ct = default, int? maxOutputChars = null)

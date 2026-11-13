@@ -32,7 +32,8 @@ internal sealed class TestCa : IDisposable
     /// <summary>Signs a CSR, keeping its extensions. <paramref name="stepLeafEku"/>: replace the extended key usage by
     /// serverAuth + clientAuth, as step's default leaf template does whatever the CSR asks. <paramref name="extraSan"/>:
     /// add a DNS SAN (to model a template that adds one).</summary>
-    public string Sign(string csrPem, out X509Certificate2 leaf, bool stepLeafEku = false, string? extraSan = null)
+    public string Sign(string csrPem, out X509Certificate2 leaf, bool stepLeafEku = false, string? extraSan = null,
+        DateTimeOffset? notAfter = null)
     {
         var req = CertificateRequest.LoadSigningRequestPem(csrPem, HashAlgorithmName.SHA256,
             CertificateRequestLoadOptions.UnsafeLoadCertificateExtensions);
@@ -50,7 +51,9 @@ internal sealed class TestCa : IDisposable
             req.CertificateExtensions.Add(san.Build());
         }
         var now = DateTimeOffset.UtcNow;
-        leaf = req.Create(Intermediate, now.AddMinutes(-5), now.AddDays(365), RandomNumberGenerator.GetBytes(8));
+        var until = notAfter ?? now.AddDays(365);   // a past notAfter models a certificate that has run out
+        var from = notAfter is null ? now.AddMinutes(-5) : until.AddHours(-12);   // never before the intermediate (now - 1 day)
+        leaf = req.Create(Intermediate, from, until, RandomNumberGenerator.GetBytes(8));
         return leaf.ExportCertificatePem() + "\n" + Intermediate.ExportCertificatePem() + "\n";
     }
 
