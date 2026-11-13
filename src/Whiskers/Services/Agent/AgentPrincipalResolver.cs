@@ -21,6 +21,21 @@ public sealed class AgentPrincipalResolver : IAgentPrincipalResolver
         _roles = roles;
     }
 
+    /// <summary>
+    /// The principal of the signed-in user on a Blazor page (agent chat, AI operations, triggers, guardrails): the role's
+    /// level, and — contract 0014 (D2) — the sign-in credential and the web session beside the account, as the UI
+    /// mutation runner records them. The pages used to build it themselves without either (Fable review), so their
+    /// agent calls and approvals named no session to revoke or trace.
+    /// </summary>
+    public static async Task<AgentPrincipal> ForWebUserAsync(ICurrentUserService user)
+    {
+        var email = await user.GetEmailAsync() ?? "local@serverwatch.local";
+        var level = Whiskers.Services.Mutations.CapabilityCatalog.LevelFor(await user.GetRoleAsync());
+        var (credential, session) = await user.GetPrincipalFieldsAsync();
+        return new AgentPrincipal(AgentPrincipalKind.WebUser, email, level, null, UserEmail: email,
+            CredentialId: credential, WebSessionId: session);
+    }
+
     public AgentPrincipal Resolve(HttpContext httpContext)
     {
         // Bearer-MCP-Key hat Vorrang (externer Agent, z.B. Claude Code).

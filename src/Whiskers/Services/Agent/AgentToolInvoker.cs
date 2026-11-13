@@ -97,7 +97,9 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
         try
         {
-            var output = await ExecuteAsync(entry, args, context);
+            // INV-40: the caller's token reaches a read tool too (Fable review — reads ran on CancellationToken.None,
+            // so a closed chat or a stopped trigger left them running against the hosts).
+            var output = await ExecuteAsync(entry, args, context, ct);
             if (output.Length > MaxOutputChars)
                 output = Truncated(output);
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, true, output, null, call.CorrelationId);

@@ -638,7 +638,8 @@ public class PageRoleScanTests
         var catalog = StripComments(File.ReadAllText(Path.Combine(product, "Services", "Mutations", "CapabilityCatalog.cs")));
         Assert.Equal(4, RoleLevelSpellings(catalog).Count);   // the two explicit arms of LevelFor and of RoleFor
         var calls = ProductFiles(product).Sum(f => Regex.Matches(StripComments(File.ReadAllText(f)), @"CapabilityCatalog\.LevelFor\(").Count);
-        Assert.True(calls >= 10, $"only {calls} surfaces call LevelFor");
+        // The agent pages share AgentPrincipalResolver.ForWebUserAsync since the Fable review (one call for five pages).
+        Assert.True(calls >= 6, $"only {calls} surfaces call LevelFor");
     }
 
     [Theory]

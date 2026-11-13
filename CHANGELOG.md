@@ -6,6 +6,20 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+Fixes from the full review of `main` after 1.0.0 (agent).
+
+- **Git deploys.** When an app's repository URL changes, the next update now fetches from the new URL. Before, it
+  kept fetching the first one: the token went to the old host, and approval and audit named a repository that was
+  not the one deployed.
+- **Agent on the web pages.** Agent chat, AI operations, triggers and guardrails now give the agent the sign-in
+  credential and the web session along with the account (contract 0014), as every other page action does.
+- **Cancellation.**
+  - Read tools the agent runs now stop when the chat is closed or the trigger is stopped.
+  - `instruct_agent` ends with the MCP request that started it and after 10 minutes at the latest, answering with
+    what it had.
+
 ## [1.0.0] — 2026-11-11
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in

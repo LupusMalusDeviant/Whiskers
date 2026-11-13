@@ -213,11 +213,6 @@ else
         else Snackbar.Add(L["Clipboard_CopyFailed_Manual"].Value, Severity.Warning);
     }
 
-    private async Task<AgentPrincipal> BuildPrincipalAsync()
-    {
-        // The editor's own level (the fixed rule), never a synthetic Admin: the store's own check then holds as well.
-        var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
-        var level = CapabilityCatalog.LevelFor(await CurrentUser.GetRoleAsync());
-        return new AgentPrincipal(AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
-    }
+    // The editor's own level (the fixed rule), never a synthetic Admin: the store's own check then holds as well.
+    private Task<AgentPrincipal> BuildPrincipalAsync() => Whiskers.Services.Agent.AgentPrincipalResolver.ForWebUserAsync(CurrentUser);
 }

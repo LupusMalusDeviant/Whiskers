@@ -539,13 +539,7 @@
         return new AgentContext(Guid.NewGuid().ToString("N"), principal, AgentOrigin.WebUi, GuardrailStore.Current);
     }
 
-    private async Task<AgentPrincipal> BuildPrincipalAsync()
-    {
-        var email = await CurrentUser.GetEmailAsync() ?? "local@serverwatch.local";
-        var role = await CurrentUser.GetRoleAsync();
-        var level = CapabilityCatalog.LevelFor(role);
-        return new AgentPrincipal(AgentPrincipalKind.WebUser, email, level, null, UserEmail: email);
-    }
+    private Task<AgentPrincipal> BuildPrincipalAsync() => Whiskers.Services.Agent.AgentPrincipalResolver.ForWebUserAsync(CurrentUser);
 
     private async Task SaveLlm()
     {
