@@ -22,7 +22,42 @@ public class SshTunnelManager : ISshTunnelManager
     /// <summary>Where the forwarded sockets live: a directory only Whiskers' user can enter (0700), each socket 0600
     /// (Fable review M: a loopback TCP port in front of the host's real docker.sock is root on that host for anything
     /// that can connect to 127.0.0.1, e.g. another process or a host-network container).</summary>
-    internal string SocketDir { get; init; } = Path.Combine(Path.GetTempPath(), $"whiskers-tunnels-{Environment.ProcessId}");
+    /// <remarks>Created on first use with a random name by <c>mkdtemp</c> (<see cref="Directory.CreateTempSubdirectory"/>):
+    /// new, ours and 0700 in one step, so another local user can neither have made it in advance nor guess it — a fixed
+    /// name in a shared /tmp let anyone who created it first swap the socket for a listener of their own (Fable review of
+    /// the fix, M1). Removed on dispose.</remarks>
+    internal string SocketDir
+    {
+        get { lock (_socketDirGate) return _socketDir ??= PrepareSocketDir(); }
+    }
+
+    /// <summary>Tests only: a fixed directory instead of a fresh random one. It is created 0700 when absent; an existing
+    /// one is used only when it is a real directory with exactly 0700, never a symlink.</summary>
+    internal string? SocketRoot { get; init; }
+
+    private readonly object _socketDirGate = new();
+    private string? _socketDir;
+
+    private const UnixFileMode OwnerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+
+    private string PrepareSocketDir()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var dir = SocketRoot ?? Path.Combine(Path.GetTempPath(), "whiskers-tunnels");
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+        if (SocketRoot is null)
+            return Directory.CreateTempSubdirectory("whiskers-tunnels-").FullName;
+
+        if (!Directory.Exists(SocketRoot) && !File.Exists(SocketRoot))
+            Directory.CreateDirectory(SocketRoot, OwnerOnly);
+        var info = new DirectoryInfo(SocketRoot);
+        if (!info.Exists || info.LinkTarget is not null || File.GetUnixFileMode(SocketRoot) != OwnerOnly)
+            throw new InvalidOperationException($"The tunnel socket directory {SocketRoot} is not a private (0700) directory; refusing to put a forward there.");
+        return SocketRoot;
+    }
 
     /// <summary>Unix sockets where the platform has them for ssh and the Docker client; a loopback TCP port only on
     /// Windows (development).</summary>
@@ -139,10 +174,6 @@ public class SshTunnelManager : ISshTunnelManager
                 new Uri($"http://127.0.0.1:{port}"), null, port);
         }
 
-        if (!OperatingSystem.IsWindows())
-            Directory.CreateDirectory(SocketDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        else
-            Directory.CreateDirectory(SocketDir);
         // Short and free of the id's characters: a socket path is limited to ~108 bytes.
         var name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(serverId)))[..16].ToLowerInvariant()
                    + "-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant() + ".sock";
@@ -270,6 +301,20 @@ public class SshTunnelManager : ISshTunnelManager
         foreach (var tunnel in _tunnels.Values)
             tunnel.Dispose();
         _tunnels.Clear();
+
+        // The random directory is ours alone; a fixed test directory belongs to the test.
+        lock (_socketDirGate)
+        {
+            if (_socketDir is not null && SocketRoot is null && !OperatingSystem.IsWindows())
+            {
+                try { Directory.Delete(_socketDir, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogDebug(ex, "Could not remove the tunnel socket directory {Dir}", _socketDir);
+                }
+            }
+            _socketDir = null;
+        }
     }
 
     private class SshTunnel : IDisposable

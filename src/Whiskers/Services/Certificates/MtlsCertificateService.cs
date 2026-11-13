@@ -154,7 +154,7 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
             var caPem = FromB64((await RunAsync("local", MtlsCertificateCommands.ReadCaBundle(), ct)).Output.Trim(), "CA bundle");
             var anchors = new X509Certificate2Collection();
             anchors.ImportFromPem(caPem);
-            if (!Whiskers.Services.Docker.DockerConnectionManager.ValidateMtlsServerCert(current, anchors, null, server.TcpHost))
+            if (!Whiskers.Services.Docker.DockerConnectionManager.ValidateMtlsServerCert(current, anchors, null, server.TcpHost, ignoreValidityPeriod: true))
                 return new(false, $"The current certificate of {server.Name} is not one the fleet CA issued for {server.TcpHost}; renew it by hand.");
             MtlsIdentity identity;
             try { identity = MtlsIdentity.ForRenewal(current, server.TcpHost); }

@@ -200,6 +200,33 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
         Assert.Equal([Ip], san.EnumerateIPAddresses().Select(i => i.ToString()));
     }
 
+    [Fact]
+    public async Task A_certificate_that_has_run_out_is_still_renewed()
+    {
+        // The case renewal exists for: the fleet CA issued it for this address, and its time is up.
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        _ca.Sign(Csr(key, "rabenhof-dockerproxy", ["rabenhof"], [Ip]), out var expired, notAfter: DateTimeOffset.UtcNow.AddHours(-1));
+        var host = new SimulatedFleet(_ca) { PresentedToday = expired };
+
+        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains("sign", host.Steps);
+    }
+
+    [Fact]
+    public async Task A_fleet_certificate_for_another_address_is_never_renewed()
+    {
+        // Issued by the fleet CA, but for a different host's address: not this host's identity to carry on.
+        var host = new SimulatedFleet(_ca) { PresentedToday = Signed("rabenhof-dockerproxy", [], ["100.64.0.10"]) };
+
+        var result = await Service(host).RenewAsync("rabenhof", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("not one the fleet CA issued", result.Message);
+        Assert.DoesNotContain("sign", host.Steps);
+    }
+
     [Theory]
     [InlineData("serverwatch-client")]
     [InlineData("whiskers-client-zirkus-g1")]

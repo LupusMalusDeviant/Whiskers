@@ -59,8 +59,9 @@ public class HostRuleSafetyTests
         Assert.False(result.Success);
         Assert.Contains("previous file was put back", result.Error);
         var write = host.Commands[0];
-        Assert.True(write.IndexOf("cp -p", StringComparison.Ordinal) < write.IndexOf("tee", StringComparison.Ordinal),
+        Assert.True(write.IndexOf("cp -p", StringComparison.Ordinal) < write.IndexOf("> '/etc/nginx/sites-available/shop'", StringComparison.Ordinal),
             "the previous file is kept before the new one is written");
+        Assert.StartsWith("rm -f '/etc/nginx/sites-available/shop.whiskers-prev'", write);   // never a stale kept file
         Assert.Equal("nginx -t 2>&1", host.Commands[1]);
         Assert.Contains("mv -f '/etc/nginx/sites-available/shop.whiskers-prev' '/etc/nginx/sites-available/shop'", host.Commands[2]);
         Assert.Contains("else rm -f '/etc/nginx/sites-available/shop'", host.Commands[2]);   // a new site is removed again
@@ -76,6 +77,61 @@ public class HostRuleSafetyTests
         Assert.True(result.Success);
         Assert.Contains(host.Commands, c => c == "rm -f '/etc/nginx/sites-available/shop.whiskers-prev'");
         Assert.DoesNotContain(host.Commands, c => c.Contains("mv -f", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_write_that_fails_half_way_puts_the_previous_file_back()
+    {
+        var host = new RecordingHost(c => c.Contains("base64 -d", StringComparison.Ordinal)
+            ? new CommandResult { ExitCode = 1, Error = "No space left on device" }
+            : new CommandResult { ExitCode = 0 });
+
+        var result = await new NginxService(host, NullLogger<NginxService>.Instance).UpdateSiteConfigAsync("srv", "shop", "server {}");
+
+        Assert.False(result.Success);
+        Assert.Contains(host.Commands, c => c == "if [ -e '/etc/nginx/sites-available/shop.whiskers-prev' ]; then mv -f '/etc/nginx/sites-available/shop.whiskers-prev' '/etc/nginx/sites-available/shop'; fi");
+        Assert.DoesNotContain(host.Commands, c => c.StartsWith("nginx -t", StringComparison.Ordinal) || c.Contains("reload", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Working_files_left_by_an_interrupted_update_are_not_listed_as_sites()
+    {
+        var host = new RecordingHost(c => c.Contains("sites-available", StringComparison.Ordinal)
+            ? new CommandResult { ExitCode = 0, Output = "shop\nshop.whiskers-prev\nshop.whiskers-next\n" }
+            : new CommandResult { ExitCode = 0, Output = "" });
+
+        var sites = await new NginxService(host, NullLogger<NginxService>.Instance).ListSitesAsync("srv");
+
+        Assert.Equal(["shop"], sites.Select(s => s.Name));
+    }
+
+    [SkippableFact]
+    public async Task On_a_real_shell_a_failed_write_and_a_refused_config_both_leave_the_old_file()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "needs a POSIX shell");
+        var dir = Path.Combine(Path.GetTempPath(), "nginx-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "shop"), "old");
+            File.WriteAllText(Path.Combine(dir, "shop" + NginxService.PreviousSuffix), "stale from a crash");
+            var shell = new RecordingHost(c =>
+            {
+                if (c.StartsWith("nginx -t", StringComparison.Ordinal)) return new CommandResult { ExitCode = 1, Error = "emerg" };
+                var psi = new System.Diagnostics.ProcessStartInfo("sh") { RedirectStandardError = true };
+                psi.ArgumentList.Add("-c");
+                psi.ArgumentList.Add(c.Replace("/etc/nginx/sites-available", dir, StringComparison.Ordinal));
+                using var p = System.Diagnostics.Process.Start(psi)!;
+                p.WaitForExit();
+                return new CommandResult { ExitCode = p.ExitCode };
+            });
+
+            await new NginxService(shell, NullLogger<NginxService>.Instance).UpdateSiteConfigAsync("srv", "shop", "server { broken");
+
+            Assert.Equal("old", File.ReadAllText(Path.Combine(dir, "shop")));   // never the stale kept file
+            Assert.Equal(["shop"], Directory.GetFiles(dir).Select(Path.GetFileName));
+        }
+        finally { Directory.Delete(dir, true); }
     }
 
     [SkippableFact]

@@ -19,6 +19,13 @@ public class NginxService : INginxService
     /// <summary>Where an update keeps the file it replaces until nginx -t has passed (sites-available is not included by nginx).</summary>
     internal const string PreviousSuffix = ".whiskers-prev";
 
+    /// <summary>Where an update decodes the new content before it replaces the site.</summary>
+    internal const string NextSuffix = ".whiskers-next";
+
+    /// <summary>Whiskers' own working files beside a site, never listed as sites themselves.</summary>
+    internal static bool IsWorkingFile(string name) =>
+        name.EndsWith(PreviousSuffix, StringComparison.Ordinal) || name.EndsWith(NextSuffix, StringComparison.Ordinal);
+
     public NginxService(IHostCommandExecutor executor, ILogger<NginxService> logger)
     {
         _executor = executor;
@@ -41,6 +48,7 @@ public class NginxService : INginxService
 
         foreach (var name in ParseFileList(availableResult.Output))
         {
+            if (IsWorkingFile(name)) continue;   // left by an interrupted update, not a site
             if (!CommandOperands.IsSafeSiteName(name))
             {
                 _logger.LogWarning("Skipping nginx site with unsafe name: {Name}", name);
@@ -102,12 +110,19 @@ public class NginxService : INginxService
         // or a reboot to pick up (Fable review). A site that did not exist before is removed again.
         var dest = ShellUtils.Quote(destPath);
         var prev = ShellUtils.Quote(destPath + PreviousSuffix);
-        var writeCmd = $"if [ -e {dest} ]; then cp -p {dest} {prev}; else rm -f {prev}; fi && " +
-                       $"echo '{base64Content}' | base64 -d | tee {dest} > /dev/null";
+        // A kept file from an interrupted earlier run is dropped first, so a kept file only ever holds this run's
+        // previous content; the new content is decoded beside the site before the site itself is touched, and copied
+        // over it with `cat` so the file keeps its owner and mode.
+        var next = ShellUtils.Quote(destPath + NextSuffix);
+        var writeCmd = $"rm -f {prev} && echo '{base64Content}' | base64 -d > {next} && " +
+                       $"if [ -e {dest} ]; then cp -p {dest} {prev}; fi && cat {next} > {dest}; " +
+                       $"rc=$?; rm -f {next}; exit $rc";
         var writeResult = await _executor.ExecuteAsync(serverId, writeCmd);
 
         if (!writeResult.Success)
         {
+            // A write that failed half way left the site cut short: the kept file, if this run made one, goes back.
+            await _executor.ExecuteAsync(serverId, $"if [ -e {prev} ]; then mv -f {prev} {dest}; fi");
             _logger.LogWarning("Failed to write nginx config '{SiteName}' on {ServerId}: {Error}", siteName, serverId, writeResult.Error);
             return writeResult;
         }

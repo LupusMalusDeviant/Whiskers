@@ -13,7 +13,7 @@ public sealed class SshTunnelForwardTests : IDisposable
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "sw-tests", "tunnels-" + Guid.NewGuid().ToString("N")[..8]);
 
     private SshTunnelManager Manager(bool unix = true) =>
-        new(new FakeServerConfig(), NullLogger<SshTunnelManager>.Instance) { SocketDir = _dir, UseUnixSockets = unix };
+        new(new FakeServerConfig(), NullLogger<SshTunnelManager>.Instance) { SocketRoot = _dir, UseUnixSockets = unix };
 
     [Fact]
     public void The_local_end_is_a_unix_socket_in_a_private_directory()
@@ -66,6 +66,52 @@ public sealed class SshTunnelForwardTests : IDisposable
     {
         var manager = new SshTunnelManager(new FakeServerConfig(), NullLogger<SshTunnelManager>.Instance);
         Assert.Equal(!OperatingSystem.IsWindows(), manager.UseUnixSockets);
+    }
+
+    [SkippableFact]
+    public void A_directory_another_user_could_have_prepared_is_refused()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "Unix file modes");
+        Directory.CreateDirectory(_dir);
+        File.SetUnixFileMode(_dir, (UnixFileMode)0b111_111_111);   // 0777, as a squatter in /tmp would leave it
+
+        Assert.Throws<InvalidOperationException>(() => Manager().NewForward("neuhof"));
+    }
+
+    [SkippableFact]
+    public void A_symlink_in_place_of_the_directory_is_refused()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "Unix symlinks");
+        var target = _dir + "-target";
+        Directory.CreateDirectory(target, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try
+        {
+            Directory.CreateSymbolicLink(_dir, target);
+            Assert.Throws<InvalidOperationException>(() => Manager().NewForward("neuhof"));
+        }
+        finally
+        {
+            try { Directory.Delete(_dir); } catch (IOException) { }
+            Directory.Delete(target, true);
+        }
+    }
+
+    [SkippableFact]
+    public void Without_a_fixed_directory_each_manager_gets_a_fresh_private_one_and_removes_it()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "Unix sockets");
+        var a = new SshTunnelManager(new FakeServerConfig(), NullLogger<SshTunnelManager>.Instance);
+        var b = new SshTunnelManager(new FakeServerConfig(), NullLogger<SshTunnelManager>.Instance);
+        var dirA = Path.GetDirectoryName(a.NewForward("neuhof").SocketPath)!;
+        var dirB = Path.GetDirectoryName(b.NewForward("neuhof").SocketPath)!;
+
+        Assert.NotEqual(dirA, dirB);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(dirA));
+
+        a.Dispose();
+        b.Dispose();
+        Assert.False(Directory.Exists(dirA));
+        Assert.False(Directory.Exists(dirB));
     }
 
     public void Dispose()
