@@ -33,7 +33,9 @@ Fixes from the full review of `main` after 1.0.0 (host access).
   process and host-networked container on the host could reach. It listens on a Unix socket in a volume that only the
   proxy and Whiskers mount. Whiskers waits for the socket and gets it as `Docker__SocketPath`. The verb whitelist is
   unchanged. **Upgrade:** at the next start, a stored server that still points at `127.0.0.1:2375` (local, or TCP
-  without TLS) is moved to the socket and a warning is logged; nothing else changes.
+  without TLS) is moved to the socket as a local server and a warning is logged. Its host commands (deploy, `.env`,
+  database panel, `execute_command`, firewall, nginx) are then not available, as for any local server in the hardened
+  profile; a TCP server ran them in a privileged helper container through the proxy before.
 - **Database panel.** The database password reaches `docker exec` as an environment variable delivered beside the
   command (`-e NAME`), never in the command line, so it no longer appears in the host's process list.
 - **Container `.env` editor.** A `.env` that could not be read (host unreachable, permission denied) is shown as an

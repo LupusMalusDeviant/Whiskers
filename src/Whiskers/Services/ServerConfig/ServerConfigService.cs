@@ -103,8 +103,10 @@ public class ServerConfigService : IServerConfigService, IInitializable
         foreach (var server in data.Servers.Where(PointsAtLegacyProxy))
         {
             _logger.LogWarning(
-                "Server {ServerId} pointed at the hardened socket proxy's old port 127.0.0.1:{Port}; it now uses {Socket}",
-                server.Id, DockerSettings.LegacyHardenedProxyPort, socket);
+                "Server {ServerId} pointed at the hardened socket proxy's old port 127.0.0.1:{Port}; it now uses {Socket} as a local server. "
+                + "Host commands for it (deploy, .env, database panel, execute_command, firewall, nginx) are not available in the hardened profile{WasTcp}",
+                server.Id, DockerSettings.LegacyHardenedProxyPort, socket,
+                server.ConnectionType == ConnectionType.TCP ? " (as a TCP server they ran in a privileged helper container)" : "");
             server.ConnectionType = ConnectionType.Local;
             server.SocketPath = socket;
             moved = true;
