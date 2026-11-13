@@ -6,80 +6,6 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-### Security
-
-Fixes from the full review of `main` after 1.0.0 (host access).
-
-- **mTLS renewal.**
-  - Whiskers now renews a proxy certificate only if the fleet CA issued it for the address Whiskers connects to.
-  - The renewed certificate names only that address, plus the current certificate's name and DNS names.
-  - A proxy certificate named like a Whiskers client certificate (`serverwatch-client`, `whiskers-client-*`) is never
-    renewed.
-  - A certificate that has run out is still renewed; the check ignores only its validity period.
-  - Renew any other certificate by hand.
-- **Helper containers pinned.**
-  - The host-shell helper and the volume backup/restore helpers run `alpine:3.22`, pinned by digest.
-  - A moved tag, a changed registry, or a different image tagged `alpine` on the host no longer runs in their place.
-- **SSH tunnels.** The local end of an SSH tunnel to a host's Docker socket is now a Unix socket (owner-only, in a
-  private directory) instead of a port on 127.0.0.1 that any local process could connect to. The directory gets a random name when it is created, so no other local user can prepare it in advance. On Windows the loopback
-  port stays.
-- **Firewall rules.** A port or source address with a trailing line break is refused instead of reaching `ufw`.
-- **nginx.** If `nginx -t` refuses an edited site config, Whiskers now restores the previous file. For a new site, it
-  removes the new file, so no refused config stays in place for the next reload.
-- **Auth:Disabled and `Origin: null`.** With authentication disabled, a request with `Origin: null` (a sandboxed frame,
-  a `data:` or `file:` page) now counts as cross-site and is refused, like any other origin that does not match the
-  host.
-- **Hardened profile: socket proxy.** The Docker socket proxy no longer publishes `127.0.0.1:2375`, which every
-  process and host-networked container on the host could reach. It listens on a Unix socket in a volume that only the
-  proxy and Whiskers mount. Whiskers waits for the socket and gets it as `Docker__SocketPath`. The verb whitelist is
-  unchanged. **Upgrade:** at the next start, a stored server that still points at `127.0.0.1:2375` (local, or TCP
-  without TLS) is moved to the socket as a local server and a warning is logged. Its host commands (deploy, `.env`,
-  database panel, `execute_command`, firewall, nginx) are then not available, as for any local server in the hardened
-  profile; a TCP server ran them in a privileged helper container through the proxy before.
-- **Database panel.** The database password reaches `docker exec` as an environment variable delivered beside the
-  command (`-e NAME`), never in the command line, so it no longer appears in the host's process list.
-- **Container `.env` editor.** A `.env` that could not be read (host unreachable, permission denied) is shown as an
-  error and saving is blocked, instead of looking like a missing file whose save would replace the real one. Saving
-  keeps comments, blank lines and other lines the editor does not show.
-
-### Fixed
-
-Fixes from the full review of `main` after 1.0.0 (data).
-
-- **DNS TXT records.**
-  - `set_dns_record` adds a TXT value next to the other TXT records of the name instead of replacing all of them.
-    SPF and verification records at the apex stay untouched.
-  - A TXT value that already exists only gets its TTL adjusted.
-  - When an A, AAAA or CNAME set merges several records into one, the answer and the audit entry name every record
-    it removed.
-  - A set whose extra records lack an ID is refused before anything is written.
-  - If a merge stops half way (a provider error on one of the deletes), the answer and the audit entry name what
-    was changed, what was removed and what is still there.
-  - A merge keeps the record that already holds the value instead of rewriting another one into a duplicate.
-  - `delete_dns_record` takes an optional `value`, so one TXT value can be removed without the others.
-  - The read-back after a set now requires exactly one A, AAAA or CNAME record and checks the TTL that was set.
-- **CVE findings during a slow scan.**
-  - A server whose container listing failed or timed out keeps its stored container findings and their ages.
-  - Before, it read as a server without containers and all of its findings were dropped. Every finding was then
-    reported as new on the next good scan.
-  - That server's scan cycle is now recorded as no success, so its "last success" age keeps growing.
-- **Log alerts.** A log-alert regex that runs into its time limit now skips only its own rule for that cycle, with a
-  warning naming the rule. Before, it silently turned off every other rule for that container.
-
-Fixes from the full review of `main` after 1.0.0 (agent).
-
-- **Git deploys.** When an app's repository URL changes, the next update now fetches from the new URL. Before, it
-  kept fetching the first one: the token went to the old host, and approval and audit named a repository that was
-  not the one deployed.
-- **Agent on the web pages.** Agent chat, AI operations, triggers and guardrails now give the agent the sign-in
-  credential and the web session along with the account (contract 0014), as every other page action does.
-- **Cancellation.**
-  - Read tools that reach a host, Docker, a cloud or a DNS provider now take the caller's cancellation: closing the
-    agent chat, stopping a trigger, `instruct_agent`'s deadline or a closed MCP request stops the read at the host.
-    The agent no longer waits for a read whose caller has stopped, even one that cannot be cancelled at its source.
-  - `instruct_agent` ends with the MCP request that started it and after 10 minutes at the latest, answering with
-    what it had and saying that the deadline cut it short.
-
 ## [1.0.0] — 2026-11-11
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in
@@ -125,9 +51,86 @@ Check these before or right after the update. Details are in the entries below.
   A host whose ghostunnel is managed by more than one compose file is refused by the preflight; merge the files first.
   See `docs/operations/per-host-mtls-migration.md`.
 - **Kubernetes.** Apply `deploy/k8s/whiskers-agent-rbac.yaml` again on every connected cluster.
+- **Hardened profile (`docker-compose.hardened.yml`).** Take the new compose file: the socket proxy listens on a Unix
+  socket in a shared volume instead of `127.0.0.1:2375`. A stored server on the old port is moved to the socket at the
+  first start (logged), if it has no TLS and the new compose file is in use. If it was a TCP server, nothing that
+  runs on the host works for it any more, like for any local server in this profile. Among them: deploy, `.env`,
+  database panel, `execute_command`, firewall, nginx, volume backups, CVE scans, systemd, SSL certificates, Git
+  deploy and AutoPatch scripts.
+- **mTLS proxy certificates.** Renewal now works only for a certificate the fleet CA issued for the address Whiskers
+  connects to; renew any other by hand.
 - **PostgreSQL overlay users.** The overlay moves to PostgreSQL 18; follow `docs/operations/postgres-18-upgrade.md`.
 
 ### All changes since 0.15.0
+
+Fixes from the full review of `main` before the tag (#190, #191, #192, #193):
+
+- **mTLS renewal.**
+  - Whiskers now renews a proxy certificate only if the fleet CA issued it for the address Whiskers connects to.
+  - The renewed certificate names only that address, plus the current certificate's name and DNS names.
+  - A proxy certificate named like a Whiskers client certificate (`serverwatch-client`, `whiskers-client-*`) is never
+    renewed.
+  - A certificate that has run out is still renewed; the check ignores only its validity period.
+  - Renew any other certificate by hand.
+- **Helper containers pinned.**
+  - The host-shell helper and the volume backup/restore helpers run `alpine:3.22`, pinned by digest.
+  - A moved tag, a changed registry, or a different image tagged `alpine` on the host no longer runs in their place.
+- **SSH tunnels.** The local end of an SSH tunnel to a host's Docker socket is now a Unix socket (owner-only, in a
+  private directory) instead of a port on 127.0.0.1 that any local process could connect to. The directory gets a random name when it is created, so no other local user can prepare it in advance. On Windows the loopback
+  port stays.
+- **Firewall rules.** A port or source address with a trailing line break is refused instead of reaching `ufw`.
+- **nginx.** If `nginx -t` refuses an edited site config, Whiskers now restores the previous file. For a new site, it
+  removes the new file, so no refused config stays in place for the next reload.
+- **Auth:Disabled and `Origin: null`.** With authentication disabled, a request with `Origin: null` (a sandboxed frame,
+  a `data:` or `file:` page) now counts as cross-site and is refused, like any other origin that does not match the
+  host.
+- **Hardened profile: socket proxy.** The Docker socket proxy no longer publishes `127.0.0.1:2375`, which every
+  process and host-networked container on the host could reach. It listens on a Unix socket in a volume that only the
+  proxy and Whiskers mount. Whiskers waits for the socket and gets it as `Docker__SocketPath`. The verb whitelist is
+  unchanged. **Upgrade:** at the next start, a stored server that still points at `127.0.0.1:2375` (local, or TCP
+  without TLS) is moved to the socket as a local server and a warning is logged. Nothing that runs on the host
+  then works for it any more (among them deploy, `.env`, database panel, `execute_command`, firewall, nginx, volume
+  backups, CVE scans, systemd, SSL certificates, Git deploy and AutoPatch scripts), as for any local server in the
+  hardened profile; a TCP server ran them in a privileged helper container through the proxy before.
+- **Database panel.** The database password reaches `docker exec` as an environment variable delivered beside the
+  command (`-e NAME`), never in the command line, so it no longer appears in the host's process list.
+- **Container `.env` editor.** A `.env` that could not be read (host unreachable, permission denied) is shown as an
+  error and saving is blocked, instead of looking like a missing file whose save would replace the real one. Saving
+  keeps comments, blank lines and other lines the editor does not show.
+
+- **DNS TXT records.**
+  - `set_dns_record` adds a TXT value next to the other TXT records of the name instead of replacing all of them.
+    SPF and verification records at the apex stay untouched.
+  - A TXT value that already exists only gets its TTL adjusted.
+  - When an A, AAAA or CNAME set merges several records into one, the answer and the audit entry name every record
+    it removed.
+  - A set whose extra records lack an ID is refused before anything is written.
+  - If a merge stops half way (a provider error on one of the deletes), the answer and the audit entry name what
+    was changed, what was removed and what is still there.
+  - A merge keeps the record that already holds the value instead of rewriting another one into a duplicate.
+  - `delete_dns_record` takes an optional `value`, so one TXT value can be removed without the others.
+  - The read-back after a set now requires exactly one A, AAAA or CNAME record and checks the TTL that was set.
+- **CVE findings during a slow scan.**
+  - A server whose container listing failed or timed out keeps its stored container findings and their ages.
+  - Before, it read as a server without containers and all of its findings were dropped. Every finding was then
+    reported as new on the next good scan.
+  - That server's scan cycle is now recorded as no success, so its "last success" age keeps growing.
+- **Log alerts.** A log-alert regex that runs into its time limit now skips only its own rule for that cycle, with a
+  warning naming the rule. Before, it silently turned off every other rule for that container.
+
+- **Git deploys.** When an app's repository URL changes, the next update now fetches from the new URL. Before, it
+  kept fetching the first one: the token went to the old host, and approval and audit named a repository that was
+  not the one deployed.
+- **Agent on the web pages.** Agent chat, AI operations, triggers and guardrails now give the agent the sign-in
+  credential and the web session along with the account (contract 0014), as every other page action does.
+- **Cancellation.**
+  - Read tools that reach a host, Docker, a cloud or a DNS provider now take the caller's cancellation: closing the
+    agent chat, stopping a trigger, `instruct_agent`'s deadline or a closed MCP request stops the read at the host.
+    The agent no longer waits for a read whose caller has stopped, even one that cannot be cancelled at its source.
+  - `instruct_agent` ends with the MCP request that started it and after 10 minutes at the latest, answering with
+    what it had and saying that the deadline cut it short.
+
+Earlier changes in 1.0.0:
 
 - **Fix: re-onboarding a host needs the control-plane approval (INV-59, #187).** Onboarding issues mTLS material,
   writes the proxy configuration and starts ghostunnel. For a host that already holds mTLS state (TLS client material
