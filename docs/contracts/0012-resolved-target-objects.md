@@ -311,13 +311,14 @@ A8–A11 were found while building steps 5 and 6. Each replaces the wording abov
   id is refused, so the decision and the onboarding (which runs on the canonical id) cannot name two different servers.
   The resolver records whether that server already holds mTLS state (`MtlsOnboardingState.Holds`): TLS client material
   in its record (`TcpUseTls`, a client certificate, key or CA path), or anything in the per-host credential store
-  (new `IMtlsClientCredentialStore.HoldsState`: false only for a host directory that is confirmed missing or empty; an
+  (new `IMtlsClientCredentialStore.HoldsState`: false only for a host directory that is empty or positively missing —
+  the nearest listable ancestor does not list it and no component on the way is a file; an
   access or I/O error throws, and a damaged or half written identity file counts). Whatever cannot be read counts as
   state (fail closed). The gateway passes it to the rules as `__resolvedControlPlaneState`; a caller's own `__…`
   arguments never reach them. `ProtectedResourceRule` then treats the re-onboarding as a control-plane capability
   (INV-59). The onboarding receives what was decided (`IOnboardingService.OnboardServerAsync(serverId,
   mayReplaceMtlsState, …)`), works only on the server whose id is exactly that id (never a display name or another
-  case), and holds the per-host lock from its first step to its end (replaces "steps 5–9" of contract 0007, amendment
+  case), and holds the per-host lock from before it looks the server up to its end (replaces "steps 5–9" of contract 0007, amendment
   10), so the server cannot be removed during the run. Under the lock it checks the state again: a run admitted as a
   first onboarding refuses before anything runs when the host holds state by then. No other capability sets or reads
   it.

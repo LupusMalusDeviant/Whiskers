@@ -71,29 +71,31 @@ public class OnboardingService : IOnboardingService
         var completed = new List<OnboardingStep>();
         var step = OnboardingStep.Bootstrap;
 
-        // INV-59 (#187): exactly the server the decision named, by its id — never another server that a display name
-        // or an id in another case would select.
-        var server = Exact(serverId)?.Clone();   // edited below, saved once at the switchover
-        if (server == null)
-        {
-            progress.Report("❌ Server nicht gefunden.");
-            return OnboardingResult.Fail(completed, step, "Server nicht gefunden.");
-        }
-
-        var slug = OnboardingCommands.Slug(server.Name);
+        Models.ServerConfig server;
+        string slug;
         SemaphoreSlim? hostLock = null;
         try
         {
             // R1-44 (contract 0007, amendment 10; review r3 MAJOR 1) and INV-59 (#187, contract 0012 A12): the whole run
-            // holds the store's per-host lock, the one every certificate step and server removal take. A running
-            // migration, renewal, rotation or removal makes onboarding refuse instead of interleaving slots, and while
-            // the run holds it the server cannot be removed, so its id cannot come to select another server.
+            // holds the store's per-host lock, the one every certificate step and server removal take — taken before
+            // the server is looked up. A running migration, renewal, rotation or removal makes onboarding refuse
+            // instead of interleaving slots, and while the run holds it the server cannot be removed, so its id cannot
+            // come to select another server.
             var gate = _clientCredentials.HostLock(serverId);
             if (!await gate.WaitAsync(0, ct))
                 return Fail(progress, completed, step,
-                    $"Für {server.Name} läuft gerade ein Zertifikatsschritt (Migration, Erneuerung, Rotation oder Entfernen); " +
+                    $"Für {serverId} läuft gerade ein Zertifikatsschritt (Migration, Erneuerung, Rotation oder Entfernen); " +
                     "Onboarding erneut starten, sobald er fertig ist.");
             hostLock = gate;
+            // INV-59 (#187): exactly the server the decision named, by its id — never another server that a display
+            // name or an id in another case would select.
+            if (Exact(serverId)?.Clone() is not { } found)   // edited below, saved once at the switchover
+            {
+                progress.Report("❌ Server nicht gefunden.");
+                return OnboardingResult.Fail(completed, step, "Server nicht gefunden.");
+            }
+            server = found;
+            slug = OnboardingCommands.Slug(server.Name);
             // INV-59 (#187): admitted as a first onboarding, but the host holds mTLS state now (another onboarding
             // finished since the decision): replacing it needs the control-plane approval, so nothing runs.
             if (!mayReplaceMtlsState && MtlsOnboardingState.Holds(server, _clientCredentials))

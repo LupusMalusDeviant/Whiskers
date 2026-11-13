@@ -863,17 +863,57 @@ public sealed class PerHostCredentialTests
         Assert.True(MtlsOnboardingState.Holds(record, w.Store));
     }
 
+    [Fact]
+    public void A_file_above_the_credential_directory_counts_as_mtls_state_and_a_missing_one_does_not()
+    {
+        // INV-59 (#187, Codex round 3): on Linux .NET reports ENOTDIR (a file where a directory belongs, here or above)
+        // as DirectoryNotFoundException; only a directory positively missing means no state.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var hosts = Path.Combine(w.MtlsDir, "hosts");
+        if (Directory.Exists(hosts)) Directory.Delete(hosts, recursive: true);
+        Assert.False(w.Store.HoldsState("neuhof"));   // nothing stored at all: missing, positively
+
+        File.WriteAllText(hosts, "");
+        Assert.ThrowsAny<IOException>(() => w.Store.HoldsState("neuhof"));
+        Assert.True(MtlsOnboardingState.Holds(new ServerConfig { Id = "neuhof" }, w.Store));
+    }
+
+    [Fact]
+    public async Task The_server_is_looked_up_only_under_the_host_lock()
+    {
+        // INV-59 (#187, Codex round 3): a removal finished between the lookup and the lock could let the id select
+        // another server; the lookup runs while the run holds the lock that removal needs.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var lookups = new List<int>();
+        var servers = NameFallbackServers.Over(w.Servers, id =>
+        {
+            if (id == "neuhof") lookups.Add(w.Store.HostLock("neuhof").CurrentCount);
+        });
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20") { OnCommand = _ => throw new OperationCanceledException() };
+        var onboarding = new OnboardingService(exec, servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        await onboarding.OnboardServerAsync("neuhof", false, new Progress<string>(), default);
+
+        Assert.NotEmpty(lookups);
+        Assert.All(lookups, held => Assert.Equal(0, held));   // the lock was taken at every lookup
+    }
+
     /// <summary>The production lookup of <see cref="Whiskers.Services.ServerConfig.IServerConfigService.GetServer"/>: the
     /// id, then the id in another case, then the display name — over <see cref="MutableServerConfig"/>.</summary>
     public class NameFallbackServers : DispatchProxy
     {
         private MutableServerConfig _inner = null!;
+        private Action<string>? _onLookup;
 
         protected override object? Invoke(MethodInfo? method, object?[]? args)
         {
             if (method!.Name == nameof(Whiskers.Services.ServerConfig.IServerConfigService.GetServer))
             {
                 var id = (string)args![0]!;
+                _onLookup?.Invoke(id);
                 var all = _inner.GetServers();
                 return all.FirstOrDefault(s => s.Id == id)
                        ?? all.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase))
@@ -883,10 +923,12 @@ public sealed class PerHostCredentialTests
             catch (TargetInvocationException ex) when (ex.InnerException is not null) { throw ex.InnerException; }
         }
 
-        internal static Whiskers.Services.ServerConfig.IServerConfigService Over(MutableServerConfig inner)
+        internal static Whiskers.Services.ServerConfig.IServerConfigService Over(MutableServerConfig inner,
+            Action<string>? onLookup = null)
         {
             var proxy = Create<Whiskers.Services.ServerConfig.IServerConfigService, NameFallbackServers>();
             ((NameFallbackServers)(object)proxy)._inner = inner;
+            ((NameFallbackServers)(object)proxy)._onLookup = onLookup;
             return proxy;
         }
     }
