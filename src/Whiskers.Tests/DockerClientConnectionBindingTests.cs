@@ -133,7 +133,9 @@ public class DockerClientConnectionBindingTests
         {
             var stale = Stale;
             Stale = null;
-            return stale ?? inner.GetServer(serverId);
+            // Like ServerConfigService: the id, then a display name as a fallback.
+            return stale ?? inner.GetServer(serverId)
+                ?? inner.GetServers().FirstOrDefault(s => string.Equals(s.Name, serverId, StringComparison.OrdinalIgnoreCase));
         }
         public ServerConfig? GetDefaultServer() => inner.GetDefaultServer();
         public bool SupportsTerminal(string? serverId) => false;
@@ -144,6 +146,34 @@ public class DockerClientConnectionBindingTests
         public string? GetSshKeyPath(ServerConfig server) => null;
         public Task DeleteSshKeyAsync(string serverId) => Task.CompletedTask;
         public Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef) => Task.FromResult(false);
+    }
+
+    [Fact]
+    public async Task A_caller_waiting_for_a_removed_server_never_gets_another_server_named_like_its_id()
+    {
+        // Codex round 7: a caller resolved server "neuhof" and waits for its build lock. "neuhof" is removed meanwhile,
+        // and another server is named "neuhof". The re-read must not answer with that server.
+        var inner = new MutableServerConfig(new ServerConfig
+        {
+            Id = "neuhof", Name = "neuhof", Enabled = true, ConnectionType = ConnectionType.SSH, SshHost = "100.64.0.20"
+        });
+        var servers = new StaleRead(inner);
+        var builds = new Builds();
+        using var docker = Manager(servers, builds);
+
+        var first = docker.GetClientAsync("neuhof");      // holds the build lock while its tunnel comes up
+        await builds.SshRequested.Task.WaitAsync(Wait);
+        var waiting = docker.GetClientAsync("neuhof");    // resolved "neuhof", waits for the lock
+
+        await inner.RemoveServerAsync("neuhof");
+        var other = Tcp("zirkus", "10.0.0.99");
+        other.Name = "neuhof";
+        await inner.AddServerAsync(other);
+        builds.SshTunnel.SetResult();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => first.WaitAsync(Wait));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => waiting.WaitAsync(Wait));
+        Assert.DoesNotContain("10.0.0.99", builds.BuiltFor.Values);   // nothing was built for the other server
     }
 
     [Fact]

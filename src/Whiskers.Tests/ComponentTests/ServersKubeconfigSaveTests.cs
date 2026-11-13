@@ -298,6 +298,42 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_dialog_for_a_removed_server_writes_nothing_to_a_server_named_like_its_id()
+    {
+        // Codex round 7: the dialog for "edge" stays open, "edge" is removed, and another server is named like its id
+        // while an onboarding holds that server. Saving the stale dialog with a key upload writes nothing anywhere.
+        var (service, recorder) = KeyUploadRecorder.Over(_servers);
+        Services.AddSingleton(service);
+        var page = Render<Servers>();
+        var removed = new ServerConfig
+        {
+            Id = "edge", Name = "edge", ConnectionType = ConnectionType.SSH, SshUser = "root", SshHost = "host.example.com", SshPort = 22
+        };
+        await _servers.AddServerAsync(removed);
+        Set(page, "_editingServer", removed.Clone());
+        Set(page, "_form", removed.Clone());
+        Set(page, "_sshKeyData", UploadedKey);
+        Set(page, "_sshKeyFileName", "id_ed25519");
+
+        await _servers.RemoveServerAsync("edge");
+        await _servers.AddServerAsync(new ServerConfig
+        {
+            Id = "zirkus", Name = "edge", ConnectionType = ConnectionType.SSH, SshUser = "root", SshHost = "other.example.com", SshPort = 22
+        });
+        var gate = Services.GetRequiredService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>().HostLock("zirkus");
+        Assert.True(await gate.WaitAsync(0));   // an onboarding of the other server
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Persist(page));
+        }
+        finally { gate.Release(); }
+
+        Assert.Empty(recorder.Uploads);
+        Assert.DoesNotContain(_servers.GetServers(), s => s.Id == "edge");   // not written back
+        Assert.Equal("other.example.com", _servers.GetServer("zirkus")!.SshHost);
+    }
+
+    [Fact]
     public async Task A_key_upload_for_a_new_server_waits_for_no_step_holding_its_host()
     {
         var (service, recorder) = KeyUploadRecorder.Over(_servers);

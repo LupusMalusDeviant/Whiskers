@@ -335,7 +335,9 @@ A8–A11 were found while building steps 5 and 6. Each replaces the wording abov
   server as well. A cached Docker client is bound to the connection it was built for
   (`DockerConnectionManager.CacheIdentityOf`): a client for the record's earlier host is never handed out, and a client
   whose build finished after the record moved is not published; a caller re-reads the record under the build lock, so one
-  that read the earlier host neither drops the current client nor builds one for that host. **Known limit:** the protection follows
+  that read the earlier host neither drops the current client nor builds one for that host. These steps find a record
+  by its exact id only, never by the registry's display-name fallback: a save, a key upload or a client build for a
+  removed server is refused and never reaches another server named like its id. **Known limit:** the protection follows
   Whiskers' records, not the physical host — a second record for the same host has no mTLS state of its own, so its
   first onboarding needs no approval. Creating that record is an Admin action (`server.save`) and is audited.
 

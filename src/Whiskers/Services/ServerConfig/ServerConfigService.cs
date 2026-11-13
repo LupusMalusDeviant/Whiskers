@@ -267,6 +267,11 @@ public class ServerConfigService : IServerConfigService, IInitializable
         }
     }
 
+    /// <summary>The record with exactly this id (INV-59, Codex round 7): an SSH key belongs to one server and never
+    /// reaches another by the display-name fallback of <see cref="GetServer"/>.</summary>
+    private Models.ServerConfig? ExactServer(string serverId) =>
+        GetServer(serverId) is { } server && string.Equals(server.Id, serverId, StringComparison.Ordinal) ? server : null;
+
     public async Task SaveSshKeyAsync(string serverId, string fileName, byte[] keyData)
     {
         // Strip any directory components to prevent path traversal (e.g. "../../etc/passwd").
@@ -285,7 +290,10 @@ public class ServerConfigService : IServerConfigService, IInitializable
         await _sshKeys.WaitAsync();
         try
         {
-            var replaced = await ReadSshKeyAsync(GetServer(serverId));
+            // A key for a server that no longer exists is not written (it would wait for whatever record takes the id).
+            var owner = ExactServer(serverId)
+                ?? throw new InvalidOperationException($"Server '{serverId}' does not exist; its SSH key was not saved.");
+            var replaced = await ReadSshKeyAsync(owner);
             var keyDir = Path.Combine(_sshKeysBasePath, serverId);
             if (OperatingSystem.IsWindows()) Directory.CreateDirectory(keyDir);
             else Directory.CreateDirectory(keyDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -297,7 +305,7 @@ public class ServerConfigService : IServerConfigService, IInitializable
             RecordSshKey(serverId, replaced, Convert.ToBase64String(keyData));
 
             // Update server config on a clone — never mutate the cached live object the lock-free readers see.
-            var server = GetServer(serverId)?.Clone();
+            var server = ExactServer(serverId)?.Clone();
             if (server != null)
             {
                 server.SshKeyFileName = fileName;
@@ -344,13 +352,13 @@ public class ServerConfigService : IServerConfigService, IInitializable
         await _sshKeys.WaitAsync();
         try
         {
-            var removed = await ReadSshKeyAsync(GetServer(serverId));
+            var removed = await ReadSshKeyAsync(ExactServer(serverId));
             var keyDir = Path.Combine(_sshKeysBasePath, serverId);
             try { if (Directory.Exists(keyDir)) Directory.Delete(keyDir, true); }
             catch { /* best effort */ }
             if (removed is not null && !Directory.Exists(keyDir)) RecordSshKey(serverId, removed, null);
 
-            var server = GetServer(serverId)?.Clone();
+            var server = ExactServer(serverId)?.Clone();
             if (server != null && server.SshKeyFileName != null)
             {
                 server.SshKeyFileName = null;

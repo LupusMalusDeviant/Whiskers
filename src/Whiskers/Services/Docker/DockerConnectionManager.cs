@@ -73,6 +73,10 @@ public class DockerConnectionManager : IDockerConnectionManager
     /// <inheritdoc cref="BuildClientForTests"/>
     internal Action<DockerClient>? DisposeClientForTests { get; init; }
 
+    /// <summary>The record with exactly this id, or null: never another server found by its display name.</summary>
+    private Models.ServerConfig? Exact(string id) =>
+        _serverConfig.GetServer(id) is { } server && string.Equals(server.Id, id, StringComparison.Ordinal) ? server : null;
+
     private void DisposeClient(DockerClient client)
     {
         if (DisposeClientForTests is { } dispose) dispose(client);
@@ -131,7 +135,9 @@ public class DockerConnectionManager : IDockerConnectionManager
         {
             // The record as it is now: a caller that read it before the wait must neither drop a client another caller
             // built for the record's current connection nor build one for its earlier connection (Codex round 6).
-            server = _serverConfig.GetServer(server.Id)
+            // Exactly this id (Codex round 7): the registry's name fallback would answer with another server once this one
+            // is removed and another is named like its id.
+            server = Exact(server.Id)
                 ?? throw new InvalidOperationException($"Server '{serverId ?? "default"}' not found");
             if (server.ConnectionType == ConnectionType.Kubernetes)
                 throw new InvalidOperationException(
@@ -150,7 +156,7 @@ public class DockerConnectionManager : IDockerConnectionManager
             var client = await (BuildClientForTests?.Invoke(server) ?? CreateClientAsync(server));
             // The record may have moved to another host while the client was built (an edit's invalidation found
             // nothing to drop then). Such a client is never published; the caller retries against the current record.
-            var current = _serverConfig.GetServer(server.Id);
+            var current = Exact(server.Id);
             if (current is null || !string.Equals(CacheIdentityOf(current), identity, StringComparison.Ordinal))
             {
                 DisposeClient(client);

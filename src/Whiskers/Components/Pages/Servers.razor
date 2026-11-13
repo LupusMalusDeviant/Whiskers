@@ -707,11 +707,20 @@
             // INV-59 (#187): a save waits for no onboarding or certificate step of the server — it holds their per-host
             // lock, or is refused while one runs (the whole record is written, so a name save counts as well). The SSH
             // key upload writes the record too, so it runs under the same lock, and nothing is written when refused.
+            // The record edited is exactly this id (never another server by its display name, Codex round 7); a record
+            // removed since the dialog opened is not written again, checked before and under the lock.
+            var editedId = _editingServer.Id;
+            Whiskers.Models.ServerConfig? Edited() =>
+                ServerConfigService.GetServer(editedId) is { } found && string.Equals(found.Id, editedId, StringComparison.Ordinal)
+                    ? found : null;
+            var stored = Edited() ?? throw new InvalidOperationException(
+                $"Server '{_editingServer.Name}' was removed meanwhile; nothing was saved.");
             var updated = Record();
             var previous = await Whiskers.Services.Certificates.MtlsOnboardingState.SaveAsync(ClientCredentials,
-                ServerConfigService.GetServer(_editingServer.Id) is { } stored && stored.Id == _editingServer.Id ? stored : null,
-                updated, async () =>
+                stored, updated, async () =>
                 {
+                    if (Edited() is null)
+                        throw new InvalidOperationException($"Server '{_editingServer.Name}' was removed meanwhile; nothing was saved.");
                     if (_sshKeyData != null && _sshKeyFileName != null)
                         await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
                     return await ServerConfigService.UpdateServerAsync(updated, _newKubeconfigKey, cloudKey);

@@ -272,6 +272,9 @@ public class SelfReportClaimTests
             var servers = new ServerConfigService(Options.Create(new DockerSettings { SocketPath = "npipe://test" }),
                 NullLogger<ServerConfigService>.Instance, dataPaths: paths, sealedKeys: new SealedKeyFiles(TestVault.Usable, paths));
             await servers.InitializeAsync();
+            // A key belongs to an existing server; an upload for a missing one is refused (INV-59, #187).
+            await servers.AddServerAsync(new ServerConfig { Id = "edge", Name = "edge", ConnectionType = ConnectionType.SSH,
+                SshHost = "127.0.0.1", SshPort = 22, SshUser = "probe" });
             await servers.SaveSshKeyAsync("edge", "id_ed25519", Encoding.UTF8.GetBytes(SealedKeyFilesTests.NewPem()));
 
             var key = Directory.GetFiles(paths.SshKeysDir, "id_ed25519", SearchOption.AllDirectories).Single();

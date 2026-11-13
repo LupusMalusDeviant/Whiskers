@@ -67,7 +67,8 @@ Check these before or right after the update. Details are in the entries below.
   certificate lock from its first step, so the server cannot be removed while it is being onboarded. The decision and
   its approval are bound to the host the record reaches: after the record's connection was changed, the run is refused
   and the approval no longer applies, no save of the server (an SSH key upload included) runs
-  while an onboarding holds the host, and a Docker client built for the earlier host is never used again. The protection follows Whiskers' records:
+  while an onboarding holds the host, and a Docker client built for the earlier host is never used again. A removed server is never
+  replaced by another one named like its id. The protection follows Whiskers' records:
   a second record for the same host has no mTLS state of its own.
 - **Fix: access stores are never restored from their previous generation.** A damaged or missing `roles.json`,
   `whitelist.json` or `mcp-permissions.json` used to be replaced automatically by its `.bak`, which may still hold what

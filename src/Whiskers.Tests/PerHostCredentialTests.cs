@@ -798,6 +798,29 @@ public sealed class PerHostCredentialTests
     }
 
     [Fact]
+    public async Task A_first_onboarding_runs_no_command_when_the_host_got_mtls_state_before_it_started()
+    {
+        // INV-59 (#187, Codex round 7): admitted as a first onboarding, but by the time it takes the host lock the host
+        // already holds mTLS state. The run refuses at its start, before a single command reaches the host.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var hostDir = Path.Combine(w.MtlsDir, "hosts", "neuhof");
+        Directory.CreateDirectory(hostDir);
+        File.WriteAllText(Path.Combine(hostDir, MtlsClientCredentialStore.IdentityFile), "{}");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Contains("Freigabe", result.Error);
+        Assert.Empty(exec.Scripts);   // nothing ran on the host
+        Assert.Equal(1, w.Store.HostLock("neuhof").CurrentCount);
+    }
+
+    [Fact]
     public async Task A_first_onboarding_is_refused_when_the_host_got_mtls_state_meanwhile()
     {
         // INV-59 (#187, Codex review): two first onboardings admitted while the host had no state; the one that finished
