@@ -326,15 +326,9 @@ internal sealed class SimulatedFleet(TestCa ca) : IHostCommandExecutor
         CancellationToken ct = default, int? maxOutputChars = null)
     {
         var script = MtlsCertificateRenewalTests.Decode(command);
-        Commands.Add((serverId, script));
+        lock (Commands) Commands.Add((serverId, script));
         if (serverId == "local" && script.Contains("step certificate sign", StringComparison.Ordinal))
-        {
-            var csrB64 = script.Split('\n').Select(l => l.Trim()).First(l => l.StartsWith("echo ", StringComparison.Ordinal)).Split(' ')[1];
-            var bundle = ca.Sign(Encoding.ASCII.GetString(Convert.FromBase64String(csrB64)), out var leaf, stepLeafEku: true);
-            leaf.Dispose();
-            Signed++;
-            return Task.FromResult(new CommandResult { ExitCode = 0, Output = SimulatedProxyHost.B64(bundle) });
-        }
+            return BeforeSign is { } gate ? SignAfterAsync(gate, script) : Task.FromResult(Sign(script));
         if (!Hosts.TryGetValue(serverId, out var host))
             return Task.FromResult(new CommandResult { ExitCode = 1, Error = "no such host" });
         // Every host command travels over the record's own credential: if the host does not admit it, Whiskers has
@@ -345,6 +339,27 @@ internal sealed class SimulatedFleet(TestCa ca) : IHostCommandExecutor
             return Task.FromResult(new CommandResult { ExitCode = 1, Error = "handshake refused: the record's own credential is not admitted" });
         }
         return Task.FromResult(host.Execute(script));
+    }
+
+    /// <summary>Awaited before step-ca signs: lets a test hold issues after they chose their name.</summary>
+    public Func<Task>? BeforeSign { get; set; }
+
+    private async Task<CommandResult> SignAfterAsync(Func<Task> gate, string script)
+    {
+        await gate();
+        return Sign(script);
+    }
+
+    private CommandResult Sign(string script)
+    {
+        lock (Commands)
+        {
+            var csrB64 = script.Split('\n').Select(l => l.Trim()).First(l => l.StartsWith("echo ", StringComparison.Ordinal)).Split(' ')[1];
+            var bundle = ca.Sign(Encoding.ASCII.GetString(Convert.FromBase64String(csrB64)), out var leaf, stepLeafEku: true);
+            leaf.Dispose();
+            Signed++;
+            return new CommandResult { ExitCode = 0, Output = SimulatedProxyHost.B64(bundle) };
+        }
     }
 }
 

@@ -31,7 +31,7 @@ internal sealed class ImageOperations
     /// duration of a pull would starve the health checks and the log scan of the same server — trading a
     /// bounded amount of load for an unbounded amount of blindness. The cap is there to stop many small calls
     /// piling up, which is not what this is.</para></summary>
-    public async Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null)
+    public async Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null, CancellationToken ct = default)
     {
         var client = await GetClient(serverId);
         var (repo, tag) = ParseImageReference(imageName);
@@ -51,7 +51,7 @@ internal sealed class ImageOperations
             new Progress<JSONMessage>(msg =>
             {
                 progress?.Report(msg.Status ?? "");
-            }));
+            }), ct);
     }
 
     /// <summary>Splits a Docker image reference into (repo, tag) for the Images.CreateImage call. A naive

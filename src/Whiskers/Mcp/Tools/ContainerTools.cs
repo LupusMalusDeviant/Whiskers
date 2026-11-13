@@ -211,7 +211,8 @@ public class ContainerTools
         IToolAuditLog auditLog,
         Whiskers.Services.AutoUpdate.IAutoUpdateService autoUpdate,
         [Description("Container ID or name")] string containerId,
-        [Description("Server ID")] string? serverId = null)
+        [Description("Server ID")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "update_container");
         if (denied != null) return MutationScope.Fail(denied);
@@ -243,7 +244,7 @@ public class ContainerTools
         string newId;
         try
         {
-            newId = await docker.RecreateContainerAsync(id, serverId, progress);
+            newId = await docker.RecreateContainerAsync(id, serverId, progress, cancellationToken);
         }
         catch
         {

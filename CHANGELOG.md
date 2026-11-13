@@ -64,6 +64,19 @@ Check these before or right after the update. Details are in the entries below.
   state that cannot be read, counts as state. Onboarding is decided on exactly the server its id names (an unknown or
   ambiguous id is refused, a display name never selects a server), and a run admitted as a first onboarding refuses
   before issuing anything when another onboarding of the same host finished in the meantime.
+- **Fix: access stores are never restored from their previous generation.** A damaged or missing `roles.json`,
+  `whitelist.json` or `mcp-permissions.json` used to be replaced automatically by its `.bak`, which may still hold what
+  the last save revoked: a deleted MCP API key authenticated again, a removed role or address came back. These three
+  stores now stop the start instead (`JsonStoreCorruptException`), like the identity bindings and the guardrail policy;
+  the operator checks the `.bak` against what was revoked since and puts it in place by hand, or restores a backup. The
+  other stores keep the automatic recovery.
+- **Fix: no two hosts get the same mTLS client name.** Two first issues for server ids with the same slug (`rabe-hof`,
+  `rabe_hof`) at the same time could both choose `whiskers-client-rabe-hof-g1`. The name is now checked again where it
+  is stored; the later issue is refused before anything is written and gets a name of its own when issued again.
+- **Fix: a cancelled container update stops before it changes anything.** `container.update` passes the caller's
+  token, and the gateway's 30-minute deadline, to the inspect and the image pull and checks it again before stopping the
+  old container. From the stop on the update completes or rolls back, as before.
+
 - **Fix: the SQLite self-backup is fast on spinning disks.** A self-backup, and so the pre-upgrade backup at the first
   start of an upgrade, copied the database with `VACUUM INTO`. That rebuilds the file in b-tree order and reads it out
   of order. On a spinning disk with a cold cache, a 780 MB database took 1089 s that way; the pre-upgrade backup of the

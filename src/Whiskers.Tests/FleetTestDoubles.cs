@@ -301,7 +301,7 @@ internal sealed class FakeDocker : IDockerService
     public Task RestartContainerAsync(string containerId, string? serverId = null) =>
         Act("restart", containerId, serverId, Task.CompletedTask);
     public Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null) => throw new NotSupportedException();
-    public Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null) => throw new NotSupportedException();
+    public Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null) =>
         AllowMutations ? Task.FromResult(("running", 0, false)) : throw new NotSupportedException();
     public Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
@@ -321,7 +321,7 @@ internal sealed class FakeDocker : IDockerService
     public Task<string?> GetImageDigestAsync(string imageRef, string? serverId, CancellationToken ct)
         => DigestWithToken?.Invoke(imageRef, ct) ?? GetImageDigestAsync(imageRef, serverId);
     public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
-    public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null) =>
+    public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null, CancellationToken ct = default) =>
         Act("recreate", containerId, serverId, Task.FromResult("recreated-" + containerId));
     /// <summary>The environment every container answers with; unset, reading it throws.</summary>
     public List<KeyValuePair<string, string>>? Env { get; set; }

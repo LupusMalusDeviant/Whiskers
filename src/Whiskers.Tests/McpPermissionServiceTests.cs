@@ -143,6 +143,33 @@ public sealed class McpPermissionServiceTests : IDisposable
         Assert.Null(svc.ValidateKey("deadbeef"));
     }
 
+    // 1.0 review: the previous generation still holds a key deleted by the last save. A damaged or missing file must
+    // stop the start rather than bring that key back.
+    [Theory]
+    [InlineData("corrupt")]
+    [InlineData("missing")]
+    public async Task A_deleted_key_never_authenticates_again_from_the_previous_generation(string damage)
+    {
+        Directory.CreateDirectory(_dir);
+        var paths = new DataPathOptions(_dir);
+        var svc = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
+        await svc.InitializeAsync();
+        var revoked = await svc.AddApiKeyAsync("compromised", "admin");
+        await svc.RemoveApiKeyAsync(revoked.Id);
+        var previous = await File.ReadAllTextAsync(paths.McpPermissionsJson + ".bak");
+        Assert.Contains(McpPermissionService.HashKey(revoked.Key!), previous);   // the previous generation still has it
+
+        if (damage == "corrupt") await File.WriteAllTextAsync(paths.McpPermissionsJson, "{ torn");
+        else File.Delete(paths.McpPermissionsJson);
+        var restarted = new McpPermissionService(new ListLogger<McpPermissionService>(), paths);
+
+        var refused = await Assert.ThrowsAsync<Whiskers.Services.Persistence.JsonStoreCorruptException>(() => restarted.InitializeAsync());
+        Assert.Contains("not restored automatically", refused.Message);
+        Assert.Null(restarted.ValidateKey(revoked.Key!));
+        Assert.Equal(previous, await File.ReadAllTextAsync(paths.McpPermissionsJson + ".bak"));   // untouched
+        Assert.Equal(damage == "corrupt", File.Exists(paths.McpPermissionsJson));                  // nothing written back
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_dir, recursive: true); } catch { /* best-effort temp cleanup */ }

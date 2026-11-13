@@ -979,7 +979,7 @@
             Snackbar.Add(L["Dashboard_Snackbar_Updating", container.Name].Value, Severity.Info);
             var progress = new Progress<string>(msg => Snackbar.Add(msg, Severity.Info));
             await Mutations.RunAsync("container.update", new { containerId = container.Id, name = container.Name, serverId = container.ServerId },
-                async (ResolvedContainer c, CancellationToken _) =>
+                async (ResolvedContainer c, CancellationToken token) =>
                 {
                     // C12: snapshot the current image + config BEFORE recreating, so this update can be rolled back.
                     // Inside the gateway: a refused update must not overwrite the previous rollback point.
@@ -993,7 +993,7 @@
                         if (cex is Whiskers.Services.AutoUpdate.RollbackSnapshotUnavailableException)
                             Snackbar.Add(L["Dashboard_Snackbar_NoRollbackSnapshot", container.Name].Value, Severity.Warning);
                     }
-                    await DockerService.RecreateContainerAsync(c.Id, c.ServerId, progress);
+                    await DockerService.RecreateContainerAsync(c.Id, c.ServerId, progress, token);
                 });
             ImageUpdateStore.Remove(container.Id, container.ServerId);
             Snackbar.Add(L["Dashboard_Snackbar_Updated", container.Name].Value, Severity.Success);

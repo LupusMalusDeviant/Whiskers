@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Configuration;
+using Whiskers.Models;
 using Whiskers.Services.Auth;
 using Whiskers.Services.Backup;
 using Whiskers.Services.Persistence;
@@ -231,6 +232,55 @@ public class JsonFileStoreRecoveryTests : IDisposable
 
         await Assert.ThrowsAsync<JsonStoreCorruptException>(() => roles.InitializeAsync());
         Assert.Equal("{\"Roles\": {", await File.ReadAllTextAsync(StorePath));
+    }
+
+    // 1.0 review: roles and the whitelist grant access; their previous generation may hold what the last save removed.
+    [Theory]
+    [InlineData("corrupt")]
+    [InlineData("missing")]
+    public async Task Access_stores_are_never_replaced_by_their_previous_generation(string damage)
+    {
+        var p = new DataPathOptions(_dir);
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+        var roles = new RoleService(config, NullLogger<RoleService>.Instance, dataPaths: p);
+        await roles.InitializeAsync();
+        await roles.SetRoleAsync("admin@example.com", AppRole.Admin);
+        await roles.SetRoleAsync("demoted@example.com", AppRole.Admin);
+        await roles.RemoveRoleAsync("demoted@example.com");
+        var whitelist = new WhitelistService(config, roles, NullLogger<WhitelistService>.Instance, p);
+        await whitelist.InitializeAsync();
+        await whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = ["admin@example.com", "removed@example.com"] });
+        await whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = ["admin@example.com"] });
+        Assert.Contains("demoted@example.com", await File.ReadAllTextAsync(p.RolesJson + ".bak"));
+        Assert.Contains("removed@example.com", await File.ReadAllTextAsync(p.WhitelistJson + ".bak"));
+
+        foreach (var file in new[] { p.RolesJson, p.WhitelistJson })
+            if (damage == "corrupt") await File.WriteAllTextAsync(file, "{ torn");
+            else File.Delete(file);
+
+        var restartedRoles = new RoleService(config, NullLogger<RoleService>.Instance, dataPaths: p);
+        await Assert.ThrowsAsync<JsonStoreCorruptException>(() => restartedRoles.InitializeAsync());
+        var restartedWhitelist = new WhitelistService(config, restartedRoles, NullLogger<WhitelistService>.Instance, p);
+        await Assert.ThrowsAsync<JsonStoreCorruptException>(() => restartedWhitelist.InitializeAsync());
+        Assert.Contains("demoted@example.com", await File.ReadAllTextAsync(p.RolesJson + ".bak"));      // untouched
+        Assert.Contains("removed@example.com", await File.ReadAllTextAsync(p.WhitelistJson + ".bak"));
+        Assert.Equal(damage == "corrupt", File.Exists(p.RolesJson));                                    // nothing written back
+    }
+
+    [Fact]
+    public async Task A_store_that_grants_access_refuses_even_a_readable_previous_generation()
+    {
+        var store = new JsonFileStore<Doc>(StorePath, restorePreviousGeneration: false);
+        await store.SaveAsync(Make(1));
+        await store.SaveAsync(Make(2));
+        await File.WriteAllTextAsync(StorePath, "{ torn");
+
+        var refused = await Assert.ThrowsAsync<JsonStoreCorruptException>(() => store.LoadAsync());
+
+        Assert.Contains(".bak", refused.Message);
+        Assert.Equal("{ torn", await File.ReadAllTextAsync(StorePath));
+        Assert.Equal(1, JsonSerializer.Deserialize<Doc>(await File.ReadAllTextAsync(StorePath + ".bak"))!.Version);
+        Assert.DoesNotContain(JsonStoreRecovery.Recovered, r => r.Path == StorePath);
     }
 
     [Fact]
