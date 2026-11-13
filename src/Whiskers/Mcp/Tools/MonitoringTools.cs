@@ -45,11 +45,12 @@ public class MonitoringTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        IHealthStore healthStore)
+        IHealthStore healthStore,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_health_summary");
         if (denied != null) return denied;
-        var containers = await docker.ListAllContainersAsync(all: true);
+        var containers = await docker.ListAllContainersAsync(true, cancellationToken);
         var running = containers.Count(c => c.State == "running");
         var stopped = containers.Count(c => c.State == "exited");
         var unhealthy = containers.Count(c => c.HealthStatus == "unhealthy");
@@ -88,7 +89,8 @@ public class MonitoringTools
         IMetricsQueryService metrics,
         [Description("Container ID")] string containerId,
         [Description("Server ID")] string serverId,
-        [Description("Time period: 1h, 6h, 24h, 7d, 30d")] string period = "1h")
+        [Description("Time period: 1h, 6h, 24h, 7d, 30d")] string period = "1h",
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_container_metrics");
         if (denied != null) return denied;
@@ -100,8 +102,8 @@ public class MonitoringTools
         if (MetricPeriods.Parse(period) is not { } timespan)
             return $"Invalid period '{period}'. Must be one of: {string.Join(", ", MetricPeriods.All)}.";
 
-        var cpu = await metrics.GetContainerCpuHistoryAsync(containerId, serverId, timespan);
-        var mem = await metrics.GetContainerMemoryHistoryAsync(containerId, serverId, timespan);
+        var cpu = await metrics.GetContainerCpuHistoryAsync(containerId, serverId, timespan, cancellationToken);
+        var mem = await metrics.GetContainerMemoryHistoryAsync(containerId, serverId, timespan, cancellationToken);
 
         if (!cpu.Any()) return "No metrics available for this container yet.";
 
@@ -121,7 +123,8 @@ public class MonitoringTools
         IMcpPermissionService permissionService,
         IMetricsQueryService metrics,
         [Description("Server ID")] string serverId,
-        [Description("Time period: 1h, 6h, 24h, 7d, 30d")] string period = "1h")
+        [Description("Time period: 1h, 6h, 24h, 7d, 30d")] string period = "1h",
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_server_metrics");
         if (denied != null) return denied;
@@ -131,8 +134,8 @@ public class MonitoringTools
         if (MetricPeriods.Parse(period) is not { } timespan)
             return $"Invalid period '{period}'. Must be one of: {string.Join(", ", MetricPeriods.All)}.";
 
-        var cpu = await metrics.GetServerCpuHistoryAsync(serverId, timespan);
-        var mem = await metrics.GetServerMemoryHistoryAsync(serverId, timespan);
+        var cpu = await metrics.GetServerCpuHistoryAsync(serverId, timespan, cancellationToken);
+        var mem = await metrics.GetServerMemoryHistoryAsync(serverId, timespan, cancellationToken);
 
         if (!cpu.Any()) return "No metrics available for this server yet.";
 
@@ -159,7 +162,8 @@ public class MonitoringTools
         [Description("Server ID")] string serverId,
         [Description("Service name to filter (optional, e.g. 'nginx', 'docker')")] string? serviceName = null,
         [Description("Number of lines (default 100)")] int lines = 100,
-        [Description("Priority filter: emerg, alert, crit, err, warning, notice, info, debug (optional)")] string? priority = null)
+        [Description("Priority filter: emerg, alert, crit, err, warning, notice, info, debug (optional)")] string? priority = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_server_logs");
         if (denied != null) return denied;
@@ -169,7 +173,7 @@ public class MonitoringTools
             return "Error: Invalid priority. Use emerg, alert, crit, err, warning, notice, info, debug, 0-7 or a range like err..warning.";
         var cmd = BuildJournalctlCommand(serviceName, lines, priority);
 
-        var result = await executor.ExecuteAsync(serverId, cmd, TimeSpan.FromSeconds(15));
+        var result = await executor.ExecuteAsync(serverId, cmd, TimeSpan.FromSeconds(15), cancellationToken);
         return result.Success ? result.Output : $"Error: {result.Error}";
     }
 }

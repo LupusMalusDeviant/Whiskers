@@ -40,6 +40,7 @@ Every tool declares its permission level via `[McpToolLevel]` and appears in
 ## Behaviour notes
 
 - **Compose plans** (R1-07): `deploy_compose`, `deploy_app` (contract 0013, D5: from its arguments through `DeploymentCompose`) and `set_container_env` are planned by the gateway's resolver before policy — every existing container the deployment recreates, removes or collides with is a related resource of the decision — and the tool plans again, refuses if a container was not decided, and runs the plan with explicit `-p` / `-f`. `DotEnvMerge` (in `ContainerTools.cs`) is the one merge both use.
+- **Cancellation** (INV-40): a read tool that reaches a host, Docker, a cloud or DNS provider ends with a `CancellationToken cancellationToken = default` parameter — the MCP SDK binds it from the request, the agent invoker passes the chat's, the trigger run's or `instruct_agent`'s — and hands it to every service call that takes one, so a stop reaches the host. `ReadToolCancellationScanTests` fails for a network read tool without it; reads of Whiskers' own state (stores, settings) may omit it.
 - **Input validation** at the boundary (`McpInputValidation.cs`): `deploy_compose` rejects unsafe project names (`..` / leading-non-alphanumeric) and quotes the target directory; container ids resolve to a **unique** match (exact id/name, else a single id-prefix) — an ambiguous prefix or no match returns a clear error instead of acting on the wrong container.
 
 ## Related

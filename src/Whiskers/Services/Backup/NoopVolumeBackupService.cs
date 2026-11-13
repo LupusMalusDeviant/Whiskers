@@ -23,12 +23,12 @@ public sealed class NoopVolumeBackupService : IVolumeBackupService
     public Task RestoreVolumeAsync(string backupId, string? targetVolume = null)
         => throw new InvalidOperationException(Disabled);
 
-    public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null)
+    public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null, CancellationToken ct = default)
         => Task.FromResult(new List<VolumeBackupEntity>());
 
     public Task DeleteBackupAsync(string backupId) => Task.CompletedTask;
 
-    public Task<List<string>> ListVolumesAsync(string? serverId = null) => Task.FromResult(new List<string>());
+    public Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default) => Task.FromResult(new List<string>());
 
     /// <summary>Throws like the mutating operations: with the module off no volume is resolved, so every volume
     /// mutation is refused before policy (contract 0012, D5).</summary>

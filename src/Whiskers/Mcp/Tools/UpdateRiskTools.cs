@@ -51,12 +51,13 @@ public class UpdateRiskTools
         [Description("Container name or id prefix.")] string container,
         [Description("True when the change touches the compose project's configuration — a new or edited " +
                      "override file, a changed environment. Then EVERY service in the project is recreated, " +
-                     "not just this one.")] bool changesProjectConfig = false)
+                     "not just this one.")] bool changesProjectConfig = false,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_blast_radius");
         if (denied != null) return denied;
 
-        var all = await docker.ListAllContainersAsync();
+        var all = await docker.ListAllContainersAsync(true, cancellationToken);
         var onServer = all.Where(c => string.Equals(c.ServerId, serverId, StringComparison.OrdinalIgnoreCase))
                           .ToList();
         var target = onServer.FirstOrDefault(c =>

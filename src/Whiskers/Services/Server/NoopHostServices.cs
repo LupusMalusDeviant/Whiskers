@@ -19,7 +19,7 @@ internal static class HostManagementDisabled
 
 public sealed class NoopFirewallService : IFirewallService
 {
-    public Task<FirewallStatus> GetStatusAsync(string serverId)
+    public Task<FirewallStatus> GetStatusAsync(string serverId, CancellationToken ct = default)
         => Task.FromResult(new FirewallStatus { RawOutput = HostManagementDisabled.Message });
     public Task<CommandResult> AddRuleAsync(string serverId, string port, string protocol = "tcp", string action = "allow", string? from = null)
         => Task.FromResult(HostManagementDisabled.Result());
@@ -31,8 +31,8 @@ public sealed class NoopFirewallService : IFirewallService
 
 public sealed class NoopNginxService : INginxService
 {
-    public Task<List<NginxSite>> ListSitesAsync(string serverId) => Task.FromResult(new List<NginxSite>());
-    public Task<string> GetSiteConfigAsync(string serverId, string siteName) => Task.FromResult("");
+    public Task<List<NginxSite>> ListSitesAsync(string serverId, CancellationToken ct = default) => Task.FromResult(new List<NginxSite>());
+    public Task<string> GetSiteConfigAsync(string serverId, string siteName, CancellationToken ct = default) => Task.FromResult("");
     public Task<CommandResult> UpdateSiteConfigAsync(string serverId, string siteName, string content)
         => Task.FromResult(HostManagementDisabled.Result());
     public Task<CommandResult> TestConfigAsync(string serverId) => Task.FromResult(HostManagementDisabled.Result());
@@ -45,7 +45,7 @@ public sealed class NoopNginxService : INginxService
 
 public sealed class NoopSystemdService : ISystemdService
 {
-    public Task<List<SystemdUnit>> ListServicesAsync(string serverId) => Task.FromResult(new List<SystemdUnit>());
+    public Task<List<SystemdUnit>> ListServicesAsync(string serverId, CancellationToken ct = default) => Task.FromResult(new List<SystemdUnit>());
     public Task<IReadOnlyList<string>> ListUnitNamesAsync(string serverId) => Task.FromResult<IReadOnlyList<string>>([]);
     public Task<string> GetStatusAsync(string serverId, string serviceName) => Task.FromResult(HostManagementDisabled.Message);
     public Task<string> GetJournalAsync(string serverId, string serviceName, int lines = 100) => Task.FromResult(HostManagementDisabled.Message);
@@ -58,7 +58,7 @@ public sealed class NoopSystemdService : ISystemdService
 
 public sealed class NoopSslCertService : ISslCertService
 {
-    public Task<List<SslCertificate>> ListCertificatesAsync(string serverId) => Task.FromResult(new List<SslCertificate>());
+    public Task<List<SslCertificate>> ListCertificatesAsync(string serverId, CancellationToken ct = default) => Task.FromResult(new List<SslCertificate>());
     public Task<CommandResult> RenewAsync(string serverId, string certName) => Task.FromResult(HostManagementDisabled.Result());
     public Task<CommandResult> RenewAllAsync(string serverId) => Task.FromResult(HostManagementDisabled.Result());
 }

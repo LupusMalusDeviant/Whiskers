@@ -21,12 +21,13 @@ public class LogTools
         [Description("Use regex matching (default: false)")] bool isRegex = false,
         [Description("Container name to search (optional, omit for all)")] string? containerId = null,
         [Description("Server ID (optional, omit to search all servers)")] string? serverId = null,
-        [Description("Number of log tail lines to search per container (default: 500)")] int tailLines = 500)
+        [Description("Number of log tail lines to search per container (default: 500)")] int tailLines = 500,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "search_logs");
         if (denied != null) return denied;
 
-        var results = await searchService.SearchAsync(pattern, isRegex, containerId, serverId, tailLines);
+        var results = await searchService.SearchAsync(pattern, isRegex, containerId, serverId, tailLines, ct: cancellationToken);
         if (!results.Any()) return $"No matches found for '{pattern}'.";
 
         // Name the server: container names repeat across hosts, so the bare name is ambiguous.

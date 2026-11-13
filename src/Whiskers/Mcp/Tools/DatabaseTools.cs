@@ -20,19 +20,20 @@ public class DatabaseTools
         IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Container ID or name")] string containerId,
-        [Description("Server ID")] string? serverId = null)
+        [Description("Server ID")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "detect_database");
         if (denied != null) return denied;
 
-        var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
+        var containers = await docker.ListContainersAsync(all: true, serverId: serverId, ct: cancellationToken);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
         if (container is null) return resolveError ?? $"Container not found: {containerId}";
 
         if (!container.IsDatabase)
             return $"Container '{container.Name}' (Image: {container.Image}) is not a database container.";
 
-        var env = await docker.GetContainerEnvAsync(container.Id, serverId);
+        var env = await docker.GetContainerEnvAsync(container.Id, serverId, cancellationToken);
         var creds = DatabaseDetector.ExtractCredentials(env, container.DatabaseType);
 
         return $"Database detected:\n  Type: {DatabaseDetector.GetLabel(container.DatabaseType)}\n  Image: {container.Image}\n  User: {creds.User}\n  Database: {creds.Database}\n  Port: {DatabaseDetector.GetDefaultPort(container.DatabaseType)}";
@@ -46,15 +47,16 @@ public class DatabaseTools
         IDockerService docker,
         IDatabaseService dbService,
         [Description("Container ID or name")] string containerId,
-        [Description("Server ID")] string? serverId = null)
+        [Description("Server ID")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_databases");
         if (denied != null) return denied;
 
-        var (container, creds, error) = await ResolveContainer(docker, containerId, serverId);
+        var (container, creds, error) = await ResolveContainer(docker, containerId, serverId, cancellationToken);
         if (error != null) return error;
 
-        var databases = await dbService.GetDatabasesAsync(container!.Id, container.DatabaseType, creds!, serverId);
+        var databases = await dbService.GetDatabasesAsync(container!.Id, container.DatabaseType, creds!, serverId, cancellationToken);
         return databases.Any()
             ? $"Databases in {container.Name}:\n{string.Join('\n', databases.Select(d => $"  - {d}"))}"
             : $"No databases found in {container.Name}.";
@@ -69,15 +71,16 @@ public class DatabaseTools
         IDatabaseService dbService,
         [Description("Container ID or name")] string containerId,
         [Description("Database name")] string database,
-        [Description("Server ID")] string? serverId = null)
+        [Description("Server ID")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_tables");
         if (denied != null) return denied;
 
-        var (container, creds, error) = await ResolveContainer(docker, containerId, serverId);
+        var (container, creds, error) = await ResolveContainer(docker, containerId, serverId, cancellationToken);
         if (error != null) return error;
 
-        var tables = await dbService.GetTablesAsync(container!.Id, database, container.DatabaseType, creds!, serverId);
+        var tables = await dbService.GetTablesAsync(container!.Id, database, container.DatabaseType, creds!, serverId, cancellationToken);
         if (!tables.Any()) return $"No tables found in {database}.";
 
         var lines = tables.Select(t => $"  - {t.Name} ({t.RowCount} rows, {t.Size})");
@@ -94,15 +97,16 @@ public class DatabaseTools
         [Description("Container ID or name")] string containerId,
         [Description("Database name")] string database,
         [Description("Table name")] string table,
-        [Description("Server ID")] string? serverId = null)
+        [Description("Server ID")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_schema");
         if (denied != null) return denied;
 
-        var (container, creds, error) = await ResolveContainer(docker, containerId, serverId);
+        var (container, creds, error) = await ResolveContainer(docker, containerId, serverId, cancellationToken);
         if (error != null) return error;
 
-        var columns = await dbService.GetSchemaAsync(container!.Id, database, table, container.DatabaseType, creds!, serverId);
+        var columns = await dbService.GetSchemaAsync(container!.Id, database, table, container.DatabaseType, creds!, serverId, cancellationToken);
         if (!columns.Any()) return $"No columns found for {table}.";
 
         var lines = columns.Select(c =>
@@ -186,14 +190,14 @@ public class DatabaseTools
     }
 
     private static async Task<(ContainerInfo? Container, DatabaseCredentials? Creds, string? Error)> ResolveContainer(
-        IDockerService docker, string containerId, string? serverId)
+        IDockerService docker, string containerId, string? serverId, CancellationToken ct = default)
     {
-        var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
+        var containers = await docker.ListContainersAsync(all: true, serverId: serverId, ct: ct);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
         if (container is null) return (null, null, resolveError ?? $"Container not found: {containerId}");
         if (!container.IsDatabase) return (null, null, $"Container '{container.Name}' is not a database.");
 
-        var env = await docker.GetContainerEnvAsync(container.Id, serverId);
+        var env = await docker.GetContainerEnvAsync(container.Id, serverId, ct);
         var creds = DatabaseDetector.ExtractCredentials(env, container.DatabaseType);
         return (container, creds, null);
     }

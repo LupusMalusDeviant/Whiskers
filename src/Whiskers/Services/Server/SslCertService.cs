@@ -38,13 +38,13 @@ public class SslCertService : ISslCertService
         _logger = logger;
     }
 
-    public async Task<List<SslCertificate>> ListCertificatesAsync(string serverId)
+    public async Task<List<SslCertificate>> ListCertificatesAsync(string serverId, CancellationToken ct = default)
     {
         var result = await _executor.ExecuteAsync(serverId,
             // A host without certbot simply has no certbot certificates; reporting that as a failure made the
             // certificate monitor log a warning for every such server, twice a day.
             "command -v certbot >/dev/null 2>&1 || exit 0; certbot certificates 2>/dev/null",
-            timeout: TimeSpan.FromSeconds(60));
+            timeout: TimeSpan.FromSeconds(60), ct: ct);
 
         var certs = new List<SslCertificate>();
 

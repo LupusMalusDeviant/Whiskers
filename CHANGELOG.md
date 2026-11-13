@@ -37,9 +37,11 @@ Fixes from the full review of `main` after 1.0.0 (agent).
 - **Agent on the web pages.** Agent chat, AI operations, triggers and guardrails now give the agent the sign-in
   credential and the web session along with the account (contract 0014), as every other page action does.
 - **Cancellation.**
-  - Read tools the agent runs now stop when the chat is closed or the trigger is stopped.
+  - Read tools that reach a host, Docker, a cloud or a DNS provider now take the caller's cancellation: closing the
+    agent chat, stopping a trigger, `instruct_agent`'s deadline or a closed MCP request stops the read at the host.
+    The agent no longer waits for a read whose caller has stopped, even one that cannot be cancelled at its source.
   - `instruct_agent` ends with the MCP request that started it and after 10 minutes at the latest, answering with
-    what it had.
+    what it had and saying that the deadline cut it short.
 
 ## [1.0.0] — 2026-11-11
 

@@ -27,12 +27,13 @@ public class HostLoadTools
         IMcpPermissionService permissionService,
         IMetricsSource metricsSource,
         IServerConfigService servers,
-        [Description("Limit to one server (optional)")] string? serverId = null)
+        [Description("Limit to one server (optional)")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_host_load");
         if (denied != null) return denied;
 
-        var infos = await metricsSource.GetAllServerSystemInfoAsync();
+        var infos = await metricsSource.GetAllServerSystemInfoAsync(cancellationToken);
         var lines = new List<string>();
 
         foreach (var (id, info) in infos)

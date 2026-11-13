@@ -5,8 +5,8 @@ namespace Whiskers.Services.Server;
 public interface INginxService
 {
     [InventoryLookup]
-    Task<List<NginxSite>> ListSitesAsync(string serverId);
-    Task<string> GetSiteConfigAsync(string serverId, string siteName);
+    Task<List<NginxSite>> ListSitesAsync(string serverId, CancellationToken ct = default);
+    Task<string> GetSiteConfigAsync(string serverId, string siteName, CancellationToken ct = default);
     [MutatingOperation("nginx.update")]
     Task<CommandResult> UpdateSiteConfigAsync(string serverId, [MutationTarget] string siteName, string content);
     Task<CommandResult> TestConfigAsync(string serverId);

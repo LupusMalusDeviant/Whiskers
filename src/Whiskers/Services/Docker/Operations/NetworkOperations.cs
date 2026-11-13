@@ -23,13 +23,13 @@ internal sealed class NetworkOperations
     private async Task<DockerClient> GetClient(string? serverId)
         => await _connectionManager.GetClientAsync(serverId);
 
-    public async Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null)
+    public async Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null, CancellationToken ct = default)
     {
         var server = serverId != null
             ? _serverConfigService.GetServer(serverId)
             : _serverConfigService.GetDefaultServer();
-        var client = await GetClient(serverId);
-        var networks = await client.Networks.ListNetworksAsync();
+        var client = await GetClient(serverId).WaitAsync(ct);
+        var networks = await client.Networks.ListNetworksAsync(cancellationToken: ct);
 
         return networks.Select(n =>
         {

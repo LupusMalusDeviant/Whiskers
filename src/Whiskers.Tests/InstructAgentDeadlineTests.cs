@@ -36,6 +36,25 @@ public class InstructAgentDeadlineTests
         public Task ResolveConfirmationAsync(string operationId, bool approved, CancellationToken ct = default) => Task.CompletedTask;
     }
 
+    /// <summary>A session that ends QUIETLY when it is cancelled, as AgentSession does between calls
+    /// (<c>if (ct.IsCancellationRequested) yield break;</c>): no exception reaches instruct_agent.</summary>
+    private sealed class QuietlyEndingSession : IAgentSession
+    {
+        public string SessionId => "s";
+        public AgentRunState State => default;
+        public IReadOnlyList<AgentMessage> History => [];
+
+        public async IAsyncEnumerable<AgentEvent> SendAsync(string userMessage, string? imageBase64 = null,
+            string? imageMediaType = null, [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            yield return new AgentEvent.AssistantDelta("working on it");
+            try { await Task.Delay(Timeout.Infinite, ct); }
+            catch (OperationCanceledException) { /* the run ends without a word */ }
+        }
+
+        public Task ResolveConfirmationAsync(string operationId, bool approved, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
     private sealed class Agents(IAgentSession session) : IAgentService
     {
         public Task<IAgentSession> StartSessionAsync(AgentContext context, IReadOnlyList<AgentMessage>? seedHistory = null,
@@ -75,6 +94,32 @@ public class InstructAgentDeadlineTests
             Assert.Contains("Frist", answer);
         }
         finally { AgentTools.Deadline = previous; }
+    }
+
+    [Fact]
+    public async Task A_run_that_ends_quietly_at_the_deadline_still_says_it_was_cut_short()
+    {
+        var previous = AgentTools.Deadline;
+        AgentTools.Deadline = TimeSpan.FromMilliseconds(200);
+        try
+        {
+            var answer = await Instruct(new QuietlyEndingSession(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Contains("working on it", answer);
+            Assert.Contains("Frist", answer);
+        }
+        finally { AgentTools.Deadline = previous; }
+    }
+
+    [Fact]
+    public async Task A_closed_request_ends_as_a_cancellation_even_when_the_run_ends_quietly()
+    {
+        using var caller = new CancellationTokenSource();
+
+        var run = Instruct(new QuietlyEndingSession(), caller.Token);
+        await caller.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     [Fact]

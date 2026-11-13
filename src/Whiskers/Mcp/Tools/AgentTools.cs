@@ -80,9 +80,24 @@ public class AgentTools
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            sb.AppendLine($"[Abgebrochen: Frist von {Deadline.TotalMinutes:0} Minuten überschritten]");
+            sb.AppendLine(DeadlineMarker());
+            return Answer(sb);
         }
 
+        // A session may also end quietly on cancellation (AgentSession: `if (ct.IsCancellationRequested) yield break;`):
+        // no exception escapes, yet the run was stopped. A closed request still ends as a cancellation, and a passed
+        // deadline still says so — an answer cut short must never read as a complete one.
+        cancellationToken.ThrowIfCancellationRequested();
+        if (deadline.IsCancellationRequested)
+            sb.AppendLine(DeadlineMarker());
+
+        return Answer(sb);
+    }
+
+    private static string DeadlineMarker() => $"[Abgebrochen: Frist von {Deadline.TotalMinutes:0} Minuten überschritten]";
+
+    private static string Answer(StringBuilder sb)
+    {
         var result = sb.ToString().Trim();
         return result.Length == 0 ? "(keine Ausgabe)" : result;
     }

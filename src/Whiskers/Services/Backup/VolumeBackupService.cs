@@ -136,7 +136,7 @@ public class VolumeBackupService : IVolumeBackupService
         _logger.LogInformation("Volume restored: {File} → {Volume}", backup.FileName, volume);
     }
 
-    public async Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null)
+    public async Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
@@ -148,7 +148,7 @@ public class VolumeBackupService : IVolumeBackupService
         if (!string.IsNullOrEmpty(volumeName))
             query = query.Where(b => b.VolumeName == volumeName);
 
-        return await query.OrderByDescending(b => b.CreatedAt).ToListAsync();
+        return await query.OrderByDescending(b => b.CreatedAt).ToListAsync(ct);
     }
 
     public async Task DeleteBackupAsync(string backupId)
@@ -171,13 +171,13 @@ public class VolumeBackupService : IVolumeBackupService
         _logger.LogInformation("Backup deleted: {BackupId} ({File})", backupId, backup.FileName);
     }
 
-    public async Task<List<string>> ListVolumesAsync(string? serverId = null)
+    public async Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default)
     {
         var sid = OmittedServer.For<IVolumeBackupService>(serverId);   // the declared fallback the scope guard resolves too
         // Use label-aware format to show compose project + service for readability
         var result = await _executor.ExecuteAsync(sid,
             "docker volume ls --format '{{.Name}}'",
-            TimeSpan.FromSeconds(10));
+            TimeSpan.FromSeconds(10), ct);
 
         if (!result.Success)
             return new List<string>();

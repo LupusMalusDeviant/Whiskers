@@ -499,10 +499,11 @@ internal sealed class ContainerOperations
         }, singleFlightKey: $"logconfig:{containerId}");
     }
 
-    public async Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null)
+    public async Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null,
+        CancellationToken ct = default)
     {
-        var client = await GetClient(serverId);
-        var inspect = await client.Containers.InspectContainerAsync(containerId);
+        var client = await GetClient(serverId).WaitAsync(ct);
+        var inspect = await client.Containers.InspectContainerAsync(containerId, ct);
         var result = new List<KeyValuePair<string, string>>();
 
         foreach (var env in inspect.Config.Env ?? new List<string>())

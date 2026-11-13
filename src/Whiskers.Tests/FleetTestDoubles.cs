@@ -188,12 +188,16 @@ internal sealed class FakeDocker : IDockerService
 
     public TaskCompletionSource ListingStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    /// <summary>Completes when a hanging listing ended because its token was cancelled — the stop reached the "host".</summary>
+    public TaskCompletionSource ListingSawStop { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public async Task<IList<ContainerInfo>> ListContainersAsync(bool all = true, string? serverId = null, CancellationToken ct = default)
     {
         if (ListContainersHangs)
         {
             ListingStarted.TrySetResult();
-            await Task.Delay(Timeout.Infinite, ct);
+            try { await Task.Delay(Timeout.Infinite, ct); }
+            catch (OperationCanceledException) { ListingSawStop.TrySetResult(); throw; }
         }
         if (ListContainersThrows) throw new InvalidOperationException("The host is unreachable.");
         if (ListContainersException is { } thrown) throw thrown;
@@ -396,12 +400,12 @@ internal sealed class StoredVolumeBackups(params VolumeBackupEntity[] backups) :
             .Select(b => b.VolumeName).Distinct()
             .Select(n => new Whiskers.Services.Backup.VolumeInfo(n, "local", new Dictionary<string, string>())).ToList());
 
-    public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null) =>
+    public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null, CancellationToken ct = default) =>
         Task.FromResult(Backups.Where(b => (serverId is null || b.ServerId == serverId) && (volumeName is null || b.VolumeName == volumeName)).ToList());
 
     public Task<VolumeBackupEntity> BackupVolumeAsync(string volumeName, string containerName, string? serverId = null, string? notes = null) =>
         throw new NotSupportedException();
     public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => throw new NotSupportedException();
     public Task DeleteBackupAsync(string backupId) => throw new NotSupportedException();
-    public Task<List<string>> ListVolumesAsync(string? serverId = null) => throw new NotSupportedException();
+    public Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
 }

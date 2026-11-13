@@ -41,9 +41,9 @@ public class FirewallService : IFirewallService
         _logger = logger;
     }
 
-    public async Task<FirewallStatus> GetStatusAsync(string serverId)
+    public async Task<FirewallStatus> GetStatusAsync(string serverId, CancellationToken ct = default)
     {
-        var result = await _executor.ExecuteAsync(serverId, "ufw status numbered");
+        var result = await _executor.ExecuteAsync(serverId, "ufw status numbered", ct: ct);
 
         if (!result.Success)
         {

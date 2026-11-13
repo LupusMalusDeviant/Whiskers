@@ -4,7 +4,7 @@ namespace Whiskers.Services.Server;
 /// <summary>Lists and controls systemd units on a server.</summary>
 public interface ISystemdService
 {
-    Task<List<SystemdUnit>> ListServicesAsync(string serverId);
+    Task<List<SystemdUnit>> ListServicesAsync(string serverId, CancellationToken ct = default);
 
     /// <summary>Contract 0012 (D11): every service unit the host knows (its unit files and loaded units, active or not),
     /// for the gateway to resolve a <c>systemd.manage</c> target. Throws when the host cannot be asked.</summary>

@@ -27,15 +27,15 @@ public class SystemdService : ISystemdService
         _logger = logger;
     }
 
-    public async Task<List<SystemdUnit>> ListServicesAsync(string serverId)
+    public async Task<List<SystemdUnit>> ListServicesAsync(string serverId, CancellationToken ct = default)
     {
         // Fire both queries concurrently (running units vs. unit-file enabled state) — they're
         // independent, so we avoid a second sequential SSH round-trip. --plain produces whitespace-
         // separated columns: UNIT LOAD ACTIVE SUB DESCRIPTION...
         var unitsTask = _executor.ExecuteAsync(serverId,
-            "systemctl list-units --type=service --no-pager --no-legend --plain 2>/dev/null");
+            "systemctl list-units --type=service --no-pager --no-legend --plain 2>/dev/null", ct: ct);
         var filesTask = _executor.ExecuteAsync(serverId,
-            "systemctl list-unit-files --type=service --no-pager --no-legend --plain 2>/dev/null");
+            "systemctl list-unit-files --type=service --no-pager --no-legend --plain 2>/dev/null", ct: ct);
         var result = await unitsTask;
         var enabledResult = await filesTask;
 

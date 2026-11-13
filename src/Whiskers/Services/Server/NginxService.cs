@@ -36,11 +36,11 @@ public class NginxService : INginxService
         _logger = logger;
     }
 
-    public async Task<List<NginxSite>> ListSitesAsync(string serverId)
+    public async Task<List<NginxSite>> ListSitesAsync(string serverId, CancellationToken ct = default)
     {
         // Both listings are independent — fire them concurrently to save a sequential SSH round-trip.
-        var availableTask = _executor.ExecuteAsync(serverId, "ls /etc/nginx/sites-available/ 2>/dev/null");
-        var enabledTask = _executor.ExecuteAsync(serverId, "ls /etc/nginx/sites-enabled/ 2>/dev/null");
+        var availableTask = _executor.ExecuteAsync(serverId, "ls /etc/nginx/sites-available/ 2>/dev/null", ct: ct);
+        var enabledTask = _executor.ExecuteAsync(serverId, "ls /etc/nginx/sites-enabled/ 2>/dev/null", ct: ct);
         var availableResult = await availableTask;
         var enabledResult = await enabledTask;
 
@@ -85,12 +85,12 @@ public class NginxService : INginxService
         return sites;
     }
 
-    public async Task<string> GetSiteConfigAsync(string serverId, string siteName)
+    public async Task<string> GetSiteConfigAsync(string serverId, string siteName, CancellationToken ct = default)
     {
         ValidateSiteName(siteName);
 
         // Try sites-available first, then sites-enabled
-        var result = await _executor.ExecuteAsync(serverId, $"cat {ShellUtils.Quote("/etc/nginx/sites-available/" + siteName)} 2>/dev/null || cat {ShellUtils.Quote("/etc/nginx/sites-enabled/" + siteName)} 2>/dev/null");
+        var result = await _executor.ExecuteAsync(serverId, $"cat {ShellUtils.Quote("/etc/nginx/sites-available/" + siteName)} 2>/dev/null || cat {ShellUtils.Quote("/etc/nginx/sites-enabled/" + siteName)} 2>/dev/null", ct: ct);
 
         if (!result.Success && !string.IsNullOrEmpty(result.Error))
             _logger.LogWarning("Failed to read nginx site config '{SiteName}' on {ServerId}: {Error}", siteName, serverId, result.Error);

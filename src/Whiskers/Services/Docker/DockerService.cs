@@ -116,6 +116,9 @@ public class DockerService : IDockerService
     public Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId = null)
         => _containers.GetContainerEnvAsync(containerId, serverId);
 
+    public Task<List<KeyValuePair<string, string>>> GetContainerEnvAsync(string containerId, string? serverId, CancellationToken ct)
+        => _containers.GetContainerEnvAsync(containerId, serverId, ct);
+
     // === Lifecycle (recreate + C12 update-rollback) ===
 
     public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null, CancellationToken ct = default)
@@ -142,6 +145,9 @@ public class DockerService : IDockerService
 
     public Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null)
         => _networks.ListNetworksAsync(serverId);
+
+    public Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId, CancellationToken ct)
+        => _networks.ListNetworksAsync(serverId, ct);
 
     public Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null)
         => _networks.CreateNetworkAsync(name, driver, serverId);

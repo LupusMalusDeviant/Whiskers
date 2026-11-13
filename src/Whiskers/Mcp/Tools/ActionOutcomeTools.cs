@@ -24,14 +24,15 @@ public class ActionOutcomeTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IActionOutcomeService outcomes,
-        [Description("How many days back to summarise (default 7, max 90)")] int days = 7)
+        [Description("How many days back to summarise (default 7, max 90)")] int days = 7,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_action_outcomes");
         if (denied != null) return denied;
 
         var window = TimeSpan.FromDays(Math.Clamp(days, 1, 90));
-        var tallies = await outcomes.TalliesAsync(DateTime.UtcNow - window);
-        var overdue = await outcomes.OverdueCountAsync(DateTime.UtcNow);
+        var tallies = await outcomes.TalliesAsync(DateTime.UtcNow - window, cancellationToken);
+        var overdue = await outcomes.OverdueCountAsync(DateTime.UtcNow, cancellationToken);
 
         if (tallies.Count == 0)
             return $"Whiskers has taken no automatic actions in the last {window.TotalDays:0} days.";

@@ -28,7 +28,8 @@ public class NotificationTools
         IInAppNotificationStore notifications,
         [Description("Severity filter: info, warning, error, critical (optional)")] string? severity = null,
         [Description("Event type filter, e.g. container_down, log_alert (optional)")] string? eventType = null,
-        [Description("How many to return, newest first (default 25, max 200)")] int limit = 25)
+        [Description("How many to return, newest first (default 25, max 200)")] int limit = 25,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_recent_alerts");
         if (denied != null) return denied;
@@ -37,8 +38,8 @@ public class NotificationTools
         // cap keeps one call from returning the entire retained history.
         var take = Math.Clamp(limit, 1, MaxTake);
 
-        var total = await notifications.CountAsync(severity, eventType);
-        var entries = await notifications.QueryAsync(severity, eventType, skip: 0, take: take);
+        var total = await notifications.CountAsync(severity, eventType, cancellationToken);
+        var entries = await notifications.QueryAsync(severity, eventType, skip: 0, take: take, ct: cancellationToken);
         if (entries.Count == 0)
             return "No alerts match" + Describe(severity, eventType) + ".";
 

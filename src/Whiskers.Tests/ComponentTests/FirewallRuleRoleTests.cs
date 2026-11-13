@@ -143,7 +143,7 @@ public class FirewallRuleRoleTests : BunitContext, IAsyncLifetime
     private sealed class RecordingFirewall : IFirewallService
     {
         public List<string> Calls { get; } = [];
-        public Task<FirewallStatus> GetStatusAsync(string serverId) =>
+        public Task<FirewallStatus> GetStatusAsync(string serverId, CancellationToken ct = default) =>
             Task.FromResult(new FirewallStatus { Active = true, Rules = [new FirewallRule { Number = 1, Port = "22" }] });
         public Task<CommandResult> AddRuleAsync(string serverId, string port, string protocol = "tcp", string action = "allow", string? from = null)
         {

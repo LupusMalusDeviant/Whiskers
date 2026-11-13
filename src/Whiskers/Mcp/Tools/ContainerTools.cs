@@ -22,13 +22,14 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        [Description("Optional server ID to filter by. Omit for all servers.")] string? serverId = null)
+        [Description("Optional server ID to filter by. Omit for all servers.")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "list_containers");
         if (denied != null) return denied;
         var containers = serverId != null
-            ? await docker.ListContainersAsync(all: true, serverId: serverId)
-            : await docker.ListAllContainersAsync(all: true);
+            ? await docker.ListContainersAsync(all: true, serverId: serverId, ct: cancellationToken)
+            : await docker.ListAllContainersAsync(true, cancellationToken);
 
         var lines = containers.Select(c =>
             $"- {c.Name} [{c.State}] ({c.HealthStatus}) | Image: {c.Image} | Server: {c.ServerName} | Project: {c.ComposeProject}");
@@ -42,18 +43,19 @@ public class ContainerTools
         IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("The full container ID")] string containerId,
-        [Description("Server ID where the container runs")] string? serverId = null)
+        [Description("Server ID where the container runs")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_container_details");
         if (denied != null) return denied;
         if (string.IsNullOrWhiteSpace(containerId))
             return "Container ID is required.";
 
-        var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
+        var containers = await docker.ListContainersAsync(all: true, serverId: serverId, ct: cancellationToken);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
         if (container is null) return resolveError ?? $"Container not found: {containerId}";
 
-        var stats = await docker.GetContainerStatsAsync(container.Id, serverId);
+        var stats = await docker.GetContainerStatsAsync(container.Id, serverId, cancellationToken);
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Name: {container.Name}");
         sb.AppendLine($"ID: {container.Id}");
@@ -83,7 +85,8 @@ public class ContainerTools
         IDockerService docker,
         [Description("Container ID or name")] string containerId,
         [Description("Number of tail lines (default 100)")] int lines = 100,
-        [Description("Server ID")] string? serverId = null)
+        [Description("Server ID")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_container_logs");
         if (denied != null) return denied;
@@ -94,11 +97,11 @@ public class ContainerTools
             lines = 100;
 
         // Find the container to resolve name to ID
-        var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
+        var containers = await docker.ListContainersAsync(all: true, serverId: serverId, ct: cancellationToken);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
         if (container is null) return resolveError ?? $"Container not found: {containerId}";
         var id = container.Id;
-        var logs = await docker.GetContainerLogsAsync(id, lines, serverId);
+        var logs = await docker.GetContainerLogsAsync(id, lines, serverId, ct: cancellationToken);
         return $"Logs for {container?.Name ?? containerId} (last {lines} lines):\n{logs}";
     }
 
@@ -262,11 +265,12 @@ public class ContainerTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IDockerService docker,
-        IImageUpdateStore updateStore)
+        IImageUpdateStore updateStore,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_update_status");
         if (denied != null) return denied;
-        var containers = await docker.ListAllContainersAsync(all: false);
+        var containers = await docker.ListAllContainersAsync(false, cancellationToken);
         var updates = containers
             .Select(c => (Container: c, Update: updateStore.Get(c.Id, c.ServerId)))
             .Where(x => x.Update?.UpdateAvailable == true)
@@ -387,19 +391,20 @@ public class ContainerTools
         IMcpPermissionService permissionService,
         IDockerService docker,
         [Description("Container ID or name")] string containerId,
-        [Description("Server ID")] string? serverId = null)
+        [Description("Server ID")] string? serverId = null,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_container_env");
         if (denied != null) return denied;
         if (string.IsNullOrWhiteSpace(containerId))
             return "Container ID or name is required.";
 
-        var containers = await docker.ListContainersAsync(all: true, serverId: serverId);
+        var containers = await docker.ListContainersAsync(all: true, serverId: serverId, ct: cancellationToken);
         var (container, resolveError) = McpInputValidation.Resolve(containers, containerId);
         if (container is null) return resolveError ?? $"Container not found: {containerId}";
         var id = container.Id;
 
-        var envVars = await docker.GetContainerEnvAsync(id, serverId);
+        var envVars = await docker.GetContainerEnvAsync(id, serverId, cancellationToken);
 
         string[] sensitiveKeywords = ["KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL", "AUTH", "PRIVATE", "PASSPHRASE"];
         bool IsSensitive(string key) => sensitiveKeywords.Any(kw => key.Contains(kw, StringComparison.OrdinalIgnoreCase));

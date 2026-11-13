@@ -127,15 +127,16 @@ public class HetznerTools
     public static async Task<string> HetznerListSnapshots(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
         ICloudControlService cloud, IHetznerExtensions hetzner,
-        [Description("Whiskers server name or id (must be a Hetzner server)")] string server)
+        [Description("Whiskers server name or id (must be a Hetzner server)")] string server,
+        CancellationToken cancellationToken = default)
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "hetzner_list_snapshots");
         if (denied != null) return MutationScope.Fail(denied);
 
-        var (ctx, error) = await ContextAsync(cloud, server);
+        var (ctx, error) = await ContextAsync(cloud, server, cancellationToken);
         if (error != null) return error;
         if (ctx == null) return MutationScope.Fail(NotHetzner(server));
-        var images = await hetzner.ListSnapshotsAsync(ctx.Value.token);
+        var images = await hetzner.ListSnapshotsAsync(ctx.Value.token, cancellationToken);
         if (images.Count == 0) return "Keine Snapshots gefunden.";
         var lines = images.Select(i =>
             $"- #{i.Id} {i.Description ?? "(ohne Beschreibung)"} [{i.Status}] | {(i.ImageSize.HasValue ? $"{i.ImageSize:F1} GB" : "-")} | von: {i.CreatedFrom?.Name ?? "-"} | {i.Created}");
@@ -174,9 +175,10 @@ public class HetznerTools
 
     /// <summary>R1-29: a key kept in a disabled or locked vault is a readable answer naming the vault (and, inside a
     /// gateway call, a failed operation) — never a tool exception, never a silent "no key".</summary>
-    private static async Task<((string token, HetznerServer server)? Ctx, string? Error)> ContextAsync(ICloudControlService cloud, string server)
+    private static async Task<((string token, HetznerServer server)? Ctx, string? Error)> ContextAsync(ICloudControlService cloud, string server,
+        CancellationToken ct = default)
     {
-        try { return (await cloud.HetznerContextAsync(server), null); }
+        try { return (await cloud.HetznerContextAsync(server, ct), null); }
         catch (InvalidOperationException ex) { return (null, Whiskers.Services.Mutations.MutationScope.Fail($"Fehler: {ex.Message}")); }
     }
 

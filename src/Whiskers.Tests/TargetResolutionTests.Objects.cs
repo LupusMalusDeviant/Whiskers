@@ -388,7 +388,7 @@ public sealed partial class TargetResolutionTests
                     ? [new VolumeInfo("pgdata", "local", new Dictionary<string, string>())]
                     : []);
 
-        public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null) =>
+        public Task<List<VolumeBackupEntity>> ListBackupsAsync(string? serverId = null, string? volumeName = null, CancellationToken ct = default) =>
             Task.FromResult(new List<VolumeBackupEntity>
             {
                 new() { BackupId = "b-edge", VolumeName = "pgdata", ServerId = "edge01", FileName = "pgdata_1.tar.gz" },
@@ -399,7 +399,7 @@ public sealed partial class TargetResolutionTests
             string? notes = null) => throw new NotSupportedException();
         public Task RestoreVolumeAsync(string backupId, string? targetVolume = null) => throw new NotSupportedException();
         public Task DeleteBackupAsync(string backupId) => throw new NotSupportedException();
-        public Task<List<string>> ListVolumesAsync(string? serverId = null) => throw new NotSupportedException();
+        public Task<List<string>> ListVolumesAsync(string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class LogRules : ILogMonitorService

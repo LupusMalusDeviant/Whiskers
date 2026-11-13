@@ -10,9 +10,13 @@ public interface IDatabaseService
 {
     [MutatingOperation("db.query")]
     Task<QueryResult> ExecuteQueryAsync([MutationTarget] string containerId, string query, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null);
-    Task<List<string>> GetDatabasesAsync(string containerId, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null);
-    Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null);
-    Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null);
+    // INV-40: the reads take the caller's token (a read tool's), which reaches the docker exec on the host.
+    Task<List<string>> GetDatabasesAsync(string containerId, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+        CancellationToken ct = default);
+    Task<List<TableInfo>> GetTablesAsync(string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+        CancellationToken ct = default);
+    Task<List<ColumnInfo>> GetSchemaAsync(string containerId, string database, string table, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null,
+        CancellationToken ct = default);
     [MutatingOperation("db.backup")]
     Task<(bool Success, string FilePath, long SizeBytes, string Error)> BackupDatabaseAsync([MutationTarget] string containerId, string database, DatabaseType dbType, DatabaseCredentials creds, string? serverId = null, string? containerName = null);
 }

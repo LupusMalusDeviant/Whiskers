@@ -56,17 +56,17 @@ public class CloudControlService : ICloudControlService
            ?? _serverConfig.GetServers().FirstOrDefault(c => c.Name.Equals(idOrName, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Resolves the provider VM/server matching this Whiskers server by public IP.</summary>
-    public async Task<CloudServerInfo?> ResolveAsync(Whiskers.Models.ServerConfig sw)
+    public async Task<CloudServerInfo?> ResolveAsync(Whiskers.Models.ServerConfig sw, CancellationToken ct = default)
     {
         if (sw.CloudProvider == CloudProvider.None || !sw.HasCloudKey())
             return null;
         var token = KeyOf(sw);
         if (string.IsNullOrWhiteSpace(token)) return null;
         var provider = ProviderFor(sw.CloudProvider);
-        return provider == null ? null : await provider.ResolveAsync(sw, token);
+        return provider == null ? null : await provider.ResolveAsync(sw, token, ct);
     }
 
-    public async Task<List<CloudServerInfo>> ListAllAsync()
+    public async Task<List<CloudServerInfo>> ListAllAsync(CancellationToken ct = default)
     {
         // Group by (provider, token) so an account with N Whiskers servers is listed ONCE instead of N times
         // (fewer API calls; kinder to the Hetzner rate limit). A no-match is omitted; an account-listing failure
@@ -100,9 +100,10 @@ public class CloudControlService : ICloudControlService
                 {
                     var p = ProviderFor(provider);
                     if (p != null)
-                        results.AddRange(await p.ListAndMapAsync(account.ToList(), token!));
+                        results.AddRange(await p.ListAndMapAsync(account.ToList(), token!, ct));
                 }
-                catch (Exception ex)
+                // A stopped caller ends the listing; its cancellation is not an account error.
+                catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
                 {
                     _logger.LogWarning(ex, "Cloud resolve failed for account ({Provider})", provider);
                     foreach (var sw in account)
@@ -131,29 +132,30 @@ public class CloudControlService : ICloudControlService
         return await provider.CreateSnapshotAsync(info, token, description);
     }
 
-    public async Task<string> MetricsAsync(string idOrName, string type)
+    public async Task<string> MetricsAsync(string idOrName, string type, CancellationToken ct = default)
     {
-        var (_, info, provider, token) = await ContextAsync(idOrName);
-        return await provider.MetricsAsync(info, token, type);
+        var (_, info, provider, token) = await ContextAsync(idOrName, ct);
+        return await provider.MetricsAsync(info, token, type, ct);
     }
 
     /// <summary>For Hetzner-only tools: returns the per-server token + resolved Hetzner server.</summary>
-    public async Task<(string token, HetznerServer server)?> HetznerContextAsync(string idOrName)
+    public async Task<(string token, HetznerServer server)?> HetznerContextAsync(string idOrName, CancellationToken ct = default)
     {
         var sw = ResolveWhiskers(idOrName);
         if (sw == null || sw.CloudProvider != CloudProvider.Hetzner || !sw.HasCloudKey() || _hetznerExt == null)
             return null;
         var token = KeyOf(sw);
         if (string.IsNullOrWhiteSpace(token)) return null;
-        var info = await ResolveAsync(sw);
+        var info = await ResolveAsync(sw, ct);
         if (info == null) return null;
-        var full = await _hetznerExt.GetServerAsync(token, info.CloudId);
+        var full = await _hetznerExt.GetServerAsync(token, info.CloudId, ct);
         return full == null ? null : (token, full);
     }
 
     // ─────────────────────────── Internals ───────────────────────────
 
-    private async Task<(Whiskers.Models.ServerConfig sw, CloudServerInfo info, ICloudProvider provider, string token)> ContextAsync(string idOrName)
+    private async Task<(Whiskers.Models.ServerConfig sw, CloudServerInfo info, ICloudProvider provider, string token)> ContextAsync(
+        string idOrName, CancellationToken ct = default)
     {
         var sw = ResolveWhiskers(idOrName)
                  ?? throw new InvalidOperationException($"Whiskers server not found: {idOrName}");
@@ -163,7 +165,7 @@ public class CloudControlService : ICloudControlService
                     ?? throw new InvalidOperationException($"No cloud provider/API key configured for '{sw.Name}'.");
         var provider = ProviderFor(sw.CloudProvider)
                        ?? throw new InvalidOperationException($"No provider registered for '{sw.CloudProvider}'.");
-        var info = await provider.ResolveAsync(sw, token)
+        var info = await provider.ResolveAsync(sw, token, ct)
                    ?? throw new InvalidOperationException($"No matching {sw.CloudProvider} server found for '{sw.Name}' (IP match failed).");
         return (sw, info, provider, token);
     }

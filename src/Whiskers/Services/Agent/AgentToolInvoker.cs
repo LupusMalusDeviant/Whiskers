@@ -99,7 +99,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             // INV-40: the caller's token reaches a read tool too (Fable review — reads ran on CancellationToken.None,
             // so a closed chat or a stopped trigger left them running against the hosts).
-            var output = await ExecuteAsync(entry, args, context, ct);
+            var output = await ReadReleasedAtCancellationAsync(ExecuteAsync(entry, args, context, ct), ct);
             if (output.Length > MaxOutputChars)
                 output = Truncated(output);
             await RecordAsync(entry.Name, entry.RequiredLevel, actor, actorType, call.ArgumentsJson, decision, sw, true, output, null, call.CorrelationId);
@@ -303,6 +303,26 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         finally
         {
             accessor.HttpContext = previous;
+        }
+    }
+
+    /// <summary>INV-40: a READ is abandoned when its caller stops — even one whose tool ignores the token or calls a
+    /// service that does not take it — so a closed chat, a stopped trigger or instruct_agent's deadline releases the
+    /// caller at once. The cancellation then takes the read path's usual exception route (an error result, recorded).
+    /// The tool keeps its DI scope until it really ends (the scope belongs to <see cref="ExecuteAsync"/>), and a fault
+    /// it raises later is observed here. Only reads: a mutation runs inside the gateway, whose outcome must stay known
+    /// (unknown-effect semantics), so it is never abandoned here.</summary>
+    private static async Task<string> ReadReleasedAtCancellationAsync(Task<string> read, CancellationToken ct)
+    {
+        try
+        {
+            return await read.WaitAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested && !read.IsCompleted)
+        {
+            _ = read.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            throw;
         }
     }
 

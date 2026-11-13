@@ -4,5 +4,6 @@ namespace Whiskers.Services.LogMonitor;
 public interface ILogSearchService
 {
     Task<List<LogSearchResult>> SearchAsync(string pattern, bool isRegex = false,
-        string? containerId = null, string? serverId = null, int tailLines = 500, int maxResults = 200);
+        string? containerId = null, string? serverId = null, int tailLines = 500, int maxResults = 200,
+        CancellationToken ct = default);
 }

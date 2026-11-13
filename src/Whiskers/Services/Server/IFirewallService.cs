@@ -5,7 +5,7 @@ namespace Whiskers.Services.Server;
 public interface IFirewallService
 {
     [InventoryLookup]
-    Task<FirewallStatus> GetStatusAsync(string serverId);
+    Task<FirewallStatus> GetStatusAsync(string serverId, CancellationToken ct = default);
     [MutatingOperation("firewall.rule_add")]
     Task<CommandResult> AddRuleAsync(string serverId, string port, string protocol = "tcp", string action = "allow", string? from = null);
     [MutatingOperation("firewall.rule_remove")]
