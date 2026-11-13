@@ -194,7 +194,9 @@ public class FirewallService : IFirewallService
     {
         if (string.IsNullOrWhiteSpace(port)) return false;
         // Allow: "80", "8080:8090" (range), "80/tcp" (embedded proto handled separately)
-        return Regex.IsMatch(port, @"^\d+(:\d+)?$");
+        // \A…\z, not ^…$: "$" also matches before a final newline, and the value goes unquoted into the shell line
+        // ("22\n" became "ufw allow 22" and an error, Fable review).
+        return Regex.IsMatch(port, @"\A\d+(:\d+)?\z");
     }
 
     private static bool IsValidProtocol(string proto) =>
@@ -207,6 +209,7 @@ public class FirewallService : IFirewallService
     {
         if (string.IsNullOrWhiteSpace(value)) return false;
         // Allow IPv4, IPv4/CIDR, IPv6, IPv6/CIDR, and the keyword "Anywhere"
-        return Regex.IsMatch(value, @"^(Anywhere|[\da-fA-F:\.]+(?:/\d{1,3})?)$");
+        // \A…\z (see IsValidPort): "10.0.0.5\n" opened every port from that address before the rest of the line failed.
+        return Regex.IsMatch(value, @"\A(Anywhere|[\da-fA-F:\.]+(?:/\d{1,3})?)\z");
     }
 }

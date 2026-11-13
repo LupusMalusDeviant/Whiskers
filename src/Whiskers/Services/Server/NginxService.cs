@@ -16,6 +16,20 @@ public class NginxService : INginxService
     private readonly IHostCommandExecutor _executor;
     private readonly ILogger<NginxService> _logger;
 
+    /// <summary>Where an update keeps the file it replaces until nginx -t has passed (sites-available is not included by nginx).</summary>
+    internal const string PreviousSuffix = ".whiskers-prev";
+
+    /// <summary>Where an update decodes the new content before it replaces the site.</summary>
+    internal const string NextSuffix = ".whiskers-next";
+
+    /// <summary>Whiskers' own working files beside a site, never listed as sites themselves.</summary>
+    internal static bool IsWorkingFile(string name) =>
+        name.EndsWith(PreviousSuffix, StringComparison.Ordinal) || name.EndsWith(NextSuffix, StringComparison.Ordinal)
+        || name.EndsWith(KeepSuffix, StringComparison.Ordinal);
+
+    /// <summary>Where the site is copied before the copy, once complete, becomes the kept file.</summary>
+    internal const string KeepSuffix = ".whiskers-keep";
+
     public NginxService(IHostCommandExecutor executor, ILogger<NginxService> logger)
     {
         _executor = executor;
@@ -38,6 +52,7 @@ public class NginxService : INginxService
 
         foreach (var name in ParseFileList(availableResult.Output))
         {
+            if (IsWorkingFile(name)) continue;   // left by an interrupted update, not a site
             if (!CommandOperands.IsSafeSiteName(name))
             {
                 _logger.LogWarning("Skipping nginx site with unsafe name: {Name}", name);
@@ -94,8 +109,28 @@ public class NginxService : INginxService
         var base64Content = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
         var destPath = $"/etc/nginx/sites-available/{siteName}";
 
-        // Write the file, then test the nginx config, and reload only if the test passes
-        var writeCmd = $"echo '{base64Content}' | base64 -d | tee {ShellUtils.Quote(destPath)} > /dev/null";
+        // Keep the current file, write the new one, then test the nginx config: reload only if the test passes, and put
+        // the previous file back if it fails — a refused config must not stay live for the next reload, a certbot hook
+        // or a reboot to pick up (Fable review). A site that did not exist before is removed again.
+        var dest = ShellUtils.Quote(destPath);
+        var prev = ShellUtils.Quote(destPath + PreviousSuffix);
+        // A kept file from an interrupted earlier run is dropped first, so a kept file only ever holds this run's
+        // previous content; the new content is decoded beside the site before the site itself is touched, and copied
+        // over it with `cat` so the file keeps its owner and mode.
+        // Each step knows what a failure there leaves behind, so the script decides the restore itself (Fable delta
+        // review: a restore decided afterwards moved a copy that had failed half way — disk full — over the intact site):
+        //  1. the new content is decoded beside the site; a failure touches nothing else;
+        //  2. the site is copied to a temporary name and only a complete copy becomes the kept file;
+        //  3. the new content is copied over the site with `cat` (owner and mode stay); if that fails, the kept file
+        //     goes back, and a site that did not exist before is removed again.
+        var next = ShellUtils.Quote(destPath + NextSuffix);
+        var keep = ShellUtils.Quote(destPath + KeepSuffix);
+        var writeCmd =
+            $"rm -f {prev} {keep}; " +
+            $"echo '{base64Content}' | base64 -d > {next} || {{ rm -f {next}; exit 1; }}; " +
+            $"if [ -e {dest} ]; then {{ cp -p {dest} {keep} && mv -f {keep} {prev}; }} || {{ rm -f {keep} {next}; exit 1; }}; fi; " +
+            $"if cat {next} > {dest}; then rm -f {next}; exit 0; fi; " +
+            $"if [ -e {prev} ]; then mv -f {prev} {dest}; else rm -f {dest}; fi; rm -f {next}; exit 1";
         var writeResult = await _executor.ExecuteAsync(serverId, writeCmd);
 
         if (!writeResult.Success)
@@ -108,14 +143,19 @@ public class NginxService : INginxService
         if (!testResult.Success)
         {
             _logger.LogWarning("nginx config test failed after updating '{SiteName}' on {ServerId}: {Error}", siteName, serverId, testResult.Error);
+            var restore = await _executor.ExecuteAsync(serverId,
+                $"if [ -e {prev} ]; then mv -f {prev} {dest}; else rm -f {dest}; fi");
             return new CommandResult
             {
                 ExitCode = testResult.ExitCode,
                 Output = testResult.Output,
-                Error = $"nginx config test failed: {testResult.Error}"
+                Error = restore.Success
+                    ? $"nginx config test failed; the previous file was put back: {testResult.Error}"
+                    : $"nginx config test failed, and putting the previous file back failed too ({restore.Error}); check {destPath} before the next reload: {testResult.Error}"
             };
         }
 
+        await _executor.ExecuteAsync(serverId, $"rm -f {prev}");
         return await ReloadAsync(serverId);
     }
 
