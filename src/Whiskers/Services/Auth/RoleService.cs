@@ -21,7 +21,9 @@ public class RoleService : IRoleService, IInitializable
     public RoleService(IConfiguration configuration, ILogger<RoleService> logger, string? storePath = null, DataPathOptions? dataPaths = null,
         AccessControlWriteGate? writeGate = null, IIdentityBindingStore? bindings = null)
     {
-        _store = new JsonFileStore<UserRoleData>(storePath ?? (dataPaths ?? DataPathOptions.Default).RolesJson);
+        // A role removed by the last save must not come back from the previous generation (1.0 review).
+        _store = new JsonFileStore<UserRoleData>(storePath ?? (dataPaths ?? DataPathOptions.Default).RolesJson,
+            restorePreviousGeneration: false);
         _configuration = configuration;
         _logger = logger;
         _gate = writeGate ?? new AccessControlWriteGate();

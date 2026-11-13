@@ -118,8 +118,8 @@ public class DockerService : IDockerService
 
     // === Lifecycle (recreate + C12 update-rollback) ===
 
-    public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null)
-        => _lifecycle.RecreateContainerAsync(containerId, serverId, progress);
+    public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null, CancellationToken ct = default)
+        => _lifecycle.RecreateContainerAsync(containerId, serverId, progress, ct);
 
     public Task<(string ImageId, string ConfigJson)> CaptureRollbackSnapshotAsync(string containerId, string? serverId = null)
         => _lifecycle.CaptureRollbackSnapshotAsync(containerId, serverId);
@@ -129,8 +129,8 @@ public class DockerService : IDockerService
 
     // === Images ===
 
-    public Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null)
-        => _images.PullImageAsync(imageName, progress, serverId);
+    public Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null, CancellationToken ct = default)
+        => _images.PullImageAsync(imageName, progress, serverId, ct);
 
     public Task<string?> GetImageDigestAsync(string imageRef, string? serverId = null)
         => _images.GetImageDigestAsync(imageRef, serverId);

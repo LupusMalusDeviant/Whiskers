@@ -23,7 +23,9 @@ public class WhitelistService : IWhitelistService, IInitializable
     public WhitelistService(IConfiguration configuration, IRoleService roleService, ILogger<WhitelistService> logger, DataPathOptions? dataPaths = null,
         AccessControlWriteGate? writeGate = null, IIdentityBindingStore? bindings = null)
     {
-        _store = new JsonFileStore<WhitelistData>((dataPaths ?? DataPathOptions.Default).WhitelistJson);
+        // An address removed by the last save must not come back from the previous generation (1.0 review).
+        _store = new JsonFileStore<WhitelistData>((dataPaths ?? DataPathOptions.Default).WhitelistJson,
+            restorePreviousGeneration: false);
         _configuration = configuration;
         _roles = roleService;
         _logger = logger;

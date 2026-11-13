@@ -1257,11 +1257,11 @@ public class WebhookService : IWebhookService
                 var (container, error) = (target.Container, target.Error);
                 outcome = await automation.RunAsync(ExpectingContainer(runActor, container, sid), "container.update",
                     new { containerId = webhook.TargetId, name = container?.Name ?? webhook.TargetId, serverId = sid },
-                    async (ResolvedContainer c, CancellationToken _) =>
+                    async (ResolvedContainer c, CancellationToken token) =>
                     {
                         EnsureOwned(webhook);
                         if (container is null) throw Unresolved(error ?? $"Container '{webhook.TargetId}' not found");
-                        var newId = await _docker.RecreateContainerAsync(c.Id, c.ServerId);
+                        var newId = await _docker.RecreateContainerAsync(c.Id, c.ServerId, ct: token);
                         return (true, $"Container {c.Name} rebuilt (new ID: {newId[..Math.Min(12, newId.Length)]}).");
                     }, ct);
                 break;
