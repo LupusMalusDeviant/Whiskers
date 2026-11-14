@@ -210,15 +210,15 @@ public class ReleaseGateTests
     [Fact]
     public void A_deleted_invariant_is_caught_even_with_the_count_adjusted()
     {
-        var deleted = Real with
+        var deleted = Bare with
         {
-            Invariants = Mutate(ShiftHolds(RemoveLine(Real.Invariants, "| INV-61 |"), -1), "| **Total** | **62** |", "| **Total** | **61** |"),
+            Invariants = Mutate(ShiftHolds(RemoveLine(Bare.Invariants, "| INV-61 |"), -1), "| **Total** | **62** |", "| **Total** | **61** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
         Assert.Contains(findings, f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("neither a row of the table nor retired"));
 
-        var abovePin = Real with { ReleaseGate = Mutate(Real.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61") };
+        var abovePin = Bare with { ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61") };
         Assert.Contains(Evaluate(abovePin, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-62" && f.Message.Contains("above the pinned"));
 
         // Retired properly: a 'Retired invariants' row with an accepted retirement decision.
@@ -230,19 +230,19 @@ public class ReleaseGateTests
         Assert.DoesNotContain(Evaluate(retired, GateMode.Development, Dev), f => f.Rule == "R3");
 
         var undecided = retired with { Contract = deleted.Contract };
-        Assert.Contains(Evaluate(undecided, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("RG-1"));
+        Assert.Contains(Evaluate(undecided, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("RG-1") && f.Message.Contains("not a row of PRODUCT_CONTRACT.md"));
 
-        var alsoRow = Real with
+        var alsoRow = Bare with
         {
-            ReleaseGate = Mutate(Real.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-61 | RG-1 | 2026-01-01 |\n"),
-            Contract = WithDecision(Real.Contract, "RG-1", "retirement", "INV-61"),
+            ReleaseGate = Mutate(Bare.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-61 | RG-1 | 2026-01-01 |\n"),
+            Contract = WithDecision(Bare.Contract, "RG-1", "retirement", "INV-61"),
         };
         Assert.Contains(Evaluate(alsoRow, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("still a row"));
 
-        var pinBelowRetired = Real with
+        var pinBelowRetired = Bare with
         {
-            ReleaseGate = Mutate(Real.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-63 | RG-1 | 2026-01-01 |\n"),
-            Contract = WithDecision(Real.Contract, "RG-1", "retirement", "INV-63"),
+            ReleaseGate = Mutate(Bare.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-63 | RG-1 | 2026-01-01 |\n"),
+            Contract = WithDecision(Bare.Contract, "RG-1", "retirement", "INV-63"),
         };
         Assert.Contains(Evaluate(pinBelowRetired, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("below the highest retired ID"));
     }
@@ -257,7 +257,7 @@ public class ReleaseGateTests
     [InlineData("`LoginHardeningTests.A_cookie_carrying_a_synthetic_identity_is_rejected`", "`Program.cs`")]                                                 // a file name
     public void Every_backticked_name_in_the_test_column_resolves(string from, string to)
     {
-        var mutated = Real with { Invariants = Mutate(Real.Invariants, from, to) };
+        var mutated = Bare with { Invariants = Mutate(Bare.Invariants, from, to) };
         Assert.Contains(Evaluate(mutated, GateMode.Development, Dev), f => f.Rule == "R4" && f.Subject == "INV-03");
     }
 
