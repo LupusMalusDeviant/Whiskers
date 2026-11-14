@@ -6,7 +6,7 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.0.0] — 2026-11-11
+## [1.0.0] — 2026-11-14
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in
 `docs/v1/SECURITY_INVARIANTS.md` is proven by named tests, which CI requires one by one. The exception is INV-58, which
