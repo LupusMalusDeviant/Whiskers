@@ -55,6 +55,7 @@ Highest invariant ID: INV-62
 
 | Invariant | Status shipped | Decision | Limitation | Review by |
 |---|---|---|---|---|
+| INV-58 | ⚠️ | RG-1 | docs/operations/per-host-mtls-migration.md#known-limitation-hosts-not-yet-migrated | 1.1.0 |
 
 ## Platform skips
 

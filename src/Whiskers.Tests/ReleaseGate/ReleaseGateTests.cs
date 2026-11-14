@@ -23,13 +23,22 @@ public class ReleaseGateTests
     private static readonly Lazy<GateInputs> RealInputs = new(GateFiles.Inputs);
     private static GateInputs Real => RealInputs.Value;
 
+    /// <summary>The real records without the accepted exception RG-1 for INV-58 and its decision, so the checks below can
+    /// add exceptions and decisions of their own (RG-1, RG-2, ...) without colliding with the real ones.</summary>
+    private static readonly Lazy<GateInputs> BareInputs = new(() => Real with
+    {
+        ReleaseGate = RemoveLine(Real.ReleaseGate, "| INV-58 | ⚠️ | RG-1 |"),
+        Contract = RemoveLine(Real.Contract, "| RG-1 |"),
+    });
+    private static GateInputs Bare => BareInputs.Value;
+
     /// <summary>The real records with INV-18 as it stood before it was closed: ❌, counted in §11 and listed as open. The
     /// checks that need a ❌ (R1, R2, R11, R17) use it now that the real table has none.</summary>
-    private static readonly Lazy<GateInputs> ViolatedInputs = new(() => Real with
+    private static readonly Lazy<GateInputs> ViolatedInputs = new(() => Bare with
     {
-        Invariants = Mutate(ShiftHolds(SetCell(Real.Invariants, "| INV-18 |", 2, "❌"), -1),
+        Invariants = Mutate(ShiftHolds(SetCell(Bare.Invariants, "| INV-18 |", 2, "❌"), -1),
             "| ❌ | 0 |", "| ❌ | 1 (INV-18) |"),
-        ReleaseGate = InsertAfter(Real.ReleaseGate, "| INV-58 |",
+        ReleaseGate = InsertAfter(Bare.ReleaseGate, "| INV-58 |",
             "| INV-18 | ❌ | WP10 | in-handler checks of approval decisions, notification deletion, scan and job start are missing | — |"),
     });
     private static GateInputs Violated => ViolatedInputs.Value;
@@ -122,7 +131,7 @@ public class ReleaseGateTests
     {
         Assert.DoesNotContain(Evaluate(Real, GateMode.Development, Dev), f => f.Rule == "R2");
 
-        var unlisted = Real with { ReleaseGate = RemoveLine(Real.ReleaseGate, "| INV-58 |") };
+        var unlisted = Bare with { ReleaseGate = RemoveLine(Bare.ReleaseGate, "| INV-58 |") };
         Assert.Contains(Evaluate(unlisted, GateMode.Development, Dev), f => f.Rule == "R2" && f.Subject == "INV-58");
 
         // An accepted exception only waives the reference, not the row.
@@ -201,15 +210,15 @@ public class ReleaseGateTests
     [Fact]
     public void A_deleted_invariant_is_caught_even_with_the_count_adjusted()
     {
-        var deleted = Real with
+        var deleted = Bare with
         {
-            Invariants = Mutate(ShiftHolds(RemoveLine(Real.Invariants, "| INV-61 |"), -1), "| **Total** | **62** |", "| **Total** | **61** |"),
+            Invariants = Mutate(ShiftHolds(RemoveLine(Bare.Invariants, "| INV-61 |"), -1), "| **Total** | **62** |", "| **Total** | **61** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
         Assert.Contains(findings, f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("neither a row of the table nor retired"));
 
-        var abovePin = Real with { ReleaseGate = Mutate(Real.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61") };
+        var abovePin = Bare with { ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61") };
         Assert.Contains(Evaluate(abovePin, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-62" && f.Message.Contains("above the pinned"));
 
         // Retired properly: a 'Retired invariants' row with an accepted retirement decision.
@@ -221,19 +230,19 @@ public class ReleaseGateTests
         Assert.DoesNotContain(Evaluate(retired, GateMode.Development, Dev), f => f.Rule == "R3");
 
         var undecided = retired with { Contract = deleted.Contract };
-        Assert.Contains(Evaluate(undecided, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("RG-1"));
+        Assert.Contains(Evaluate(undecided, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("RG-1") && f.Message.Contains("not a row of PRODUCT_CONTRACT.md"));
 
-        var alsoRow = Real with
+        var alsoRow = Bare with
         {
-            ReleaseGate = Mutate(Real.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-61 | RG-1 | 2026-01-01 |\n"),
-            Contract = WithDecision(Real.Contract, "RG-1", "retirement", "INV-61"),
+            ReleaseGate = Mutate(Bare.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-61 | RG-1 | 2026-01-01 |\n"),
+            Contract = WithDecision(Bare.Contract, "RG-1", "retirement", "INV-61"),
         };
         Assert.Contains(Evaluate(alsoRow, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("still a row"));
 
-        var pinBelowRetired = Real with
+        var pinBelowRetired = Bare with
         {
-            ReleaseGate = Mutate(Real.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-63 | RG-1 | 2026-01-01 |\n"),
-            Contract = WithDecision(Real.Contract, "RG-1", "retirement", "INV-63"),
+            ReleaseGate = Mutate(Bare.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-63 | RG-1 | 2026-01-01 |\n"),
+            Contract = WithDecision(Bare.Contract, "RG-1", "retirement", "INV-63"),
         };
         Assert.Contains(Evaluate(pinBelowRetired, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("below the highest retired ID"));
     }
@@ -248,7 +257,7 @@ public class ReleaseGateTests
     [InlineData("`LoginHardeningTests.A_cookie_carrying_a_synthetic_identity_is_rejected`", "`Program.cs`")]                                                 // a file name
     public void Every_backticked_name_in_the_test_column_resolves(string from, string to)
     {
-        var mutated = Real with { Invariants = Mutate(Real.Invariants, from, to) };
+        var mutated = Bare with { Invariants = Mutate(Bare.Invariants, from, to) };
         Assert.Contains(Evaluate(mutated, GateMode.Development, Dev), f => f.Rule == "R4" && f.Subject == "INV-03");
     }
 
@@ -418,26 +427,26 @@ public class ReleaseGateTests
     [Fact]
     public void An_exception_needs_an_accepted_dated_decision_and_a_limitation()
     {
-        var valid = WithException(Real, "INV-58", "RG-1");
+        var valid = WithException(Bare, "INV-58", "RG-1");
         Assert.DoesNotContain(Evaluate(valid, GateMode.Development, Dev), f => f.Rule == "R11");
 
         void Fails(GateInputs inputs, string because, GateVersion? version = null)
             => Assert.Contains(Evaluate(inputs, GateMode.Development, version ?? Dev), f => f.Rule == "R11" && f.Message.Contains(because));
 
-        Fails(WithException(Real, "INV-58", "RG-1", decisionStatus: "Proposed"), "not Accepted");
-        Fails(WithException(Real, "INV-58", "RG-1", date: ""), "no ISO date");
-        Fails(WithException(Real, "INV-58", "RG-1", date: "2999-01-01"), "in the future");
-        Fails(WithException(Real, "INV-58", "RG-1", decidedBy: "—"), "names no maintainer");
-        Fails(WithException(Real, "INV-58", "RG-1", decisionKind: "retirement"), "not 'exception'");
-        Fails(WithException(Real, "INV-58", "RG-1", decisionInvariant: "INV-13"), "not for INV-58");
-        Fails(WithException(Real, "INV-58", "RG-1", link: "docs/operations/no-such-page.md#limits"), "does not exist");
-        Fails(WithException(Real, "INV-58", "RG-1", link: LimitsDoc + "#no-such-heading"), "has no heading");
-        Fails(WithException(Real, "INV-58", "RG-1", limitationText: "Principals are typed."), "does not name INV-58");
-        Fails(WithException(Real, "INV-58", "RG-1", link: "docs/v1/WORK_PACKAGES.md#r1-51"), "must be in README.md");
+        Fails(WithException(Bare, "INV-58", "RG-1", decisionStatus: "Proposed"), "not Accepted");
+        Fails(WithException(Bare, "INV-58", "RG-1", date: ""), "no ISO date");
+        Fails(WithException(Bare, "INV-58", "RG-1", date: "2999-01-01"), "in the future");
+        Fails(WithException(Bare, "INV-58", "RG-1", decidedBy: "—"), "names no maintainer");
+        Fails(WithException(Bare, "INV-58", "RG-1", decisionKind: "retirement"), "not 'exception'");
+        Fails(WithException(Bare, "INV-58", "RG-1", decisionInvariant: "INV-13"), "not for INV-58");
+        Fails(WithException(Bare, "INV-58", "RG-1", link: "docs/operations/no-such-page.md#limits"), "does not exist");
+        Fails(WithException(Bare, "INV-58", "RG-1", link: LimitsDoc + "#no-such-heading"), "has no heading");
+        Fails(WithException(Bare, "INV-58", "RG-1", limitationText: "Principals are typed."), "does not name INV-58");
+        Fails(WithException(Bare, "INV-58", "RG-1", link: "docs/v1/WORK_PACKAGES.md#r1-51"), "must be in README.md");
         Fails(WithException(Violated, "INV-18", "RG-1", status: "❌"), "never accepted");
-        Fails(WithException(Real, "INV-02", "RG-1", status: "✅"), "stale");
-        Fails(WithException(Real, "INV-58", "RG-1", reviewBy: "0.15.0"), "is due");                 // in Development mode too
-        Fails(WithException(Real, "INV-58", "RG-1", reviewBy: "1.0.0"), "is due", V100);
+        Fails(WithException(Bare, "INV-02", "RG-1", status: "✅"), "stale");
+        Fails(WithException(Bare, "INV-58", "RG-1", reviewBy: "0.15.0"), "is due");                 // in Development mode too
+        Fails(WithException(Bare, "INV-58", "RG-1", reviewBy: "1.0.0"), "is due", V100);
     }
 
     // ---- R17 ---------------------------------------------------------------------------------------------------
@@ -480,26 +489,26 @@ public class ReleaseGateTests
     {
         const string csproj = "<Project><PropertyGroup><Version>0.15.0</Version></PropertyGroup></Project>";
         GateSnapshot Snapshot(GateInputs i, string? project = null) => new(project ?? csproj, i.Invariants, i.ReleaseGate, i.Contract);
-        var withRg2 = Real with { Contract = WithDecision(Real.Contract, "RG-2", "exception", "INV-58") };
+        var withRg2 = Bare with { Contract = WithDecision(Bare.Contract, "RG-2", "exception", "INV-58") };
         var baseline = Snapshot(withRg2);
         Assert.Empty(BaseComparison.Compare(baseline, baseline, "the base"));
 
         // Edited in one cell, deleted, an ID reused, a new ID at or below the base's highest: all fail.
-        var edited = Snapshot(Real with { Contract = WithDecision(Real.Contract, "RG-2", "exception", "INV-58", date: "2026-01-02") });
+        var edited = Snapshot(Bare with { Contract = WithDecision(Bare.Contract, "RG-2", "exception", "INV-58", date: "2026-01-02") });
         Assert.Contains(BaseComparison.Compare(edited, baseline, "the base"), f => f.Rule == "R18" && f.Subject == "RG-2" && f.Message.Contains("never edited"));
-        Assert.Contains(BaseComparison.Compare(Snapshot(Real), baseline, "the base"), f => f.Rule == "R18" && f.Subject == "RG-2" && f.Message.Contains("never deleted"));
-        var reused = Snapshot(Real with { Contract = WithDecision(withRg2.Contract, "RG-1", "exception", "INV-13") });
+        Assert.Contains(BaseComparison.Compare(Snapshot(Bare), baseline, "the base"), f => f.Rule == "R18" && f.Subject == "RG-2" && f.Message.Contains("never deleted"));
+        var reused = Snapshot(Bare with { Contract = WithDecision(withRg2.Contract, "RG-1", "exception", "INV-13") });
         Assert.Contains(BaseComparison.Compare(reused, baseline, "the base"), f => f.Rule == "R18" && f.Subject == "RG-1");
-        var added = Snapshot(Real with { Contract = WithDecision(withRg2.Contract, "RG-3", "exception", "INV-13") });
+        var added = Snapshot(Bare with { Contract = WithDecision(withRg2.Contract, "RG-3", "exception", "INV-13") });
         Assert.Empty(BaseComparison.Compare(added, baseline, "the base"));
 
         // An invariant ID that disappears, and a pin that goes down.
-        var deleted = Snapshot(Real with
+        var deleted = Snapshot(Bare with
         {
-            Invariants = RemoveLine(Real.Invariants, "| INV-62 |"),
-            ReleaseGate = Mutate(Real.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61"),
+            Invariants = RemoveLine(Bare.Invariants, "| INV-62 |"),
+            ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-62", "Highest invariant ID: INV-61"),
         });
-        var lost = BaseComparison.Compare(deleted, Snapshot(Real), "the base");
+        var lost = BaseComparison.Compare(deleted, Snapshot(Bare), "the base");
         Assert.Contains(lost, f => f.Rule == "D16" && f.Subject == "INV-62");
         Assert.Contains(lost, f => f.Rule == "D16" && f.Message.Contains("went down"));
 
@@ -513,23 +522,23 @@ public class ReleaseGateTests
         Assert.Contains(BaseComparison.Compare(edited, baseline, "the previous release tag v1.0.1"), f => f.Rule == "R18" && f.Subject == "RG-2");
 
         // Bootstrap: a base below 1.0.0 that predates the tables is empty for them.
-        var predates = new GateSnapshot(csproj, Real.Invariants, null, Mutate(Real.Contract, "### 6.1 Release decisions", "### 6.1 (not yet)"));
-        Assert.Empty(BaseComparison.Compare(Snapshot(Real), predates, "the base"));
-        var noPinYet = new GateSnapshot(csproj, Real.Invariants, "# Release gate\n", Real.Contract);
-        Assert.Empty(BaseComparison.Compare(Snapshot(Real), noPinYet, "the base"));
+        var predates = new GateSnapshot(csproj, Bare.Invariants, null, Mutate(Bare.Contract, "### 6.1 Release decisions", "### 6.1 (not yet)"));
+        Assert.Empty(BaseComparison.Compare(Snapshot(Bare), predates, "the base"));
+        var noPinYet = new GateSnapshot(csproj, Bare.Invariants, "# Release gate\n", Bare.Contract);
+        Assert.Empty(BaseComparison.Compare(Snapshot(Bare), noPinYet, "the base"));
         // Amendment 1: a 0.x base without the files (v0.14.1, v0.15.0 have no docs/v1/) is an empty base.
         var bare = new GateSnapshot(csproj, null, null, null);
-        Assert.Empty(BaseComparison.Compare(Snapshot(Real), bare, "the previous release v0.15.0", "v0.15.0"));
-        Assert.Empty(BaseComparison.Compare(Snapshot(Real), predates with { Invariants = null }, "the base"));
-        Assert.Empty(BaseComparison.Compare(Snapshot(Real), predates with { Contract = null }, "the base"));
+        Assert.Empty(BaseComparison.Compare(Snapshot(Bare), bare, "the previous release v0.15.0", "v0.15.0"));
+        Assert.Empty(BaseComparison.Compare(Snapshot(Bare), predates with { Invariants = null }, "the base"));
+        Assert.Empty(BaseComparison.Compare(Snapshot(Bare), predates with { Contract = null }, "the base"));
         // From 1.0.0 on a missing file or table is a finding; so is a base without a csproj, or no base at all.
         const string one = "<Project><PropertyGroup><Version>1.0.0</Version></PropertyGroup></Project>";
         GateSnapshot Current(GateInputs i) => Snapshot(i, "<Project><PropertyGroup><Version>1.0.1</Version></PropertyGroup></Project>");
-        Assert.Contains(BaseComparison.Compare(Current(Real), bare with { Csproj = one }, "the base"), f => f.Rule == "D16" && f.Message.Contains("SECURITY_INVARIANTS.md"));
-        Assert.Contains(BaseComparison.Compare(Current(Real), predates with { Csproj = one, Contract = null }, "the base"), f => f.Rule == "D16" && f.Message.Contains("PRODUCT_CONTRACT.md"));
-        Assert.Contains(BaseComparison.Compare(Snapshot(Real), bare with { Csproj = null }, "the base"), f => f.Rule == "D16" && f.Message.Contains("csproj"));
-        Assert.Contains(BaseComparison.Compare(Snapshot(Real), null, "the base"), f => f.Rule == "D16");
-        var findings = BaseComparison.Compare(Current(Real), predates with { Csproj = one }, "the previous release v1.0.0", "v1.0.0");
+        Assert.Contains(BaseComparison.Compare(Current(Bare), bare with { Csproj = one }, "the base"), f => f.Rule == "D16" && f.Message.Contains("SECURITY_INVARIANTS.md"));
+        Assert.Contains(BaseComparison.Compare(Current(Bare), predates with { Csproj = one, Contract = null }, "the base"), f => f.Rule == "D16" && f.Message.Contains("PRODUCT_CONTRACT.md"));
+        Assert.Contains(BaseComparison.Compare(Snapshot(Bare), bare with { Csproj = null }, "the base"), f => f.Rule == "D16" && f.Message.Contains("csproj"));
+        Assert.Contains(BaseComparison.Compare(Snapshot(Bare), null, "the base"), f => f.Rule == "D16");
+        var findings = BaseComparison.Compare(Current(Bare), predates with { Csproj = one }, "the previous release v1.0.0", "v1.0.0");
         Assert.Contains(findings, f => f.Rule == "D16" && f.Message.Contains("no RELEASE_GATE.md"));
         Assert.Contains(findings, f => f.Rule == "R18" && f.Message.Contains("6.1"));
     }
