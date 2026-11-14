@@ -7,6 +7,20 @@ that name. New hosts get it at onboarding. Existing hosts are migrated one at a 
 
 The guarantee holds **per host after its migration**. A host that still admits the shared name is exposed as before.
 
+## Known limitation: hosts not yet migrated
+
+Whiskers 1.0.0 ships with INV-58 at ⚠️ under the accepted exception RG-1 (`docs/v1/PRODUCT_CONTRACT.md` §6.1). The
+per-host identity is complete, but it protects only migrated hosts:
+
+- A host whose ghostunnel still admits `serverwatch-client` is exposed as before: whoever holds the shared client
+  key reaches its Docker API.
+- The shared key stays in `{MtlsDir}` until an Admin retires it, and retiring is refused while any considered host is
+  not narrowed.
+- The fleet CA's intermediate key still opens every host.
+
+Migrate every host, then retire the shared credential. The readiness checklist lists every host that is still open.
+The exception is reviewed again by 1.1.0.
+
 ## What changes where
 
 | Where | Before | After |

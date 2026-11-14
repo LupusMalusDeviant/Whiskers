@@ -10,10 +10,10 @@ All notable changes to Whiskers are documented here. The format follows
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in
 `docs/v1/SECURITY_INVARIANTS.md` is proven by named tests, which CI requires one by one. The exception is INV-58, which
-holds per host once that host is migrated (#184). Every change, whether from the UI, MCP, the agent, a webhook or a
-scheduled task, runs through one Mutation Gateway. The gateway resolves the target, decides on a structured principal,
-asks for approval where the policy says so, and writes one audit event per attempt. From 1.0.0 on, every pull request
-runs the gate in Line mode.
+holds per host once that host is migrated (#184) and ships at ⚠️ under the accepted exception RG-1. Every change,
+whether from the UI, MCP, the agent, a webhook or a scheduled task, runs through one Mutation Gateway. The gateway
+resolves the target, decides on a structured principal, asks for approval where the policy says so, and writes one audit
+event per attempt. From 1.0.0 on, every pull request runs the gate in Line mode.
 
 ### Upgrading from 0.15.0
 

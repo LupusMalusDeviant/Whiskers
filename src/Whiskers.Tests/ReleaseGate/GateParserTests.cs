@@ -178,7 +178,10 @@ public class ReleaseGateDocumentTests
             gate.Open.Count);
         Assert.Contains(gate.Open, o => o is { Id: "INV-58", Status: InvariantStatus.Partial, Package: "R1-44" });
         Assert.DoesNotContain(gate.Open, o => o.Id == "INV-57");   // closed by contract 0012
-        Assert.Empty(gate.Exceptions);
+        // 1.0.0 ships INV-58 at ⚠️ under the accepted exception RG-1, reviewed again by 1.1.0.
+        var exception = Assert.Single(gate.Exceptions);
+        Assert.Equal(("INV-58", InvariantStatus.Partial, "RG-1", "1.1.0"),
+            (exception.Id, exception.Shipped, exception.DecisionId, exception.ReviewBy));
         Assert.Empty(gate.Known);
         Assert.Empty(gate.Retired);
         Assert.Contains(gate.Suites, s => s is { Workflow: "ci.yml", Job: "build-test", Step: "Test (in-process)" });
@@ -286,12 +289,13 @@ public class ReleaseGateDocumentTests
         var contract = GateFiles.Require(GateFiles.Contract);
         var (decisions, problem) = ReleaseDecisions.Parse(contract);
         Assert.Null(problem);
-        Assert.Empty(decisions);
+        var decision = Assert.Single(decisions);
+        Assert.Equal(("RG-1", "exception", "INV-58", "Accepted"), (decision.Id, decision.Kind, decision.Invariant, decision.Status));
         Assert.NotNull(ReleaseDecisions.Parse(contract.Replace("### 6.1 Release decisions", "### 6.1 Decisions")).Problem);
         Assert.NotNull(ReleaseDecisions.Parse(contract.Replace("| ID | Kind | Invariant | Decision | Release | Status | Date | Decided by |",
             "| ID | Kind | Invariant | Decision | Status | Date | Decided by | Notes |")).Problem);
-        var one = ReleaseGateTests.WithDecision(contract, "RG-1", "exception", "INV-01");
-        var d = Assert.Single(ReleaseDecisions.Parse(one).Decisions);
-        Assert.Equal(("RG-1", "exception", "INV-01", (string?)null, "Accepted", new DateOnly(2026, 1, 1)), (d.Id, d.Kind, d.Invariant, d.Release, d.Status, d.Date!.Value));
+        var one = ReleaseGateTests.WithDecision(contract, "RG-2", "exception", "INV-01");
+        var d = Assert.Single(ReleaseDecisions.Parse(one).Decisions, x => x.Id == "RG-2");
+        Assert.Equal(("RG-2", "exception", "INV-01", (string?)null, "Accepted", new DateOnly(2026, 1, 1)), (d.Id, d.Kind, d.Invariant, d.Release, d.Status, d.Date!.Value));
     }
 }

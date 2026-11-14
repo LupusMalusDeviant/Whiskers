@@ -139,6 +139,7 @@ recorded here as a `retirement` that cites it.
 
 | ID | Kind | Invariant | Decision | Release | Status | Date | Decided by |
 |---|---|---|---|---|---|---|---|
+| RG-1 | exception | INV-58 | 1.0.0 ships with INV-58 at ⚠️. The per-host mTLS identity is complete, but it protects a host only after that host's migration; a host still on the shared client credential is exposed as before (limitation in `docs/operations/per-host-mtls-migration.md`). Reviewed again by 1.1.0. | — | Accepted | 2026-11-14 | LupusMalusDeviant |
 
 No release decision is recorded yet.
 
