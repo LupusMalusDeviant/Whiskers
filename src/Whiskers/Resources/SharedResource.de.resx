@@ -6389,4 +6389,16 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Readiness_mtlsKeysProtected_FailUnix" xml:space="preserve">
     <value>Nicht 0600: {0}.</value>
   </data>
+  <data name="Common_Error_ActionFailed" xml:space="preserve">
+    <value>Die Aktion ist fehlgeschlagen: {0}</value>
+  </data>
+  <data name="Common_Error_LoadFailed" xml:space="preserve">
+    <value>Die Daten konnten nicht geladen werden: {0}</value>
+  </data>
+  <data name="Common_Error_ContainersUnavailable" xml:space="preserve">
+    <value>Die Container dieses Servers konnten nicht gelesen werden: {0}</value>
+  </data>
+  <data name="Common_Error_FileTooLarge" xml:space="preserve">
+    <value>Die Datei ist größer als {0} KB.</value>
+  </data>
 </root>

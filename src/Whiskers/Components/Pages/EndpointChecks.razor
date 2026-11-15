@@ -9,6 +9,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IUiMutationRunner Mutations
 @inject ISnackbar Snackbar
+@inject ILogger<EndpointChecks> Logger
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["Checks_Title"] - Whiskers</PageTitle>
@@ -288,6 +289,10 @@ else
         return false;
     }
 
+    // Review 1.0.0 (U1): any other failure is shown and logged without secrets instead of ending the circuit.
+    private void ShowFailure(string action, Exception ex) =>
+        Snackbar.Add(L["Common_Error_ActionFailed", UiFailure.Report(Logger, action, ex)].Value, Severity.Error);
+
     private void NewCheck() => _editing = new Form { ServerId = _servers.FirstOrDefault()?.Id ?? "" };
 
     private void Edit(EndpointCheckDefinition c) => _editing = new Form
@@ -330,6 +335,7 @@ else
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (ArgumentException ex) { Snackbar.Add(ex.Message, Severity.Error); }
         catch (KeyNotFoundException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        catch (Exception ex) { ShowFailure("save endpoint check", ex); }
         finally { _busy = false; }
     }
 
@@ -345,6 +351,7 @@ else
             Reload();
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) { ShowFailure("delete endpoint check", ex); }
         finally { _busy = false; }
     }
 
@@ -382,6 +389,7 @@ else
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (MutationFailedException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        catch (Exception ex) { ShowFailure("run endpoint check", ex); }
         finally
         {
             Slots.Release(c.Id);

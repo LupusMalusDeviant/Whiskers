@@ -43,6 +43,9 @@
 14 Whiskers.Tests.BorgFleetScriptTests
 8 Whiskers.Tests.TailnetGuardScriptTests
 
+# Review 1.0.0 (U1): page handlers and renders that failed ended the Blazor circuit.
+12 Whiskers.Tests.ComponentTests.UiCrashRegressionTests
+
 # Backups (review 1.0.0, Data): a restore writes the database the app opens and refuses a settings mismatch first;
 # a volume backup leaves no unrecorded archive, keeps its record when its file stays, and names each archive alone.
 11 Whiskers.Tests.RestoreCustomSqlitePathTests

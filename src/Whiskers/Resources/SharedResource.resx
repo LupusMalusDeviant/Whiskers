@@ -6389,4 +6389,16 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Readiness_mtlsKeysProtected_FailUnix" xml:space="preserve">
     <value>Not 0600: {0}.</value>
   </data>
+  <data name="Common_Error_ActionFailed" xml:space="preserve">
+    <value>The action failed: {0}</value>
+  </data>
+  <data name="Common_Error_LoadFailed" xml:space="preserve">
+    <value>The data could not be loaded: {0}</value>
+  </data>
+  <data name="Common_Error_ContainersUnavailable" xml:space="preserve">
+    <value>The containers of this server could not be listed: {0}</value>
+  </data>
+  <data name="Common_Error_FileTooLarge" xml:space="preserve">
+    <value>The file is larger than {0} KB.</value>
+  </data>
 </root>

@@ -7,6 +7,7 @@
 @inject IUiMutationRunner Mutations
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IOptionsMonitor<AutomationOptions> AutomationOptions
+@inject ILogger<ScheduledTasksView> Logger
 @inject IStringLocalizer<SharedResource> L
 @inject Whiskers.Services.Mutations.IEffectiveRequirementResolver Requirements
 
@@ -417,7 +418,17 @@ else
     private async Task LoadContainersForServer()
     {
         var sid = _formServerId;
-        _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
+        try
+        {
+            _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
+        }
+        catch (Exception ex)
+        {
+            // Review 1.0.0 (U1): an unreachable server leaves the picker empty and says so; the dialog still opens
+            // (another server can be chosen) instead of the listing error ending the circuit.
+            _containers = new();
+            Snackbar.Add(L["Common_Error_ContainersUnavailable", UiFailure.Report(Logger, "list containers", ex)].Value, Severity.Warning);
+        }
     }
 
     private async Task CreateTask()
