@@ -841,6 +841,45 @@ public class SelfProtectionTests
     public void Bypasses_from_the_S2_round_8_review_are_refused_for_a_key(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
+    /// <summary>B19, B20, m7: braces after a comment or an escaped quote, glob segments that can be '.' or '..', and
+    /// a relative glob in a changing command.</summary>
+    [Theory]
+    [InlineData("echo ok # it's fine\ndocker stop whi{s,}kers")]
+    [InlineData("echo ok # it's fine\ncurl --unix-socket /var/run/docker.so{c,}k -X POST http://x/containers/abc/stop")]
+    [InlineData("echo \"\\\"\\\"\" ; docker stop whi{s,}kers")]
+    [InlineData("echo \"a\\\"b\\\"c\" ; docker stop whi{s,}kers")]
+    [InlineData("echo x | nc -U /var/run/.*/docker.sock")]
+    [InlineData("socat - /var/run/.*/docker.sock")]
+    [InlineData("cat /var/run/lock/.?/docker.sock")]
+    [InlineData("cat /var/run/docker.s[[.o.]]ck")]
+    [InlineData("cd /app/data && rm -rf mtl?")]
+    [InlineData("cd /app/data && chmod -R 777 mtl?")]
+    [InlineData("cd /app/data && mv mtl? /tmp/x")]
+    public void Bypasses_from_the_S2_round_9_review_are_refused_for_a_key(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
+    /// <summary>M5, M6: everyday bracket expressions and relative or quoted globs stay allowed.</summary>
+    [Theory]
+    [InlineData("[[ -f /etc/hosts ]] && echo ok")]
+    [InlineData("if [[ -d /srv/app ]]; then echo ok; fi")]
+    [InlineData("grep '[0-9][0-9]*' /srv/app/f")]
+    [InlineData("grep -E '^[[:space:]]*#' /etc/fstab")]
+    [InlineData("ls /var/log/*.[0-9][0-9].gz")]
+    [InlineData("ls -d /srv/app/v[0-9].[0-9]")]
+    [InlineData("find /srv -name '[a-z]*[0-9].log'")]
+    [InlineData("ls logs/*.log")]
+    [InlineData("tail -n 100 logs/*.log")]
+    [InlineData("rm -f build/*.o")]
+    [InlineData("git add src/*.cs")]
+    [InlineData("ssh host 'ls /srv/app/*.conf'")]
+    [InlineData("bash -c 'ls /srv/*.log'")]
+    [InlineData("sed 's/a*/b/' /srv/app/f")]
+    [InlineData("sed -i 's/foo.*/bar/' /srv/app/f")]
+    [InlineData("grep -r 'foo/.*bar' /srv/app")]
+    [InlineData("ls ../logs/*.log")]
+    public void Everyday_globs_and_brackets_stay_allowed_for_a_key(string command) =>
+        Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
     /// <summary>B18: braces up to the cap are decided in one pass, not one scan per brace.</summary>
     [Theory]
     [InlineData("{")]

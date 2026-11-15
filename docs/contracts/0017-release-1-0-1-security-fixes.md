@@ -532,15 +532,20 @@ The rule ignores the command word, so these are refused for a key too. This is f
 - round 7: a brace is matched by depth, skipping escaped and quoted characters, so `whi{{},s}kers`, `whi{\},s}kers`
   and `whi{'}',s}kers` are unanalysable; every brace of a text is decided in one pass, so the time stays linear. A bracket expression
   ends at its first `]` after a leading `]` (`docker.soc[]k]`) and never crosses `/`; a segment with `[[` or with
-  more than one `]` (`[[.o.]]`, `[a]o]`) counts as a hit (round 8). A glob
+  more than one `]` (`[[.o.]]`, `[a]o]`) is read from its first `[` on as `*`, which can only find more
+  (round 9; `grep '[0-9][0-9]*'` and `[[ -f … ]]` stay allowed). Braces are read with the same lexer as the words:
+  a comment starts only outside a word, `\"` does not end a double quote (round 9). A glob
   in a path is tested against each protected path and everything below it as a real intersection of the two patterns
   (the glob's `*` and `?` stay within a segment, the pattern's `*` does not), in any segment and under a compose
   prefix (`…/whis?ers_data/_data/vault.key`, `…/proj_whis[k]ers_data`); for each glob the time is the product of its
-  length and the pattern's. Repeated slashes and `.` segments are collapsed first; a `..` segment in a glob path counts
-  as a hit (round 8). In a command that changes or removes what it names (`rm`, `mv`, `chmod`, `chown`, `find …
+  length and the pattern's. Repeated slashes and `.` segments are collapsed first; a segment that can expand to `.`
+  (`.*`, `.?` in dash or an older bash) is tried both kept and removed, and one that is or can be `..` counts as a hit
+  (rounds 8 and 9). In a command that changes or removes what it names (`rm`, `mv`, `chmod`, `chown`, `find …
   -delete`), a glob that could name a directory above a protected path is a hit (`rm -r /var/lib/dock?r`,
-  `chmod -R 000 /var/lib/docker/v*`). A relative glob is a hit when a wildcard segment could be a protected
-  directory (`cd /app/data && cat mtl?/client.key`). A glob
+  `chmod -R 000 /var/lib/docker/v*`). A relative glob is a hit when a segment could be a protected directory
+  with its `?` and `[…]` standing for letters (`cd /app/data && cat mtl?/client.key`, `rm -rf mtl?`); its `*` stands
+  only for what the name leaves open, so `ls logs/*.log` and `rm -f build/*.o` stay allowed (round 9). A quoted word
+  that is read again is not also tested as one glob. A glob
   without `/` (a name) hits when it could spell a protected name with its `?` and `[…]` standing for letters, or when
   it matches the name's stem (`whis*`); its `*` does not stand for the protected letters, so `*.log` hits nothing.
   `fish -c` is unanalysable (fish substitutes commands with plain parentheses). A remote shell reached through `ssh` is
@@ -549,7 +554,8 @@ The rule ignores the command word, so these are refused for a key too. This is f
   `docker compose -f … up` are refused for a key too, and so are quoted globs and programs that could reach a
   protected name or path the same way an unquoted one does: `find /etc -name 's*'`, `systemctl status 'nginx*'`,
   `du -sh '/var/log/*'`, `ls '/srv/*/config.yml'`, `jq '{a:.x,b:.y}' f`, `ls /var/lib/docker/volumes/a*` (it could be
-  `a_whiskers…`).
+  `a_whiskers…`), and an absolute glob segment that can be `..` (`ls /srv/app/../logs/*.log`, `ls /root/.*`). Such a
+  hit names no control-plane pattern; an interactive Admin is still asked to approve it.
 
 These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv ./a ./b`, `awk -v x=./y`, `grep -v foo`,
 `scp ./a host:/b`, `docker exec app cp -rv ./a ./b`, `-v /srv/app:/app:ro` and named volumes.
@@ -564,6 +570,11 @@ These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv 
 - relative paths outside a mount (`cat ../var/run/docker.sock`, `cat ~/../var/run/docker.sock`): the working directory
   is unknown, so only mount sources are decided by how they are written;
 - a name glob whose `*` stands for protected letters under a compose prefix (`proj_whis*` in the working directory),
+  and a relative glob whose `*` does (`cd /app/data && rm -rf mt*`);
+- reading or copying a directory above a protected path (`tar czf /tmp/x.tgz /var/lib/docker`, `cp -a /var/lib/docker
+  /tmp/x`): only changing commands are decided on the directories above;
+- the cost of words with very many path segments (2 to 3.5 s at the cap): the number of segments per word is not
+  limited yet;
   zsh globs and extglob forms (`whis(k)ers`, `@(k)`), a non-POSIX login shell behind `ssh` or `su -c`, and other
   non-POSIX shells run with `-c` (`nu`, `xonsh`, `rc`, `es`);
 - the classes that need a real shell parser rather than a word reader: command words hidden behind option values of
