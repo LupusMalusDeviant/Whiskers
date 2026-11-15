@@ -125,6 +125,15 @@ public sealed class SecretRedactorTests
         @"{<U>Authorization<U>: <U>***<U>}")]
     [InlineData(@"{\\\""Authorization\\\"": \\\""Token token=\\\\\\\""hunter2secret\\\\\\\""\\\""}",
         @"{\\\""Authorization\\\"": \\\""***\\\""}")]
+    // A value that ends in a literal backslash still ends at its closing quote (delta review 3).
+    [InlineData(@"""Authorization"" => ""hunter2secret\\""", @"""Authorization"" => ""***""")]
+    [InlineData(@"'Authorization' => 'hunter2secret\\'", "'Authorization' => '***'")]
+    [InlineData(@"""Authorization"" = ""Basic hunter2\\""", @"""Authorization"" = ""***""")]
+    [InlineData(@"headers = {'Authorization': 'Token C:\\keys\\'}", "headers = {'Authorization': '***'}")]
+    [InlineData(@"msg=""{\""Authorization\"": \""hunter2secret\\\\\""}""", @"msg=""{\""Authorization\"": \""***\""}""")]
+    [InlineData(@"'Authorization': 'hunter2secret\\', 'n': 'kept'", "'Authorization': '***', 'n': 'kept'")]
+    [InlineData(@"msg=""{\""Authorization\"": \""hunter2secret\\\\\"", \""n\"": \""kept\""}""",
+        @"msg=""{\""Authorization\"": \""***\"", \""n\"": \""kept\""}""")]
     // Only what this rule or 1.0.0 could have written counts as redacted (NIT-1).
     [InlineData("Authorization: ***-hunter2secret", "Authorization: ***")]
     [InlineData("Authorization: ***.hunter2secret", "Authorization: ***")]

@@ -101,8 +101,13 @@ public static class SecretRedactor
     private static readonly Pair QuotedAuthorizationKey = new(
         // Up to three levels of escaping, bounded so a run of backslashes costs linear time.
         @"(?i)(?<kq>'|""|(?:\\\\){0,3}\\""|\\u00(?:22|27))(?<key>[\w-]{0,64}authorization)\k<kq>(?<sep>\s*(?:=>|[=:])\s*)" +
-        // A deeper-escaped quote inside the value (vq with more backslash pairs in front) belongs to the value.
-        @"(?<vq>'|""|(?:\\\\){0,3}\\""|\\u00(?:22|27))(?>(?:(?:\\\\){1,4}\k<vq>|(?!\k<vq>)(?:\\[^\r\n]|[^\\\r\n]))*)\k<vq>",
+        // A deeper-escaped quote inside an escaped value belongs to the value: for a value quoted with \" (or the
+        // unicode escape), a quote with 2 + 4n more backslashes in front; for \\\" one with 4 + 8n more — counted from
+        // the start of the backslash run (no backslash before it), so a literal backslash at the end of a value
+        // never swallows the closing quote. A plain ' or " value has no deeper form: \' and \" are escapes inside it.
+        @"(?<vq>'|""|(?<l1>\\""|\\u00(?:22|27))|(?<l2>\\{3}"")|\\{5}""|\\{7}"")" +
+        @"(?>(?:(?(l1)(?<!\\)(?:\\{4})*\\{2}\k<vq>|(?(l2)(?<!\\)(?:\\{8})*\\{4}\k<vq>|(?!)))" +
+        @"|(?!\k<vq>)(?:\\[^\r\n]|[^\\\r\n]))*)\k<vq>",
         RegexOptions.Compiled);
 
     // A Basic credential wherever it stands (nginx proxy_set_header, headers.Add("Authorization", "Basic …"), HAR
