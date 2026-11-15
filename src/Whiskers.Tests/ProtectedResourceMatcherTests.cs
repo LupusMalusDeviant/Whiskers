@@ -221,6 +221,9 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "docker service update --mount-add type=bind,source=/var/run,target=/r app")]
     [InlineData("command", "docker service update --mount-add=type=bind,SRC=/var/lib/docker/volumes,dst=/v app")]
     [InlineData("command", "/tmp/d run --rm -itv /var/run:/r alpine ls /r")]                         // a staged copy
+    [InlineData("command", "sh -c docker\\ run\\ -v\\ /var/run:/r\\ alpine")]                         // escaped spaces
+    [InlineData("command", "sh -c rm\\ -rf\\ /var/lib/docker")]
+    [InlineData("command", "cat \"/var/run/dock\\\ner.sock\"")]                                       // quoted continuation
     [InlineData("command", "docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
     [InlineData("command", "docker run --rm --mount type=bind,source=/var/run,target=/r alpine ls /r")]
     [InlineData("command", "docker run --rm --mount=type=bind,src=/,dst=/host alpine ls /host")]
@@ -280,6 +283,10 @@ public class ProtectedResourceMatcherTests
     [InlineData("docker run -v /dev/sda:/d alpine")]                                // under /dev
     [InlineData("cd /var && finch run -dv ./run:/r alpine")]                        // a runtime of another name
     [InlineData("docker run -v '/srv/a b':/r alpine")]                              // not a plain absolute path
+    [InlineData("docker volume create -o type=none -o o=bind -o device=var/run x")]  // a relative host path
+    [InlineData("docker run --mount type=bind,src=var,dst=/r alpine")]
+    [InlineData("docker run --mount type=volume,src=var/run,dst=/r alpine")]
+    [InlineData("/tmp/rsync run -dv ./x:/r alpine")]                                // no name decides a v cluster
     [InlineData("docker run --rm --mount type=bind,SRC=./x,target=/r alpine ls /r")]
     [InlineData("docker run --rm -v /proc/1/root:/h alpine ls /h")]                // another process's file system
     [InlineData("docker run --rm -v /proc/self/root/var/run:/r alpine ls /r")]

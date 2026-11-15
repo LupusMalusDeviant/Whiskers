@@ -106,9 +106,9 @@ public static class ProtectedResourceMatcher
                 // Contract 0017 B (INV-59): a mount source written in the command (docker run -v /var/run:/r) is a
                 // mount, whatever the command word is; a directory above a protected path reaches into it. Only a
                 // plain absolute path is analysable (MountSourceKind); anything else that names a path is not (INV-24).
-                foreach (var source in ShellMountSources(shell))
+                foreach (var (source, form) in ShellMountSources(shell))
                 {
-                    var kind = MountSourceKind(source);
+                    var kind = MountSourceKind(source, form);
                     if (kind == MountSource.Unanalyzable)
                         return new Hit("", null, key) { Argument = key, InFreeText = true };
                     if (kind == MountSource.Path && AncestorHit(source, pathPatterns) is { } above)
@@ -310,54 +310,60 @@ public static class ProtectedResourceMatcher
     /// <c>--volume=</c> form, the value attached to <c>-v</c> or to a short-flag cluster ending in <c>v</c>
     /// (<c>-v/src:dst</c>, <c>-v=src:dst</c>, <c>-itv/src:dst</c>), any <c>&lt;absolute path&gt;:&lt;path&gt;</c>
     /// word, and the word after such a cluster (<c>-itv ./x:/r</c>) when it starts with <c>.</c>, <c>~</c> or
-    /// <c>/</c> and holds a <c>:</c>, unless its command is a known tool whose <c>v</c> means verbose
-    /// (<see cref="VerboseTools"/>: <c>rsync -av</c>, <c>cp -rv</c>);</item>
+    /// <c>/</c> and holds a <c>:</c>, whatever the command is (<c>rsync -av ./a:b …</c> too: a name says nothing about
+    /// the program);</item>
     /// <item>keyed: the value of a <c>source=</c> / <c>src=</c> / <c>device=</c> key, also after <c>volume-opt=</c>.
     /// Inside a <c>--mount</c> / <c>--mount-add</c> value and a <c>-o</c> / <c>--opt</c> value (also their
     /// <c>=</c> forms and attached <c>-o…</c>), and anywhere in a command that names a container runtime, keys are
     /// matched in any case, as Docker lower-cases them; in any other word only in lower case at the start of a
     /// comma-separated part (<c>echo SRC=./build</c> is none). A keyed value is a path, so it is returned whole and
-    /// also cut at its first <c>:</c>. A <c>--mount</c> value with a <c>"</c> (a CSV-quoted field) is
+    /// also cut at its first <c>:</c>. In a <c>-o</c> / <c>--opt</c> / <c>--mount</c> value a <c>device=</c> value, and
+    /// a <c>source=</c> / <c>src=</c> value of a <c>type=bind</c> mount, is always a host path
+    /// (<see cref="SourceForm.HostPath"/>). A <c>--mount</c> value with a <c>"</c> (a CSV-quoted field) is
     /// <see cref="UnresolvableSource"/>.</item>
     /// </list></summary>
-    private static IEnumerable<string> ShellMountSources(ShellText shell)
+    private static IEnumerable<(string Value, SourceForm Form)> ShellMountSources(ShellText shell)
     {
         var words = shell.Words;
-        var commands = shell.Commands ?? [];
         var runtime = words.Any(NamesContainerRuntime);
         var keyCase = runtime ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var command = 0;
         for (var i = 0; i < words.Count; i++)
         {
-            while (command + 1 < commands.Count && commands[command + 1] <= i) command++;
             var word = words[i];
             var next = i + 1 < words.Count ? words[i + 1] : null;
-            if (word is "-v" or "--volume" && next is not null) yield return BeforeColon(next);
-            else if (IsVolumeCluster(word) && next is { Length: > 0 } && next[0] is '.' or '~' or '/' && next.Contains(':')
-                     && !(commands.Count > 0 && commands[command] < i
-                          && VerboseTools.Contains(Path.GetFileName(words[commands[command]]))))
-                yield return BeforeColon(next);
-            else if (word.StartsWith("--volume=", StringComparison.Ordinal)) yield return BeforeColon(word["--volume=".Length..]);
-            else if (AttachedVolume(word) is { } attached) yield return BeforeColon(attached);
-            else if (word.StartsWith('/') && word.IndexOf(':') > 0) yield return BeforeColon(word);
+            if (word is "-v" or "--volume" && next is not null) yield return (BeforeColon(next), SourceForm.Short);
+            else if (IsVolumeCluster(word) && next is { Length: > 0 } && next[0] is '.' or '~' or '/' && next.Contains(':'))
+                yield return (BeforeColon(next), SourceForm.Short);
+            else if (word.StartsWith("--volume=", StringComparison.Ordinal))
+                yield return (BeforeColon(word["--volume=".Length..]), SourceForm.Short);
+            else if (AttachedVolume(word) is { } attached) yield return (BeforeColon(attached), SourceForm.Short);
+            else if (word.StartsWith('/') && word.IndexOf(':') > 0) yield return (BeforeColon(word), SourceForm.Short);
 
             // A --mount / --mount-add value: CSV, so a quoted field (a comma inside a source) is not read here.
             var mountValue = word is "--mount" or "--mount-add" ? next
                 : word.StartsWith("--mount=", StringComparison.Ordinal) ? word["--mount=".Length..]
                 : word.StartsWith("--mount-add=", StringComparison.Ordinal) ? word["--mount-add=".Length..]
                 : null;
-            if (mountValue is not null && mountValue.Contains('"')) yield return UnresolvableSource;
+            if (mountValue is not null && mountValue.Contains('"')) yield return (UnresolvableSource, SourceForm.HostPath);
             // A -o / --opt value: keys in any case.
             var optionValue = mountValue ?? (word is "-o" or "--opt" ? next
                 : word.StartsWith("--opt=", StringComparison.Ordinal) ? word["--opt=".Length..]
                 : word.StartsWith("-o", StringComparison.Ordinal) && word.Length > 2 ? word[2..].TrimStart('=')
                 : null);
             if (optionValue is not null)
-                foreach (var source in KeyedSources(optionValue, StringComparison.OrdinalIgnoreCase))
-                    foreach (var whole in WholeAndCut(source)) yield return whole;
+            {
+                var bind = optionValue.Contains("type=bind", StringComparison.OrdinalIgnoreCase);
+                foreach (var (sourceKey, source) in KeyedSources(optionValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    // device= of the local driver is bound relative to the daemon's directory; a bind source is
+                    // made absolute against the client's: neither is a volume name.
+                    var form = sourceKey == "device=" || bind ? SourceForm.HostPath : SourceForm.Keyed;
+                    foreach (var whole in WholeAndCut(source)) yield return (whole, form);
+                }
+            }
             // Any other word: Docker's lower-case keys, in any case in a runtime's command.
-            foreach (var source in KeyedSources(word, keyCase))
-                foreach (var whole in WholeAndCut(source)) yield return whole;
+            foreach (var (_, source) in KeyedSources(word, keyCase))
+                foreach (var whole in WholeAndCut(source)) yield return (whole, SourceForm.Keyed);
         }
 
         static string BeforeColon(string value) => value.IndexOf(':') is var colon and >= 0 ? value[..colon] : value;
@@ -368,9 +374,9 @@ public static class ProtectedResourceMatcher
             if (value.Contains(':')) yield return BeforeColon(value);
         }
 
-        // The value of a source= / src= / device= key that starts a comma-separated part, also after volume-opt=
-        // (repeated).
-        static IEnumerable<string> KeyedSources(string value, StringComparison comparison)
+        // The key (lower case) and value of a source= / src= / device= key that starts a comma-separated part, also
+        // after volume-opt= (repeated).
+        static IEnumerable<(string Key, string Value)> KeyedSources(string value, StringComparison comparison)
         {
             if (!value.Contains('=')) yield break;
             foreach (var part in value.Split(','))
@@ -380,7 +386,7 @@ public static class ProtectedResourceMatcher
                 foreach (var sourceKey in SourceKeys)
                     if (option.Span.StartsWith(sourceKey, comparison))
                     {
-                        yield return option[sourceKey.Length..].ToString();
+                        yield return (sourceKey, option[sourceKey.Length..].ToString());
                         break;
                     }
             }
@@ -392,12 +398,17 @@ public static class ProtectedResourceMatcher
     /// <summary>A source that cannot be read at all (a CSV-quoted <c>--mount</c> field); always unanalysable.</summary>
     private const string UnresolvableSource = "\0";
 
-    /// <summary>Tools whose short-flag cluster ending in <c>v</c> means verbose, not a volume (<c>rsync -av</c>).</summary>
-    private static readonly HashSet<string> VerboseTools = new(StringComparer.Ordinal)
+    /// <summary>How a mount source was written, which decides what a value that is not a plain absolute path means.</summary>
+    private enum SourceForm
     {
-        "rsync", "cp", "mv", "tar", "ls", "scp", "grep", "awk", "sed", "ln", "install", "chmod", "chown", "find", "du",
-        "df", "curl", "wget", "ssh", "zip", "unzip", "gzip", "xz", "cpio", "dd",
-    };
+        /// <summary>Short syntax (<c>-v a:b</c>): a word without a leading <c>/</c>, <c>.</c> or <c>~</c> is a volume
+        /// name Docker would refuse with a <c>/</c> in it (<c>awk -v x=./y</c>).</summary>
+        Short,
+        /// <summary>A <c>source=</c> / <c>src=</c> value: without <c>/</c> a volume name; with one, a path.</summary>
+        Keyed,
+        /// <summary>A <c>device=</c> value or a bind mount's source: always a host path, relative ones included.</summary>
+        HostPath,
+    }
 
     private enum MountSource { NotAPath, Path, Unanalyzable }
 
@@ -411,17 +422,24 @@ public static class ProtectedResourceMatcher
     /// (<c>^/[A-Za-z0-9._@+/:-]*$</c>) outside <c>/proc</c>, <c>/sys</c> and <c>/dev</c> is a <see cref="MountSource.Path"/>
     /// compared with the control plane. A source that starts with <c>.</c> or <c>~</c>, an absolute one with any other
     /// character (a quote, a comma, a glob, a backslash, <c>$</c>, a backtick), one under <c>/proc</c> (another
-    /// process's file system), <c>/sys</c> or <c>/dev</c>, and <see cref="UnresolvableSource"/> are unanalysable. A source
-    /// without <c>/</c> is a named volume, not a path; so is one that neither starts with <c>/</c> nor with a quote
-    /// (<c>awk -v x=./y</c>, which Docker would refuse as a volume name).
+    /// process's file system), <c>/sys</c> or <c>/dev</c>, and <see cref="UnresolvableSource"/> are unanalysable. What a
+    /// value that is not absolute means depends on its <see cref="SourceForm"/>: a host path (<c>device=var/run</c>, a
+    /// bind source) is unanalysable, a keyed value with a <c>/</c> (<c>src=var/run</c>) too, a keyed or short value
+    /// without one is a named volume, and a short value with one that starts with neither <c>/</c> nor a quote is no
+    /// source Docker accepts (<c>awk -v x=./y</c>).
     /// </summary>
-    private static MountSource MountSourceKind(string source)
+    private static MountSource MountSourceKind(string source, SourceForm form)
     {
         if (source == UnresolvableSource) return MountSource.Unanalyzable;
         if (source.StartsWith('.') || source.StartsWith('~')) return MountSource.Unanalyzable;
-        if (!source.Contains('/')) return MountSource.NotAPath;
         if (!source.StartsWith('/'))
-            return source[0] is '"' or '\'' or '\\' or '$' or '`' ? MountSource.Unanalyzable : MountSource.NotAPath;
+            return form switch
+            {
+                SourceForm.HostPath => source.Length == 0 ? MountSource.NotAPath : MountSource.Unanalyzable,
+                SourceForm.Keyed => source.Contains('/') ? MountSource.Unanalyzable : MountSource.NotAPath,
+                _ => !source.Contains('/') ? MountSource.NotAPath
+                    : source[0] is '"' or '\'' or '\\' or '$' or '`' ? MountSource.Unanalyzable : MountSource.NotAPath,
+            };
         bool plain;
         try { plain = PlainAbsolutePath.IsMatch(source); }
         catch (RegexMatchTimeoutException) { plain = false; }
@@ -592,6 +610,11 @@ public static class ProtectedResourceMatcher
         }
     }
 
+    // MentionWords, RuntimeIdWords and InvokesContainerRuntime read AnalyseShell's words. Above MaxShellLength
+    // (64 Ki characters) those are empty: they name no container then, which is safe only because the same request is
+    // already unanalysable in FirstHit (refused for a key, an approval for an interactive Admin) —
+    // SelfProtectionTests.A_command_over_the_cap_names_no_words_but_is_unanalysable pins both halves.
+
     /// <summary>The words a container id could be written as in an argument: the shell's words for a command, else
     /// the plain words.</summary>
     public static IEnumerable<string> MentionWords(string argument, string text) =>
@@ -743,7 +766,7 @@ public static class ProtectedResourceMatcher
         return new ShellText(words, globs, unanalyzable, commands);
     }
 
-    /// <summary>The longest command read word by word (64 KiB); a longer one is unanalysable.</summary>
+    /// <summary>The longest command read word by word (64 Ki characters); a longer one is unanalysable.</summary>
     public const int MaxShellLength = 64 * 1024;
 
     /// <summary>A compose or stack command that changes containers (<c>docker compose down</c>, <c>docker-compose up</c>,
@@ -829,7 +852,7 @@ public static class ProtectedResourceMatcher
         var unanalyzable = false;
         var word = new StringBuilder();
         var quotedPart = new StringBuilder();
-        bool inWord = false, glob = false, quoted = false;
+        bool inWord = false, glob = false, quoted = false, escaped = false;
         // Whether the next word is a command word, and whether a prefix (sudo, env …) is still taking its options.
         bool atCommand = true, inPrefix = false;
         var i = 0;
@@ -855,11 +878,17 @@ public static class ProtectedResourceMatcher
             words.Add(w);
             if (glob) globs.Add(w);
             // Quoted text that looks like a command line is read again: it may be run by sh -c, ssh, docker exec …
-            if (quoted && quotedPart.Length > 0 && LooksLikeCommand(quotedPart.ToString()))
+            // A word built with escapes (sh -c docker\ run\ -v\ …) is quoted text too, and is read again whole.
+            if (escaped && LooksLikeCommand(w))
+                unanalyzable |= Tokenize(w, words, globs, commands, depth + 1);
+            else if (quoted && quotedPart.Length > 0 && LooksLikeCommand(quotedPart.ToString()))
                 unanalyzable |= Tokenize(quotedPart.ToString(), words, globs, commands, depth + 1);
+            // Whitespace inside a word that was not read again is a command nobody looked at.
+            else if (w.AsSpan().IndexOfAny(" \t\n\r") >= 0)
+                unanalyzable = true;
             word.Clear();
             quotedPart.Clear();
-            inWord = glob = quoted = false;
+            inWord = glob = quoted = escaped = false;
         }
 
         while (i < text.Length)
@@ -916,7 +945,13 @@ public static class ProtectedResourceMatcher
                         var d = text[i];
                         if (d == '"') { closed = true; i++; break; }
                         if (d is '$' or '`') unanalyzable = true;
-                        if (d == '\\' && i + 1 < text.Length && text[i + 1] is '$' or '`' or '"' or '\\' or '\n')
+                        // A line continuation inside double quotes is removed too ("whis\<newline>kers" is whiskers).
+                        if (d == '\\' && i + 1 < text.Length && text[i + 1] == '\n')
+                        {
+                            i += 2;
+                            continue;
+                        }
+                        if (d == '\\' && i + 1 < text.Length && text[i + 1] is '$' or '`' or '"' or '\\')
                         {
                             part.Append(text[i + 1]);
                             i += 2;
@@ -936,7 +971,8 @@ public static class ProtectedResourceMatcher
                     if (i + 1 < text.Length && text[i + 1] != '\n')
                     {
                         word.Append(text[i + 1]);
-                        inWord = true;
+                        quotedPart.Append(text[i + 1]);
+                        inWord = quoted = escaped = true;
                     }
                     i += 2;
                     continue;

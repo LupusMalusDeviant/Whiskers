@@ -684,6 +684,87 @@ public class SelfProtectionTests
     public void Mount_bypass_classes_from_the_S2_delta_review_are_refused_for_a_key(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
+    /// <summary>Contract 0017 B, amendment 3, round 4 (the S2 delta review of 91097206): every probe that was allowed.</summary>
+    [Theory]
+    // B9: a word built with escaped spaces is read again as a command
+    [InlineData("sh -c docker\\ run\\ -v\\ /var/run:/r\\ alpine")]
+    [InlineData("ssh localhost docker\\ run\\ -v\\ /var/run:/r\\ alpine")]
+    [InlineData("tar -cf /tmp/x.tar /etc/hostname --checkpoint=1 --checkpoint-action=exec=docker\\ run\\ -v\\ /var/run:/r\\ alpine")]
+    [InlineData("bash -c docker\\ run\\ -dv\\ ./x:/r\\ alpine")]
+    [InlineData("ssh h docker\\ run\\ --volume=/var/run:/r\\ alpine")]
+    [InlineData("sh -c rm\\ -rf\\ /var/lib/docker")]
+    [InlineData("sh -c docker\\ run\\ -v\\ /:/r\\ alpine")]
+    [InlineData("sudo sh -c docker\\ run\\ -v/var/run:/r\\ alpine")]
+    [InlineData("sh -c docker\\ stop\\ whiskers")]
+    [InlineData("docker run -v\\ /var/run:/r alpine")]
+    // B10: no tool name decides whether a v cluster is a volume
+    [InlineData("ssh localhost docker run -dv ~/../var/run:/r alpine")]
+    [InlineData("ssh localhost docker run -dv ./../var/run:/r alpine")]
+    [InlineData("find /tmp -maxdepth 0 -exec docker run -dv ~/../var/run:/r alpine ;")]
+    [InlineData("find /tmp -maxdepth 0 -exec docker run -dv ~/../var/run:/r alpine \\;")]
+    [InlineData("cp /usr/bin/docker /tmp/rsync; /tmp/rsync run -dv ~/../var/run:/r alpine")]
+    [InlineData("/tmp/rsync run -dv ~/../var/run:/r alpine")]
+    [InlineData("/tmp/tar run -dv ./../../var/run:/r alpine")]
+    [InlineData("alias cp=docker\ncp run -dv ~/../var/run:/r alpine")]
+    [InlineData("time rsync run -dv ./x:/r alpine")]
+    [InlineData("ls -lv 2>&1 docker run -dv ./x:/r alpine")]
+    [InlineData("ls > /tmp/o docker run -dv ./x:/r alpine")]
+    [InlineData("env -i ls docker run -dv ./x:/r alpine")]
+    [InlineData("env -u tar docker run -dv ./x:/r alpine")]
+    [InlineData("env -u tar docker run -dv ~/../var/run:/r alpine")]
+    [InlineData("sudo -u ls docker run -dv ./x:/r alpine")]
+    [InlineData("sudo -u tar docker run -dv ./x:/r alpine")]
+    [InlineData("sudo -g tar docker run -dv ./x:/r alpine")]
+    [InlineData("timeout -s tar 5 docker run -dv ./x:/r alpine")]
+    [InlineData("flock /tmp/ls docker run -dv ./x:/r alpine")]
+    [InlineData("flock /tmp/tar docker run -dv ./x:/r alpine")]
+    [InlineData("chroot /tmp/ls docker run -dv ./x:/r alpine")]
+    [InlineData("stdbuf -o tar docker run -dv ./x:/r alpine")]
+    [InlineData("exec -a ls docker run -dv ./x:/r alpine")]
+    [InlineData("exec -a tar docker run -dv ./x:/r alpine")]
+    [InlineData("nice -n tar docker run -dv ./x:/r alpine")]
+    // B10, accepted overreach: another tool's v cluster before a word that starts with . ~ / and holds a ':'
+    [InlineData("curl -sv ./x:/r")]
+    [InlineData("ssh host -tv ./x:/r")]
+    [InlineData("ssh host 'ls -lv ./x:/r'")]
+    [InlineData("rsync -av ./a:b /srv/c")]
+    [InlineData("scp -rv ./a:b host:/c")]
+    [InlineData("tar -czv ./a:b")]
+    [InlineData("echo docker\\ stop\\ whiskers")]                                    // read again: names whiskers
+    // B11: a device= value or a bind source is a host path, relative ones included
+    [InlineData("docker volume create -d local -o type=none -o o=bind -o device=var/run sockvol")]
+    [InlineData("docker volume create --opt type=none --opt o=bind --opt device=var/run/../run sockvol")]
+    [InlineData("docker volume create -odevice=var/run -otype=none -oo=bind v")]
+    [InlineData("docker volume create -o type=none -o o=bind -o device=var v")]
+    [InlineData("docker run --rm --mount type=volume,volume-opt=type=none,volume-opt=o=bind,volume-opt=device=var/run,dst=/r ubuntu ls /r")]
+    [InlineData("cd / && podman run --mount type=bind,src=var/run,dst=/r alpine")]
+    [InlineData("docker run --mount type=bind,source=var/run,target=/r alpine")]
+    [InlineData("docker run --mount type=bind,source=var,target=/r alpine")]
+    [InlineData("docker run --mount type=volume,source=var/run,target=/r alpine")]
+    // B12: a line continuation inside double quotes is removed (a key, a protected name, the socket path)
+    [InlineData("docker stop \"whis\\\nkers\"")]
+    [InlineData("docker rm -f \"whis\\\nkers\"")]
+    [InlineData("docker run -v \"/var/\\\nrun:/r\" alpine")]
+    [InlineData("docker run --mount \"type=bind,sou\\\nrce=/var/run,target=/r\" alpine")]
+    [InlineData("docker run --mount \"type=bind,source=/var/\\\nrun,target=/r\" alpine")]
+    [InlineData("cat \"/var/run/dock\\\ner.sock\"")]
+    public void Bypasses_from_the_S2_round_4_review_are_refused_for_a_key(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
+    /// <summary>M7: above the cap the helpers that look for container ids see no words; that is safe only because the
+    /// same request is unanalysable in the protected-resource check.</summary>
+    [Fact]
+    public void A_command_over_the_cap_names_no_words_but_is_unanalysable()
+    {
+        var text = "docker stop whiskers; echo " + new string('a', Whiskers.Services.Guardrails.ProtectedResourceMatcher.MaxShellLength);
+        Assert.Empty(Whiskers.Services.Guardrails.ProtectedResourceMatcher.MentionWords("command", text));
+        Assert.Empty(Whiskers.Services.Guardrails.ProtectedResourceMatcher.RuntimeIdWords(text));
+        Assert.False(Whiskers.Services.Guardrails.ProtectedResourceMatcher.InvokesContainerRuntime("command", text));
+        Assert.Equal("command", Whiskers.Services.Guardrails.ProtectedResourceMatcher.FirstUnanalyzable(
+            new Dictionary<string, JsonElement> { ["command"] = JsonSerializer.SerializeToElement(text) })?.UnanalyzableArgument);
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(text));
+    }
+
     [Fact]
     public void A_command_longer_than_the_matcher_reads_is_refused_for_a_key() =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow,
@@ -692,11 +773,23 @@ public class SelfProtectionTests
     [Fact]
     public void Many_commands_up_to_the_limit_are_decided_quickly()
     {
-        var command = string.Concat(Enumerable.Repeat("a b; ", Whiskers.Services.Guardrails.ProtectedResourceMatcher.MaxShellLength / 5 - 1));
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        ExecuteCommandAsAdminKey(command);
-        // About a second locally; the per-command checks over the whole text took ~9 s at this size.
-        Assert.True(watch.ElapsedMilliseconds < 5000, $"took {watch.ElapsedMilliseconds} ms");
+        // Linear, not quadratic: four times the commands take well under eight times as long (a quadratic check takes
+        // sixteen). Best of three after a warm-up, so a busy runner does not decide it; 20 s is only a backstop.
+        var count = Whiskers.Services.Guardrails.ProtectedResourceMatcher.MaxShellLength / 5 - 1;
+        var full = string.Concat(Enumerable.Repeat("a b; ", count));
+        var quarter = string.Concat(Enumerable.Repeat("a b; ", count / 4));
+        ExecuteCommandAsAdminKey(quarter);
+        var small = Best(quarter);
+        var large = Best(full);
+        Assert.True(large < 20_000, $"took {large} ms");
+        Assert.True(large < 8 * Math.Max(small, 5), $"{count} commands took {large} ms, {count / 4} took {small} ms");
+
+        static long Best(string command) => Enumerable.Range(0, 3).Min(_ =>
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            ExecuteCommandAsAdminKey(command);
+            return watch.ElapsedMilliseconds;
+        });
     }
 
     [Theory]
