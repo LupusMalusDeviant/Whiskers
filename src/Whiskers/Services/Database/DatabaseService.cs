@@ -67,7 +67,12 @@ public class DatabaseService : IDatabaseService
         // positional database); an empty one keeps the client's default.
         if (!string.IsNullOrEmpty(creds.Database) && dbType is DatabaseType.PostgreSQL or DatabaseType.MySQL or DatabaseType.MongoDB)
             CheckDatabaseName(creds.Database, dbType);
-        var cmd = BuildQueryCommand(dbType, creds, query);
+        // Redis: the command line is split into arguments as redis-cli splits its own prompt (quotes keep a value with
+        // spaces together); each argument is then single-quoted for the host shell like every other operand.
+        List<string>? redisArgs = null;
+        if (dbType == DatabaseType.Redis && !TryParseRedisArguments(query, out redisArgs, out var parseError))
+            return new QueryResult { Error = parseError, DurationMs = sw.Elapsed.TotalMilliseconds };
+        var cmd = redisArgs != null ? new[] { "redis-cli" }.Concat(redisArgs).ToArray() : BuildQueryCommand(dbType, creds, query);
         var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromSeconds(30), dbType, creds);
         sw.Stop();
 
@@ -102,8 +107,11 @@ public class DatabaseService : IDatabaseService
         if (dbType == DatabaseType.Redis)
             return ParseRedisDatabaseList(stdout);
 
+        // Only the header line of `mysql -e` batch output ("Database") is skipped, never a database whose name merely
+        // starts with a header word (Redis, whose CONFIG GET answer starts with "databases", returned above).
         return stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("+-") && !l.StartsWith("Database") && !l.StartsWith("databases"))
+            .Skip(dbType == DatabaseType.MySQL ? 1 : 0)
+            .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("+-"))
             .Select(l => l.Trim('|', ' '))
             .Where(l => !string.IsNullOrWhiteSpace(l))
             .ToList();
@@ -137,7 +145,7 @@ public class DatabaseService : IDatabaseService
         var cmd = dbType switch
         {
             DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", database, "-t", "-A", "-c",
-                "SELECT t.tablename, pg_size_pretty(pg_total_relation_size('public.' || t.tablename)), COALESCE(s.n_live_tup, 0) FROM pg_tables t LEFT JOIN pg_stat_user_tables s ON t.tablename = s.relname WHERE t.schemaname = 'public' ORDER BY t.tablename" },
+                "SELECT t.tablename, COALESCE(s.n_live_tup, 0), pg_size_pretty(pg_total_relation_size('public.' || t.tablename)) FROM pg_tables t LEFT JOIN pg_stat_user_tables s ON t.tablename = s.relname WHERE t.schemaname = 'public' ORDER BY t.tablename" },
             DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", database, "-e", "SELECT TABLE_NAME, TABLE_ROWS, ROUND(((DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024), 2) AS 'Size_MB' FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME"),
             DatabaseType.MongoDB => new[] { "mongosh", "--quiet", database, "--eval", "db.getCollectionNames().forEach(c => { var s = db[c].stats(); print(c + '|' + s.count + '|' + s.size) })" },
             _ => Array.Empty<string>()
@@ -148,20 +156,21 @@ public class DatabaseService : IDatabaseService
         var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds, ct: ct);
         if (exitCode != 0) return new();
 
+        // Every engine answers name, row count, size per line: psql -t -A and the mongosh script '|'-separated without a
+        // header; `mysql -e` (no terminal) in batch mode, tab-separated after one header line, its size in MB.
+        var mysql = dbType == DatabaseType.MySQL;
         var tables = new List<TableInfo>();
-        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var line in SplitRows(stdout).Skip(mysql ? 1 : 0))
         {
-            if (line.StartsWith("+-") || line.StartsWith("TABLE") || string.IsNullOrWhiteSpace(line)) continue;
-            var parts = line.Split('|');
-            if (parts.Length >= 1)
+            var parts = line.Split(mysql ? '\t' : '|').Select(p => p.Trim()).ToArray();
+            if (parts[0].Length == 0) continue;
+            var size = parts.Length > 2 && !IsSqlNull(parts[2], mysql) ? parts[2] : "";
+            tables.Add(new TableInfo
             {
-                tables.Add(new TableInfo
-                {
-                    Name = parts[0].Trim(),
-                    RowCount = parts.Length > 1 && long.TryParse(parts[1].Trim(), out var rc) ? rc : 0,
-                    Size = parts.Length > 2 ? parts[2].Trim() : ""
-                });
-            }
+                Name = parts[0],
+                RowCount = parts.Length > 1 && long.TryParse(parts[1], out var rc) ? rc : 0,
+                Size = mysql && size.Length > 0 ? size + " MB" : size
+            });
         }
         return tables;
     }
@@ -189,22 +198,25 @@ public class DatabaseService : IDatabaseService
         var (stdout, _, exitCode) = await ExecInContainer(containerId, cmd, serverId, dbType: dbType, creds: creds, ct: ct);
         if (exitCode != 0) return new();
 
+        // psql -t -A: name|type|nullable|default|pk(YES/NO), no header. `mysql -e DESCRIBE` in batch mode: a header line,
+        // then Field, Type, Null, Key (PRI), Default (NULL for none), Extra — tab-separated.
+        var mysql = dbType == DatabaseType.MySQL;
         var columns = new List<ColumnInfo>();
-        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var line in SplitRows(stdout).Skip(mysql ? 1 : 0))
         {
-            if (line.StartsWith("+-") || line.StartsWith("Field") || string.IsNullOrWhiteSpace(line)) continue;
-            var parts = line.Split('|').Select(p => p.Trim()).ToArray();
-            if (parts.Length >= 2)
+            var parts = line.Split(mysql ? '\t' : '|').Select(p => p.Trim()).ToArray();
+            if (parts.Length < 2 || parts[0].Length == 0) continue;
+            var defaultValue = mysql ? (parts.Length > 4 ? parts[4] : "") : (parts.Length > 3 ? parts[3] : "");
+            columns.Add(new ColumnInfo
             {
-                columns.Add(new ColumnInfo
-                {
-                    Name = parts[0],
-                    Type = parts[1],
-                    Nullable = parts.Length > 2 && parts[2].Contains("YES", StringComparison.OrdinalIgnoreCase),
-                    Default = parts.Length > 3 && !string.IsNullOrWhiteSpace(parts[3]) ? parts[3] : null,
-                    PrimaryKey = parts.Length > 4 && parts[4]?.Contains("YES", StringComparison.OrdinalIgnoreCase) == true
-                });
-            }
+                Name = parts[0],
+                Type = parts[1],
+                Nullable = parts.Length > 2 && parts[2].Equals("YES", StringComparison.OrdinalIgnoreCase),
+                Default = string.IsNullOrWhiteSpace(defaultValue) || IsSqlNull(defaultValue, mysql) ? null : defaultValue,
+                PrimaryKey = mysql
+                    ? parts.Length > 3 && parts[3].Equals("PRI", StringComparison.OrdinalIgnoreCase)
+                    : parts.Length > 4 && parts[4].Equals("YES", StringComparison.OrdinalIgnoreCase)
+            });
         }
         return columns;
     }
@@ -268,10 +280,85 @@ public class DatabaseService : IDatabaseService
         DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", creds.Database, "-c", query },
         DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", creds.Database, "-e", query),
         DatabaseType.MongoDB => new[] { "mongosh", "--quiet", creds.Database, "--eval", query },
-        DatabaseType.Redis => new[] { "redis-cli" }.Concat(query.Split(' ')).ToArray(),
+        // Redis never reaches this branch from ExecuteQueryAsync (TryParseRedisArguments); kept fail-safe all the same.
+        DatabaseType.Redis => TryParseRedisArguments(query, out var args, out _) ? new[] { "redis-cli" }.Concat(args).ToArray()
+            : new[] { "echo", "Unparseable Redis command" },
         DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, query },
         _ => new[] { "echo", "Unsupported database type" }
     };
+
+    /// <summary>Splits a Redis command line into its arguments the way the redis-cli prompt does, in a strict subset:
+    /// arguments are separated by whitespace; one that starts with <c>"</c> runs to the matching <c>"</c> and knows the
+    /// escapes <c>\" \\ \n \r \t</c>; one that starts with <c>'</c> runs to the matching <c>'</c> and knows only
+    /// <c>\'</c>. A closing quote must end the argument. A quote inside an unquoted argument is an ordinary character.
+    /// Any other escape (such as <c>\x41</c>), an unterminated quote or text after a closing quote is refused, so an
+    /// argument is never assembled from parts at run time. The arguments are passed as argv elements, each single-quoted
+    /// for the host shell (<see cref="ExecInContainer"/>); nothing here is ever handed to a shell raw.</summary>
+    internal static bool TryParseRedisArguments(string? line, out List<string> args, out string error)
+    {
+        args = [];
+        error = "";
+        var text = line ?? "";
+        var i = 0;
+        while (true)
+        {
+            while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
+            if (i >= text.Length) break;
+            var sb = new System.Text.StringBuilder();
+            var quote = text[i];
+            if (quote is '"' or '\'')
+            {
+                i++;
+                var closed = false;
+                while (i < text.Length)
+                {
+                    var c = text[i++];
+                    if (c == quote) { closed = true; break; }
+                    if (c != '\\') { sb.Append(c); continue; }
+                    if (i >= text.Length) break;
+                    var e = text[i++];
+                    char? decoded = quote == '\''
+                        ? (e == '\'' ? '\'' : null)
+                        : e switch { '"' => '"', '\\' => '\\', 'n' => '\n', 'r' => '\r', 't' => '\t', _ => null };
+                    if (decoded is null)
+                    {
+                        error = $"Unsupported escape '\\{e}' in a quoted Redis argument.";
+                        return false;
+                    }
+                    sb.Append(decoded.Value);
+                }
+                if (!closed)
+                {
+                    error = "Unterminated quote in the Redis command.";
+                    return false;
+                }
+                if (i < text.Length && !char.IsWhiteSpace(text[i]))
+                {
+                    error = "A closing quote must be followed by a space or the end of the Redis command.";
+                    return false;
+                }
+            }
+            else
+            {
+                while (i < text.Length && !char.IsWhiteSpace(text[i])) sb.Append(text[i++]);
+            }
+            args.Add(sb.ToString());
+        }
+        if (args.Count == 0)
+        {
+            error = "Empty Redis command.";
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>The non-empty lines of client output, without a trailing carriage return; leading tabs are kept (they
+    /// are field separators in batch output).</summary>
+    private static IEnumerable<string> SplitRows(string stdout) =>
+        (stdout ?? "").Split('\n').Select(l => l.TrimEnd('\r')).Where(l => !string.IsNullOrWhiteSpace(l));
+
+    /// <summary>MySQL batch output writes SQL NULL as the word <c>NULL</c>; psql -A writes it as an empty field.</summary>
+    private static bool IsSqlNull(string value, bool mysql) => mysql && value == "NULL";
 
     /// <summary>INV-19: the one check for a database name before it becomes a client operand or part of a host file
     /// name (<see cref="CommandOperands.RequireDatabaseName"/>; for MongoDB without '.'). Throws
@@ -296,6 +383,9 @@ public class DatabaseService : IDatabaseService
     // The password from MYSQL_PWD (ExecInContainer), never -p<pw> in argv; plain argv elements, no shell.
     private static string[] BuildMysqlCmd(DatabaseCredentials creds, params string[] extraArgs) =>
         new[] { "mysql", "-u", creds.User }.Concat(extraArgs).ToArray();
+
+    private static readonly System.Text.RegularExpressions.Regex PsqlRule = new(@"^-+(\+-+)*$");
+    private static readonly System.Text.RegularExpressions.Regex PsqlFooter = new(@"^\(\d+ rows?\)$");
 
     private static QueryResult ParseQueryResult(string output, DatabaseType dbType, double durationMs)
     {
@@ -322,20 +412,27 @@ public class DatabaseService : IDatabaseService
             return result;
         }
 
-        // Tab/pipe-separated table output
-        bool headerParsed = false;
-        foreach (var line in lines)
+        // Table output. psql -c (aligned): a header, the "----+----" rule right below it, the rows, and a "(N rows)"
+        // footer — only those two lines are skipped by position, so a row whose value starts with "(" or "--" stays.
+        // mysql -e (batch): a header and tab-separated rows, nothing to skip. Others: '|' if present, else tabs.
+        var rows = lines.Select(l => l.TrimEnd('\r')).Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
+        if (dbType == DatabaseType.PostgreSQL)
         {
-            var trimmed = line.Trim();
+            if (rows.Count > 0 && PsqlFooter.IsMatch(rows[^1].Trim())) rows.RemoveAt(rows.Count - 1);
+            if (rows.Count > 1 && PsqlRule.IsMatch(rows[1].Trim())) rows.RemoveAt(1);
+        }
 
-            // Skip separator lines (postgres: ----+----, mysql: +----+)
-            if (trimmed.StartsWith("--") || trimmed.StartsWith("+-") || trimmed.StartsWith("(") || string.IsNullOrWhiteSpace(trimmed))
-                continue;
-
-            // Split by | (postgres) or \t (mysql)
-            var cells = trimmed.Contains('|')
-                ? trimmed.Split('|').Select(c => c.Trim()).ToList()
-                : trimmed.Split('\t').Select(c => c.Trim()).ToList();
+        bool headerParsed = false;
+        foreach (var line in rows)
+        {
+            var cells = dbType switch
+            {
+                DatabaseType.PostgreSQL => line.Split('|').Select(c => c.Trim()).ToList(),
+                DatabaseType.MySQL => line.Split('\t').Select(c => c.Trim()).ToList(),
+                _ => line.Trim().Contains('|')
+                    ? line.Trim().Split('|').Select(c => c.Trim()).ToList()
+                    : line.Trim().Split('\t').Select(c => c.Trim()).ToList(),
+            };
 
             if (!headerParsed)
             {
