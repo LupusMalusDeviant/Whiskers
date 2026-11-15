@@ -96,7 +96,7 @@ public static class OpenAiRequestMapper
                             ["function"] = new JsonObject
                             {
                                 ["name"] = c.Name,
-                                ["arguments"] = c.ArgumentsJson,
+                                ["arguments"] = ToolCallArguments.ToObjectString(c.ArgumentsJson),
                             }
                         });
                     obj["tool_calls"] = calls;

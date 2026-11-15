@@ -18,6 +18,7 @@ All providers stream (SSE) and surface the same `AgentStreamDelta` sequence, tex
 | `GeminiWire.cs` | Request mapper + stream accumulator for Gemini (roles user/model, `functionDeclarations`, pairs tool responses by function name). |
 | `AnthropicProvider.cs` | Anthropic Messages client (`x-api-key` + `anthropic-version`; default model `claude-opus-4-8`). |
 | `AnthropicWire.cs` | Request mapper + stream accumulator for Anthropic (top-level system, `tool_use`/`tool_result` blocks; no temperature, since 4.x models reject sampling params). |
+| `ToolCallArguments.cs` | Reads a history tool call's `ArgumentsJson` back as a JSON object for all three request mappers. A call cut off at `max_tokens` keeps a truncated fragment in the history; anything that is not a JSON object is sent as `{}` (as `AgentArgumentBinder` treats it when the tool runs), so the next request of the chat still builds (`TruncatedToolCallHistoryTests`). |
 | `ProviderError.cs` | Shared helper that pulls a provider error body's `error.message` so a failed call surfaces the real reason instead of a bare status code. Never leaks the API key (it lives in the request headers, not the body). |
 | `ProviderHttp.cs` | The bounded HTTP steps every provider takes (R1-38, INV-40): `ProviderTimeouts` (response headers, idle time between two streamed lines, whole answer), send, error body, JSON body and line-by-line stream reads. A stall throws `ProviderTimeoutException`; the caller's cancellation stays an `OperationCanceledException`. A provider built without explicit timeouts (as the factory builds them) uses `ProviderTimeouts.Default` (60 s / 90 s / 10 min). |
 
@@ -25,4 +26,4 @@ All three mappers support an optional **image** on a user turn (`AgentMessage.Im
 
 ## Related
 
-- Tests: `OpenAiWireTests`, `GeminiWireTests`, `AnthropicWireTests`, `MultimodalWireTests` in [`../../../../Whiskers.Tests/`](../../../../Whiskers.Tests/)
+- Tests: `OpenAiWireTests`, `GeminiWireTests`, `AnthropicWireTests`, `MultimodalWireTests`, `TruncatedToolCallHistoryTests` in [`../../../../Whiskers.Tests/`](../../../../Whiskers.Tests/)
