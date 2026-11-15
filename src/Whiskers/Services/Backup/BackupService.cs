@@ -485,6 +485,13 @@ public sealed class BackupService : IBackupService
                 }
                 if (postgres) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, safety.Id, forward, ct);
 
+                // The SQLite file this app has open: the swap replaces that one, whatever WHISKERS_DB_CONNECTION names.
+                string? databasePath = null;
+                if (!postgres)
+                    using (var scope = _scopeFactory.CreateScope())
+                        databasePath = Whiskers.Services.Persistence.DatabaseRegistration.SqliteFilePath(
+                            scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetConnectionString());
+
                 // Commit point: write the marker atomically (.tmp + rename) AFTER staging is fully populated.
                 var marker = new RestoreMarker
                 {
@@ -494,6 +501,7 @@ public sealed class BackupService : IBackupService
                     Provider = prepared.Manifest.Provider,
                     Actor = actor,
                     Archive = Path.GetFileName(uploadedPath),
+                    DatabasePath = databasePath ?? "",
                 };
                 var tmpMarker = _dataPaths.RestorePendingMarker + ".tmp";
                 await File.WriteAllTextAsync(tmpMarker, JsonSerializer.Serialize(marker, JsonOpts), ct);

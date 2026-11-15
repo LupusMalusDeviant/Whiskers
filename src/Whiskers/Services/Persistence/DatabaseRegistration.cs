@@ -31,6 +31,25 @@ public static class DatabaseRegistration
         return (provider, connectionString);
     }
 
+    /// <summary>The full path of the SQLite file a connection string opens, or null when it names none (empty, in-memory).
+    /// A restore writes the archive's database there, the file the app opens (review 1.0.0, Data). A source given as a
+    /// <c>file:</c> URI or through <c>|DataDirectory|</c> is refused: which file SQLite opens is not read off it here, and a
+    /// restore must not guess.</summary>
+    public static string? SqliteFilePath(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return null;
+        var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString);
+        var source = builder.DataSource;
+        if (string.IsNullOrWhiteSpace(source) || source == ":memory:"
+            || builder.Mode == Microsoft.Data.Sqlite.SqliteOpenMode.Memory)
+            return null;
+        if (source.StartsWith("file:", StringComparison.OrdinalIgnoreCase)
+            || source.Contains("|DataDirectory|", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "the SQLite connection string names its file as a URI or through |DataDirectory|; give the file path as Data Source");
+        return Path.GetFullPath(source);
+    }
+
     /// <summary>
     /// Wires up <see cref="MetricsDbContext"/> for <c>Database:Provider</c> (sqlite | postgres). With no
     /// configuration this is byte-identical to the previous inline SQLite registration (connection string
