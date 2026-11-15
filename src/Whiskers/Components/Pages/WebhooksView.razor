@@ -10,6 +10,7 @@
 @inject IComposePlanner ComposePlanner
 @inject IAutomationOwnerResolver OwnerResolver
 @inject IJSRuntime JS
+@inject ILogger<WebhooksView> Logger
 @inject IStringLocalizer<SharedResource> L
 
 @* The interactive webhooks UI. Rendered by Webhooks.razor only when the Webhooks module is enabled (via
@@ -273,7 +274,17 @@ else
         var sid = _formServerId;
         // all: true — a stopped container is a legitimate restart/rebuild target too. The server-scoped
         // overload is used on purpose; ListAllContainersAsync spans the whole fleet.
-        _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
+        try
+        {
+            _containers = (await DockerService.ListContainersAsync(all: true, serverId: sid)).ToList();
+        }
+        catch (Exception ex)
+        {
+            // Review 1.0.0 (U1): an unreachable server leaves the picker empty and says so; the dialog still opens
+            // (another server can be chosen) instead of the listing error ending the circuit.
+            _containers = new();
+            Snackbar.Add(L["Common_Error_ContainersUnavailable", UiFailure.Report(Logger, "list containers", ex)].Value, Severity.Warning);
+        }
     }
 
     private async Task CreateWebhook()

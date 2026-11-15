@@ -4,6 +4,8 @@
 @inject Whiskers.Services.AuditLog.IAuditChain Chain
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject NavigationManager NavManager
+@inject ISnackbar Snackbar
+@inject ILogger<AuditLog> Logger
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["AuditLog_PageTitle"]</PageTitle>
@@ -209,9 +211,20 @@ else
     {
         if (!_isAdmin) return;
         _loading = true;
-        _totalCount = await AuditLogService.GetTotalCountAsync(_actionFilter, _targetTypeFilter);
-        _entries = await AuditLogService.GetRecentAsync(_pageSize, _currentPage * _pageSize, _actionFilter, _targetTypeFilter);
-        _loading = false;
+        try
+        {
+            _totalCount = await AuditLogService.GetTotalCountAsync(_actionFilter, _targetTypeFilter);
+            _entries = await AuditLogService.GetRecentAsync(_pageSize, _currentPage * _pageSize, _actionFilter, _targetTypeFilter);
+        }
+        catch (Exception ex)
+        {
+            // Review 1.0.0 (U1): a query that fails is reported; the page leaves "loading" and keeps the circuit.
+            Snackbar.Add(L["Common_Error_LoadFailed", UiFailure.Report(Logger, "load audit log", ex)].Value, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private async Task OnActionFilterChanged(string value)

@@ -8,6 +8,7 @@
 @inject IUiMutationRunner Mutations
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject ISnackbar Snackbar
+@inject ILogger<AiOperationsView> Logger
 @inject IStringLocalizer<SharedResource> L
 @inject IJSRuntime JS
 
@@ -168,6 +169,7 @@ else
             Snackbar.Add(L["AiOps_Key_Created"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) { ShowFailure("create MCP API key", ex); }
         finally { _busy = false; }
     }
 
@@ -193,8 +195,13 @@ else
             Snackbar.Add(L["AiOps_Preset_Activated", name].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) { ShowFailure("activate guardrail preset", ex); }
         finally { _busy = false; }
     }
+
+    // Review 1.0.0 (U1): any other failure is shown and logged without secrets instead of ending the circuit.
+    private void ShowFailure(string action, Exception ex) =>
+        Snackbar.Add(L["Common_Error_ActionFailed", UiFailure.Report(Logger, action, ex)].Value, Severity.Error);
 
     private string Preview(string name)
     {

@@ -33,6 +33,7 @@
 @inject Whiskers.Services.Persistence.IAppSettingsStore AppSettings
 @inject IUiMutationRunner Mutations
 @inject IConfiguration Configuration
+@inject ILogger<Settings> Logger
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["Settings_PageTitle"]</PageTitle>
@@ -893,6 +894,7 @@ else
         {
             Snackbar.Add(ex.Message, Severity.Warning);
         }
+        catch (Exception ex) { ShowFailure("save " + scope, ex); }
         return false;
     }
 
@@ -924,6 +926,7 @@ else
         {
             Snackbar.Add(L["Settings_Error_IntervalOutOfRange", ex.Key, ex.Min, ex.Max].Value, Severity.Warning);
         }
+        catch (Exception ex) { ShowFailure("save health monitoring", ex); }
     }
 
     private async Task SaveMetricAlert()
@@ -942,6 +945,7 @@ else
             Snackbar.Add(L["Settings_Snackbar_MetricAlertsSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) { ShowFailure("save metric alerts", ex); }
     }
 
     private async Task SaveCve()
@@ -969,6 +973,7 @@ else
         {
             Snackbar.Add(L["Settings_Error_IntervalOutOfRange", ex.Key, ex.Min, ex.Max].Value, Severity.Warning);
         }
+        catch (Exception ex) { ShowFailure("save CVE monitor", ex); }
     }
 
     private async Task SaveImageUpdate()
@@ -992,6 +997,7 @@ else
         {
             Snackbar.Add(L["Settings_Error_IntervalOutOfRange", ex.Key, ex.Min, ex.Max].Value, Severity.Warning);
         }
+        catch (Exception ex) { ShowFailure("save image updates", ex); }
     }
 
     private async Task SaveTerminal()
@@ -1011,6 +1017,7 @@ else
             Snackbar.Add(L["Settings_Snackbar_TerminalSaved"].Value, Severity.Success);
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (Exception ex) { ShowFailure("save terminal", ex); }
     }
 
     private void LoadDns()
@@ -1092,6 +1099,7 @@ else
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
+        catch (Exception ex) { ShowFailure("save DNS", ex); return; }
         // The settings name the new token now; the one they named before is unused.
         var previousRef = Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous);
         if (newRef is not null && previousRef is not null && previousRef != newRef) await RemoveUnusedDnsTokenAsync(previousRef);
@@ -1127,6 +1135,7 @@ else
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
+        catch (Exception ex) { ShowFailure("clear DNS token", ex); return; }
         if (Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous) is { } previousRef)
         {
             // Without a usable vault the entry cannot be removed: it stays encrypted and unused — say so.
@@ -1244,6 +1253,11 @@ else
         return false;
     }
 
+    // Review 1.0.0 (U1): a failure other than a refusal (a store that cannot write, the gateway's deadline) is shown
+    // and logged without secrets instead of leaving the handler and ending the circuit.
+    private void ShowFailure(string action, Exception ex) =>
+        Snackbar.Add(L["Settings_Snackbar_SaveError", UiFailure.Report(Logger, action, ex)].Value, Severity.Error);
+
     private async Task CopyKey(string value)
     {
         // Copy to the clipboard via JS — never echo the key value in a toast. Report success only when the
@@ -1310,6 +1324,7 @@ else
                 (ResolvedRecord rt, CancellationToken _) => McpPermissionService.RemoveApiKeyAsync(rt.RecordId));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
+        catch (Exception ex) { ShowFailure("delete MCP API key", ex); return; }
         ReloadApiKeysKeepingPendingToggles();
         if (_freshKey?.Id == id) _freshKey = null;
         Snackbar.Add(L["Settings_Snackbar_ApiKeyDeleted"].Value, Severity.Info);
@@ -1496,6 +1511,14 @@ else
             _defaultRole = stored.DefaultRole;
             return;
         }
+        catch (Exception ex)
+        {
+            ShowFailure("save roles", ex);
+            var stored = RoleService.GetRoleData();
+            _roleEntries = stored.Roles;
+            _defaultRole = stored.DefaultRole;
+            return;
+        }
         Snackbar.Add(L["Settings_Snackbar_RolesSaved"].Value, Severity.Success);
     }
 
@@ -1515,6 +1538,7 @@ else
                 (ResolvedRecord rt, CancellationToken _) => VaultService.DeleteSecretAsync(key));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
+        catch (Exception ex) { ShowFailure("delete vault secret", ex); return; }
         LoadVault();
     }
 

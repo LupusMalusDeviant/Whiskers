@@ -2,6 +2,8 @@
 @attribute [Authorize]
 @inject Whiskers.Services.Observability.IMcpCallLogStore CallLog
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject ISnackbar Snackbar
+@inject ILogger<AgentHistory> Logger
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["AgentHistory_PageTitle"]</PageTitle>
@@ -157,11 +159,22 @@ else
     {
         if (!_isAdmin) return;
         _loading = true;
-        var since = Since();
-        _totalCount = await CallLog.CountAsync(_actorFilter, _toolFilter, Verdict(), _writesOnly, since);
-        _entries = await CallLog.GetRecentAsync(_pageSize, _currentPage * _pageSize,
-            _actorFilter, _toolFilter, Verdict(), _writesOnly, since);
-        _loading = false;
+        try
+        {
+            var since = Since();
+            _totalCount = await CallLog.CountAsync(_actorFilter, _toolFilter, Verdict(), _writesOnly, since);
+            _entries = await CallLog.GetRecentAsync(_pageSize, _currentPage * _pageSize,
+                _actorFilter, _toolFilter, Verdict(), _writesOnly, since);
+        }
+        catch (Exception ex)
+        {
+            // Review 1.0.0 (U1): a query that fails is reported; the page leaves "loading" and keeps the circuit.
+            Snackbar.Add(L["Common_Error_LoadFailed", UiFailure.Report(Logger, "load agent history", ex)].Value, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private async Task Reload()

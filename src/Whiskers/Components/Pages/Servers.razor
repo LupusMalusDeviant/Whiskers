@@ -817,7 +817,18 @@
         StateHasChanged();
         try
         {
-            var saved = await PersistServerAsync();
+            Whiskers.Models.ServerConfig saved;
+            try
+            {
+                saved = await PersistServerAsync();
+            }
+            catch (InvalidOperationException ex)
+            {
+                // As SaveServer: a validation failure (e.g. an invalid SSH host) is shown, the dialog stays open.
+                // Review 1.0.0 (U1): it used to leave the click handler and end the circuit.
+                Snackbar.Add(ex.Message, Severity.Error);
+                return;
+            }
             _showDialog = false;
             await StartOnboarding(saved, skipPreflight: true);
         }
@@ -979,11 +990,27 @@
 
     private async Task OnSshKeyFileChanged(InputFileChangeEventArgs e)
     {
+        const int maxKeyKb = 100;
         var file = e.File;
-        using var ms = new MemoryStream();
-        await file.OpenReadStream(maxAllowedSize: 1024 * 100).CopyToAsync(ms);
-        _sshKeyData = ms.ToArray();
-        _sshKeyFileName = file.Name;
+        // Review 1.0.0 (U1): a file over the limit is refused with a message; the stream's IOException used to leave
+        // the handler and end the circuit. Nothing of a refused file is kept.
+        if (file.Size > maxKeyKb * 1024)
+        {
+            Snackbar.Add(L["Common_Error_FileTooLarge", maxKeyKb].Value, Severity.Error);
+            return;
+        }
+        try
+        {
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(maxAllowedSize: maxKeyKb * 1024).CopyToAsync(ms);
+            _sshKeyData = ms.ToArray();
+            _sshKeyFileName = file.Name;
+        }
+        catch (IOException ex)
+        {
+            // The browser stream broke off (or grew past the limit); the message names no key content.
+            Snackbar.Add(L["Common_Error_ActionFailed", Whiskers.Utils.SinkRedaction.Text(ex.Message) ?? ""].Value, Severity.Error);
+        }
     }
 
     // ---- R1-44: per-host mTLS client credentials ---------------------------------------------------------------------

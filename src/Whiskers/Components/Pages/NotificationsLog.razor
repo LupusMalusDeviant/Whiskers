@@ -6,6 +6,7 @@
 @inject ISnackbar Snackbar
 @inject IUiMutationRunner Mutations
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
+@inject ILogger<NotificationsLog> Logger
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>@L["NotificationsLog_PageTitle"]</PageTitle>
@@ -164,10 +165,25 @@
     private async Task LoadData()
     {
         _loading = true;
-        _totalCount = await Store.CountAsync(_severityFilter, _typeFilter);
-        _entries = await Store.QueryAsync(_severityFilter, _typeFilter, _currentPage * _pageSize, _pageSize);
-        _loading = false;
+        try
+        {
+            _totalCount = await Store.CountAsync(_severityFilter, _typeFilter);
+            _entries = await Store.QueryAsync(_severityFilter, _typeFilter, _currentPage * _pageSize, _pageSize);
+        }
+        catch (Exception ex)
+        {
+            // Review 1.0.0 (U1): a query that fails is reported; the page leaves "loading" and keeps the circuit.
+            Snackbar.Add(L["Common_Error_LoadFailed", UiFailure.Report(Logger, "load notifications", ex)].Value, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
+
+    // Review 1.0.0 (U1): any failure other than a refusal is shown and logged without secrets instead of ending the circuit.
+    private void ShowFailure(string action, Exception ex) =>
+        Snackbar.Add(L["Common_Error_ActionFailed", UiFailure.Report(Logger, action, ex)].Value, Severity.Error);
 
     private async Task OnSeverityChanged(string value) { _severityFilter = value; _currentPage = 0; await LoadData(); }
     private async Task OnTypeChanged(string value) { _typeFilter = value; _currentPage = 0; await LoadData(); }
@@ -187,6 +203,11 @@
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
+        catch (Exception ex)
+        {
+            ShowFailure("mark notifications read", ex);
+            return;
+        }
         Snackbar.Add(L["NotificationsLog_Snackbar_MarkedRead"].Value, Severity.Success);
     }
 
@@ -200,6 +221,11 @@
         catch (MutationRefusedException ex)
         {
             Snackbar.Add(ex.Message, Severity.Warning);
+            return;
+        }
+        catch (Exception ex)
+        {
+            ShowFailure("clear notifications", ex);
             return;
         }
         _currentPage = 0;
