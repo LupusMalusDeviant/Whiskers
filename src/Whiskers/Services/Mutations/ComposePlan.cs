@@ -815,7 +815,7 @@ public static partial class ComposeModel
             {
                 var raw = (apiSocket as YamlScalarNode)?.Value
                           ?? throw new ComposePlanException($"The use_api_socket of '{service}' cannot be read.");
-                if (UsesApiSocket(Interpolate(raw, env, $"The use_api_socket of '{service}'")))
+                if (IsOn(Interpolate(raw, env, $"The use_api_socket of '{service}'")))
                     yield return new ComposeMount(DockerSocket, ProjectScoped: false) { FromVariable = raw.Contains('$') };
             }
             if (!source.Children.TryGetValue(new YamlScalarNode("volumes"), out var node)) continue;
@@ -859,13 +859,9 @@ public static partial class ComposeModel
     /// A1), read-write: decided like a <c>volumes:</c> entry of that path.</summary>
     public const string DockerSocket = "/var/run/docker.sock";
 
-    /// <summary>The host paths a bind of the Docker socket shows in <c>docker inspect</c> (<c>/run</c> is <c>/var/run</c>).</summary>
-    public static readonly IReadOnlySet<string> DockerSocketPaths =
-        new HashSet<string>(StringComparer.Ordinal) { DockerSocket, "/run/docker.sock" };
-
-    /// <summary>Whether a <c>use_api_socket</c> value turns the socket on: every value except the ones compose reads as
-    /// false (fail closed).</summary>
-    public static bool UsesApiSocket(string value) =>
+    /// <summary>Whether a boolean field of compose (<c>use_api_socket</c>, a hook's <c>privileged</c>) is on: every value
+    /// except the ones compose reads as false (fail closed).</summary>
+    public static bool IsOn(string value) =>
         value.Trim().ToLowerInvariant() is not ("false" or "no" or "n" or "off" or "0" or "");
 
     /// <summary>A mapping and every mapping it merges with <c>&lt;&lt;</c>, through any depth (anchors of anchors).</summary>

@@ -20,6 +20,12 @@ public enum ExposureKind
     /// <c>exposedByDefault</c>, cloudflared, Tailscale serve/Funnel). Key = the signal, value <c>true</c> (a host Traefik:
     /// its container name).</summary>
     ExternalRoute,
+
+    /// <summary>Contract 0017, A (amendment to contract 0006, Amendment 8): a bind of the Docker socket into the container
+    /// (class <c>host</c>). Key <c>mount:&lt;destination&gt;</c>, value the normalised host source. The plan reads it for
+    /// <c>use_api_socket</c> (which also hands the container the registry credentials of the Docker client compose runs
+    /// as); the re-check for every socket bind in a created container's <c>Mounts</c>.</summary>
+    SocketMount,
 }
 
 /// <summary>
@@ -106,6 +112,7 @@ public static class ExposureClasses
         ExposureKind.SecurityOpt => "security option",
         ExposureKind.DeviceCgroupRule => "device cgroup rule",
         ExposureKind.ExternalRoute => "external route",
+        ExposureKind.SocketMount => "socket mount",
         _ => "exposure",
     };
 }
@@ -158,6 +165,7 @@ public static class ComposeExposures
             ExposureKind.SecurityOpt => $"{p.Service}: security_opt {p.Key}={p.Value}",
             ExposureKind.DeviceCgroupRule => $"{p.Service}: device_cgroup_rules {p.Key}",
             ExposureKind.ExternalRoute => $"{p.Service}: external route {p.Key}",
+            ExposureKind.SocketMount => $"{p.Service}: socket mount {p.Key}",
             _ => $"{p.Service}: {p.Kind}",
         };
     }
@@ -184,6 +192,64 @@ public static class ComposeExposures
     /// <summary>The comparison key of a privileged hook: <c>hook:&lt;post_start|pre_stop&gt;:&lt;index&gt;</c>. A hook is
     /// an exec, not container state: the re-check after <c>up</c> cannot see it, so it is decided at planning only.</summary>
     public static string HookKey(string hook, int index) => $"hook:{hook}:{index}";
+
+    // ------------------------------------------------------------------------------------------- socket mounts
+
+    /// <summary>Whether a service of compose's resolved model sets <c>use_api_socket</c> on (fail closed: any value but
+    /// one compose reads as false).</summary>
+    public static bool UsesApiSocket(JsonElement definition) => IsOn(definition, "use_api_socket");
+
+    private static bool IsOn(JsonElement element, string field) =>
+        Property(element, field) is { } v
+        && v.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined or JsonValueKind.False)
+        && (v.ValueKind != JsonValueKind.String || ComposeModel.IsOn(v.GetString() ?? ""));
+
+    /// <summary>The key of a <see cref="ExposureKind.SocketMount"/>: <c>mount:&lt;destination&gt;</c>.</summary>
+    public static string SocketMountKey(string destination) => $"mount:{destination}";
+
+    /// <summary>Whether a normalised host path is a Docker socket: a socket path of <c>ControlPlaneResources</c>, or any
+    /// file named <c>docker.sock</c> (<c>/run/docker.sock</c>, rootless <c>/run/user/&lt;uid&gt;/docker.sock</c>).</summary>
+    public static bool IsSocketPath(string path) =>
+        path.StartsWith('/')
+        && (Whiskers.Services.Guardrails.ControlPlaneResources.PathPatterns
+                .Any(p => p.EndsWith(".sock", StringComparison.Ordinal) && string.Equals(p, path, StringComparison.Ordinal))
+            || path[(path.LastIndexOf('/') + 1)..] == "docker.sock");
+
+    /// <summary>Whether two normalised host paths are the same socket source: equal, or both socket paths of
+    /// <c>ControlPlaneResources</c> (<c>/var/run/docker.sock</c> and <c>/run/docker.sock</c> are one source).</summary>
+    public static bool SameSocket(string a, string b)
+    {
+        static bool ControlPlane(string p) => Whiskers.Services.Guardrails.ControlPlaneResources.PathPatterns
+            .Any(x => x.EndsWith(".sock", StringComparison.Ordinal) && string.Equals(x, p, StringComparison.Ordinal));
+        var na = a.StartsWith('/') ? Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(a) : a;
+        var nb = b.StartsWith('/') ? Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(b) : b;
+        return string.Equals(na, nb, StringComparison.Ordinal) || (ControlPlane(na) && ControlPlane(nb));
+    }
+
+    /// <summary>
+    /// Contract 0017, A1 (re-check): whether the plan decided a socket bind of <paramref name="source"/> for
+    /// <paramref name="service"/> — that service's own mounts (a <c>volumes_from</c> source's mounts are attributed to
+    /// the receiving service) hold the same source (<see cref="SameSocket"/>), or the service sets
+    /// <c>use_api_socket</c>, whose decided source is the engine's socket whatever its path.
+    /// </summary>
+    public static bool SocketDecided(ComposeServicePlan? service, string source)
+    {
+        if (service is null) return false;
+        if (service.Mounts.Any(m => !m.Container && m.Reference is null && SameSocket(m.Source, source))) return true;
+        var apiSocket = ApiSocket(service.Name, withheld: false).Identity;
+        return IsSocketPath(source)
+               && service.Mounts.Any(m => m.Source == ComposeModel.DockerSocket)
+               && service.Exposures.Any(e => e.Identity == apiSocket);
+    }
+
+    /// <summary>The <see cref="ExposureKind.SocketMount"/> that <c>use_api_socket: true</c> gives a service: the engine's
+    /// socket at the same path in the container, read-write.</summary>
+    public static ComposeExposure ApiSocket(string service, bool withheld) =>
+        new(service, ExposureKind.SocketMount, withheld ? "socket mount (withheld)" : "use_api_socket: true")
+        {
+            Key = SocketMountKey(ComposeModel.DockerSocket), Value = ComposeModel.DockerSocket,
+            KeyWithheld = withheld, ValueWithheld = withheld,
+        };
 
     // ------------------------------------------------------------------------------------------- normalisation
 
@@ -371,6 +437,8 @@ public static class ComposeExposures
                     Add(ExposureKind.HostNetwork, "networks", "host", "networks: host");
         if (Property(definition, "privileged") is { ValueKind: JsonValueKind.True })
             Add(ExposureKind.Privileged, "privileged", "true", "privileged: true");
+        // Contract 0017, A1: use_api_socket binds the engine's socket (and the client's registry credentials).
+        if (UsesApiSocket(definition)) found.Add(ApiSocket(service, withheld: true));
         // Contract 0017, A2: a privileged lifecycle hook.
         foreach (var hook in Hooks)
             if (Property(definition, hook) is { ValueKind: JsonValueKind.Array } entries)
@@ -378,9 +446,7 @@ public static class ComposeExposures
                 var index = 0;
                 foreach (var entry in entries.EnumerateArray())
                 {
-                    if (Property(entry, "privileged") is { } p
-                        && (p.ValueKind == JsonValueKind.True
-                            || (p.ValueKind == JsonValueKind.String && string.Equals(p.GetString(), "true", StringComparison.OrdinalIgnoreCase))))
+                    if (IsOn(entry, "privileged"))
                         Add(ExposureKind.Privileged, HookKey(hook, index), "true", $"{HookKey(hook, index)} privileged: true");
                     index++;
                 }
@@ -494,16 +560,30 @@ public static class ComposeExposures
         return (found, shared);
     }
 
-    /// <summary>Contract 0017, A1: the binds of the Docker socket among a container's <c>Mounts</c> (<c>docker inspect</c>),
-    /// as their normalised host paths.</summary>
-    public static IEnumerable<string> SocketBinds(JsonElement container)
+    /// <summary>Contract 0017, A1: the binds of the Docker socket among a container's <c>Mounts</c> (<c>docker inspect</c>)
+    /// as <see cref="ExposureKind.SocketMount"/> exposures (key <c>mount:&lt;destination&gt;</c>, value the normalised
+    /// source); <c>null</c> when the <c>Mounts</c> cannot be read.</summary>
+    public static IReadOnlyList<ComposeExposure>? SocketMounts(string service, JsonElement container)
     {
-        if (Property(container, "Mounts") is not { ValueKind: JsonValueKind.Array } mounts) yield break;
+        if (Property(container, "Mounts") is not { } mounts) return null;
+        if (mounts.ValueKind == JsonValueKind.Null) return [];
+        if (mounts.ValueKind != JsonValueKind.Array) return null;
+        var found = new List<ComposeExposure>();
         foreach (var mount in mounts.EnumerateArray())
-            if (Text(mount, "Type") == "bind" && Text(mount, "Source") is { Length: > 0 } source && source.StartsWith('/')
-                && Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(source) is var path
-                && ComposeModel.DockerSocketPaths.Contains(path))
-                yield return path;
+        {
+            if (mount.ValueKind != JsonValueKind.Object) return null;
+            if (Text(mount, "Type") != "bind") continue;
+            if (Text(mount, "Source") is not { Length: > 0 } source) return null;
+            if (!source.StartsWith('/')) continue;
+            var path = Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(source);
+            if (!IsSocketPath(path)) continue;
+            var key = SocketMountKey(Text(mount, "Destination") ?? "");
+            found.Add(new ComposeExposure(service, ExposureKind.SocketMount, $"socket mount {key}")
+            {
+                Key = key, Value = path, ValueWithheld = true,
+            });
+        }
+        return found;
     }
 
     /// <summary>The identity of a container in an inspect document, its name without the leading slash, and its

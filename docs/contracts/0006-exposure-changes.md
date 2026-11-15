@@ -827,4 +827,4 @@ Amendment 2's field list is narrowed for `CgroupnsMode`:
 - **`Covers`.** Impact containers and mounts are still covered by argument values as in R1-07; only exposures and shared
   namespaces use the target-only checks above.
 
-Amended by contract 0017 part A (1.0.1): `use_api_socket: true` is a read-write bind mount of the Docker socket, and a privileged `post_start` / `pre_stop` hook is a `Privileged` exposure (planning only).
+Amended by contract 0017 part A (1.0.1): `use_api_socket: true` is a read-write bind mount of the Docker socket, the closed list of exposure kinds (Amendment 8) gains `SocketMount` (class `host`, key `mount:<destination>`, value the normalised source), and a privileged `post_start` / `pre_stop` hook is a `Privileged` exposure (key `hook:<kind>:<index>`, planning only).

@@ -124,14 +124,121 @@ public sealed partial class ComposeExposureTests
     }
 
     [Fact]
-    public void Socket_binds_are_read_from_a_containers_mounts()
+    public void Use_api_socket_is_a_socket_mount_exposure_of_class_host_in_the_model_and_in_config()
+    {
+        var exposure = Assert.Single(Of("services:\n  web:\n    image: nginx\n    use_api_socket: true\n"));
+        Assert.Equal(ExposureKind.SocketMount, exposure.Kind);
+        Assert.Equal("mount:/var/run/docker.sock", exposure.Key);
+        Assert.Equal("/var/run/docker.sock", exposure.Value);
+        Assert.False(exposure.Withheld);
+        Assert.Equal(ExposureClasses.Host, ExposureClasses.Of(exposure.Kind, exposure.Key, Prefixes));
+        Assert.Equal("web: socket mount mount:/var/run/docker.sock", ComposeExposures.Describe(exposure.Identity, false));
+
+        using var config = JsonDocument.Parse("""{"image":"nginx","use_api_socket":true}""");
+        Assert.Equal(exposure.Identity, Assert.Single(ComposeExposures.FromConfig("web", config.RootElement,
+            new Dictionary<string, JsonElement>(), Prefixes)).Identity);
+    }
+
+    [Theory]
+    [InlineData("x-base: &base\n  use_api_socket: true\n  post_start:\n    - command: [\"id\"]\n      privileged: true\nservices:\n  web:\n    <<: *base\n    image: nginx\n")]
+    [InlineData("services:\n  base:\n    image: nginx\n    use_api_socket: true\n    post_start:\n      - command: [\"id\"]\n        privileged: true\n  web:\n    extends: base\n")]
+    public void Use_api_socket_and_a_hooks_privileged_are_read_through_merges_and_extends(string yaml)
+    {
+        var exposures = Of(yaml);
+        Assert.Contains(exposures, e => e is { Kind: ExposureKind.SocketMount, Key: "mount:/var/run/docker.sock" });
+        Assert.Contains(exposures, e => e is { Kind: ExposureKind.Privileged, Key: "hook:post_start:0" });
+
+        var (_, _, services) = ComposeModel.MergeWithSource([($"{ProjectDirectory}/docker-compose.yml", yaml)],
+            new Dictionary<string, string?>(), ProjectDirectory);
+        Assert.Contains(services.Single(s => s.Name == "web").Mounts, m => m.Source == "/var/run/docker.sock");
+    }
+
+    [Theory]
+    [InlineData("use_api_socket: ${UNSET}")]
+    [InlineData("post_start:\n      - command: [\"id\"]\n        privileged: ${UNSET}")]
+    public void Use_api_socket_or_a_hooks_privileged_from_an_unset_variable_refuses_the_plan(string field) =>
+        Assert.Throws<ComposePlanException>(() => Of($"services:\n  web:\n    image: nginx\n    {field}\n"));
+
+    [Fact]
+    public void Use_api_socket_from_an_unset_variable_refuses_the_mounts_too() =>
+        Assert.Throws<ComposePlanException>(() => ComposeModel.MergeWithSource(
+            [($"{ProjectDirectory}/docker-compose.yml", "services:\n  web:\n    image: nginx\n    use_api_socket: ${UNSET}\n")],
+            new Dictionary<string, string?>(), ProjectDirectory));
+
+    [Fact]
+    public void Socket_mounts_are_read_from_a_containers_mounts()
     {
         using var doc = JsonDocument.Parse("""
             {"Mounts":[{"Type":"bind","Source":"/run/docker.sock","Destination":"/var/run/docker.sock","RW":true},
+                       {"Type":"bind","Source":"/run/user/1000/docker.sock","Destination":"/rootless.sock","RW":true},
                        {"Type":"bind","Source":"/srv/app","Destination":"/app","RW":true},
                        {"Type":"volume","Name":"v","Source":"/var/lib/docker/volumes/v/_data"}]}
             """);
-        Assert.Equal(["/run/docker.sock"], ComposeExposures.SocketBinds(doc.RootElement));
+        var sockets = ComposeExposures.SocketMounts("web", doc.RootElement)!;
+        Assert.Equal(["mount:/var/run/docker.sock=/run/docker.sock", "mount:/rootless.sock=/run/user/1000/docker.sock"],
+            sockets.Select(s => $"{s.Key}={s.Value}"));
+        Assert.All(sockets, s => Assert.Equal(ExposureKind.SocketMount, s.Kind));
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"Mounts":"x"}""")]
+    [InlineData("""{"Mounts":[{"Type":"bind"}]}""")]
+    public void Mounts_that_cannot_be_read_are_reported_as_unreadable(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        Assert.Null(ComposeExposures.SocketMounts("web", doc.RootElement));
+    }
+
+    // ---------------------------------------------------------------- A1: decided per service
+
+    private static ComposeServicePlan Service(string name, params string[] mounts) =>
+        new(name, null) { Mounts = mounts.Select(m => new ComposeMount(m, false)).ToList() };
+
+    [Theory]
+    [InlineData("/var/run/docker.sock", "/run/docker.sock", true)]    // the control plane's socket paths are one source
+    [InlineData("/run/docker.sock", "/var/run/docker.sock", true)]
+    [InlineData("/var/run/docker.sock", "/var/run/docker.sock", true)]
+    [InlineData("/run/user/1000/docker.sock", "/run/user/1000/docker.sock", true)]
+    [InlineData("/run/user/1000/docker.sock", "/var/run/docker.sock", false)]
+    [InlineData("/srv/app", "/var/run/docker.sock", false)]
+    public void A_socket_bind_is_decided_when_the_service_decided_the_same_source(string decided, string inspected, bool expected) =>
+        Assert.Equal(expected, ComposeExposures.SocketDecided(Service("web", decided), inspected));
+
+    [Fact]
+    public void A_socket_decided_for_another_service_does_not_decide_this_one() =>
+        Assert.False(ComposeExposures.SocketDecided(Service("web", "/srv/app"), "/var/run/docker.sock"));
+
+    [Fact]
+    public void With_use_api_socket_the_engines_socket_is_decided_whatever_its_path()
+    {
+        var web = Service("web", ComposeModel.DockerSocket) with { Exposures = [ComposeExposures.ApiSocket("web", false)] };
+        Assert.True(ComposeExposures.SocketDecided(web, "/run/user/1000/docker.sock"));
+        // A written volume of the same path is not use_api_socket: only that source is decided.
+        Assert.False(ComposeExposures.SocketDecided(Service("web", ComposeModel.DockerSocket), "/run/user/1000/docker.sock"));
+    }
+
+    [Fact]
+    public void Volumes_from_a_service_with_use_api_socket_gives_the_receiver_the_decided_socket()
+    {
+        var plan = Planned(
+            "services:\n  sock:\n    image: nginx\n    use_api_socket: true\n  web:\n    image: nginx\n    volumes_from: [sock]\n",
+            """{"services":{"sock":{"image":"nginx","use_api_socket":true},"web":{"image":"nginx","volumes_from":["service:sock"]}}}""");
+        Assert.True(ComposeExposures.SocketDecided(plan.Services.Single(s => s.Name == "web"), "/var/run/docker.sock"));
+    }
+
+    // ---------------------------------------------------------------- A2: model and compose disagree on a hook
+
+    [Fact]
+    public void A_hook_key_compose_reads_differently_than_the_model_is_decided_on_its_own()
+    {
+        // An override merge can move a hook: compose's index is not the model's. Both are decided; compose's withheld.
+        var plan = Planned(
+            "services:\n  web:\n    image: nginx\n    post_start:\n      - command: [\"id\"]\n        privileged: true\n",
+            """{"services":{"web":{"image":"nginx","post_start":[{"command":["true"]},{"command":["id"],"privileged":true}]}}}""");
+        var hooks = plan.Exposures().Where(e => e.Kind == ExposureKind.Privileged).ToList();
+        Assert.Contains(hooks, e => e is { Key: "hook:post_start:0", Withheld: false });
+        Assert.Contains(hooks, e => e is { Key: "hook:post_start:1", Withheld: true });
     }
 
     // ---------------------------------------------------------------- A2: a privileged hook is an exposure

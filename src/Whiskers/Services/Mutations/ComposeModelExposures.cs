@@ -129,6 +129,14 @@ public static partial class ComposeModel
         }
         if (Scalar(source, "privileged") is { } rawPrivileged && Truthy(Value(rawPrivileged, "privileged")))
             Add(ExposureKind.Privileged, "privileged", "true", "privileged: true", ComposeExposures.HasVariable(rawPrivileged));
+        // Contract 0017, A1: use_api_socket binds the engine's socket (and the client's registry credentials).
+        if (source.Children.TryGetValue(new YamlScalarNode("use_api_socket"), out var apiSocket))
+        {
+            var raw = (apiSocket as YamlScalarNode)?.Value
+                      ?? throw new ComposePlanException($"The use_api_socket of '{service}' cannot be read.");
+            if (IsOn(Value(raw, "The use_api_socket")))
+                found.Add(ComposeExposures.ApiSocket(service, ComposeExposures.HasVariable(raw)));
+        }
         // Contract 0017, A2: a lifecycle hook with privileged: true runs its command with every capability.
         foreach (var hook in ComposeExposures.Hooks)
         {
@@ -136,7 +144,7 @@ public static partial class ComposeModel
             foreach (var (entry, _) in Entries(source, hook))
             {
                 if (entry is YamlMappingNode hookMap && Scalar(hookMap, "privileged") is { } rawHook
-                    && Truthy(Value(rawHook, $"The privileged of a {hook} hook")))
+                    && IsOn(Value(rawHook, $"The privileged of a {hook} hook")))
                 {
                     var key = ComposeExposures.HookKey(hook, index);
                     Add(ExposureKind.Privileged, key, "true", $"{key} privileged: true", ComposeExposures.HasVariable(rawHook));

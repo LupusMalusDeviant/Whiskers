@@ -58,6 +58,11 @@ public sealed class ExposureChangeRule : IGuardrailRule
     /// value; for a withheld entry the kind and the class only.</summary>
     private static string Reason(string service, ExposureKind kind, string key, string cls, bool withheld)
     {
+        // Contract 0017, A1: compose's use_api_socket hands the container the socket and the registry credentials of
+        // the Docker client it runs as (/run/secrets/docker/config.json, verified with Compose v5.6.1).
+        if (kind == ExposureKind.SocketMount)
+            return $"{service} gets the Docker socket mounted (root on the host); with use_api_socket compose also hands "
+                   + $"it the registry credentials of the Docker client on the host (class '{cls}').";
         if (withheld)
             return $"{service} gets a {ExposureClasses.Noun(kind)} (withheld) of class '{cls}'; it needs a confirmation.";
         return kind switch
