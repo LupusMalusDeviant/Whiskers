@@ -116,6 +116,21 @@ public sealed class SecretRedactorTests
         @"bash -c ""curl -H \""Authorization: Digest ***\"" https://x""")]
     [InlineData(@"{""cmd"":""curl -H <U>Authorization: Digest username=\\<U>u\\<U>, response=\\<U>hunter2secret\\<U><U> https://x"",""n"":""kept""}",
         @"{""cmd"":""curl -H <U>Authorization: Digest ***<U> https://x"",""n"":""kept""}")]
+    // A deeper-escaped quote inside an escaped quoted value belongs to the value (delta review 2, MINOR-1).
+    [InlineData(@"msg=""{\""Authorization\"": \""Token token=\\\""hunter2secret\\\""\""}""",
+        @"msg=""{\""Authorization\"": \""***\""}""")]
+    [InlineData(@"msg=""{\""Authorization\"": \""Digest username=\\\""u\\\"", response=\\\""hunter2secret\\\""\""}""",
+        @"msg=""{\""Authorization\"": \""***\""}""")]
+    [InlineData(@"{<U>Authorization<U>: <U>Token token=\\<U>hunter2secret\\<U><U>}",
+        @"{<U>Authorization<U>: <U>***<U>}")]
+    [InlineData(@"{\\\""Authorization\\\"": \\\""Token token=\\\\\\\""hunter2secret\\\\\\\""\\\""}",
+        @"{\\\""Authorization\\\"": \\\""***\\\""}")]
+    // Only what this rule or 1.0.0 could have written counts as redacted (NIT-1).
+    [InlineData("Authorization: ***-hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: ***.hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: ***/hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: ***=hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: ***:hunter2secret", "Authorization: ***")]
     // A closing quote glued to more text is no boundary.
     [InlineData(@"""Authorization: Basic abc""hunter2secret"" tail", @"""Authorization: Basic ***")]
     [InlineData(@"""Authorization: ***""hunter2secret"" tail", @"""Authorization: ***")]
@@ -161,6 +176,21 @@ public sealed class SecretRedactorTests
 
         Assert.Equal("""{"log":"> Authorization: Basic ***","next":"kept"}""", redacted);
         Assert.Equal(redacted, SecretRedactor.RedactJson(redacted));
+    }
+
+    [Fact]
+    public void A_json_key_beyond_the_bound_that_names_a_secret_is_masked()
+    {
+        var longSecretKey = new string('x', 140) + "_password";
+        var longPlainKey = new string('y', 140) + "_name";
+        var json = $"{{\"{longSecretKey}\":\"hunter2secret\",\"{longPlainKey}\":\"kept-value\"}}";
+
+        var redacted = SecretRedactor.Redact(json);
+
+        Assert.DoesNotContain("hunter2secret", redacted);
+        Assert.Contains($"\"{longSecretKey}\":\"***\"", redacted);
+        Assert.Contains("kept-value", redacted);
+        Assert.Equal(redacted, SecretRedactor.Redact(redacted));
     }
 
     /// <summary>The Authorization rule stays linear on pathological input (the 1 s budget would withhold the text).</summary>

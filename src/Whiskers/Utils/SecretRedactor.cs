@@ -63,13 +63,14 @@ public static class SecretRedactor
     //    at the matching escaped quote; a deeper-escaped quote (\\\") inside belongs to the value;
     //  - the quote that opens it is a JSON unicode escape (backslash-u0022 / -u0027): at the same escape;
     //  - otherwise: at the end of the line, whatever it holds (backslashes and escaped quotes included).
-    // A value this rule already wrote ("***" followed by the end, whitespace, punctuation or the closing quote) is left
-    // alone, so applying it twice, or to the re-serialized JSON of values it redacted, changes nothing; "***secret",
-    // "***\secret" and "***"secret" are values like any other. Ending at the line end masks more than the value when
+    // A value this rule already wrote ("***" followed by the end, whitespace, one of , ; } ] ) or a closing quote — what
+    // this rule and 1.0.0 could have written) is left alone, so applying it twice, or to the re-serialized JSON of
+    // values it redacted, changes nothing; "***secret", "***\secret", "***"secret", "***-x", "***.x", "***:x" are
+    // values like any other. Ending at the line end masks more than the value when
     // the header is not quoted: the safe direction. A scheme with its credential on the next line loses that line too.
     // Known limit: a 1.0.0 row already holding "Authorization=*** <credential>" is not redacted again.
-    private const string Finished = @"\*\*\*(?:$|\s|[^\w\\*'""]|['""](?:$|[,;:}\])]))";
-    private const string FinishedQuoted = @"\*\*\*(?:$|\s|[^\w\\*'""]|['""](?:$|[\s,;)\]}]))";
+    private const string Finished = @"\*\*\*(?:$|\s|[,;}\])]|['""](?:$|[,;}\])]))";
+    private const string FinishedQuoted = @"\*\*\*(?:$|\s|[,;}\])]|['""](?:$|[\s,;}\])]))";
     private static readonly Pair AuthorizationValue = new(
         // A prefix (Proxy-, X-Upstream-) is at most 64 characters: unbounded, a long word of repeated keys after a
         // quote costs quadratic time.
@@ -100,7 +101,8 @@ public static class SecretRedactor
     private static readonly Pair QuotedAuthorizationKey = new(
         // Up to three levels of escaping, bounded so a run of backslashes costs linear time.
         @"(?i)(?<kq>'|""|(?:\\\\){0,3}\\""|\\u00(?:22|27))(?<key>[\w-]{0,64}authorization)\k<kq>(?<sep>\s*(?:=>|[=:])\s*)" +
-        @"(?<vq>'|""|(?:\\\\){0,3}\\""|\\u00(?:22|27))(?>(?:(?!\k<vq>)(?:\\[^\r\n]|[^\\\r\n]))*)\k<vq>",
+        // A deeper-escaped quote inside the value (vq with more backslash pairs in front) belongs to the value.
+        @"(?<vq>'|""|(?:\\\\){0,3}\\""|\\u00(?:22|27))(?>(?:(?:\\\\){1,4}\k<vq>|(?!\k<vq>)(?:\\[^\r\n]|[^\\\r\n]))*)\k<vq>",
         RegexOptions.Compiled);
 
     // A Basic credential wherever it stands (nginx proxy_set_header, headers.Add("Authorization", "Basic …"), HAR
@@ -115,6 +117,14 @@ public static class SecretRedactor
         // The key is bounded (128): unbounded, a quote before a long word of repeated key names cost quadratic time.
         $@"(?i)""(?=[\w-]{{0,128}}?(?:{SecretKeys}))([\w-]{{1,128}})""\s*:\s*""(?:[^""\\]|\\.)*""",
         RegexOptions.Compiled);
+
+    // A key longer than JsonSecret's bound (taken whole, atomically, so linear): masked when it names a secret anywhere
+    // in it — fail closed rather than skipped.
+    private static readonly Pair LongJsonKey = new(
+        @"""(?<key>(?>[\w-]{129,}))""(?<sep>\s*:\s*)""(?:[^""\\]|\\.)*""",
+        RegexOptions.Compiled);
+    private static readonly Regex SecretKeyName = new(
+        $@"(?i){SecretKeys}", RegexOptions.Compiled, Timeout);
 
     // Authorization: Bearer <token> without a colon after "Bearer"  →  Bearer ***
     private static readonly Pair BearerToken = new(
@@ -254,6 +264,9 @@ public static class SecretRedactor
         s = SlackWebhook.Replace(s, m => $"{m.Groups[1].Value}***");
         s = HookKey.Replace(s, m => $"{m.Groups[1].Value}***");
         s = JsonSecret.Replace(s, m => $"\"{m.Groups[1].Value}\":\"***\"");
+        s = LongJsonKey.Replace(s, m => SecretKeyName.IsMatch(m.Groups["key"].Value)
+            ? $"\"{m.Groups["key"].Value}\":\"***\""
+            : m.Value);
         s = QuotedAuthorizationKey.Replace(s, m =>
             $"{m.Groups["kq"].Value}{m.Groups["key"].Value}{m.Groups["kq"].Value}{m.Groups["sep"].Value}" +
             $"{m.Groups["vq"].Value}***{m.Groups["vq"].Value}");
