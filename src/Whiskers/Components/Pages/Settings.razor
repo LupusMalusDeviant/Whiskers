@@ -518,7 +518,7 @@ else
 
     @* Local accounts (R1-49) *@
     <MudExpansionPanel Text="@L["LocalAccounts_Panel"]" Icon="@Icons.Material.Filled.People">
-        <LocalAccountsPanel />
+        <LocalAccountsPanel AccountsChanged="ReloadWhitelist" />
     </MudExpansionPanel>
 
     @* Google/OIDC sign-in identities (R1-27) *@
@@ -1367,6 +1367,17 @@ else
     private void RemoveEmail(string email)
     {
         _whitelistEmails.Remove(email);
+    }
+
+    /// <summary>Contract 0017 H2/H3: adding or deleting a local account may change the whitelist in the service. The
+    /// editor reloads it, so saving a stale buffer can neither drop a new account's entry nor list a deleted account's
+    /// address again (as a manual entry that would admit a federated identity).</summary>
+    private void ReloadWhitelist()
+    {
+        if (_role < AppRole.Admin) return;
+        var data = WhitelistService.GetWhitelist();
+        _whitelistEnabled = data.Enabled;
+        _whitelistEmails = data.Emails;
     }
 
     private async Task SaveWhitelist()

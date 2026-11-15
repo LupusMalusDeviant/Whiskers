@@ -35,9 +35,13 @@ public interface IWhitelistService
     /// <summary>
     /// Contract 0017 H3: removes the entry <see cref="AddLocalAccountEntryAsync"/> added for <paramref name="accountId"/>,
     /// with the binding prune of contract 0003 rule 5. An address without that account's record (listed before, or
-    /// removed or re-added by hand since) stays; returns false then. Runs inside the decided <c>account.delete</c>; its only
-    /// caller is <c>LocalAccountService.DeleteAsync</c> (pinned).
+    /// removed or re-added by hand since) stays; returns false then. Runs inside the decided <c>account.delete</c> — or
+    /// <c>account.create</c>, to take back the entry of a creation that failed after it was written; its callers are
+    /// <c>LocalAccountService.DeleteAsync</c> and the undo of <c>CreateAsync</c> (pinned).
     /// </summary>
+    /// <remarks>All three local-account writes throw <see cref="InvalidOperationException"/>, with nothing written, when
+    /// they would change the whitelist outside a gateway scope that decided their account operation (INV-46: no
+    /// whitelist write without its event). A call that changes nothing needs no decision.</remarks>
     Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default);
 
     /// <summary>

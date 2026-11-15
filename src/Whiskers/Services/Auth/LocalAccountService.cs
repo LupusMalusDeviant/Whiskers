@@ -196,15 +196,18 @@ public sealed class LocalAccountService : ILocalAccountService
                 // added, through the access-control gate (AdminGate is held: AdminGate, then AccessControlWriteGate),
                 // inside this decided account.create. A disabled whitelist is not touched.
                 if (_whitelist is not null) await _whitelist.AddLocalAccountEntryAsync(email, user.Id, ct);
+                _owners.RememberLocalAccounts();
             }
             catch
             {
-                // As for a failed role write: nothing of the account stays — neither the account nor the role it got here.
+                // As for a failed role write: nothing of the account stays — not the whitelist entry it got here (a
+                // write that persisted before the failure; no-op without this account's record), not the role, not the
+                // account.
+                await RemoveEntryQuietlyAsync(email, user.Id);
                 if (!explicitRole) await RemoveRoleQuietlyAsync(email);
                 await DeleteQuietlyAsync(email);
                 throw;
             }
-            _owners.RememberLocalAccounts();
             _logger?.LogInformation("Local account {Email} was created with role {Role}", Whiskers.Utils.LogSafe.Account(email), role);
             return new LocalAccountResult(true) { RecoveryCode = code, RecoveryExpiresUtc = expires };
         }
@@ -272,10 +275,15 @@ public sealed class LocalAccountService : ILocalAccountService
 
             // Contract 0017 H3: the whitelist entry this account's creation added goes too (an address listed before, or
             // changed by hand since, stays). A failed removal undoes the deletion, as a failed role removal would.
+            // Whether this account's record names the entry now: only then may a failure put an entry back (a removal
+            // that persisted before it threw), never an address the account never had.
+            var hadEntry = _whitelist is not null
+                && string.Equals(RecordOf(_whitelist.GetWhitelist(), target), user.Id, StringComparison.Ordinal);
             var removedEntry = false;
             try { removedEntry = _whitelist is not null && await _whitelist.RemoveLocalAccountEntryAsync(target, user.Id, ct); }
             catch
             {
+                await RestoreEntryAsync(target, user.Id, hadEntry);
                 await RestoreRoleAsync(target, removedRole);
                 throw;
             }
@@ -346,13 +354,30 @@ public sealed class LocalAccountService : ILocalAccountService
         }
     }
 
+    private static string? RecordOf(WhitelistData whitelist, string email) =>
+        whitelist.AddedForAccounts?.FirstOrDefault(r => SameEmail(r.Key, email)).Value;
+
+    /// <summary>Takes back the whitelist entry a creation that then failed had written (contract 0017 H2); nothing
+    /// without this account's record.</summary>
+    private async Task RemoveEntryQuietlyAsync(string email, string accountId)
+    {
+        if (_whitelist is null) return;
+        try { await _whitelist.RemoveLocalAccountEntryAsync(email, accountId); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError("The whitelist entry of half-created local account {Email} could not be removed again ({Error})",
+                Whiskers.Utils.LogSafe.Account(email), ex.GetType().Name);
+        }
+    }
+
     /// <summary>Takes back the role a creation that then failed had just written (contract 0017 H2).</summary>
     private async Task RemoveRoleQuietlyAsync(string email)
     {
         try { await _roles.RemoveRoleAsync(email); }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger?.LogError("The role of a half-created local account could not be removed again ({Error})", ex.GetType().Name);
+            _logger?.LogError("The role of half-created local account {Email} could not be removed again ({Error})",
+                Whiskers.Utils.LogSafe.Account(email), ex.GetType().Name);
         }
     }
 

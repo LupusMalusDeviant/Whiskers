@@ -193,6 +193,7 @@ public class WhitelistService : IWhitelistService, IInitializable
         RemoveRecord(record, email);
         record[email] = accountId;
         var next = new WhitelistData { Enabled = true, Emails = [.. before.Emails, email], AddedForAccounts = record };
+        RequireDecision("account.create");
         await WriteAsync(lease, before, next, ct);
         _logger.LogInformation("A local account an Admin created was added to the enabled whitelist");
         return true;
@@ -216,6 +217,7 @@ public class WhitelistService : IWhitelistService, IInitializable
             Emails = before.Emails.Where(e => !SameAddress(e, email)).ToList(),
             AddedForAccounts = record.Count == 0 ? null : record
         };
+        RequireDecision("account.delete", "account.create");   // account.create: the undo of a failed creation
         await WriteAsync(lease, before, next, ct);
         _logger.LogInformation("The whitelist entry of a deleted local account was removed");
         return true;
@@ -234,6 +236,7 @@ public class WhitelistService : IWhitelistService, IInitializable
         RemoveRecord(record, email);
         record[email] = accountId;
         var next = new WhitelistData { Enabled = before.Enabled, Emails = [.. before.Emails, email], AddedForAccounts = record };
+        RequireDecision("account.delete");
         await WriteAsync(lease, before, next, ct);
         _logger.LogInformation("The whitelist entry of a local account whose deletion failed was put back");
     }
@@ -251,6 +254,16 @@ public class WhitelistService : IWhitelistService, IInitializable
         await _store.SaveAsync(next);
         SetCache(next);
         Whiskers.Services.Mutations.ConfigChange.Record("whitelist", before, next);
+    }
+
+    /// <summary>INV-46: the local-account entry writes are part of a decided account operation, whose event records
+    /// them. Checked under the gate when a write is due (a call that changes nothing needs no decision; a decision
+    /// that closed while the call waited counts as none): outside such a decision nothing is written (fail closed).</summary>
+    private static void RequireDecision(params string[] capabilityIds)
+    {
+        if (!capabilityIds.Any(Whiskers.Services.Mutations.MutationScope.Authorizes))
+            throw new InvalidOperationException(
+                $"A local-account whitelist write runs only inside a decided {string.Join(" or ", capabilityIds)}; nothing was written.");
     }
 
     private static bool SameAddress(string? a, string? b) =>

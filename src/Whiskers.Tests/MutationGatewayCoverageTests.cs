@@ -848,8 +848,13 @@ public class MutationGatewayCoverageTests
 
         Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.CreateAsync"],
             CallersOf(wl, nameof(Whiskers.Services.Auth.IWhitelistService.AddLocalAccountEntryAsync)));
-        Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.DeleteAsync"],
+        Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.DeleteAsync",
+                "Whiskers.Services.Auth.LocalAccountService.RemoveEntryQuietlyAsync"],
             CallersOf(wl, nameof(Whiskers.Services.Auth.IWhitelistService.RemoveLocalAccountEntryAsync)));
+        // The quiet removal is the undo of a creation that failed after its whitelist write.
+        Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.CreateAsync"], MutationCallScanner
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Auth.LocalAccountService) && m.Name == "RemoveEntryQuietlyAsync")
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().ToList());
         // The restore helper is called only from DeleteAsync's failure paths.
         Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.RestoreEntryAsync"],
             CallersOf(wl, nameof(Whiskers.Services.Auth.IWhitelistService.RestoreLocalAccountEntryAsync)));

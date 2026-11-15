@@ -65,7 +65,12 @@ listed cannot sign in, just like a Google or OIDC user.
 - **Deleting an account** removes the whitelist entry its creation added (with the identity bindings of that
   address), in the same audited `account.delete` operation. An address that was listed before stays. If an Admin
   removed or re-added the entry by hand in the meantime, the deletion leaves it: it is a manual entry now. If the entry
-  cannot be removed, the account is not deleted.
+  cannot be removed, the account is not deleted. The deletion also removes its recorded entry when the whitelist was
+  disabled in the meantime (the address stays in the stored list until then).
+- A record whose account vanished outside Whiskers (for example a database restored from an older backup) keeps its
+  stale account id; the entry then stays until an Admin removes it by hand.
+- The whitelist editor in *Settings → Authentication* reloads after every account added or deleted on the same page,
+  so saving it never undoes these changes.
 - Whiskers keeps the record of which entries it added next to the list in `whitelist.json` (`AddedForAccounts`,
   address → account id). Saving the whitelist in *Settings → Authentication* keeps the record of every address that
   stays listed.

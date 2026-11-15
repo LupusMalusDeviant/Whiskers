@@ -40,6 +40,25 @@ public sealed class WhitelistLocalAccountEntryTests
         return (await scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>().FindByEmailAsync(email))?.Id;
     }
 
+    /// <summary>The completion line of the last <paramref name="capabilityId"/> event in the gateway's sink.</summary>
+    private static string CompletionOf(LocalAccountWorld world, string capabilityId)
+    {
+        var lines = world.Sink.Text.Split('\n');
+        var events = world.Sink.Events;
+        var begin = events.LastIndexOf($"begin:{capabilityId}");
+        Assert.True(begin >= 0, $"no {capabilityId} event");
+        var complete = events.FindIndex(begin + 1, e => e.StartsWith("complete:", StringComparison.Ordinal));
+        Assert.True(complete > begin, $"the {capabilityId} event was not completed");
+        return lines[complete];
+    }
+
+    /// <summary>INV-46: the whitelist write is recorded as the config.version entry of that operation's event.</summary>
+    private static void AssertWhitelistVersionIn(LocalAccountWorld world, string capabilityId)
+    {
+        var completion = CompletionOf(world, capabilityId);
+        Assert.Contains($"Action = {ConfigChange.VersionAction}, TargetType = config, TargetId = whitelist", completion);
+    }
+
     private static async Task<LocalAccountWorld> EnabledAsync(params string[] extra)
     {
         var world = await LocalAccountWorld.CreateAsync();
@@ -60,8 +79,8 @@ public sealed class WhitelistLocalAccountEntryTests
         Assert.True(data.Enabled);
         Assert.Equal([LocalAccountWorld.Root, New], data.Emails);
         Assert.Equal(await AccountIdAsync(world, New), Assert.Single(data.AddedForAccounts!).Value);
-        // The same audited operation: the whitelist change is part of the account.create event.
-        Assert.Contains("whitelist", world.Sink.Text);
+        // The same audited operation: the whitelist's version entry is part of the account.create event.
+        AssertWhitelistVersionIn(world, "account.create");
         // Emails stays a list of strings; the record is a sibling map.
         var json = await File.ReadAllTextAsync(world.WhitelistPath);
         Assert.Contains("\"Emails\":[", json.Replace(" ", "").Replace("\n", "").Replace("\r", ""));
@@ -149,6 +168,7 @@ public sealed class WhitelistLocalAccountEntryTests
         Assert.True((await CreateAsync(world, Listed)).Success);
 
         Assert.True((await DeleteAsync(world, New)).Success);
+        AssertWhitelistVersionIn(world, "account.delete");   // the removal is part of the account.delete event
         Assert.True((await DeleteAsync(world, Listed)).Success);
 
         // The entry H2 added is gone; the address listed before the account was created stays.
@@ -235,22 +255,139 @@ public sealed class WhitelistLocalAccountEntryTests
         Assert.True(world.Roles.HasExplicitRole(New));
         Assert.Contains(New, world.Whitelist.GetWhitelist().Emails);
         Assert.Equal(id, Assert.Single(world.Whitelist.GetWhitelist().AddedForAccounts!).Value);
+        // Removal and restore are both recorded in the account.delete event (two whitelist version entries).
+        var completion = CompletionOf(world, "account.delete");
+        Assert.Equal(2, completion.Split($"Action = {ConfigChange.VersionAction}, TargetType = config, TargetId = whitelist").Length - 1);
     }
 
-    /// <summary>The world's whitelist, with the local-account writes failing on demand.</summary>
+    [Fact]
+    public async Task A_create_that_fails_after_its_whitelist_write_takes_the_entry_back()
+    {
+        await using var world = await EnabledAsync();
+        var failing = new FailingWhitelist(world.Whitelist) { FailAfterAdd = true };
+
+        await Assert.ThrowsAsync<IOException>(() => CreateAsync(world, New, whitelist: failing));
+
+        Assert.Null(await AccountIdAsync(world, New));
+        Assert.False(world.Roles.HasExplicitRole(New));
+        Assert.Equal([LocalAccountWorld.Root], world.Whitelist.GetWhitelist().Emails);
+        Assert.Null(world.Whitelist.GetWhitelist().AddedForAccounts);
+    }
+
+    [Fact]
+    public async Task A_delete_that_fails_after_its_whitelist_removal_puts_the_entry_back()
+    {
+        await using var world = await EnabledAsync();
+        Assert.True((await CreateAsync(world, New)).Success);
+        var id = await AccountIdAsync(world, New);
+        var failing = new FailingWhitelist(world.Whitelist) { FailAfterRemove = true };
+
+        await Assert.ThrowsAsync<IOException>(() => DeleteAsync(world, New, whitelist: failing));
+
+        Assert.Equal(id, await AccountIdAsync(world, New));
+        Assert.True(world.Roles.HasExplicitRole(New));
+        Assert.Equal([LocalAccountWorld.Root, New], world.Whitelist.GetWhitelist().Emails);
+        Assert.Equal(id, Assert.Single(world.Whitelist.GetWhitelist().AddedForAccounts!).Value);
+    }
+
+    [Fact]
+    public async Task A_failed_removal_never_lists_an_address_the_account_had_no_entry_for()
+    {
+        // Created while the whitelist was disabled (no entry, no record), then the whitelist was enabled without it.
+        await using var world = await LocalAccountWorld.CreateAsync();
+        Assert.True((await CreateAsync(world, New)).Success);
+        await world.Whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = [LocalAccountWorld.Root] });
+        var failing = new FailingWhitelist(world.Whitelist) { FailRemove = true };
+
+        await Assert.ThrowsAsync<IOException>(() => DeleteAsync(world, New, whitelist: failing));
+
+        Assert.Equal([LocalAccountWorld.Root], world.Whitelist.GetWhitelist().Emails);
+    }
+
+    [Fact]
+    public async Task A_whitelist_carrying_the_record_round_trips_through_a_restart()
+    {
+        await using var world = await EnabledAsync();
+        Assert.True((await CreateAsync(world, New)).Success);
+        var id = await AccountIdAsync(world, New);
+
+        var restarted = new WhitelistService(world.Configuration, world.Roles,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<WhitelistService>.Instance,
+            new Whiskers.Configuration.DataPathOptions(Path.GetDirectoryName(world.WhitelistPath)!));
+        await restarted.InitializeAsync();
+
+        var data = restarted.GetWhitelist();
+        Assert.Equal([LocalAccountWorld.Root, New], data.Emails);
+        var record = Assert.Single(data.AddedForAccounts!);
+        Assert.Equal(New, record.Key);
+        Assert.Equal(id, record.Value);
+        // And H3 works on what was loaded.
+        Assert.True(await GatewayArrange.RunAsync("account.delete", () => restarted.RemoveLocalAccountEntryAsync(New, id!)));
+        Assert.Equal([LocalAccountWorld.Root], restarted.GetWhitelist().Emails);
+    }
+
+    [Fact]
+    public async Task A_cancelled_whitelist_write_writes_nothing()
+    {
+        await using var world = await EnabledAsync();
+        var before = await File.ReadAllBytesAsync(world.WhitelistPath);
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GatewayArrange.RunAsync("account.create",
+            () => world.Whitelist.AddLocalAccountEntryAsync(New, "id-1", cancelled.Token)));
+
+        Assert.Equal(before, await File.ReadAllBytesAsync(world.WhitelistPath));
+    }
+
+    [Fact]
+    public async Task A_local_account_whitelist_write_outside_its_decision_is_refused()
+    {
+        // INV-46: no whitelist write without the event of a decided account operation.
+        await using var world = await EnabledAsync();
+        Assert.True((await CreateAsync(world, New)).Success);
+        var id = (await AccountIdAsync(world, New))!;
+        var before = await File.ReadAllBytesAsync(world.WhitelistPath);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.Whitelist.AddLocalAccountEntryAsync("x@local.test", "id-x"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.Whitelist.RemoveLocalAccountEntryAsync(New, id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => world.Whitelist.RestoreLocalAccountEntryAsync("y@local.test", "id-y"));
+        // Nor inside another decision (a whitelist save is not an account operation).
+        await Assert.ThrowsAsync<InvalidOperationException>(() => GatewayArrange.RunAsync("config.whitelist",
+            () => world.Whitelist.AddLocalAccountEntryAsync("x@local.test", "id-x")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => GatewayArrange.RunAsync("account.create",
+            () => world.Whitelist.RestoreLocalAccountEntryAsync("y@local.test", "id-y")));
+
+        Assert.Equal(before, await File.ReadAllBytesAsync(world.WhitelistPath));
+    }
+
+    /// <summary>The world's whitelist, with the local-account writes failing on demand — before or after the write.</summary>
     private sealed class FailingWhitelist(IWhitelistService inner) : IWhitelistService
     {
         public bool FailAdd { get; init; }
         public bool FailRemove { get; init; }
+        public bool FailAfterAdd { get; init; }
+        public bool FailAfterRemove { get; init; }
         public Task InitializeAsync(CancellationToken ct = default) => inner.InitializeAsync(ct);
         public bool IsEmailAllowed(string? email) => inner.IsEmailAllowed(email);
         public WhitelistData GetWhitelist() => inner.GetWhitelist();
         public Task SaveWhitelistAsync(WhitelistData data) => inner.SaveWhitelistAsync(data);
         public Task AddFirstAdminAsync(string email, AccessControlWriteGate.Lease lease) => inner.AddFirstAdminAsync(email, lease);
-        public Task<bool> AddLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) =>
-            FailAdd ? throw new IOException("whitelist.json could not be written") : inner.AddLocalAccountEntryAsync(email, accountId, ct);
-        public Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) =>
-            FailRemove ? throw new IOException("whitelist.json could not be written") : inner.RemoveLocalAccountEntryAsync(email, accountId, ct);
+        public async Task<bool> AddLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default)
+        {
+            if (FailAdd) throw new IOException("whitelist.json could not be written");
+            var added = await inner.AddLocalAccountEntryAsync(email, accountId, ct);
+            if (FailAfterAdd) throw new IOException("failed after the write");
+            return added;
+        }
+
+        public async Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default)
+        {
+            if (FailRemove) throw new IOException("whitelist.json could not be written");
+            var removed = await inner.RemoveLocalAccountEntryAsync(email, accountId, ct);
+            if (FailAfterRemove) throw new IOException("failed after the write");
+            return removed;
+        }
         public Task RestoreLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) =>
             inner.RestoreLocalAccountEntryAsync(email, accountId, ct);
     }

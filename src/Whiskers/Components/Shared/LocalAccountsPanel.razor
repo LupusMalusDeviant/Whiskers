@@ -94,6 +94,11 @@
     /// <summary>The clock the service uses when one is registered (tests), the system clock otherwise.</summary>
     private TimeProvider Clock => ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
 
+    /// <summary>Raised after every add or delete attempt (contract 0017 H2/H3: the service may have changed the
+    /// whitelist). The Settings page reloads its whitelist editor from the service, so a stale edit buffer can neither
+    /// drop a new account's entry nor list a deleted account's address again as a manual entry.</summary>
+    [Parameter] public EventCallback AccountsChanged { get; set; }
+
     private bool _isAdmin;
     private bool _authDisabled;
     private bool _busy;
@@ -154,6 +159,7 @@
             Snackbar.Add(L["LocalAccounts_Snackbar_Created", email].Value, Severity.Success);
         }
         await LoadAsync();
+        await AccountsChanged.InvokeAsync();
     }
 
     private async Task Reset(string email)
@@ -177,6 +183,7 @@
             (ResolvedRecord rt, CancellationToken ct) => Accounts.DeleteAsync(rt.Id, ct)));
         if (result is { Success: true }) Snackbar.Add(L["LocalAccounts_Snackbar_Deleted", email].Value, Severity.Success);
         await LoadAsync();
+        await AccountsChanged.InvokeAsync();
     }
 
     /// <summary>Runs one gated call and shows why it was refused; the result only when it succeeded.</summary>
