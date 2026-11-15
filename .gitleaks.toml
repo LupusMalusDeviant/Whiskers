@@ -44,6 +44,20 @@ paths = ['''^src/Whiskers\.Tests/SinkRedactionTests\.cs$''']
 regexes = ['''^deploy:\{Canary\}\{new$''']
 
 [[allowlists]]
+description = "Fake Basic credential in a curl header (base64 of deploy:canary-value-r124; secret redactor test)"
+targetRules = ["curl-auth-header"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/SecretRedactorTests\.cs$''']
+regexes = ['''^ZGVwbG95OmNhbmFyeS12YWx1ZS1yMTI0$''']
+
+[[allowlists]]
+description = "Fake token-shaped header value in a curl command (secret redactor test)"
+targetRules = ["curl-auth-header"]
+condition = "AND"
+paths = ['''^src/Whiskers\.Tests/SecretRedactorTests\.cs$''']
+regexes = ['''^ghp_canaryvaluer124$''']
+
+[[allowlists]]
 description = "Fake basic-auth probe in a curl command (audit path matrix test: the event keeps none of it)"
 targetRules = ["curl-auth-user"]
 condition = "AND"
