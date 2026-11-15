@@ -105,10 +105,11 @@ public static class ProtectedResourceMatcher
                         return hit with { Argument = key, InFreeText = true };
                 // Contract 0017 B (INV-59): a mount source written in the command (docker run -v /var/run:/r) is a
                 // mount, whatever the command word is; a directory above a protected path reaches into it. A source
-                // relative to the working or home directory (./x, ~/..) cannot be resolved here: unanalysable (INV-24).
+                // relative to the working or home directory (./x, ~/..), or one through another process's view of the
+                // file system (/proc/1/root, /proc/self/cwd), cannot be resolved here: unanalysable (INV-24).
                 foreach (var source in ShellMountSources(shell.Words))
                 {
-                    if (source.StartsWith('.') || source.StartsWith('~'))
+                    if (source.StartsWith('.') || source.StartsWith('~') || IsProcRootOrCwd(source))
                         return new Hit("", null, key) { Argument = key, InFreeText = true };
                     if (AncestorHit(source, pathPatterns) is { } above)
                         return above with { Argument = key, InFreeText = true };
@@ -303,46 +304,87 @@ public static class ProtectedResourceMatcher
         }
     }
 
-    /// <summary>The mount sources a shell command names (contract 0017 B), each cut at its first <c>:</c>: the word
-    /// after <c>-v</c> / <c>--volume</c>, the <c>--volume=</c> form, the value attached to <c>-v</c> or to a short-flag
-    /// cluster ending in <c>v</c> (<c>-v/src:dst</c>, <c>-v=src:dst</c>, <c>-itv/src:dst</c>), the value of every
-    /// <c>source=</c> / <c>src=</c> / <c>device=</c> key of any comma-separated key=value word (<c>--mount …</c>,
-    /// <c>volume-opt=device=…</c>, <c>-o device=…</c>), and the part before the first <c>:</c> of any
-    /// <c>&lt;absolute path&gt;:&lt;path&gt;</c> word.</summary>
+    /// <summary>The mount sources a shell command names (contract 0017 B and its amendments):
+    /// <list type="bullet">
+    /// <item>short syntax, cut at its first <c>:</c>: the word after <c>-v</c> / <c>--volume</c> or after a short-flag
+    /// cluster ending in <c>v</c> (<c>-itv</c>), the <c>--volume=</c> form, the value attached to <c>-v</c> or to such a
+    /// cluster (<c>-v/src:dst</c>, <c>-v=src:dst</c>, <c>-itv/src:dst</c>), and any
+    /// <c>&lt;absolute path&gt;:&lt;path&gt;</c> word;</item>
+    /// <item>keyed: the value of a <c>source=</c> / <c>src=</c> / <c>device=</c> key, also after <c>volume-opt=</c>.
+    /// Inside a <c>--mount</c> / <c>--mount=</c> value and a <c>-o</c> / <c>--opt</c> value (also <c>-o=…</c>,
+    /// <c>--opt=…</c> and attached <c>-o…</c>) keys are matched in any case, as Docker lower-cases them; in any other
+    /// word only in lower case at the start of a comma-separated part (<c>echo SRC=./build</c> is none). A keyed value
+    /// is a path, so it is returned whole and also cut at its first <c>:</c>.</item>
+    /// </list></summary>
     private static IEnumerable<string> ShellMountSources(IReadOnlyList<string> words)
     {
         for (var i = 0; i < words.Count; i++)
         {
             var word = words[i];
             var next = i + 1 < words.Count ? words[i + 1] : null;
-            if (word is "-v" or "--volume" && next is not null) yield return BeforeColon(next);
+            if ((word is "--volume" || IsVolumeCluster(word)) && next is not null) yield return BeforeColon(next);
             else if (word.StartsWith("--volume=", StringComparison.Ordinal)) yield return BeforeColon(word["--volume=".Length..]);
             else if (AttachedVolume(word) is { } attached) yield return BeforeColon(attached);
             else if (word.StartsWith('/') && word.IndexOf(':') > 0) yield return BeforeColon(word);
-            foreach (var source in KeyedSources(word)) yield return BeforeColon(source);
+
+            // A --mount or -o / --opt value: keys in any case.
+            string? optionValue = word is "--mount" or "-o" or "--opt" ? next
+                : word.StartsWith("--mount=", StringComparison.Ordinal) ? word["--mount=".Length..]
+                : word.StartsWith("--opt=", StringComparison.Ordinal) ? word["--opt=".Length..]
+                : word.StartsWith("-o", StringComparison.Ordinal) && word.Length > 2 ? word[2..].TrimStart('=')
+                : null;
+            if (optionValue is not null)
+                foreach (var source in KeyedSources(optionValue, StringComparison.OrdinalIgnoreCase))
+                    foreach (var whole in WholeAndCut(source)) yield return whole;
+            // Any other word: Docker's lower-case keys only.
+            foreach (var source in KeyedSources(word, StringComparison.Ordinal))
+                foreach (var whole in WholeAndCut(source)) yield return whole;
         }
 
         static string BeforeColon(string value) => value.IndexOf(':') is var colon and >= 0 ? value[..colon] : value;
 
-        // The value of a source= / src= / device= key (Docker's keys, lower case only) that starts a comma-separated
-        // part of the word, also after volume-opt= or a flag's own = (--mount=src=…, --opt=device=…, -o=device=…).
-        // Another word's key (make SRC=…, MYSRC=…) is no mount source.
-        static IEnumerable<string> KeyedSources(string word)
+        static IEnumerable<string> WholeAndCut(string value)
         {
-            if (!word.Contains('=')) yield break;
-            foreach (var part in word.Split(','))
+            yield return value;
+            if (value.Contains(':')) yield return BeforeColon(value);
+        }
+
+        // The value of a source= / src= / device= key that starts a comma-separated part, also after volume-opt=
+        // (repeated). A part may be quoted as a CSV field ("source=/x").
+        static IEnumerable<string> KeyedSources(string value, StringComparison comparison)
+        {
+            if (!value.Contains('=')) yield break;
+            foreach (var part in value.Split(','))
             {
-                var option = part;
-                while (KeyPrefixes.FirstOrDefault(p => option.StartsWith(p, StringComparison.Ordinal)) is { } prefix)
-                    option = option[prefix.Length..];
-                if (SourceKeys.FirstOrDefault(k => option.StartsWith(k, StringComparison.Ordinal)) is { } sourceKey)
-                    yield return option[sourceKey.Length..];
+                var option = part.Trim().Trim('"');
+                while (option.StartsWith("volume-opt=", comparison)) option = option["volume-opt=".Length..];
+                foreach (var sourceKey in SourceKeys)
+                    if (option.StartsWith(sourceKey, comparison))
+                    {
+                        yield return option[sourceKey.Length..].Trim('"');
+                        break;
+                    }
             }
         }
     }
 
     private static readonly string[] SourceKeys = ["source=", "src=", "device="];
-    private static readonly string[] KeyPrefixes = ["volume-opt=", "--mount=", "--opt=", "-o="];
+
+    /// <summary>A short-flag cluster ending in <c>v</c> (<c>-v</c>, <c>-itv</c>, <c>-dv</c>): its next word is a
+    /// volume, as Docker's flag parser reads it.</summary>
+    private static bool IsVolumeCluster(string word) =>
+        word.Length >= 2 && word[0] == '-' && word[^1] == 'v' && word[1..].All(char.IsAsciiLetter);
+
+    /// <summary>A path through another process's view of the file system: <c>/proc/&lt;pid|self|thread-self&gt;/root</c>
+    /// or <c>/proc/*/cwd</c>, and anything below them. What it reaches cannot be resolved here.</summary>
+    private static bool IsProcRootOrCwd(string source)
+    {
+        if (!source.StartsWith('/')) return false;
+        var parts = NormalizePath(source).Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3 || parts[0] != "proc") return false;
+        return parts[2] == "cwd"
+            || (parts[2] == "root" && (parts[1] is "self" or "thread-self" || parts[1].All(char.IsAsciiDigit)));
+    }
 
     /// <summary>The value attached to <c>-v</c> or to a short-flag cluster ending in <c>v</c> (<c>-v/src:dst</c>,
     /// <c>-itv/src:dst</c>, <c>-v=src:dst</c>, <c>-v./x:/y</c>, <c>-v~/x:/y</c>), as Docker's flag parser reads it: the

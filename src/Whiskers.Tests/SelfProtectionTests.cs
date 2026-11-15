@@ -586,8 +586,68 @@ public class SelfProtectionTests
     public void A_key_cannot_mount_the_control_plane_through_mount_or_volume_forms(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
+    /// <summary>Contract 0017 B, amendment 3 (the S2 review's bypass probe): every form below reached the control plane
+    /// through a mount and must stay refused for a key.</summary>
+    [Theory]
+    // B1: Docker lower-cases the keys of a --mount value
+    [InlineData("docker run --rm --mount type=bind,SOURCE=/var/run,target=/r alpine ls /r")]
+    [InlineData("docker run --rm --mount type=bind,Src=/var/lib/docker/volumes,dst=/v alpine ls /v")]
+    [InlineData("docker run --rm --mount type=volume,VOLUME-OPT=type=none,VOLUME-OPT=o=bind,VOLUME-OPT=device=/var/lib/docker/volumes,dst=/v alpine ls /v")]
+    [InlineData("docker run --rm --mount=SRC=/var/run,dst=/r,type=bind alpine ls /r")]
+    // B4: an attached -o value
+    [InlineData("docker volume create -otype=none -oo=bind -odevice=/var/lib/docker/volumes x")]
+    [InlineData("docker volume create -d local -odevice=/var/run -otype=none -oo=bind x")]
+    [InlineData("docker volume create -o type=none -o o=bind -o DEVICE=/var/run x")]
+    // B2: a keyed source is a path; it is not cut at ':'
+    [InlineData("docker run --rm --mount type=bind,source=/tmp/a:b/../../var/run,target=/r alpine ls /r")]
+    [InlineData("mkdir -p /tmp/a:b && docker run --rm --mount type=bind,source=/tmp/a:b/../../var/lib/docker/volumes,target=/v alpine ls /v")]
+    [InlineData("docker volume create -o type=none -o o=bind -o device=/tmp/a:b/../../var/run x")]
+    // B3: a flag cluster ending in v takes the next word; a relative source in it is unanalysable
+    [InlineData("cd /var && docker run --rm -itv ./run:/r alpine ls /r")]
+    [InlineData("cd /var/lib/docker && docker run -dv ./volumes:/v alpine ls /v")]
+    [InlineData("docker run --rm -itv ~/..:/v alpine ls /v")]
+    [InlineData("docker run --rm -itv ../run:/r alpine ls /r")]
+    [InlineData("docker run --rm -itv /var/run:/r alpine ls /r")]
+    // quoting and normalisation
+    [InlineData("docker run --rm -v \"/var/run\":/r alpine ls /r")]
+    [InlineData("docker run --rm -v '/var/run:/r' alpine ls /r")]
+    [InlineData("docker run --rm '-v' /var/run:/r alpine ls /r")]
+    [InlineData("docker run --rm -v /var/run\\:/r alpine ls /r")]
+    [InlineData("docker run --rm -v //var//run:/r alpine ls /r")]
+    [InlineData("docker run --rm -v /var/run/../run:/r alpine ls /r")]
+    [InlineData("docker run --rm -v /var/run/:/r alpine ls /r")]
+    [InlineData("docker run --rm -v /var/./run/.:/r alpine ls /r")]
+    [InlineData("docker run --rm -v /var/lib/docker/volumes/../volumes/:/v alpine ls /v")]
+    [InlineData("docker run --rm -itv=/var/run:/r alpine ls /r")]
+    [InlineData("docker run --rm --volume=\"/var/run\":/r alpine ls /r")]
+    [InlineData("docker run --rm --mount 'type=bind,\"source=/var/run\",target=/r' alpine ls /r")]
+    [InlineData("docker run --rm --mount type=bind,source=\"/var/run\",target=/r alpine ls /r")]
+    [InlineData("docker run --rm --mount type=bind,src=/var//run/.,dst=/r alpine ls /r")]
+    [InlineData("docker run --rm --mount type=bind,target=/r,source=/var/run alpine ls /r")]
+    [InlineData("docker service create --mount type=bind,source=/var/run,target=/r alpine")]
+    // run-time expansion
+    [InlineData("docker run --rm -v $HOME/..:/v alpine ls /v")]
+    [InlineData("docker run --rm -v $(pwd):/v alpine ls /v")]
+    [InlineData("docker run --rm -v /var/{run,x}:/r alpine ls /r")]
+    // other runtimes, compose, heredoc
+    [InlineData("nerdctl run --rm -v /var/run:/r alpine ls /r")]
+    [InlineData("sudo nerdctl run --rm --mount type=bind,src=/var/run,dst=/r alpine ls /r")]
+    [InlineData("docker compose -f - up -d <<EOF\nservices:\n  t:\n    image: alpine\n    volumes: [\"/var/run:/r\"]\nEOF")]
+    [InlineData("echo 'docker run -v /var/run:/r alpine ls' | sh")]
+    // M3: another process's view of the file system
+    [InlineData("docker run --rm -v /proc/1/root/var/run:/r alpine ls /r")]
+    [InlineData("docker run --rm -v /proc/1/root:/h alpine ls /h")]
+    [InlineData("docker run --rm -v /proc/self/root/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("docker run --rm --mount type=bind,source=/proc/thread-self/cwd,target=/c alpine ls /c")]
+    public void Mount_forms_from_the_S2_review_are_refused_for_a_key(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
     [Theory]
     [InlineData("docker run -v /srv/app:/app alpine ls")]
+    [InlineData("docker run -v /srv/app:/app:ro alpine ls")]
+    [InlineData("docker run --mount type=bind,source=/srv/a:b,target=/r alpine ls")]  // a ':' inside a keyed path
+    [InlineData("docker run --mount type=bind,SOURCE=/srv/app,target=/app alpine ls")]
+    [InlineData("docker volume create -otype=none -oo=bind -odevice=/srv/data x")]
     [InlineData("docker run -v data:/var/run alpine ls")]                              // a named volume
     [InlineData("echo SRC=./build")]                                                   // not Docker's lower-case key
     [InlineData("export MYSRC=/var/run")]                                              // not a key of its own

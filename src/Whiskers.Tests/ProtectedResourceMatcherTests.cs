@@ -211,6 +211,12 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "docker volume create --opt=device=/var/run x")]
     [InlineData("command", "docker run --rm -v /var/lib/docker/volumes:/v:ro alpine find /v -name vault.json -delete")]
     [InlineData("command", "docker run --rm --mount type=bind,source=/var/run:x,target=/r alpine ls /r")]  // cut at ':' too
+    [InlineData("command", "docker run --rm --mount type=bind,source=/tmp/a:b/../../var/run,target=/r alpine ls /r")]  // and whole
+    [InlineData("command", "docker run --rm --mount type=bind,SOURCE=/var/run,target=/r alpine ls /r")]   // any case in --mount
+    [InlineData("command", "docker run --rm --mount type=volume,VOLUME-OPT=device=/var/run,dst=/r alpine ls /r")]
+    [InlineData("command", "docker volume create -odevice=/var/lib/docker/volumes x")]                     // attached -o
+    [InlineData("command", "docker volume create --opt DEVICE=/var/run x")]
+    [InlineData("command", "docker run --rm -dv /var/run:/r alpine ls /r")]
     [InlineData("command", "docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
     [InlineData("command", "docker run --rm --mount type=bind,source=/var/run,target=/r alpine ls /r")]
     [InlineData("command", "docker run --rm --mount=type=bind,src=/,dst=/host alpine ls /host")]
@@ -232,6 +238,9 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "docker volume create -o type=none -o o=bind -o device=/srv/data x")]
     [InlineData("command", "docker run --mount type=volume,volume-opt=device=/srv/data,dst=/d alpine ls")]
     [InlineData("command", "echo SRC=./build")]                               // not Docker's lower-case key
+    [InlineData("command", "docker run --mount type=bind,source=/srv/a:b,target=/r alpine ls")]  // a ':' in a keyed path
+    [InlineData("command", "docker run --mount type=bind,SOURCE=/srv/app,target=/app alpine ls")]
+    [InlineData("command", "docker volume create -odevice=/srv/data x")]
     [InlineData("command", "export MYSRC=/var/run")]                          // a key must start the word or a part
     [InlineData("command", "docker run --mount type=bind,source=/srv/app,target=/app alpine ls")]
     [InlineData("command", "docker run -v data:/var/run alpine ls")]          // a named volume; the container side
@@ -247,6 +256,12 @@ public class ProtectedResourceMatcherTests
     [InlineData("docker run --rm --volume=./data:/v alpine ls /v")]
     [InlineData("docker run --rm --mount type=bind,source=./x,target=/r alpine ls /r")]
     [InlineData("docker volume create -o type=none -o o=bind -o device=~/.. x")]
+    [InlineData("docker run --rm -itv ./run:/r alpine ls /r")]                     // a cluster ending in v
+    [InlineData("docker run --rm -dv ../run:/r alpine ls /r")]
+    [InlineData("docker run --rm --mount type=bind,SRC=./x,target=/r alpine ls /r")]
+    [InlineData("docker run --rm -v /proc/1/root:/h alpine ls /h")]                // another process's file system
+    [InlineData("docker run --rm -v /proc/self/root/var/run:/r alpine ls /r")]
+    [InlineData("docker run --rm -v /proc/42/cwd:/c alpine ls /c")]
     public void A_mount_source_relative_to_a_directory_is_unanalysable(string command) =>
         Assert.Equal("command", ControlPlane("command", command)?.UnanalyzableArgument);
 
