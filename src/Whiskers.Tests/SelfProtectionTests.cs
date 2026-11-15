@@ -858,6 +858,24 @@ public class SelfProtectionTests
     public void Bypasses_from_the_S2_round_9_review_are_refused_for_a_key(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
+    /// <summary>Round 10: a relative glob on a protected volume name, widened brackets in a relative path, and a
+    /// brace bash reads past a '}' without a comma.</summary>
+    [Theory]
+    [InlineData("cd /var/lib/docker/volumes && cat whisk?rs_data/_data/vault.key")]
+    [InlineData("cd /var/lib/docker/volumes && cat whi[s]kers_data/_data/vault.key")]
+    [InlineData("cd /var/lib/docker/volumes && cat ./whisk?rs_data/_data/vault.key")]
+    [InlineData("cd /var/lib/docker && cat volumes/whisk?rs_data/_data/vault.key")]
+    [InlineData("cd /app/data && rm -rf mt[]l]s")]
+    [InlineData("cd /app/data && rm -rf mt[[.l.]]s")]
+    [InlineData("cd /app/data && chmod -R 777 mt[]l]s")]
+    [InlineData("docker stop whi{x},s}kers")]
+    [InlineData("docker stop whi{},s}kers")]
+    [InlineData("ssh host docker stop whi{x},s}kers")]
+    [InlineData("curl --unix-socket /var/run/docker.so{k},c}k -X POST http://x/containers/abc/stop")]
+    [InlineData("cat /var/lib/docker/volumes/whi{x},s}kers_data/_data/vault.key")]
+    public void Bypasses_from_the_S2_round_10_review_are_refused_for_a_key(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
     /// <summary>M5, M6: everyday bracket expressions and relative or quoted globs stay allowed.</summary>
     [Theory]
     [InlineData("[[ -f /etc/hosts ]] && echo ok")]
@@ -877,6 +895,11 @@ public class SelfProtectionTests
     [InlineData("sed -i 's/foo.*/bar/' /srv/app/f")]
     [InlineData("grep -r 'foo/.*bar' /srv/app")]
     [InlineData("ls ../logs/*.log")]
+    [InlineData("cp -a /etc/skel/.[!.]* /home/u/")]
+    [InlineData("rm -f /tmp/build/.[!.]*")]
+    [InlineData("rm -rf dist/*")]
+    [InlineData("docker ps --format '{{.Names}},{{.Status}}'")]
+    [InlineData("echo {a},{b}")]
     public void Everyday_globs_and_brackets_stay_allowed_for_a_key(string command) =>
         Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 

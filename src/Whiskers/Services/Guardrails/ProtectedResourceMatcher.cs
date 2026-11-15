@@ -547,73 +547,93 @@ public static class ProtectedResourceMatcher
             }
         if (!asGlob.Contains('/')) return null;
         if (!asGlob.StartsWith('/')) return RelativeGlobHit(glob, pathPatterns);
-        // Repeated slashes and '.' segments are collapsed, a segment that can be '.' is tried with and without it; one
-        // that can be '..' cannot be resolved in a glob: a hit (B17, B20).
-        if (GlobPathVariants(asGlob) is not { } paths) return pathPatterns.Count > 0 ? new Hit(glob, UnreadableGlob) : null;
+        // Repeated slashes and '.' segments are collapsed; a segment that is or can be '.' or '..' cannot be resolved
+        // in a glob: a hit (B17, B20).
+        if (GlobPath(glob) is not { } path) return pathPatterns.Count > 0 ? new Hit(glob, UnreadableGlob) : null;
         // The protected path itself and everything below it; the pattern's '*' crosses '/', the glob's does not.
-        foreach (var path in paths)
-            foreach (var pattern in pathPatterns)
-                if (GlobsIntersect(path, pattern) || GlobsIntersect(path, pattern.TrimEnd('/') + "/*"))
-                    return new Hit(glob, pattern);
+        foreach (var pattern in pathPatterns)
+            if (GlobsIntersect(path, pattern) || GlobsIntersect(path, pattern.TrimEnd('/') + "/*"))
+                return new Hit(glob, pattern);
         return null;
     }
 
     /// <summary>A relative glob (the working directory is unknown) hits when one of its segments could be a protected
     /// directory with its <c>?</c> and <c>[…]</c> standing for letters (cd /app/data && cat mtl?/client.key,
-    /// rm -rf mtl?); a <c>*</c> stands only for what the name leaves open, so logs/*.log reaches nothing (S2 round 9,
-    /// M6, m7).</summary>
+    /// rm -rf mtl?, cd /var/lib/docker/volumes && cat whisk?rs_data/…); a <c>*</c> of the glob stands only for what the
+    /// name leaves open, so logs/*.log reaches nothing (S2 rounds 9 and 10). A segment that is not read reliably
+    /// (nested or several brackets) is widened, and its <c>*</c> may stand for any letter.</summary>
     private static Hit? RelativeGlobHit(string glob, IReadOnlyList<string> pathPatterns)
     {
-        var segments = ReadableGlob(glob).Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Where(seg => seg.IndexOfAny(['*', '?']) >= 0).ToList();
+        var segments = glob.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(seg => (Glob: ReadableSegment(seg), Widened: UnreadableSegment(seg)))
+            .Where(seg => seg.Glob.IndexOfAny(['*', '?']) >= 0).ToList();
         if (segments.Count == 0) return null;
         foreach (var pattern in pathPatterns)
         {
             var name = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(x => x != "*");
-            if (name is null || name.Contains('*')) continue;
-            if (segments.Any(seg => GlobsIntersect(seg, name, starTakesLetters: false))) return new Hit(glob, pattern);
+            if (name is null) continue;
+            if (segments.Any(seg => GlobsIntersect(seg.Glob, name, starTakesLetters: seg.Widened))) return new Hit(glob, pattern);
         }
         return null;
     }
 
-    /// <summary>A glob with each bracket expression as <c>?</c>. A segment with nested or several closing brackets
-    /// ([[.o.]], [a]o], an escaped ]) is not read reliably: from its first <c>[</c> on it becomes <c>*</c>, which can
-    /// only find more ([0-9][0-9]* names nothing, docker.s[[.o.]]ck still reaches docker.sock; S2 round 9, M5).</summary>
-    private static string ReadableGlob(string glob) =>
-        string.Join('/', glob.Split('/').Select(seg =>
-            seg.Contains("[[") || (seg.Contains('[') && seg.Count(ch => ch == ']') > 1)
-                ? seg[..seg.IndexOf('[')] + "*"
-                : BracketsAsAnyCharacter(seg)));
+    /// <summary>A glob with each bracket expression as <c>?</c>. A segment with nested brackets or a stray closing
+    /// bracket ([[.o.]], [a]o], an escaped ]) is not read reliably: from its first <c>[</c> on it becomes <c>*</c>, which finds
+    /// more in an absolute path ([0-9][0-9]* names nothing, docker.s[[.o.]]ck still reaches docker.sock; S2 round 9,
+    /// M5); a relative glob lets that <c>*</c> stand for letters (round 10).</summary>
+    private static string ReadableGlob(string glob) => string.Join('/', glob.Split('/').Select(ReadableSegment));
+
+    // Nested brackets ([[.o.]], [[=o=]]) or a ']' left over once the bracket expressions are read ([a]o], which an
+    // escaped ] became): the shell may read the segment otherwise. [a-z]*[0-9].log is read reliably.
+    private static bool UnreadableSegment(string seg) =>
+        seg.Contains("[[") || (seg.Contains('[') && BracketsAsAnyCharacter(seg).Contains(']'));
+
+    private static string ReadableSegment(string seg) =>
+        UnreadableSegment(seg) ? seg[..seg.IndexOf('[')] + "*" : BracketsAsAnyCharacter(seg);
 
     /// <summary>The pattern a hit names when a glob in a path cannot be read reliably (a segment that can be
     /// <c>..</c>). It is no control-plane pattern; an interactive Admin is still asked to approve it, as for any
     /// presumed hit on the control plane.</summary>
     public const string UnreadableGlob = "(a glob path that cannot be read reliably)";
 
-    /// <summary>An absolute glob path as the kernel would read what it expands to: repeated slashes and <c>.</c>
-    /// segments removed, and each segment that can expand to <c>.</c> (<c>.*</c>, <c>.?</c> in dash or an older bash)
-    /// tried both kept and removed. <c>null</c> when a segment is or can be <c>..</c>, which only the file system
-    /// resolves, or when more than three segments can be <c>.</c>.</summary>
-    private static List<string>? GlobPathVariants(string glob)
+    /// <summary>An absolute glob path, readable (<see cref="ReadableGlob"/>), with repeated slashes and <c>.</c>
+    /// segments removed. <c>null</c> when a segment is <c>..</c> or a glob that can expand to <c>.</c> or <c>..</c>
+    /// (<c>.*</c>, <c>.?</c> in dash or an older bash), which only the file system resolves (S2 rounds 8 to 10). A
+    /// bracket that excludes the dot (<c>.[!.]*</c>) cannot.</summary>
+    private static string? GlobPath(string glob)
     {
-        var variants = new List<List<string>> { new() };
-        var dots = 0;
-        foreach (var part in glob.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        var parts = new List<string>();
+        foreach (var raw in glob.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
-            if (part == ".") continue;
-            if (part == ".." || (part.StartsWith('.') && part.IndexOfAny(['*', '?']) >= 0 && GlobsIntersect(part, "..")))
-                return null;
-            var maybeDot = part.StartsWith('.') && part.IndexOfAny(['*', '?']) >= 0 && GlobsIntersect(part, ".");
-            if (maybeDot && ++dots > 3) return null;
-            var next = new List<List<string>>();
-            foreach (var v in variants)
+            if (raw == ".") continue;
+            if (raw == "..") return null;
+            if (raw.StartsWith('.') && raw.IndexOfAny(['*', '?', '[']) >= 0)
             {
-                next.Add([.. v, part]);
-                if (maybeDot) next.Add([.. v]);
+                var asDot = DotForm(raw);
+                if (GlobsIntersect(asDot, ".") || GlobsIntersect(asDot, "..")) return null;
             }
-            variants = next;
+            parts.Add(ReadableSegment(raw));
         }
-        return variants.Select(v => "/" + string.Join('/', v)).ToList();
+        return "/" + string.Join('/', parts);
+    }
+
+    // A segment as far as it can spell '.' or '..': a bracket expression that excludes the dot ([!.], [^.]) is a letter
+    // other than a dot, any other one (or one that is not read reliably) could be a dot.
+    private static string DotForm(string seg)
+    {
+        if (UnreadableSegment(seg)) return seg[..seg.IndexOf('[')] + "*";
+        var result = new StringBuilder(seg.Length);
+        for (var i = 0; i < seg.Length; i++)
+        {
+            if (seg[i] != '[') { result.Append(seg[i]); continue; }
+            var close = seg.IndexOf(']', i + 2);
+            if (close < 0) { result.Append('['); continue; }
+            var negated = seg[i + 1] is '!' or '^';
+            var members = seg[(i + (negated ? 2 : 1))..close];
+            result.Append(negated && members.Contains('.') ? 'x' : '?');
+            i = close;
+        }
+        return result.ToString();
     }
 
     /// <summary>M4: a glob that could name a directory above a literal protected path (rm -r /var/lib/dock?r,
@@ -621,17 +641,16 @@ public static class ProtectedResourceMatcher
     private static Hit? GlobAncestorHit(string glob, IReadOnlyList<string> pathPatterns)
     {
         if (!glob.StartsWith('/')) return RelativeGlobHit(glob, pathPatterns);
-        if (GlobPathVariants(ReadableGlob(glob)) is not { } paths) return pathPatterns.Count > 0 ? new Hit(glob, UnreadableGlob) : null;
-        foreach (var path in paths)
-            foreach (var pattern in pathPatterns)
-            {
-                if (pattern.StartsWith('*')) continue;
-                var segments = pattern.TrimEnd('*').TrimEnd('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-                if (path == "/") return new Hit(glob, pattern);
-                for (var k = 1; k < segments.Length; k++)
-                    if (GlobsIntersect(path, "/" + string.Join('/', segments[..k])))
-                        return new Hit(glob, pattern);
-            }
+        if (GlobPath(glob) is not { } path) return pathPatterns.Count > 0 ? new Hit(glob, UnreadableGlob) : null;
+        foreach (var pattern in pathPatterns)
+        {
+            if (pattern.StartsWith('*')) continue;
+            var segments = pattern.TrimEnd('*').TrimEnd('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (path == "/") return new Hit(glob, pattern);
+            for (var k = 1; k < segments.Length; k++)
+                if (GlobsIntersect(path, "/" + string.Join('/', segments[..k])))
+                    return new Hit(glob, pattern);
+        }
         return null;
     }
 
@@ -1130,26 +1149,22 @@ public static class ProtectedResourceMatcher
         text.IndexOfAny([' ', '\t', '\n', ';', '|', '&', '$', '`', '"', '\'', '\\', '{', '<', '>']) >= 0;
 
     // {a,b} and {1..3} are expanded by the shell; a lone brace (find -exec {} \;, awk '{…}' quoted) is not.
-    // Decided for every brace of the text in one pass (S2 round 8, B18: a scan per brace was quadratic): the matching
-    // brace is found by depth, skipping escaped and quoted characters (whi{{},s}kers, whi{\},s}kers and whi{'}',s}kers
-    // all expand to whiskers); a ',' or '..' anywhere inside it counts, a nested brace passes its own on to the one
-    // around it. A brace without a match counts when a ',' or '..' follows it before the word ends (fail-closed).
+    // Decided for every brace of the text in one pass, as bash's brace_gobbler decides it for each brace on its own
+    // (S2 round 10): a '}' that brings a brace back to its own level closes it only when a ',' or '..' came at that
+    // level before; otherwise bash reads on (whi{x},s}kers and whi{},s}kers expand to whiskers). A brace still open
+    // when the word ends is a letter ({{.Names}},{{.Status}}). Braces at the same level move together, so they are kept
+    // as groups in one linked list each; a '}' that closes nothing joins its group to the one around it. Linear in the
+    // text (S2 round 8, B18). Words end where Tokenize ends them (round 9, B19): a comment starts only outside a word,
+    // a double-quoted \" does not end the quote, and after a quote that never closes every brace counts.
     private static bool[] BraceExpansions(string text)
     {
         var result = new bool[text.Length];
-        var open = new List<(int Index, bool Separator)>();
-        void Unmatched()
+        var next = new int[text.Length];
+        var groups = new List<(int Head, int Tail, bool Separator)>();
+        void Close((int Head, int Tail, bool Separator) group)
         {
-            var separator = false;
-            for (var k = open.Count - 1; k >= 0; k--)
-            {
-                separator |= open[k].Separator;
-                result[open[k].Index] = separator;
-            }
-            open.Clear();
+            for (var k = group.Head; k >= 0; k = next[k]) result[k] = true;
         }
-        // Read as Tokenize reads it (S2 round 9, B19): a comment starts only outside a word, a double-quoted \" does not
-        // end the quote, and a quote that never closes leaves every later brace counted (the text is unanalysable then).
         var inWord = false;
         for (var i = 0; i < text.Length; i++)
         {
@@ -1162,9 +1177,10 @@ public static class ProtectedResourceMatcher
                     end += c == '"' && text[end] == '\\' ? 2 : 1;
                 if (end >= text.Length)
                 {
+                    foreach (var group in groups) Close(group);
                     for (var k = i; k < text.Length; k++)
                         if (text[k] == '{') result[k] = true;
-                    break;
+                    return result;
                 }
                 i = end;
                 inWord = true;
@@ -1178,23 +1194,34 @@ public static class ProtectedResourceMatcher
             }
             if (c is ' ' or '\t' or '\r' or '\n' or ';' or '|' or '&' or '(' or ')' or '<' or '>')
             {
-                Unmatched();
+                groups.Clear();   // still open when the word ends: a letter
                 inWord = false;
                 continue;
             }
             inWord = true;
-            if (c == '{') open.Add((i, false));
-            else if (c == '}' && open.Count > 0)
+            if (c == '{')
             {
-                var (index, separator) = open[^1];
-                open.RemoveAt(open.Count - 1);
-                result[index] = separator;
-                if (separator && open.Count > 0) open[^1] = (open[^1].Index, true);
+                next[i] = -1;
+                groups.Add((i, i, false));
             }
-            else if (open.Count > 0 && (c == ',' || (c == '.' && i + 1 < text.Length && text[i + 1] == '.')))
-                open[^1] = (open[^1].Index, true);
+            else if (c == '}' && groups.Count > 0)
+            {
+                var top = groups[^1];
+                groups.RemoveAt(groups.Count - 1);
+                if (top.Separator) Close(top);
+                else if (groups.Count == 0) groups.Add(top);   // read on, still at its own level
+                else
+                {
+                    // The braces one level out are now at their own level too; the separator they saw counts for
+                    // them, and for the joined ones it can only make more of them count (fail-closed).
+                    var outer = groups[^1];
+                    next[outer.Tail] = top.Head;
+                    groups[^1] = (outer.Head, top.Tail, outer.Separator);
+                }
+            }
+            else if (groups.Count > 0 && (c == ',' || (c == '.' && i + 1 < text.Length && text[i + 1] == '.')))
+                groups[^1] = (groups[^1].Head, groups[^1].Tail, true);
         }
-        Unmatched();
         return result;
     }
 
