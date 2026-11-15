@@ -130,7 +130,8 @@ built in). <!-- claim:SEC-02 -->
 ## VAULT_KEY loss, change and rotation
 
 The vault's key also derives the keys for the webhook secrets, the rollback snapshots and the data-protection key ring
-(R1-31). There is no in-place rotation of `VAULT_KEY` yet; what a change or loss does: <!-- claim:SEC-22 -->
+(R1-31). A planned replacement is done in place ([docs/operations/vault-key-rotation.md](docs/operations/vault-key-rotation.md));
+what a change without it, or a loss, does: <!-- claim:SEC-22 -->
 
 - **Changed or lost key:** the vault is locked (it is left unchanged until the right key is set again). Stored
   credentials cannot be read; webhooks refuse every delivery until their secret is regenerated with a usable vault;
@@ -205,8 +206,9 @@ are logged (lines that quote rows are left out). <!-- claim:SEC-12 -->
 - Keep the email whitelist tight; review roles under *Settings > Authentication*.
 - Issue MCP API keys with the **least** permission level needed.
 - Keep the agent's guardrail presets restrictive; only widen autonomy deliberately. <!-- claim-free:advice -->
-- Set a strong `VAULT_KEY` (or mount it as a file via `VAULT_KEY_FILE`) and protect the `/app/data` volume (it still holds plaintext SSH and
-  mTLS client keys). Without a usable vault Whiskers creates no webhook and keeps no rollback snapshot (an update then
+- Set a strong `VAULT_KEY` (or mount it as a file via `VAULT_KEY_FILE`) and protect the `/app/data` volume (its SSH and
+  mTLS client keys are sealed when a vault key is set; plaintext only without one, where Whiskers stores no new key
+  and keys stored before stay plaintext). Without a usable vault Whiskers creates no webhook and keeps no rollback snapshot (an update then
   goes ahead without a way back), and writes the data-protection keys as before. Credentials entered in the UI need the vault;
   credentials set by environment variables (`AICHAT_API_KEY`, `AGENT_API_KEY`, `MATTERMOST_WEBHOOK_URL`, …) are not
   stored by Whiskers — keep them in a secret store or a mode-0600 `.env`, never in the image. <!-- claim:SEC-26 -->

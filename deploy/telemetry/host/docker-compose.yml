@@ -14,7 +14,7 @@ services:
     pid: host
     command:
       - '--path.rootfs=/host'
-      - '--web.listen-address=${TS_IP}:9100'   # mesh-only binding
+      - '--web.listen-address=${TS_IP:?set TS_IP to this host''s mesh IP}:9100'   # mesh-only binding
       # R1-58: SMART readings written by a host timer (docs/operations/disk-health.md), read through the ro /host mount.
       - '--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector'
     volumes:
