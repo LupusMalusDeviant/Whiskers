@@ -103,6 +103,11 @@ public static class ProtectedResourceMatcher
                 foreach (var glob in shell.Globs)
                     if (GlobHit(glob, keyPatterns, pathPatterns) is { } hit)
                         return hit with { Argument = key, InFreeText = true };
+                // Contract 0017 B (INV-59): a mount source written in the command (docker run -v /var/run:/r) is a
+                // mount, whatever the command word is; a directory above a protected path reaches into it.
+                foreach (var source in ShellMountSources(shell.Words))
+                    if (AncestorHit(source, pathPatterns) is { } above)
+                        return above with { Argument = key, InFreeText = true };
                 // A command that removes, moves or changes permissions of a directory above a protected path
                 // (rm -rf /var/lib/docker) destroys it; merely reading one (df -h /var/lib/docker) does not.
                 if (shell.Words.Any(w => ModifyingCommands.Contains(Path.GetFileName(w))))
@@ -290,6 +295,39 @@ public static class ProtectedResourceMatcher
         {
             var colon = entry.IndexOf(':');
             yield return colon > 0 ? entry[..colon] : entry;
+        }
+    }
+
+    /// <summary>The mount sources a shell command names (contract 0017 B): the word after <c>-v</c> / <c>--volume</c>
+    /// and the <c>--volume=</c> form up to the first <c>:</c>, the <c>source=</c> / <c>src=</c> value of a
+    /// <c>--mount</c> word, and the part before the first <c>:</c> of any <c>&lt;absolute path&gt;:&lt;path&gt;</c> word.</summary>
+    private static IEnumerable<string> ShellMountSources(IReadOnlyList<string> words)
+    {
+        for (var i = 0; i < words.Count; i++)
+        {
+            var word = words[i];
+            var next = i + 1 < words.Count ? words[i + 1] : null;
+            if (word is "-v" or "--volume" && next is not null) yield return BeforeColon(next);
+            else if (word.StartsWith("--volume=", StringComparison.Ordinal)) yield return BeforeColon(word["--volume=".Length..]);
+            else if (word == "--mount" && next is not null)
+                foreach (var source in MountOptionSources(next)) yield return source;
+            else if (word.StartsWith("--mount=", StringComparison.Ordinal))
+                foreach (var source in MountOptionSources(word["--mount=".Length..])) yield return source;
+            else if (word.StartsWith('/') && word.IndexOf(':') > 0) yield return BeforeColon(word);
+        }
+
+        static string BeforeColon(string value) => value.IndexOf(':') is var colon and >= 0 ? value[..colon] : value;
+
+        static IEnumerable<string> MountOptionSources(string value)
+        {
+            foreach (var option in value.Split(','))
+            {
+                var eq = option.IndexOf('=');
+                if (eq <= 0) continue;
+                var name = option[..eq].Trim();
+                if (name.Equals("source", StringComparison.OrdinalIgnoreCase) || name.Equals("src", StringComparison.OrdinalIgnoreCase))
+                    yield return option[(eq + 1)..].Trim();
+            }
         }
     }
 

@@ -196,6 +196,14 @@ public class ProtectedResourceMatcherTests
     [InlineData("yaml", "services: [unclosed")]                                                // no YAML
     [InlineData("yaml", "services:\n  t:\n    volumes: [\"/var/run/dock\\u0065r.sock:/s\"]\n")]  // an escaped protected path
     [InlineData("command", "cat /var/lib/docker/volumes/serverwatch-data/_data/mtls/client.key")]
+    // Contract 0017 B (INV-59): a mount source in a shell command, whatever the command word is.
+    [InlineData("command", "docker run --rm -v /var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm --volume /var/run:/r alpine ls /r")]
+    [InlineData("command", "docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm --mount type=bind,source=/var/run,target=/r alpine ls /r")]
+    [InlineData("command", "docker run --rm --mount=type=bind,src=/,dst=/host alpine ls /host")]
+    [InlineData("command", "podman run --rm /var/run:/r alpine ls /r")]                     // <absolute path>:<path>
+    [InlineData("command", "sh -c 'docker run -v /var/run:/r alpine ls'")]                  // read again
     public void Paths_reaching_the_control_plane_are_found_however_they_are_written(string key, string value) =>
         Assert.NotNull(ControlPlane(key, value));
 
@@ -206,6 +214,9 @@ public class ProtectedResourceMatcherTests
     [InlineData("volumes", "/var/log:/host-logs:ro")]
     [InlineData("command", "df -h /var/lib/docker")]                           // reading a directory above it
     [InlineData("command", "rm -rf /tmp/build")]
+    [InlineData("command", "docker run -v /srv/app:/app alpine ls")]          // contract 0017 B: an ordinary mount
+    [InlineData("command", "docker run --mount type=bind,source=/srv/app,target=/app alpine ls")]
+    [InlineData("command", "docker run -v data:/var/run alpine ls")]          // a named volume; the container side
     [InlineData("yaml", "services:\n  t:\n    ports: [\"${PORT:-8080}:80\"]\n    volumes:\n      - ${DATA:-./data}:/data\n")]
     public void Ordinary_mounts_stay_allowed(string key, string value) => Assert.Null(ControlPlane(key, value));
 

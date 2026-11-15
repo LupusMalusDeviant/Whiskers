@@ -543,4 +543,39 @@ public class SelfProtectionTests
         Assert.Equal(MutationStatus.Denied, outcome.Status);
         Assert.Empty(h.Approvals.GetPending());
     }
+
+    // Contract 0017 B (INV-59): a mount written inside a shell command is read as a mount.
+    private static Whiskers.Services.Guardrails.GuardrailVerdict ExecuteCommandAsAdminKey(string command)
+    {
+        var policy = GuardrailPolicy.SafeDefault();
+        policy.MaxAutonomousLevel = McpPermissionLevels.Admin;
+        policy.RequireConfirmationForWrites = false;
+        var principal = new AgentPrincipal(AgentPrincipalKind.McpKey, "k", McpPermissionLevels.Admin, null, McpKeyId: "k1");
+        var args = new Dictionary<string, JsonElement>
+        {
+            ["serverId"] = JsonSerializer.SerializeToElement("local"),
+            ["command"] = JsonSerializer.SerializeToElement(command),
+        };
+        return Whiskers.Services.Guardrails.GuardrailEngine.CreateDefault().Evaluate(
+            new Whiskers.Services.Guardrails.GuardrailRequest("execute_command", McpPermissionLevels.Admin, args,
+                new AgentContext("s", principal, AgentOrigin.McpDirect, policy))).Verdict;
+    }
+
+    /// <summary>The review's repro (finding 6): an Admin MCP key may not mount the volumes directory or /var/run.</summary>
+    [Theory]
+    [InlineData("docker run --rm -v /var/lib/docker/volumes:/v alpine find /v -name vault.json -delete")]
+    [InlineData("docker run --rm -v /var/run:/r docker docker -H unix:///r/docker.sock ps")]
+    public void A_key_cannot_mount_a_directory_above_the_control_plane_through_execute_command(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
+    [Theory]
+    [InlineData("docker run --rm --mount type=bind,source=/var/run,target=/r alpine ls /r")]
+    [InlineData("docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
+    public void A_key_cannot_mount_the_control_plane_through_mount_or_volume_forms(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
+    [Fact]
+    public void A_key_may_still_mount_an_ordinary_directory_through_execute_command() =>
+        Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow,
+            ExecuteCommandAsAdminKey("docker run -v /srv/app:/app alpine ls"));
 }
