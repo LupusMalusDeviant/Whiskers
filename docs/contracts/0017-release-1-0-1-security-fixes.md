@@ -392,3 +392,57 @@ A source that starts with `.` or `~` cannot be resolved and counts as unanalysab
 7. The mTLS approval covers the adaptation of the contract 0007 client path to the new `SignCsr` signature.
 8. Every Python call named above is replaced in 1.0.1.
 9. INV-40 stays ✅ with the precise wording of part J.
+
+## Amendment 2 — review round 2 (15 November 2026)
+
+Wording only: no new decision and no new protected area. Where it differs, this amendment wins over Amendment 1.
+
+### I — tools, and what happens when one is missing
+
+- **Tools.** The scripts need these tools, and each script names them at the top:
+
+  | Job | Tool | Notes |
+  |---|---|---|
+  | JSON | `jq` | |
+  | SQLite snapshot | `sqlite3` | `.timeout`, `.backup`; each copy under `timeout 300`. The header check and size limits stay as today, and no half copies are left. |
+  | Probe in `tailnet-guard.sh` | `nc -z -w5`, or bash `/dev/tcp` under `timeout 5` | |
+
+- **Missing tool.** Each function keeps today's behaviour:
+  - Without `sqlite3`, the SQLite snapshot is skipped with a WARN that the run status reports, and the backup itself
+    still runs.
+  - Only a tool that the whole script needs refuses the start.
+- **Rollout.** The tools are installed on every fleet server before the new client is rolled out. This step is
+  `[braucht Nutzer]`.
+- **Test.** The client without `sqlite3` still completes a backup and reports the skipped snapshot.
+
+### A — socket path equivalence
+
+- The socket paths of `ControlPlaneResources` count as one source.
+- For `use_api_socket`, the decided source is the engine's socket, whatever its path.
+
+An Admin-approved deploy therefore raises no violation because the inspect reports `/run/docker.sock` where the plan
+said `/var/run/docker.sock`.
+
+### F2 — the source test
+
+The test fails on an `on<word>="` attribute that is **not** preceded by `@`. Blazor's `@onclick` stays allowed.
+
+### H2/H3 — the record and failures
+
+- **The record.** The record that H2 added an entry lives in `whitelist.json` as an additive field of that entry,
+  naming the account id. No database migration.
+- **Failed removal.** A failed whitelist removal undoes the deletion, as a failed role removal does
+  (`RestoreRoleAsync`).
+- **Manual change.** When an Admin removed or re-added the entry by hand in between, the record is cleared and H3
+  leaves the entry.
+
+### D — shell variables
+
+The exact names `PWD` and `OLDPWD` are not masked. The masking rule is shared with the UI, so the CHANGELOG names
+the change for both.
+
+### NITs
+
+- **B.** "Up to the first `:`" does not apply to `--mount=`; form 2 reads its value.
+- **E1.** Text outside the `CERTIFICATE REQUEST` block is ignored and never forwarded.
+- **J.** The INV-40 row drops "cannot hold a slot indefinitely".
