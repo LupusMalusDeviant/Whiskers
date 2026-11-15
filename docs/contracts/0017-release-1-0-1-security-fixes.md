@@ -429,8 +429,12 @@ The test fails on an `on<word>="` attribute that is **not** preceded by `@`. Bla
 
 ### H2/H3 — the record and failures
 
-- **The record.** The record that H2 added an entry lives in `whitelist.json` as an additive field of that entry,
-  naming the account id. No database migration.
+- **The record.** The record that H2 added an entry is a sibling map in `whitelist.json`: address → account id.
+  - `Emails` stays a list of strings.
+  - `SaveWhitelistAsync` keeps the record of every address that stays listed, and drops it only for an address the
+    save removes.
+  - No database migration.
+  - Test: an unrelated whitelist save, then `DeleteAsync`, still removes the entry.
 - **Failed removal.** A failed whitelist removal undoes the deletion, as a failed role removal does
   (`RestoreRoleAsync`).
 - **Manual change.** When an Admin removed or re-added the entry by hand in between, the record is cleared and H3
@@ -444,5 +448,6 @@ the change for both.
 ### NITs
 
 - **B.** "Up to the first `:`" does not apply to `--mount=`; form 2 reads its value.
-- **E1.** Text outside the `CERTIFICATE REQUEST` block is ignored and never forwarded.
+- **E1.** Non-PEM text outside the `CERTIFICATE REQUEST` block is ignored and never forwarded. A second PEM block is
+  still refused.
 - **J.** The INV-40 row drops "cannot hold a slot indefinitely".
