@@ -241,6 +241,9 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "docker run --mount type=bind,source=/srv/a:b,target=/r alpine ls")]  // a ':' in a keyed path
     [InlineData("command", "docker run --mount type=bind,SOURCE=/srv/app,target=/app alpine ls")]
     [InlineData("command", "docker volume create -odevice=/srv/data x")]
+    [InlineData("command", "rsync -av ./a host:/b")]                         // a cluster ending in v, no runtime
+    [InlineData("command", "tar -czvf ./a.tgz ./dir")]
+    [InlineData("command", "cp -rv ./a ./b")]
     [InlineData("command", "export MYSRC=/var/run")]                          // a key must start the word or a part
     [InlineData("command", "docker run --mount type=bind,source=/srv/app,target=/app alpine ls")]
     [InlineData("command", "docker run -v data:/var/run alpine ls")]          // a named volume; the container side
@@ -258,6 +261,9 @@ public class ProtectedResourceMatcherTests
     [InlineData("docker volume create -o type=none -o o=bind -o device=~/.. x")]
     [InlineData("docker run --rm -itv ./run:/r alpine ls /r")]                     // a cluster ending in v
     [InlineData("docker run --rm -dv ../run:/r alpine ls /r")]
+    [InlineData("sudo nerdctl run -dv ../run:/r alpine ls /r")]
+    [InlineData("alias d=docker; d run -itv ./x:/r alpine ls /r")]
+    [InlineData("docker-compose run -itv ./x:/r t ls /r")]
     [InlineData("docker run --rm --mount type=bind,SRC=./x,target=/r alpine ls /r")]
     [InlineData("docker run --rm -v /proc/1/root:/h alpine ls /h")]                // another process's file system
     [InlineData("docker run --rm -v /proc/self/root/var/run:/r alpine ls /r")]

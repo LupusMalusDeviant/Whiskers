@@ -306,8 +306,9 @@ public static class ProtectedResourceMatcher
 
     /// <summary>The mount sources a shell command names (contract 0017 B and its amendments):
     /// <list type="bullet">
-    /// <item>short syntax, cut at its first <c>:</c>: the word after <c>-v</c> / <c>--volume</c> or after a short-flag
-    /// cluster ending in <c>v</c> (<c>-itv</c>), the <c>--volume=</c> form, the value attached to <c>-v</c> or to such a
+    /// <item>short syntax, cut at its first <c>:</c>: the word after <c>-v</c> / <c>--volume</c> or, when the command
+    /// names a container runtime (<see cref="NamesContainerRuntime"/>), after a short-flag cluster ending in <c>v</c>
+    /// (<c>-itv</c>), the <c>--volume=</c> form, the value attached to <c>-v</c> or to such a
     /// cluster (<c>-v/src:dst</c>, <c>-v=src:dst</c>, <c>-itv/src:dst</c>), and any
     /// <c>&lt;absolute path&gt;:&lt;path&gt;</c> word;</item>
     /// <item>keyed: the value of a <c>source=</c> / <c>src=</c> / <c>device=</c> key, also after <c>volume-opt=</c>.
@@ -318,11 +319,14 @@ public static class ProtectedResourceMatcher
     /// </list></summary>
     private static IEnumerable<string> ShellMountSources(IReadOnlyList<string> words)
     {
+        // A flag cluster ending in v (-itv) is a volume flag only where a container runtime runs; elsewhere it is
+        // another tool's verbose flag (rsync -av, tar -czvf, cp -rv).
+        var runtime = words.Any(NamesContainerRuntime);
         for (var i = 0; i < words.Count; i++)
         {
             var word = words[i];
             var next = i + 1 < words.Count ? words[i + 1] : null;
-            if ((word is "--volume" || IsVolumeCluster(word)) && next is not null) yield return BeforeColon(next);
+            if ((word is "-v" or "--volume" || (runtime && IsVolumeCluster(word))) && next is not null) yield return BeforeColon(next);
             else if (word.StartsWith("--volume=", StringComparison.Ordinal)) yield return BeforeColon(word["--volume=".Length..]);
             else if (AttachedVolume(word) is { } attached) yield return BeforeColon(attached);
             else if (word.StartsWith('/') && word.IndexOf(':') > 0) yield return BeforeColon(word);
@@ -369,6 +373,29 @@ public static class ProtectedResourceMatcher
     }
 
     private static readonly string[] SourceKeys = ["source=", "src=", "device="];
+
+    /// <summary>A word that runs a container runtime: <c>docker</c>, <c>podman</c>, <c>nerdctl</c>, <c>ctr</c>,
+    /// <c>crictl</c> (<see cref="IsRuntimeWord"/>, by file name, so <c>sudo /usr/bin/docker</c> counts),
+    /// <c>docker-compose</c> / <c>podman-compose</c>, or an alias or assignment whose value starts with one
+    /// (<c>alias d=docker</c>, <c>d='sudo docker run'</c>).</summary>
+    private static bool NamesContainerRuntime(string word)
+    {
+        if (IsRuntimeOrCompose(word)) return true;
+        var eq = word.IndexOf('=');
+        if (eq <= 0) return false;
+        foreach (var token in word[(eq + 1)..].Split([' ', '\t', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (token is "sudo" or "env" or "command" or "exec" || token.Contains('=') || token.StartsWith('-')) continue;
+            return IsRuntimeOrCompose(token);
+        }
+        return false;
+
+        static bool IsRuntimeOrCompose(string w)
+        {
+            var name = Path.GetFileName(w);
+            return IsRuntimeWord(name) || name is "docker-compose" or "podman-compose";
+        }
+    }
 
     /// <summary>A short-flag cluster ending in <c>v</c> (<c>-v</c>, <c>-itv</c>, <c>-dv</c>): its next word is a
     /// volume, as Docker's flag parser reads it.</summary>

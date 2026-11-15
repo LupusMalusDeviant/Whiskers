@@ -608,6 +608,8 @@ public class SelfProtectionTests
     [InlineData("docker run --rm -itv ~/..:/v alpine ls /v")]
     [InlineData("docker run --rm -itv ../run:/r alpine ls /r")]
     [InlineData("docker run --rm -itv /var/run:/r alpine ls /r")]
+    [InlineData("sudo nerdctl run -dv ../run:/r alpine ls /r")]                     // the runtime after sudo
+    [InlineData("alias d=docker; d run -itv ./x:/r alpine ls /r")]                   // the runtime behind an alias
     // quoting and normalisation
     [InlineData("docker run --rm -v \"/var/run\":/r alpine ls /r")]
     [InlineData("docker run --rm -v '/var/run:/r' alpine ls /r")]
@@ -648,6 +650,9 @@ public class SelfProtectionTests
     [InlineData("docker run --mount type=bind,source=/srv/a:b,target=/r alpine ls")]  // a ':' inside a keyed path
     [InlineData("docker run --mount type=bind,SOURCE=/srv/app,target=/app alpine ls")]
     [InlineData("docker volume create -otype=none -oo=bind -odevice=/srv/data x")]
+    [InlineData("rsync -av ./a host:/b")]                                              // another tool's verbose cluster
+    [InlineData("tar -czvf ./a.tgz ./dir")]
+    [InlineData("cp -rv ./a ./b")]
     [InlineData("docker run -v data:/var/run alpine ls")]                              // a named volume
     [InlineData("echo SRC=./build")]                                                   // not Docker's lower-case key
     [InlineData("export MYSRC=/var/run")]                                              // not a key of its own

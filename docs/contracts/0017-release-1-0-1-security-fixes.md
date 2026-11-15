@@ -466,8 +466,12 @@ over Amendments 1 and 2 for part B.
 - **Keyed sources are not cut at `:`.** A `source=`, `src=` or `device=` value is a path. It is checked whole, and also
   cut at its first `:`, so `source=/var/run:x` stays refused and `source=/tmp/a:b/../../var/run` is refused. The short
   syntax (`-v a:b`) is still cut.
-- **Flag clusters.** A word `-<letters>v` (`-itv`, `-dv`) takes the next word as a volume, as `-v` does. A relative or
-  `~` source in it is unanalysable.
+- **Flag clusters.** When the command names a container runtime, a word `-<letters>v` (`-itv`, `-dv`) takes the next
+  word as a volume, as `-v` does. A relative or `~` source in it is unanalysable. A runtime word is `docker`, `podman`,
+  `nerdctl`, `ctr`, `crictl`, `docker-compose` or `podman-compose`, by file name, also after `sudo` / `env` and as the
+  value of an alias or assignment (`alias d=docker`). Without one, a cluster is another tool's verbose flag
+  (`rsync -av ./a host:/b`, `cp -rv ./a ./b`) and is not read. Plain `-v` / `--volume` take the next word in any
+  command.
 - **Attached `-o`.** `-o<value>` (`-odevice=/var/run`, `-otype=none`) is read like `-o <value>`, `-o=` and `--opt`.
 - **Other processes' file systems.** A source under `/proc/<pid|self|thread-self>/root` or `/proc/*/cwd` cannot be
   resolved and counts as unanalysable free text (INV-24).
@@ -475,8 +479,9 @@ over Amendments 1 and 2 for part B.
 ### Accepted overreach
 
 The rule ignores the command word, so these are refused for a key too. This is fail-closed and deliberate:
-- another tool's `-v` or flag cluster ending in `v` followed by `./`, `~` or a directory above a protected path, for
-  example `grep -v . file`, `mv -v ./a ./b`, `rsync -av ./a host:/b`, `grep -v /var /etc/fstab`;
+- another tool's plain `-v` followed by `./`, `~` or a directory above a protected path, for example
+  `grep -v . file`, `mv -v ./a ./b`, `grep -v /var /etc/fstab`;
+- a flag cluster ending in `v` the same way, but only in a command that also names a container runtime;
 - a lower-case `src=./…` word, for example `curl -d src=./x`.
 
 ### Gaps left for 1.1.0
