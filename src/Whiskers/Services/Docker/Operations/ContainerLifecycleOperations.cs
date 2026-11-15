@@ -63,12 +63,14 @@ internal sealed class ContainerLifecycleOperations
         ct.ThrowIfCancellationRequested();
 
         // 3. Stop container
+        // Whether it ran is taken from the inspect, not from the stop's answer: a stop that threw may still have taken
+        // effect, and a container that ran must then be started again if the update cannot go on.
+        var wasRunning = inspect.State?.Running == true;
+        var previousId = inspect.ID;  // the full id, whatever form the caller passed
         progress?.Report("Stopping container...");
-        var stopped = false;
         try
         {
-            // false: it was not running (304).
-            stopped = await client.Containers.StopContainerAsync(containerId,
+            await client.Containers.StopContainerAsync(containerId,
                 new ContainerStopParameters { WaitBeforeKillSeconds = 10 });
         }
         catch { } // May already be stopped
@@ -87,7 +89,7 @@ internal sealed class ContainerLifecycleOperations
         catch (Exception ex)
         {
             // Nothing was created: start the container again if this update stopped it, and say so.
-            await ContainerRestore.RecoverFailedStashAsync(restore, containerId, name, oldName, stopped, ex, "Update");
+            await ContainerRestore.RecoverFailedStashAsync(restore, previousId, name, oldName, wasRunning, ex, "Update");
             throw; // not reached: the recovery always throws
         }
 
@@ -138,7 +140,7 @@ internal sealed class ContainerLifecycleOperations
             progress?.Report("Recreate failed — rolling back...");
             try
             {
-                await ContainerRestore.RestorePreviousAsync(restore, newId, containerId, name, oldName, ex, "Update");
+                await ContainerRestore.RestorePreviousAsync(restore, newId, previousId, name, oldName, image, ex, "Update");
             }
             catch (Exception rollbackEx)
             {
@@ -226,8 +228,9 @@ internal sealed class ContainerLifecycleOperations
         if (currentId != null)
         {
             progress?.Report("Stopping current container...");
-            var stopped = false;
-            try { stopped = await client.Containers.StopContainerAsync(currentId, new ContainerStopParameters { WaitBeforeKillSeconds = 10 }); }
+            // Whether it ran is taken from the listing, not from the stop's answer (a stop that threw may have taken effect).
+            var wasRunning = string.Equals(existing?.State, "running", StringComparison.OrdinalIgnoreCase);
+            try { await client.Containers.StopContainerAsync(currentId, new ContainerStopParameters { WaitBeforeKillSeconds = 10 }); }
             catch { }
             try
             {
@@ -237,7 +240,7 @@ internal sealed class ContainerLifecycleOperations
             catch (Exception ex)
             {
                 // Nothing was created: start the current container again if this rollback stopped it, and say so.
-                await ContainerRestore.RecoverFailedStashAsync(restore, currentId, containerName, stashName, stopped, ex, "Rollback");
+                await ContainerRestore.RecoverFailedStashAsync(restore, currentId, containerName, stashName, wasRunning, ex, "Rollback");
                 throw; // not reached: the recovery always throws
             }
         }
@@ -286,9 +289,9 @@ internal sealed class ContainerLifecycleOperations
             try
             {
                 if (currentId != null)
-                    await ContainerRestore.RestorePreviousAsync(restore, newId, currentId, containerName, stashName, ex, "Rollback");
+                    await ContainerRestore.RestorePreviousAsync(restore, newId, currentId, containerName, stashName, imageId, ex, "Rollback");
                 else
-                    await ContainerRestore.RemoveCreatedAsync(restore, newId, containerName, ex, "Rollback");
+                    await ContainerRestore.RemoveCreatedAsync(restore, newId, containerName, imageId, ex, "Rollback");
             }
             catch (Exception rex)
             {

@@ -1,17 +1,24 @@
+using System.Net;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 
 namespace Whiskers.Services.Docker.Operations;
 
+/// <summary>A container as the restore sees it: id, Docker state (<c>created</c>, <c>running</c>, <c>exited</c>, …) and
+/// the image it was created from, as the daemon lists it.</summary>
+internal sealed record RestoreContainer(string Id, string State, string Image);
+
 /// <summary>The Docker calls that put a container back after a failed recreate (<c>container.update</c>) or C12
-/// rollback: find the container holding a name, remove the container the failed attempt created, give the previous one
-/// its name back, start it. A seam so the restore order and its error reporting are testable without a Docker daemon
-/// (<c>ContainerRestoreTests</c>).</summary>
+/// rollback: find the container holding a name, read a container's state, remove the container the failed attempt
+/// created, give the previous one its name back, start it. A seam so the restore order and its error reporting are
+/// testable without a Docker daemon (<c>ContainerRestoreTests</c>).</summary>
 internal interface IContainerRestoreSteps
 {
-    /// <summary>The container whose name is exactly <paramref name="name"/>, running or not, with its Docker state
-    /// (<c>created</c>, <c>running</c>, <c>exited</c>, …); <c>null</c> when no container has that name.</summary>
-    Task<(string Id, string State)?> FindByNameAsync(string name);
+    /// <summary>The container whose name is exactly <paramref name="name"/>, running or not; <c>null</c> when no
+    /// container has that name.</summary>
+    Task<RestoreContainer?> FindByNameAsync(string name);
+    /// <summary>The Docker state of container <paramref name="id"/> (<c>created</c>, <c>running</c>, <c>exited</c>, …).</summary>
+    Task<string> GetStateAsync(string id);
     /// <summary>Force-removes a container (killing it if it runs).</summary>
     Task RemoveAsync(string id);
     Task RenameAsync(string id, string newName);
@@ -22,7 +29,7 @@ internal interface IContainerRestoreSteps
 /// cancellation: once a restore begins it runs to its end.</summary>
 internal sealed class DockerClientContainerRestore(DockerClient client) : IContainerRestoreSteps
 {
-    public async Task<(string Id, string State)?> FindByNameAsync(string name)
+    public async Task<RestoreContainer?> FindByNameAsync(string name)
     {
         // The daemon's name filter matches a pattern; the exact comparison below decides.
         var listed = await client.Containers.ListContainersAsync(new ContainersListParameters
@@ -34,8 +41,11 @@ internal sealed class DockerClientContainerRestore(DockerClient client) : IConta
             },
         }, CancellationToken.None);
         var hit = listed.FirstOrDefault(c => c.Names?.Any(n => n.TrimStart('/') == name) == true);
-        return hit is null ? null : (hit.ID, hit.State ?? "");
+        return hit is null ? null : new RestoreContainer(hit.ID, hit.State ?? "", hit.Image ?? "");
     }
+
+    public async Task<string> GetStateAsync(string id) =>
+        (await client.Containers.InspectContainerAsync(id, CancellationToken.None)).State?.Status ?? "";
 
     public Task RemoveAsync(string id) =>
         client.Containers.RemoveContainerAsync(id, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
@@ -56,20 +66,19 @@ internal static class ContainerRestore
     /// Puts <paramref name="previousId"/> (renamed to <paramref name="stashedName"/> before the attempt) back under
     /// <paramref name="name"/> and starts it. The container the failed attempt created holds <paramref name="name"/>, so
     /// it is force-removed FIRST — renaming the previous one back while it exists answers 409 and left the service down
-    /// (1.0.0 review, Fleet HIGH 4). When <paramref name="createdId"/> is <c>null</c> (the create call failed — possibly
-    /// after the daemon made the container, its answer lost), the container holding the name is looked up and removed
-    /// only if it is not the previous one and was never started (state <c>created</c>); a running or foreign container is
-    /// never removed. Returns normally when the previous container runs under its name again. Otherwise it throws, naming
-    /// the previous container's current name and whether it runs; the attempt's error and every restore error are inside.
+    /// (1.0.0 review, Fleet HIGH 4). When <paramref name="createdId"/> is <c>null</c> (the create call failed), a container
+    /// the daemon may still have made is looked up under the guards of <see cref="FindLostCreateAsync"/>.
+    /// Returns normally when the previous container runs under its name again. Otherwise it throws, naming the previous
+    /// container's current name and whether it runs; the attempt's error and every restore error are inside.
     /// </summary>
     public static async Task RestorePreviousAsync(IContainerRestoreSteps steps, string? createdId, string previousId,
-        string name, string stashedName, Exception failure, string operation)
+        string name, string stashedName, string createImage, Exception failure, string operation)
     {
         var errors = new List<Exception>();
         var currentName = stashedName;
         var started = false;
 
-        createdId ??= await FindLostCreateAsync(steps, previousId, name);
+        createdId ??= await FindLostCreateAsync(steps, previousId, name, createImage, failure);
 
         var nameFree = true;
         if (createdId is not null)
@@ -115,15 +124,16 @@ internal static class ContainerRestore
 
     /// <summary>
     /// The stash rename (moving the previous container out of the way under <paramref name="stashedName"/>) failed, so
-    /// nothing was created. If the attempt had stopped the container (<paramref name="wasStopped"/>), it is started
-    /// again. Always throws: the attempt did not happen; the message says whether the container runs again.
+    /// nothing was created. If the container ran before the attempt (<paramref name="wasRunning"/>), it is started
+    /// again. Always throws: the attempt did not happen; the message says whether the container runs again and, as far
+    /// as the daemon tells, under which name.
     /// </summary>
     public static async Task RecoverFailedStashAsync(IContainerRestoreSteps steps, string previousId, string name,
-        string stashedName, bool wasStopped, Exception failure, string operation)
+        string stashedName, bool wasRunning, Exception failure, string operation)
     {
         var state = "it was not running before and was left as it was";
         Exception? startError = null;
-        if (wasStopped)
+        if (wasRunning)
         {
             try
             {
@@ -137,47 +147,106 @@ internal static class ContainerRestore
             }
         }
 
+        // A rename that answered with an error may still have taken effect: say which name it has, as the daemon lists it.
+        var naming = await NameOfAsync(steps, previousId, name, stashedName) switch
+        {
+            { } current => $"It is named '{current}'",
+            null => $"Its current name could not be determined (it was '{name}')",
+        };
+
         throw new InvalidOperationException(
             $"{operation} of '{name}' did not happen: the container ({Short(previousId)}) could not be renamed out of the " +
-            $"way to '{stashedName}' ({failure.Message}). It keeps its name '{name}'; {state}.",
+            $"way to '{stashedName}' ({failure.Message}). {naming}; {state}.",
             startError is null ? failure : new AggregateException(failure, startError));
     }
 
     /// <summary>
     /// A C12 rollback with no previous container to restore: removes the container the failed rollback created, so a
-    /// never-started container does not keep <paramref name="name"/>. Returns normally when it is gone (or none was
-    /// created); throws when it could not be removed.
+    /// never-started container does not keep <paramref name="name"/>. When <paramref name="createdId"/> is <c>null</c> a
+    /// container the daemon may still have made is looked up under the guards of <see cref="FindLostCreateAsync"/>.
+    /// A container that runs (its start reported a failure but took effect) or whose state cannot be read is never
+    /// removed: it is kept, and this throws with its state. Returns normally when it is gone or none was created.
     /// </summary>
     public static async Task RemoveCreatedAsync(IContainerRestoreSteps steps, string? createdId, string name,
-        Exception failure, string operation)
+        string createImage, Exception failure, string operation)
     {
+        createdId ??= await FindLostCreateAsync(steps, null, name, createImage, failure);
         if (createdId is null)
             return;
+
+        string state;
+        try { state = await steps.GetStateAsync(createdId); }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"{operation} of '{name}' failed ({failure.Message}); the container it created ({Short(createdId)}) was " +
+                $"kept because its state could not be read ({ex.Message}). It holds the name '{name}'.",
+                new AggregateException(failure, ex));
+        }
+
+        if (string.Equals(state, "running", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"{operation} of '{name}' reported a failure ({failure.Message}), but the container it created " +
+                $"({Short(createdId)}) is running; it was kept under the name '{name}'.", failure);
+
         try { await steps.RemoveAsync(createdId); }
         catch (Exception ex)
         {
             throw new InvalidOperationException(
                 $"{operation} of '{name}' failed ({failure.Message}) and the container it created ({Short(createdId)}) " +
-                $"could not be removed ({ex.Message}); it holds the name '{name}' and is not running.",
+                $"could not be removed ({ex.Message}); it holds the name '{name}' and is {state}.",
                 new AggregateException(failure, ex));
         }
     }
 
-    // When the create call itself failed, the daemon may still have made the container. It is ours to remove only when
-    // it is not the previous container and was never started; a lookup that fails is left to the rename to report.
-    private static async Task<string?> FindLostCreateAsync(IContainerRestoreSteps steps, string previousId, string name)
+    /// <summary>Whether <paramref name="failure"/> is the daemon's definite refusal (a 4xx answer, such as 409 for a
+    /// name another container holds): then the create made nothing, and nothing may be looked up to remove.</summary>
+    internal static bool IsDefiniteRejection(Exception failure) =>
+        failure is DockerApiException { StatusCode: var status } && (int)status is >= 400 and < 500;
+
+    /// <summary>
+    /// When the create call failed without a definite refusal (a timeout, a dropped tunnel, a 5xx), the daemon may still
+    /// have made the container. The container holding <paramref name="name"/> is taken for it only when it is not the
+    /// previous one, was created from <paramref name="createImage"/>, and was never started (state <c>created</c>);
+    /// anything else — someone else's container, a running or exited one — is never ours to remove. A lookup that fails
+    /// is left to the next step to report.
+    /// </summary>
+    private static async Task<string?> FindLostCreateAsync(IContainerRestoreSteps steps, string? previousId, string name,
+        string createImage, Exception failure)
     {
+        if (IsDefiniteRejection(failure))
+            return null;
         try
         {
             var holder = await steps.FindByNameAsync(name);
-            return holder is { } h && h.Id != previousId && string.Equals(h.State, "created", StringComparison.OrdinalIgnoreCase)
-                ? h.Id
+            return holder is not null
+                   && holder.Id != previousId
+                   && string.Equals(holder.State, "created", StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(holder.Image, createImage, StringComparison.Ordinal)
+                ? holder.Id
                 : null;
         }
         catch
         {
             return null;
         }
+    }
+
+    private static async Task<string?> NameOfAsync(IContainerRestoreSteps steps, string id, params string[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                if ((await steps.FindByNameAsync(candidate))?.Id == id)
+                    return candidate;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static string Short(string id) => id.Length > 12 ? id[..12] : id;
