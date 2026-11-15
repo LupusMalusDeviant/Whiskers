@@ -407,10 +407,8 @@ public class ContainerTools
 
         var envVars = await docker.GetContainerEnvAsync(id, serverId, cancellationToken);
 
-        string[] sensitiveKeywords = ["KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL", "AUTH", "PRIVATE", "PASSPHRASE"];
-        bool IsSensitive(string key) => sensitiveKeywords.Any(kw => key.Contains(kw, StringComparison.OrdinalIgnoreCase));
-
-        var lines = envVars.Select(e => IsSensitive(e.Key)
+        // INV-16/INV-24 (contract 0017 D): the one masking rule the web UI uses — the key, and credentials in a URL value.
+        var lines = envVars.Select(e => EnvMasking.ShouldMask(e.Key, e.Value)
             ? $"  {e.Key}=••••••••"
             : $"  {e.Key}={e.Value}");
 

@@ -82,7 +82,7 @@ public static class WhiskersPipelineExtensions
                 var headers = ((HttpContext)state).Response.Headers;
                 headers["X-Content-Type-Options"] = "nosniff";
                 headers["X-Frame-Options"] = "DENY";
-                headers["Content-Security-Policy"] = "frame-ancestors 'none'";
+                headers["Content-Security-Policy"] = "frame-ancestors 'none'; script-src 'self'; object-src 'none'; base-uri 'self'";
                 headers["Referrer-Policy"] = "same-origin";
                 return Task.CompletedTask;
             }, ctx);

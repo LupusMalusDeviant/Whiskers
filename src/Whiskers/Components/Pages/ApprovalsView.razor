@@ -43,7 +43,7 @@ else
             <MudPaper id="@a.Id" Class="pa-4" Outlined="true" Style="border-color: var(--mud-palette-warning);">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Wrap="Wrap.Wrap">
                     <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@a.Actor</MudChip>
-                    <MudText Typo="Typo.body1">@((MarkupString)L["ApprovalsView_WantsToRun", a.ToolName].Value)</MudText>
+                    <MudText Typo="Typo.body1">@((MarkupString)L["ApprovalsView_WantsToRun", System.Net.WebUtility.HtmlEncode(a.ToolName)].Value)</MudText>
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@LevelColor(a.Level)">@a.Level</MudChip>
                     <MudSpacer />
                     <MudTooltip Text="@L["ApprovalsView_ExpiresAt_Tooltip", a.ExpiresAt.ToLocalTime().ToString("HH:mm:ss")].Value">

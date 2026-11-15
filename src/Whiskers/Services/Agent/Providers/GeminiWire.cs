@@ -85,7 +85,7 @@ public static class GeminiRequestMapper
                             ["functionCall"] = new JsonObject
                             {
                                 ["name"] = c.Name,
-                                ["args"] = JsonNode.Parse(string.IsNullOrWhiteSpace(c.ArgumentsJson) ? "{}" : c.ArgumentsJson),
+                                ["args"] = ToolCallArguments.ToObject(c.ArgumentsJson),
                             }
                         };
                         // Replay Gemini's thoughtSignature — required for tools to work on thinking models.

@@ -267,7 +267,9 @@ public sealed class AuditRecovery : FleetBackgroundService, IAuditRecovery
                                 .SetProperty(a => a.DurationMs, row.DurationMs)
                                 .SetProperty(a => a.Success, row.Success)
                                 .SetProperty(a => a.OperationId, row.OperationId)
-                                .SetProperty(a => a.Details, row.Details), token);
+                                // A bulk update passes the save interceptor by: redacted here as it would redact it
+                                // (idempotent, so a row read back from the table stays byte-identical).
+                                .SetProperty(a => a.Details, Whiskers.Utils.SinkRedaction.Json(row.Details)), token);
                         return (changed, changed == 1 ? (IReadOnlyCollection<long>)[rowId] : []);
                     }, ct);
                     // Skipped on stale evidence: unless the gateway completed it meanwhile, it is still incomplete.
