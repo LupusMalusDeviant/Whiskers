@@ -218,9 +218,9 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
         var request = new CertificateRequest($"CN={identity.CommonName}", key, HashAlgorithmName.SHA256);
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
             new OidCollection { new Oid(MtlsCertificateValidator.ClientAuthOid) }, false));
-        var csrB64 = Convert.ToBase64String(Encoding.ASCII.GetBytes(request.CreateSigningRequestPem()));
+        var csrDer = request.CreateSigningRequest();
 
-        var bundlePem = await SignAsync(csrB64, identity.CommonName, ct);
+        var bundlePem = await SignAsync(csrDer, identity.CommonName, ct);
         using var leaf = MtlsCertificateValidator.ValidateIssuedClient(bundlePem, caPem, key.ExportSubjectPublicKeyInfo(), identity.CommonName);
 
         string slot;
@@ -298,9 +298,9 @@ public sealed partial class MtlsClientCredentialStore : IMtlsClientCredentialSto
 
     /// <summary>step-ca on Whiskers' own host signs the CSR (one year, leaf + intermediate) — the same call that signs
     /// the proxies' server certificates. Only the CSR goes out; the key stays here.</summary>
-    private async Task<string> SignAsync(string csrB64, string commonName, CancellationToken ct)
+    private async Task<string> SignAsync(byte[] csrDer, string commonName, CancellationToken ct)
     {
-        var r = await _exec.ExecuteAsync("local", MtlsCertificateCommands.SignCsr(csrB64, commonName), SignTimeout, ct);
+        var r = await _exec.ExecuteAsync("local", MtlsCertificateCommands.SignCsr(csrDer, commonName), SignTimeout, ct);
         if (!r.Success)
             throw new InvalidOperationException($"step-ca did not sign the client certificate (exit {r.ExitCode}).");
         try { return Encoding.ASCII.GetString(Convert.FromBase64String(r.Output.Trim())); }
