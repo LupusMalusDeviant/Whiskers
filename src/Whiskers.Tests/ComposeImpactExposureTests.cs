@@ -59,7 +59,9 @@ public sealed partial class ComposeImpactExposureTests
                     _host.Inspect[id] = "{\"Id\":\"" + id + "\",\"Name\":\"/shop-" + service + "-1\"," +
                         Image(service) +
                         "\"Config\":{\"Labels\":{\"com.docker.compose.project\":\"shop\",\"com.docker.compose.service\":\"" +
-                        service + "\"" + labels + "}},\"HostConfig\":" + hostConfig + "}";
+                        service + "\"" + labels + "}},\"HostConfig\":" + hostConfig +
+                        // docker inspect always lists Mounts (contract 0017: unreadable counts as undecided).
+                        (hostConfig.Contains("\"Mounts\"", StringComparison.Ordinal) ? "" : ",\"Mounts\":[]") + "}";
                 }
             return null;
         };

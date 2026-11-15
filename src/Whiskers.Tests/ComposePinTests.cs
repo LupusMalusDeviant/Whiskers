@@ -46,7 +46,7 @@ public sealed class ComposePinTests
                 _host.Inspect[id] = "{\"Id\":\"" + id + "\",\"Name\":\"/shop-" + service + "-1\"," +
                     (image is null ? "" : "\"Image\":\"" + image + "\",") +
                     "\"Config\":{\"Labels\":{\"com.docker.compose.project\":\"shop\",\"com.docker.compose.service\":\"" + service +
-                    "\"}},\"HostConfig\":{\"NetworkMode\":\"shop_default\"}}";
+                    "\"}},\"HostConfig\":{\"NetworkMode\":\"shop_default\"},\"Mounts\":[]}";
             }
             return null;
         };

@@ -9,7 +9,8 @@ namespace Whiskers.Services.Mutations;
 /// files merged, YAML anchors and <c>extends</c> followed, variables interpolated from the <c>.env</c>, relative paths
 /// made absolute — compose's own model, not a copy of it. Every source is a <see cref="ComposeMount"/> per service:
 /// bind sources, a volume's real name and the host device a local volume binds, the files of file-backed secrets and
-/// configs, and the containers (<see cref="ComposeMount.Container"/>) or services <c>volumes_from</c> takes over.
+/// configs, the Docker socket <c>use_api_socket</c> binds (contract 0017, A1), and the containers
+/// (<see cref="ComposeMount.Container"/>) or services <c>volumes_from</c> takes over.
 /// Anything that cannot be read throws <see cref="ComposePlanException"/> (fail closed).
 /// </summary>
 public static class ComposeConfigEffects
@@ -188,6 +189,10 @@ public static class ComposeConfigEffects
                         throw new ComposePlanException("A service mounts something whose kind is unknown.");
                 }
             }
+        // Contract 0017, A1: use_api_socket binds the engine's socket into the container, read-write; compose prints
+        // only the key, no volume.
+        if (ComposeExposures.UsesApiSocket(service))
+            yield return Mount(ComposeModel.DockerSocket) with { ApiSocket = true };
         if (service.TryGetProperty("volumes_from", out var from) && from.ValueKind == JsonValueKind.Array)
             foreach (var entry in from.EnumerateArray())
             {

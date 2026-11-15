@@ -426,6 +426,43 @@ public class MutationGatewayCoverageTests
     }
 
     [Fact]
+    public void Only_the_update_and_rollback_restore_drive_the_restore_steps()
+    {
+        // 1.0.1 (review Fleet HIGH 4): the restore steps (lookup, state, remove, rename, start) sit behind IContainerRestoreSteps
+        // for testability. They run only inside container.update / the C12 rollback, which the gateway decided — another
+        // caller would be an ungated container mutation.
+        var restore = typeof(Whiskers.Services.Docker.Operations.ContainerRestore).FullName!;
+        var lifecycle = typeof(Whiskers.Services.Docker.Operations.ContainerLifecycleOperations).FullName!;
+
+        var callers = MutationCallScanner
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Docker.Operations.IContainerRestoreSteps))
+            .Select(c => c.Owner.FullName!)
+            .Distinct()
+            .Order();
+        Assert.Equal([restore], callers);
+
+        var restoreCallers = MutationCallScanner
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Docker.Operations.ContainerRestore) && m.IsPublic)
+            .Select(c => c.Owner.FullName!)
+            .Distinct()
+            .Order();
+        Assert.Equal([lifecycle], restoreCallers);
+
+        var constructors = MutationCallScanner
+            .Constructors(App, typeof(Whiskers.Services.Docker.Operations.DockerClientContainerRestore))
+            .Select(t => t.FullName!)
+            .Distinct()
+            .Order();
+        Assert.Equal([lifecycle], constructors);
+
+        var implementations = App.GetTypes()
+            .Where(t => !t.IsInterface && typeof(Whiskers.Services.Docker.Operations.IContainerRestoreSteps).IsAssignableFrom(t))
+            .Select(t => t.FullName!)
+            .Order();
+        Assert.Equal([typeof(Whiskers.Services.Docker.Operations.DockerClientContainerRestore).FullName!], implementations);
+    }
+
+    [Fact]
     public void Every_changing_mcp_tool_is_decided_by_the_gateway()
     {
         var tools = App.GetTypes()
@@ -542,6 +579,9 @@ public class MutationGatewayCoverageTests
         ("IServerConfigService.AdoptCloudKeyRefAsync", "start-up credential migration (R1-29), pinned by CredentialAdoptionCallersTests"),
         ("IVaultService.AdoptLegacyCredentialAsync", "start-up credential migration, pinned by CredentialAdoptionCallersTests"),
         ("IWhitelistService.AddFirstAdminAsync", "first-run wizard, refuses once an Admin exists, pinned to SetupStateService"),
+        ("IWhitelistService.AddLocalAccountEntryAsync", "contract 0017 H2: lists a new local account in an enabled whitelist inside the decided account.create, pinned to LocalAccountService.CreateAsync"),
+        ("IWhitelistService.RemoveLocalAccountEntryAsync", "contract 0017 H3: removes the entry H2 added inside the decided account.delete, pinned to LocalAccountService.DeleteAsync"),
+        ("IWhitelistService.RestoreLocalAccountEntryAsync", "contract 0017 H3: puts back the entry of a deletion that failed, inside the decided account.delete, pinned to LocalAccountService.DeleteAsync"),
         ("IIdentityBindingStore.RecordPendingAsync", "R1-27: a refused Google/OIDC sign-in records its binding request for a configured address — nobody exists yet the gateway could decide for; it grants nothing, pinned to FederatedAdmission"),
         ("IIdentityBindingStore.RecordSignInAsync", "R1-27: the day of an admitted sign-in on its binding (housekeeping of the admission), pinned to FederatedAdmission"),
         ("IIdentityBindingStore.PruneOrphansAsync", "R1-27: removes bindings of addresses that are no entries, before every decided config.roles / config.whitelist write that adds or removes one and the wizard's first-admin writes (the start-up prune goes through RefreshAsync); it only takes access away"),
@@ -555,6 +595,10 @@ public class MutationGatewayCoverageTests
         ("IHostShellDocker.PullImageAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
         ("IHostShellDocker.RemoveAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
         ("IHostShellDocker.StartAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IContainerRestoreSteps.RemoveIfStoppedAsync", "a restore step inside container.update / the C12 rollback after their attempt failed (1.0.1 seam; pinned)"),
+        ("IContainerRestoreSteps.RemoveAsync", "a restore step inside container.update / the C12 rollback after their attempt failed (1.0.1 seam; pinned)"),
+        ("IContainerRestoreSteps.RenameAsync", "a restore step inside container.update / the C12 rollback after their attempt failed (1.0.1 seam; pinned)"),
+        ("IContainerRestoreSteps.StartAsync", "a restore step inside container.update / the C12 rollback after their attempt failed (1.0.1 seam; pinned)"),
         ("IHostCommandExecutor.ExecuteAsync", "the plain read path; every caller is listed (The_plain_executor_is_called_only_for_reads_or_inside_a_marked_operation)"),
         ("IServerBudget.RunAsync", "the per-server concurrency lane work runs in"),
         ("IComposeRunner.RunAsync", "runs a compose plan inside its caller's decision: every host write goes through the mutate delegate the caller passes (the primitive, or Git deploy's own executor inside gitdeploy.deploy) — contract 0006"),
@@ -798,7 +842,9 @@ public class MutationGatewayCoverageTests
         Assert.Equal(["Whiskers.Services.Auth.RoleService.PruneRemovedAsync",
                 "Whiskers.Services.Auth.RoleService.SetFirstAdminAsync",
                 "Whiskers.Services.Auth.WhitelistService.AddFirstAdminAsync",
-                "Whiskers.Services.Auth.WhitelistService.SaveWhitelistAsync"],
+                "Whiskers.Services.Auth.WhitelistService.SaveWhitelistAsync",
+                // Contract 0017 H2/H3: the local-account entry writes (inside account.create / account.delete).
+                "Whiskers.Services.Auth.WhitelistService.WriteAsync"],
             CallersOf("PruneOrphansAsync"));
         Assert.Equal(["Whiskers.Services.Auth.FederatedAdmission.DecideAsync",
                 "Whiskers.Services.Auth.IdentityBindingCli.RunAsync",
@@ -825,6 +871,40 @@ public class MutationGatewayCoverageTests
         // Nor the implementations directly.
         Assert.Empty(CallersOf(typeof(Whiskers.Services.Auth.RoleService), nameof(Whiskers.Services.Auth.RoleService.SetFirstAdminAsync)));
         Assert.Empty(CallersOf(typeof(Whiskers.Services.Auth.WhitelistService), nameof(Whiskers.Services.Auth.WhitelistService.AddFirstAdminAsync)));
+    }
+
+    [Fact]
+    public void The_local_account_whitelist_writes_have_exactly_the_account_service_as_caller()
+    {
+        // Contract 0017 H2/H3: the whitelist entry of a local account is written only inside the decided account.create
+        // and account.delete — never from a page, a tool or anywhere else.
+        static IReadOnlyList<string> CallersOf(Type type, string method) => MutationCallScanner
+            .Callers(App, m => m.DeclaringType == type && m.Name == method)
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}")
+            .Distinct()
+            .Order()
+            .ToList();
+        var wl = typeof(Whiskers.Services.Auth.IWhitelistService);
+        var impl = typeof(Whiskers.Services.Auth.WhitelistService);
+
+        Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.CreateAsync"],
+            CallersOf(wl, nameof(Whiskers.Services.Auth.IWhitelistService.AddLocalAccountEntryAsync)));
+        Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.DeleteAsync",
+                "Whiskers.Services.Auth.LocalAccountService.RemoveEntryQuietlyAsync"],
+            CallersOf(wl, nameof(Whiskers.Services.Auth.IWhitelistService.RemoveLocalAccountEntryAsync)));
+        // The quiet removal is the undo of a creation that failed after its whitelist write.
+        Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.CreateAsync"], MutationCallScanner
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Auth.LocalAccountService) && m.Name == "RemoveEntryQuietlyAsync")
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().ToList());
+        // The restore helper is called only from DeleteAsync's failure paths.
+        Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.RestoreEntryAsync"],
+            CallersOf(wl, nameof(Whiskers.Services.Auth.IWhitelistService.RestoreLocalAccountEntryAsync)));
+        Assert.Equal(["Whiskers.Services.Auth.LocalAccountService.DeleteAsync"], MutationCallScanner
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Auth.LocalAccountService) && m.Name == "RestoreEntryAsync")
+            .Select(c => $"{c.Owner.FullName}.{c.Handler}").Distinct().ToList());
+        Assert.Empty(CallersOf(impl, nameof(Whiskers.Services.Auth.WhitelistService.AddLocalAccountEntryAsync)));
+        Assert.Empty(CallersOf(impl, nameof(Whiskers.Services.Auth.WhitelistService.RemoveLocalAccountEntryAsync)));
+        Assert.Empty(CallersOf(impl, nameof(Whiskers.Services.Auth.WhitelistService.RestoreLocalAccountEntryAsync)));
     }
 
     [Fact]

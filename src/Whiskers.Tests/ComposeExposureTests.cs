@@ -5,7 +5,7 @@ using Whiskers.Services.Mutations;
 namespace Whiskers.Tests;
 
 /// <summary>Contract 0006: what the plan model and the helpers read as an exposure of a compose deployment.</summary>
-public sealed class ComposeExposureTests
+public sealed partial class ComposeExposureTests
 {
     private static readonly IReadOnlyList<string> Prefixes = GuardrailPolicy.DefaultExposureLabelPrefixes;
 

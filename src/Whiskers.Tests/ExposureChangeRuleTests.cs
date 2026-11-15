@@ -86,6 +86,41 @@ public sealed class ExposureChangeRuleTests
         Assert.Contains("label (withheld)", reason);
     }
 
+    /// <summary>Contract 0017, A1: a socket mount is of class host; its reason names the registry credentials, never the key.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_socket_mount_needs_a_confirmation_and_names_the_registry_credentials(bool withheld)
+    {
+        var verdict = Verdict(Admin(), Resolved(ExposureKind.SocketMount, "mount:/var/run/docker.sock", "/var/run/docker.sock"),
+            out var reason, withheld);
+
+        Assert.Equal(GuardrailVerdict.Confirm, verdict);
+        Assert.Equal("web gets the Docker socket mounted (root on the host); with use_api_socket compose may also hand it the " +
+                     "registry credentials of the Docker client on the host (class 'host').", reason);
+    }
+
+    /// <summary>Contract 0017, A2: a privileged hook says which hook and that it is decided at planning only.</summary>
+    [Theory]
+    [InlineData("hook:post_start:0", false, "web runs a privileged post_start hook (hook:post_start:0); it is decided at planning only.")]
+    [InlineData("hook:pre_stop:2", false, "web runs a privileged pre_stop hook (hook:pre_stop:2); it is decided at planning only.")]
+    [InlineData("hook:pre_stop:2", true, "web runs a privileged hook (withheld); it is decided at planning only.")]
+    public void A_privileged_hook_needs_a_confirmation_and_says_it_is_decided_at_planning_only(string key, bool withheld,
+        string expected)
+    {
+        var verdict = Verdict(Admin(), Resolved(ExposureKind.Privileged, key, "true"), out var reason, withheld);
+
+        Assert.Equal(GuardrailVerdict.Confirm, verdict);
+        Assert.Equal(expected, reason);
+    }
+
+    [Fact]
+    public void Privileged_on_the_service_keeps_its_reason()
+    {
+        Verdict(Admin(), Resolved(ExposureKind.Privileged, "privileged", "true"), out var reason);
+        Assert.Equal("web runs privileged.", reason);
+    }
+
     [Fact]
     public void An_entry_that_cannot_be_read_needs_a_confirmation() =>
         Assert.Equal(GuardrailVerdict.Confirm, Verdict(Admin(), "garbage", out _));

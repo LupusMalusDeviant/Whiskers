@@ -166,6 +166,14 @@ install -m 0755 deploy/tailnet-guard.sh /usr/local/sbin/tailnet-guard
 - as a systemd timer (every 60s) for the churn that happens outside deploys, and as the backstop for the
   delayed case above
 
+**Tools (no Python since 1.0.1, contract 0017 part I).** `ip` and `grep` are required: without `ip` the script
+refuses to start (exit 1) instead of judging the tailnet broken. The peer list in `servers.json` is read with `jq`;
+the TCP probe is `nc -z -w5`, and when that fails (or `nc` is busybox's, without `-z`) bash's `/dev/tcp` under
+`timeout 5` before a peer counts as unreachable. Without `jq`, or without both `nc` and `timeout`, only the address on
+`tailscale0` is checked, with a WARN and `tailnet OK (address only: jq missing)` (or the missing probe tool) instead of
+a plain `tailnet OK`. Repairs use `systemctl`, `flock`, `sleep` and `logger`. Install `jq` (and `netcat-openbsd`) on the host before rolling out
+the new script.
+
 Repairs are serialized with `flock`: the timer and a deploy's postflight can fire together, and two
 concurrent `systemctl restart tailscaled` runs race each other into a worse state than the one being
 repaired.
