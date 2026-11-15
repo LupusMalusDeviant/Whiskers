@@ -442,8 +442,7 @@ public class MutationGatewayCoverageTests
         Assert.Equal([restore], callers);
 
         var restoreCallers = MutationCallScanner
-            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Docker.Operations.ContainerRestore)
-                               && m.Name == nameof(Whiskers.Services.Docker.Operations.ContainerRestore.RestorePreviousAsync))
+            .Callers(App, m => m.DeclaringType == typeof(Whiskers.Services.Docker.Operations.ContainerRestore) && m.IsPublic)
             .Select(c => c.Owner.FullName!)
             .Distinct()
             .Order();
