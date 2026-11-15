@@ -25,6 +25,11 @@ public sealed class RestoreMarker
 
     public string Archive { get; set; } = "";
 
+    /// <summary>SQLite only: the full path of the database file the app had open when the restore was committed. The swap
+    /// writes the archive's database there when the start has no configuration to read it from; empty for PostgreSQL and
+    /// in markers of earlier releases (the default <c>metrics.db</c> then).</summary>
+    public string DatabasePath { get; set; } = "";
+
     /// <summary>When the swap was applied (UTC); set in the note an applied restore leaves.</summary>
     public DateTime? AppliedAtUtc { get; set; }
 }
