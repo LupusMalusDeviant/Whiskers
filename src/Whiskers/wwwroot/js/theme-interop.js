@@ -28,6 +28,12 @@ window.swTheme = {
 window.swChat = {
     scrollToBottom: function (el) {
         if (el) { el.scrollTop = el.scrollHeight; }
+    },
+    // The floating AI chat (AiChat.razor) addresses its message list by id; smooth, as before. Replaces an "eval"
+    // interop call, which the CSP (script-src 'self', no 'unsafe-eval') blocks.
+    scrollToBottomById: function (id) {
+        var el = document.getElementById(id);
+        if (el) { el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }
     }
 };
 

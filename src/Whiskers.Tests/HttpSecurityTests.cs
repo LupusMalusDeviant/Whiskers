@@ -33,9 +33,26 @@ public sealed class HttpSecurityTests
                 var response = await client.GetAsync(path);
                 Assert.Equal("nosniff", Header(response, "X-Content-Type-Options"));
                 Assert.Equal("DENY", Header(response, "X-Frame-Options"));
-                Assert.Equal("frame-ancestors 'none'", Header(response, "Content-Security-Policy"));
+                // Contract 0017 F2: scripts only from the app's own origin (no inline script, no eval), no plugins, no foreign <base>.
+                Assert.Equal("frame-ancestors 'none'; script-src 'self'; object-src 'none'; base-uri 'self'", Header(response, "Content-Security-Policy"));
                 Assert.Equal("same-origin", Header(response, "Referrer-Policy"));
             }
+        });
+
+    [Fact]
+    public async Task The_app_shell_carries_no_inline_script_the_csp_would_block() =>
+        await BootAsync(async (_, client) =>
+        {
+            // Contract 0017 F2: under script-src 'self' an inline <script> block or on* handler would not run.
+            var html = await client.GetStringAsync("/login");
+            // The theme script stays a blocking script in <head> (no flash of the default theme before first paint).
+            var head = html[..html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase)];
+            var themeTag = Regex.Match(head, @"<script[^>]*js/theme-init[^>]*>", RegexOptions.IgnoreCase);
+            Assert.True(themeTag.Success, "theme-init.js is not loaded in <head>");
+            Assert.DoesNotMatch(new Regex(@"\b(async|defer|type=""module"")", RegexOptions.IgnoreCase), themeTag.Value);
+            Assert.Contains("js/sw-register", html);
+            Assert.DoesNotMatch(new Regex(@"<script(?![^>]*\bsrc=)[^>]*>", RegexOptions.IgnoreCase), html);
+            Assert.DoesNotMatch(new Regex(@"<[a-z][^>]*\son[a-z]+\s*=", RegexOptions.IgnoreCase), html);
         });
 
     [Theory]
