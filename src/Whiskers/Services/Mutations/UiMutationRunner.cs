@@ -23,9 +23,12 @@ public interface IUiMutationRunner
     /// </summary>
     /// <exception cref="MutationRefusedException">The gateway refused the call (level, tool switch, kill switch,
     /// protected resource, unknown target, audit not writable). Nothing ran.</exception>
-    /// <exception cref="MutationFailedException">The call ran past its deadline.</exception>
+    /// <exception cref="MutationFailedException">The capability's deadline cancelled the token passed to
+    /// <paramref name="action"/> and the action stopped on it; its effect is unknown.</exception>
     /// <remarks>An exception thrown by <paramref name="action"/> itself is rethrown unchanged, so a page's existing
-    /// error handling keeps working.</remarks>
+    /// error handling keeps working.
+    /// <para>The deadline is cooperative (INV-40): every execution has one, and it cancels the action's token. An
+    /// action that ignores the token runs to its end — this call waits for it, and its slot stays held until then.</para></remarks>
     [MutationEntryPoint]
     Task<T> RunAsync<TTarget, T>(string capabilityId, object arguments, Func<TTarget, CancellationToken, Task<T>> action,
         CancellationToken ct = default) where TTarget : ResolvedTarget =>
