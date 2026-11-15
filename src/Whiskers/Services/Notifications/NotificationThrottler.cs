@@ -6,36 +6,39 @@ namespace Whiskers.Services.Notifications;
 public class NotificationThrottler
 {
     private readonly ConcurrentDictionary<string, DateTime> _lastSent = new();
-    // The window the last check ran with (live settings). Record prunes with it, so a ThrottleMinutes raised at runtime
-    // is not undercut by pruning with the value the channel was built with.
-    private int _windowMinutes;
+    private readonly TimeProvider _time;
 
-    public NotificationThrottler(int throttleMinutes)
+    /// <param name="time">The clock (tests move it); the system clock by default.</param>
+    public NotificationThrottler(TimeProvider? time = null)
     {
-        _windowMinutes = throttleMinutes;
+        _time = time ?? TimeProvider.System;
     }
+
+    private DateTime UtcNow => _time.GetUtcNow().UtcDateTime;
 
     // The window is passed per call (from live settings) rather than frozen at construction, so a changed
     // ThrottleMinutes takes effect without recreating the provider. 0 = never throttle.
     public bool IsThrottled(string containerId, string eventType, int minutes)
     {
-        Volatile.Write(ref _windowMinutes, minutes);
         var key = $"{containerId}:{eventType}";
         if (_lastSent.TryGetValue(key, out var lastTime))
         {
-            return DateTime.UtcNow - lastTime < TimeSpan.FromMinutes(Math.Max(0, minutes));
+            return UtcNow - lastTime < TimeSpan.FromMinutes(Math.Max(0, minutes));
         }
         return false;
     }
 
-    public void Record(string containerId, string eventType)
+    /// <summary>Records a send. <paramref name="minutes"/> is the live window (the channel's current
+    /// <c>ThrottleMinutes</c>), also for a redelivery, which skips the check: the map is pruned with it, so a window
+    /// raised at runtime is not undercut by pruning with an older value.</summary>
+    public void Record(string containerId, string eventType, int minutes)
     {
         var key = $"{containerId}:{eventType}";
-        var now = DateTime.UtcNow;
+        var now = UtcNow;
         _lastSent[key] = now;
 
         // Keep the map bounded: an entry can't affect throttling once it's older than twice the window.
-        var cutoff = now - TimeSpan.FromMinutes(2 * Math.Max(1, Volatile.Read(ref _windowMinutes)));
+        var cutoff = now - TimeSpan.FromMinutes(2 * Math.Max(1, minutes));
         foreach (var kv in _lastSent)
             if (kv.Value < cutoff) _lastSent.TryRemove(kv.Key, out _);
     }
@@ -50,9 +53,9 @@ public class NotificationThrottler
     public bool IsThrottled(NotificationEvent evt, int minutes) =>
         !IsExempt(evt) && IsThrottled(KeyFor(evt), evt.EventType, minutes);
 
-    public void Record(NotificationEvent evt)
+    public void Record(NotificationEvent evt, int minutes)
     {
-        if (!IsExempt(evt)) Record(KeyFor(evt), evt.EventType);
+        if (!IsExempt(evt)) Record(KeyFor(evt), evt.EventType, minutes);
     }
 
     private static bool IsExempt(NotificationEvent evt) =>

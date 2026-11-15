@@ -89,10 +89,10 @@ public sealed class CertificateMonitorTests : IDisposable
     [Fact]
     public void Several_certificates_on_one_server_are_not_throttled_into_one()
     {
-        var throttler = new NotificationThrottler(60);
+        var throttler = new NotificationThrottler();
         var a = new NotificationEvent { EventType = "certificate_expiring", ServerId = "s1", ImageInfo = "a" };
         var b = new NotificationEvent { EventType = "certificate_expiring", ServerId = "s1", ImageInfo = "b" };
-        throttler.Record(a);
+        throttler.Record(a, 60);
         Assert.False(throttler.IsThrottled(b, 60));
     }
 
