@@ -571,6 +571,8 @@ public class SelfProtectionTests
     [Theory]
     [InlineData("docker run --rm --mount type=bind,source=/var/run,target=/r alpine ls /r")]
     [InlineData("docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("docker run --rm -v/var/run:/r alpine ls /r")]                       // the attached short form
+    [InlineData("docker run --rm -v/var/lib/docker/volumes:/v alpine ls /v")]
     public void A_key_cannot_mount_the_control_plane_through_mount_or_volume_forms(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 

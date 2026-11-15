@@ -299,7 +299,7 @@ public static class ProtectedResourceMatcher
     }
 
     /// <summary>The mount sources a shell command names (contract 0017 B): the word after <c>-v</c> / <c>--volume</c>
-    /// and the <c>--volume=</c> form up to the first <c>:</c>, the <c>source=</c> / <c>src=</c> value of a
+    /// (also attached, <c>-v/src:dst</c>) and the <c>--volume=</c> form up to the first <c>:</c>, the <c>source=</c> / <c>src=</c> value of a
     /// <c>--mount</c> word, and the part before the first <c>:</c> of any <c>&lt;absolute path&gt;:&lt;path&gt;</c> word.</summary>
     private static IEnumerable<string> ShellMountSources(IReadOnlyList<string> words)
     {
@@ -309,6 +309,8 @@ public static class ProtectedResourceMatcher
             var next = i + 1 < words.Count ? words[i + 1] : null;
             if (word is "-v" or "--volume" && next is not null) yield return BeforeColon(next);
             else if (word.StartsWith("--volume=", StringComparison.Ordinal)) yield return BeforeColon(word["--volume=".Length..]);
+            // The attached short form (-v/var/run:/r) is the same value after -v, as Docker parses it.
+            else if (word.StartsWith("-v/", StringComparison.Ordinal)) yield return BeforeColon(word[2..]);
             else if (word == "--mount" && next is not null)
                 foreach (var source in MountOptionSources(next)) yield return source;
             else if (word.StartsWith("--mount=", StringComparison.Ordinal))
