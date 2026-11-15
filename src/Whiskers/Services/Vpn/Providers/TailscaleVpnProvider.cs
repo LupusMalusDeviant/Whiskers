@@ -41,6 +41,16 @@ public class TailscaleVpnProvider : IVpnProvider
 
     private string SocketArg => "--socket=" + _settings.Tailscale.Socket;
 
+    /// <summary>
+    /// The name to register: the configured hostname, else the container hostname (<c>HOSTNAME</c>), else
+    /// <c>serverwatch</c>. An empty or whitespace value counts as unset — docker-compose.yml always passes
+    /// <c>Vpn__Hostname=${VPN_HOSTNAME:-}</c>, so an unset <c>VPN_HOSTNAME</c> arrives as an empty string.
+    /// </summary>
+    internal static string DefaultHostName(string? configured) =>
+        !string.IsNullOrWhiteSpace(configured) ? configured
+        : Environment.GetEnvironmentVariable("HOSTNAME") is { } env && !string.IsNullOrWhiteSpace(env) ? env
+        : "serverwatch";
+
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         var r = await _runner.RunAsync("tailscale", ["version"], ct, 5000);
@@ -62,8 +72,7 @@ public class TailscaleVpnProvider : IVpnProvider
         string? loginServer = null;
         try
         {
-            hostname = VpnArguments.RequireHostName(
-                _settings.Hostname ?? Environment.GetEnvironmentVariable("HOSTNAME") ?? "serverwatch");
+            hostname = VpnArguments.RequireHostName(DefaultHostName(_settings.Hostname));
             if (!string.IsNullOrWhiteSpace(ts.LoginServer))
                 loginServer = VpnArguments.RequireControlUrl(ts.LoginServer, "Tailscale login server");
         }
