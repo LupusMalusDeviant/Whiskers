@@ -207,3 +207,188 @@ removed. The tool description keeps the promise "sensitive values are masked", a
 3. The OAuth whitelist may change for part H.
 4. Python is replaced in 1.0.1 already (part I).
 5. The deadline stays cooperative; the docs and INV-40 are corrected (part J).
+
+## Amendment 1 — review round 1 (15 November 2026, accepted by the maintainer the same day)
+
+This amendment answers the review of the draft and records four decisions the maintainer took on it. Where it differs
+from the parts above, this amendment wins.
+
+### Corrections to "Current state"
+
+- **B.** The review command passed for two reasons:
+  - its `find` is in `ModifyingCommands`, so the gate was open;
+  - `AncestorHit` got the unsplit word `/var/lib/docker/volumes:/v`.
+
+  Both are fixed: the split at `:`, and no command gate for mount sources.
+- **A1.** The re-check reads `Mounts` only for third-party tools (`ComposeThirdParty.cs:131`), never as exposures.
+- **D.** No invariant row describes env masking. The defect is a contradiction between the tool and the UI, and
+  between the tool and its own description. INV-16 and INV-24 are not affected.
+- **E1.** Only lines made of base64-alphabet characters and blanks pass the decoder, for example `reboot` or
+  `docker kill …`. That is still an injection.
+- **F.** The pipeline is built in `Components/Pages/AgentView.razor:269-272` and in `Help.razor:121`.
+  `MarkdownSanitizer.cs:14` is the href neutraliser.
+- **G.** `NotificationEvent` carries `ApprovalId`, `DeliveryId` and `CorrelationId` only.
+- **I1.** The step is ⑧ in the UI and step 7 in the code comment (`OnboardingService.cs:244-247`).
+- **J.** The file is `src/Whiskers/Services/Mutations/README.md`. Lines 445-446 already describe the case; the
+  promise to correct sits in the `IUiMutationRunner` doc (`UiMutationRunner.cs:15`).
+
+### A — socket mounts as an exposure kind
+
+- **New kind.** A new exposure kind `SocketMount`: class `host`, key `mount:<destination>`, value the normalised
+  source. The closed enum of contract 0006 Amendment 8 gains it.
+- **What counts as a socket mount.** A container mount is a socket mount when its type is `bind` and its normalised
+  source is either:
+  - a socket path of `ControlPlaneResources`, or
+  - a path whose file name is `docker.sock`. This covers rootless `/run/user/<uid>/docker.sock`.
+- **When it is decided.** Per service: only when `plan.Mounts()` of that service holds the same normalised source.
+  Mounts that arrive through `volumes_from` count for the receiving service.
+- **Unreadable mounts.** A container whose `Mounts` cannot be read counts as undecided.
+- **How the fields are read.**
+  - `use_api_socket`, and `privileged` inside a hook, are read through `<<` merges and `extends` like `privileged`.
+  - A value from an unset variable refuses the plan.
+  - A hook key that differs between the YAML model and `docker compose config` counts as undecided.
+- **Registry credentials.** The docs and the approval text say that `use_api_socket` may also hand the caller's
+  registry credentials to the container. Where this is verified for Compose v5.6.1, they say so without "may".
+
+### B — every mount source, wherever it stands
+
+A mount source is, in any word of a shell command:
+
+1. **Flag forms.** Each up to the first `:`:
+   - the text after a leading `-v`, `-v=`, `--volume=` or `--mount=`;
+   - the text after a short-flag group ending in `v` (`-itv/…`);
+   - the word after `-v`, `--volume`, `--mount`, or after a short-flag group ending in `v`.
+2. **Key=value forms.** The value of every `source=`, `src=` and `device=` key in a comma-separated key=value word,
+   also after `volume-opt=`, and after `-o` / `--opt` (`docker volume create -o device=…`).
+3. **Path pairs.** The part before the first `:` of any word `<path>:<path>`.
+
+A source that starts with `.` or `~` cannot be resolved and counts as unanalysable free text (INV-24).
+
+**Accepted limit.** Another tool's `-v` followed by a protected path is refused for a key (for example
+`grep -v /var/run file`). This is fail-closed and deliberate.
+
+### C — redaction
+
+- **C2 — the `Authorization` value.**
+  - The value is removed up to the end of the line, or up to the closing quote of the argument that holds it.
+  - A scheme stays readable only when it is one of `Basic`, `Bearer`, `Digest`, `Negotiate` or `NTLM` **and** more
+    text follows.
+  - A one-word value is removed whole.
+  - `Proxy-Authorization` is treated the same.
+  - Redacting twice changes nothing.
+- **C1 — writes that bypass the interceptor.** A source test fails when an `ExecuteUpdate` sets a non-exempt string
+  column without redacting it explicitly. String collections and owned types are covered by the structural test.
+
+### D — one masking rule, made stronger
+
+- `EnvMasking` also masks:
+  - keys containing `PASS` or `PWD`;
+  - values containing `Password=` or `Pwd=` (connection strings).
+- A parity test checks that the tool masks exactly when `EnvMasking.ShouldMask` is true.
+
+### E — the CSR bytes (mTLS approval covers both callers)
+
+- **E1 — the attack the tests must catch.**
+  - The acceptance test inserts a line of base64-alphabet characters (`reboot`). The answer either fails, or the CA
+    script's only variable text is base64 that Whiskers produced; the inserted line appears nowhere.
+  - A non-base64 answer was already refused in 1.0.0. That test alone proves nothing.
+- **E1 — the bytes.**
+  - `SignCsr` takes the DER bytes and encodes them itself.
+  - The DER is the content of the single `CERTIFICATE REQUEST` block that `ValidateCsr` verified. A second PEM block
+    or trailing data is refused.
+  - The CA still receives a PEM file, which Whiskers writes from the DER.
+- **The second caller.** `SignCsr` is also used by the client path of contract 0007
+  (`MtlsClientCredentialStore.cs:303`). It is adapted to the new signature with no other change. **The maintainer's
+  mTLS approval covers it (decision 7).**
+- **NIT.** The identity regex in `MtlsIdentity.cs:67` ends in `\z`, not `$`.
+
+### F — rendering and CSP
+
+- **F1 — the Markdown pipeline.**
+  - Model output uses an explicit list of Markdown extensions, not `UseAdvancedExtensions()`. The list excludes
+    generic attributes, media links and custom containers.
+  - The sanitizer removes `on*` and `style` attributes from tags only, never from text or code.
+  - It limits `img src` like `href`: relative or `data:` only.
+- **F2 — the header.**
+  - The CSP is exactly `frame-ancestors 'none'; script-src 'self'; object-src 'none'; base-uri 'self'`, and the test
+    asserts the exact value.
+  - The middleware stays where it is; only this header value changes.
+- **F2 — inline script removed.**
+  - The `eval` interop call in `AiChat.razor:407` becomes a named function in `wwwroot/js`.
+  - The inline `onmouseover` / `onmouseout` in `AiChat.razor:35` become CSS `:hover`.
+  - A source test fails on `Invoke…Async("eval"` and on a literal `on<word>="` attribute in a `.razor` file.
+  - The theme script stays a blocking script in `<head>`.
+- **F2 — browser check.** It also covers the chat widget, the agent page, and sign-in and sign-out.
+
+### G — what is never throttled
+
+- An event that carries an `ApprovalId` is never throttled.
+- Every other event keeps the key `ServerId/ContainerId` plus type.
+- `DeliveryId` is never part of the key, because every event gets a fresh one.
+- `UnsuppressibleEvents` are not exempt as a group. `automation_refused` fires once per refused call and could flood
+  the channels.
+- Tests:
+  - two `unhealthy` events for one container inside the window give one delivery;
+  - two approvals inside the window give two deliveries.
+
+### H — whitelist (decision 6)
+
+- **H1 — seeding.** When the whitelist is seeded enabled from `GoogleAuth:AllowedEmails`, a set
+  `WHISKERS_ADMIN_EMAIL` is added to the seeded list. `WHISKERS_ADMIN_EMAIL` alone seeds no whitelist.
+- **H2 — adding.**
+  - The entry admits the address for every sign-in method; the docs say so.
+  - The addition first prunes orphan bindings (contract 0003, amendment c).
+  - A failed whitelist write undoes the account, as a failed role write does.
+  - Lock order: `AdminGate`, then `AccessControlWriteGate`.
+  - The account records that H2 added the entry.
+- **H3 — removing (third write point, approved).** `LocalAccountService.DeleteAsync` removes an entry that H2 added,
+  through the gate, with the binding prune of contract 0003 rule 5. An address that was listed before the account was
+  created stays.
+- **Existing installs.** A 1.0.0 install that already has a `whitelist.json` is not changed by H1; the CHANGELOG
+  tells the operator to add the address. `LocalAdminSeeder` does not go through `CreateAsync`.
+- **Tests.**
+  - The seeded local admin signs in.
+  - `WHISKERS_ADMIN_EMAIL` alone enables no whitelist.
+  - An unlisted address is refused on local and federated sign-in.
+  - A disabled whitelist is byte-identical after `CreateAsync`.
+  - A refused `CreateAsync` adds nothing.
+  - `DeleteAsync` removes only its own entry.
+
+### I — no Python (decision 8)
+
+- **Every Python call is replaced in 1.0.1.** Besides the two named in I1 and I2:
+  - `deploy/borg-fleet/borg-fleet-client:150-151`
+  - `deploy/borg-fleet/borg-fleet-prune:36-37`
+  - `deploy/tailnet-guard.sh:39, 55`
+- **Tools.** The replacements use `sh` with `jq`, or `awk`. Each script names its tools at the top and refuses to
+  start without them.
+- **Onboarding step 8 (I1).** The server id and the address are emitted as YAML scalars by the YAML writer. An entry
+  already present for the address changes nothing.
+- **Guard test (I3).** It fails when a tracked file:
+  - has a `.py` extension;
+  - has a python shebang; or
+  - is a script or C# source outside the tests and the matcher's interpreter list that invokes `python`/`python3`.
+- **Required tests.** `.github/required-tests/in-process.txt:1243` (`AddScrapeTarget_ships_python_base64_encoded`)
+  changes in the same PR (contract 0008).
+- **`borg-enroll` tests.** One test per exit code, run against stubs.
+
+### J — INV-40 (decision 9)
+
+- INV-40 stays ✅, with precise wording: every execution has a deadline that cancels its token; an action that ignores
+  the token runs to its end, and its slot stays held until then.
+- The `IUiMutationRunner` doc says the same.
+
+### Documentation, additionally
+
+- The INV-40 row.
+- The Mutations and Guardrails READMEs.
+- The `get_container_env` description.
+- A pointer in the detection table of contract 0013.
+- `docs/operations/local-accounts.md` (H2, H3).
+
+### Decisions (maintainer, 15 November 2026)
+
+6. H3 is approved as a third write point of the whitelist, limited to entries H2 added.
+7. The mTLS approval covers the adaptation of the contract 0007 client path to the new `SignCsr` signature.
+8. Every Python call named above is replaced in 1.0.1.
+9. INV-40 stays ✅ with the precise wording of part J.
