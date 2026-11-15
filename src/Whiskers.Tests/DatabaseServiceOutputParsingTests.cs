@@ -123,6 +123,35 @@ public class DatabaseServiceOutputParsingTests
     }
 
     [Fact]
+    public async Task A_last_row_that_only_looks_like_the_psql_footer_is_kept()
+    {
+        // psql's own footer counts the data rows; a value "(5 rows)" in the last data row is data.
+        const string psql =
+            " note\n" +
+            "----------\n" +
+            " a\n" +
+            " (5 rows)\n" +
+            "(2 rows)\n";
+        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = psql });
+
+        var result = await Db(host).ExecuteQueryAsync("c0ffee", "select note from notes", DatabaseType.PostgreSQL, Creds, "local");
+
+        Assert.Equal(2, result.RowCount);
+        Assert.Equal(["(5 rows)"], result.Rows[1]);
+    }
+
+    [Fact]
+    public async Task An_empty_psql_result_has_its_columns_and_no_rows()
+    {
+        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = " a | b\n---+---\n(0 rows)\n" });
+
+        var result = await Db(host).ExecuteQueryAsync("c0ffee", "select a, b from t", DatabaseType.PostgreSQL, Creds, "local");
+
+        Assert.Equal(["a", "b"], result.Columns);
+        Assert.Equal(0, result.RowCount);
+    }
+
+    [Fact]
     public async Task A_mysql_query_result_splits_on_tabs_only()
     {
         var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = "a\tb\nx|y\t(z)\n" });
@@ -182,6 +211,7 @@ public class DatabaseServiceOutputParsingTests
     [InlineData("SET k \"a\\\"b\\\\c\\n\"", new[] { "SET", "k", "a\"b\\c\n" })]
     [InlineData("SET k \"\"", new[] { "SET", "k", "" })]
     [InlineData("SET pro\"tected\" v", new[] { "SET", "pro\"tected\"", "v" })]
+    [InlineData("SET k -h", new[] { "SET", "k", "-h" })]   // after the command name redis-cli reads no options
     public void Redis_arguments_are_split_like_the_redis_cli_prompt(string line, string[] expected)
     {
         Assert.True(DatabaseService.TryParseRedisArguments(line, out var args, out var error), error);
@@ -196,6 +226,11 @@ public class DatabaseServiceOutputParsingTests
     [InlineData("SET k \"\\x41\"")]
     [InlineData("SET k \"\\p\"")]
     [InlineData("SET k 'a\\n'")]
+    [InlineData("-h attacker.example -p 6379 PING")]
+    [InlineData("  --rdb /tmp/dump.rdb")]
+    [InlineData("--pipe")]
+    [InlineData("\"-h\" attacker.example PING")]
+    [InlineData("-- PING")]
     public async Task An_unparseable_redis_command_is_refused_and_nothing_runs(string line)
     {
         var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = "OK\n" });

@@ -287,13 +287,16 @@ public class DatabaseService : IDatabaseService
         _ => new[] { "echo", "Unsupported database type" }
     };
 
-    /// <summary>Splits a Redis command line into its arguments the way the redis-cli prompt does, in a strict subset:
-    /// arguments are separated by whitespace; one that starts with <c>"</c> runs to the matching <c>"</c> and knows the
-    /// escapes <c>\" \\ \n \r \t</c>; one that starts with <c>'</c> runs to the matching <c>'</c> and knows only
-    /// <c>\'</c>. A closing quote must end the argument. A quote inside an unquoted argument is an ordinary character.
-    /// Any other escape (such as <c>\x41</c>), an unterminated quote or text after a closing quote is refused, so an
-    /// argument is never assembled from parts at run time. The arguments are passed as argv elements, each single-quoted
-    /// for the host shell (<see cref="ExecInContainer"/>); nothing here is ever handed to a shell raw.</summary>
+    /// <summary>Splits a Redis command line into its arguments, redis-cli-like: arguments are separated by whitespace;
+    /// one that starts with <c>"</c> runs to the matching <c>"</c> and knows the escapes <c>\" \\ \n \r \t</c>; one that
+    /// starts with <c>'</c> runs to the matching <c>'</c> and knows only <c>\'</c>. A closing quote must end the argument;
+    /// a quote inside an unquoted word stays literal (unlike the redis-cli prompt, which would join the parts). Any other
+    /// escape (such as <c>\x41</c>), an unterminated quote or text after a closing quote is refused, so an argument is
+    /// never assembled from parts at run time. A first argument that starts with <c>-</c> is refused too: redis-cli
+    /// reads options up to the command name (<c>-h host</c> would send <c>REDISCLI_AUTH</c> to another server,
+    /// <c>--rdb</c>/<c>--pipe</c> do other things), and it knows no <c>--</c> end-of-options marker, so the command
+    /// name must come first. The arguments are passed as argv elements, each single-quoted for the host shell
+    /// (<see cref="ExecInContainer"/>); nothing here is ever handed to a shell raw.</summary>
     internal static bool TryParseRedisArguments(string? line, out List<string> args, out string error)
     {
         args = [];
@@ -349,6 +352,11 @@ public class DatabaseService : IDatabaseService
             error = "Empty Redis command.";
             return false;
         }
+        if (args[0].StartsWith('-'))
+        {
+            error = "A Redis command cannot start with a redis-cli option.";
+            return false;
+        }
         return true;
     }
 
@@ -385,7 +393,7 @@ public class DatabaseService : IDatabaseService
         new[] { "mysql", "-u", creds.User }.Concat(extraArgs).ToArray();
 
     private static readonly System.Text.RegularExpressions.Regex PsqlRule = new(@"^-+(\+-+)*$");
-    private static readonly System.Text.RegularExpressions.Regex PsqlFooter = new(@"^\(\d+ rows?\)$");
+    private static readonly System.Text.RegularExpressions.Regex PsqlFooter = new(@"^\((\d+) rows?\)$");
 
     private static QueryResult ParseQueryResult(string output, DatabaseType dbType, double durationMs)
     {
@@ -418,8 +426,15 @@ public class DatabaseService : IDatabaseService
         var rows = lines.Select(l => l.TrimEnd('\r')).Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
         if (dbType == DatabaseType.PostgreSQL)
         {
-            if (rows.Count > 0 && PsqlFooter.IsMatch(rows[^1].Trim())) rows.RemoveAt(rows.Count - 1);
-            if (rows.Count > 1 && PsqlRule.IsMatch(rows[1].Trim())) rows.RemoveAt(1);
+            if (rows.Count > 1 && PsqlRule.IsMatch(rows[1].Trim()))
+            {
+                rows.RemoveAt(1);
+                // The footer counts the data rows (all but the header and the footer itself); a last row that only
+                // looks like "(N rows)" with another N is data.
+                if (rows.Count > 1 && PsqlFooter.Match(rows[^1].Trim()) is { Success: true } footer
+                    && int.TryParse(footer.Groups[1].Value, out var n) && n == rows.Count - 2)
+                    rows.RemoveAt(rows.Count - 1);
+            }
         }
 
         bool headerParsed = false;
