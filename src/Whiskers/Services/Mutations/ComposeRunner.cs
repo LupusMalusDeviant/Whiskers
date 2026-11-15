@@ -374,7 +374,8 @@ public sealed class ComposeRunner : IComposeRunner
     /// The re-check after <c>up</c> (Amendments 2–10): the containers this run created or recreated (ids that were not in
     /// the plan's impact, of the plan's project and services) join the scope's stop set; each is inspected and its
     /// exposures compared on (service, kind, key, value) with what was decided; a namespace it shares must be a decided
-    /// container or one this run created. A run that cannot be checked counts as an undecided exposure of class
+    /// container or one this run created; a bind of the Docker socket in its <c>Mounts</c> the plan did not decide is an
+    /// undecided exposure of class <c>host</c> (contract 0017, A1). A run that cannot be checked counts as an undecided exposure of class
     /// <c>public</c>. Under the agent rule set a container with an undecided exposure of a class that needs a confirmation
     /// is stopped (no restart, then stop, retried once); otherwise it keeps running and the run is reported as failed.
     /// </summary>
@@ -485,6 +486,14 @@ public sealed class ComposeRunner : IComposeRunner
                 }
                 Undecided(container, cls, $"undecided {Named(run, exposure)} (class '{cls}'){note}");
             }
+            // Contract 0017, A1: a bind of the Docker socket the plan did not decide for this service; Mounts that
+            // cannot be read count as one.
+            if (ComposeExposures.SocketMounts(service, doc) is not { } sockets)
+                Undecided(container, ExposureClasses.Host, "the mounts could not be read (counts as an undecided socket mount, class 'host')");
+            else
+                foreach (var socket in sockets)
+                    if (!ComposeExposures.SocketDecided(plan.Services.FirstOrDefault(s => s.Name == service), socket.Value))
+                        Undecided(container, ExposureClasses.Host, "undecided socket mount of the Docker socket (class 'host')");
             // Amendment 9: a namespace shared at run time must be a decided container or one this run created.
             foreach (var (field, id) in shared)
                 if (run.Scope is not { } scope
@@ -637,7 +646,10 @@ public sealed class ComposeRunner : IComposeRunner
 
     /// <summary>The service, the kind and the key of an exposure — never its value; a key from a variable not even that.</summary>
     internal static string Safe(ComposeExposure exposure) =>
-        exposure.KeyWithheld
+        // Contract 0017, A1: a planned socket mount comes from use_api_socket, which may also hand over registry credentials.
+        exposure.Kind == ExposureKind.SocketMount
+            ? $"{exposure.Service}: Docker socket mounted (use_api_socket may also hand it the host client's registry credentials)"
+            : exposure.KeyWithheld
             ? $"{exposure.Service}: {ExposureClasses.Noun(exposure.Kind)} (withheld)"
             : $"{exposure.Service}: {ExposureClasses.Noun(exposure.Kind)} {exposure.Key}";
 

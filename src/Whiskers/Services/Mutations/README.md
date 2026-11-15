@@ -375,7 +375,12 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   (interpolated; relative bind sources resolved against the project directory; project-scoped volumes also as
   `<project>_<key>`, explicit `name:` resolved; a volume with `driver_opts: device: <host path>` also as that path;
   a long `type: bind` entry as a host path even when relative; `<<` merges through any depth; the files of
-  file-backed `secrets` / `configs`; `volumes_from` as the other service's mounts (of any file, resolved after all
+  file-backed `secrets` / `configs`; `use_api_socket: true` as a read-write bind of `/var/run/docker.sock` (contract
+  0017, A1: in the model and in compose's model, through `<<` merges and `extends`, a value from an unset variable
+  refuses the plan; the control-plane rule refuses it for keys, agents, automations and Operators like every socket
+  mount). `use_api_socket` may also hand the container the registry credentials of the Docker client compose runs as
+  on the host (Compose's schema describes the field as "Bind mount Docker API socket and required auth"), so it is
+  also a `SocketMount` exposure (below), and the mount carries `ComposeMount.ApiSocket` through `volumes_from`; `volumes_from` as the other service's mounts (of any file, resolved after all
   files are read) or the container's id and name, looked up on the server —
   `ComposeModel.ResolveContainers`; not found or not unique refuses the plan without quoting the reference — plus
   that container's own mounts from `docker inspect`, unreadable → refused). `ComposePlanner` also has compose
@@ -390,7 +395,13 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   `ComposePlan.EnsureDecided` refuses a re-plan whose mounts were not decided.
 - **Compose exposures** (contract 0006, INV-62): the plan also reads every way a service is reachable or powerful
   beyond its own network namespace (`ComposeExposure`, `ComposeModel.ExposuresOf`): published ports (loopback left
-  out), `network_mode: host` or an external network named `host`, `privileged`, `cap_add`, `pid`/`ipc`/`uts`/
+  out), `network_mode: host` or an external network named `host`, `privileged`, a `post_start` / `pre_stop` hook
+  with `privileged: true` (contract 0017, A2: `Privileged`, key `hook:<kind>:<index>`, value `true`; a hook is an exec,
+  not container state, so it is decided at planning only — the re-check cannot see it; read through merges and
+  `extends`; a hook key compose reads at another index than the model, e.g. after an override merge, is decided on
+  its own, withheld), `use_api_socket: true` (contract 0017, A1: `SocketMount`, class `host`, key
+  `mount:<destination>` = `mount:/var/run/docker.sock`, value the normalised source; its approval reason and its
+  `exposure_change` notice name the registry credentials), `cap_add`, `pid`/`ipc`/`uts`/
   `userns_mode`/`cgroup: host`, devices, unconfined `security_opt`, `device_cgroup_rules` and labels under the policy's
   `ExposureLabelPrefixes` (the union of every stored preset at planning). `docker compose config` adds what the model
   did not read (withheld), the local images their labels (`docker image inspect`, no pull), and a `service:x` /
@@ -422,8 +433,19 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   refused under the agent rule set, otherwise decided and noted) → `up -d --pull never --no-build` → the re-check.
   The re-check inspects the containers the run created (project and service labels, an id not in the plan's
   `Impact`; `MutationScope.AddCreatedByRun`) and compares their exposures on (service, kind, key, value); a
-  namespace shared at run time must be decided or created by the run; a container that cannot be inspected counts as
-  `public`. A `CgroupnsMode: host` whose service does not set `cgroup` is the daemon's default, not the deployment's
+  namespace shared at run time must be decided or created by the run. Contract 0017, A1: every bind in a container's
+  `Mounts` whose normalised source is a socket path of `ControlPlaneResources` or a file named `docker.sock`
+  (`/run/docker.sock`, rootless `/run/user/<uid>/docker.sock`) is a `SocketMount` (key `mount:<destination>`); it is
+  decided only when the mounts of that same service hold the same source — the control plane's socket paths
+  (`/var/run/docker.sock`, `/run/docker.sock`) count as one source, a `volumes_from` source's mounts belong to the
+  receiving service, and with `use_api_socket` (also through `volumes_from`) the engine's socket is decided whatever
+  its path. An undecided one, and `Mounts` that cannot be read (an entry without a type or of an unknown type
+  included), are an undecided exposure of class `host`. Limits: the re-check sees only a bind of the socket file
+  itself — a bind of a directory above it (`/var/run:/x`, decided as a mount by the control-plane rule at planning), a
+  source that reaches the socket through a symlink, and an engine socket not named `docker.sock` outside the control
+  plane's list are not recognised here. A socket mount or a privileged hook is not passed on to a service that only
+  shares a namespace with the one that declares it. A container that cannot be inspected
+  counts as `public`. A `CgroupnsMode: host` whose service does not set `cgroup` is the daemon's default, not the deployment's
   (review M1): the runner reads the default once per server and keeps only the parsed version and mode, never the
   text (`default-cgroupns-mode` of `/etc/docker/daemon.json`,
   otherwise `host` for cgroup v1 and `private` for v2 from `docker info`; a successful read is kept for the runner's

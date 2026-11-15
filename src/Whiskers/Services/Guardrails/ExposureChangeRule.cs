@@ -58,6 +58,16 @@ public sealed class ExposureChangeRule : IGuardrailRule
     /// value; for a withheld entry the kind and the class only.</summary>
     private static string Reason(string service, ExposureKind kind, string key, string cls, bool withheld)
     {
+        // Contract 0017, A: a socket mount (class host) — use_api_socket may also hand the container the registry
+        // credentials of the Docker client compose runs as. Named by kind only: its key can be an .env value.
+        if (kind == ExposureKind.SocketMount)
+            return $"{service} gets the Docker socket mounted (root on the host); with use_api_socket compose may also hand "
+                   + $"it the registry credentials of the Docker client on the host (class '{cls}').";
+        // Contract 0017, A2: a privileged lifecycle hook, which the re-check cannot see.
+        if (kind == ExposureKind.Privileged && ComposeExposures.IsHookKey(key))
+            return withheld
+                ? $"{service} runs a privileged hook (withheld); it is decided at planning only."
+                : $"{service} runs a privileged {key.Split(':')[1]} hook ({key}); it is decided at planning only.";
         if (withheld)
             return $"{service} gets a {ExposureClasses.Noun(kind)} (withheld) of class '{cls}'; it needs a confirmation.";
         return kind switch

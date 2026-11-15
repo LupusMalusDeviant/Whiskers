@@ -36,7 +36,7 @@ public sealed partial class WebhookMutationTests
             _host.Inspect[id] = "{\"Id\":\"" + id + "\",\"Name\":\"/" + project + "-" + service + "-2\"," +
                 (_host.PinnedImageId(service) is { } image ? "\"Image\":\"" + image + "\"," : "") +
                 "\"Config\":{\"Labels\":{\"com.docker.compose.project\":\"" + project + "\",\"com.docker.compose.service\":\"" +
-                service + "\"" + labels + "}},\"HostConfig\":" + hostConfig + "}";
+                service + "\"" + labels + "}},\"HostConfig\":" + hostConfig + ",\"Mounts\":[]}";
             return null;
         };
     }

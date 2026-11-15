@@ -183,7 +183,9 @@ public sealed class ComposePlanner : IComposePlanner
             {
                 var fromVariable = modelShared.FirstOrDefault(m => m.Service == service && m.Field == field) is not { } read
                                    || read.FromVariable;
-                var inherited = await SharedAsync(reference, fromVariable, depth + 1);
+                // Contract 0017 (review): a socket mount or a privileged hook stays with the service that declares it,
+                // which is decided on it itself; sharing its namespace does not make it this service's.
+                var inherited = (await SharedAsync(reference, fromVariable, depth + 1)).Where(e => !ComposeExposures.IsOwnOnly(e));
                 result.AddRange(inherited.Select(e => fromVariable
                     ? e with { Service = service, KeyWithheld = true, ValueWithheld = true, Detail = $"{ExposureClasses.Noun(e.Kind)} (withheld)" }
                     : e with { Service = service }));
