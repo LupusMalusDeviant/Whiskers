@@ -20,7 +20,7 @@ public class MatrixNotificationService : IMatrixNotificationService
     {
         _httpClient = httpClient;
         _settings = settings;
-        _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
+        _throttler = new NotificationThrottler();
         _logger = logger;
     }
 
@@ -40,7 +40,7 @@ public class MatrixNotificationService : IMatrixNotificationService
         var (plain, html) = FormatMessage(evt);
         await SendMatrixMessage(config, plain, html, ct, evt.DeliveryId);
 
-        _throttler.Record(evt);
+        _throttler.Record(evt, _settings.CurrentValue.ThrottleMinutes);
         _logger.LogInformation("Matrix notification sent: {EventType} for {Container}",
             evt.EventType, evt.ContainerName);
         return true;
