@@ -129,6 +129,21 @@ public static partial class ComposeModel
         }
         if (Scalar(source, "privileged") is { } rawPrivileged && Truthy(Value(rawPrivileged, "privileged")))
             Add(ExposureKind.Privileged, "privileged", "true", "privileged: true", ComposeExposures.HasVariable(rawPrivileged));
+        // Contract 0017, A2: a lifecycle hook with privileged: true runs its command with every capability.
+        foreach (var hook in ComposeExposures.Hooks)
+        {
+            var index = 0;
+            foreach (var (entry, _) in Entries(source, hook))
+            {
+                if (entry is YamlMappingNode hookMap && Scalar(hookMap, "privileged") is { } rawHook
+                    && Truthy(Value(rawHook, $"The privileged of a {hook} hook")))
+                {
+                    var key = ComposeExposures.HookKey(hook, index);
+                    Add(ExposureKind.Privileged, key, "true", $"{key} privileged: true", ComposeExposures.HasVariable(rawHook));
+                }
+                index++;
+            }
+        }
         foreach (var (_, raw) in Entries(source, "cap_add"))
         {
             var cap = ComposeExposures.Capability(Value(raw, "A cap_add entry"));

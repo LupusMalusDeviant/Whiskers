@@ -407,6 +407,26 @@ public sealed partial class ProtectedResourceResolutionTests
             (await h.RunAsync("compose.deploy", args, ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
     }
 
+    /// <summary>Contract 0017, A1: <c>use_api_socket: true</c> is a mount of the Docker socket, refused for a key as
+    /// every socket mount is.</summary>
+    [Fact]
+    public async Task A_deployment_given_the_Docker_socket_by_use_api_socket_is_refused_for_a_key()
+    {
+        _host.ComposeConfig = """{"services":{"t":{"image":"x","use_api_socket":true}}}""";
+        var h = new ProtectionHarness(planner: docker => new ComposePlanner(docker, _host));
+        var args = new
+        {
+            serverId = "local", projectName = "tools",
+            composeContent = "services:\n  t:\n    image: x\n    use_api_socket: true\n",
+        };
+
+        var outcome = await AsKey(h, "compose.deploy", args);
+
+        Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Equal(MutationStatus.PendingApproval,
+            (await h.RunAsync("compose.deploy", args, ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
+    }
+
     [Fact]
     public async Task The_mounts_decision_of_a_planned_deployment_covers_each_mount()
     {

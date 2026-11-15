@@ -148,7 +148,9 @@ public static class ComposeExposures
         {
             ExposureKind.PublishedPort => $"{p.Service}: port {p.Value}->{p.Key}",
             ExposureKind.HostNetwork => $"{p.Service}: {p.Key}: host",
-            ExposureKind.Privileged => $"{p.Service}: privileged: true",
+            ExposureKind.Privileged => p.Key.StartsWith("hook:", StringComparison.Ordinal)
+                ? $"{p.Service}: {p.Key} privileged: true"
+                : $"{p.Service}: privileged: true",
             ExposureKind.AddedCapability => $"{p.Service}: cap_add: {p.Key}",
             ExposureKind.HostNamespace => $"{p.Service}: {p.Key}: host",
             ExposureKind.RouteLabel => $"{p.Service}: label {p.Key}",
@@ -173,6 +175,15 @@ public static class ComposeExposures
     public static string Classes(IEnumerable<ComposeExposure> exposures, IReadOnlyList<string> prefixes) =>
         string.Join(',', exposures.Select(e => ExposureClasses.Of(e.Kind, e.Key, prefixes)).OfType<string>()
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
+
+    // ------------------------------------------------------------------------------------------- lifecycle hooks
+
+    /// <summary>The lifecycle hook fields whose entries may set <c>privileged: true</c> (contract 0017, A2).</summary>
+    public static readonly IReadOnlyList<string> Hooks = ["post_start", "pre_stop"];
+
+    /// <summary>The comparison key of a privileged hook: <c>hook:&lt;post_start|pre_stop&gt;:&lt;index&gt;</c>. A hook is
+    /// an exec, not container state: the re-check after <c>up</c> cannot see it, so it is decided at planning only.</summary>
+    public static string HookKey(string hook, int index) => $"hook:{hook}:{index}";
 
     // ------------------------------------------------------------------------------------------- normalisation
 
@@ -360,6 +371,20 @@ public static class ComposeExposures
                     Add(ExposureKind.HostNetwork, "networks", "host", "networks: host");
         if (Property(definition, "privileged") is { ValueKind: JsonValueKind.True })
             Add(ExposureKind.Privileged, "privileged", "true", "privileged: true");
+        // Contract 0017, A2: a privileged lifecycle hook.
+        foreach (var hook in Hooks)
+            if (Property(definition, hook) is { ValueKind: JsonValueKind.Array } entries)
+            {
+                var index = 0;
+                foreach (var entry in entries.EnumerateArray())
+                {
+                    if (Property(entry, "privileged") is { } p
+                        && (p.ValueKind == JsonValueKind.True
+                            || (p.ValueKind == JsonValueKind.String && string.Equals(p.GetString(), "true", StringComparison.OrdinalIgnoreCase))))
+                        Add(ExposureKind.Privileged, HookKey(hook, index), "true", $"{HookKey(hook, index)} privileged: true");
+                    index++;
+                }
+            }
         foreach (var cap in Strings(definition, "cap_add"))
             Add(ExposureKind.AddedCapability, Capability(cap), "", $"cap_add: {Capability(cap)}");
         foreach (var ns in (string[])["pid", "ipc", "uts", "userns_mode", "cgroup"])
@@ -467,6 +492,18 @@ public static class ComposeExposures
                 }
             }
         return (found, shared);
+    }
+
+    /// <summary>Contract 0017, A1: the binds of the Docker socket among a container's <c>Mounts</c> (<c>docker inspect</c>),
+    /// as their normalised host paths.</summary>
+    public static IEnumerable<string> SocketBinds(JsonElement container)
+    {
+        if (Property(container, "Mounts") is not { ValueKind: JsonValueKind.Array } mounts) yield break;
+        foreach (var mount in mounts.EnumerateArray())
+            if (Text(mount, "Type") == "bind" && Text(mount, "Source") is { Length: > 0 } source && source.StartsWith('/')
+                && Whiskers.Services.Guardrails.ProtectedResourceMatcher.NormalizePath(source) is var path
+                && ComposeModel.DockerSocketPaths.Contains(path))
+                yield return path;
     }
 
     /// <summary>The identity of a container in an inspect document, its name without the leading slash, and its
