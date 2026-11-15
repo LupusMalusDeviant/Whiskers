@@ -64,6 +64,6 @@ public sealed partial record MtlsIdentity
         string.Join(",", DnsNames.Select(d => $"DNS:{d}").Concat(IpAddresses.Select(i => $"IP:{i}")));
 
     // Lowercase labels separated by dots: what Slug() produces and what the existing proxy certificates carry.
-    [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$")]
+    [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\\z")]
     private static partial Regex NameRegex();
 }
