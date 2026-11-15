@@ -169,6 +169,22 @@ public sealed class MtlsCsrReencodeTests : IDisposable
         Assert.Empty(await CaCommandsFor(B64(PemEncoding.WriteString("PRIVATE KEY", [1, 2, 3]) + "\n" + pem)));
     }
 
+    /// <summary>Contract 0017 E: only a single `CERTIFICATE REQUEST` block. The legacy `NEW CERTIFICATE REQUEST` label
+    /// is refused even around an otherwise honest CSR (fail closed).</summary>
+    [Fact]
+    public async Task A_new_certificate_request_block_is_refused_before_the_ca_host()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var der = DerOf(HonestCsrPem(key, Web1));
+        var legacy = PemEncoding.WriteString("NEW CERTIFICATE REQUEST", der);
+
+        Assert.Throws<InvalidOperationException>(() => MtlsCertificateValidator.ValidateCsr(legacy, Web1));
+        Assert.Throws<InvalidOperationException>(() => MtlsCertificateValidator.ValidateCsrAnswer(B64(legacy), Web1));
+        Assert.Empty(await CaCommandsFor(B64(legacy)));
+        // The same DER under the standard label passes, so it is the label that is refused.
+        Assert.NotNull(MtlsCertificateValidator.ValidateCsrAnswer(B64(PemEncoding.WriteString("CERTIFICATE REQUEST", der)), Web1));
+    }
+
     [Fact]
     public async Task A_csr_with_data_after_the_request_is_refused_before_the_ca_host()
     {

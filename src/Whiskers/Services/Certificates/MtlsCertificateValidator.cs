@@ -41,18 +41,20 @@ public static class MtlsCertificateValidator
     private static bool IsBase64Char(char c) =>
         c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '+' or '/' or '=';
 
-    /// <summary>Parses the CSR (verifying its self-signature) and returns its public key, or throws with the reason.</summary>
-    public static PublicKey ValidateCsr(string csrPem, MtlsIdentity expected) =>
+    /// <summary>Parses the CSR (verifying its self-signature) and returns its public key, or throws with the reason. Only
+    /// the tests call this; production goes through <see cref="ValidateCsrAnswer"/>.</summary>
+    internal static PublicKey ValidateCsr(string csrPem, MtlsIdentity expected) =>
         ValidateCsrDer(CsrDerFromPem(csrPem), expected);
 
     /// <summary>The DER of the single PEM block in <paramref name="pem"/>, which must be a certificate request. A second
-    /// PEM block of any kind is refused. Text around the block is never used.</summary>
+    /// PEM block of any kind is refused, and so is the legacy label `NEW CERTIFICATE REQUEST` (contract 0017 E: only a single
+    /// `CERTIFICATE REQUEST` block). Text around the block is never used.</summary>
     private static byte[] CsrDerFromPem(string pem)
     {
         if (!PemEncoding.TryFind(pem, out var fields))
             throw new InvalidOperationException("The CSR from the host is not valid: it holds no certificate request.");
         var label = pem.AsSpan()[fields.Label];
-        if (!label.SequenceEqual("CERTIFICATE REQUEST") && !label.SequenceEqual("NEW CERTIFICATE REQUEST"))
+        if (!label.SequenceEqual("CERTIFICATE REQUEST"))
             throw new InvalidOperationException("The CSR from the host is not valid: its PEM block is not a certificate request.");
         if (PemEncoding.TryFind(pem.AsSpan()[fields.Location.End..], out _))
             throw new InvalidOperationException("The CSR from the host is not valid: it holds more than one PEM block.");
