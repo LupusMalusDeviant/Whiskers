@@ -103,6 +103,17 @@ public static class ProtectedResourceMatcher
                 foreach (var glob in shell.Globs)
                     if (GlobHit(glob, keyPatterns, pathPatterns) is { } hit)
                         return hit with { Argument = key, InFreeText = true };
+                // Contract 0017 B (INV-59): a mount source written in the command (docker run -v /var/run:/r) is a
+                // mount, whatever the command word is; a directory above a protected path reaches into it. Only a
+                // plain absolute path is analysable (MountSourceKind); anything else that names a path is not (INV-24).
+                foreach (var (source, form) in ShellMountSources(shell))
+                {
+                    var kind = MountSourceKind(source, form);
+                    if (kind == MountSource.Unanalyzable)
+                        return new Hit("", null, key) { Argument = key, InFreeText = true };
+                    if (kind == MountSource.Path && AncestorHit(source, pathPatterns) is { } above)
+                        return above with { Argument = key, InFreeText = true };
+                }
                 // A command that removes, moves or changes permissions of a directory above a protected path
                 // (rm -rf /var/lib/docker) destroys it; merely reading one (df -h /var/lib/docker) does not.
                 if (shell.Words.Any(w => ModifyingCommands.Contains(Path.GetFileName(w))))
@@ -110,6 +121,8 @@ public static class ProtectedResourceMatcher
                     {
                         if (word.StartsWith('/') && AncestorHit(word, pathPatterns) is { } above)
                             return above with { Argument = key, InFreeText = true };
+                        if (shell.Globs.Contains(word) && GlobAncestorHit(word, pathPatterns) is { } globAbove)
+                            return globAbove with { Argument = key, InFreeText = true };
                         // A relative operand (cd /app/data && rm -rf mtls) is judged by the directory it names.
                         if (!word.StartsWith('/') && ProtectedSegment(word, pathPatterns) is { } segment)
                             return new Hit(word, segment) { Argument = key, InFreeText = true };
@@ -293,6 +306,193 @@ public static class ProtectedResourceMatcher
         }
     }
 
+    /// <summary>The mount sources a shell command names (contract 0017 B and its amendments):
+    /// <list type="bullet">
+    /// <item>short syntax, cut at its first <c>:</c>: the word after <c>-v</c> / <c>--volume</c>, the
+    /// <c>--volume=</c> form, the value attached to <c>-v</c> or to a short-flag cluster ending in <c>v</c>
+    /// (<c>-v/src:dst</c>, <c>-v=src:dst</c>, <c>-itv/src:dst</c>), any <c>&lt;absolute path&gt;:&lt;path&gt;</c>
+    /// word, and the word after such a cluster (<c>-itv ./x:/r</c>) when it starts with <c>.</c>, <c>~</c> or
+    /// <c>/</c> and holds a <c>:</c>, whatever the command is (<c>rsync -av ./a:b …</c> too: a name says nothing about
+    /// the program);</item>
+    /// <item>keyed: the value of a <c>source=</c> / <c>src=</c> / <c>device=</c> key, also after <c>volume-opt=</c>.
+    /// Inside a <c>--mount</c> / <c>--mount-add</c> value and a <c>-o</c> / <c>--opt</c> value (also their
+    /// <c>=</c> forms and attached <c>-o…</c>), and anywhere in a command that names a container runtime, keys are
+    /// matched in any case, as Docker lower-cases them; in any other word only in lower case at the start of a
+    /// comma-separated part (<c>echo SRC=./build</c> is none). A keyed value is a path, so it is returned whole and
+    /// also cut at its first <c>:</c>. In a <c>-o</c> / <c>--opt</c> / <c>--mount</c> value a <c>device=</c> value, and
+    /// a <c>source=</c> / <c>src=</c> value of a <c>type=bind</c> mount, is always a host path
+    /// (<see cref="SourceForm.HostPath"/>). A <c>--mount</c> value with a <c>"</c> (a CSV-quoted field) is
+    /// <see cref="UnresolvableSource"/>.</item>
+    /// </list></summary>
+    private static IEnumerable<(string Value, SourceForm Form)> ShellMountSources(ShellText shell)
+    {
+        var words = shell.Words;
+        var runtime = words.Any(NamesContainerRuntime);
+        var keyCase = runtime ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        for (var i = 0; i < words.Count; i++)
+        {
+            var word = words[i];
+            var next = i + 1 < words.Count ? words[i + 1] : null;
+            if (word is "-v" or "--volume" && next is not null) yield return (BeforeColon(next), SourceForm.Short);
+            else if (IsVolumeCluster(word) && next is { Length: > 0 } && next[0] is '.' or '~' or '/' && next.Contains(':'))
+                yield return (BeforeColon(next), SourceForm.Short);
+            else if (word.StartsWith("--volume=", StringComparison.Ordinal))
+                yield return (BeforeColon(word["--volume=".Length..]), SourceForm.Short);
+            else if (AttachedVolume(word) is { } attached) yield return (BeforeColon(attached), SourceForm.Short);
+            else if (word.StartsWith('/') && word.IndexOf(':') > 0) yield return (BeforeColon(word), SourceForm.Short);
+
+            // A --mount / --mount-add value: CSV, so a quoted field (a comma inside a source) is not read here.
+            var mountValue = word is "--mount" or "--mount-add" ? next
+                : word.StartsWith("--mount=", StringComparison.Ordinal) ? word["--mount=".Length..]
+                : word.StartsWith("--mount-add=", StringComparison.Ordinal) ? word["--mount-add=".Length..]
+                : null;
+            if (mountValue is not null && mountValue.Contains('"')) yield return (UnresolvableSource, SourceForm.HostPath);
+            // A -o / --opt value: keys in any case.
+            var optionValue = mountValue ?? (word is "-o" or "--opt" ? next
+                : word.StartsWith("--opt=", StringComparison.Ordinal) ? word["--opt=".Length..]
+                : word.StartsWith("-o", StringComparison.Ordinal) && word.Length > 2 ? word[2..].TrimStart('=')
+                : null);
+            if (optionValue is not null)
+            {
+                var bind = optionValue.Contains("type=bind", StringComparison.OrdinalIgnoreCase);
+                foreach (var (sourceKey, source) in KeyedSources(optionValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    // device= of the local driver is bound relative to the daemon's directory; a bind source is
+                    // made absolute against the client's: neither is a volume name.
+                    var form = sourceKey == "device=" || bind ? SourceForm.HostPath : SourceForm.Keyed;
+                    foreach (var whole in WholeAndCut(source)) yield return (whole, form);
+                }
+            }
+            // Any other word: Docker's lower-case keys, in any case in a runtime's command.
+            foreach (var (_, source) in KeyedSources(word, keyCase))
+                foreach (var whole in WholeAndCut(source)) yield return (whole, SourceForm.Keyed);
+        }
+
+        static string BeforeColon(string value) => value.IndexOf(':') is var colon and >= 0 ? value[..colon] : value;
+
+        static IEnumerable<string> WholeAndCut(string value)
+        {
+            yield return value;
+            if (value.Contains(':')) yield return BeforeColon(value);
+        }
+
+        // The key (lower case) and value of a source= / src= / device= key that starts a comma-separated part, also
+        // after volume-opt= (repeated).
+        static IEnumerable<(string Key, string Value)> KeyedSources(string value, StringComparison comparison)
+        {
+            if (!value.Contains('=')) yield break;
+            foreach (var part in value.Split(','))
+            {
+                var option = part.AsMemory().Trim();
+                while (option.Span.StartsWith("volume-opt=", comparison)) option = option["volume-opt=".Length..];
+                foreach (var sourceKey in SourceKeys)
+                    if (option.Span.StartsWith(sourceKey, comparison))
+                    {
+                        yield return (sourceKey, option[sourceKey.Length..].ToString());
+                        break;
+                    }
+            }
+        }
+    }
+
+    private static readonly string[] SourceKeys = ["source=", "src=", "device="];
+
+    /// <summary>A source that cannot be read at all (a CSV-quoted <c>--mount</c> field); always unanalysable.</summary>
+    private const string UnresolvableSource = "\0";
+
+    /// <summary>How a mount source was written, which decides what a value that is not a plain absolute path means.</summary>
+    private enum SourceForm
+    {
+        /// <summary>Short syntax (<c>-v a:b</c>): a word without a leading <c>/</c>, <c>.</c> or <c>~</c> is a volume
+        /// name Docker would refuse with a <c>/</c> in it (<c>awk -v x=./y</c>).</summary>
+        Short,
+        /// <summary>A <c>source=</c> / <c>src=</c> value: without <c>/</c> a volume name; with one, a path.</summary>
+        Keyed,
+        /// <summary>A <c>device=</c> value or a bind mount's source: always a host path, relative ones included.</summary>
+        HostPath,
+    }
+
+    private enum MountSource { NotAPath, Path, Unanalyzable }
+
+    // A plain absolute path: what may be compared with the control plane's paths. ':' is allowed for a keyed source,
+    // which is a path and is not cut (source=/srv/a:b); short syntax is cut at ':' before it gets here.
+    private static readonly Regex PlainAbsolutePath = new(@"^/[A-Za-z0-9._@+/:-]*$", RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(200));
+
+    /// <summary>
+    /// How a mount source is decided (contract 0017 B, amendment 3): only a plain absolute path
+    /// (<c>^/[A-Za-z0-9._@+/:-]*$</c>) outside <c>/proc</c>, <c>/sys</c> and <c>/dev</c> is a <see cref="MountSource.Path"/>
+    /// compared with the control plane. A source that starts with <c>.</c> or <c>~</c>, an absolute one with any other
+    /// character (a quote, a comma, a glob, a backslash, <c>$</c>, a backtick), one under <c>/proc</c> (another
+    /// process's file system), <c>/sys</c> or <c>/dev</c>, and <see cref="UnresolvableSource"/> are unanalysable. What a
+    /// value that is not absolute means depends on its <see cref="SourceForm"/>: a host path (<c>device=var/run</c>, a
+    /// bind source) is unanalysable, a keyed value with a <c>/</c> (<c>src=var/run</c>) too, a keyed or short value
+    /// without one is a named volume, and a short value with one that starts with neither <c>/</c> nor a quote is no
+    /// source Docker accepts (<c>awk -v x=./y</c>).
+    /// </summary>
+    private static MountSource MountSourceKind(string source, SourceForm form)
+    {
+        if (source == UnresolvableSource) return MountSource.Unanalyzable;
+        if (source.StartsWith('.') || source.StartsWith('~')) return MountSource.Unanalyzable;
+        if (!source.StartsWith('/'))
+            return form switch
+            {
+                SourceForm.HostPath => source.Length == 0 ? MountSource.NotAPath : MountSource.Unanalyzable,
+                SourceForm.Keyed => source.Contains('/') ? MountSource.Unanalyzable : MountSource.NotAPath,
+                _ => !source.Contains('/') ? MountSource.NotAPath
+                    : source[0] is '"' or '\'' or '\\' or '$' or '`' ? MountSource.Unanalyzable : MountSource.NotAPath,
+            };
+        bool plain;
+        try { plain = PlainAbsolutePath.IsMatch(source); }
+        catch (RegexMatchTimeoutException) { plain = false; }
+        if (!plain) return MountSource.Unanalyzable;
+        var path = NormalizePath(source);
+        foreach (var root in (string[])["/proc", "/sys", "/dev"])
+            if (path == root || path.StartsWith(root + "/", StringComparison.Ordinal))
+                return MountSource.Unanalyzable;
+        return MountSource.Path;
+    }
+
+    /// <summary>A word that runs a container runtime: <c>docker</c>, <c>podman</c>, <c>nerdctl</c>, <c>ctr</c>,
+    /// <c>crictl</c> (<see cref="IsRuntimeWord"/>, by file name, so <c>sudo /usr/bin/docker</c> counts),
+    /// <c>docker-compose</c> / <c>podman-compose</c>, or an alias or assignment whose value starts with one
+    /// (<c>alias d=docker</c>, <c>d='sudo docker run'</c>).</summary>
+    private static bool NamesContainerRuntime(string word)
+    {
+        if (IsRuntimeOrCompose(word)) return true;
+        var eq = word.IndexOf('=');
+        if (eq <= 0) return false;
+        foreach (var token in word[(eq + 1)..].Split([' ', '\t', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (token is "sudo" or "env" or "command" or "exec" || token.Contains('=') || token.StartsWith('-')) continue;
+            return IsRuntimeOrCompose(token);
+        }
+        return false;
+
+        static bool IsRuntimeOrCompose(string w)
+        {
+            var name = Path.GetFileName(w);
+            return IsRuntimeWord(name) || name is "docker-compose" or "podman-compose";
+        }
+    }
+
+    /// <summary>A short-flag cluster ending in <c>v</c> (<c>-itv</c>, <c>-dv</c>): in a container runtime its next word
+    /// is a volume, as Docker's flag parser reads it.</summary>
+    private static bool IsVolumeCluster(string word) =>
+        word.Length >= 2 && word[0] == '-' && word[^1] == 'v' && word[1..].All(char.IsAsciiLetter);
+
+    /// <summary>The value attached to <c>-v</c> or to a short-flag cluster ending in <c>v</c> (<c>-v/src:dst</c>,
+    /// <c>-itv/src:dst</c>, <c>-v=src:dst</c>, <c>-v./x:/y</c>, <c>-v~/x:/y</c>), as Docker's flag parser reads it: the
+    /// text after that <c>v</c>, a leading <c>=</c> removed; <c>null</c> for any other word.</summary>
+    private static string? AttachedVolume(string word)
+    {
+        if (word.Length < 3 || word[0] != '-' || word[1] == '-') return null;
+        for (var i = 1; i + 1 < word.Length && char.IsAsciiLetter(word[i]); i++)
+            if (word[i] == 'v' && word[i + 1] is '/' or '=' or '.' or '~')
+                return word[i + 1] == '=' ? word[(i + 2)..] : word[(i + 1)..];
+        return null;
+    }
+
     // A mount of a directory that contains a protected path: the root for any of them, and every parent of an
     // absolute one (/var/run for the Docker socket, /var/lib/docker for Whiskers' volume).
     private static Hit? AncestorHit(string source, IReadOnlyList<string> pathPatterns)
@@ -334,45 +534,174 @@ public static class ProtectedResourceMatcher
     /// <summary>A word the shell expands as a glob hits when it could expand to a protected name or path.</summary>
     private static Hit? GlobHit(string glob, IReadOnlyList<string> patterns, IReadOnlyList<string> pathPatterns)
     {
-        var asGlob = Regex.Replace(glob, @"\[[^\]]*\]", "?");
+        var asGlob = ReadableGlob(glob);
         // A glob of nothing but wildcards (the arguments of `rm *`, `count(*)` in quoted SQL) names no resource.
         if (!asGlob.Contains('/') && asGlob.Any(ch => ch is not ('*' or '?')))
             foreach (var pattern in patterns)
-                if (GuardrailRuleHelpers.GlobMatch(asGlob, pattern.Replace("*", "").Replace("?", "")))
-                    return new Hit(glob, pattern);
+            {
+                var stem = pattern.Replace("*", "").Replace("?", "");
+                if (GuardrailRuleHelpers.GlobMatch(asGlob, stem)) return new Hit(glob, pattern);
+                // A ? or [..] may stand for a letter of the pattern (whis?ers_db reaches whiskers*, proj_whis[k]ers
+                // reaches *_whiskers*); a * of the glob only for what the pattern leaves open, so *.log reaches nothing.
+                if (GlobsIntersect(asGlob, pattern, starTakesLetters: false)) return new Hit(glob, pattern);
+            }
         if (!asGlob.Contains('/')) return null;
+        if (!asGlob.StartsWith('/')) return RelativeGlobHit(glob, pathPatterns);
+        // Repeated slashes and '.' segments are collapsed; a segment that is or can be '.' or '..' cannot be resolved
+        // in a glob: a hit (B17, B20).
+        if (GlobPath(glob) is not { } path) return pathPatterns.Count > 0 ? new Hit(glob, UnreadableGlob) : null;
+        // The protected path itself and everything below it; the pattern's '*' crosses '/', the glob's does not.
+        foreach (var pattern in pathPatterns)
+            if (GlobsIntersect(path, pattern) || GlobsIntersect(path, pattern.TrimEnd('/') + "/*"))
+                return new Hit(glob, pattern);
+        return null;
+    }
+
+    /// <summary>A relative glob (the working directory is unknown) hits when one of its segments could be a protected
+    /// directory with its <c>?</c> and <c>[…]</c> standing for letters (cd /app/data && cat mtl?/client.key,
+    /// rm -rf mtl?, cd /var/lib/docker/volumes && cat whisk?rs_data/…); a <c>*</c> of the glob stands only for what the
+    /// name leaves open, so logs/*.log reaches nothing (S2 rounds 9 and 10). A segment that is not read reliably
+    /// (nested or several brackets) is widened, and its <c>*</c> may stand for any letter.</summary>
+    private static Hit? RelativeGlobHit(string glob, IReadOnlyList<string> pathPatterns)
+    {
+        var segments = glob.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(seg => (Glob: ReadableSegment(seg), Widened: UnreadableSegment(seg)))
+            .Where(seg => seg.Glob.IndexOfAny(['*', '?']) >= 0).ToList();
+        if (segments.Count == 0) return null;
         foreach (var pattern in pathPatterns)
         {
-            foreach (var sample in Samples(pattern))
-                if (GuardrailRuleHelpers.GlobMatch(asGlob.TrimEnd('/'), sample))
-                    return new Hit(glob, pattern);
-            // A wildcard segment that could be the protected directory itself (/opt/*/ca.key, /app/da?a/…).
-            var protectedSegment = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(x => x != "*");
-            if (protectedSegment is not null
-                && asGlob.Split('/', StringSplitOptions.RemoveEmptyEntries)
-                    .Any(seg => seg.IndexOfAny(['*', '?']) >= 0 && GuardrailRuleHelpers.GlobMatch(seg, protectedSegment)))
-                return new Hit(glob, pattern);
+            var name = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(x => x != "*");
+            if (name is null) continue;
+            if (segments.Any(seg => GlobsIntersect(seg.Glob, name, starTakesLetters: seg.Widened))) return new Hit(glob, pattern);
         }
         return null;
     }
 
-    // Concrete paths a protected path pattern covers, for testing whether a glob could reach one: the leading '*'
-    // stands for any parent directory.
-    private static IEnumerable<string> Samples(string pathPattern)
+    /// <summary>A glob with each bracket expression as <c>?</c>. A segment with nested brackets or a stray closing
+    /// bracket ([[.o.]], [a]o], an escaped ]) is not read reliably: from its first <c>[</c> on it becomes <c>*</c>, which finds
+    /// more in an absolute path ([0-9][0-9]* names nothing, docker.s[[.o.]]ck still reaches docker.sock; S2 round 9,
+    /// M5); a relative glob lets that <c>*</c> stand for letters (round 10).</summary>
+    private static string ReadableGlob(string glob) => string.Join('/', glob.Split('/').Select(ReadableSegment));
+
+    // Nested brackets ([[.o.]], [[=o=]]) or a ']' left over once the bracket expressions are read ([a]o], which an
+    // escaped ] became): the shell may read the segment otherwise. [a-z]*[0-9].log is read reliably.
+    private static bool UnreadableSegment(string seg) =>
+        seg.Contains("[[") || (seg.Contains('[') && BracketsAsAnyCharacter(seg).Contains(']'));
+
+    private static string ReadableSegment(string seg) =>
+        UnreadableSegment(seg) ? seg[..seg.IndexOf('[')] + "*" : BracketsAsAnyCharacter(seg);
+
+    /// <summary>The pattern a hit names when a glob in a path cannot be read reliably (a segment that can be
+    /// <c>..</c>). It is no control-plane pattern; an interactive Admin is still asked to approve it, as for any
+    /// presumed hit on the control plane.</summary>
+    public const string UnreadableGlob = "(a glob path that cannot be read reliably)";
+
+    /// <summary>An absolute glob path, readable (<see cref="ReadableGlob"/>), with repeated slashes and <c>.</c>
+    /// segments removed. <c>null</c> when a segment is <c>..</c> or a glob that can expand to <c>.</c> or <c>..</c>
+    /// (<c>.*</c>, <c>.?</c> in dash or an older bash), which only the file system resolves (S2 rounds 8 to 10). A
+    /// bracket that excludes the dot (<c>.[!.]*</c>) cannot.</summary>
+    private static string? GlobPath(string glob)
     {
-        var literal = pathPattern.TrimEnd('*').TrimEnd('/');
-        if (!literal.StartsWith('*'))
+        var parts = new List<string>();
+        foreach (var raw in glob.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
-            yield return literal;
-            yield return literal + "/x";
-            yield break;
+            if (raw == ".") continue;
+            if (raw == "..") return null;
+            if (raw.StartsWith('.') && raw.IndexOfAny(['*', '?', '[']) >= 0)
+            {
+                var asDot = DotForm(raw);
+                if (GlobsIntersect(asDot, ".") || GlobsIntersect(asDot, "..")) return null;
+            }
+            parts.Add(ReadableSegment(raw));
         }
-        var tail = literal.TrimStart('*');
-        foreach (var parent in new[] { "", "/opt", "/etc", "/srv", "/root", "/home/x", "/app/data", "/var/lib", "/data" })
+        return "/" + string.Join('/', parts);
+    }
+
+    // A segment as far as it can spell '.' or '..': a bracket expression that excludes the dot ([!.], [^.]) is a letter
+    // other than a dot, any other one (or one that is not read reliably) could be a dot.
+    private static string DotForm(string seg)
+    {
+        if (UnreadableSegment(seg)) return seg[..seg.IndexOf('[')] + "*";
+        var result = new StringBuilder(seg.Length);
+        for (var i = 0; i < seg.Length; i++)
         {
-            yield return parent + tail;
-            yield return parent + tail + "/x";
+            if (seg[i] != '[') { result.Append(seg[i]); continue; }
+            // The end is found as BracketsAsAnyCharacter finds it: a ']' right after '[', '[!' or '[^' is a member
+            // (.[!]] can be '..').
+            var negated = i + 1 < seg.Length && seg[i + 1] is '!' or '^';
+            var start = i + (negated ? 2 : 1);
+            var close = seg.IndexOf(']', Math.Min(start + 1, seg.Length));
+            if (start >= seg.Length || close < 0) { result.Append('['); continue; }
+            var members = seg[start..close];
+            result.Append(negated && members.Contains('.') ? 'x' : '?');
+            i = close;
         }
+        return result.ToString();
+    }
+
+    /// <summary>M4: a glob that could name a directory above a literal protected path (rm -r /var/lib/dock?r,
+    /// chmod -R 000 /var/lib/docker/v*). A segment that can be '..' counts as one.</summary>
+    private static Hit? GlobAncestorHit(string glob, IReadOnlyList<string> pathPatterns)
+    {
+        if (!glob.StartsWith('/')) return RelativeGlobHit(glob, pathPatterns);
+        if (GlobPath(glob) is not { } path) return pathPatterns.Count > 0 ? new Hit(glob, UnreadableGlob) : null;
+        foreach (var pattern in pathPatterns)
+        {
+            if (pattern.StartsWith('*')) continue;
+            var segments = pattern.TrimEnd('*').TrimEnd('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (path == "/") return new Hit(glob, pattern);
+            for (var k = 1; k < segments.Length; k++)
+                if (GlobsIntersect(path, "/" + string.Join('/', segments[..k])))
+                    return new Hit(glob, pattern);
+        }
+        return null;
+    }
+
+    /// <summary>Whether a shell glob (<c>*</c> and <c>?</c> stay within a path segment) and a protected pattern
+    /// (<c>*</c> matches anything, <c>/</c> included) can match the same text. Letters compare without case, which can
+    /// only find more. Time and memory are the product of the two lengths.</summary>
+    internal static bool GlobsIntersect(string glob, string pattern, bool starTakesLetters = true)
+    {
+        int n = glob.Length, m = pattern.Length;
+        var reach = new bool[(n + 1) * (m + 1)];
+        reach[0] = true;
+        for (var i = 0; i <= n; i++)
+            for (var j = 0; j <= m; j++)
+            {
+                if (!reach[i * (m + 1) + j]) continue;
+                if (i == n && j == m) return true;
+                var a = i < n ? glob[i] : '\0';
+                var b = j < m ? pattern[j] : '\0';
+                if (a == '*') reach[(i + 1) * (m + 1) + j] = true;                     // the glob's * is empty
+                if (b == '*') reach[i * (m + 1) + j + 1] = true;                       // the pattern's * is empty
+                if (starTakesLetters && a == '*' && j < m && b != '*' && b != '/') reach[i * (m + 1) + j + 1] = true;   // * takes b's letter
+                if (b == '*' && i < n && a != '*') reach[(i + 1) * (m + 1) + j] = true;              // * takes a's letter
+                if (i < n && j < m && a != '*' && b != '*' && Compatible(a, b)) reach[(i + 1) * (m + 1) + j + 1] = true;
+            }
+        return false;
+
+        static bool Compatible(char a, char b) =>
+            a == '?' ? b != '/' : b == '?' || char.ToLowerInvariant(a) == char.ToLowerInvariant(b);
+    }
+
+    /// <summary>Turns each bracket expression into <c>?</c> as the shell reads it: a <c>]</c> right after <c>[</c>,
+    /// <c>[!</c> or <c>[^</c> is a member, not the end (<c>docker.soc[]k]</c> is <c>docker.soc?</c>). A <c>[</c>
+    /// without an end is a letter.</summary>
+    internal static string BracketsAsAnyCharacter(string glob)
+    {
+        var result = new StringBuilder(glob.Length);
+        for (var i = 0; i < glob.Length; i++)
+        {
+            if (glob[i] != '[') { result.Append(glob[i]); continue; }
+            var j = i + 1;
+            if (j < glob.Length && glob[j] is '!' or '^') j++;
+            if (j < glob.Length && glob[j] == ']') j++;
+            while (j < glob.Length && glob[j] != ']' && glob[j] != '/') j++;
+            if (j >= glob.Length || glob[j] == '/') { result.Append('['); continue; }
+            result.Append('?');
+            i = j;
+        }
+        return result.ToString();
     }
 
     private static string? Match(string value, IReadOnlyList<string> patterns)
@@ -411,6 +740,11 @@ public static class ProtectedResourceMatcher
                 if (part != word) yield return part;
         }
     }
+
+    // MentionWords, RuntimeIdWords and InvokesContainerRuntime read AnalyseShell's words. Above MaxShellLength
+    // (64 Ki characters) those are empty: they name no container then, which is safe only because the same request is
+    // already unanalysable in FirstHit (refused for a key, an approval for an interactive Admin) —
+    // SelfProtectionTests.A_command_over_the_cap_names_no_words_but_is_unanalysable pins both halves.
 
     /// <summary>The words a container id could be written as in an argument: the shell's words for a command, else
     /// the plain words.</summary>
@@ -494,7 +828,8 @@ public static class ProtectedResourceMatcher
 
     /// <summary>What the shell makes of a command: its literal words (quotes and escapes removed, with the words of
     /// quoted text that is run again), the words it expands as globs, and whether anything is built at run time.</summary>
-    public sealed record ShellText(IReadOnlyList<string> Words, IReadOnlyList<string> Globs, bool Unanalyzable);
+    public sealed record ShellText(IReadOnlyList<string> Words, IReadOnlyList<string> Globs, bool Unanalyzable,
+        IReadOnlyList<int>? Commands = null);
 
     private const int MaxShellDepth = 4;
 
@@ -507,33 +842,47 @@ public static class ProtectedResourceMatcher
     /// </summary>
     public static ShellText AnalyseShell(string text)
     {
+        // A command this long is not read word by word (the per-command checks grow with its size): unanalysable.
+        if (text.Length > MaxShellLength) return new ShellText([], [], true, []);
         var words = new List<string>();
         var globs = new List<string>();
         var commands = new List<int>();
         var unanalyzable = Tokenize(text, words, globs, commands, 0);
-        foreach (var i in commands)
+        var globWords = new HashSet<string>(globs, StringComparer.Ordinal);
+        for (var c = 0; c < commands.Count; c++)
         {
             if (unanalyzable) break;
+            var i = commands[c];
+            // The words of this command: up to the next command word.
+            var segment = words.Skip(i + 1).Take((c + 1 < commands.Count ? commands[c + 1] : words.Count) - i - 1);
             var word = words[i];
             var name = Path.GetFileName(word);
             var next = i + 1 < words.Count ? words[i + 1] : null;
-            if (ShellRunTime.Contains(name) || BuildTools.Contains(name) || name == "."
+            // A command word the shell expands (a glob: /usr/bin/docke?, [d]ocker) names a program only at run time.
+            // A bare * is left out: re-read quoted SQL (count(*)) puts one there.
+            if (word is not ("[" or "[[" or "*") && word.IndexOfAny(['*', '?', '[']) >= 0 && globWords.Contains(word))
+                unanalyzable = true;
+            else if (ShellRunTime.Contains(name) || BuildTools.Contains(name) || name == "."
                 || word.StartsWith("./", StringComparison.Ordinal) || word.StartsWith("../", StringComparison.Ordinal)
                 || word.StartsWith("~/", StringComparison.Ordinal)
                 || (word.StartsWith('/') && ScriptFile.IsMatch(word))
                 || IsInterpreter(name))
                 unanalyzable = true;
+            // fish substitutes commands with plain parentheses (docker stop (printf …)): its text is never read as POSIX.
+            else if (name == "fish")
+                unanalyzable = true;
             else if ((Shells.Contains(name) || name == "su") && !IsCommandFlag(next))
                 unanalyzable = true;
-            else if (ComposeWrite(words, i, name))
+            else if (ComposeWrite(segment, name))
                 unanalyzable = true;
-            else if (name == "find" && words.Skip(i + 1).Any(w => w is "-exec" or "-execdir" or "-ok" or "-okdir" or "-delete"))
+            else if (name == "find" && segment.Any(w => w is "-exec" or "-execdir" or "-ok" or "-okdir" or "-delete"))
             {
                 // What it acts on comes from the file system: analysable only when every starting point is a plain
                 // absolute directory that neither is nor contains a protected path.
-                var roots = words.Skip(i + 1).TakeWhile(w => !w.StartsWith('-') && w is not "(" and not "!").ToList();
+                var roots = segment.TakeWhile(w => !w.StartsWith('-') && w is not "(" and not "!").ToList();
                 unanalyzable = roots.Count == 0 || roots.Any(r => !r.StartsWith('/')
                     || AncestorHit(r, ControlPlaneResources.PathPatterns) is not null
+                    || (globWords.Contains(r) && GlobAncestorHit(r, ControlPlaneResources.PathPatterns) is not null)
                     || Match(NormalizePath(r), ControlPlaneResources.PathPatterns) is not null);
             }
         }
@@ -543,20 +892,24 @@ public static class ProtectedResourceMatcher
             var name = Path.GetFileName(words[w]);
             var next = w + 1 < words.Count ? words[w + 1] : null;
             if (ShellRunTime.Contains(name)) unanalyzable = true;
-            else if (Shells.Contains(name) && !IsCommandFlag(next)) unanalyzable = true;
+            else if ((name == "fish" && next is not null && next.StartsWith('-'))
+                     || (Shells.Contains(name) && !IsCommandFlag(next))) unanalyzable = true;
             else if (IsInterpreter(name) && next is not null && (next.StartsWith('-') || next.Contains('.') || next.Contains('/')))
                 unanalyzable = true;
         }
         try { unanalyzable |= ShellUnanalyzable.IsMatch(text); }
         catch (RegexMatchTimeoutException) { unanalyzable = true; }
-        return new ShellText(words, globs, unanalyzable);
+        return new ShellText(words, globs, unanalyzable, commands);
     }
+
+    /// <summary>The longest command read word by word (64 Ki characters); a longer one is unanalysable.</summary>
+    public const int MaxShellLength = 64 * 1024;
 
     /// <summary>A compose or stack command that changes containers (<c>docker compose down</c>, <c>docker-compose up</c>,
     /// <c>docker stack deploy</c>) acts on what a compose file this text does not show defines.</summary>
-    private static bool ComposeWrite(List<string> words, int command, string name)
+    private static bool ComposeWrite(IEnumerable<string> segment, string name)
     {
-        var rest = words.Skip(command + 1).Where(w => !w.StartsWith('-')).ToList();
+        var rest = segment.Where(w => !w.StartsWith('-')).ToList();
         // A cleanup (docker system prune, docker container prune, … volume/network) removes what the daemon finds,
         // named nowhere; images and the build cache hold no state of the control plane.
         if (IsRuntimeWord(name) && rest.Contains("prune") && !rest.Any(w => w is "image" or "builder" or "buildx"))
@@ -633,9 +986,9 @@ public static class ProtectedResourceMatcher
     {
         if (depth > MaxShellDepth) return true;
         var unanalyzable = false;
+        var braces = BraceExpansions(text);
         var word = new StringBuilder();
-        var quotedPart = new StringBuilder();
-        bool inWord = false, glob = false, quoted = false;
+        bool inWord = false, glob = false, quoted = false, escaped = false;
         // Whether the next word is a command word, and whether a prefix (sudo, env …) is still taking its options.
         bool atCommand = true, inPrefix = false;
         var i = 0;
@@ -659,13 +1012,19 @@ public static class ProtectedResourceMatcher
                 }
             }
             words.Add(w);
-            if (glob) globs.Add(w);
+            // A quoted or escaped glob is expanded by the shell that runs it next (ssh, sh -c): tested as a glob too.
+            var readAgain = (quoted || escaped) && LooksLikeCommand(w);
+            if (glob || ((quoted || escaped) && !readAgain && w.AsSpan().IndexOfAny("*?[") >= 0)) globs.Add(w);
             // Quoted text that looks like a command line is read again: it may be run by sh -c, ssh, docker exec …
-            if (quoted && quotedPart.Length > 0 && LooksLikeCommand(quotedPart.ToString()))
-                unanalyzable |= Tokenize(quotedPart.ToString(), words, globs, commands, depth + 1);
+            // A word built with escapes (sh -c docker\ run\ -v\ …) is quoted text too. The whole word is read again, its
+            // unquoted pieces included: sh -c 'docker run -v '/var/run:/r is one word.
+            if (readAgain)
+                unanalyzable |= Tokenize(w, words, globs, commands, depth + 1);
+            // Whitespace inside a word that was not read again is a command nobody looked at.
+            else if (w.AsSpan().IndexOfAny(" \t\n\r") >= 0)
+                unanalyzable = true;
             word.Clear();
-            quotedPart.Clear();
-            inWord = glob = quoted = false;
+            inWord = glob = quoted = escaped = false;
         }
 
         while (i < text.Length)
@@ -707,7 +1066,6 @@ public static class ProtectedResourceMatcher
                     if (close < 0) return true;
                     var part = text[(i + 1)..close];
                     word.Append(part);
-                    quotedPart.Append(part);
                     inWord = quoted = true;
                     i = close + 1;
                     continue;
@@ -722,7 +1080,13 @@ public static class ProtectedResourceMatcher
                         var d = text[i];
                         if (d == '"') { closed = true; i++; break; }
                         if (d is '$' or '`') unanalyzable = true;
-                        if (d == '\\' && i + 1 < text.Length && text[i + 1] is '$' or '`' or '"' or '\\' or '\n')
+                        // A line continuation inside double quotes is removed too ("whis\<newline>kers" is whiskers).
+                        if (d == '\\' && i + 1 < text.Length && text[i + 1] == '\n')
+                        {
+                            i += 2;
+                            continue;
+                        }
+                        if (d == '\\' && i + 1 < text.Length && text[i + 1] is '$' or '`' or '"' or '\\')
                         {
                             part.Append(text[i + 1]);
                             i += 2;
@@ -733,15 +1097,15 @@ public static class ProtectedResourceMatcher
                     }
                     if (!closed) return true;
                     word.Append(part);
-                    quotedPart.Append(part);
                     inWord = quoted = true;
                     continue;
                 }
                 case '\\':
-                    if (i + 1 < text.Length)
+                    // A line continuation (\ and a newline) is removed; it joins, it starts no word of its own.
+                    if (i + 1 < text.Length && text[i + 1] != '\n')
                     {
-                        if (text[i + 1] != '\n') word.Append(text[i + 1]);
-                        inWord = true;
+                        word.Append(text[i + 1]);
+                        inWord = quoted = escaped = true;
                     }
                     i += 2;
                     continue;
@@ -751,7 +1115,7 @@ public static class ProtectedResourceMatcher
                     inWord = true;
                     i++;
                     continue;
-                case '{' when BraceExpansion(text, i):
+                case '{' when braces[i]:
                     unanalyzable = true;
                     word.Append(c);
                     inWord = true;
@@ -781,16 +1145,87 @@ public static class ProtectedResourceMatcher
         return unanalyzable;
     }
 
+    // Also what a second shell expands without any whitespace (S2 round 6, B14): braces (bash -c '{docker,stop,x}') and
+    // redirections (sh -c 'cat</var/run/docker.s?ck'). Read again, an expanding brace is unanalysable. A quoted glob
+    // (ssh host rm '/var/lib/docker/volumes/whisk*') is not read again but tested as a glob, see End().
     private static bool LooksLikeCommand(string text) =>
-        text.IndexOfAny([' ', '\t', '\n', ';', '|', '&', '$', '`', '"', '\'', '\\']) >= 0;
+        text.IndexOfAny([' ', '\t', '\n', ';', '|', '&', '$', '`', '"', '\'', '\\', '{', '<', '>']) >= 0;
 
     // {a,b} and {1..3} are expanded by the shell; a lone brace (find -exec {} \;, awk '{…}' quoted) is not.
-    private static bool BraceExpansion(string text, int open)
+    // Decided for every brace of the text in one pass, as bash's brace_gobbler decides it for each brace on its own
+    // (S2 round 10): a '}' that brings a brace back to its own level closes it only when a ',' or '..' came at that
+    // level before; otherwise bash reads on (whi{x},s}kers and whi{},s}kers expand to whiskers). A brace still open
+    // when the word ends is a letter ({{.Names}},{{.Status}}). Braces at the same level move together, so they are kept
+    // as groups in one linked list each; a '}' that closes nothing joins its group to the one around it. Linear in the
+    // text (S2 round 8, B18). Words end where Tokenize ends them (round 9, B19): a comment starts only outside a word,
+    // a double-quoted \" does not end the quote, and after a quote that never closes every brace counts.
+    private static bool[] BraceExpansions(string text)
     {
-        var close = text.IndexOf('}', open + 1);
-        if (close < 0) return false;
-        var inner = text[(open + 1)..close];
-        return inner.Contains(',') || inner.Contains("..");
+        var result = new bool[text.Length];
+        var next = new int[text.Length];
+        var groups = new List<(int Head, int Tail, bool Separator)>();
+        void Close((int Head, int Tail, bool Separator) group)
+        {
+            for (var k = group.Head; k >= 0; k = next[k]) result[k] = true;
+        }
+        var inWord = false;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (c == '\\') { i++; inWord = true; continue; }
+            if (c is '\'' or '"')
+            {
+                var end = i + 1;
+                while (end < text.Length && text[end] != c)
+                    end += c == '"' && text[end] == '\\' ? 2 : 1;
+                if (end >= text.Length)
+                {
+                    foreach (var group in groups) Close(group);
+                    for (var k = i; k < text.Length; k++)
+                        if (text[k] == '{') result[k] = true;
+                    return result;
+                }
+                i = end;
+                inWord = true;
+                continue;
+            }
+            if (c == '#' && !inWord)
+            {
+                var newline = text.IndexOf('\n', i);
+                i = newline < 0 ? text.Length : newline - 1;
+                continue;
+            }
+            if (c is ' ' or '\t' or '\r' or '\n' or ';' or '|' or '&' or '(' or ')' or '<' or '>')
+            {
+                groups.Clear();   // still open when the word ends: a letter
+                inWord = false;
+                continue;
+            }
+            inWord = true;
+            if (c == '{')
+            {
+                next[i] = -1;
+                groups.Add((i, i, false));
+            }
+            else if (c == '}' && groups.Count > 0)
+            {
+                var top = groups[^1];
+                groups.RemoveAt(groups.Count - 1);
+                if (top.Separator) Close(top);
+                else if (groups.Count == 0) groups.Add(top);   // read on, still at its own level
+                else
+                {
+                    // The braces one level out are now at their own level too; the separator they saw counts for
+                    // them, and for the joined ones it can only make more of them count (fail-closed).
+                    var outer = groups[^1];
+                    next[outer.Tail] = top.Head;
+                    groups[^1] = (outer.Head, top.Tail, outer.Separator);
+                }
+            }
+            else if (groups.Count > 0 && (c == ',' || (c == '.' && i + 1 < text.Length && text[i + 1] == '.')))
+                groups[^1] = (groups[^1].Head, groups[^1].Tail, true);
+        }
+        return result;
     }
 
     // SQL that builds a statement at run time, or reaches the file system or a shell.

@@ -196,6 +196,39 @@ public class ProtectedResourceMatcherTests
     [InlineData("yaml", "services: [unclosed")]                                                // no YAML
     [InlineData("yaml", "services:\n  t:\n    volumes: [\"/var/run/dock\\u0065r.sock:/s\"]\n")]  // an escaped protected path
     [InlineData("command", "cat /var/lib/docker/volumes/serverwatch-data/_data/mtls/client.key")]
+    // Contract 0017 B (INV-59): a mount source in a shell command, whatever the command word is.
+    [InlineData("command", "docker run --rm -v /var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm --volume /var/run:/r alpine ls /r")]
+    [InlineData("command", "docker run --rm -v/var/run:/r alpine ls /r")]                    // the attached short form
+    [InlineData("command", "docker run --rm -v/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm -itv/var/run:/r alpine ls /r")]                  // a flag cluster ending in v
+    [InlineData("command", "docker run -dv/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm -itv /var/run:/r alpine ls /r")]                 // the cluster, value apart
+    [InlineData("command", "docker run --rm -v=/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm --mount type=volume,volume-opt=type=none,volume-opt=o=bind,volume-opt=device=/var/lib/docker/volumes,dst=/v alpine ls /v")]
+    [InlineData("command", "docker volume create -o type=none -o o=bind -o device=/var/lib/docker/volumes x")]
+    [InlineData("command", "docker volume create --opt device=/var/run x")]
+    [InlineData("command", "docker volume create --opt=device=/var/run x")]
+    [InlineData("command", "docker run --rm -v /var/lib/docker/volumes:/v:ro alpine find /v -name vault.json -delete")]
+    [InlineData("command", "docker run --rm --mount type=bind,source=/var/run:x,target=/r alpine ls /r")]  // cut at ':' too
+    [InlineData("command", "docker run --rm --mount type=bind,source=/tmp/a:b/../../var/run,target=/r alpine ls /r")]  // and whole
+    [InlineData("command", "docker run --rm --mount type=bind,SOURCE=/var/run,target=/r alpine ls /r")]   // any case in --mount
+    [InlineData("command", "docker run --rm --mount type=volume,VOLUME-OPT=device=/var/run,dst=/r alpine ls /r")]
+    [InlineData("command", "docker volume create -odevice=/var/lib/docker/volumes x")]                     // attached -o
+    [InlineData("command", "docker volume create --opt DEVICE=/var/run x")]
+    [InlineData("command", "docker run --rm -dv /var/run:/r alpine ls /r")]
+    [InlineData("command", "docker run --mount \\\n type=bind,SOURCE=/var/run,target=/r alpine")]   // a line continuation
+    [InlineData("command", "docker service update --mount-add type=bind,source=/var/run,target=/r app")]
+    [InlineData("command", "docker service update --mount-add=type=bind,SRC=/var/lib/docker/volumes,dst=/v app")]
+    [InlineData("command", "/tmp/d run --rm -itv /var/run:/r alpine ls /r")]                         // a staged copy
+    [InlineData("command", "sh -c docker\\ run\\ -v\\ /var/run:/r\\ alpine")]                         // escaped spaces
+    [InlineData("command", "sh -c rm\\ -rf\\ /var/lib/docker")]
+    [InlineData("command", "cat \"/var/run/dock\\\ner.sock\"")]                                       // quoted continuation
+    [InlineData("command", "docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm --mount type=bind,source=/var/run,target=/r alpine ls /r")]
+    [InlineData("command", "docker run --rm --mount=type=bind,src=/,dst=/host alpine ls /host")]
+    [InlineData("command", "podman run --rm /var/run:/r alpine ls /r")]                     // <absolute path>:<path>
+    [InlineData("command", "sh -c 'docker run -v /var/run:/r alpine ls'")]                  // read again
     public void Paths_reaching_the_control_plane_are_found_however_they_are_written(string key, string value) =>
         Assert.NotNull(ControlPlane(key, value));
 
@@ -206,8 +239,60 @@ public class ProtectedResourceMatcherTests
     [InlineData("volumes", "/var/log:/host-logs:ro")]
     [InlineData("command", "df -h /var/lib/docker")]                           // reading a directory above it
     [InlineData("command", "rm -rf /tmp/build")]
+    [InlineData("command", "docker run -v /srv/app:/app alpine ls")]          // contract 0017 B: an ordinary mount
+    [InlineData("command", "docker run -v/srv/app:/app alpine ls")]
+    [InlineData("command", "docker run -itv/srv/app:/app alpine ls")]
+    [InlineData("command", "docker volume create -o type=none -o o=bind -o device=/srv/data x")]
+    [InlineData("command", "docker run --mount type=volume,volume-opt=device=/srv/data,dst=/d alpine ls")]
+    [InlineData("command", "echo SRC=./build")]                               // not Docker's lower-case key
+    [InlineData("command", "docker run --mount type=bind,source=/srv/a:b,target=/r alpine ls")]  // a ':' in a keyed path
+    [InlineData("command", "docker run --mount type=bind,SOURCE=/srv/app,target=/app alpine ls")]
+    [InlineData("command", "docker volume create -odevice=/srv/data x")]
+    [InlineData("command", "rsync -av ./a host:/b")]                         // a cluster ending in v, no runtime
+    [InlineData("command", "tar -czvf ./a.tgz ./dir")]
+    [InlineData("command", "cp -rv ./a ./b")]
+    [InlineData("command", "docker exec app cp -rv ./a ./b")]                // no ':' after the cluster
+    [InlineData("command", "awk -v x=./y 1 /etc/hosts")]                     // not an absolute path, no ./ start
+    [InlineData("command", "docker run -v /srv/app:/app:ro alpine ls")]
+    [InlineData("command", "docker run --mount type=volume,src=data,dst=/var/run alpine ls")]
+    [InlineData("command", "export MYSRC=/var/run")]                          // a key must start the word or a part
+    [InlineData("command", "docker run --mount type=bind,source=/srv/app,target=/app alpine ls")]
+    [InlineData("command", "docker run -v data:/var/run alpine ls")]          // a named volume; the container side
     [InlineData("yaml", "services:\n  t:\n    ports: [\"${PORT:-8080}:80\"]\n    volumes:\n      - ${DATA:-./data}:/data\n")]
     public void Ordinary_mounts_stay_allowed(string key, string value) => Assert.Null(ControlPlane(key, value));
+
+    /// <summary>Contract 0017 B: a mount source relative to the working or home directory cannot be resolved here, so
+    /// the command is unanalysable free text (INV-24).</summary>
+    [Theory]
+    [InlineData("docker run --rm -v ./var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("docker run --rm -v ~/..:/v alpine ls /v")]
+    [InlineData("docker run --rm -v~/..:/v alpine ls /v")]
+    [InlineData("docker run --rm --volume=./data:/v alpine ls /v")]
+    [InlineData("docker run --rm --mount type=bind,source=./x,target=/r alpine ls /r")]
+    [InlineData("docker volume create -o type=none -o o=bind -o device=~/.. x")]
+    [InlineData("docker run --rm -itv ./run:/r alpine ls /r")]                     // a cluster ending in v
+    [InlineData("docker run --rm -dv ../run:/r alpine ls /r")]
+    [InlineData("sudo nerdctl run -dv ../run:/r alpine ls /r")]
+    [InlineData("alias d=docker; d run -itv ./x:/r alpine ls /r")]
+    [InlineData("docker-compose run -itv ./x:/r t ls /r")]
+    [InlineData("cd /var && docker run -v \\\n ./run:/r alpine")]                   // a line continuation
+    [InlineData("docker run --mount 'type=bind,\"source=/tmp/a,b/../../var/run\",target=/r' alpine")]  // CSV quotes
+    [InlineData("cd /var && /usr/bin/docke? run -itv ./run:/r alpine")]             // a glob in the command word
+    [InlineData("docker run -v /proc/1/task/1/root:/h alpine")]                     // under /proc
+    [InlineData("docker run -v /sys/fs/cgroup:/c alpine")]                          // under /sys
+    [InlineData("docker run -v /dev/sda:/d alpine")]                                // under /dev
+    [InlineData("cd /var && finch run -dv ./run:/r alpine")]                        // a runtime of another name
+    [InlineData("docker run -v '/srv/a b':/r alpine")]                              // not a plain absolute path
+    [InlineData("docker volume create -o type=none -o o=bind -o device=var/run x")]  // a relative host path
+    [InlineData("docker run --mount type=bind,src=var,dst=/r alpine")]
+    [InlineData("docker run --mount type=volume,src=var/run,dst=/r alpine")]
+    [InlineData("/tmp/rsync run -dv ./x:/r alpine")]                                // no name decides a v cluster
+    [InlineData("docker run --rm --mount type=bind,SRC=./x,target=/r alpine ls /r")]
+    [InlineData("docker run --rm -v /proc/1/root:/h alpine ls /h")]                // another process's file system
+    [InlineData("docker run --rm -v /proc/self/root/var/run:/r alpine ls /r")]
+    [InlineData("docker run --rm -v /proc/42/cwd:/c alpine ls /c")]
+    public void A_mount_source_relative_to_a_directory_is_unanalysable(string command) =>
+        Assert.Equal("command", ControlPlane("command", command)?.UnanalyzableArgument);
 
     [Theory]
     [InlineData("DROP DATABASE U&\"s\\0068op\"")]                             // PostgreSQL unicode escapes

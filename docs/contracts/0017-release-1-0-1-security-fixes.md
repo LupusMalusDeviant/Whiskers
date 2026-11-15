@@ -451,3 +451,138 @@ the change for both.
 - **E1.** Non-PEM text outside the `CERTIFICATE REQUEST` block is ignored and never forwarded. A second PEM block is
   still refused.
 - **J.** The INV-40 row drops "cannot hold a slot indefinitely".
+
+## Amendment 3 (2026-11-15, from the S2 review, rounds 2 to 4)
+
+The reviews of the B implementation found bypasses through forms Docker accepts. Rounds 3 and 4 close them by class,
+not by instance, and fail closed. Where it differs, this amendment wins over Amendments 1 and 2 for part B.
+
+### B — where a mount source stands
+
+- **Short syntax**, cut at its first `:`:
+  - the word after `-v` or `--volume`, in any command;
+  - the `--volume=` form;
+  - the value attached to `-v` or to a short-flag cluster ending in `v` (`-v/src:dst`, `-v=src:dst`, `-itv/src:dst`);
+  - any `<absolute path>:<path>` word;
+  - the word after a cluster `-<letters>v` (`-itv`, `-dv`), when it starts with `.`, `~` or `/` and holds a `:`, in
+    any command. No program name decides this (round 4): a name is chosen by whoever writes the command (a copy named
+    `rsync`, `alias cp=docker`, `ssh host docker …`, `find -exec docker …`, an option value such as `sudo -u tar` read
+    as the command word). Round 3's verbose-tool exception is withdrawn.
+- **Keyed values**: the value of a `source=`, `src=` or `device=` key, also after `volume-opt=`.
+  - Keys match in any case inside a `--mount` / `--mount-add` value and a `-o` / `--opt` value (their `=` forms and an
+    attached `-o<value>` included), and anywhere in a command that names a container runtime. Docker lower-cases the
+    keys. This reverses the lower-case-only narrowing of Amendment 1.
+  - Elsewhere, keys count only in lower case at the start of a comma-separated part, so `echo SRC=./build` is none.
+  - A keyed value is a path. It is checked whole, and also cut at its first `:`, so `source=/var/run:x` and
+    `source=/tmp/a:b/../../var/run` are refused.
+  - A `--mount` / `--mount-add` value that holds a `"` (a CSV-quoted field, where a comma may sit inside a source) is
+    unanalysable.
+
+### B — what a mount source may be (allow-list)
+
+- Only a plain absolute path is compared with the control plane: `^/[A-Za-z0-9._@+/:-]*$`, normalised (no `..` left),
+  and not under `/proc`, `/sys` or `/dev`.
+- Any other source that starts with `.`, `~` or `/` cannot be resolved and makes the command unanalysable free text
+  (INV-24). This covers quotes, commas, globs, backslashes, `$`, backticks, spaces, and `/proc/<pid>/root`,
+  `/proc/<pid>/task/<tid>/cwd` and the like.
+- A source that does not start with `/` is decided by how it is written (round 4):
+  - **host path**: a `device=` value inside a `-o` / `--opt` / `--mount` value (`volume-opt=device=` included), and a
+    `source=` / `src=` value of a `--mount` value with `type=bind`. The local volume driver binds a relative `device=`
+    against the daemon's working directory (`/`), so `device=var/run` is `/var/run` (verified on Docker); a relative
+    bind source is made absolute against the client's. Every non-empty value that is not a plain absolute path is
+    unanalysable, `device=var` included;
+  - **keyed** (any other `source=` / `src=` value): one that contains `/` is unanalysable; one without `/` is a named
+    volume;
+  - **short syntax** (the word after `-v` and the other short forms): one without `/` is a named volume; one with `/`
+    that starts with neither `/`, `.`, `~` nor a quote is not a source Docker accepts (it refuses `var/run:/r` as a
+    volume name), so it stays allowed (`awk -v x=./y`).
+
+### B — reading the command
+
+- A line continuation (`\` and a newline) is removed, outside quotes and inside double quotes (round 4:
+  `"whis\<newline>kers"` is `whiskers`). It starts no word of its own.
+- A backslash-escaped character counts as quoted text (round 4). A word built with escapes that looks like a command
+  (`sh -c docker\ run\ -v\ /var/run:/r`, `ssh host docker\ stop\ whiskers`, `tar --checkpoint-action=exec=…`) is read
+  again whole. A word that still holds whitespace and was not read again is unanalysable.
+- A command word the shell expands as a glob (`/usr/bin/docke?`, `[d]ocker`, `nerdct[l]`) is unanalysable. A bare `*`,
+  as in re-read SQL `count(*)`, and the test command `[` are not.
+- A command longer than 64 Ki characters is unanalysable. The per-command checks read only the words of their own
+  command, so the time grows linearly with the command. Above the cap the helpers that look for container ids
+  (`MentionWords`, `RuntimeIdWords`, `InvokesContainerRuntime`) see no words; the request is unanalysable all the same.
+
+### Accepted overreach
+
+The rule ignores the command word, so these are refused for a key too. This is fail-closed and deliberate:
+- another tool's plain `-v` followed by `./`, `~`, a non-plain path or a directory above a protected path, for example
+  `grep -v . file`, `mv -v ./a ./b`, `ls -v ~/x`, `grep -v /var /etc/fstab`;
+- any tool's `v` cluster followed by a word that starts with `.`, `~` or `/` and holds a `:`, for example
+  `rsync -av ./a:b /srv/c`, `scp -rv ./a:b host:/c`, `tar -czv ./a:b`, `curl -sv ./x:/r`; it needs an approval;
+- a lower-case `src=./…` word, for example `curl -d src=./x`, and a lower-case `device=` value with a relative path in
+  a `-o` / `--opt` value of any tool. A `device=` value that is not a plain absolute path is refused too, so the
+  standard NFS and tmpfs volumes (`-o device=:/export/data`, `-o device=tmpfs`) need an approval for a key;
+- any mount of `/proc`, `/sys` or `/dev`, for example `-v /sys/fs/cgroup:/sys/fs/cgroup:ro`;
+- a word with escaped whitespace that, read again, names something protected, for example `echo docker\ stop\ whiskers`;
+- a word with an escaped quote or `$`, for example `echo it\'s fine`, `echo \$HOME`, `grep price\$ /etc/hosts`: it is
+  read again, and a `$` or an open quote there makes it unanalysable;
+- a word with quoted and unquoted parts that looks like a command is read again whole (round 5, B13), for example
+  `sh -c 'docker run -v '/var/run:/r`; a protected name or path anywhere in it is a hit;
+- a quoted or escaped word with an expanding brace or a redirection is read again too (round 6, B14), so
+  `bash -c '{docker,stop,whiskers}'` is unanalysable; a quoted or escaped glob is tested as a glob
+  (`ssh host rm '/var/lib/docker/volumes/whisk*'`);
+- rounds 7 to 10: a brace is decided as bash decides it: by depth, skipping escaped and quoted characters, and a `}`
+  that brings it back to its own level closes it only after a `,` or `..` at that level, otherwise bash reads on. So
+  `whi{{},s}kers`, `whi{\},s}kers`, `whi{'}',s}kers`, `whi{x},s}kers` and `whi{},s}kers` are unanalysable, and a brace
+  still open when the word ends is a letter (`--format '{{.Names}},{{.Status}}'`). Every brace of a text is decided in
+  one pass with the words' own lexer (a comment starts only outside a word, `\"` does not end a double quote), so the
+  time stays linear. A bracket expression ends at its first `]` after a leading `]` (`docker.soc[]k]`) and never
+  crosses `/`; a segment with `[[` or a `]` left over once its brackets are read (`[[.o.]]`, `[a]o]`) is read from its
+  first `[` on as `*`, which in an absolute path can only find more and in a relative one may stand for any letter
+  (`grep '[0-9][0-9]*'`, `[a-z]*[0-9].log` and `[[ -f … ]]` stay allowed). A glob
+  in a path is tested against each protected path and everything below it as a real intersection of the two patterns
+  (the glob's `*` and `?` stay within a segment, the pattern's `*` does not), in any segment and under a compose
+  prefix (`…/whis?ers_data/_data/vault.key`, `…/proj_whis[k]ers_data`); for each glob the time is the product of its
+  length and the pattern's. Repeated slashes and `.` segments are collapsed first; a segment that is `..` or can expand
+  to `.` or `..` (`.*`, `.?` in dash or an older bash) counts as a hit; one whose bracket excludes the dot
+  (`.[!.]*`) does not (rounds 8 to 10). In a command that changes or removes what it names (`rm`, `mv`, `chmod`, `chown`, `find …
+  -delete`), a glob that could name a directory above a protected path is a hit (`rm -r /var/lib/dock?r`,
+  `chmod -R 000 /var/lib/docker/v*`). A relative glob is a hit when a segment could be a protected directory
+  or volume name with its `?` and `[…]` standing for letters (`cd /app/data && cat mtl?/client.key`, `rm -rf mtl?`,
+  `cd /var/lib/docker/volumes && cat whisk?rs_data/…`); its `*` stands only for what the name leaves open, so `ls logs/*.log` and `rm -f build/*.o` stay allowed (round 9). A quoted word
+  that is read again is not also tested as one glob. A glob
+  without `/` (a name) hits when it could spell a protected name with its `?` and `[…]` standing for letters, or when
+  it matches the name's stem (`whis*`); its `*` does not stand for the protected letters, so `*.log` hits nothing.
+  `fish -c` is unanalysable (fish substitutes commands with plain parentheses). A remote shell reached through `ssh` is
+  assumed to be a POSIX shell;
+- a quote inside double quotes (`echo "it's fine"`), a mount source with a space (`-v '/srv/my dir':/d`) and
+  `docker compose -f … up` are refused for a key too, and so are quoted globs and programs that could reach a
+  protected name or path the same way an unquoted one does: `find /etc -name 's*'`, `systemctl status 'nginx*'`,
+  `du -sh '/var/log/*'`, `ls '/srv/*/config.yml'`, `jq '{a:.x,b:.y}' f`, `ls /var/lib/docker/volumes/a*` (it could be
+  `a_whiskers…`), and an absolute glob segment that can be `..` (`ls /srv/app/../logs/*.log`, `ls /root/.*`). Such a
+  hit names no control-plane pattern; an interactive Admin is still asked to approve it.
+
+These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv ./a ./b`, `awk -v x=./y`, `grep -v foo`,
+`scp ./a host:/b`, `docker exec app cp -rv ./a ./b`, `-v /srv/app:/app:ro` and named volumes.
+
+### Gaps left for 1.1.0
+
+- `docker cp` into or out of a protected path;
+- `cp -s` / `cp -as`;
+- `bwrap --bind` and `systemd-nspawn --bind`;
+- `podman --rootfs`;
+- `--volumes-from`;
+- relative paths outside a mount (`cat ../var/run/docker.sock`, `cat ~/../var/run/docker.sock`): the working directory
+  is unknown, so only mount sources are decided by how they are written;
+- a name glob whose `*` stands for protected letters under a compose prefix (`proj_whis*` in the working directory),
+  and a relative glob whose `*` does (`cd /app/data && rm -rf mt*`);
+- reading or copying a directory above a protected path (`tar czf /tmp/x.tgz /var/lib/docker`, `cp -a /var/lib/docker
+  /tmp/x`): only changing commands are decided on the directories above;
+- the cost of words with very many path segments (about 1.5 s at the cap): the number of segments per word is not
+  limited yet;
+- a relative glob of one segment in a reading command (`cd /var/run && curl --unix-socket docker.s?ck …`), like
+  relative paths in general;
+- zsh globs and extglob forms (`whis(k)ers`, `@(k)`, `zsh -c 'cat /var/run/docker.s(o)ck'`), a non-POSIX login shell behind `ssh` or `su -c`, and other
+  non-POSIX shells run with `-c` (`nu`, `xonsh`, `rc`, `es`);
+- the classes that need a real shell parser rather than a word reader: command words hidden behind option values of
+  prefixes (`sudo -u`, `env -u`, `exec -a`, `flock`, `chroot`, `timeout -s`), functions and aliases defined in the
+  same text, redirections between words, and nested shells beyond four levels. Round 4 does not rely on reading
+  them right: no decision of part B depends on which word is the command word any more, except the glob rule.
