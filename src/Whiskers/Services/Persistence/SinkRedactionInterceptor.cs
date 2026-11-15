@@ -10,7 +10,10 @@ namespace Whiskers.Services.Persistence;
 /// decision and task-result tables is redacted on save, whoever wrote it — a caller that forgot to redact cannot put
 /// a secret on disk. Redaction is idempotent, so text a writer already redacted stays as it is. Bulk updates
 /// (<c>ExecuteUpdate</c>) bypass interceptors: their values are built from rows that went through here, or are
-/// fixed texts.
+/// fixed texts — a source test (<c>SinkRedactionTests.A_bulk_update_sets_a_redacted_column_only_through_explicit_redaction</c>)
+/// holds every <c>ExecuteUpdate</c> that sets a redacted column to a constant or an explicit redaction. Every string column of <see cref="MetricsDbContext"/> is either redacted here or exempt with a reason
+/// (contract 0017 C1, <c>SinkRedactionTests.Every_string_column_is_redacted_on_save_or_exempt_with_a_reason</c>): a
+/// new column without a decision fails that test.
 /// </summary>
 public sealed class SinkRedactionInterceptor : SaveChangesInterceptor
 {
@@ -58,6 +61,10 @@ public sealed class SinkRedactionInterceptor : SaveChangesInterceptor
                     break;
                 case PolicyDecisionEntity decision:
                     decision.Reason = SinkRedaction.Json(decision.Reason);
+                    // As in the audit row: a target can be named by a whole command or a repository URL.
+                    decision.TargetId = SinkRedaction.Text(decision.TargetId) ?? "";
+                    decision.TargetName = SinkRedaction.Text(decision.TargetName);
+                    decision.TargetRelated = SinkRedaction.Json(decision.TargetRelated);
                     break;
                 case TaskRunHistoryEntity run:
                     run.Output = SinkRedaction.Json(run.Output);
@@ -76,6 +83,36 @@ public sealed class SinkRedactionInterceptor : SaveChangesInterceptor
                 case ScheduledTaskEntity task:
                     // Only the last result: the task's own fields (its command) are what it runs.
                     task.LastResult = SinkRedaction.Json(task.LastResult);
+                    break;
+                // Contract 0017 C1: the webhook run log and the update history carry command output and exception
+                // texts (a git error names its remote with credentials), redacted like a task result.
+                case WebhookLogEntity webhookLog:
+                    webhookLog.Output = SinkRedaction.Json(webhookLog.Output);
+                    webhookLog.Error = SinkRedaction.Json(webhookLog.Error);
+                    break;
+                case UpdateHistoryEntity update:
+                    update.Error = SinkRedaction.Json(update.Error);
+                    break;
+                // The same exception text the update history gets, kept on the policy as its last result.
+                case UpdatePolicyEntity policy:
+                    policy.LastUpdateResult = SinkRedaction.Json(policy.LastUpdateResult);
+                    break;
+                // Free text built from a failed run's exception message or a refusal reason (endpoint checks), and
+                // the reason an automatic action was taken (a pause carries the reason it was given).
+                case EndpointCheckResultEntity checkResult:
+                    checkResult.Detail = SinkRedaction.Text(checkResult.Detail) ?? "";
+                    break;
+                // Names why a check was suspended; the suspension itself is a bulk update that redacts its own value.
+                case EndpointCheckEntity check:
+                    check.SuspendedReason = SinkRedaction.Text(check.SuspendedReason);
+                    break;
+                case ActionOutcomeEntity outcome:
+                    outcome.Detail = SinkRedaction.Text(outcome.Detail);
+                    outcome.Reason = SinkRedaction.Text(outcome.Reason);
+                    break;
+                // A note given with a backup is free text from the caller (an MCP key or the UI).
+                case VolumeBackupEntity backup:
+                    backup.Notes = SinkRedaction.Text(backup.Notes);
                     break;
             }
         }

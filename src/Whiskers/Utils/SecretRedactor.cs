@@ -45,8 +45,27 @@ public static class SecretRedactor
         @"password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer";
 
     // password=x, token: x, api_key=x, Passwort: x, etc.  →  $1=***
+    // "authorization" has its own rule (AuthorizationValue), which keeps the scheme; here it would cut the value
+    // after the scheme word.
     private static readonly Pair KeyedSecret = new(
-        $@"(?i)({SecretKeys})\s*[=:]\s*{NotRedacted}\S+",
+        $@"(?i)((?!authorization)(?:{SecretKeys}))\s*[=:]\s*{NotRedacted}\S+",
+        RegexOptions.Compiled);
+
+    // INV-51 (contract 0017 C2): "Authorization: <scheme> <credentials>" and "Authorization=<…>" (Proxy-Authorization
+    // and HTTP_AUTHORIZATION included) lose the whole value. The scheme word stays readable only when it is one of
+    // Basic, Bearer, Digest, Negotiate, NTLM and more text follows it ("Authorization: Basic ***"); any other value,
+    // a one-word token included, goes whole ("Authorization: ***"). The value ends at the end of the line, or — when
+    // the header sits inside a quoted argument ('Authorization: …' / "Authorization: …") — before that closing quote
+    // (an escaping backslash in front of it stays). A value this rule already wrote (it starts with "***") is left
+    // alone, so applying it twice, or to the re-serialized JSON of values it redacted, changes nothing. Ending at the
+    // line end masks more than the value when the header is not quoted: the safe direction. An unquoted value also
+    // ends before a backslash, so a header inside an escaped JSON string (a quote written as backslash-u0022) leaves
+    // the document's structure intact; credentials (base64, tokens, Digest parameters) carry no backslash.
+    private static readonly Pair AuthorizationValue = new(
+        // The separator and the scheme are atomic: giving back a space or the scheme word must not let a value this
+        // rule wrote ("Basic ***") match again as a new value.
+        @"(?i)(?<q>['""])?(?<key>authorization)(?>(?<sep>[ \t]*[=:]\s*)(?:(?<scheme>Basic|Bearer|Digest|Negotiate|NTLM)[ \t]+)?)" +
+        @"(?!\*\*\*)(?(q)(?:(?!\\?\k<q>)[^\r\n])+|[^\r\n\\]+)",
         RegexOptions.Compiled);
 
     // JSON form: "password": "x"  →  "password":"***"  (the key is followed by a quote, so KeyedSecret misses it)
@@ -192,6 +211,9 @@ public static class SecretRedactor
         s = SlackWebhook.Replace(s, m => $"{m.Groups[1].Value}***");
         s = HookKey.Replace(s, m => $"{m.Groups[1].Value}***");
         s = JsonSecret.Replace(s, m => $"\"{m.Groups[1].Value}\":\"***\"");
+        s = AuthorizationValue.Replace(s, m =>
+            $"{m.Groups["q"].Value}{m.Groups["key"].Value}{m.Groups["sep"].Value}" +
+            (m.Groups["scheme"].Success ? m.Groups["scheme"].Value + " " : "") + "***");
         s = BearerToken.Replace(s, "Bearer ***");
         s = KeyedSecret.Replace(s, m => $"{m.Groups[1].Value}=***");
         return s;

@@ -53,6 +53,61 @@ public sealed class SecretRedactorTests
         Assert.DoesNotContain(Canary, SinkRedaction.Text($"https://{Canary}@github.com/org/repo"));
     }
 
+    // ---- Contract 0017 C2: the whole Authorization value, whatever the scheme --------------------------------------
+
+    [Fact]
+    public void A_basic_authorization_header_is_redacted()
+    {
+        var credential = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("deploy:example-value-1"));
+        var redacted = SecretRedactor.Redact($"curl -H 'Authorization: Basic {credential}' https://registry.example/v2/");
+        Assert.False(redacted.Contains(credential.TrimEnd('='), StringComparison.Ordinal), "the credential survives redaction: " + redacted);
+    }
+
+    [Theory]
+    [InlineData("curl -H 'Authorization: Basic ZGVwbG95OmNhbmFyeS12YWx1ZS1yMTI0' https://r.example/v2/",
+        "curl -H 'Authorization: Basic ***' https://r.example/v2/")]
+    [InlineData("curl -H \"Authorization: Bearer canary-value-r124\" https://r.example/",
+        "curl -H \"Authorization: Bearer ***\" https://r.example/")]
+    [InlineData("Authorization: Digest username=\"u\", response=\"canary-value-r124\"", "Authorization: Digest ***")]
+    [InlineData("Authorization: Negotiate canary-value-r124", "Authorization: Negotiate ***")]
+    [InlineData("Authorization=Basic canary-value-r124", "Authorization=Basic ***")]
+    [InlineData("Authorization: NTLM TlRMTVNTUAABAAAAB4IIog==", "Authorization: NTLM ***")]
+    // A scheme outside the list is no scheme: the whole value goes.
+    [InlineData("HTTP_AUTHORIZATION=Token canary-value-r124", "HTTP_AUTHORIZATION=***")]
+    [InlineData("Proxy-Authorization: Basic canary-value-r124\nnext line", "Proxy-Authorization: Basic ***\nnext line")]
+    [InlineData("Proxy-Authorization: canary-value-r124", "Proxy-Authorization: ***")]
+    // A one-word value is removed whole, also when it is a scheme word with nothing after it.
+    [InlineData("authorization: canary-value-r124", "authorization: ***")]
+    [InlineData("Authorization: ghp_canaryvaluer124canaryvaluer124", "Authorization: ***")]
+    [InlineData("curl -H 'Authorization: ghp_canaryvaluer124' https://api.example/", "curl -H 'Authorization: ***' https://api.example/")]
+    [InlineData("Authorization: Basic", "Authorization: ***")]
+    public void An_authorization_value_is_redacted_down_to_its_scheme(string input, string expected)
+    {
+        var redacted = SecretRedactor.Redact(input);
+        Assert.Equal(expected, redacted);
+        Assert.Equal(redacted, SecretRedactor.Redact(redacted));   // idempotent
+    }
+
+    [Fact]
+    public void An_authorization_header_in_json_keeps_the_document_valid()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            command = $"curl -H \"Authorization: Basic {Canary}\" https://r.example/",
+            next = "kept",
+        });
+
+        var redacted = SecretRedactor.RedactJson(json);
+
+        Assert.DoesNotContain(Canary, redacted);
+        using var document = System.Text.Json.JsonDocument.Parse(redacted);
+        Assert.Equal("kept", document.RootElement.GetProperty("next").GetString());
+        Assert.Equal(redacted, SecretRedactor.RedactJson(redacted));
+        // A raw pass over the escaped document (no decoding) keeps it valid as well.
+        using var raw = System.Text.Json.JsonDocument.Parse(SecretRedactor.Redact(json));
+        Assert.Equal("kept", raw.RootElement.GetProperty("next").GetString());
+    }
+
     [Fact]
     public void Multiline_material_is_redacted_on_every_line()
     {
