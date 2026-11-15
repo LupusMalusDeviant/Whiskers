@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Markdig;
 using Whiskers.Utils;
 
@@ -11,7 +12,7 @@ public class MarkdownSanitizerTests
     [InlineData("<a href=\"data:text/html,abc\">x</a>")]
     public void NeutralizesUnsafeHrefs(string html)
     {
-        var result = MarkdownSanitizer.NeutralizeUnsafeHrefs(html);
+        var result = MarkdownSanitizer.Sanitize(html);
         Assert.Contains("href=\"#\"", result);
         Assert.DoesNotContain("javascript:", result.ToLowerInvariant());
         Assert.DoesNotContain("data:", result.ToLowerInvariant());
@@ -23,7 +24,7 @@ public class MarkdownSanitizerTests
     [InlineData("<a href=\"mailto:a@b.com\">x</a>")]
     [InlineData("<a href=\"#section\">x</a>")]
     public void PreservesSafeHrefs(string html)
-        => Assert.Equal(html, MarkdownSanitizer.NeutralizeUnsafeHrefs(html));
+        => Assert.Equal(html, MarkdownSanitizer.Sanitize(html));
 
     [Fact]
     public void MarkdigRoundTrip_JavascriptLinkIsNeutralized()
@@ -31,7 +32,7 @@ public class MarkdownSanitizerTests
         // The real attack path: a model-supplied javascript: link rendered through Markdig.
         var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
         var html = Markdown.ToHtml("[click me](javascript:alert(document.cookie))", pipeline);
-        var safe = MarkdownSanitizer.NeutralizeUnsafeHrefs(html);
+        var safe = MarkdownSanitizer.Sanitize(html);
         Assert.DoesNotContain("javascript:", safe.ToLowerInvariant());
         Assert.Contains("href=\"#\"", safe);
     }
@@ -48,7 +49,7 @@ public class MarkdownSanitizerTests
         // Whatever Markdig version renders the reply, every link form must come out as an href the sanitizer sees: a
         // change in Markdig's output (another attribute, quoting) would otherwise slip past the regex.
         var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
-        var safe = MarkdownSanitizer.NeutralizeUnsafeHrefs(Markdown.ToHtml(markdown, pipeline)).ToLowerInvariant();
+        var safe = MarkdownSanitizer.Sanitize(Markdown.ToHtml(markdown, pipeline)).ToLowerInvariant();
 
         Assert.DoesNotContain("href=\"javascript:", safe);
         Assert.DoesNotContain("href=\"data:", safe);
@@ -140,13 +141,69 @@ public class MarkdownSanitizerTests
     }
 
     [Fact]
-    public void Sanitize_drops_every_attribute_of_a_tag_it_cannot_read()
-        => Assert.Equal("<p>x</p>", MarkdownSanitizer.Sanitize("<p class=\"a\" \"onclick=alert(1)>x</p>"));
+    public void Sanitize_escapes_a_tag_it_cannot_read()
+    {
+        var html = MarkdownSanitizer.Sanitize("<p class=\"a\" \"onclick=alert(1)>x</p>");
+        Assert.Equal("&lt;p class=\"a\" \"onclick=alert(1)>x</p>", html);
+        Assert.DoesNotMatch(@"<p\b", html);
+    }
+
+    // ---- Review of cdabe7d1: Sanitize is fail-closed on raw HTML too, not only on what Markdig emits ---------------------
+
+    /// <summary>No start tag left in the output carries a handler, a style, a srcset/formaction/action, an iframe, or a
+    /// URL attribute outside the allowed forms.</summary>
+    private static void AssertInert(string html)
+    {
+        foreach (Match tag in Regex.Matches(html, @"<[a-zA-Z](?:""[^""]*""|'[^']*'|[^<>""'])*>"))
+        {
+            var t = tag.Value.ToLowerInvariant();
+            var names = Regex.Replace(t, @"""[^""]*""|'[^']*'", "\"\"");   // text inside a value is no attribute
+            Assert.DoesNotMatch(@"[\s/""'](on[a-z]+|style|srcset|formaction|action|xlink:href|srcdoc)\s*=", names);
+            Assert.DoesNotMatch(@"^<(iframe|script|object|embed|form|svg|math|base|meta|link|style)\b", t);
+            foreach (Match href in Regex.Matches(t, @"\shref\s*=\s*(""[^""]*""|'[^']*'|[^\s>]+)"))
+                Assert.Matches(@"^[""']?(https?://|mailto:|#)", href.Groups[1].Value);
+        }
+    }
+
+    [Theory]
+    [InlineData("<a href=\"https://x\" title=\"<\" onclick=\"alert(1)\">x</a>")]          // '<' inside a quoted value
+    [InlineData("<a href=\"https://x\" title=\">\" onclick=\"alert(1)\">x</a>")]          // '>' inside a quoted value
+    [InlineData("<a href='javascript:alert(1)'>x</a>")]                                   // single-quoted href
+    [InlineData("<a href=javascript:alert(1)>x</a>")]                                     // unquoted href
+    [InlineData("<a href=\" java&#x09;script:alert(1)\">x</a>")]                          // entity + whitespace in the scheme
+    [InlineData("<a HREF=\"JAVASCRIPT:alert(1)\">x</a>")]
+    [InlineData("<iframe src=\"https://evil.example\"></iframe>")]                        // iframe src
+    [InlineData("<iframe srcdoc=\"&lt;script&gt;alert(1)&lt;/script&gt;\"></iframe>")]
+    [InlineData("<form action=\"https://evil\"><button formaction=\"javascript:alert(1)\">x</button></form>")]
+    [InlineData("<input type=\"image\" formaction=\"javascript:alert(1)\" src=\"x\">")]  // formaction on an allowed tag
+    [InlineData("<img srcset=\"https://evil.example/p.png 1x\" src=\"a.png\">")]          // srcset
+    [InlineData("<img src=x onerror=alert(1)>")]                                          // unquoted handler
+    [InlineData("<img/src=x/onerror=alert(1)>")]                                          // '/' as separator
+    [InlineData("<a href=\"https://x\"onclick=\"alert(1)\">x</a>")]                       // no space after a value
+    [InlineData("<svg><a xlink:href=\"javascript:alert(1)\">x</a></svg>")]
+    [InlineData("<script>alert(1)</script>")]
+    [InlineData("<p style='position:fixed' ONCLICK='alert(1)'>x</p>")]
+    [InlineData("<a href=\"https://x\" title='a\" onclick=\"alert(1)'>x</a>")]            // a quote inside the other quote
+    [InlineData("<<a href=javascript:alert(1)>x</a>")]
+    [InlineData("</a onclick=\"alert(1)\">")]                                             // attributes on an end tag
+    public void Sanitize_leaves_no_active_attribute_in_raw_html(string payload)
+        => AssertInert(MarkdownSanitizer.Sanitize(payload));
+
+    [Fact]
+    public void Sanitize_keeps_the_safe_parts_of_a_tag_with_a_quoted_angle_bracket()
+        => Assert.Equal("<a href=\"https://x\" title=\"<\">x</a>",
+            MarkdownSanitizer.Sanitize("<a href=\"https://x\" title=\"<\" onclick=\"alert(1)\">x</a>"));
+
+    [Theory]
+    [InlineData("<a href='javascript:alert(1)'>x</a>")]
+    [InlineData("<a href=javascript:alert(1)>x</a>")]
+    public void An_unsafe_href_in_any_quoting_form_becomes_a_fragment(string payload)
+        => Assert.Equal("<a href=\"#\">x</a>", MarkdownSanitizer.Sanitize(payload));
 
     [Fact]
     public void NullOrEmpty_ReturnsEmpty()
     {
-        Assert.Equal("", MarkdownSanitizer.NeutralizeUnsafeHrefs(null));
-        Assert.Equal("", MarkdownSanitizer.NeutralizeUnsafeHrefs(""));
+        Assert.Equal("", MarkdownSanitizer.Sanitize(null));
+        Assert.Equal("", MarkdownSanitizer.Sanitize(""));
     }
 }
