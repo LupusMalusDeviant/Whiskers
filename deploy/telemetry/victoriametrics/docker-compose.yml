@@ -16,4 +16,4 @@ services:
       - /opt/serverwatch-telemetry/vm-storage:/storage   # bind-mount, survives rebuild
       - ./scrape.yml:/etc/vm/scrape.yml:ro
     ports:
-      - '${TS_IP}:8428:8428'                        # mesh-only
+      - '${TS_IP:?set TS_IP to this host''s mesh IP}:8428:8428'                        # mesh-only
