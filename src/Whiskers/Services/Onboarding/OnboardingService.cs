@@ -44,6 +44,14 @@ public class OnboardingService : IOnboardingService
     private const string VmComposeDirOnHost = "/opt/telemetry-vm";   // holds scrape.yml + compose
     private const string ScrapeFileOnHost = "/opt/telemetry-vm/scrape.yml";
 
+    /// <summary>Step 8 reads, edits and writes the one scrape config of the Whiskers host: two onboardings at once would
+    /// otherwise each write their own edit over the other's. Static: every service instance edits the same file.</summary>
+    private static readonly SemaphoreSlim ScrapeConfigGate = new(1, 1);
+
+    /// <summary>The scrape config is decoded strictly: invalid UTF-8 fails the step instead of being written back
+    /// with replacement characters.</summary>
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     public OnboardingService(
         IHostCommandExecutor exec,
         IServerConfigService serverConfig,
@@ -173,11 +181,14 @@ public class OnboardingService : IOnboardingService
 
             // The tailnet IP flows into shell commands and compose files below — accept only a real
             // IP literal, never arbitrary command output.
-            if (!IPAddress.TryParse(tsIp, out _))
+            // IPAddress.TryParse alone would admit an IPv6 zone id carrying arbitrary text (fe80::1%';…): only an IPv4
+            // literal passes, and from here on only its normalised form is used.
+            if (OnboardingCommands.TailnetIPv4(tsIp) is not { } normalisedIp)
             {
-                progress.Report($"❌ Unerwartete Tailscale-IP: '{tsIp}'");
-                return Fail(progress, completed, step, $"Unerwartete Tailscale-IP: '{tsIp}'");
+                progress.Report("❌ Unerwartete Tailscale-IP (keine IPv4-Adresse).");
+                return Fail(progress, completed, step, "Unerwartete Tailscale-IP (keine IPv4-Adresse).");
             }
+            tsIp = normalisedIp;
             completed.Add(step);
             progress.Report($"✅ Mit dem Tailnet verbunden: {tsIp}");
 
@@ -244,7 +255,25 @@ public class OnboardingService : IOnboardingService
             // 7) Wire into the VictoriaMetrics scrape config (on local) + reload -----------------
             step = OnboardingStep.ScrapeConfig;
             progress.Report("⑧ In Scrape-Config eintragen…");
-            await Sh("local", OnboardingCommands.AddScrapeTargetCommand(ScrapeFileOnHost, serverId, tsIp), TimeSpan.FromSeconds(20), ct);
+            // Contract 0017 I1: read the file, edit it in C#, write it back base64 as root (sh when root, else sudo sh).
+            // The server id and the address become YAML scalars; neither reaches any program text on the host. The
+            // read-modify-write is serialised, so concurrent onboardings cannot drop each other's target.
+            await ScrapeConfigGate.WaitAsync(ct);
+            try
+            {
+                var scrapeB64 = (await Sh("local", OnboardingCommands.ReadFileB64(ScrapeFileOnHost), TimeSpan.FromSeconds(20), ct)).Output.Trim();
+                var scrapeEdit = ScrapeConfigEditor.AddTarget(
+                    StrictUtf8.GetString(Convert.FromBase64String(scrapeB64)), serverId, tsIp);
+                if (scrapeEdit.Outcome == ScrapeConfigEditOutcome.Added)
+                    await Sh("local", OnboardingCommands.WriteFileAsRootB64(ScrapeFileOnHost,
+                        Convert.ToBase64String(StrictUtf8.GetBytes(scrapeEdit.Yaml!))), TimeSpan.FromSeconds(30), ct);
+                else if (scrapeEdit.Outcome == ScrapeConfigEditOutcome.NoAnchor)
+                    progress.Report($"⚠️ {ScrapeFileOnHost} hat keine Zeile 'static_configs:' — Ziel nicht eingetragen.");
+            }
+            finally
+            {
+                ScrapeConfigGate.Release();
+            }
             await ShTry("local", $"cd {VmComposeDirOnHost} && docker compose restart victoriametrics", TimeSpan.FromSeconds(30), ct);
             completed.Add(step);
 

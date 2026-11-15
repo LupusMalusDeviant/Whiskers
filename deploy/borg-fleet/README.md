@@ -35,6 +35,26 @@ Repo of each: `ssh://<sub-account>@u699949.your-storagebox.de:23/./borg` (home d
 | `borg-fleet-prune` + `.service`/`.timer` (Badwolf) | weekly retention, Sun 07:30 |
 | `fleet.json.example` | copy to `/root/.config/borg-fleet/fleet.json` |
 
+### Tools (no Python since 1.0.1, contract 0017 part I)
+
+| Script | Needs | Without it |
+|---|---|---|
+| `borg-enroll` (POSIX `sh`) | `curl jq base64 sha256sum awk sed tr head tail cut grep cp cat rm mkdir chmod dirname date sleep mktemp ssh-keygen sshpass sftp` | refuses to start (exit 1, `missing tool: …`) |
+| `borg-fleet-prune` | `jq borg sftp ssh sed grep comm sort mktemp wc rm cat basename` | refuses to start (exit 1) |
+| `borg-fleet-client` | `borg`, `flock`, coreutils, `find`; `docker` + `gzip` for the DB dumps | no docker: no DB dumps (as before) |
+| `borg-fleet-client` | **`sqlite3`** (`.timeout`, `.backup`, each copy under `timeout 300`) | the SQLite snapshot is skipped with a WARN; the backup itself still runs, and `last-status.json` says `"sqlite_snapshot":"skipped"` with `result` `warning` |
+
+`borg-enroll` keeps its arguments, outputs and exit codes (0 = enrolled, 1 = anything else). It now refuses a
+`--time` that is not a time of day (`00:00`–`23:59`), and an empty server id or one with `/` or a leading `.`, all of
+which end up in commands or paths. Secrets (API token, MCP key, sub-account passwords) never stand in a program's
+arguments; they travel in 0600 files or on stdin. The client's `last-status.json` gained `sqlite_snapshot`: `ok`,
+`errors` (some files could not be copied or moved into place; no half copy is left; `result` `warning`) or
+`skipped` (`result` `warning`).
+
+**Rollout `[braucht Nutzer]`:** install `jq` on Badwolf and `sqlite3` on **every** fleet server
+(`apt-get install -y sqlite3`) **before** the new `borg-fleet-client` is rolled out (re-run `borg-enroll <id>`, which
+refreshes the client); then check `borg-fleet-client status` after the next night for `"sqlite_snapshot":"ok"`.
+
 Badwolf, root-only (`/root/.config/…`):
 
 | Path | Content |
@@ -78,7 +98,9 @@ running containers, plus `/var/backups/borg-fleet` which holds, freshly made bef
 - GitLab Omnibus containers: `pg_dumpall` of the bundled Postgres (socket
   `/var/opt/gitlab/postgresql`); its live `postgresql/data` dir is excluded. For a full GitLab
   restore also keep `/etc/gitlab/gitlab-secrets.json` (in the config volume, backed up).
-- `sqlite/…` — consistent copies (SQLite online-backup API) of every SQLite file found
+- `sqlite/…` — consistent copies (SQLite online-backup API via `sqlite3 .backup`, 30 s busy timeout, 300 s per
+  file) of every SQLite file found under `/opt /srv /home /root /var/lib/docker/volumes` (512 bytes to 8 GiB,
+  SQLite header checked, symlinks skipped)
 
 The live data directories of the DB containers are **excluded** — no hot copies of running
 database files. Skip a directory by dropping a `.nobackup` file into it.
