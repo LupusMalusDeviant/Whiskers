@@ -75,7 +75,8 @@ jobs:
           sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg deploy/keys/pgdg-ACCC4CF8.asc
           echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          # sqlite3 and jq: the borg-fleet and tailnet-guard script tests (contract 0017 part I) use the real tools.
+          sudo apt-get install -y --no-install-recommends postgresql-client-18 sqlite3 jq
           echo "WHISKERS_PG_BIN_DIR=/usr/lib/postgresql/18/bin" >> "$GITHUB_ENV"
           /usr/lib/postgresql/18/bin/pg_dump --version
 
