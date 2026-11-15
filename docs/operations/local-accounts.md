@@ -51,6 +51,27 @@ Every Admin action runs through the Mutation Gateway and is recorded with the ac
 account is added) — never with a password or code. Roles stay in *Settings → User roles*; an account added here gets
 its role there as well.
 
+### Local accounts and the email whitelist
+
+While the email whitelist is **enabled**, it decides for every sign-in method: a local account whose address is not
+listed cannot sign in, just like a Google or OIDC user.
+
+- **Adding an account** lists its address in an enabled whitelist, in the same audited `account.create` operation. A
+  whitelist entry admits the address for **every** sign-in method — a Google or OIDC identity with the same address
+  can then sign in to the account as well (as an identity binding, see
+  [Identity bindings](identity-bindings.md)). If the whitelist cannot be written, the account is not created.
+- A **disabled** whitelist is not touched.
+- An address that was **listed before** the account was added stays a manual entry.
+- **Deleting an account** removes the whitelist entry its creation added (with the identity bindings of that
+  address), in the same audited `account.delete` operation. An address that was listed before stays. If an Admin
+  removed or re-added the entry by hand in the meantime, the deletion leaves it: it is a manual entry now. If the entry
+  cannot be removed, the account is not deleted.
+- Whiskers keeps the record of which entries it added next to the list in `whitelist.json` (`AddedForAccounts`,
+  address → account id). Saving the whitelist in *Settings → Authentication* keeps the record of every address that
+  stays listed.
+- Accounts that existed before 1.0.1, and the Admin seeded from `WHISKERS_ADMIN_EMAIL` on an install that already had
+  a `whitelist.json`, are not added: list their addresses yourself.
+
 ### Sessions end on every credential change
 
 Changing a password, resetting it, redeeming a recovery code, issuing a code on the host and deleting the account all

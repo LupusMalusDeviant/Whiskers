@@ -78,7 +78,10 @@ docker exec serverwatch cat /app/data/setup-token.txt   # release docker-compose
 
 Alternatives:
 
-- Seed the admin unattended with `WHISKERS_ADMIN_EMAIL` + `WHISKERS_ADMIN_PASSWORD_FILE`.
+- Seed the admin unattended with `WHISKERS_ADMIN_EMAIL` + `WHISKERS_ADMIN_PASSWORD_FILE`. When `GOOGLE_ADMIN_EMAIL` is
+  set too, the first start seeds an enabled email whitelist with both addresses, so the local Admin can sign in.
+  `WHISKERS_ADMIN_EMAIL` alone switches no whitelist on. An install that already has a `whitelist.json` (1.0.0) is not
+  changed: add the address under *Settings → Authentication* (whitelist) yourself.
 - Use Google or generic OIDC ([Configuration](configuration.md)).
 - For a trial on a trusted network, `AUTH_DISABLED=true` (container variable `Auth__Disabled`). Every request is then an Admin, so Whiskers only answers
   clients from private networks, with an IP or `localhost` as host name and without a foreign `Origin`.
