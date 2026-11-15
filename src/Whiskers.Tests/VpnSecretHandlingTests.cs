@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Whiskers.Services.Vpn;
@@ -138,6 +139,53 @@ public class VpnSecretHandlingTests : IDisposable
         Assert.Equal(TailscaleKey, up.KeyContent);   // the CLI read the key from the file
         Assert.False(File.Exists(up.KeyPath));       // … which is gone once the call returned
         Assert.False(Directory.Exists(Path.GetDirectoryName(up.KeyPath)));
+    }
+
+    [Fact]
+    public async Task Tailscale_comes_up_with_the_container_hostname_when_VPN_HOSTNAME_is_empty()
+    {
+        // docker-compose.yml always sets Vpn__Hostname=${VPN_HOSTNAME:-} — an empty value when VPN_HOSTNAME is unset.
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Vpn:Provider"] = "tailscale", ["Vpn:Hostname"] = "" })
+            .Build();
+        var settings = new VpnSettings();
+        configuration.GetSection(VpnSettings.SectionName).Bind(settings);
+        settings.Tailscale.StateDir = Path.Combine(_dir, "ts-state");
+        var runner = new RecordingVpnRunner();
+        var provider = new TailscaleVpnProvider(Options.Create(settings),
+            new ListLogger<TailscaleVpnProvider>(), runner, hostInterfacePresent: () => false);
+
+        var result = await provider.EnsureUpAsync();
+
+        Assert.True(result.Success, $"Tailscale bring-up with an empty Vpn:Hostname: {result.State} — {result.Message}");
+        Assert.Contains("--hostname=" + TailscaleVpnProvider.DefaultHostName(null), runner.Up.Args);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Tailscale_never_passes_an_empty_hostname(string? hostname)
+    {
+        var runner = new RecordingVpnRunner();
+        var provider = new TailscaleVpnProvider(Settings(s => s.Hostname = hostname),
+            new ListLogger<TailscaleVpnProvider>(), runner, () => false, _dir);
+
+        var result = await provider.EnsureUpAsync();
+
+        Assert.True(result.Success, $"{result.State} — {result.Message}");
+        var arg = Assert.Single(runner.Up.Args, a => a.StartsWith("--hostname=", StringComparison.Ordinal));
+        Assert.False(string.IsNullOrWhiteSpace(arg["--hostname=".Length..]));
+    }
+
+    [Fact]
+    public void An_empty_or_blank_hostname_falls_back_and_a_set_one_is_kept()
+    {
+        Assert.Equal("edge-1", TailscaleVpnProvider.DefaultHostName("edge-1"));
+        var fallback = TailscaleVpnProvider.DefaultHostName(null);
+        Assert.False(string.IsNullOrWhiteSpace(fallback));
+        Assert.Equal(fallback, TailscaleVpnProvider.DefaultHostName(""));
+        Assert.Equal(fallback, TailscaleVpnProvider.DefaultHostName("  "));
     }
 
     [Fact]
