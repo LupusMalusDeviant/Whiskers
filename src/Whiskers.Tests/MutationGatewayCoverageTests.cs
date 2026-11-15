@@ -428,7 +428,7 @@ public class MutationGatewayCoverageTests
     [Fact]
     public void Only_the_update_and_rollback_restore_drive_the_restore_steps()
     {
-        // 1.0.1 (review Fleet HIGH 4): the restore steps (force-remove, rename, start) sit behind IContainerRestoreSteps
+        // 1.0.1 (review Fleet HIGH 4): the restore steps (lookup, state, remove, rename, start) sit behind IContainerRestoreSteps
         // for testability. They run only inside container.update / the C12 rollback, which the gateway decided — another
         // caller would be an ungated container mutation.
         var restore = typeof(Whiskers.Services.Docker.Operations.ContainerRestore).FullName!;
@@ -592,6 +592,7 @@ public class MutationGatewayCoverageTests
         ("IHostShellDocker.PullImageAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
         ("IHostShellDocker.RemoveAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
         ("IHostShellDocker.StartAsync", "a step of the helper container behind IDockerService.RunHostShellAsync (R1-57 seam; pinned)"),
+        ("IContainerRestoreSteps.RemoveIfStoppedAsync", "a restore step inside container.update / the C12 rollback after their attempt failed (1.0.1 seam; pinned)"),
         ("IContainerRestoreSteps.RemoveAsync", "a restore step inside container.update / the C12 rollback after their attempt failed (1.0.1 seam; pinned)"),
         ("IContainerRestoreSteps.RenameAsync", "a restore step inside container.update / the C12 rollback after their attempt failed (1.0.1 seam; pinned)"),
         ("IContainerRestoreSteps.StartAsync", "a restore step inside container.update / the C12 rollback after their attempt failed (1.0.1 seam; pinned)"),

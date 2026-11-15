@@ -70,7 +70,9 @@ internal sealed class ContainerLifecycleOperations
         progress?.Report("Stopping container...");
         try
         {
-            await client.Containers.StopContainerAsync(containerId,
+            // inspect.State.Running is also true for a paused or restarting container; a stop that reports it stopped
+            // something counts as well.
+            wasRunning |= await client.Containers.StopContainerAsync(containerId,
                 new ContainerStopParameters { WaitBeforeKillSeconds = 10 });
         }
         catch { } // May already be stopped
@@ -156,7 +158,7 @@ internal sealed class ContainerLifecycleOperations
         progress?.Report("Removing old container...");
         try
         {
-            await client.Containers.RemoveContainerAsync(containerId,
+            await client.Containers.RemoveContainerAsync(previousId,
                 new ContainerRemoveParameters { Force = true });
         }
         catch (Exception ex)
@@ -164,8 +166,8 @@ internal sealed class ContainerLifecycleOperations
             _logger.LogWarning(ex, "New container {Name} is up but removing the old one ({OldName}) failed", name, oldName);
         }
 
-        progress?.Report($"Container updated successfully (new ID: {newId[..12]})");
-        _logger.LogInformation("Container {Name} recreated: {OldId} → {NewId}", name, containerId[..12], newId[..12]);
+        progress?.Report($"Container updated successfully (new ID: {ContainerRestore.Short(newId)})");
+        _logger.LogInformation("Container {Name} recreated: {OldId} → {NewId}", name, ContainerRestore.Short(previousId), ContainerRestore.Short(newId));
 
         return newId;
     }
@@ -228,9 +230,10 @@ internal sealed class ContainerLifecycleOperations
         if (currentId != null)
         {
             progress?.Report("Stopping current container...");
-            // Whether it ran is taken from the listing, not from the stop's answer (a stop that threw may have taken effect).
-            var wasRunning = string.Equals(existing?.State, "running", StringComparison.OrdinalIgnoreCase);
-            try { await client.Containers.StopContainerAsync(currentId, new ContainerStopParameters { WaitBeforeKillSeconds = 10 }); }
+            // Whether it ran is taken from the listing (running, paused or restarting), or from a stop that reports it
+            // stopped something — a stop that threw may still have taken effect.
+            var wasRunning = ContainerRestore.WasRunning(existing?.State);
+            try { wasRunning |= await client.Containers.StopContainerAsync(currentId, new ContainerStopParameters { WaitBeforeKillSeconds = 10 }); }
             catch { }
             try
             {
@@ -311,7 +314,7 @@ internal sealed class ContainerLifecycleOperations
             catch (Exception ex) { _logger.LogWarning(ex, "Rollback of {Name} is up, but removing the stashed container failed", containerName); }
         }
 
-        progress?.Report($"Rollback complete (new ID: {newId[..12]})");
+        progress?.Report($"Rollback complete (new ID: {ContainerRestore.Short(newId)})");
         _logger.LogInformation("Container {Name} rolled back to image {Image}", containerName, imageId.Length > 19 ? imageId[..19] : imageId);
         return newId;
     }

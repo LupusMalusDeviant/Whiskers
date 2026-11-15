@@ -25,6 +25,9 @@ public class ContainerRestoreTests
         public readonly Dictionary<string, (string Name, string State, string Image)> Containers = new();
         public readonly List<string> Calls = [];
         public bool FailRemove, FailRename, FailStart, FailFind, FailState;
+        /// <summary>A state reported by the listing and the inspect while the container is really in another one: the
+        /// race in which it starts between the read and the remove.</summary>
+        public string? StaleState;
 
         public Task<RestoreContainer?> FindByNameAsync(string name)
         {
@@ -32,7 +35,7 @@ public class ContainerRestoreTests
             if (FailFind) throw new InvalidOperationException("list refused");
             foreach (var (id, c) in Containers)
                 if (c.Name == name)
-                    return Task.FromResult<RestoreContainer?>(new RestoreContainer(id, c.State, c.Image));
+                    return Task.FromResult<RestoreContainer?>(new RestoreContainer(id, StaleState ?? c.State, c.Image));
             return Task.FromResult<RestoreContainer?>(null);
         }
 
@@ -40,7 +43,17 @@ public class ContainerRestoreTests
         {
             Calls.Add($"state {id[..4]}");
             if (FailState) throw new InvalidOperationException("inspect refused");
-            return Task.FromResult(Containers[id].State);
+            return Task.FromResult(StaleState ?? Containers[id].State);
+        }
+
+        public Task RemoveIfStoppedAsync(string id)
+        {
+            Calls.Add($"remove-safe {id[..4]}");
+            if (FailRemove) throw new InvalidOperationException("remove refused");
+            if (ContainerRestore.WasRunning(Containers[id].State))
+                throw new DockerApiException(HttpStatusCode.Conflict, "You cannot remove a running container");
+            Containers.Remove(id);
+            return Task.CompletedTask;
         }
 
         public Task RemoveAsync(string id)
@@ -118,7 +131,7 @@ public class ContainerRestoreTests
 
         await ContainerRestore.RestorePreviousAsync(daemon, null, OldId, "web", "web-old-1", Image, LostAnswer, "Update");
 
-        Assert.Equal(["find web", "remove bbbb", "rename aaaa web", "start aaaa"], daemon.Calls);
+        Assert.Equal(["find web", "remove-safe bbbb", "rename aaaa web", "start aaaa"], daemon.Calls);
         Assert.Equal(("web", "running", "sha256:old"), Assert.Single(daemon.Containers).Value);
     }
 
@@ -330,7 +343,7 @@ public class ContainerRestoreTests
 
         await ContainerRestore.RemoveCreatedAsync(daemon, NewId, "web", Image, StartFailure, "Rollback");
 
-        Assert.Equal(["state bbbb", "remove bbbb"], daemon.Calls);
+        Assert.Equal(["state bbbb", "remove-safe bbbb"], daemon.Calls);
         Assert.Empty(daemon.Containers);
     }
 
@@ -345,7 +358,7 @@ public class ContainerRestoreTests
             ContainerRestore.RemoveCreatedAsync(daemon, NewId, "web", Image, StartFailure, "Rollback"));
 
         Assert.True(NoRemove(daemon));
-        Assert.Contains("is running; it was kept", ex.Message);
+        Assert.Contains("is 'running'; it was kept", ex.Message);
     }
 
     [Fact]
@@ -382,7 +395,7 @@ public class ContainerRestoreTests
 
         await ContainerRestore.RemoveCreatedAsync(daemon, null, "web", Image, LostAnswer, "Rollback");
 
-        Assert.Equal(["find web", "state bbbb", "remove bbbb"], daemon.Calls);
+        Assert.Equal(["find web", "state bbbb", "remove-safe bbbb"], daemon.Calls);
         Assert.Empty(daemon.Containers);
     }
 
@@ -412,4 +425,84 @@ public class ContainerRestoreTests
         Assert.True(NoRemove(daemon));
         Assert.True(daemon.Containers.ContainsKey(NewId));
     }
+
+    [Theory]
+    [InlineData("created")]
+    [InlineData("exited")]
+    [InlineData("dead")]
+    public async Task Rollback_container_in_an_allowed_state_is_removed(string state)
+    {
+        var daemon = new FakeDaemon();
+        daemon.Containers[NewId] = ("web", state, Image);
+
+        await ContainerRestore.RemoveCreatedAsync(daemon, NewId, "web", Image, StartFailure, "Rollback");
+
+        Assert.Empty(daemon.Containers);
+    }
+
+    [Theory]
+    [InlineData("running")]
+    [InlineData("restarting")]
+    [InlineData("paused")]
+    [InlineData("removing")]
+    [InlineData("")]
+    public async Task Rollback_container_in_any_other_state_is_kept_and_thrown(string state)
+    {
+        var daemon = new FakeDaemon();
+        daemon.Containers[NewId] = ("web", state, Image);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ContainerRestore.RemoveCreatedAsync(daemon, NewId, "web", Image, StartFailure, "Rollback"));
+
+        Assert.True(NoRemove(daemon));
+        Assert.True(daemon.Containers.ContainsKey(NewId));
+        Assert.Contains(state.Length == 0 ? "in an unknown state" : $"'{state}'", ex.Message);
+        Assert.Contains("it was kept under the name 'web'", ex.Message);
+    }
+
+    [Fact]
+    public async Task Rollback_container_that_started_after_its_state_was_read_is_refused_by_the_daemon_and_kept()
+    {
+        // Read as exited, running by the time of the remove: the non-forced remove gets the daemon's 409.
+        var daemon = new FakeDaemon { StaleState = "exited" };
+        daemon.Containers[NewId] = ("web", "running", Image);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ContainerRestore.RemoveCreatedAsync(daemon, NewId, "web", Image, StartFailure, "Rollback"));
+
+        Assert.Equal(["state bbbb", "remove-safe bbbb"], daemon.Calls);
+        Assert.True(daemon.Containers.ContainsKey(NewId));
+        Assert.Contains("the daemon refused to remove", ex.Message);
+        Assert.Contains("it runs. It was kept under the name 'web'", ex.Message);
+    }
+
+    [Fact]
+    public async Task Lost_create_holder_that_started_after_the_lookup_is_refused_by_the_daemon_and_kept()
+    {
+        var daemon = AfterFailedStart();
+        daemon.Containers[NewId] = ("web", "running", Image);
+        daemon.StaleState = "created";  // the listing still said created
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ContainerRestore.RestorePreviousAsync(daemon, null, OldId, "web", "web-old-1", Image, LostAnswer, "Update"));
+
+        Assert.DoesNotContain(daemon.Calls, c => c == "remove bbbb");  // never the forced remove for a looked-up container
+        Assert.Contains("remove-safe bbbb", daemon.Calls);
+        Assert.True(daemon.Containers.ContainsKey(NewId));
+        Assert.Contains("was kept: the daemon refused to remove it, it runs", ex.Message);
+        Assert.Contains("now named 'web-old-1'", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("running", true)]
+    [InlineData("paused", true)]
+    [InlineData("restarting", true)]
+    [InlineData("Running", true)]
+    [InlineData("exited", false)]
+    [InlineData("created", false)]
+    [InlineData("dead", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void Was_running_covers_every_state_with_a_process(string? state, bool expected) =>
+        Assert.Equal(expected, ContainerRestore.WasRunning(state));
 }

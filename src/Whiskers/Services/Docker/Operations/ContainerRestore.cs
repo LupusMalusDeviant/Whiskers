@@ -21,6 +21,9 @@ internal interface IContainerRestoreSteps
     Task<string> GetStateAsync(string id);
     /// <summary>Force-removes a container (killing it if it runs).</summary>
     Task RemoveAsync(string id);
+    /// <summary>Removes a container WITHOUT force: the daemon itself refuses a running (or paused, restarting) one with
+    /// 409, so a container that started after its state was read is never killed.</summary>
+    Task RemoveIfStoppedAsync(string id);
     Task RenameAsync(string id, string newName);
     Task StartAsync(string id);
 }
@@ -50,6 +53,9 @@ internal sealed class DockerClientContainerRestore(DockerClient client) : IConta
     public Task RemoveAsync(string id) =>
         client.Containers.RemoveContainerAsync(id, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
 
+    public Task RemoveIfStoppedAsync(string id) =>
+        client.Containers.RemoveContainerAsync(id, new ContainerRemoveParameters { Force = false }, CancellationToken.None);
+
     public Task RenameAsync(string id, string newName) =>
         client.Containers.RenameContainerAsync(id, new ContainerRenameParameters { NewName = newName }, CancellationToken.None);
 
@@ -78,16 +84,29 @@ internal static class ContainerRestore
         var currentName = stashedName;
         var started = false;
 
+        // A known created id is this attempt's own container and is force-removed. One found by the lookup is removed
+        // without force, so the daemon refuses it (409) should it have started meanwhile.
+        var found = createdId is null;
         createdId ??= await FindLostCreateAsync(steps, previousId, name, createImage, failure);
 
         var nameFree = true;
+        var leftover = "";
         if (createdId is not null)
         {
-            try { await steps.RemoveAsync(createdId); }
+            try
+            {
+                if (found)
+                    await steps.RemoveIfStoppedAsync(createdId);
+                else
+                    await steps.RemoveAsync(createdId);
+            }
             catch (Exception ex)
             {
                 errors.Add(ex);
                 nameFree = false;  // the failed container still holds the name; a rename would only add a 409
+                leftover = IsConflict(ex) && found
+                    ? $" The container holding '{name}' ({Short(createdId)}) was kept: the daemon refused to remove it, it runs."
+                    : $" The container the failed {operation} created ({Short(createdId)}) could not be removed and still holds the name '{name}'.";
             }
         }
 
@@ -112,9 +131,6 @@ internal static class ContainerRestore
         if (errors.Count == 0)
             return;
 
-        var leftover = createdId is not null && !nameFree
-            ? $" The container the failed {operation} created ({Short(createdId)}) could not be removed and still holds the name '{name}'."
-            : "";
         throw new InvalidOperationException(
             $"{operation} of '{name}' failed ({failure.Message}) and the rollback failed too: the previous container " +
             $"({Short(previousId)}) is now named '{currentName}' and is {(started ? "running" : "not running")}.{leftover} " +
@@ -164,8 +180,10 @@ internal static class ContainerRestore
     /// A C12 rollback with no previous container to restore: removes the container the failed rollback created, so a
     /// never-started container does not keep <paramref name="name"/>. When <paramref name="createdId"/> is <c>null</c> a
     /// container the daemon may still have made is looked up under the guards of <see cref="FindLostCreateAsync"/>.
-    /// A container that runs (its start reported a failure but took effect) or whose state cannot be read is never
-    /// removed: it is kept, and this throws with its state. Returns normally when it is gone or none was created.
+    /// Only a container in a state that is allowed (<c>created</c>, <c>exited</c>, <c>dead</c>) is removed, and without
+    /// force, so the daemon refuses (409) one that started after its state was read. Anything else — running (its start
+    /// reported a failure but took effect), paused, restarting, an unreadable or unknown state — is kept, and this throws
+    /// with its state. Returns normally when it is gone or none was created.
     /// </summary>
     public static async Task RemoveCreatedAsync(IContainerRestoreSteps steps, string? createdId, string name,
         string createImage, Exception failure, string operation)
@@ -184,12 +202,20 @@ internal static class ContainerRestore
                 new AggregateException(failure, ex));
         }
 
-        if (string.Equals(state, "running", StringComparison.OrdinalIgnoreCase))
+        if (!RemovableStates.Contains(state))
             throw new InvalidOperationException(
                 $"{operation} of '{name}' reported a failure ({failure.Message}), but the container it created " +
-                $"({Short(createdId)}) is running; it was kept under the name '{name}'.", failure);
+                $"({Short(createdId)}) is {(state.Length == 0 ? "in an unknown state" : $"'{state}'")}; it was kept under the name '{name}'.",
+                failure);
 
-        try { await steps.RemoveAsync(createdId); }
+        try { await steps.RemoveIfStoppedAsync(createdId); }
+        catch (Exception ex) when (IsConflict(ex))
+        {
+            throw new InvalidOperationException(
+                $"{operation} of '{name}' reported a failure ({failure.Message}), but the daemon refused to remove the " +
+                $"container it created ({Short(createdId)}): it runs. It was kept under the name '{name}'.",
+                new AggregateException(failure, ex));
+        }
         catch (Exception ex)
         {
             throw new InvalidOperationException(
@@ -203,6 +229,19 @@ internal static class ContainerRestore
     /// name another container holds): then the create made nothing, and nothing may be looked up to remove.</summary>
     internal static bool IsDefiniteRejection(Exception failure) =>
         failure is DockerApiException { StatusCode: var status } && (int)status is >= 400 and < 500;
+
+    /// <summary>The daemon's 409 — for a non-forced remove: the container runs.</summary>
+    private static bool IsConflict(Exception ex) => ex is DockerApiException { StatusCode: HttpStatusCode.Conflict };
+
+    /// <summary>States in which a container this attempt created may be removed: never started, or stopped.</summary>
+    private static readonly HashSet<string> RemovableStates = new(StringComparer.OrdinalIgnoreCase) { "created", "exited", "dead" };
+
+    /// <summary>Whether a container in the listed Docker <paramref name="state"/> was running for the purpose of starting
+    /// it again: <c>running</c>, <c>paused</c> and <c>restarting</c> all hold a process the attempt's stop ended.</summary>
+    internal static bool WasRunning(string? state) =>
+        state is not null && (string.Equals(state, "running", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(state, "paused", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(state, "restarting", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// When the create call failed without a definite refusal (a timeout, a dropped tunnel, a 5xx), the daemon may still
@@ -222,6 +261,9 @@ internal static class ContainerRestore
             return holder is not null
                    && holder.Id != previousId
                    && string.Equals(holder.State, "created", StringComparison.OrdinalIgnoreCase)
+                   // The image as the daemon lists it: the tag the recreate created from, or the sha256 id the C12
+                   // rollback created from. A listing that shows it differently (a moved tag shown as an id) is a
+                   // mismatch, and a mismatch fails safe: the container is left alone.
                    && string.Equals(holder.Image, createImage, StringComparison.Ordinal)
                 ? holder.Id
                 : null;
@@ -249,5 +291,5 @@ internal static class ContainerRestore
         return null;
     }
 
-    private static string Short(string id) => id.Length > 12 ? id[..12] : id;
+    internal static string Short(string? id) => id is null ? "" : id.Length > 12 ? id[..12] : id;
 }
