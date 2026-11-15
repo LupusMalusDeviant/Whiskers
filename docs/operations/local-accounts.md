@@ -51,6 +51,38 @@ Every Admin action runs through the Mutation Gateway and is recorded with the ac
 account is added) — never with a password or code. Roles stay in *Settings → User roles*; an account added here gets
 its role there as well.
 
+### Local accounts and the email whitelist
+
+While the email whitelist is **enabled**, it decides for every sign-in method: a local account whose address is not
+listed cannot sign in, just like a Google or OIDC user.
+
+- **Adding an account** lists its address in an enabled whitelist, in the same audited `account.create` operation. A
+  whitelist entry admits the address for **every** sign-in method — a Google or OIDC identity with the same address
+  can then sign in to the account as well (as an identity binding, see
+  [Identity bindings](identity-bindings.md)). If the whitelist cannot be written, the account is not created.
+- A **disabled** whitelist is not touched.
+- An address that was **listed before** the account was added stays a manual entry.
+- **Deleting an account** removes the whitelist entry its creation added (with the identity bindings of that
+  address), in the same audited `account.delete` operation. An address that was listed before stays. If an Admin
+  removed or re-added the entry by hand in the meantime, the deletion leaves it: it is a manual entry now. If the entry
+  cannot be removed, the account is not deleted. The deletion also removes its recorded entry when the whitelist was
+  disabled in the meantime (the address stays in the stored list until then).
+- A record whose account vanished outside Whiskers (for example a database restored from an older backup) keeps its
+  stale account id; the entry then stays until an Admin removes it by hand.
+- The whitelist editor in *Settings → Authentication* reloads after every account added or deleted **on the same
+  page**, so saving it there does not undo these changes. Another browser tab or another Admin with an older copy of
+  the list can still save it over them: the last save wins (as before 1.0.1; a version check is planned for 1.1.0).
+  Reload *Settings* before editing the whitelist after accounts changed elsewhere.
+- If a creation fails after its whitelist entry was written and the entry cannot be taken back either, the entry
+  stays (the error is logged); remove it in *Settings → Authentication*.
+- If a deletion fails after its whitelist entry was removed, the entry is put back — only when the removal was
+  really written, never because of what the list looked like before.
+- Whiskers keeps the record of which entries it added next to the list in `whitelist.json` (`AddedForAccounts`,
+  address → account id). Saving the whitelist in *Settings → Authentication* keeps the record of every address that
+  stays listed.
+- Accounts that existed before 1.0.1, and the Admin seeded from `WHISKERS_ADMIN_EMAIL` on an install that already had
+  a `whitelist.json`, are not added: list their addresses yourself.
+
 ### Sessions end on every credential change
 
 Changing a password, resetting it, redeeming a recovery code, issuing a code on the host and deleting the account all

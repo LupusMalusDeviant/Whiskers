@@ -95,6 +95,66 @@ public class AuthBootstrapTests
         return svc;
     }
 
+    /// <summary>Contract 0017 H1 (review repro): WHISKERS_ADMIN_EMAIL seeds a local Admin; GOOGLE_ADMIN_EMAIL seeds an
+    /// ENABLED whitelist. With both set to different addresses the seeded local Admin must be listed too.</summary>
+    [Fact]
+    public async Task The_seeded_local_admin_may_sign_in_when_a_google_admin_email_seeded_the_whitelist()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sw-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var cfg = Cfg(("WHISKERS_ADMIN_EMAIL", "ops@local.test"), ("GoogleAuth:AllowedEmails:0", "me@gmail.test"));
+        var roles = new RoleService(cfg, NullLogger<RoleService>.Instance, Path.Combine(dir, "roles.json"));
+        await roles.InitializeAsync();
+        var whitelist = new WhitelistService(cfg, roles, NullLogger<WhitelistService>.Instance, new DataPathOptions(dir));
+        await whitelist.InitializeAsync();
+
+        Assert.Equal(AppRole.Admin, roles.GetRole("ops@local.test"));          // seeded as Admin (C5 bootstrap)
+        Assert.True(whitelist.IsEmailAllowed("me@gmail.test"));
+        // /login-local and the session check both ask this:
+        Assert.True(whitelist.IsEmailAllowed("ops@local.test"),
+            "WHISKERS_ADMIN_EMAIL was seeded as Admin but the whitelist seeded from GOOGLE_ADMIN_EMAIL refuses its sign-in.");
+        Assert.Equal(["me@gmail.test", "ops@local.test"], whitelist.GetWhitelist().Emails);
+        Assert.Null(whitelist.GetWhitelist().AddedForAccounts);   // a seeded entry is no local-account entry (H3 leaves it)
+    }
+
+    [Fact]
+    public async Task Whiskers_admin_email_alone_seeds_no_whitelist()
+    {
+        // Contract 0017 H1: only a seed from GoogleAuth:AllowedEmails switches the whitelist on.
+        var dir = Path.Combine(Path.GetTempPath(), "sw-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var cfg = Cfg(("WHISKERS_ADMIN_EMAIL", "ops@local.test"), ("GoogleAuth:AllowedEmails:0", ""));
+        var roles = new RoleService(cfg, NullLogger<RoleService>.Instance, Path.Combine(dir, "roles.json"));
+        await roles.InitializeAsync();
+        var whitelist = new WhitelistService(cfg, roles, NullLogger<WhitelistService>.Instance, new DataPathOptions(dir));
+        await whitelist.InitializeAsync();
+
+        Assert.False(whitelist.GetWhitelist().Enabled);
+        Assert.Empty(whitelist.GetWhitelist().Emails);
+        Assert.False(File.Exists(new DataPathOptions(dir).WhitelistJson));
+        Assert.True(whitelist.IsEmailAllowed("ops@local.test"));       // its explicit role admits it (C5)
+        Assert.False(whitelist.IsEmailAllowed("stranger@local.test"));
+    }
+
+    [Fact]
+    public async Task An_existing_whitelist_file_is_not_changed_by_the_admin_email_seed()
+    {
+        // Contract 0017 H1, existing installs: a 1.0.0 whitelist.json is loaded as it is.
+        var dir = Path.Combine(Path.GetTempPath(), "sw-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = new DataPathOptions(dir).WhitelistJson;
+        await File.WriteAllTextAsync(path, """{"Enabled":true,"Emails":["me@gmail.test"]}""");
+        var before = await File.ReadAllBytesAsync(path);
+        var cfg = Cfg(("WHISKERS_ADMIN_EMAIL", "ops@local.test"), ("GoogleAuth:AllowedEmails:0", "me@gmail.test"));
+        var roles = new RoleService(cfg, NullLogger<RoleService>.Instance, Path.Combine(dir, "roles.json"));
+        await roles.InitializeAsync();
+        var whitelist = new WhitelistService(cfg, roles, NullLogger<WhitelistService>.Instance, new DataPathOptions(dir));
+        await whitelist.InitializeAsync();
+
+        Assert.Equal(["me@gmail.test"], whitelist.GetWhitelist().Emails);
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+    }
+
     [Fact]
     public async Task Disabled_whitelist_with_no_roles_is_fail_open()
     {

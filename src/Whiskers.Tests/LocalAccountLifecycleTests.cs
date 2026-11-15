@@ -36,6 +36,29 @@ public sealed class LocalAccountLifecycleTests
     private const string Viewer = "viewer@local.test";
     private const string Operator = "operator@local.test";
 
+    // ------------------------------------------------------------------------------------------------ whitelist (0017 H2)
+
+    /// <summary>Contract 0017 H2 (review repro): an account an Admin adds while the whitelist is enabled is created, its
+    /// invitation redeemed — and its session must be admitted.</summary>
+    [Fact]
+    public async Task A_local_account_an_admin_added_can_sign_in_while_the_whitelist_is_enabled()
+    {
+        await using var world = await LocalAccountWorld.CreateAsync();
+        await world.Whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = [LocalAccountWorld.Root] });
+        using var admin = world.As(await world.SessionOfAsync(LocalAccountWorld.Root));
+
+        var created = await admin.Mutations.RunAsync("account.create", new { account = "new@local.test", role = "Operator" },
+            (ResolvedTarget _, CancellationToken ct) => admin.Accounts.CreateAsync("new@local.test", AppRole.Operator, ct));
+        Assert.True(created.Success, created.ToString());
+
+        using var anonymous = world.As(LocalAccountWorld.Anonymous);
+        Assert.True((await anonymous.Accounts.RedeemRecoveryCodeAsync("new@local.test", created.RecoveryCode!,
+            LocalAccountWorld.NewPassword)).Success);
+
+        var check = await world.Validator.CheckAsync(await world.SessionOfAsync("new@local.test"));
+        Assert.True(check.Valid, $"The account was created and its password set, but its session is refused: {check.Reason}");
+    }
+
     // ------------------------------------------------------------------------------------------------ own password
 
     [Fact]
@@ -1014,6 +1037,8 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
     public CountingHasher Hasher { get; }
     /// <summary>The guardrail policy the gateway, the account service and the binding store read (contract 0009).</summary>
     public IGuardrailStore Guardrails { get; }
+    /// <summary>The <c>whitelist.json</c> the world's whitelist service writes.</summary>
+    public string WhitelistPath => new DataPathOptions(_dir).WhitelistJson;
 
     private LocalAccountWorld(string dir, ServiceProvider sp, RoleService roles, WhitelistService whitelist,
         IConfiguration configuration, DataPathOptions paths, RecordingAuditLog audit,
@@ -1166,7 +1191,7 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
             : app.GetService(serviceType);
     }
 
-    public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7",
+    public Acting As(ClaimsPrincipal principal, IRoleService? roles = null, string? client = "198.51.100.7", IWhitelistService? whitelist = null,
         Func<IServiceProvider, UserManager<AppUser>>? users = null)
     {
         var scope = _sp.CreateScope();
@@ -1174,7 +1199,7 @@ internal sealed class LocalAccountWorld : IAsyncDisposable
         var accounts = new LocalAccountService(
             users?.Invoke(scope.ServiceProvider) ?? scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
             scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>(), roles ?? Roles, user, Owners, Audit, Limiter, new FixedClient(client), Configuration, Guardrails,
-            _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings);
+            _time, scope.ServiceProvider.GetRequiredService<ILogger<LocalAccountService>>(), Bindings, whitelist ?? Whitelist);
         return new Acting(scope, accounts, new UiMutationRunner(Gateway, new CapabilityCatalog(), user), user);
     }
 
