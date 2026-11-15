@@ -11,9 +11,16 @@
 #   2. flips append_only to 0 in the repo config (SFTP), prunes + compacts, flips it back to 1.
 #
 #   borg-fleet-prune [server-id ...]     (default: all enrolled servers)
+#
+# Tools (no Python — contract 0017 part I), all needed by the whole script, which refuses to start without them:
+#   jq borg sftp ssh sed grep comm sort mktemp wc
 set -uo pipefail
 
-CFG=/root/.config/borg-fleet
+for tool in jq borg sftp ssh sed grep comm sort mktemp wc; do
+    command -v "$tool" >/dev/null 2>&1 || { echo "borg-fleet-prune: missing tool: $tool" >&2; exit 1; }
+done
+
+CFG=${BORG_FLEET_CFG_DIR:-/root/.config/borg-fleet}
 KEEP=(--keep-daily 14 --keep-weekly 8 --keep-monthly 12)
 ADMIN="$CFG/admin_ed25519"
 export BORG_RSH="ssh -i $ADMIN -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile=$CFG/known_hosts"
@@ -33,8 +40,9 @@ set_append_only() {  # user host value
 prune_one() {
     local id=$1 rec="$CFG/servers/$1.json"
     local repo user host remote
-    repo=$(python3 -c "import json;print(json.load(open('$rec'))['repo'])")
-    remote=$(python3 -c "import json;print(json.load(open('$rec'))['remote_path'])")
+    # The record is data: jq reads it, the path never becomes program text.
+    repo=$(jq -er '.repo' "$rec") || { echo "[$id] cannot read repo from $rec"; return 1; }
+    remote=$(jq -er '.remote_path' "$rec") || { echo "[$id] cannot read remote_path from $rec"; return 1; }
     user=${repo#ssh://}; user=${user%%@*}
     host=${repo#ssh://*@}; host=${host%%:*}
     export BORG_REPO=$repo BORG_REMOTE_PATH=$remote BORG_PASSCOMMAND="cat $CFG/escrow/$id/passphrase"

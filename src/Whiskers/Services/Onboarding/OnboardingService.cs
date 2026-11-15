@@ -173,11 +173,14 @@ public class OnboardingService : IOnboardingService
 
             // The tailnet IP flows into shell commands and compose files below — accept only a real
             // IP literal, never arbitrary command output.
-            if (!IPAddress.TryParse(tsIp, out _))
+            // IPAddress.TryParse alone would admit an IPv6 zone id carrying arbitrary text (fe80::1%';…): only an IPv4
+            // literal passes, and from here on only its normalised form is used.
+            if (OnboardingCommands.TailnetIPv4(tsIp) is not { } normalisedIp)
             {
-                progress.Report($"❌ Unerwartete Tailscale-IP: '{tsIp}'");
-                return Fail(progress, completed, step, $"Unerwartete Tailscale-IP: '{tsIp}'");
+                progress.Report("❌ Unerwartete Tailscale-IP (keine IPv4-Adresse).");
+                return Fail(progress, completed, step, "Unerwartete Tailscale-IP (keine IPv4-Adresse).");
             }
+            tsIp = normalisedIp;
             completed.Add(step);
             progress.Report($"✅ Mit dem Tailnet verbunden: {tsIp}");
 
@@ -244,7 +247,15 @@ public class OnboardingService : IOnboardingService
             // 7) Wire into the VictoriaMetrics scrape config (on local) + reload -----------------
             step = OnboardingStep.ScrapeConfig;
             progress.Report("⑧ In Scrape-Config eintragen…");
-            await Sh("local", OnboardingCommands.AddScrapeTargetCommand(ScrapeFileOnHost, serverId, tsIp), TimeSpan.FromSeconds(20), ct);
+            // Contract 0017 I1: read the file, edit it in C#, write it back through the base64 writer. The server id
+            // and the address become YAML scalars; neither reaches any program text on the host.
+            var scrapeB64 = (await Sh("local", OnboardingCommands.ReadFileB64(ScrapeFileOnHost), TimeSpan.FromSeconds(20), ct)).Output.Trim();
+            var scrapeEdit = ScrapeConfigEditor.AddTarget(
+                Encoding.UTF8.GetString(Convert.FromBase64String(scrapeB64)), serverId, tsIp);
+            if (scrapeEdit.Outcome == ScrapeConfigEditOutcome.Added)
+                await WriteFile("local", ScrapeFileOnHost, scrapeEdit.Yaml!, ct);
+            else if (scrapeEdit.Outcome == ScrapeConfigEditOutcome.NoAnchor)
+                progress.Report($"⚠️ {ScrapeFileOnHost} hat keine Zeile 'static_configs:' — Ziel nicht eingetragen.");
             await ShTry("local", $"cd {VmComposeDirOnHost} && docker compose restart victoriametrics", TimeSpan.FromSeconds(30), ct);
             completed.Add(step);
 

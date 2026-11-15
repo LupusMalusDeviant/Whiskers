@@ -71,17 +71,100 @@ public class OnboardingCommandsTests
         Assert.DoesNotContain("$(reboot)", cmd);
     }
 
+    // --- Scrape config (contract 0017 part I1): read base64, edit in C#, write base64 -----------------
+
+    private const string ScrapeTemplate =
+        "# comment kept\n" +
+        "global:\n" +
+        "  scrape_interval: 30s\n" +
+        "\n" +
+        "scrape_configs:\n" +
+        "  - job_name: node\n" +
+        "    static_configs:\n" +
+        "      - targets: ['100.64.0.1:9100']       # controller\n" +
+        "        labels: { server: 'host-a' }\n";
+
     [Fact]
-    public void AddScrapeTarget_ships_python_base64_encoded()
+    public void AddScrapeTarget_reads_the_file_base64_and_runs_no_interpreter()
     {
-        var cmd = OnboardingCommands.AddScrapeTargetCommand("/opt/telemetry-vm/scrape.yml", "srv-1", "100.64.0.7");
-        Assert.StartsWith("echo ", cmd);
-        Assert.EndsWith("| base64 -d | python3 -", cmd);
-        // decode round-trip: the payload contains the ip + server id, the shell line does not
-        var b64 = cmd.Split(' ')[1];
-        var py = Encoding.UTF8.GetString(Convert.FromBase64String(b64));
-        Assert.Contains("ip='100.64.0.7'; sid='srv-1'", py);
-        Assert.DoesNotContain("100.64.0.7:9100", cmd.Replace(b64, ""));
+        var cmd = OnboardingCommands.ReadFileB64("/opt/telemetry-vm/scrape.yml");
+        Assert.Equal("base64 -w0 /opt/telemetry-vm/scrape.yml", cmd);
+        Assert.DoesNotContain("python", cmd, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddScrapeTarget_edits_the_config_in_csharp_and_keeps_the_rest()
+    {
+        var edit = ScrapeConfigEditor.AddTarget(ScrapeTemplate, "srv-1", "100.64.0.7");
+        Assert.Equal(ScrapeConfigEditOutcome.Added, edit.Outcome);
+        var yaml = edit.Yaml!;
+        Assert.Contains("      - targets: [\"100.64.0.7:9100\"]\n        labels: { server: \"srv-1\" }\n", yaml);
+        // Everything that was there stays, line for line.
+        foreach (var line in ScrapeTemplate.TrimEnd().Split('\n'))
+            Assert.Contains(line, yaml);
+        var targets = ScrapeConfigEditor.Targets(yaml).ToList();
+        Assert.Contains(("100.64.0.7:9100", (string?)"srv-1"), targets);
+        Assert.Contains(("100.64.0.1:9100", (string?)"host-a"), targets);
+        // The written file is shipped through the base64 writer: the values never stand in the shell line.
+        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(yaml));
+        var write = OnboardingCommands.WriteFileB64("/opt/telemetry-vm/scrape.yml", b64);
+        Assert.DoesNotContain("srv-1", write);
+        Assert.DoesNotContain("100.64.0.7", write);
+    }
+
+    [Fact]
+    public void AddScrapeTarget_with_the_address_already_present_changes_nothing()
+    {
+        var once = ScrapeConfigEditor.AddTarget(ScrapeTemplate, "srv-1", "100.64.0.7").Yaml!;
+        var again = ScrapeConfigEditor.AddTarget(once, "other-id", "100.64.0.7");
+        Assert.Equal(ScrapeConfigEditOutcome.AlreadyPresent, again.Outcome);
+        Assert.Null(again.Yaml);
+        // A longer address that merely starts with it is a different target.
+        Assert.Equal(ScrapeConfigEditOutcome.Added, ScrapeConfigEditor.AddTarget(ScrapeTemplate, "srv-2", "100.64.0.70").Outcome);
+    }
+
+    [Fact]
+    public void AddScrapeTarget_without_a_static_configs_line_changes_nothing()
+    {
+        var edit = ScrapeConfigEditor.AddTarget("global:\n  scrape_interval: 30s\n", "srv-1", "100.64.0.7");
+        Assert.Equal(ScrapeConfigEditOutcome.NoAnchor, edit.Outcome);
+        Assert.Null(edit.Yaml);
+    }
+
+    [Theory]
+    [InlineData("fe80::1%';reboot;'")]
+    [InlineData("fe80::1%$(reboot)")]
+    [InlineData("fe80::1%eth0")]
+    [InlineData("::1")]
+    [InlineData("100.64.0.7; reboot")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void TailnetIPv4_refuses_anything_but_an_ipv4_literal_including_a_zone_id_payload(string? raw)
+    {
+        Assert.Null(OnboardingCommands.TailnetIPv4(raw));
+        if (!string.IsNullOrEmpty(raw))
+            Assert.Throws<ArgumentException>(() => ScrapeConfigEditor.AddTarget(ScrapeTemplate, "srv-1", raw));
+    }
+
+    [Theory]
+    [InlineData("100.64.0.7", "100.64.0.7")]
+    [InlineData(" 100.64.0.7\n", "100.64.0.7")]
+    public void TailnetIPv4_returns_the_normalised_address(string raw, string expected) =>
+        Assert.Equal(expected, OnboardingCommands.TailnetIPv4(raw));
+
+    [Theory]
+    [InlineData("x'; open('/tmp/review-marker','w'); sid='x")]
+    [InlineData("a\" }\n      - targets: ['10.0.0.1:9100']\n        labels: { server: 'b")]
+    [InlineData("$(reboot) `id` \\ # : { } [ ]")]
+    public void A_server_id_with_a_quote_does_not_become_code_in_the_scrape_config_step(string id)
+    {
+        var edit = ScrapeConfigEditor.AddTarget(ScrapeTemplate, id, "100.64.0.7");
+        Assert.Equal(ScrapeConfigEditOutcome.Added, edit.Outcome);
+        // The id is one scalar: the file parses, carries the id verbatim as the label and gains exactly one target.
+        var targets = ScrapeConfigEditor.Targets(edit.Yaml!).ToList();
+        Assert.Equal(2, targets.Count);
+        Assert.Contains(("100.64.0.7:9100", (string?)id), targets);
+        Assert.Equal(ScrapeTemplate.Split('\n').Length + 2, edit.Yaml!.Split('\n').Length);
     }
 
     // --- Compose templates -------------------------------------------------------------------------

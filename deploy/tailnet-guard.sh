@@ -11,7 +11,14 @@
 #
 #   --check-only   report and exit non-zero on breakage; never restart anything.
 #
-# Exit codes: 0 = healthy (or repaired), 1 = broken and repair failed / --check-only found breakage.
+# Exit codes: 0 = healthy (or repaired), 1 = broken and repair failed / --check-only found breakage,
+# or `ip` is missing.
+#
+# Tools (no Python — contract 0017 part I):
+#   whole script: ip, grep (the address check) — without `ip` the script refuses to start, it cannot judge anything
+#   repair:       systemctl, flock, logger (as before)
+#   peer list:    jq — without it there are no probe targets and only the address is checked
+#   TCP probe:    nc (-z -w5), else bash /dev/tcp under timeout 5 — without either only the address is checked
 set -u
 
 PROBE_PORT=${TAILNET_GUARD_PORT:-2376}
@@ -22,6 +29,10 @@ CHECK_ONLY=0
 [ "${1:-}" = "--check-only" ] && CHECK_ONLY=1
 
 log() { echo "$*"; logger -t tailnet-guard -- "$*"; }
+
+for tool in ip grep; do
+    command -v "$tool" >/dev/null 2>&1 || { echo "tailnet-guard: missing tool: $tool" >&2; exit 1; }
+done
 
 # One repair at a time. The timer and a deploy's postflight can fire together, and two concurrent
 # `systemctl restart tailscaled` runs race each other into a worse state than the one being repaired.
@@ -36,42 +47,39 @@ fi
 
 probe_targets() {
     # The fleet's own Docker endpoints are the most honest probe: that is the path that must work.
-    python3 - "$SERVERS_JSON" <<'PY' 2>/dev/null
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-except Exception:
-    sys.exit(0)
-items = d if isinstance(d, list) else d.get('Servers', [])
-for s in items:
-    if s.get('Enabled', True) and s.get('TcpHost'):
-        print(s['TcpHost'])
-PY
+    # Without jq (or with an unreadable file) there are no targets, and the address check is all we assert.
+    command -v jq >/dev/null 2>&1 || return 0
+    jq -r '(if type == "array" then . else (.Servers // []) end)[]
+           | select(type == "object")
+           | select((if has("Enabled") then .Enabled else true end) as $e | $e != null and $e != false and $e != 0 and $e != "")
+           | select((.TcpHost // "") | type == "string" and length > 0)
+           | .TcpHost' "$SERVERS_JSON" 2>/dev/null
 }
 
 has_v4() { ip -4 addr show tailscale0 2>/dev/null | grep -q 'inet '; }
 
+# The TCP probe: `nc -z -w5`, else bash's /dev/tcp under `timeout 5`. Without either the probe cannot run, and
+# the address check is all we assert (as without targets).
+can_probe() { command -v nc >/dev/null 2>&1 || command -v timeout >/dev/null 2>&1; }
+
 tcp_ok() {
-    python3 - "$1" "$PROBE_PORT" <<'PY' 2>/dev/null
-import socket, sys
-s = socket.socket(); s.settimeout(5)
-try:
-    s.connect((sys.argv[1], int(sys.argv[2])))
-except Exception:
-    sys.exit(1)
-finally:
-    s.close()
-PY
+    if command -v nc >/dev/null 2>&1; then
+        nc -z -w5 "$1" "$PROBE_PORT" >/dev/null 2>&1
+    else
+        timeout 5 bash -c 'exec 3<>"/dev/tcp/$1/$2"' tcp-probe "$1" "$PROBE_PORT" >/dev/null 2>&1
+    fi
 }
 
 healthy() {
     has_v4 || { REASON="tailscale0 has no IPv4 address"; return 1; }
-    local reached=0 target
-    for target in $(probe_targets); do
+    local reached=0 target targets
+    targets=$(probe_targets)
+    # No configured TCP peers at all, or no probe tool → the address check is all we can assert.
+    [ -z "$targets" ] && return 0
+    can_probe || return 0
+    for target in $targets; do
         if tcp_ok "$target"; then reached=1; break; fi
     done
-    # No configured TCP peers at all → the address check is all we can assert.
-    [ -z "$(probe_targets)" ] && return 0
     [ "$reached" = 1 ] || { REASON="no tailnet peer answered on :$PROBE_PORT"; return 1; }
     return 0
 }

@@ -732,6 +732,53 @@ public sealed class PerHostCredentialTests
     }
 
     [Fact]
+    public async Task Onboarding_edits_the_scrape_config_in_csharp_and_runs_no_python_on_the_whiskers_host()
+    {
+        // Contract 0017 I1: step 8 reads the scrape config base64, edits it in C# and writes it through the base64 writer.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance)
+        {
+            ProbeCredential = (_, _) => Task.FromResult(MtlsProbeOutcome.Refused),
+        };
+
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
+
+        Assert.True(result.Success, result.Error);
+        var edited = ScrapeConfigEditor.AddTarget(exec.ScrapeYaml, "neuhof", "100.64.0.20").Yaml!;
+        var write = OnboardingCommands.WriteFileB64("/opt/telemetry-vm/scrape.yml", SimulatedProxyHost.B64(edited));
+        Assert.Contains(write, exec.Scripts);
+        Assert.DoesNotContain(exec.Scripts, s => s.Contains("python", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_tailnet_answer_with_an_ipv6_zone_id_is_refused_and_never_reaches_a_command()
+    {
+        // S4 review: IPAddress.TryParse accepts fe80::1%<anything>; that text must not reach the CA host ("local").
+        const string payload = "fe80::1%';reboot;'";
+        Assert.True(System.Net.IPAddress.TryParse(payload, out _));   // the old guard alone let it through
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        await SshRecordAsync(w, "neuhof");
+        var exec = new OnboardingExecutor(w.Fleet, payload);
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance);
+
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.TailscaleLogin, result.FailedStep);
+        Assert.DoesNotContain("reboot", result.Error ?? "", StringComparison.Ordinal);
+        Assert.DoesNotContain(exec.Scripts, s => s.Contains("reboot", StringComparison.Ordinal)
+            || s.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes(payload)), StringComparison.Ordinal));
+        Assert.DoesNotContain(exec.Scripts, s => s.Contains("scrape", StringComparison.Ordinal));
+        Assert.Equal(ConnectionType.SSH, w.Server("neuhof").ConnectionType);
+    }
+
+    [Fact]
     public async Task While_onboarding_holds_the_host_lock_removal_and_migration_are_refused()
     {
         // Review r3 MAJOR 1: the break-glass re-onboarding of an existing mTLS host holds the store's per-host lock from
@@ -1625,6 +1672,9 @@ public sealed class PerHostCredentialTests
     private sealed class OnboardingExecutor(SimulatedFleet fleet, string ip, TestCa? ca = null) : IHostCommandExecutor
     {
         public List<string> Scripts { get; } = new();
+        /// <summary>The scrape config the Whiskers host ("local") answers with.</summary>
+        public string ScrapeYaml { get; set; } =
+            "scrape_configs:\n  - job_name: node\n    static_configs:\n      - targets: ['100.64.0.1:9100']\n        labels: { server: 'local' }\n";
         /// <summary>Runs before each command (e.g. a record change while onboarding is in its first steps).</summary>
         public Action<string>? OnCommand { get; set; }
         /// <summary>Whether the host was asked to activate a freshly staged server certificate.</summary>
@@ -1654,6 +1704,8 @@ public sealed class PerHostCredentialTests
                 return Task.FromResult(new CommandResult { ExitCode = 0, Output = SimulatedProxyHost.B64(ca.BundlePem) });
             if (ca is not null && command == MtlsCertificateCommands.ActivateFresh())
                 ServerCertificateActivated = true;
+            if (serverId == "local" && command == OnboardingCommands.ReadFileB64("/opt/telemetry-vm/scrape.yml"))
+                return Task.FromResult(new CommandResult { ExitCode = 0, Output = SimulatedProxyHost.B64(ScrapeYaml) });
             if (command.Contains("BackendState", StringComparison.Ordinal))
                 return Task.FromResult(new CommandResult { ExitCode = 0, Output = "\"BackendState\": \"Running\"," });
             if (command.Contains("tailscale ip -4", StringComparison.Ordinal))

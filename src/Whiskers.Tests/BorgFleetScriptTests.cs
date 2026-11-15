@@ -1,0 +1,355 @@
+using System.Numerics;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+namespace Whiskers.Tests;
+
+/// <summary>Contract 0017 part I: the borg-fleet scripts without Python. <c>borg-enroll</c> is POSIX <c>sh</c> (run here
+/// with <c>sh</c>: dash on CI) with the same arguments, outputs and exit codes, one test per exit code against stubs;
+/// <c>borg-fleet-client</c> copies SQLite files with the sqlite3 CLI and, without sqlite3, still completes the backup
+/// and reports the skipped snapshot; <c>borg-fleet-prune</c> reads the enrolment record with jq.</summary>
+public sealed class BorgFleetScriptTests : IDisposable
+{
+    private readonly ShellScriptHarness _h = new();
+
+    public void Dispose() => _h.Dispose();
+
+    // --- borg-enroll -------------------------------------------------------------------------------------------------
+
+    private static readonly string[] Enroll = ["deploy", "borg-fleet", "borg-enroll"];
+    private const string Token = "hz-token-secret";
+    private const string McpKey = "mcp-key-secret";
+    private static readonly string[] EnrollTools =
+        ["jq", "base64", "sha256sum", "awk", "sed", "tr", "head", "tail", "cut", "grep", "cp", "date", "mktemp",
+         "rm", "mkdir", "chmod", "dirname", "cat"];
+
+    private string Cfg => Path.Combine(_h.Root, "cfg");
+
+    private void EnrollStubs()
+    {
+        Directory.CreateDirectory(Cfg);
+        File.WriteAllText(Path.Combine(Cfg, "token"), Token + "\n");
+        File.WriteAllText(Path.Combine(Cfg, "whiskers-mcp-key"), McpKey + "\n");
+        File.WriteAllText(Path.Combine(Cfg, "fleet.json"),
+            $$$"""{"box_id":7,"hetzner_token_file":"{{{DeploymentScripts.ForBash(Path.Combine(Cfg, "token"))}}}","whiskers_mcp_url":"https://mcp.test/mcp","times":{"other":"01:15"}}""");
+        _h.Stub("sleep", "#!/bin/bash\nexit 0\n");
+        _h.Stub("ssh-keygen", """
+            #!/bin/bash
+            while [ $# -gt 0 ]; do [ "$1" = -f ] && f=$2; shift; done
+            echo private > "$f"; echo 'ssh-ed25519 AAAAadmin borg-fleet-admin@badwolf' > "$f.pub"
+            """);
+        _h.Stub("sftp", "#!/bin/bash\nexit 0\n");
+        _h.Stub("sshpass", """
+            #!/bin/bash
+            echo "sshpass $* SSHPASS=${SSHPASS:+set}" >> "$STUB_DIR/sshpass.log"
+            cat > "$STUB_DIR/sftp.batch"
+            src=$(sed -n 's/^put \([^ ]*\) .*/\1/p' "$STUB_DIR/sftp.batch")
+            cp "$src" "$STUB_DIR/authorized_keys"
+            echo '-rw------- 1 u u 120 Nov 15 .ssh/authorized_keys'
+            """);
+        _h.Stub("curl", """
+            #!/bin/bash
+            echo "curl $*" >> "$STUB_DIR/curl.args"
+            out=/dev/null; data=; method=GET; url=; dump=; hdrs=
+            while [ $# -gt 0 ]; do
+              case $1 in
+                -o) out=$2; shift ;; -D) dump=$2; shift ;; -X) method=$2; shift ;; -w|--max-time) shift ;;
+                --data-binary) data=${2#@}; method=${method/GET/POST}; shift ;;
+                -H) case $2 in @*) hdrs="$hdrs$(cat "${2#@}")"$'\n' ;; esac; shift ;;
+                -*) ;;
+                *) url=$1 ;;
+              esac; shift
+            done
+            body=; [ -n "$data" ] && body=$(cat "$data")
+            printf '%s %s\n' "$method" "$url" >> "$STUB_DIR/curl.log"
+            printf '%s' "$hdrs" >> "$STUB_DIR/curl.headers"
+            code=200; resp='{}'
+            case $url in
+              https://mcp.test/mcp)
+                [ -n "$dump" ] && printf 'HTTP/1.1 200 OK\r\nMcp-Session-Id: sess-1\r\n\r\n' > "$dump"
+                case $body in
+                  *notifications/initialized*) resp= ;;
+                  *'"initialize"'*) resp=$(printf 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{}}\n') ;;
+                  *"borg-fleet-client prepare"*)
+                    if [ "${STUB_PREPARE_EXIT:-0}" != 0 ]; then t=$(printf 'Exit code: %s\nprepare broke' "$STUB_PREPARE_EXIT")
+                    else t=$(printf 'BORG_VERSION=1.4.1\nPUBKEY=ssh-ed25519 AAAAserver borg-fleet@neuhof'); fi
+                    resp="data: $(jq -cn --arg t "$t" '{jsonrpc:"2.0",id:2,result:{content:[{type:"text",text:$t}]}}')" ;;
+                  *"borg-fleet-client init"*)
+                    echo "$body" > "$STUB_DIR/init.req"
+                    t=$(printf 'REPO=created\nPASSPHRASE=pass-phrase-1\nREPOKEY_B64=%s\nTIMER=Mon 2026-11-16 01:15' "$(printf 'repokey-bytes' | base64)")
+                    resp="$(jq -cn --arg t "$t" '{jsonrpc:"2.0",id:3,result:{content:[{type:"text",text:$t}]}}')" ;;
+                  *systemd-run*) resp='{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"Running as unit"}]}}' ;;
+                esac ;;
+              */storage_boxes/7)
+                if [ -n "${STUB_HZ_FAIL:-}" ]; then code=500; resp='{"error":"down"}'
+                else resp='{"storage_box":{"server":"u1.your-storagebox.de","snapshot_plan":null}}'; fi ;;
+              */storage_boxes/7/actions/enable_snapshot_plan) resp='{"action":{"id":1,"status":"running","command":"enable_snapshot_plan"}}' ;;
+              */storage_boxes/7/subaccounts)
+                if [ "$method" = POST ]; then echo "$body" > "$STUB_DIR/create.req"; resp='{"subaccount":{"id":42}}'
+                else resp='{"subaccounts":[{"id":1,"username":"u1-sub1","labels":{"whiskers-server":"other"}}]}'; fi ;;
+              */storage_boxes/7/subaccounts/42) resp='{"subaccount":{"id":42,"username":"u1-sub9"}}' ;;
+              */reset_subaccount_password) resp='{"action":{"id":5,"status":"running","command":"reset_subaccount_password"}}' ;;
+              */storage_boxes/actions/5) resp='{"action":{"id":5,"status":"success","command":"reset_subaccount_password"}}' ;;
+              *) code=404; resp='{"error":"not found"}' ;;
+            esac
+            printf '%s' "$resp" > "$out"
+            printf '%s' "$code"
+            """);
+    }
+
+    private (int Exit, string Stdout, string Stderr) RunEnroll(string[] args, Dictionary<string, string?>? env = null, string[]? tools = null)
+    {
+        env ??= new();
+        env["BORG_FLEET_CFG_DIR"] = DeploymentScripts.ForBash(Cfg);
+        return _h.Run("sh", Enroll, args, tools ?? EnrollTools, env);
+    }
+
+    private string Stub(string file) => File.Exists(Path.Combine(_h.Root, file)) ? File.ReadAllText(Path.Combine(_h.Root, file)).Replace("\r", "") : "";
+
+    /// <summary>The fixed slot of the former Python version: sha256(id) mod 20 quarter hours after 00:30.</summary>
+    private static string Slot(string id)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(id));
+        var h = (int)(new BigInteger(hash, isUnsigned: true, isBigEndian: true) % 20);
+        var m = 30 + h * 15;
+        return $"{m / 60:00}:{m % 60:00}";
+    }
+
+    [SkippableFact]
+    public void Borg_enroll_exits_0_after_a_full_enrolment_with_the_same_outputs()
+    {
+        EnrollStubs();
+        var (exit, stdout, stderr) = RunEnroll(["neuhof", "--first-run"]);
+
+        Assert.True(exit == 0, stdout + stderr);
+        var slot = Slot("neuhof");
+        Assert.Equal(
+            "box: snapshot plan enabled (daily 06:30 UTC, keep 14)\n" +
+            "[neuhof] borg 1.4.1 -> remote borg-1.4\n" +
+            "[neuhof] created sub-account u1-sub9\n" +
+            $"[neuhof] repo created ssh://u1-sub9@u1.your-storagebox.de:23/./borg, timer {slot} (next Mon 2026-11-16 01:15)\n" +
+            "[neuhof] first backup started (journalctl -u borg-fleet-first)\n",
+            stdout.Replace("\r", ""));
+
+        // The authorized_keys: the server key forced to append-only, then the admin key.
+        Assert.Equal(
+            "command=\"borg-1.4 serve --append-only --restrict-to-repository borg\",restrict ssh-ed25519 AAAAserver borg-fleet@neuhof\n" +
+            "ssh-ed25519 AAAAadmin borg-fleet-admin@badwolf\n", Stub("authorized_keys"));
+        Assert.Contains("-P 23", Stub("sshpass.log"));
+        Assert.Contains("SSHPASS=set", Stub("sshpass.log"));
+        Assert.Contains("u1-sub9@u1.your-storagebox.de", Stub("sshpass.log"));
+
+        // The sub-account the Python version created.
+        using (var create = JsonDocument.Parse(Stub("create.req")))
+        {
+            var root = create.RootElement;
+            Assert.Equal("whiskers-neuhof", root.GetProperty("name").GetString());
+            Assert.Equal("whiskers-neuhof", root.GetProperty("home_directory").GetString());
+            Assert.Equal("neuhof", root.GetProperty("labels").GetProperty("whiskers-server").GetString());
+            Assert.StartsWith("Bf7#", root.GetProperty("password").GetString());
+            Assert.Equal(32, root.GetProperty("password").GetString()!.Length);
+        }
+        Assert.Contains($"init 'ssh://u1-sub9@u1.your-storagebox.de:23/./borg' {slot} borg-1.4", Stub("init.req"));
+
+        // Escrow and record.
+        Assert.Equal("pass-phrase-1\n", File.ReadAllText(Path.Combine(Cfg, "escrow", "neuhof", "passphrase")).Replace("\r", ""));
+        Assert.Equal("repokey-bytes", File.ReadAllText(Path.Combine(Cfg, "escrow", "neuhof", "repokey")));
+        using (var record = JsonDocument.Parse(File.ReadAllText(Path.Combine(Cfg, "servers", "neuhof.json"))))
+        {
+            var r = record.RootElement;
+            Assert.Equal("neuhof", r.GetProperty("server_id").GetString());
+            Assert.Equal("u1-sub9", r.GetProperty("subaccount").GetString());
+            Assert.Equal(42, r.GetProperty("subaccount_id").GetInt32());
+            Assert.Equal("ssh://u1-sub9@u1.your-storagebox.de:23/./borg", r.GetProperty("repo").GetString());
+            Assert.Equal("borg-1.4", r.GetProperty("remote_path").GetString());
+            Assert.Equal(slot, r.GetProperty("time").GetString());
+            Assert.Equal("1.4.1", r.GetProperty("borg_version").GetString());
+        }
+
+        // The secrets travel in header files, never in curl's arguments; the MCP session id is carried along.
+        var args = Stub("curl.args");
+        Assert.DoesNotContain(Token, args);
+        Assert.DoesNotContain(McpKey, args);
+        Assert.Contains($"Authorization: Bearer {Token}", Stub("curl.headers"));
+        Assert.Contains($"Authorization: Bearer {McpKey}", Stub("curl.headers"));
+        Assert.Contains("Mcp-Session-Id: sess-1", Stub("curl.headers"));
+        Assert.Contains("POST https://api.hetzner.com/v1/storage_boxes/7/subaccounts/42/actions/reset_subaccount_password", Stub("curl.log"));
+        Assert.Contains("GET https://api.hetzner.com/v1/storage_boxes/actions/5", Stub("curl.log"));   // waited for the action
+    }
+
+    [SkippableFact]
+    public void Borg_enroll_takes_the_time_from_the_argument_or_fleet_json()
+    {
+        EnrollStubs();
+        Assert.Equal(0, RunEnroll(["neuhof", "--time", "03:45"]).Exit);
+        Assert.Contains("init 'ssh://u1-sub9@u1.your-storagebox.de:23/./borg' 03:45 borg-1.4", Stub("init.req"));
+        Assert.Equal(0, RunEnroll(["other"]).Exit);
+        Assert.Contains("01:15 borg-1.4", Stub("init.req"));
+    }
+
+    [SkippableTheory]
+    [InlineData("usage")]
+    [InlineData("missing-tool")]
+    [InlineData("hetzner-api")]
+    [InlineData("prepare-failed")]
+    [InlineData("bad-time")]
+    public void Borg_enroll_exits_1_with_a_message_on_every_failure(string failure)
+    {
+        EnrollStubs();
+        var env = new Dictionary<string, string?>();
+        string[] args = ["neuhof"];
+        var tools = EnrollTools;
+        string expected;
+        switch (failure)
+        {
+            case "usage": args = []; expected = "borg-enroll: usage: borg-enroll <whiskers-server-id>"; break;
+            case "missing-tool": _h.Unstub("sshpass"); expected = "borg-enroll: missing tool: sshpass"; break;
+            case "hetzner-api": env["STUB_HZ_FAIL"] = "1"; expected = "borg-enroll: Hetzner API GET /storage_boxes/7 -> 500: {\"error\":\"down\"}"; break;
+            case "prepare-failed": env["STUB_PREPARE_EXIT"] = "3"; expected = "borg-enroll: prepare failed on neuhof:\nExit code: 3\nprepare broke"; break;
+            default: args = ["neuhof", "--time", "1;reboot"]; expected = "borg-enroll: invalid time slot"; break;
+        }
+
+        var (exit, stdout, stderr) = RunEnroll(args, env, tools);
+
+        Assert.True(exit == 1, $"exit {exit}: {stdout}{stderr}");
+        Assert.Contains(expected, stderr.Replace("\r", ""));
+        Assert.False(File.Exists(Path.Combine(Cfg, "servers", "neuhof.json")));
+    }
+
+    // --- borg-fleet-client backup ------------------------------------------------------------------------------------
+
+    private static readonly string[] Client = ["deploy", "borg-fleet", "borg-fleet-client"];
+    private static readonly string[] ClientTools =
+        ["date", "rm", "install", "mv", "head", "od", "tr", "sed", "find", "cat", "mkdir"];
+
+    private string TestRoot => Path.Combine(_h.Root, "host");
+
+    private void ClientStubs()
+    {
+        foreach (var dir in new[] { "etc/borg-fleet", "var/lib/borg-fleet", "var/backups/borg-fleet", "opt/app", "srv" })
+            Directory.CreateDirectory(Path.Combine(TestRoot, dir));
+        File.WriteAllText(Path.Combine(TestRoot, "etc/borg-fleet/borg-fleet.env"), "BORG_REPO=ssh://u@h:23/./borg\n");
+        _h.Stub("flock", "#!/bin/bash\nexit 0\n");
+        _h.Stub("borg", "#!/bin/bash\necho \"borg $*\" >> \"$STUB_DIR/borg.log\"\nexit 0\n");
+    }
+
+    private (int Exit, string Output, JsonElement Status) RunBackup(params string[] hostTools)
+    {
+        var env = new Dictionary<string, string?> { ["BORG_FLEET_TEST_ROOT"] = DeploymentScripts.ForBash(TestRoot) };
+        var (exit, stdout, stderr) = _h.Run("bash", Client, ["backup"], [.. ClientTools, .. hostTools], env);
+        var statusFile = Path.Combine(TestRoot, "var/lib/borg-fleet/last-status.json");
+        Assert.True(File.Exists(statusFile), stdout + stderr);
+        using var doc = JsonDocument.Parse(File.ReadAllText(statusFile));
+        return (exit, stdout + stderr, doc.RootElement.Clone());
+    }
+
+    private string SnapshotDir => Path.Combine(TestRoot, "var/backups/borg-fleet/sqlite");
+
+    [SkippableFact]
+    public void Without_sqlite3_the_backup_still_runs_and_the_status_reports_the_skipped_snapshot()
+    {
+        ClientStubs();
+        File.WriteAllBytes(Path.Combine(TestRoot, "opt/app/data.db"), SqliteHeaderFile());
+
+        var (exit, output, status) = RunBackup();   // no sqlite3 on the PATH
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("borg create", Stub("borg.log"));                      // the backup itself ran
+        Assert.Contains("WARN: sqlite3 or timeout missing — SQLite snapshot skipped", output);
+        Assert.Equal("skipped", status.GetProperty("sqlite_snapshot").GetString());
+        Assert.Equal("warning", status.GetProperty("result").GetString());
+        Assert.Empty(Directory.GetFileSystemEntries(SnapshotDir));
+    }
+
+    [SkippableFact]
+    public void With_sqlite3_every_sqlite_file_is_copied_whole_and_nothing_else()
+    {
+        ClientStubs();
+        var db = Path.Combine(TestRoot, "opt/app/data.db");
+        var made = DeploymentScripts.Run(DeploymentScripts.FindBash() ?? "bash",
+            ["-c", "sqlite3 \"$0\" 'create table t(x); insert into t values (42);'", DeploymentScripts.ForBash(db)]);
+        if (made.Exit != 0)
+        {
+            if (DeploymentScripts.InCi) Assert.Fail("sqlite3 is required on CI: " + made.Stderr);
+            Skip.If(true, "no sqlite3 to make a database");
+        }
+        File.WriteAllText(Path.Combine(TestRoot, "srv/notes.txt"), new string('x', 4096));   // not SQLite
+        File.WriteAllBytes(Path.Combine(TestRoot, "srv/tiny.db"), SqliteHeaderFile()[..100]); // below 512 bytes
+
+        var (exit, output, status) = RunBackup("sqlite3", "timeout");
+
+        Assert.True(exit == 0, output);
+        Assert.Equal("ok", status.GetProperty("sqlite_snapshot").GetString());
+        Assert.Equal("ok", status.GetProperty("result").GetString());
+        var copy = Assert.Single(Directory.GetFiles(SnapshotDir));
+        Assert.EndsWith("__opt__app__data.db", copy.Replace('\\', '/'));
+        Assert.Equal("SQLite format 3\0", Encoding.ASCII.GetString(File.ReadAllBytes(copy)[..16]));
+        Assert.Empty(Directory.GetFiles(SnapshotDir, ".partial"));
+    }
+
+    [SkippableFact]
+    public void A_failed_copy_leaves_no_half_copy_and_the_status_reports_the_errors()
+    {
+        ClientStubs();
+        File.WriteAllBytes(Path.Combine(TestRoot, "opt/app/data.db"), SqliteHeaderFile());
+        // A sqlite3 that writes half a file and fails, as a copy cut off by its deadline would.
+        _h.Stub("sqlite3", "#!/bin/bash\nprintf 'SQLite format 3' > .partial\nexit 1\n");
+
+        var (exit, output, status) = RunBackup("timeout");
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("WARN: sqlite snapshot had errors", output);
+        Assert.Equal("errors", status.GetProperty("sqlite_snapshot").GetString());
+        Assert.Contains("borg create", Stub("borg.log"));
+        Assert.Empty(Directory.GetFileSystemEntries(SnapshotDir));
+    }
+
+    /// <summary>1 KiB that starts with the SQLite header (enough for the header check, not a database).</summary>
+    private static byte[] SqliteHeaderFile()
+    {
+        var bytes = new byte[1024];
+        Encoding.ASCII.GetBytes("SQLite format 3\0").CopyTo(bytes, 0);
+        return bytes;
+    }
+
+    // --- borg-fleet-prune --------------------------------------------------------------------------------------------
+
+    [SkippableFact]
+    public void Borg_fleet_prune_reads_the_record_with_jq_and_a_quote_in_the_id_stays_data()
+    {
+        Directory.CreateDirectory(Path.Combine(Cfg, "servers"));
+        const string id = "x'y";
+        File.WriteAllText(Path.Combine(Cfg, "servers", id + ".json"),
+            """{"repo":"ssh://u1-sub9@u1.your-storagebox.de:23/./borg","remote_path":"borg-1.4"}""");
+        _h.Stub("ssh", "#!/bin/bash\nexit 0\n");
+        _h.Stub("borg", """
+            #!/bin/bash
+            echo "borg $* REPO=$BORG_REPO REMOTE=$BORG_REMOTE_PATH" >> "$STUB_DIR/borg.log"
+            [ "$1" = list ] && printf 'a1\na2\n'
+            exit 0
+            """);
+        _h.Stub("sftp", """
+            #!/bin/bash
+            echo "sftp $*" >> "$STUB_DIR/sftp.log"
+            read -r cmd a b
+            [ "$cmd" = get ] && printf '[repository]\nappend_only = 1\n' > "$b"
+            exit 0
+            """);
+        var env = new Dictionary<string, string?> { ["BORG_FLEET_CFG_DIR"] = DeploymentScripts.ForBash(Cfg) };
+
+        var (exit, stdout, stderr) = _h.Run("bash", ["deploy", "borg-fleet", "borg-fleet-prune"], [],
+            ["jq", "sed", "grep", "comm", "sort", "mktemp", "wc", "rm", "cat", "basename"], env);
+
+        Assert.True(exit == 0, stdout + stderr);
+        Assert.Contains($"[{id}] pruned (rc=0), 2 archives kept", stdout);
+        Assert.Contains("REPO=ssh://u1-sub9@u1.your-storagebox.de:23/./borg REMOTE=borg-1.4", Stub("borg.log"));
+        Assert.Contains("u1-sub9@u1.your-storagebox.de", Stub("sftp.log"));
+
+        _h.Unstub("borg");
+        var missing = _h.Run("bash", ["deploy", "borg-fleet", "borg-fleet-prune"], [],
+            ["jq", "sed", "grep", "comm", "sort", "mktemp", "wc", "rm", "cat", "basename"], env);
+        Assert.Equal(1, missing.Exit);
+        Assert.Contains("missing tool: borg", missing.Stderr);
+    }
+}

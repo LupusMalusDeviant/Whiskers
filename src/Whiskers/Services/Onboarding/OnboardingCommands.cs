@@ -1,4 +1,5 @@
-using System.Text;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.RegularExpressions;
 
 namespace Whiskers.Services.Onboarding;
@@ -30,31 +31,21 @@ public static class OnboardingCommands
         return $"sudo mkdir -p {dir} && echo {b64} | base64 -d | sudo tee {path} >/dev/null";
     }
 
-    /// <summary>The regenerate-safe scrape-config append, shipped as base64-encoded python so the
-    /// YAML content and IP/serverId values never meet the shell.</summary>
-    public static string AddScrapeTargetCommand(string scrapeFileOnHost, string serverId, string tsIp)
-    {
-        var py =
-            "import sys\n" +
-            $"f='{scrapeFileOnHost}'\n" +
-            "import re\n" +
-            "s=open(f).read()\n" +
-            $"ip='{tsIp}'; sid='{serverId}'\n" +
-            "if ip in s:\n    print('already present'); sys.exit(0)\n" +
-            "lines=s.rstrip().split(chr(10))\n" +
-            "out=[]\n" +
-            "ins=False\n" +
-            "for ln in lines:\n" +
-            "    out.append(ln)\n" +
-            "    if not ins and ln.strip()=='static_configs:':\n" +
-            "        out.append(\"      - targets: ['%s:9100']\" % ip)\n" +
-            "        out.append(\"        labels: { server: '%s' }\" % sid)\n" +
-            "        ins=True\n" +
-            "open(f,'w').write(chr(10).join(out)+chr(10))\n" +
-            "print('added' if ins else 'no static_configs anchor found')\n";
-        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(py));
-        return $"echo {b64} | base64 -d | python3 -";
-    }
+    /// <summary>The host's answer to <c>tailscale ip -4</c> as a normalised IPv4 literal, or null. <c>IPAddress.TryParse</c>
+    /// alone also accepts IPv6 with a zone id that carries arbitrary text (<c>fe80::1%';…</c>) and lenient IPv4 forms;
+    /// only <c>AddressFamily.InterNetwork</c> passes, and callers use the returned <c>ToString()</c>, never the raw
+    /// answer.</summary>
+    public static string? TailnetIPv4(string? raw) =>
+        raw is not null
+        && IPAddress.TryParse(raw.Trim(), out var parsed)
+        && parsed.AddressFamily == AddressFamily.InterNetwork
+            ? parsed.ToString()
+            : null;
+
+    /// <summary>Prints a file base64-encoded on one line, so its bytes reach Whiskers unchanged. The path must be a fixed,
+    /// code-owned path. Onboarding step 8 reads the scrape config with it, edits it in C# (<see cref="ScrapeConfigEditor"/>)
+    /// and writes it back with <see cref="WriteFileB64"/>; no interpreter runs on the host (contract 0017 part I1).</summary>
+    public static string ReadFileB64(string path) => $"base64 -w0 {path}";
 
     // Host files are LF: normalise, so a CRLF checkout of this source cannot put CR characters into them.
     public static string NodeExporterCompose(string tsIp) => NodeExporterComposeFor(tsIp).Replace("\r\n", "\n", StringComparison.Ordinal);
