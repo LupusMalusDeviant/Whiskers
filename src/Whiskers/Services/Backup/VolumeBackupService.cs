@@ -93,11 +93,21 @@ public class VolumeBackupService : IVolumeBackupService
         catch
         {
             // Without a record nothing lists or prunes the archive: a partial (or unrecorded) file is removed. The name
-            // is this backup's own (random suffix), so no other backup's file can be hit.
-            var cleanup = await _executor.ExecuteAsync(sid,
-                $"rm -f {ShellUtils.Quote(_backupDir + "/" + fileName)}", TimeSpan.FromSeconds(10));
-            if (!cleanup.Success)
-                _logger.LogWarning("Failed volume backup: its archive {File} on {Server} could not be removed", fileName, sid);
+            // is this backup's own (random suffix), so no other backup's file can be hit. A docker run that timed out
+            // ends with its effect unknown: the tar may still be writing on the host, so this rm can come too early and
+            // the file appear after it; the warning names it for the operator.
+            try
+            {
+                var cleanup = await _executor.ExecuteAsync(sid,
+                    $"rm -f {ShellUtils.Quote(_backupDir + "/" + fileName)}", TimeSpan.FromSeconds(10));
+                if (!cleanup.Success)
+                    _logger.LogWarning("Failed volume backup: its archive {File} on {Server} could not be removed", fileName, sid);
+            }
+            catch (Exception cleanupError)
+            {
+                // The cleanup never hides the backup's own error, which is rethrown below.
+                _logger.LogWarning(cleanupError, "Failed volume backup: removing its archive {File} on {Server} failed", fileName, sid);
+            }
             throw;
         }
 

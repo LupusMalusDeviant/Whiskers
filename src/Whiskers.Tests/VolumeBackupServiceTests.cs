@@ -122,6 +122,23 @@ public sealed class VolumeBackupServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_cleanup_that_throws_does_not_hide_the_backup_s_own_error()
+    {
+        var host = new ScriptedHost(c =>
+            c.StartsWith("docker run", StringComparison.Ordinal) ? new CommandResult { ExitCode = 1, Error = "volume not found" }
+            : c.StartsWith("rm ", StringComparison.Ordinal) ? throw new TimeoutException("ssh session lost")
+            : Ok());
+        var service = new VolumeBackupService(host, Scopes, NullLogger<VolumeBackupService>.Instance, new DataPathOptions("/app/data"));
+
+        var thrown = await Record.ExceptionAsync(() => service.BackupVolumeAsync("pgdata", "db", "local"));
+
+        Assert.NotNull(thrown);
+        Assert.IsNotType<TimeoutException>(thrown);
+        Assert.Contains("volume not found", thrown.Message);
+        Assert.Empty(await service.ListBackupsAsync("local", "pgdata"));
+    }
+
+    [Fact]
     public async Task A_successful_delete_removes_the_file_and_then_the_record()
     {
         var host = new ScriptedHost(c => c.StartsWith("stat", StringComparison.Ordinal) ? Ok("10") : Ok());

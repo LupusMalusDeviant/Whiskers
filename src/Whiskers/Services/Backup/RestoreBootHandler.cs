@@ -41,7 +41,7 @@ public static class RestoreBootHandler
         if (!File.Exists(marker))
         {
             // No pending restore: garbage-collect any orphan staging (extraction that never committed) + temps.
-            CleanupTransients(dataPaths, includeStaging: true);
+            CleanupTransients(dataPaths, includeStaging: true, ConfiguredSqliteFile(dataPaths, configuration));
             return;
         }
 
@@ -54,7 +54,7 @@ public static class RestoreBootHandler
         {
             Console.Error.WriteLine("[restore] Restore marker present but staging is missing/empty — abandoning the restore.");
             MoveAside(marker);
-            CleanupTransients(dataPaths, includeStaging: true);
+            CleanupTransients(dataPaths, includeStaging: true, ConfiguredSqliteFile(dataPaths, configuration));
             return;
         }
 
@@ -63,11 +63,13 @@ public static class RestoreBootHandler
 
         // Swap each staged top-level entry over the live data. Throws on an unrecoverable failure → process
         // exits → restart retries from the (immutable) staging.
+        string databaseFile;
         try
         {
             if (string.Equals(parsed.Provider, SelfBackupFormat.ProviderPostgres, StringComparison.OrdinalIgnoreCase))
                 RestoreDatabase(dataPaths, staging, configuration, pgTools);
-            SwapStagingOverLive(dataPaths, staging, SqliteTarget(dataPaths, parsed, configuration));
+            databaseFile = SqliteTarget(dataPaths, parsed, configuration, staging);   // throws before anything is replaced
+            SwapStagingOverLive(dataPaths, staging, databaseFile);
         }
         catch (Exception ex)
         {
@@ -89,7 +91,7 @@ public static class RestoreBootHandler
 
         // Success: remove the marker LAST (commit consumed), then staging + transient temps.
         TryDelete(marker);
-        CleanupTransients(dataPaths, includeStaging: true);
+        CleanupTransients(dataPaths, includeStaging: true, databaseFile);
         Console.Out.WriteLine(
             "[restore] Restore applied. Continuing normal startup (migrations + cache warm-up run against the restored data).");
     }
@@ -158,18 +160,49 @@ public static class RestoreBootHandler
     /// <summary>The SQLite file the app opens after this start: the one its configuration names (with the data
     /// directory's layers, as the app reads them), else the one the app had open when the restore was committed (marker),
     /// else the default <c>metrics.db</c>. A custom <c>WHISKERS_DB_CONNECTION</c> must get the archive's database, not
-    /// a file the app never opens (review 1.0.0, Data).</summary>
-    internal static string SqliteTarget(DataPathOptions dataPaths, RestoreMarker marker, IConfiguration? configuration)
+    /// a file the app never opens (review 1.0.0, Data).
+    /// <para>Like the PostgreSQL path, the database the settings name now and the one they name after the swap (the
+    /// archive's <c>app-settings.json</c>) must be the same file, and a start configured for another provider than the
+    /// archive's is refused: both throw before anything is replaced.</para></summary>
+    internal static string SqliteTarget(DataPathOptions dataPaths, RestoreMarker marker, IConfiguration? configuration,
+        string staging)
     {
+        var fallback = Path.GetFullPath(dataPaths.DbPath);
+        // A PostgreSQL archive holds no metrics.db; the file swap never writes this target.
+        if (string.Equals(marker.Provider, SelfBackupFormat.ProviderPostgres, StringComparison.OrdinalIgnoreCase))
+            return fallback;
         if (configuration is not null)
         {
             var (provider, connection) = DatabaseRegistration.Resolve(WithDataLayers(configuration, dataPaths, dataPaths.RootDir));
-            if (provider == SelfBackupFormat.ProviderSqlite)
-                return DatabaseRegistration.SqliteFilePath(connection) ?? Path.GetFullPath(dataPaths.DbPath);
+            if (provider != SelfBackupFormat.ProviderSqlite)
+                throw new InvalidOperationException("the restore holds a SQLite database, but this start is not configured for SQLite");
+            var target = DatabaseRegistration.SqliteFilePath(connection) ?? fallback;
+            var afterSwap = DatabaseRegistration.Resolve(WithDataLayers(configuration, dataPaths, staging));
+            var afterTarget = afterSwap.Provider == SelfBackupFormat.ProviderSqlite
+                ? DatabaseRegistration.SqliteFilePath(afterSwap.ConnectionString) ?? fallback
+                : null;
+            if (afterTarget is null || !SamePath(afterTarget, target))
+                throw new InvalidOperationException(
+                    "the archive's settings files name another database than this start uses (Database:* in app-settings.json); " +
+                    "configure the database through the environment (WHISKERS_DB_PROVIDER, WHISKERS_DB_CONNECTION)");
+            return target;
         }
-        return string.IsNullOrWhiteSpace(marker.DatabasePath)
-            ? Path.GetFullPath(dataPaths.DbPath)
-            : Path.GetFullPath(marker.DatabasePath);
+        return string.IsNullOrWhiteSpace(marker.DatabasePath) ? fallback : Path.GetFullPath(marker.DatabasePath);
+    }
+
+    private static bool SamePath(string a, string b) => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b),
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    // Best effort, for sweeping a swap temp beside a configured database file when no restore is applied.
+    private static string? ConfiguredSqliteFile(DataPathOptions dataPaths, IConfiguration? configuration)
+    {
+        if (configuration is null) return null;
+        try
+        {
+            var (provider, connection) = DatabaseRegistration.Resolve(WithDataLayers(configuration, dataPaths, dataPaths.RootDir));
+            return provider == SelfBackupFormat.ProviderSqlite ? DatabaseRegistration.SqliteFilePath(connection) : null;
+        }
+        catch { return null; }
     }
 
     private static void SwapStagingOverLive(DataPathOptions dataPaths, string staging, string databaseFile)
@@ -196,8 +229,11 @@ public static class RestoreBootHandler
             var live = name == SelfBackupFormat.DbEntryName ? databaseFile : Path.Combine(root, name);
             // R1-35: a JSON store's previous generation belongs to the replaced data; left in place it would come back
             // the first time the restored file cannot be read, or bring back a store the archive does not hold.
+            // Not beside a custom SQLite file: its "<file>.bak" is the operator's, never written by Whiskers, and may lie
+            // outside the data directory.
             var previous = live + DurableFile.BackupSuffix;
-            Retry(() => { if (File.Exists(previous)) File.Delete(previous); });
+            if (name != SelfBackupFormat.DbEntryName || SamePath(live, Path.Combine(root, name)))
+                Retry(() => { if (File.Exists(previous)) File.Delete(previous); });
             if (File.Exists(staged))
             {
                 ReplaceFile(staged, live);
@@ -313,9 +349,12 @@ public static class RestoreBootHandler
         }
     }
 
-    private static void CleanupTransients(DataPathOptions dataPaths, bool includeStaging)
+    private static void CleanupTransients(DataPathOptions dataPaths, bool includeStaging, string? databaseFile = null)
     {
         if (includeStaging) TryDeleteDir(dataPaths.RestoreStagingDir);
+
+        // The swap's copy beside a database file outside the data directory (a custom SQLite connection string).
+        if (!string.IsNullOrEmpty(databaseFile)) TryDelete(databaseFile + SwapTempSuffix);
 
         // Copies a swap left half made (only reached without a pending restore, or after one completed), at the
         // root and in the merged outbox.
