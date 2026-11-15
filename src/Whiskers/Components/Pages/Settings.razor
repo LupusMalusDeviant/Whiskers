@@ -1135,7 +1135,7 @@ else
             Snackbar.Add(ex.Message, Severity.Warning);
             return;
         }
-        catch (Exception ex) { ShowFailure("clear DNS token", ex); return; }
+        catch (Exception ex) { ShowFailure("clear DNS token", ex, isSave: false); return; }
         if (Whiskers.Services.Dns.DnsSettingsSection.StoredRef(previous) is { } previousRef)
         {
             // Without a usable vault the entry cannot be removed: it stays encrypted and unused — say so.
@@ -1255,8 +1255,10 @@ else
 
     // Review 1.0.0 (U1): a failure other than a refusal (a store that cannot write, the gateway's deadline) is shown
     // and logged without secrets instead of leaving the handler and ending the circuit.
-    private void ShowFailure(string action, Exception ex) =>
-        Snackbar.Add(L["Settings_Snackbar_SaveError", UiFailure.Report(Logger, action, ex)].Value, Severity.Error);
+    // A save says "Error while saving"; a delete or clear says only that the action failed.
+    private void ShowFailure(string action, Exception ex, bool isSave = true) =>
+        Snackbar.Add(L[isSave ? "Settings_Snackbar_SaveError" : "Common_Error_ActionFailed", UiFailure.Report(Logger, action, ex)].Value,
+            Severity.Error);
 
     private async Task CopyKey(string value)
     {
@@ -1324,7 +1326,7 @@ else
                 (ResolvedRecord rt, CancellationToken _) => McpPermissionService.RemoveApiKeyAsync(rt.RecordId));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
-        catch (Exception ex) { ShowFailure("delete MCP API key", ex); return; }
+        catch (Exception ex) { ShowFailure("delete MCP API key", ex, isSave: false); return; }
         ReloadApiKeysKeepingPendingToggles();
         if (_freshKey?.Id == id) _freshKey = null;
         Snackbar.Add(L["Settings_Snackbar_ApiKeyDeleted"].Value, Severity.Info);
@@ -1538,7 +1540,7 @@ else
                 (ResolvedRecord rt, CancellationToken _) => VaultService.DeleteSecretAsync(key));
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
-        catch (Exception ex) { ShowFailure("delete vault secret", ex); return; }
+        catch (Exception ex) { ShowFailure("delete vault secret", ex, isSave: false); return; }
         LoadVault();
     }
 

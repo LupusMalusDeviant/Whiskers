@@ -15,6 +15,7 @@
 @inject IUiMutationRunner Mutations
 @inject Whiskers.Services.Certificates.IMtlsClientCredentialStore ClientCredentials
 @inject Whiskers.Services.Certificates.IMtlsCertificateService Certificates
+@inject ILogger<Servers> Logger
 @inject IStringLocalizer<SharedResource> L
 @using Whiskers.Services.Observability
 
@@ -784,6 +785,13 @@
                 Snackbar.Add(ex.Message, Severity.Error);
                 return;
             }
+            catch (Exception ex)
+            {
+                // Review 1.0.0 (U1): any other failure (a store or vault that cannot write) is shown and logged
+                // without secrets instead of ending the circuit; the dialog stays open.
+                ShowFailure("save server", ex);
+                return;
+            }
             // Build + probe the connection before closing, so a broken server isn't saved silently
             // (which would otherwise drag the dashboard with timeouts later).
             var (ok, info) = await TryConnectAsync(saved.Id, TimeSpan.FromSeconds(12));
@@ -829,6 +837,11 @@
                 Snackbar.Add(ex.Message, Severity.Error);
                 return;
             }
+            catch (Exception ex)
+            {
+                ShowFailure("save server for onboarding", ex);
+                return;
+            }
             _showDialog = false;
             await StartOnboarding(saved, skipPreflight: true);
         }
@@ -837,6 +850,10 @@
             _saving = false;
         }
     }
+
+    // Review 1.0.0 (U1): a failure that is neither a refusal nor a validation error, shown and logged without secrets.
+    private void ShowFailure(string action, Exception ex) =>
+        Snackbar.Add(L["Common_Error_ActionFailed", UiFailure.Report(Logger, action, ex)].Value, Severity.Error);
 
     /// <summary>Forces a fresh client for the server and probes it (list containers) within a timeout,
     /// so the save flow can report whether the connection actually comes up.</summary>

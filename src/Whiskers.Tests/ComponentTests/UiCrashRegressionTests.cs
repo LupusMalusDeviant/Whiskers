@@ -316,14 +316,38 @@ public sealed class UiCrashRegressionTests : BunitContext, IAsyncLifetime
     {
         var calls = 0;
         Services.AddSingleton(Stub<Whiskers.Services.Observability.IMcpCallLogStore>()
-            .On("CountAsync", _ => ++calls == 1 ? Task.FromResult(0) : Task.FromException<int>(new TimeoutException("The database did not answer."))).Object);
+            .On("CountAsync", _ => ++calls == 1 ? Task.FromResult(1) : Task.FromException<int>(new TimeoutException("The database did not answer.")))
+            .On("GetRecentAsync", _ => Task.FromResult(new List<McpToolCallEntity> { new() })).Object);
         var page = Render<AgentHistory>();
+        page.WaitForAssertion(() => Assert.Single(Get<List<McpToolCallEntity>>(page.Instance, "_entries")));   // the first load's hit
 
         var ex = await Record.ExceptionAsync(() => Invoke(page, "Reload"));
 
         Assert.True(ex is null && !Get<bool>(page.Instance, "_loading"),
             $"A filter change while the call log cannot be read escapes the handler ({Describe(ex)}); _loading stays {Get<bool>(page.Instance, "_loading")}.");
         Assert.Contains(Snackbars(), s => s.Severity == Severity.Error);
+        // The previous filter's hits are not shown under the new one.
+        Assert.Empty(Get<List<McpToolCallEntity>>(page.Instance, "_entries"));
+        Assert.Equal(0, Get<int>(page.Instance, "_totalCount"));
+    }
+
+    [Fact]
+    public async Task The_notification_log_reports_a_query_that_fails()
+    {
+        var calls = 0;
+        Services.AddSingleton(Stub<IInAppNotificationStore>()
+            .On("CountAsync", _ => ++calls == 1 ? Task.FromResult(1) : Task.FromException<int>(new TimeoutException("The database did not answer.")))
+            .On("QueryAsync", _ => Task.FromResult(new List<InAppNotification> { new("n1", DateTime.UtcNow, "container_event", "web restarted", "", "Info") })).Object);
+        var page = Render<NotificationsLog>();
+        page.WaitForAssertion(() => Assert.Single(Get<List<InAppNotification>>(page.Instance, "_entries")));   // the first load's hit
+
+        var ex = await Record.ExceptionAsync(() => Invoke(page, "LoadData"));
+
+        Assert.True(ex is null && !Get<bool>(page.Instance, "_loading"),
+            $"A filter or page change while the notification log cannot be read escapes the handler ({Describe(ex)}); _loading stays {Get<bool>(page.Instance, "_loading")}.");
+        Assert.Contains(Snackbars(), s => s.Severity == Severity.Error);
+        Assert.Empty(Get<List<InAppNotification>>(page.Instance, "_entries"));
+        Assert.Equal(0, Get<int>(page.Instance, "_totalCount"));
     }
 
     [Fact]
@@ -331,16 +355,19 @@ public sealed class UiCrashRegressionTests : BunitContext, IAsyncLifetime
     {
         var calls = 0;
         Services.AddSingleton(Stub<Whiskers.Services.AuditLog.IAuditLogService>()
-            .On("GetTotalCountAsync", _ => ++calls == 1 ? Task.FromResult(0) : Task.FromException<int>(new TimeoutException("The database did not answer.")))
-            .On("GetRecentAsync", _ => Task.FromResult(new List<AuditLogEntity>())).Object);
+            .On("GetTotalCountAsync", _ => ++calls == 1 ? Task.FromResult(1) : Task.FromException<int>(new TimeoutException("The database did not answer.")))
+            .On("GetRecentAsync", _ => Task.FromResult(new List<AuditLogEntity> { new() })).Object);
         Services.AddSingleton(Null<Whiskers.Services.AuditLog.IAuditChain>());
         var page = Render<AuditLog>();
+        page.WaitForAssertion(() => Assert.Single(Get<List<AuditLogEntity>>(page.Instance, "_entries")));   // the first load's hit
 
         var ex = await Record.ExceptionAsync(() => Invoke(page, "LoadData"));
 
         Assert.True(ex is null && !Get<bool>(page.Instance, "_loading"),
             $"A filter or page change while the audit log cannot be read escapes the handler ({Describe(ex)}); _loading stays {Get<bool>(page.Instance, "_loading")}.");
         Assert.Contains(Snackbars(), s => s.Severity == Severity.Error);
+        Assert.Empty(Get<List<AuditLogEntity>>(page.Instance, "_entries"));
+        Assert.Equal(0, Get<int>(page.Instance, "_totalCount"));
     }
 
     // ------------------------------------------------------------------ runners

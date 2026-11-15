@@ -168,7 +168,10 @@ else
         }
         catch (Exception ex)
         {
-            // Review 1.0.0 (U1): a query that fails is reported; the page leaves "loading" and keeps the circuit.
+            // Review 1.0.0 (U1): a query that fails is reported; the page leaves "loading" and keeps the circuit. The
+            // hits of the previous filter are not left on screen under the new one.
+            _entries = new();
+            _totalCount = 0;
             Snackbar.Add(L["Common_Error_LoadFailed", UiFailure.Report(Logger, "load agent history", ex)].Value, Severity.Error);
         }
         finally
