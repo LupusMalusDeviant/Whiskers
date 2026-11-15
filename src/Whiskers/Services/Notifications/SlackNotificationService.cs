@@ -17,7 +17,7 @@ public class SlackNotificationService : ISlackNotificationService
         _http = http;
         _settings = settings;
         _logger = logger;
-        _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
+        _throttler = new NotificationThrottler();
     }
 
     public IReadOnlyList<OutboundEndpoint> Targets =>
@@ -30,7 +30,7 @@ public class SlackNotificationService : ISlackNotificationService
         if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
         var (title, severity) = NotificationFormatter.Describe(evt);
         await PostAsync(c, title, NotificationFormatter.Detail(evt), severity, ct);
-        _throttler.Record(evt);
+        _throttler.Record(evt, _settings.CurrentValue.ThrottleMinutes);
         _logger.LogInformation("Slack notification sent: {EventType}", evt.EventType);
         return true;
     }

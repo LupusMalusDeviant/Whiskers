@@ -25,7 +25,7 @@ public class EmailNotificationService : IEmailNotificationService
         _settings = settings;
         _guard = guard;
         _logger = logger;
-        _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
+        _throttler = new NotificationThrottler();
     }
 
     /// <summary>R1-40: the longest one SMTP conversation (connect, TLS, auth, send, the server's final answer) may take
@@ -80,7 +80,7 @@ public class EmailNotificationService : IEmailNotificationService
                 throw;
             }
         }
-        _throttler.Record(evt);
+        _throttler.Record(evt, _settings.CurrentValue.ThrottleMinutes);
         _logger.LogInformation("Email notification sent: {EventType}", evt.EventType);
         return true;
     }

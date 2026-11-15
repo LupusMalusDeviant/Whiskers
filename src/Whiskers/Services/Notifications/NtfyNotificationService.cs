@@ -17,7 +17,7 @@ public class NtfyNotificationService : INtfyNotificationService
         _http = http;
         _settings = settings;
         _logger = logger;
-        _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
+        _throttler = new NotificationThrottler();
     }
 
     public IReadOnlyList<OutboundEndpoint> Targets =>
@@ -30,7 +30,7 @@ public class NtfyNotificationService : INtfyNotificationService
         if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
         var (_, severity) = NotificationFormatter.Describe(evt);
         await PostAsync(c, NotificationFormatter.PlainText(evt), severity, ct);
-        _throttler.Record(evt);
+        _throttler.Record(evt, _settings.CurrentValue.ThrottleMinutes);
         _logger.LogInformation("ntfy notification sent: {EventType}", evt.EventType);
         return true;
     }
