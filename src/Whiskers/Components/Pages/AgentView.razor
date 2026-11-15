@@ -1,5 +1,4 @@
 @implements IAsyncDisposable
-@using Markdig
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.Extensions.Options
@@ -266,10 +265,8 @@
         if (_fileUpload is not null) await _fileUpload.OpenFilePickerAsync();
     }
 
-    private static readonly MarkdownPipeline MdPipeline =
-        new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
-    private static string RenderMarkdown(string? text)
-        => Whiskers.Utils.MarkdownSanitizer.NeutralizeUnsafeHrefs(Markdown.ToHtml(text ?? "", MdPipeline));
+    // Contract 0017 F1: model output goes through the pipeline without generic attributes and the full sanitizer.
+    private static string RenderMarkdown(string? text) => Whiskers.Utils.MarkdownSanitizer.RenderModelOutput(text);
     private static string FormatSize(int chars) => chars < 1024 ? $"{chars} B" : $"{chars / 1024} KB";
 
     private IAgentSession? _session;
