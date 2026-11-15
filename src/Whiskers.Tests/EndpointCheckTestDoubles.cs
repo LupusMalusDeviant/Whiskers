@@ -18,6 +18,11 @@ internal static class EndpointCheckTestDoubles
     public const string Admin = "admin@example.com";
     public static readonly string AdminId = PrincipalIds.User(Admin);
 
+    /// <summary>An outer safety bound for waits whose length proves nothing (a premise signal, runs settling, a run
+    /// whose deadline the test clock already passed): generous, so a loaded CI runner cannot fail a healthy run; it
+    /// only keeps a real hang from blocking the suite.</summary>
+    public static readonly TimeSpan OuterGuard = TimeSpan.FromSeconds(90);
+
     /// <summary>A server reached over SSH: it has a shell transport.</summary>
     public static Whiskers.Models.ServerConfig SshServer(string id = "web") =>
         new() { Id = id, Name = id, ConnectionType = ConnectionType.SSH, SshHost = "198.51.100.7" };
@@ -115,11 +120,86 @@ internal static class EndpointCheckTestDoubles
         public void Advance(TimeSpan by) => Now += by;
     }
 
+    /// <summary>
+    /// A clock the test moves by hand whose timers — the run deadline's <see cref="CancellationTokenSource"/> among
+    /// them — fire only when it is advanced past their due time, synchronously inside <see cref="Advance"/>. A deadline
+    /// is then tested exactly and independently of how loaded the machine is.
+    /// </summary>
+    public sealed class TimerClock : TimeProvider
+    {
+        private readonly object _gate = new();
+        private readonly List<Timer> _timers = [];
+        private DateTimeOffset _now = new(2026, 11, 5, 12, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            lock (_gate) return _now;
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new Timer(this, callback, state);
+            timer.Change(dueTime, period);
+            return timer;
+        }
+
+        /// <summary>Moves the clock on and fires every timer that came due, in due order.</summary>
+        public void Advance(TimeSpan by)
+        {
+            DateTimeOffset now;
+            lock (_gate) now = _now += by;
+            while (true)
+            {
+                Timer? next;
+                lock (_gate)
+                {
+                    next = _timers.Where(t => t.Due <= now).OrderBy(t => t.Due).FirstOrDefault();
+                    if (next is null) return;
+                    if (next.Period > TimeSpan.Zero && next.Period != Timeout.InfiniteTimeSpan) next.Due += next.Period;
+                    else _timers.Remove(next);
+                }
+                next.Callback(next.State);
+            }
+        }
+
+        private sealed class Timer(TimerClock clock, TimerCallback callback, object? state) : ITimer
+        {
+            public TimerCallback Callback { get; } = callback;
+            public object? State { get; } = state;
+            public DateTimeOffset Due { get; set; }
+            public TimeSpan Period { get; private set; }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                lock (clock._gate)
+                {
+                    clock._timers.Remove(this);
+                    Period = period;
+                    if (dueTime == Timeout.InfiniteTimeSpan) return true;
+                    Due = clock._now + dueTime;
+                    clock._timers.Add(this);
+                    return true;
+                }
+            }
+
+            public void Dispose()
+            {
+                lock (clock._gate) clock._timers.Remove(this);
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
     /// <summary>Waits for the runs a cycle started (the monitor does not await them itself).</summary>
     public static async Task SettleAsync(EndpointCheckMonitor monitor)
     {
         var field = typeof(EndpointCheckMonitor).GetField("_inFlight", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var inFlight = (ConcurrentDictionary<string, Task>)field.GetValue(monitor)!;
-        await Task.WhenAll(inFlight.Values).WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.WhenAll(inFlight.Values).WaitAsync(OuterGuard);
     }
 }

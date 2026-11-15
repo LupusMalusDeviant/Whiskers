@@ -31,7 +31,7 @@ public class LocalAccountsPanelTests : BunitContext, IAsyncLifetime
         await _world.DisposeAsync();
     }
 
-    private IRenderedComponent<LocalAccountsPanel> RenderAs(ClaimsPrincipal principal)
+    private IRenderedComponent<LocalAccountsPanel> RenderAs(ClaimsPrincipal principal, Action? accountsChanged = null)
     {
         _acting = _world.As(principal);
         Services.AddLogging();
@@ -43,7 +43,7 @@ public class LocalAccountsPanelTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<ICurrentUserService>(_acting.User);
         Services.AddSingleton<IUiMutationRunner>(_acting.Mutations);
         JSInterop.Mode = JSRuntimeMode.Loose;
-        return Render<LocalAccountsPanel>();
+        return Render<LocalAccountsPanel>(p => p.Add(c => c.AccountsChanged, () => accountsChanged?.Invoke()));
     }
 
     private static T Field<T>(IRenderedComponent<LocalAccountsPanel> cut, string name) =>
@@ -99,6 +99,38 @@ public class LocalAccountsPanelTests : BunitContext, IAsyncLifetime
         Assert.NotNull(await _world.FindAsync(LocalAccountWorld.Root));
         Assert.Contains("complete:Failed", _world.Sink.Events);
         Assert.Null(Field<object?>(cut, "_issued"));
+    }
+
+    [Fact]
+    public async Task Every_add_and_delete_tells_the_page_that_the_whitelist_may_have_changed()
+    {
+        // Contract 0017 H2/H3: the service may change the whitelist; the Settings page reloads its editor on this callback.
+        await _world.Whitelist.SaveWhitelistAsync(new WhitelistData { Enabled = true, Emails = [LocalAccountWorld.Root] });
+        var changes = 0;
+        var cut = RenderAs(await _world.SessionOfAsync(LocalAccountWorld.Root), () => changes++);
+
+        Set(cut, "_newEmail", "new@local.test");
+        Set(cut, "_newRole", AppRole.Operator);
+        await Invoke(cut, "Create");
+        Assert.Equal(1, changes);
+        Assert.Contains("new@local.test", _world.Whitelist.GetWhitelist().Emails);
+
+        await Invoke(cut, "Delete", "new@local.test");
+        Assert.Equal(2, changes);
+        Assert.DoesNotContain("new@local.test", _world.Whitelist.GetWhitelist().Emails);
+    }
+
+    [Fact]
+    public async Task A_call_refused_before_any_write_does_not_ask_the_page_to_reload()
+    {
+        // Review N1: an invalid address is refused by the service's checks before anything is written.
+        var changes = 0;
+        var cut = RenderAs(await _world.SessionOfAsync(LocalAccountWorld.Root), () => changes++);
+
+        Set(cut, "_newEmail", "not-an-address");
+        await Invoke(cut, "Create");
+
+        Assert.Equal(0, changes);
     }
 
     [Fact]

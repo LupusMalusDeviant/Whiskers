@@ -28,6 +28,7 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
     private readonly AgentToolTestHelpers.NullMutationAudit _audit = new();
     private readonly ServersPauseResumeRoleTests.MutableUser _user = new(AppRole.Viewer);
     private readonly List<string> _sent = [];
+    private readonly ListedWhitelist _whitelist = new();
 
     public SettingsHandlerRoleTests()
     {
@@ -42,7 +43,7 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<INotificationService>(Recording<INotificationService>.Create(_sent, "channels"));
         Services.AddSingleton<IMatrixNotificationService>(Recording<IMatrixNotificationService>.Create(_sent, "matrix"));
         Services.AddSingleton(NullProxy<Whiskers.Modules.IModuleRegistry>.Create());
-        Services.AddSingleton(NullProxy<Whiskers.Services.Auth.IWhitelistService>.Create());
+        Services.AddSingleton<Whiskers.Services.Auth.IWhitelistService>(_whitelist);
         Services.AddSingleton(NullProxy<IRoleService>.Create());
         Services.AddSingleton(NullProxy<Whiskers.Services.Vault.IVaultService>.Create());
         Services.AddSingleton(NullProxy<Whiskers.Services.Mcp.IMcpPermissionService>.Create());
@@ -130,6 +131,70 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
         // Mattermost has no service of its own: its test goes through the channel service.
         lock (_sent) Assert.Equal(["channels.SendTestAsync", "channels.SendTestAsync", "matrix.SendTestAsync"], _sent);
         Assert.Contains(Snackbars(), s => s.Message == "Settings_Snackbar_MattermostTestSent");
+    }
+
+    /// <summary>Contract 0017 H2/H3 (review): the local-accounts panel changes the whitelist through the service. The
+    /// page's whitelist editor reloads after every account change, so saving a stale buffer can neither drop a new
+    /// account's entry nor list a deleted account's address again.</summary>
+    [Fact]
+    public async Task An_account_change_reloads_the_whitelist_editor_from_the_service()
+    {
+        var page = Render<Settings>();
+        typeof(Settings).GetField("_role", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(page.Instance, AppRole.Admin);
+        static List<string> Buffer(IRenderedComponent<Settings> p) => (List<string>)typeof(Settings)
+            .GetField("_whitelistEmails", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(p.Instance)!;
+        static bool Enabled(IRenderedComponent<Settings> p) => (bool)typeof(Settings)
+            .GetField("_whitelistEnabled", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(p.Instance)!;
+
+        // What the service holds now (an account was added through the panel since the page loaded).
+        _whitelist.Data = new WhitelistData { Enabled = true, Emails = ["root@local.test", "new@local.test"] };
+        await page.InvokeAsync(() =>
+            typeof(Settings).GetMethod("ReloadWhitelist", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page.Instance, null));
+
+        Assert.True(Enabled(page));
+        Assert.Equal(["root@local.test", "new@local.test"], Buffer(page));
+    }
+
+    [Fact]
+    public async Task Below_admin_the_whitelist_reload_reads_nothing()
+    {
+        // Review N4: the page loads no whitelist into a non-Admin's circuit, and the reload keeps it that way.
+        var page = Render<Settings>();   // a Viewer
+        _whitelist.Data = new WhitelistData { Enabled = true, Emails = ["root@local.test"] };
+
+        await page.InvokeAsync(() =>
+            typeof(Settings).GetMethod("ReloadWhitelist", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page.Instance, null));
+
+        var buffer = (List<string>)typeof(Settings)
+            .GetField("_whitelistEmails", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page.Instance)!;
+        Assert.Empty(buffer);
+        Assert.Equal(0, _whitelist.Reads);
+    }
+
+    [Fact]
+    public void The_local_accounts_panel_on_the_settings_page_triggers_the_reload()
+    {
+        var source = File.ReadAllText(Path.Combine(DeploymentScripts.RepoRoot(), "src", "Whiskers", "Components", "Pages", "Settings.razor"));
+        Assert.Contains("<LocalAccountsPanel AccountsChanged=\"ReloadWhitelist\" />", source);
+        Assert.Equal(1, source.Split("<LocalAccountsPanel").Length - 1);
+    }
+
+    private sealed class ListedWhitelist : Whiskers.Services.Auth.IWhitelistService
+    {
+        public WhitelistData Data { get; set; } = new();
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public bool IsEmailAllowed(string? email) => false;
+        public int Reads { get; private set; }
+        public WhitelistData GetWhitelist()
+        {
+            Reads++;
+            return new() { Enabled = Data.Enabled, Emails = [.. Data.Emails] };
+        }
+        public Task SaveWhitelistAsync(WhitelistData data) => throw new NotSupportedException();
+        public Task AddFirstAdminAsync(string email, AccessControlWriteGate.Lease lease) => throw new NotSupportedException();
+        public Task<bool> AddLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default, WhitelistWriteReceipt? receipt = null) => throw new NotSupportedException();
+        public Task RestoreLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private List<string> Events() { lock (_audit.Events) return _audit.Events.ToList(); }

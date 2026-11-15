@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -834,11 +833,18 @@ public sealed class EndpointCheckTests : IDisposable
     public async Task A_stalled_host_ends_the_run_at_its_deadline()
     {
         // The worst case: a host that ignores the call's timeout and answers only when the caller gives up.
+        // The deadline runs on the test's clock, not the wall clock: it is moved to one tick before the deadline (the
+        // call must still be waiting) and then onto it (the call must be cancelled and the run end). A loaded machine
+        // can only delay the run's end after that, never move the deadline — the generous outer guard only stops a
+        // hang from blocking the suite.
+        var time = new TimerClock();
         var cancelled = 0;
+        var calls = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
         var host = new Host
         {
             Answer = async (_, _, ct) =>
             {
+                calls.TrySetResult(ct);
                 try { await Task.Delay(Timeout.InfiniteTimeSpan, ct); }
                 catch (OperationCanceledException) { Interlocked.Increment(ref cancelled); throw; }
                 return new CommandResult();
@@ -846,16 +852,25 @@ public sealed class EndpointCheckTests : IDisposable
         };
         var deadline = EndpointCheckValidator.RunDeadline(1);
         Assert.Equal(TimeSpan.FromSeconds(15), deadline);   // timeout × 5 + 10 s
-        var watch = Stopwatch.StartNew();
 
-        var run = await Runner(host).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443, timeout: 1),
-            CancellationToken.None).WaitAsync(deadline + TimeSpan.FromSeconds(10));
+        var running = Runner(host, time).ProbeDefinitionAsync(Definition(EndpointCheckKind.Tcp, "example.com", 443, timeout: 1),
+            CancellationToken.None);
+        var call = await calls.Task.WaitAsync(OuterGuard);   // the resolve has reached the host and stalls there
 
-        watch.Stop();
+        time.Advance(deadline - TimeSpan.FromTicks(1));
+        // A due timer cancels synchronously inside Advance (linked tokens included), so this is not a race.
+        Assert.False(call.IsCancellationRequested, "ended early: the call was cancelled before the run deadline");
+        Assert.Equal(0, Volatile.Read(ref cancelled));
+        Assert.False(running.IsCompleted, "ended early: the run ended before its deadline");
+
+        time.Advance(TimeSpan.FromTicks(1));
+        Assert.True(call.IsCancellationRequested, "the run deadline did not cancel the stalled call");
+        var run = await running.WaitAsync(OuterGuard);
+
         Assert.Equal(EndpointCheckOutcome.Failed, run.Outcome);
         Assert.Contains("did not finish within 15 s", run.Detail);
-        Assert.True(watch.Elapsed >= deadline - TimeSpan.FromSeconds(1), $"ended early: {watch.Elapsed}");
         Assert.Equal(1, cancelled);
+        Assert.Single(host.Calls);
     }
 
     [Fact]
