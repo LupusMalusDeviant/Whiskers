@@ -593,7 +593,8 @@ public sealed class WebhookReplayTests : IDisposable
     /// <see cref="HangGuard"/>.</summary>
     private void AssertAnsweredBeforeTheDatabase()
     {
-        Assert.True(_options.TestRunTimeout > HangGuard, "premise: the page Test waits longer than the hang guard");
+        // The proof is by order (the lock is still held when the answer comes), so the wait is the generous signal guard.
+        Assert.True(_options.TestRunTimeout > SignalGuard, "premise: the page Test waits longer than the signal guard");
         Assert.True(_faults.LockTaken.IsCompleted,
             "premise: the run's start reached the lock before its deadline (a setup or runner problem, not the product)");
         Assert.Equal(1, _faults.Tripped);
@@ -751,7 +752,7 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service();
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
-        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(HangGuard);
+        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(SignalGuard);
         // Answered while its start still waited for the lock: the start lands only after the deadline.
         AssertAnsweredBeforeTheDatabase();
         Assert.False(success);
@@ -1540,7 +1541,7 @@ public sealed class WebhookReplayTests : IDisposable
         // a timeout (until the test unlocks it), as SQLite waits synchronously and does not cancel a command under way.
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
-        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(HangGuard);
+        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(SignalGuard);
 
         // The worker came back within the deadline, not the database's timeout — proven by order: its start was still
         // waiting for the lock when it answered. Once the lock is gone the start that landed late is recorded as
