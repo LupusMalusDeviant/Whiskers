@@ -4,7 +4,7 @@ The **Mutation Gateway** ([ADR-0005](../../../../docs/adr/0005-mutation-gateway.
 infrastructure mutation is meant to take. An entry point describes the mutation as a `MutationRequest`; the gateway
 decides, executes the supplied delegate, verifies and records.
 
-**State: WP2 step 2.3.** MCP tools, the agent, the UI and unattended automation run every mutation through the
+**State: WP2 complete (steps 2.1–2.6; the scope guard enforces since R1-48).** MCP tools, the agent, the UI and unattended automation run every mutation through the
 gateway:
 
 - direct MCP calls in [`McpGuardrailFilter`](../../Mcp/McpGuardrailFilter.cs) (surface `Mcp`), which also reports each call's outcome to the call history (R1-20);
@@ -30,15 +30,18 @@ refused as `TargetChanged`.
 ### UI handlers
 
 ```csharp
-await Mutations.RunAsync("network.create", new { name, driver, serverId = sid },
-    _ => DockerService.CreateNetworkAsync(name, driver, sid));
+var id = await Mutations.RunAsync("network.create", new { name, driver, serverId = sid },
+    async (ResolvedNew n, CancellationToken ct) => await DockerService.CreateNetworkAsync(name, driver, n.ServerId));
 ```
 
 The capability id is a string literal and the service call a lambda written in that call: the architecture test
 recognises a gated UI call by exactly that shape. The arguments name the target the way MCP tools do
 (`containerId`, `serverId`, `name`, …) and never carry secrets. A refusal throws `MutationRefusedException` (the page
-shows its message as a warning); an exception of the service call itself reaches the page unchanged. The page keeps
-its own role check and audit row.
+shows its message as a warning); an exception of the service call itself reaches the page unchanged. The lambda's
+first parameter is the object the gateway resolved and confirmed (contract 0012, D3: `ResolvedContainer`,
+`ResolvedNew`, …); the page acts on it, never on an id of its own, and the second is the deadline-bound token. The
+page keeps its own role check, but writes no audit row: the gateway's event is the one row per attempt, and a page's
+role refusal is recorded through `RefuseAsync` (R1-21, INV-45).
 
 For a human in the UI the policy applies only the rules PC-D1 names — authorization, the kill switch, protected
 resources (`GuardrailEngine.CreateForHumans`). Tool lists, argument patterns and confirmation are about delegating to
@@ -55,9 +58,9 @@ fail-closed store (`LoadError`) has none: it is repaired on the host (put a vali
 ### Unattended automation (PC-D6)
 
 ```csharp
-var outcome = await _automation.RunAsync(new AutomationActor("task:" + task.TaskId, $"Scheduled task '{task.Name}'",
-        task.CreatedBy), "container.restart", new { containerId, serverId = task.ServerId },
-    _ => _docker.RestartContainerAsync(containerId, task.ServerId));
+var outcome = await _automation.RunAsync(AutomationActor.ForTask(task.TaskId, task.Name, task.CreatedBy, task.CreatedVia),
+    "container.restart", new { containerId, name = task.TargetName, serverId = ScheduledTaskServer.Of(task) },
+    (ResolvedContainer c, CancellationToken ct) => _docker.RestartContainerAsync(c.Id, c.ServerId));
 ```
 
 Same shape as the UI runner (literal capability id, lambda in the call), but the result is a `MutationOutcome` —
@@ -442,8 +445,10 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   approval card of a non-UI request (an agent's chat call, whose approver must read what the agent wants to run),
   with secrets masked by `SecretRedactor` — including SQL password literals (`PASSWORD '…'`, `IDENTIFIED BY …`) —
   a UI approval stores only their lengths.
-- **A UI action that outlives its deadline** keeps running when the service call ignores the token (most do); the
-  page then shows a timeout while the work continues.
+- **The deadline is cooperative** (INV-40): every execution has a capability deadline that cancels its token. An
+  action that stops on the token ends `Failed` with "its effect is unknown" (the UI runner throws
+  `MutationFailedException`). An action that ignores the token (many service calls do) runs to its end: the caller —
+  a page included — waits for it, and its slot stays held until then. There is no hard abort.
 - **Approval eligibility.** Approvals are persisted and fully bound since R1-14 (`../Approvals/`); who may approve (no self-approval for unattended requests) and requester-session lifetime follow in R1-15.
 - `MutationPrincipal` maps onto `AgentPrincipal` for the policy; WP6 brings structured identity.
 
