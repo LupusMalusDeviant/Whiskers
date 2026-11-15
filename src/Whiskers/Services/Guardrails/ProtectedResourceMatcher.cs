@@ -104,10 +104,15 @@ public static class ProtectedResourceMatcher
                     if (GlobHit(glob, keyPatterns, pathPatterns) is { } hit)
                         return hit with { Argument = key, InFreeText = true };
                 // Contract 0017 B (INV-59): a mount source written in the command (docker run -v /var/run:/r) is a
-                // mount, whatever the command word is; a directory above a protected path reaches into it.
+                // mount, whatever the command word is; a directory above a protected path reaches into it. A source
+                // relative to the working or home directory (./x, ~/..) cannot be resolved here: unanalysable (INV-24).
                 foreach (var source in ShellMountSources(shell.Words))
+                {
+                    if (source.StartsWith('.') || source.StartsWith('~'))
+                        return new Hit("", null, key) { Argument = key, InFreeText = true };
                     if (AncestorHit(source, pathPatterns) is { } above)
                         return above with { Argument = key, InFreeText = true };
+                }
                 // A command that removes, moves or changes permissions of a directory above a protected path
                 // (rm -rf /var/lib/docker) destroys it; merely reading one (df -h /var/lib/docker) does not.
                 if (shell.Words.Any(w => ModifyingCommands.Contains(Path.GetFileName(w))))
@@ -298,9 +303,12 @@ public static class ProtectedResourceMatcher
         }
     }
 
-    /// <summary>The mount sources a shell command names (contract 0017 B): the word after <c>-v</c> / <c>--volume</c>
-    /// (also attached, <c>-v/src:dst</c>) and the <c>--volume=</c> form up to the first <c>:</c>, the <c>source=</c> / <c>src=</c> value of a
-    /// <c>--mount</c> word, and the part before the first <c>:</c> of any <c>&lt;absolute path&gt;:&lt;path&gt;</c> word.</summary>
+    /// <summary>The mount sources a shell command names (contract 0017 B), each cut at its first <c>:</c>: the word
+    /// after <c>-v</c> / <c>--volume</c>, the <c>--volume=</c> form, the value attached to <c>-v</c> or to a short-flag
+    /// cluster ending in <c>v</c> (<c>-v/src:dst</c>, <c>-v=src:dst</c>, <c>-itv/src:dst</c>), the value of every
+    /// <c>source=</c> / <c>src=</c> / <c>device=</c> key of any comma-separated key=value word (<c>--mount …</c>,
+    /// <c>volume-opt=device=…</c>, <c>-o device=…</c>), and the part before the first <c>:</c> of any
+    /// <c>&lt;absolute path&gt;:&lt;path&gt;</c> word.</summary>
     private static IEnumerable<string> ShellMountSources(IReadOnlyList<string> words)
     {
         for (var i = 0; i < words.Count; i++)
@@ -309,39 +317,44 @@ public static class ProtectedResourceMatcher
             var next = i + 1 < words.Count ? words[i + 1] : null;
             if (word is "-v" or "--volume" && next is not null) yield return BeforeColon(next);
             else if (word.StartsWith("--volume=", StringComparison.Ordinal)) yield return BeforeColon(word["--volume=".Length..]);
-            // The attached short form (-v/var/run:/r, also at the end of a flag cluster: -itv/var/run:/r) is the same
-            // value after -v, as Docker parses it.
             else if (AttachedVolume(word) is { } attached) yield return BeforeColon(attached);
-            else if (word == "--mount" && next is not null)
-                foreach (var source in MountOptionSources(next)) yield return source;
-            else if (word.StartsWith("--mount=", StringComparison.Ordinal))
-                foreach (var source in MountOptionSources(word["--mount=".Length..])) yield return source;
             else if (word.StartsWith('/') && word.IndexOf(':') > 0) yield return BeforeColon(word);
+            foreach (var source in KeyedSources(word)) yield return BeforeColon(source);
         }
 
         static string BeforeColon(string value) => value.IndexOf(':') is var colon and >= 0 ? value[..colon] : value;
 
-        static IEnumerable<string> MountOptionSources(string value)
+        // In each comma-separated part, the value after the first source / src / device key, wherever it stands
+        // (--mount=src=…, volume-opt=device=…, --opt=device=…).
+        static IEnumerable<string> KeyedSources(string word)
         {
-            foreach (var option in value.Split(','))
+            if (!word.Contains('=')) yield break;
+            foreach (var option in word.Split(','))
             {
-                var eq = option.IndexOf('=');
-                if (eq <= 0) continue;
-                var name = option[..eq].Trim();
-                if (name.Equals("source", StringComparison.OrdinalIgnoreCase) || name.Equals("src", StringComparison.OrdinalIgnoreCase))
-                    yield return option[(eq + 1)..].Trim();
+                var parts = option.Split('=');
+                for (var p = 0; p < parts.Length - 1; p++)
+                    if (parts[p].Trim().TrimStart('-') is var name
+                        && (name.Equals("source", StringComparison.OrdinalIgnoreCase)
+                            || name.Equals("src", StringComparison.OrdinalIgnoreCase)
+                            || name.Equals("device", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        yield return string.Join('=', parts[(p + 1)..]).Trim();
+                        break;
+                    }
             }
         }
     }
 
-    /// <summary>The value of a short-flag cluster ending in <c>v</c> with the volume attached (<c>-v/src:dst</c>,
-    /// <c>-itv/src:dst</c>, i.e. <c>^-[A-Za-z]*v/</c>): the text from that <c>/</c> on; <c>null</c> for any other word.</summary>
+    /// <summary>The value attached to <c>-v</c> or to a short-flag cluster ending in <c>v</c> (<c>-v/src:dst</c>,
+    /// <c>-itv/src:dst</c>, <c>-v=src:dst</c>, <c>-v./x:/y</c>, <c>-v~/x:/y</c>), as Docker's flag parser reads it: the
+    /// text after that <c>v</c>, a leading <c>=</c> removed; <c>null</c> for any other word.</summary>
     private static string? AttachedVolume(string word)
     {
-        if (word.Length < 3 || word[0] != '-') return null;
-        var i = 1;
-        while (i < word.Length && char.IsAsciiLetter(word[i]) && !(word[i] == 'v' && i + 1 < word.Length && word[i + 1] == '/')) i++;
-        return i + 1 < word.Length && word[i] == 'v' && word[i + 1] == '/' ? word[(i + 1)..] : null;
+        if (word.Length < 3 || word[0] != '-' || word[1] == '-') return null;
+        for (var i = 1; i + 1 < word.Length && char.IsAsciiLetter(word[i]); i++)
+            if (word[i] == 'v' && word[i + 1] is '/' or '=' or '.' or '~')
+                return word[i + 1] == '=' ? word[(i + 2)..] : word[(i + 1)..];
+        return null;
     }
 
     // A mount of a directory that contains a protected path: the root for any of them, and every parent of an

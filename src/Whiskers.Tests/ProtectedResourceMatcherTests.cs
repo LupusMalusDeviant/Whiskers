@@ -204,6 +204,13 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "docker run --rm -itv/var/run:/r alpine ls /r")]                  // a flag cluster ending in v
     [InlineData("command", "docker run -dv/var/lib/docker/volumes:/v alpine ls /v")]
     [InlineData("command", "docker run --rm -itv /var/run:/r alpine ls /r")]                 // the cluster, value apart
+    [InlineData("command", "docker run --rm -v=/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm --mount type=volume,volume-opt=type=none,volume-opt=o=bind,volume-opt=device=/var/lib/docker/volumes,dst=/v alpine ls /v")]
+    [InlineData("command", "docker volume create -o type=none -o o=bind -o device=/var/lib/docker/volumes x")]
+    [InlineData("command", "docker volume create --opt device=/var/run x")]
+    [InlineData("command", "docker volume create --opt=device=/var/run x")]
+    [InlineData("command", "docker run --rm -v /var/lib/docker/volumes:/v:ro alpine find /v -name vault.json -delete")]
+    [InlineData("command", "docker run --rm --mount type=bind,source=/var/run:x,target=/r alpine ls /r")]  // cut at ':' too
     [InlineData("command", "docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
     [InlineData("command", "docker run --rm --mount type=bind,source=/var/run,target=/r alpine ls /r")]
     [InlineData("command", "docker run --rm --mount=type=bind,src=/,dst=/host alpine ls /host")]
@@ -222,10 +229,24 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "docker run -v /srv/app:/app alpine ls")]          // contract 0017 B: an ordinary mount
     [InlineData("command", "docker run -v/srv/app:/app alpine ls")]
     [InlineData("command", "docker run -itv/srv/app:/app alpine ls")]
+    [InlineData("command", "docker volume create -o type=none -o o=bind -o device=/srv/data x")]
+    [InlineData("command", "docker run --mount type=volume,volume-opt=device=/srv/data,dst=/d alpine ls")]
     [InlineData("command", "docker run --mount type=bind,source=/srv/app,target=/app alpine ls")]
     [InlineData("command", "docker run -v data:/var/run alpine ls")]          // a named volume; the container side
     [InlineData("yaml", "services:\n  t:\n    ports: [\"${PORT:-8080}:80\"]\n    volumes:\n      - ${DATA:-./data}:/data\n")]
     public void Ordinary_mounts_stay_allowed(string key, string value) => Assert.Null(ControlPlane(key, value));
+
+    /// <summary>Contract 0017 B: a mount source relative to the working or home directory cannot be resolved here, so
+    /// the command is unanalysable free text (INV-24).</summary>
+    [Theory]
+    [InlineData("docker run --rm -v ./var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("docker run --rm -v ~/..:/v alpine ls /v")]
+    [InlineData("docker run --rm -v~/..:/v alpine ls /v")]
+    [InlineData("docker run --rm --volume=./data:/v alpine ls /v")]
+    [InlineData("docker run --rm --mount type=bind,source=./x,target=/r alpine ls /r")]
+    [InlineData("docker volume create -o type=none -o o=bind -o device=~/.. x")]
+    public void A_mount_source_relative_to_a_directory_is_unanalysable(string command) =>
+        Assert.Equal("command", ControlPlane("command", command)?.UnanalyzableArgument);
 
     [Theory]
     [InlineData("DROP DATABASE U&\"s\\0068op\"")]                             // PostgreSQL unicode escapes

@@ -576,13 +576,21 @@ public class SelfProtectionTests
     [InlineData("docker run --rm -itv/var/run:/r alpine ls /r")]                     // a flag cluster ending in v
     [InlineData("docker run -dv/var/lib/docker/volumes:/v alpine ls /v")]
     [InlineData("docker run --rm -itv /var/run:/r alpine ls /r")]                    // the cluster, value apart
+    [InlineData("docker run --rm -v=/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("docker run --rm --mount type=volume,volume-opt=type=none,volume-opt=o=bind,volume-opt=device=/var/lib/docker/volumes,dst=/v alpine ls /v")]
+    [InlineData("docker volume create -o type=none -o o=bind -o device=/var/lib/docker/volumes x")]
+    [InlineData("docker volume create --opt device=/var/run x")]
+    [InlineData("docker run --rm -v ./var/lib/docker/volumes:/v alpine ls /v")]   // unresolvable: unanalysable
+    [InlineData("docker run --rm -v ~/..:/v alpine ls /v")]
+    [InlineData("docker run --rm -v /var/lib/docker/volumes:/v:ro alpine find /v -name vault.json -delete")]
     public void A_key_cannot_mount_the_control_plane_through_mount_or_volume_forms(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
-    [Fact]
-    public void A_key_may_still_mount_an_ordinary_directory_through_execute_command() =>
-        Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow,
-            ExecuteCommandAsAdminKey("docker run -v /srv/app:/app alpine ls"));
+    [Theory]
+    [InlineData("docker run -v /srv/app:/app alpine ls")]
+    [InlineData("docker run -v data:/var/run alpine ls")]                              // a named volume
+    public void A_key_may_still_mount_an_ordinary_directory_through_execute_command(string command) =>
+        Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
     [Fact]
     public void A_key_may_still_mount_an_ordinary_directory_through_a_flag_cluster() =>
