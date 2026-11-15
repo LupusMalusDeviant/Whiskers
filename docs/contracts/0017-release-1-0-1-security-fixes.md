@@ -525,7 +525,13 @@ The rule ignores the command word, so these are refused for a key too. This is f
 - a word with an escaped quote or `$`, for example `echo it\'s fine`, `echo \$HOME`, `grep price\$ /etc/hosts`: it is
   read again, and a `$` or an open quote there makes it unanalysable;
 - a word with quoted and unquoted parts that looks like a command is read again whole (round 5, B13), for example
-  `sh -c 'docker run -v '/var/run:/r`; a protected name or path anywhere in it is a hit.
+  `sh -c 'docker run -v '/var/run:/r`; a protected name or path anywhere in it is a hit;
+- a quoted or escaped word with an expanding brace or a redirection is read again too (round 6, B14), so
+  `bash -c '{docker,stop,whiskers}'` is unanalysable; a quoted or escaped glob is tested as a glob
+  (`ssh host rm '/var/lib/docker/volumes/whisk*'`), and a glob against a prefix pattern is tried with its own tail
+  (`whis[k]ers_data`). A glob segment longer than 255 characters counts as a hit;
+- a quote inside double quotes (`echo "it's fine"`), a mount source with a space (`-v '/srv/my dir':/d`) and
+  `docker compose -f … up` are refused for a key too.
 
 These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv ./a ./b`, `awk -v x=./y`, `grep -v foo`,
 `scp ./a host:/b`, `docker exec app cp -rv ./a ./b`, `-v /srv/app:/app:ro` and named volumes.
@@ -537,6 +543,8 @@ These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv 
 - `bwrap --bind` and `systemd-nspawn --bind`;
 - `podman --rootfs`;
 - `--volumes-from`;
+- relative paths outside a mount (`cat ../var/run/docker.sock`, `cat ~/../var/run/docker.sock`): the working directory
+  is unknown, so only mount sources are decided by how they are written;
 - the classes that need a real shell parser rather than a word reader: command words hidden behind option values of
   prefixes (`sudo -u`, `env -u`, `exec -a`, `flock`, `chroot`, `timeout -s`), functions and aliases defined in the
   same text, redirections between words, and nested shells beyond four levels. Round 4 does not rely on reading

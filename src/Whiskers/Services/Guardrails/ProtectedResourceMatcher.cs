@@ -544,6 +544,20 @@ public static class ProtectedResourceMatcher
             foreach (var sample in Samples(pattern))
                 if (GuardrailRuleHelpers.GlobMatch(asGlob.TrimEnd('/'), sample))
                     return new Hit(glob, pattern);
+            // A prefix pattern (…/volumes/whiskers*) covers every name that starts with it: try it with each tail of
+            // the glob (whis[k]ers_data reaches whiskers_data), wildcards as a plain letter.
+            // Only the last segment can hold the tail; one longer than a file name (255) counts as a hit, so the cost
+            // stays linear in the command.
+            if (pattern.EndsWith('*') && !pattern.EndsWith("/*", StringComparison.Ordinal))
+            {
+                var trimmed = asGlob.TrimEnd('/');
+                var last = trimmed[(trimmed.LastIndexOf('/') + 1)..];
+                if (last.Length > 255) return new Hit(glob, pattern);
+                foreach (var sample in Samples(pattern))
+                    for (var j = 0; j < last.Length; j++)
+                        if (GuardrailRuleHelpers.GlobMatch(trimmed, sample + last[j..].Replace('*', 'x').Replace('?', 'x')))
+                            return new Hit(glob, pattern);
+            }
             // A wildcard segment that could be the protected directory itself (/opt/*/ca.key, /app/da?a/…).
             var protectedSegment = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(x => x != "*");
             if (protectedSegment is not null
@@ -875,7 +889,8 @@ public static class ProtectedResourceMatcher
                 }
             }
             words.Add(w);
-            if (glob) globs.Add(w);
+            // A quoted or escaped glob is expanded by the shell that runs it next (ssh, sh -c): tested as a glob too.
+            if (glob || ((quoted || escaped) && w.AsSpan().IndexOfAny("*?[") >= 0)) globs.Add(w);
             // Quoted text that looks like a command line is read again: it may be run by sh -c, ssh, docker exec …
             // A word built with escapes (sh -c docker\ run\ -v\ …) is quoted text too. The whole word is read again, its
             // unquoted pieces included: sh -c 'docker run -v '/var/run:/r is one word.
@@ -1006,8 +1021,11 @@ public static class ProtectedResourceMatcher
         return unanalyzable;
     }
 
+    // Also what a second shell expands without any whitespace (S2 round 6, B14): braces (bash -c '{docker,stop,x}') and
+    // redirections (sh -c 'cat</var/run/docker.s?ck'). Read again, an expanding brace is unanalysable. A quoted glob
+    // (ssh host rm '/var/lib/docker/volumes/whisk*') is not read again but tested as a glob, see End().
     private static bool LooksLikeCommand(string text) =>
-        text.IndexOfAny([' ', '\t', '\n', ';', '|', '&', '$', '`', '"', '\'', '\\']) >= 0;
+        text.IndexOfAny([' ', '\t', '\n', ';', '|', '&', '$', '`', '"', '\'', '\\', '{', '<', '>']) >= 0;
 
     // {a,b} and {1..3} are expanded by the shell; a lone brace (find -exec {} \;, awk '{…}' quoted) is not.
     private static bool BraceExpansion(string text, int open)

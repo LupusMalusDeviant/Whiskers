@@ -769,6 +769,37 @@ public class SelfProtectionTests
     public void Bypasses_from_the_S2_round_5_review_are_refused_for_a_key(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
+    /// <summary>B14: a quoted or escaped word without whitespace that a second shell expands (braces, globs,
+    /// redirections) is read again too.</summary>
+    [Theory]
+    [InlineData("bash -c '{docker,stop,whi{s,}kers}'")]
+    [InlineData("bash -c '{docker,run,-v,/var/run:/r,alpine}'")]
+    [InlineData("bash -c \\{docker,stop,whi\\{s,\\}kers\\}")]
+    [InlineData("sudo bash -c '{docker,stop,whi{s,}kers}'")]
+    [InlineData("docker exec app bash -c '{docker,stop,whi{s,}kers}'")]
+    [InlineData("bash -c '{rm,-rf,/var/lib/docker/volumes/whisk{e,}rs_data}'")]
+    [InlineData("ssh host docker stop 'whi{s,}kers'")]
+    [InlineData("ssh host docker stop whi\\{s,\\}kers")]
+    [InlineData("ssh host docker run '{-v,/var/run:/r}' alpine")]
+    [InlineData("ssh host rm -rf '/var/lib/docker/volumes/whisk*'")]
+    [InlineData("ssh host rm -rf '/var/lib/docker/volumes/whis[k]ers_data'")]
+    [InlineData("ssh host cat '/var/run/docker.s?ck'")]
+    [InlineData("sh -c 'cat</var/run/docker.s?ck'")]
+    [InlineData("rm -rf /var/lib/docker/volumes/whis[k]ers_data")]
+    [InlineData("rm -rf /var/lib/docker/volumes/whis?ers_data")]
+    public void Bypasses_from_the_S2_round_6_review_are_refused_for_a_key(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
+    /// <summary>B14 must not refuse ordinary quoted patterns that name nothing protected.</summary>
+    [Theory]
+    [InlineData("find /var/log -name '*.log' -mtime +7")]
+    [InlineData("grep 'a.*b' /etc/hosts")]
+    [InlineData("docker ps --format '{{.Names}}'")]
+    [InlineData("ls '/srv/app/*.conf'")]
+    [InlineData("find /srv -exec ls '{}' \\;")]
+    public void Quoted_patterns_that_name_nothing_protected_stay_allowed_for_a_key(string command) =>
+        Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
     /// <summary>M7: above the cap the helpers that look for container ids see no words; that is safe only because the
     /// same request is unanalysable in the protected-resource check.</summary>
     [Fact]
