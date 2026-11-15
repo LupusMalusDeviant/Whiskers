@@ -54,18 +54,31 @@ public static class SecretRedactor
     // INV-51 (contract 0017 C2): "Authorization: <scheme> <credentials>" and "Authorization=<…>" (Proxy-Authorization
     // and HTTP_AUTHORIZATION included) lose the whole value. The scheme word stays readable only when it is one of
     // Basic, Bearer, Digest, Negotiate, NTLM and more text follows it ("Authorization: Basic ***"); any other value,
-    // a one-word token included, goes whole ("Authorization: ***"). The value ends at the end of the line, or — when
-    // the header sits inside a quoted argument ('Authorization: …' / "Authorization: …") — before that closing quote
-    // (an escaping backslash in front of it stays). A value this rule already wrote (it starts with "***") is left
-    // alone, so applying it twice, or to the re-serialized JSON of values it redacted, changes nothing. Ending at the
-    // line end masks more than the value when the header is not quoted: the safe direction. An unquoted value also
-    // ends before a backslash, so a header inside an escaped JSON string (a quote written as backslash-u0022) leaves
-    // the document's structure intact; credentials (base64, tokens, Digest parameters) carry no backslash.
+    // a one-word token included, goes whole ("Authorization: ***"). Where the value ends:
+    //  - the header opens a quoted argument ('Authorization: …', "Proxy-Authorization: …"): at the closing quote; an
+    //    escaped quote inside (\") belongs to the value (Digest parameters);
+    //  - the quote that opens it is itself escaped (\"Authorization: …\" inside a JSON string or a quoted command):
+    //    at the matching escaped quote;
+    //  - otherwise: at the end of the line, or before an escaped quote (\" \', or backslash-u0022 / -u0027) of a JSON string that
+    //    holds the header. A backslash alone never ends it (DOMAIN\user:password).
+    // A value this rule already wrote ("***" followed by the end, whitespace or a closing quote) is left alone, so
+    // applying it twice, or to the re-serialized JSON of values it redacted, changes nothing; "***secret" is a value
+    // like any other. Ending at the line end masks more than the value when the header is not quoted: the safe
+    // direction. A scheme with its credential on the next line loses that line too.
     private static readonly Pair AuthorizationValue = new(
         // The separator and the scheme are atomic: giving back a space or the scheme word must not let a value this
         // rule wrote ("Basic ***") match again as a new value.
-        @"(?i)(?<q>['""])?(?<key>authorization)(?>(?<sep>[ \t]*[=:]\s*)(?:(?<scheme>Basic|Bearer|Digest|Negotiate|NTLM)[ \t]+)?)" +
-        @"(?!\*\*\*)(?(q)(?:(?!\\?\k<q>)[^\r\n])+|[^\r\n\\]+)",
+        @"(?i)(?:(?<esc>\\)?(?<q>['""])(?<pre>[\w-]*?))?(?<key>authorization)" +
+        @"(?>(?<sep>[ \t]*[=:]\s*)(?:(?<scheme>Basic|Bearer|Digest|Negotiate|NTLM)\s+)?)" +
+        @"(?!\*\*\*(?:\s|$|\\?['""]|\\u00(?:22|27)))" +
+        @"(?(q)(?(esc)(?:(?!\\\k<q>)[^\r\n])+|(?:\\[^\r\n]|(?!\k<q>)[^\r\n\\])+)" +
+        @"|(?:(?!\\['""]|\\u00(?:22|27))[^\r\n])+)",
+        RegexOptions.Compiled);
+
+    // A single-quoted key, as a Python dict or a log prints headers: 'Authorization': 'Basic x'  →  'Authorization': '***'
+    // (the double-quoted JSON form is JsonSecret's).
+    private static readonly Pair QuotedAuthorizationKey = new(
+        @"(?i)(?<kq>')(?<key>[\w-]*authorization)\k<kq>(?<sep>\s*[=:]\s*)(?<vq>['""])(?:\\.|(?!\k<vq>)[^\\\r\n])*\k<vq>",
         RegexOptions.Compiled);
 
     // JSON form: "password": "x"  →  "password":"***"  (the key is followed by a quote, so KeyedSecret misses it)
@@ -211,8 +224,11 @@ public static class SecretRedactor
         s = SlackWebhook.Replace(s, m => $"{m.Groups[1].Value}***");
         s = HookKey.Replace(s, m => $"{m.Groups[1].Value}***");
         s = JsonSecret.Replace(s, m => $"\"{m.Groups[1].Value}\":\"***\"");
+        s = QuotedAuthorizationKey.Replace(s, m =>
+            $"{m.Groups["kq"].Value}{m.Groups["key"].Value}{m.Groups["kq"].Value}{m.Groups["sep"].Value}" +
+            $"{m.Groups["vq"].Value}***{m.Groups["vq"].Value}");
         s = AuthorizationValue.Replace(s, m =>
-            $"{m.Groups["q"].Value}{m.Groups["key"].Value}{m.Groups["sep"].Value}" +
+            $"{m.Groups["esc"].Value}{m.Groups["q"].Value}{m.Groups["pre"].Value}{m.Groups["key"].Value}{m.Groups["sep"].Value}" +
             (m.Groups["scheme"].Success ? m.Groups["scheme"].Value + " " : "") + "***");
         s = BearerToken.Replace(s, "Bearer ***");
         s = KeyedSecret.Replace(s, m => $"{m.Groups[1].Value}=***");

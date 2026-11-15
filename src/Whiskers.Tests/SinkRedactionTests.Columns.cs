@@ -45,8 +45,6 @@ public sealed partial class SinkRedactionTests
         ["QuietHoursSuppressionEntity.RuleId"] = IdReason,
         ["QuietHoursSuppressionEntity.RuleName"] = NameReason,
         ["QuietHoursSuppressionEntity.WindowKey"] = IdReason,
-        ["QuietHoursSuppressionEntity.Target"] = "Built from the event after the composite redacted it (CompositeNotificationService.Redacted).",
-        ["QuietHoursSuppressionEntity.ItemsJson"] = "Titles and details of held events, written after the composite redacted the event (CompositeNotificationService.Redacted).",
 
         ["ActionOutcomeEntity.CorrelationId"] = IdReason,
         ["ActionOutcomeEntity.ActionKind"] = VocabularyReason,
@@ -63,8 +61,6 @@ public sealed partial class SinkRedactionTests
         ["ApprovalRecordEntity.Level"] = VocabularyReason,
         ["ApprovalRecordEntity.CorrelationId"] = IdReason,
         ["ApprovalRecordEntity.RiskLevel"] = VocabularyReason,
-        ["ApprovalRecordEntity.TargetServer"] = "A server id, resolved or read from the server argument (ApprovalDisplay.ExtractTarget).",
-        ["ApprovalRecordEntity.TargetWorkload"] = "A container or project id/name, resolved or read from the target argument (ApprovalDisplay.ExtractTarget).",
         ["ApprovalRecordEntity.GuardrailPreset"] = VocabularyReason,
         ["ApprovalRecordEntity.GuardrailRule"] = "The id of the guardrail rule that asked for the approval.",
         ["ApprovalRecordEntity.ArgumentsHash"] = HashReason,
@@ -320,7 +316,9 @@ public sealed partial class SinkRedactionTests
 
     private static bool IsExplicitlySafe(string value, string fileText)
     {
-        if (value.Contains("SinkRedaction.", StringComparison.Ordinal) || value.Contains("SecretRedactor.", StringComparison.Ordinal))
+        // Only the redacting calls count: SinkRedaction.Cap only shortens, and the other helpers redact nothing.
+        if (System.Text.RegularExpressions.Regex.IsMatch(value,
+                @"^(?:Whiskers\.Utils\.)?(?:SinkRedaction\.(?:Text|Json|Arguments)|SecretRedactor\.(?:Redact|RedactJson))\("))
             return true;
         var bare = value.Replace("(string?)", "", StringComparison.Ordinal).Trim();
         if (bare == "null" || (bare.StartsWith('"') && bare.EndsWith('"'))) return true;

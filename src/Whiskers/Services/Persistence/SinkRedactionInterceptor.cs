@@ -58,6 +58,15 @@ public sealed class SinkRedactionInterceptor : SaveChangesInterceptor
                     approval.ParamsJson = SinkRedaction.Json(approval.ParamsJson);
                     approval.Reason = SinkRedaction.Json(approval.Reason) ?? "";
                     approval.Diff = SinkRedaction.Json(approval.Diff);
+                    // The target is the resolved id or, unresolved, read from the caller's arguments.
+                    approval.TargetServer = SinkRedaction.Text(approval.TargetServer);
+                    approval.TargetWorkload = SinkRedaction.Text(approval.TargetWorkload);
+                    break;
+                // What quiet hours held back: the composite redacts the event first, the sink again for any writer.
+                // The JSON stays parseable (value by value); the row is found by its id.
+                case QuietHoursSuppressionEntity held:
+                    held.Target = SinkRedaction.Text(held.Target) ?? "";
+                    held.ItemsJson = SinkRedaction.Json(held.ItemsJson) ?? "[]";
                     break;
                 case PolicyDecisionEntity decision:
                     decision.Reason = SinkRedaction.Json(decision.Reason);

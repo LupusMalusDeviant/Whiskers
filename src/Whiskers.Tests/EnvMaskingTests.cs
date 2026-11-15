@@ -23,6 +23,9 @@ public class EnvMaskingTests
     [InlineData("ConnectionStrings__Db", "Host=db;Database=app;Username=app;Password=s3cr3t", true)]
     [InlineData("ODBC", "Driver={x};Server=db;Uid=app;Pwd=s3cr3t;", true)]
     [InlineData("ConnectionStrings__Cache", "localhost:6379,abortConnect=false", false)]
+    [InlineData("JDBC_OPTS", "-Djavax.net.ssl.trustStorePassword=s3cr3t", true)]
+    [InlineData("ConnectionStrings__Pg", "Host=db;SslPassword=s3cr3t", true)]
+    [InlineData("KAFKA_OPTS", "ssl.keyPassword=s3cr3t", true)]
     // The shell's working directories are no secret.
     [InlineData("PWD", "/app", false)]
     [InlineData("OLDPWD", "/", false)]

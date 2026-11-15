@@ -81,11 +81,70 @@ public sealed class SecretRedactorTests
     [InlineData("Authorization: ghp_canaryvaluer124canaryvaluer124", "Authorization: ***")]
     [InlineData("curl -H 'Authorization: ghp_canaryvaluer124' https://api.example/", "curl -H 'Authorization: ***' https://api.example/")]
     [InlineData("Authorization: Basic", "Authorization: ***")]
+    // A backslash does not end the value (review of 37f88726, M1).
+    [InlineData(@"Authorization: DOMAIN\user:hunter2secret", "Authorization: ***")]
+    [InlineData(@"Authorization: \hunter2secret", "Authorization: ***")]
+    [InlineData(@"HTTP_AUTHORIZATION=tok\en-hunter2secret", "HTTP_AUTHORIZATION=***")]
+    [InlineData(@"-H Authorization:\ Bearer\ hunter2secret", "-H Authorization:***")]
+    [InlineData(@"curl -H ""Authorization: Digest username=\""u\"", response=\""hunter2secret\"""" https://x",
+        @"curl -H ""Authorization: Digest ***"" https://x")]
+    // A header inside an escaped JSON string ends at the escaped quote; the document stays intact.
+    [InlineData(@"{""cmd"":""curl -H \""Authorization: Basic hunter2secret\"" https://x"",""n"":""kept""}",
+        @"{""cmd"":""curl -H \""Authorization: Basic ***\"" https://x"",""n"":""kept""}")]
+    // The same with the quotes written as backslash-u0022 (the default JSON encoder), built from pieces.
+    [InlineData(@"{""cmd"":""curl -H \" + "u0022Authorization: Basic hunter2secret" + @"\" + @"u0022 https://x"",""n"":""kept""}",
+        @"{""cmd"":""curl -H \" + "u0022Authorization: Basic ***" + @"\" + @"u0022 https://x"",""n"":""kept""}")]
+    // "***" counts as already redacted only when the value ends there (m2).
+    [InlineData("Authorization: ***hunter2secret", "Authorization: ***")]
+    [InlineData("Authorization: Bearer ***hunter2secret", "Authorization: Bearer ***")]
+    // A prefixed header inside a quoted argument keeps what follows the argument (m3).
+    [InlineData("curl -H 'Proxy-Authorization: Basic hunter2secret' -H 'X: y' https://x",
+        "curl -H 'Proxy-Authorization: Basic ***' -H 'X: y' https://x")]
+    // The credential on the next line after the scheme, and a single-quoted key.
+    [InlineData("Authorization: Basic \nhunter2secret", "Authorization: Basic ***")]
+    [InlineData("{'Authorization': 'Basic hunter2secret'}", "{'Authorization': '***'}")]
     public void An_authorization_value_is_redacted_down_to_its_scheme(string input, string expected)
     {
         var redacted = SecretRedactor.Redact(input);
         Assert.Equal(expected, redacted);
         Assert.Equal(redacted, SecretRedactor.Redact(redacted));   // idempotent
+    }
+
+    [Fact]
+    public void A_logged_authorization_header_in_a_json_document_keeps_the_fields_after_it()
+    {
+        const string json = """{"log":"> Authorization: Basic hunter2secret","next":"kept"}""";
+
+        var redacted = SecretRedactor.RedactJson(json);
+
+        Assert.Equal("""{"log":"> Authorization: Basic ***","next":"kept"}""", redacted);
+        Assert.Equal(redacted, SecretRedactor.RedactJson(redacted));
+    }
+
+    /// <summary>The Authorization rule stays linear on pathological input (the 1 s budget would withhold the text).</summary>
+    [Theory]
+    [InlineData("repeat")]
+    [InlineData("quote-spaces")]
+    [InlineData("newlines")]
+    [InlineData("backslashes")]
+    [InlineData("escaped-quotes")]
+    public void The_authorization_rule_has_no_catastrophic_backtracking(string shape)
+    {
+        var input = shape switch
+        {
+            "repeat" => string.Concat(Enumerable.Repeat("authorization: ", 20000)),
+            "quote-spaces" => string.Concat(Enumerable.Repeat("\"authorization" + new string(' ', 50), 5000)),
+            "newlines" => string.Concat(Enumerable.Repeat("authorization:" + new string('\n', 300), 1000)) + "***",
+            "backslashes" => "\"authorization: " + new string('\\', 300000),
+            _ => string.Concat(Enumerable.Repeat("\\\"authorization: Basic \\x", 20000)),
+        };
+
+        var watch = Stopwatch.StartNew();
+        var redacted = SecretRedactor.Redact(input);
+        watch.Stop();
+
+        Assert.NotEqual("***", redacted);   // not withheld by a timeout
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"{shape}: {watch.ElapsedMilliseconds} ms");
     }
 
     [Fact]

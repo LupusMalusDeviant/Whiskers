@@ -25,8 +25,9 @@ public static partial class EnvMasking
     [GeneratedRegex(@"://[^/@\s]*:[^/@\s]+@", RegexOptions.Compiled)]
     private static partial Regex CredentialsInUrlRegex();
 
-    // A connection string's password pair: "Password=…", "Pwd=…" (ADO.NET, ODBC), case-insensitive, as a whole key.
-    [GeneratedRegex(@"(?i)(?<![A-Za-z])(?:password|pwd)\s*=", RegexOptions.Compiled)]
+    // A connection string's password pair: "Password=…", "Pwd=…" (ADO.NET, ODBC), case-insensitive, also as the end
+    // of a longer key (trustStorePassword=, SslPassword=, keyPassword=).
+    [GeneratedRegex(@"(?i)(?:password|pwd)\s*=", RegexOptions.Compiled)]
     private static partial Regex ConnectionStringPasswordRegex();
 
     public static bool IsSensitiveKey(string key)
