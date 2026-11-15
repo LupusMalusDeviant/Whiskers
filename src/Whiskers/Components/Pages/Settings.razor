@@ -1374,7 +1374,8 @@ else
     /// address again (as a manual entry that would admit a federated identity).</summary>
     private void ReloadWhitelist()
     {
-        if (_role < AppRole.Admin) return;
+        // Reads only: refreshes the list after a local account changed. Same role as the whitelist itself.
+        if (_role < CapabilityCatalog.RoleOf("config.whitelist")) return;
         var data = WhitelistService.GetWhitelist();
         _whitelistEnabled = data.Enabled;
         _whitelistEmails = data.Emails;
