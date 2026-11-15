@@ -873,6 +873,12 @@ public class SelfProtectionTests
     [InlineData("ssh host docker stop whi{x},s}kers")]
     [InlineData("curl --unix-socket /var/run/docker.so{k},c}k -X POST http://x/containers/abc/stop")]
     [InlineData("cat /var/lib/docker/volumes/whi{x},s}kers_data/_data/vault.key")]
+    [InlineData("cat /var/run/lock/.[!]]/docker.sock")]
+    [InlineData("sh -c 'cat /var/run/lock/.[!]]/docker.sock'")]
+    [InlineData("curl --unix-socket /var/run/lock/.[!]]/docker.sock -X POST http://x/containers/abc/stop")]
+    [InlineData("cat /var/run/lock/.[^]]/docker.sock")]
+    [InlineData("cat /var/run/lock/.[!]a]/docker.sock")]
+    [InlineData("chmod -R 000 /var/lib/docker/volumes/.[!]]")]
     public void Bypasses_from_the_S2_round_10_review_are_refused_for_a_key(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 

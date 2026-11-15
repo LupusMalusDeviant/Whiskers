@@ -626,10 +626,13 @@ public static class ProtectedResourceMatcher
         for (var i = 0; i < seg.Length; i++)
         {
             if (seg[i] != '[') { result.Append(seg[i]); continue; }
-            var close = seg.IndexOf(']', i + 2);
-            if (close < 0) { result.Append('['); continue; }
-            var negated = seg[i + 1] is '!' or '^';
-            var members = seg[(i + (negated ? 2 : 1))..close];
+            // The end is found as BracketsAsAnyCharacter finds it: a ']' right after '[', '[!' or '[^' is a member
+            // (.[!]] can be '..').
+            var negated = i + 1 < seg.Length && seg[i + 1] is '!' or '^';
+            var start = i + (negated ? 2 : 1);
+            var close = seg.IndexOf(']', Math.Min(start + 1, seg.Length));
+            if (start >= seg.Length || close < 0) { result.Append('['); continue; }
+            var members = seg[start..close];
             result.Append(negated && members.Contains('.') ? 'x' : '?');
             i = close;
         }
