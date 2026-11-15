@@ -851,7 +851,6 @@ public static class ProtectedResourceMatcher
         if (depth > MaxShellDepth) return true;
         var unanalyzable = false;
         var word = new StringBuilder();
-        var quotedPart = new StringBuilder();
         bool inWord = false, glob = false, quoted = false, escaped = false;
         // Whether the next word is a command word, and whether a prefix (sudo, env …) is still taking its options.
         bool atCommand = true, inPrefix = false;
@@ -878,16 +877,14 @@ public static class ProtectedResourceMatcher
             words.Add(w);
             if (glob) globs.Add(w);
             // Quoted text that looks like a command line is read again: it may be run by sh -c, ssh, docker exec …
-            // A word built with escapes (sh -c docker\ run\ -v\ …) is quoted text too, and is read again whole.
-            if (escaped && LooksLikeCommand(w))
+            // A word built with escapes (sh -c docker\ run\ -v\ …) is quoted text too. The whole word is read again, its
+            // unquoted pieces included: sh -c 'docker run -v '/var/run:/r is one word.
+            if ((quoted || escaped) && LooksLikeCommand(w))
                 unanalyzable |= Tokenize(w, words, globs, commands, depth + 1);
-            else if (quoted && quotedPart.Length > 0 && LooksLikeCommand(quotedPart.ToString()))
-                unanalyzable |= Tokenize(quotedPart.ToString(), words, globs, commands, depth + 1);
             // Whitespace inside a word that was not read again is a command nobody looked at.
             else if (w.AsSpan().IndexOfAny(" \t\n\r") >= 0)
                 unanalyzable = true;
             word.Clear();
-            quotedPart.Clear();
             inWord = glob = quoted = escaped = false;
         }
 
@@ -930,7 +927,6 @@ public static class ProtectedResourceMatcher
                     if (close < 0) return true;
                     var part = text[(i + 1)..close];
                     word.Append(part);
-                    quotedPart.Append(part);
                     inWord = quoted = true;
                     i = close + 1;
                     continue;
@@ -962,7 +958,6 @@ public static class ProtectedResourceMatcher
                     }
                     if (!closed) return true;
                     word.Append(part);
-                    quotedPart.Append(part);
                     inWord = quoted = true;
                     continue;
                 }
@@ -971,7 +966,6 @@ public static class ProtectedResourceMatcher
                     if (i + 1 < text.Length && text[i + 1] != '\n')
                     {
                         word.Append(text[i + 1]);
-                        quotedPart.Append(text[i + 1]);
                         inWord = quoted = escaped = true;
                     }
                     i += 2;

@@ -518,9 +518,14 @@ The rule ignores the command word, so these are refused for a key too. This is f
 - any tool's `v` cluster followed by a word that starts with `.`, `~` or `/` and holds a `:`, for example
   `rsync -av ./a:b /srv/c`, `scp -rv ./a:b host:/c`, `tar -czv ./a:b`, `curl -sv ./x:/r`; it needs an approval;
 - a lower-case `src=./…` word, for example `curl -d src=./x`, and a lower-case `device=` value with a relative path in
-  a `-o` / `--opt` value of any tool;
+  a `-o` / `--opt` value of any tool. A `device=` value that is not a plain absolute path is refused too, so the
+  standard NFS and tmpfs volumes (`-o device=:/export/data`, `-o device=tmpfs`) need an approval for a key;
 - any mount of `/proc`, `/sys` or `/dev`, for example `-v /sys/fs/cgroup:/sys/fs/cgroup:ro`;
-- a word with escaped whitespace that, read again, names something protected, for example `echo docker\ stop\ whiskers`.
+- a word with escaped whitespace that, read again, names something protected, for example `echo docker\ stop\ whiskers`;
+- a word with an escaped quote or `$`, for example `echo it\'s fine`, `echo \$HOME`, `grep price\$ /etc/hosts`: it is
+  read again, and a `$` or an open quote there makes it unanalysable;
+- a word with quoted and unquoted parts that looks like a command is read again whole (round 5, B13), for example
+  `sh -c 'docker run -v '/var/run:/r`; a protected name or path anywhere in it is a hit.
 
 These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv ./a ./b`, `awk -v x=./y`, `grep -v foo`,
 `scp ./a host:/b`, `docker exec app cp -rv ./a ./b`, `-v /srv/app:/app:ro` and named volumes.

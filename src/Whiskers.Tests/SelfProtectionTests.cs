@@ -751,6 +751,24 @@ public class SelfProtectionTests
     public void Bypasses_from_the_S2_round_4_review_are_refused_for_a_key(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
+    /// <summary>B13: a word with quoted and unquoted parts is read again whole, not only its quoted parts.</summary>
+    [Theory]
+    [InlineData("sh -c 'docker run -v '/var/run:/r' alpine'")]
+    [InlineData("sh -c 'docker run -v '/var/run:/r")]
+    [InlineData("sh -c 'docker run -v /var/r'un:/r' alpine'")]
+    [InlineData("sh -c docker\" run -v /var/r\"un:/r")]
+    [InlineData("sh -c 'docker run -'v' ~/../var/run:/r alpine'")]
+    [InlineData("ssh host 'docker run -'v' ~/../var/run:/r alpine'")]
+    [InlineData("sh -c \"docker run -\"v\" ~/../var/run:/r alpine\"")]
+    [InlineData("sh -c 'docker run -dv .'/x:/r' alpine'")]
+    [InlineData("sh -c 'docker run --vol'ume' ~/../var/run:/r alpine'")]
+    [InlineData("sh -c 'docker volume create -o type=none -o o=bind -o dev'ice=var/run' v'")]
+    [InlineData("sh -c 'docker volume create --o'pt' device=var/run v'")]
+    [InlineData("sh -c 'docker stop whis'kers")]
+    [InlineData("sh -c 'cat /var/run/dock'er.sock")]
+    public void Bypasses_from_the_S2_round_5_review_are_refused_for_a_key(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
     /// <summary>M7: above the cap the helpers that look for container ids see no words; that is safe only because the
     /// same request is unanalysable in the protected-resource check.</summary>
     [Fact]
