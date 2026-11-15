@@ -15,15 +15,65 @@ namespace Whiskers.Services.Certificates;
 /// </summary>
 public static class MtlsCertificateValidator
 {
-    /// <summary>Parses the CSR (verifying its self-signature) and returns its public key, or throws with the reason.</summary>
-    public static PublicKey ValidateCsr(string csrPem, MtlsIdentity expected)
+    /// <summary>
+    /// The host's answer to <see cref="MtlsCertificateCommands.GenerateKeyAndCsr"/> (contract 0017 E1): the CSR PEM,
+    /// base64-encoded. Refused unless every non-whitespace character is a base64 character; then decoded, parsed and
+    /// checked like <see cref="ValidateCsr"/>. Returns the parsed CSR's DER and public key. Only that DER — re-encoded
+    /// by Whiskers — goes on to the CA host; no byte of the answer itself does.
+    /// </summary>
+    public static MtlsValidatedCsr ValidateCsrAnswer(string answer, MtlsIdentity expected)
+    {
+        foreach (var c in answer)
+        {
+            if (char.IsWhiteSpace(c)) continue;
+            if (!IsBase64Char(c))
+                throw new InvalidOperationException("The CSR answer from the host holds characters that are not base64.");
+        }
+
+        string pem;
+        try { pem = System.Text.Encoding.ASCII.GetString(Convert.FromBase64String(answer)); }
+        catch (FormatException) { throw new InvalidOperationException("The CSR did not come back as base64."); }
+
+        var der = CsrDerFromPem(pem);
+        return new MtlsValidatedCsr(der, ValidateCsrDer(der, expected));
+    }
+
+    private static bool IsBase64Char(char c) =>
+        c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '+' or '/' or '=';
+
+    /// <summary>Parses the CSR (verifying its self-signature) and returns its public key, or throws with the reason. Only
+    /// the tests call this; production goes through <see cref="ValidateCsrAnswer"/>.</summary>
+    internal static PublicKey ValidateCsr(string csrPem, MtlsIdentity expected) =>
+        ValidateCsrDer(CsrDerFromPem(csrPem), expected);
+
+    /// <summary>The DER of the single PEM block in <paramref name="pem"/>, which must be a certificate request. A second
+    /// PEM block of any kind is refused, and so is the legacy label `NEW CERTIFICATE REQUEST` (contract 0017 E: only a single
+    /// `CERTIFICATE REQUEST` block). Text around the block is never used.</summary>
+    private static byte[] CsrDerFromPem(string pem)
+    {
+        if (!PemEncoding.TryFind(pem, out var fields))
+            throw new InvalidOperationException("The CSR from the host is not valid: it holds no certificate request.");
+        var label = pem.AsSpan()[fields.Label];
+        if (!label.SequenceEqual("CERTIFICATE REQUEST"))
+            throw new InvalidOperationException("The CSR from the host is not valid: its PEM block is not a certificate request.");
+        if (PemEncoding.TryFind(pem.AsSpan()[fields.Location.End..], out _))
+            throw new InvalidOperationException("The CSR from the host is not valid: it holds more than one PEM block.");
+        var der = new byte[fields.DecodedDataLength];
+        if (!Convert.TryFromBase64Chars(pem.AsSpan()[fields.Base64Data], der, out var written) || written != der.Length)
+            throw new InvalidOperationException("The CSR from the host is not valid: its PEM block does not decode.");
+        return der;
+    }
+
+    private static PublicKey ValidateCsrDer(byte[] der, MtlsIdentity expected)
     {
         CertificateRequest req;
         try
         {
             // Extensions are loaded only to be read here; this request is never signed by .NET.
-            req = CertificateRequest.LoadSigningRequestPem(csrPem, HashAlgorithmName.SHA256,
+            req = CertificateRequest.LoadSigningRequest(der, HashAlgorithmName.SHA256, out var consumed,
                 CertificateRequestLoadOptions.UnsafeLoadCertificateExtensions);
+            if (consumed != der.Length)
+                throw new InvalidOperationException("The CSR from the host is not valid: data follows the request.");
         }
         catch (CryptographicException ex)
         {
@@ -185,5 +235,12 @@ public static class MtlsCertificateValidator
         if (!dns.SequenceEqual(wantDns) || !ips.SequenceEqual(wantIps))
             throw new InvalidOperationException(
                 $"{what} names [{string.Join(", ", dns.Concat(ips))}], expected [{string.Join(", ", wantDns.Concat(wantIps))}].");
+        // Contract 0017 E2: names of another kind (URI, e-mail, …) are invisible to the typed enumerators above.
+        if (CountGeneralNames(san.RawData) != wantDns.Count + wantIps.Count)
+            throw new InvalidOperationException($"{what} carries subject alternative names other than its DNS names and IP addresses.");
     }
 }
+
+/// <summary>A host's CSR after <see cref="MtlsCertificateValidator.ValidateCsrAnswer"/>: the parsed request's DER and its
+/// public key. <see cref="Der"/> is all that goes on to <see cref="MtlsCertificateCommands.SignCsr"/>, never the host's text.</summary>
+public sealed record MtlsValidatedCsr(byte[] Der, PublicKey PublicKey);
