@@ -1,6 +1,5 @@
 @page "/help"
 @using Microsoft.AspNetCore.Authorization
-@using Markdig
 @using Whiskers.Models.Help
 @using Whiskers.Services.Help
 @attribute [Authorize]
@@ -117,10 +116,8 @@
         _selected = _all.FirstOrDefault(c => c.Id == id);
     }
 
-    private static readonly MarkdownPipeline MdPipeline =
-        new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
-
-    private static string RenderMarkdown(string text) => Markdown.ToHtml(text ?? "", MdPipeline);
+    // Contract 0017 F1: the help text goes through the same restricted pipeline and sanitizer as model output.
+    private static string RenderMarkdown(string text) => Whiskers.Utils.MarkdownSanitizer.RenderModelOutput(text);
 
     private static string ResolveIcon(string name) => name switch
     {

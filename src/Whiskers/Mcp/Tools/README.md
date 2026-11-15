@@ -8,7 +8,7 @@ The authoritative level of every mutating tool is the capability table [`../../S
 
 | File | Tool group |
 |---|---|
-| `ContainerTools.cs` | Containers, list/inspect/logs/metrics/env, start/stop/restart/update; `deploy_app` and `deploy_compose` (compose projects through the compose runner, contract 0013) |
+| `ContainerTools.cs` | Containers, list/inspect/logs/metrics/env (`get_container_env` masks by `EnvMasking.ShouldMask`, the UI's rule), start/stop/restart/update; `deploy_app` and `deploy_compose` (compose projects through the compose runner, contract 0013) |
 | `ServerTools.cs` | Host & server, info, logs, metrics, health, `execute_command`, firewall, Nginx, systemd, SSL |
 | `NetworkTools.cs` | Docker networks, list/create/remove, connect/disconnect |
 | `DatabaseTools.cs` | In-container databases, detect, list, schema, query, backup |
