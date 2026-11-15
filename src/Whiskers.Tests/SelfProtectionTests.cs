@@ -790,6 +790,46 @@ public class SelfProtectionTests
     public void Bypasses_from_the_S2_round_6_review_are_refused_for_a_key(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
+    /// <summary>B15, B16, M1, M2: nested or escaped braces, globs in any segment and under a compose prefix, a ']'
+    /// first in a bracket expression, and fish's command substitution.</summary>
+    [Theory]
+    [InlineData("docker stop whi{{},s}kers")]
+    [InlineData("docker stop whi{\\},s}kers")]
+    [InlineData("docker stop whi{'}',s}kers")]
+    [InlineData("bash -c 'docker stop whi{{},s}kers'")]
+    [InlineData("bash -c '{{},docker,stop,whi{{},s}kers}'")]
+    [InlineData("ssh host docker stop 'whi{{},s}kers'")]
+    [InlineData("ssh host docker stop whi\\{\\{\\},s\\}kers")]
+    [InlineData("cat /var/run/docker.so{{},c}k")]
+    [InlineData("ssh host cat '/var/run/docker.so{{},c}k'")]
+    [InlineData("cat /var/lib/docker/volumes/whis?ers_data/_data/vault.key")]
+    [InlineData("cat /var/lib/docker/volumes/whis?ers_d?ta/_data/vault.key")]
+    [InlineData("cat /var/lib/docker/volumes/whis?ers_data/_d?ta/vault.key")]
+    [InlineData("ls /var/lib/docker/volumes/proj_whis[k]ers_data")]
+    [InlineData("cat /var/lib/docker/volumes/proj_whis?ers_data/_data/vault.key")]
+    [InlineData("ssh host rm -rf '/var/lib/docker/volumes/proj_whis[k]ers_data'")]
+    [InlineData("cat /var/run/docker.soc[]k]")]
+    [InlineData("cat /var/run/docker.s[]o]ck")]
+    [InlineData("cat /var/run/docker.s[!]x]ck")]
+    [InlineData("ssh host cat '/var/run/docker.s[]o]ck'")]
+    [InlineData("fish -c 'docker stop (printf %s%s whi skers)'")]
+    public void Bypasses_from_the_S2_round_7_review_are_refused_for_a_key(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
+    /// <summary>m3: glob words up to the cap are decided in time that grows with the command, not its square.</summary>
+    [Fact]
+    public void Many_glob_words_up_to_the_limit_are_decided_quickly()
+    {
+        var questionMarks = "cat " + string.Join(' ', Enumerable.Repeat("/a/" + new string('?', 255), 240));
+        var stars = "cat " + string.Join(' ', Enumerable.Repeat("/a/*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a", 1500));
+        foreach (var command in new[] { questionMarks[..Math.Min(questionMarks.Length, 64 * 1024 - 1)], stars[..Math.Min(stars.Length, 64 * 1024 - 1)] })
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            ExecuteCommandAsAdminKey(command);
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"{command.Length} characters took {watch.Elapsed}");
+        }
+    }
+
     /// <summary>B14 must not refuse ordinary quoted patterns that name nothing protected.</summary>
     [Theory]
     [InlineData("find /var/log -name '*.log' -mtime +7")]
@@ -797,6 +837,10 @@ public class SelfProtectionTests
     [InlineData("docker ps --format '{{.Names}}'")]
     [InlineData("ls '/srv/app/*.conf'")]
     [InlineData("find /srv -exec ls '{}' \\;")]
+    [InlineData("docker ps --format '{{.Names}},{{.Status}}'")]
+    [InlineData("docker inspect -f '{{range.Mounts}}{{.Source}},{{end}}' app")]
+    [InlineData("ls /srv/app/*.conf")]
+    [InlineData("tar -czf /backup/logs.tgz --exclude='*.tmp' /var/log")]
     public void Quoted_patterns_that_name_nothing_protected_stay_allowed_for_a_key(string command) =>
         Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 

@@ -528,10 +528,20 @@ The rule ignores the command word, so these are refused for a key too. This is f
   `sh -c 'docker run -v '/var/run:/r`; a protected name or path anywhere in it is a hit;
 - a quoted or escaped word with an expanding brace or a redirection is read again too (round 6, B14), so
   `bash -c '{docker,stop,whiskers}'` is unanalysable; a quoted or escaped glob is tested as a glob
-  (`ssh host rm '/var/lib/docker/volumes/whisk*'`), and a glob against a prefix pattern is tried with its own tail
-  (`whis[k]ers_data`). A glob segment longer than 255 characters counts as a hit;
+  (`ssh host rm '/var/lib/docker/volumes/whisk*'`);
+- round 7: a brace is matched by depth, skipping escaped and quoted characters, so `whi{{},s}kers`, `whi{\},s}kers`
+  and `whi{'}',s}kers` are unanalysable; a bracket expression is read as the shell reads it (`docker.soc[]k]`). A glob
+  in a path is tested against each protected path and everything below it as a real intersection of the two patterns
+  (the glob's `*` and `?` stay within a segment, the pattern's `*` does not), in any segment and under a compose
+  prefix (`…/whis?ers_data/_data/vault.key`, `…/proj_whis[k]ers_data`); time is the product of the two lengths. A glob
+  without `/` (a name) hits when it could spell a protected name with its `?` and `[…]` standing for letters, or when
+  it matches the name's stem (`whis*`); its `*` does not stand for the protected letters, so `*.log` hits nothing.
+  `fish -c` is unanalysable (fish substitutes commands with plain parentheses). A remote shell reached through `ssh` is
+  assumed to be a POSIX shell;
 - a quote inside double quotes (`echo "it's fine"`), a mount source with a space (`-v '/srv/my dir':/d`) and
-  `docker compose -f … up` are refused for a key too.
+  `docker compose -f … up` are refused for a key too, and so are quoted globs and programs that could reach a
+  protected name or path the same way an unquoted one does: `find /etc -name 's*'`, `systemctl status 'nginx*'`,
+  `du -sh '/var/log/*'`, `ls '/srv/*/config.yml'`, `jq '{a:.x,b:.y}' f`.
 
 These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv ./a ./b`, `awk -v x=./y`, `grep -v foo`,
 `scp ./a host:/b`, `docker exec app cp -rv ./a ./b`, `-v /srv/app:/app:ro` and named volumes.
@@ -545,6 +555,8 @@ These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv 
 - `--volumes-from`;
 - relative paths outside a mount (`cat ../var/run/docker.sock`, `cat ~/../var/run/docker.sock`): the working directory
   is unknown, so only mount sources are decided by how they are written;
+- a name glob whose `*` stands for protected letters under a compose prefix (`proj_whis*` in the working directory),
+  zsh globs and extglob forms (`whis(k)ers`, `@(k)`), and a non-POSIX login shell behind `ssh`;
 - the classes that need a real shell parser rather than a word reader: command words hidden behind option values of
   prefixes (`sudo -u`, `env -u`, `exec -a`, `flock`, `chroot`, `timeout -s`), functions and aliases defined in the
   same text, redirections between words, and nested shells beyond four levels. Round 4 does not rely on reading

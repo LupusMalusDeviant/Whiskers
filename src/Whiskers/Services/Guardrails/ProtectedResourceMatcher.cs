@@ -532,59 +532,71 @@ public static class ProtectedResourceMatcher
     /// <summary>A word the shell expands as a glob hits when it could expand to a protected name or path.</summary>
     private static Hit? GlobHit(string glob, IReadOnlyList<string> patterns, IReadOnlyList<string> pathPatterns)
     {
-        var asGlob = Regex.Replace(glob, @"\[[^\]]*\]", "?");
+        var asGlob = BracketsAsAnyCharacter(glob);
         // A glob of nothing but wildcards (the arguments of `rm *`, `count(*)` in quoted SQL) names no resource.
         if (!asGlob.Contains('/') && asGlob.Any(ch => ch is not ('*' or '?')))
             foreach (var pattern in patterns)
-                if (GuardrailRuleHelpers.GlobMatch(asGlob, pattern.Replace("*", "").Replace("?", "")))
-                    return new Hit(glob, pattern);
-        if (!asGlob.Contains('/')) return null;
-        foreach (var pattern in pathPatterns)
-        {
-            foreach (var sample in Samples(pattern))
-                if (GuardrailRuleHelpers.GlobMatch(asGlob.TrimEnd('/'), sample))
-                    return new Hit(glob, pattern);
-            // A prefix pattern (…/volumes/whiskers*) covers every name that starts with it: try it with each tail of
-            // the glob (whis[k]ers_data reaches whiskers_data), wildcards as a plain letter.
-            // Only the last segment can hold the tail; one longer than a file name (255) counts as a hit, so the cost
-            // stays linear in the command.
-            if (pattern.EndsWith('*') && !pattern.EndsWith("/*", StringComparison.Ordinal))
             {
-                var trimmed = asGlob.TrimEnd('/');
-                var last = trimmed[(trimmed.LastIndexOf('/') + 1)..];
-                if (last.Length > 255) return new Hit(glob, pattern);
-                foreach (var sample in Samples(pattern))
-                    for (var j = 0; j < last.Length; j++)
-                        if (GuardrailRuleHelpers.GlobMatch(trimmed, sample + last[j..].Replace('*', 'x').Replace('?', 'x')))
-                            return new Hit(glob, pattern);
+                var stem = pattern.Replace("*", "").Replace("?", "");
+                if (GuardrailRuleHelpers.GlobMatch(asGlob, stem)) return new Hit(glob, pattern);
+                // A ? or [..] may stand for a letter of the pattern (whis?ers_db reaches whiskers*, proj_whis[k]ers
+                // reaches *_whiskers*); a * of the glob only for what the pattern leaves open, so *.log reaches nothing.
+                if (GlobsIntersect(asGlob, pattern, starTakesLetters: false)) return new Hit(glob, pattern);
             }
-            // A wildcard segment that could be the protected directory itself (/opt/*/ca.key, /app/da?a/…).
-            var protectedSegment = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(x => x != "*");
-            if (protectedSegment is not null
-                && asGlob.Split('/', StringSplitOptions.RemoveEmptyEntries)
-                    .Any(seg => seg.IndexOfAny(['*', '?']) >= 0 && GuardrailRuleHelpers.GlobMatch(seg, protectedSegment)))
+        if (!asGlob.Contains('/')) return null;
+        var path = asGlob.TrimEnd('/');
+        // The protected path itself and everything below it; the pattern's '*' crosses '/', the glob's does not.
+        foreach (var pattern in pathPatterns)
+            if (GlobsIntersect(path, pattern) || GlobsIntersect(path, pattern.TrimEnd('/') + "/*"))
                 return new Hit(glob, pattern);
-        }
         return null;
     }
 
-    // Concrete paths a protected path pattern covers, for testing whether a glob could reach one: the leading '*'
-    // stands for any parent directory.
-    private static IEnumerable<string> Samples(string pathPattern)
+    /// <summary>Whether a shell glob (<c>*</c> and <c>?</c> stay within a path segment) and a protected pattern
+    /// (<c>*</c> matches anything, <c>/</c> included) can match the same text. Letters compare without case, which can
+    /// only find more. Time and memory are the product of the two lengths.</summary>
+    internal static bool GlobsIntersect(string glob, string pattern, bool starTakesLetters = true)
     {
-        var literal = pathPattern.TrimEnd('*').TrimEnd('/');
-        if (!literal.StartsWith('*'))
+        int n = glob.Length, m = pattern.Length;
+        var reach = new bool[(n + 1) * (m + 1)];
+        reach[0] = true;
+        for (var i = 0; i <= n; i++)
+            for (var j = 0; j <= m; j++)
+            {
+                if (!reach[i * (m + 1) + j]) continue;
+                if (i == n && j == m) return true;
+                var a = i < n ? glob[i] : '\0';
+                var b = j < m ? pattern[j] : '\0';
+                if (a == '*') reach[(i + 1) * (m + 1) + j] = true;                     // the glob's * is empty
+                if (b == '*') reach[i * (m + 1) + j + 1] = true;                       // the pattern's * is empty
+                if (starTakesLetters && a == '*' && j < m && b != '*' && b != '/') reach[i * (m + 1) + j + 1] = true;   // * takes b's letter
+                if (b == '*' && i < n && a != '*') reach[(i + 1) * (m + 1) + j] = true;              // * takes a's letter
+                if (i < n && j < m && a != '*' && b != '*' && Compatible(a, b)) reach[(i + 1) * (m + 1) + j + 1] = true;
+            }
+        return false;
+
+        static bool Compatible(char a, char b) =>
+            a == '?' ? b != '/' : b == '?' || char.ToLowerInvariant(a) == char.ToLowerInvariant(b);
+    }
+
+    /// <summary>Turns each bracket expression into <c>?</c> as the shell reads it: a <c>]</c> right after <c>[</c>,
+    /// <c>[!</c> or <c>[^</c> is a member, not the end (<c>docker.soc[]k]</c> is <c>docker.soc?</c>). A <c>[</c>
+    /// without an end is a letter.</summary>
+    internal static string BracketsAsAnyCharacter(string glob)
+    {
+        var result = new StringBuilder(glob.Length);
+        for (var i = 0; i < glob.Length; i++)
         {
-            yield return literal;
-            yield return literal + "/x";
-            yield break;
+            if (glob[i] != '[') { result.Append(glob[i]); continue; }
+            var j = i + 1;
+            if (j < glob.Length && glob[j] is '!' or '^') j++;
+            if (j < glob.Length && glob[j] == ']') j++;
+            while (j < glob.Length && glob[j] != ']') j++;
+            if (j >= glob.Length) { result.Append('['); continue; }
+            result.Append('?');
+            i = j;
         }
-        var tail = literal.TrimStart('*');
-        foreach (var parent in new[] { "", "/opt", "/etc", "/srv", "/root", "/home/x", "/app/data", "/var/lib", "/data" })
-        {
-            yield return parent + tail;
-            yield return parent + tail + "/x";
-        }
+        return result.ToString();
     }
 
     private static string? Match(string value, IReadOnlyList<string> patterns)
@@ -751,6 +763,9 @@ public static class ProtectedResourceMatcher
                 || (word.StartsWith('/') && ScriptFile.IsMatch(word))
                 || IsInterpreter(name))
                 unanalyzable = true;
+            // fish substitutes commands with plain parentheses (docker stop (printf …)): its text is never read as POSIX.
+            else if (name == "fish")
+                unanalyzable = true;
             else if ((Shells.Contains(name) || name == "su") && !IsCommandFlag(next))
                 unanalyzable = true;
             else if (ComposeWrite(segment, name))
@@ -771,7 +786,8 @@ public static class ProtectedResourceMatcher
             var name = Path.GetFileName(words[w]);
             var next = w + 1 < words.Count ? words[w + 1] : null;
             if (ShellRunTime.Contains(name)) unanalyzable = true;
-            else if (Shells.Contains(name) && !IsCommandFlag(next)) unanalyzable = true;
+            else if ((name == "fish" && next is not null && next.StartsWith('-'))
+                     || (Shells.Contains(name) && !IsCommandFlag(next))) unanalyzable = true;
             else if (IsInterpreter(name) && next is not null && (next.StartsWith('-') || next.Contains('.') || next.Contains('/')))
                 unanalyzable = true;
         }
@@ -1028,12 +1044,30 @@ public static class ProtectedResourceMatcher
         text.IndexOfAny([' ', '\t', '\n', ';', '|', '&', '$', '`', '"', '\'', '\\', '{', '<', '>']) >= 0;
 
     // {a,b} and {1..3} are expanded by the shell; a lone brace (find -exec {} \;, awk '{…}' quoted) is not.
+    // The matching brace is found by depth, skipping escaped and quoted characters (whi{{},s}kers, whi{\},s}kers and
+    // whi{'}',s}kers all expand to whiskers); a ',' or '..' anywhere inside it counts. Without a matching brace a ','
+    // or '..' after the opening one counts too (fail-closed).
     private static bool BraceExpansion(string text, int open)
     {
-        var close = text.IndexOf('}', open + 1);
-        if (close < 0) return false;
-        var inner = text[(open + 1)..close];
-        return inner.Contains(',') || inner.Contains("..");
+        var depth = 0;
+        var separator = false;
+        for (var i = open; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (c == '\\') { i++; continue; }
+            if (c is '\'' or '"')
+            {
+                var end = text.IndexOf(c, i + 1);
+                if (end < 0) break;
+                i = end;
+                continue;
+            }
+            if (c is ' ' or '\t' or '\n' or ';' or '|' or '&') break;
+            if (c == '{') depth++;
+            else if (c == '}' && --depth == 0) return separator;
+            else if (c == ',' || (c == '.' && i + 1 < text.Length && text[i + 1] == '.')) separator = true;
+        }
+        return separator;
     }
 
     // SQL that builds a statement at run time, or reaches the file system or a shell.
