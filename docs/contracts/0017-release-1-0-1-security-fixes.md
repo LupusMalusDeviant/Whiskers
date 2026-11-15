@@ -452,10 +452,10 @@ the change for both.
   still refused.
 - **J.** The INV-40 row drops "cannot hold a slot indefinitely".
 
-## Amendment 3 (2026-11-15, from the S2 review, rounds 2 and 3)
+## Amendment 3 (2026-11-15, from the S2 review, rounds 2 to 4)
 
-The reviews of the B implementation found bypasses through forms Docker accepts. Round 3 closes them by class, not by
-instance, and fails closed. Where it differs, this amendment wins over Amendments 1 and 2 for part B.
+The reviews of the B implementation found bypasses through forms Docker accepts. Rounds 3 and 4 close them by class,
+not by instance, and fail closed. Where it differs, this amendment wins over Amendments 1 and 2 for part B.
 
 ### B — where a mount source stands
 
@@ -464,11 +464,10 @@ instance, and fails closed. Where it differs, this amendment wins over Amendment
   - the `--volume=` form;
   - the value attached to `-v` or to a short-flag cluster ending in `v` (`-v/src:dst`, `-v=src:dst`, `-itv/src:dst`);
   - any `<absolute path>:<path>` word;
-  - the word after a cluster `-<letters>v` (`-itv`, `-dv`), when it starts with `.`, `~` or `/` and holds a `:`.
-    This does not apply when the command is a known tool whose `v` means verbose: `rsync`, `cp`, `mv`, `tar`, `ls`,
-    `scp`, `grep`, `awk`, `sed`, `ln`, `install`, `chmod`, `chown`, `find`, `du`, `df`, `curl`, `wget`, `ssh`, `zip`,
-    `unzip`, `gzip`, `xz`, `cpio`, `dd`. Which runtime runs does not matter, so a staged copy (`/tmp/d`) or another
-    name (`podman-remote`, `finch`) is covered.
+  - the word after a cluster `-<letters>v` (`-itv`, `-dv`), when it starts with `.`, `~` or `/` and holds a `:`, in
+    any command. No program name decides this (round 4): a name is chosen by whoever writes the command (a copy named
+    `rsync`, `alias cp=docker`, `ssh host docker …`, `find -exec docker …`, an option value such as `sudo -u tar` read
+    as the command word). Round 3's verbose-tool exception is withdrawn.
 - **Keyed values**: the value of a `source=`, `src=` or `device=` key, also after `volume-opt=`.
   - Keys match in any case inside a `--mount` / `--mount-add` value and a `-o` / `--opt` value (their `=` forms and an
     attached `-o<value>` included), and anywhere in a command that names a container runtime. Docker lower-cases the
@@ -486,24 +485,42 @@ instance, and fails closed. Where it differs, this amendment wins over Amendment
 - Any other source that starts with `.`, `~` or `/` cannot be resolved and makes the command unanalysable free text
   (INV-24). This covers quotes, commas, globs, backslashes, `$`, backticks, spaces, and `/proc/<pid>/root`,
   `/proc/<pid>/task/<tid>/cwd` and the like.
-- A source without `/` is a named volume and stays allowed.
+- A source that does not start with `/` is decided by how it is written (round 4):
+  - **host path**: a `device=` value inside a `-o` / `--opt` / `--mount` value (`volume-opt=device=` included), and a
+    `source=` / `src=` value of a `--mount` value with `type=bind`. The local volume driver binds a relative `device=`
+    against the daemon's working directory (`/`), so `device=var/run` is `/var/run` (verified on Docker); a relative
+    bind source is made absolute against the client's. Every non-empty value that is not a plain absolute path is
+    unanalysable, `device=var` included;
+  - **keyed** (any other `source=` / `src=` value): one that contains `/` is unanalysable; one without `/` is a named
+    volume;
+  - **short syntax** (the word after `-v` and the other short forms): one without `/` is a named volume; one with `/`
+    that starts with neither `/`, `.`, `~` nor a quote is not a source Docker accepts (it refuses `var/run:/r` as a
+    volume name), so it stays allowed (`awk -v x=./y`).
 
 ### B — reading the command
 
-- A line continuation (`\` and a newline) is removed. It starts no word of its own.
+- A line continuation (`\` and a newline) is removed, outside quotes and inside double quotes (round 4:
+  `"whis\<newline>kers"` is `whiskers`). It starts no word of its own.
+- A backslash-escaped character counts as quoted text (round 4). A word built with escapes that looks like a command
+  (`sh -c docker\ run\ -v\ /var/run:/r`, `ssh host docker\ stop\ whiskers`, `tar --checkpoint-action=exec=…`) is read
+  again whole. A word that still holds whitespace and was not read again is unanalysable.
 - A command word the shell expands as a glob (`/usr/bin/docke?`, `[d]ocker`, `nerdct[l]`) is unanalysable. A bare `*`,
   as in re-read SQL `count(*)`, and the test command `[` are not.
-- A command longer than 64 KiB is unanalysable. The per-command checks read only the words of their own command, so
-  the time grows linearly with the command.
+- A command longer than 64 Ki characters is unanalysable. The per-command checks read only the words of their own
+  command, so the time grows linearly with the command. Above the cap the helpers that look for container ids
+  (`MentionWords`, `RuntimeIdWords`, `InvokesContainerRuntime`) see no words; the request is unanalysable all the same.
 
 ### Accepted overreach
 
 The rule ignores the command word, so these are refused for a key too. This is fail-closed and deliberate:
 - another tool's plain `-v` followed by `./`, `~`, a non-plain path or a directory above a protected path, for example
   `grep -v . file`, `mv -v ./a ./b`, `ls -v ~/x`, `grep -v /var /etc/fstab`;
-- the cluster of a tool not on the verbose list, followed by a word that starts with `.`, `~` or `/` and holds a `:`;
-- a lower-case `src=./…` word, for example `curl -d src=./x`;
-- any mount of `/proc`, `/sys` or `/dev`, for example `-v /sys/fs/cgroup:/sys/fs/cgroup:ro`.
+- any tool's `v` cluster followed by a word that starts with `.`, `~` or `/` and holds a `:`, for example
+  `rsync -av ./a:b /srv/c`, `scp -rv ./a:b host:/c`, `tar -czv ./a:b`, `curl -sv ./x:/r`; it needs an approval;
+- a lower-case `src=./…` word, for example `curl -d src=./x`, and a lower-case `device=` value with a relative path in
+  a `-o` / `--opt` value of any tool;
+- any mount of `/proc`, `/sys` or `/dev`, for example `-v /sys/fs/cgroup:/sys/fs/cgroup:ro`;
+- a word with escaped whitespace that, read again, names something protected, for example `echo docker\ stop\ whiskers`.
 
 These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv ./a ./b`, `awk -v x=./y`, `grep -v foo`,
 `scp ./a host:/b`, `docker exec app cp -rv ./a ./b`, `-v /srv/app:/app:ro` and named volumes.
@@ -514,4 +531,8 @@ These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv 
 - `cp -s` / `cp -as`;
 - `bwrap --bind` and `systemd-nspawn --bind`;
 - `podman --rootfs`;
-- `--volumes-from`.
+- `--volumes-from`;
+- the classes that need a real shell parser rather than a word reader: command words hidden behind option values of
+  prefixes (`sudo -u`, `env -u`, `exec -a`, `flock`, `chroot`, `timeout -s`), functions and aliases defined in the
+  same text, redirections between words, and nested shells beyond four levels. Round 4 does not rely on reading
+  them right: no decision of part B depends on which word is the command word any more, except the glob rule.
