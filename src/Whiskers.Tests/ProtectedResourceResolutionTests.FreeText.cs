@@ -423,6 +423,7 @@ public sealed partial class ProtectedResourceResolutionTests
         var outcome = await AsKey(h, "compose.deploy", args);
 
         Assert.Equal(MutationStatus.Denied, outcome.Status);
+        Assert.Contains(Whiskers.Services.Guardrails.ProtectedResourceRule.RuleId, outcome.MatchedRules);   // refused as a control-plane mount
         Assert.Equal(MutationStatus.PendingApproval,
             (await h.RunAsync("compose.deploy", args, ProtectionHarness.UiAdmin, MutationSurface.Ui)).Status);
     }

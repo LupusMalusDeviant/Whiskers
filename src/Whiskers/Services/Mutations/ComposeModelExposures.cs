@@ -129,7 +129,7 @@ public static partial class ComposeModel
         }
         if (Scalar(source, "privileged") is { } rawPrivileged && Truthy(Value(rawPrivileged, "privileged")))
             Add(ExposureKind.Privileged, "privileged", "true", "privileged: true", ComposeExposures.HasVariable(rawPrivileged));
-        // Contract 0017, A1: use_api_socket binds the engine's socket (and the client's registry credentials).
+        // Contract 0017, A1: use_api_socket binds the engine's socket (and may hand over the client's registry credentials).
         if (source.Children.TryGetValue(new YamlScalarNode("use_api_socket"), out var apiSocket))
         {
             var raw = (apiSocket as YamlScalarNode)?.Value
@@ -143,12 +143,15 @@ public static partial class ComposeModel
             var index = 0;
             foreach (var (entry, _) in Entries(source, hook))
             {
-                if (entry is YamlMappingNode hookMap && Scalar(hookMap, "privileged") is { } rawHook
-                    && IsOn(Value(rawHook, $"The privileged of a {hook} hook")))
-                {
-                    var key = ComposeExposures.HookKey(hook, index);
-                    Add(ExposureKind.Privileged, key, "true", $"{key} privileged: true", ComposeExposures.HasVariable(rawHook));
-                }
+                // The entry itself and what it merges with << (fail closed: any of them that turns it on counts).
+                if (entry is YamlMappingNode hookMap)
+                    foreach (var part in Merged(hookMap, 0))
+                        if (Scalar(part, "privileged") is { } rawHook && IsOn(Value(rawHook, $"The privileged of a {hook} hook")))
+                        {
+                            var key = ComposeExposures.HookKey(hook, index);
+                            Add(ExposureKind.Privileged, key, "true", $"{key} privileged: true", ComposeExposures.HasVariable(rawHook));
+                            break;
+                        }
                 index++;
             }
         }

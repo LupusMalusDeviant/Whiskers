@@ -192,7 +192,7 @@ public static class ComposeConfigEffects
         // Contract 0017, A1: use_api_socket binds the engine's socket into the container, read-write; compose prints
         // only the key, no volume.
         if (ComposeExposures.UsesApiSocket(service))
-            yield return Mount(ComposeModel.DockerSocket);
+            yield return Mount(ComposeModel.DockerSocket) with { ApiSocket = true };
         if (service.TryGetProperty("volumes_from", out var from) && from.ValueKind == JsonValueKind.Array)
             foreach (var entry in from.EnumerateArray())
             {

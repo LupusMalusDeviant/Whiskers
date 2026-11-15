@@ -114,6 +114,11 @@ public sealed record ComposeMount(string Source, bool ProjectScoped)
     /// <summary>What the entry refers to by name until every file is read: <c>service</c> (<c>volumes_from</c> of
     /// another service), <c>secret</c> or <c>config</c> (a file-backed one is mounted into the container).</summary>
     public string? Reference { get; init; }
+
+    /// <summary>Contract 0017, A1: the engine's API socket that <c>use_api_socket</c> binds. Kept through
+    /// <c>volumes_from</c>, so the re-check decides the engine's socket whatever its path on the host (rootless
+    /// <c>/run/user/&lt;uid&gt;/docker.sock</c>) for the receiving service too.</summary>
+    public bool ApiSocket { get; init; }
 }
 
 /// <summary>A compose deployment's impact could not be determined; the deployment does not run (fail closed).</summary>
@@ -816,7 +821,7 @@ public static partial class ComposeModel
                 var raw = (apiSocket as YamlScalarNode)?.Value
                           ?? throw new ComposePlanException($"The use_api_socket of '{service}' cannot be read.");
                 if (IsOn(Interpolate(raw, env, $"The use_api_socket of '{service}'")))
-                    yield return new ComposeMount(DockerSocket, ProjectScoped: false) { FromVariable = raw.Contains('$') };
+                    yield return new ComposeMount(DockerSocket, ProjectScoped: false) { FromVariable = raw.Contains('$'), ApiSocket = true };
             }
             if (!source.Children.TryGetValue(new YamlScalarNode("volumes"), out var node)) continue;
             if (node is not YamlSequenceNode list)
@@ -894,8 +899,11 @@ public static partial class ComposeModel
         return services.Select(s => effects.TryGetValue(s.Name, out var resolved)
             ? s with
             {
-                Mounts = s.Mounts.Concat(resolved.Where(r =>
-                    !s.Mounts.Any(m => m.Source == r.Source && m.Container == r.Container))).ToList(),
+                // A model mount compose also reports keeps the model's reading, plus compose's API-socket fact.
+                Mounts = s.Mounts.Select(m => !m.ApiSocket && resolved.Any(r => r.ApiSocket && r.Source == m.Source && r.Container == m.Container)
+                        ? m with { ApiSocket = true } : m)
+                    .Concat(resolved.Where(r =>
+                        !s.Mounts.Any(m => m.Source == r.Source && m.Container == r.Container))).ToList(),
             }
             : s).ToList();
     }

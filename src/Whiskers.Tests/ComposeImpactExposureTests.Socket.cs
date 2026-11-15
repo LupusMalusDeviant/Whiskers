@@ -99,6 +99,26 @@ public sealed partial class ComposeImpactExposureTests
         Assert.Contains(_docker.Actions, a => a is { Op: "stop", ContainerId: "new-web" });
     }
 
+    /// <summary>Review of contract 0017: a service that only shares the network namespace of x is not labelled with
+    /// x's socket mount or privileged hook — x itself is decided on them.</summary>
+    [Fact]
+    public async Task A_socket_mount_and_a_privileged_hook_stay_with_the_service_that_declares_them()
+    {
+        var plan = await PlanAsync(
+            "name: shop\nservices:\n  sock:\n    image: nginx\n    use_api_socket: true\n    privileged: true\n" +
+            "    post_start:\n      - command: [\"id\"]\n        privileged: true\n" +
+            "  web:\n    image: nginx\n    network_mode: service:sock\n",
+            """{"services":{"sock":{"image":"nginx","use_api_socket":true,"privileged":true,"post_start":[{"command":["id"],"privileged":true}]},"web":{"image":"nginx","network_mode":"service:sock"}}}""");
+
+        var sock = plan.Services.Single(s => s.Name == "sock").Exposures;
+        var web = plan.Services.Single(s => s.Name == "web").Exposures;
+        Assert.Contains(sock, e => e.Kind == ExposureKind.SocketMount);
+        Assert.Contains(sock, e => e is { Kind: ExposureKind.Privileged, Key: "hook:post_start:0" });
+        Assert.DoesNotContain(web, ComposeExposures.IsOwnOnly);
+        // What a namespace really passes on is still inherited.
+        Assert.Contains(web, e => e is { Kind: ExposureKind.Privileged, Key: "privileged" });
+    }
+
     [Fact]
     public async Task A_container_whose_mounts_cannot_be_read_counts_as_undecided()
     {

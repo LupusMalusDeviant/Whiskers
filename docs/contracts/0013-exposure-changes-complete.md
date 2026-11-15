@@ -212,6 +212,10 @@ basename, or a `sh -c` / `bash -c` string contains T's binary as a word:
 | `tailscale.serve` | a serve config with `TCP`, `Web` or `Services` entries and no Funnel, or `tailscale serve` in a command | published |
 | `tailscale.state` | a Tailscale service with persistent state (`TS_STATE_DIR` or a mount at `/var/lib/tailscale`) and no `TS_SERVE_CONFIG`: its serve state lives in tailscaled and cannot be read (Q7) | public |
 
+The detection table (contract 0006 with this contract) gains rows in contract 0017 part A (1.0.1): `SocketMount`
+(`use_api_socket`, and every socket bind the re-check reads; class `host`) and a privileged `post_start` / `pre_stop`
+hook (`Privileged`, key `hook:<kind>:<index>`, planning only).
+
 The exposure is attached to the tool's service; the reason names the services sharing its network namespace
 (`network_mode: service:<tool>`). `ExposureChangeRule` gets reasons such as "web becomes public through a Cloudflare
 tunnel (cloudflared)" and "traefik routes every container on the server (exposedByDefault)". No value (token, key, URL)

@@ -646,9 +646,9 @@ public sealed class ComposeRunner : IComposeRunner
 
     /// <summary>The service, the kind and the key of an exposure — never its value; a key from a variable not even that.</summary>
     internal static string Safe(ComposeExposure exposure) =>
-        // Contract 0017, A1: a planned socket mount comes from use_api_socket, which also hands over registry credentials.
+        // Contract 0017, A1: a planned socket mount comes from use_api_socket, which may also hand over registry credentials.
         exposure.Kind == ExposureKind.SocketMount
-            ? $"{exposure.Service}: Docker socket mounted (use_api_socket also hands it the host client's registry credentials)"
+            ? $"{exposure.Service}: Docker socket mounted (use_api_socket may also hand it the host client's registry credentials)"
             : exposure.KeyWithheld
             ? $"{exposure.Service}: {ExposureClasses.Noun(exposure.Kind)} (withheld)"
             : $"{exposure.Service}: {ExposureClasses.Noun(exposure.Kind)} {exposure.Key}";

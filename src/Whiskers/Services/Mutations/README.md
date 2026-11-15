@@ -375,9 +375,9 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   file-backed `secrets` / `configs`; `use_api_socket: true` as a read-write bind of `/var/run/docker.sock` (contract
   0017, A1: in the model and in compose's model, through `<<` merges and `extends`, a value from an unset variable
   refuses the plan; the control-plane rule refuses it for keys, agents, automations and Operators like every socket
-  mount). `use_api_socket` also hands the container the registry credentials of the Docker client compose runs as on
-  the host (`/run/secrets/docker/config.json`; verified with Compose v5.6.1, whose schema describes the field as "Bind
-  mount Docker API socket and required auth"), so it is also a `SocketMount` exposure (below); `volumes_from` as the other service's mounts (of any file, resolved after all
+  mount). `use_api_socket` may also hand the container the registry credentials of the Docker client compose runs as
+  on the host (Compose's schema describes the field as "Bind mount Docker API socket and required auth"), so it is
+  also a `SocketMount` exposure (below), and the mount carries `ComposeMount.ApiSocket` through `volumes_from`; `volumes_from` as the other service's mounts (of any file, resolved after all
   files are read) or the container's id and name, looked up on the server —
   `ComposeModel.ResolveContainers`; not found or not unique refuses the plan without quoting the reference — plus
   that container's own mounts from `docker inspect`, unreadable → refused). `ComposePlanner` also has compose
@@ -435,8 +435,13 @@ reported a failure is answered with its own text, marked `isError`. The agent ge
   (`/run/docker.sock`, rootless `/run/user/<uid>/docker.sock`) is a `SocketMount` (key `mount:<destination>`); it is
   decided only when the mounts of that same service hold the same source — the control plane's socket paths
   (`/var/run/docker.sock`, `/run/docker.sock`) count as one source, a `volumes_from` source's mounts belong to the
-  receiving service, and with `use_api_socket` the engine's socket is decided whatever its path. An undecided one,
-  and `Mounts` that cannot be read, are an undecided exposure of class `host`. A container that cannot be inspected
+  receiving service, and with `use_api_socket` (also through `volumes_from`) the engine's socket is decided whatever
+  its path. An undecided one, and `Mounts` that cannot be read (an entry without a type or of an unknown type
+  included), are an undecided exposure of class `host`. Limits: the re-check sees only a bind of the socket file
+  itself — a bind of a directory above it (`/var/run:/x`, decided as a mount by the control-plane rule at planning), a
+  source that reaches the socket through a symlink, and an engine socket not named `docker.sock` outside the control
+  plane's list are not recognised here. A socket mount or a privileged hook is not passed on to a service that only
+  shares a namespace with the one that declares it. A container that cannot be inspected
   counts as `public`. A `CgroupnsMode: host` whose service does not set `cgroup` is the daemon's default, not the deployment's
   (review M1): the runner reads the default once per server and keeps only the parsed version and mode, never the
   text (`default-cgroupns-mode` of `/etc/docker/daemon.json`,
