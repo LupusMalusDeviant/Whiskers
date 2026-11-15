@@ -24,6 +24,8 @@ public sealed class MtlsCertificateRenewalTests : IDisposable
     [InlineData("rabenhof-dockerproxy", "rabenhof", "100.64.0.9,DNS:evil")]
     [InlineData("Rabenhof", "rabenhof", Ip)]
     [InlineData("rabenhof-dockerproxy", "$(id)", Ip)]
+    [InlineData("rabenhof-dockerproxy\n", "rabenhof", Ip)]
+    [InlineData("rabenhof-dockerproxy", "rabenhof\n", Ip)]
     public void Identity_rejects_anything_that_could_reach_the_shell(string cn, string dns, string ip)
     {
         Assert.Throws<ArgumentException>(() => new MtlsIdentity(cn, [dns], [ip]));

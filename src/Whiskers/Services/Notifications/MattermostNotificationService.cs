@@ -19,7 +19,7 @@ public class MattermostNotificationService : IMattermostNotificationService
     {
         _httpClient = httpClient;
         _settings = settings;
-        _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
+        _throttler = new NotificationThrottler();
         _logger = logger;
     }
 
@@ -46,7 +46,7 @@ public class MattermostNotificationService : IMattermostNotificationService
         using var response = await _httpClient.PostAsJsonAsync(config.WebhookUrl, payload, ct);
         response.EnsureSuccessStatusCode();
 
-        _throttler.Record(evt);
+        _throttler.Record(evt, _settings.CurrentValue.ThrottleMinutes);
         _logger.LogInformation("Mattermost notification sent: {EventType} for {Container}",
             evt.EventType, evt.ContainerName);
         return true;
