@@ -41,7 +41,8 @@ public sealed partial class SinkRedactionTests
         ["NotificationEntity.EventType"] = VocabularyReason,
         ["NotificationEntity.Severity"] = VocabularyReason,
         ["NotificationEntity.Link"] = "A link into Whiskers' own pages, built from ids.",
-        ["QuietHoursSuppressionEntity.Id"] = IdReason,
+        ["QuietHoursSuppressionEntity.Id"] = "The lookup key rule|window|target (AlertSuppressionStore.IdOf); it embeds the target, built from the event " +
+            "after the composite redacted it (CompositeNotificationService.Redacted). Redacting it here would break the lookup.",
         ["QuietHoursSuppressionEntity.RuleId"] = IdReason,
         ["QuietHoursSuppressionEntity.RuleName"] = NameReason,
         ["QuietHoursSuppressionEntity.WindowKey"] = IdReason,

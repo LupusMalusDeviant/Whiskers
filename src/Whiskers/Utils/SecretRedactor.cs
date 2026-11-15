@@ -56,34 +56,64 @@ public static class SecretRedactor
     // Basic, Bearer, Digest, Negotiate, NTLM and more text follows it ("Authorization: Basic ***"); any other value,
     // a one-word token included, goes whole ("Authorization: ***"). Where the value ends:
     //  - the header opens a quoted argument ('Authorization: …', "Proxy-Authorization: …"): at the closing quote; an
-    //    escaped quote inside (\") belongs to the value (Digest parameters);
+    //    escaped quote or a backslash-newline continuation inside belongs to the value (Digest parameters). When the
+    //    closing quote is glued to more text ("Authorization: "$(cat secret) or "…"secret"), the quoting is no
+    //    boundary and the unquoted rule below applies;
     //  - the quote that opens it is itself escaped (\"Authorization: …\" inside a JSON string or a quoted command):
-    //    at the matching escaped quote;
-    //  - otherwise: at the end of the line, or before an escaped quote (\" \', or backslash-u0022 / -u0027) of a JSON string that
-    //    holds the header. A backslash alone never ends it (DOMAIN\user:password).
-    // A value this rule already wrote ("***" followed by the end, whitespace or a closing quote) is left alone, so
-    // applying it twice, or to the re-serialized JSON of values it redacted, changes nothing; "***secret" is a value
-    // like any other. Ending at the line end masks more than the value when the header is not quoted: the safe
-    // direction. A scheme with its credential on the next line loses that line too.
+    //    at the matching escaped quote; a deeper-escaped quote (\\\") inside belongs to the value;
+    //  - the quote that opens it is a JSON unicode escape (backslash-u0022 / -u0027): at the same escape;
+    //  - otherwise: at the end of the line, whatever it holds (backslashes and escaped quotes included).
+    // A value this rule already wrote ("***" followed by the end, whitespace, punctuation or the closing quote) is left
+    // alone, so applying it twice, or to the re-serialized JSON of values it redacted, changes nothing; "***secret",
+    // "***\secret" and "***"secret" are values like any other. Ending at the line end masks more than the value when
+    // the header is not quoted: the safe direction. A scheme with its credential on the next line loses that line too.
+    // Known limit: a 1.0.0 row already holding "Authorization=*** <credential>" is not redacted again.
+    private const string Finished = @"\*\*\*(?:$|\s|[^\w\\*'""]|['""](?:$|[,;:}\])]))";
+    private const string FinishedQuoted = @"\*\*\*(?:$|\s|[^\w\\*'""]|['""](?:$|[\s,;)\]}]))";
     private static readonly Pair AuthorizationValue = new(
+        // A prefix (Proxy-, X-Upstream-) is at most 64 characters: unbounded, a long word of repeated keys after a
+        // quote costs quadratic time.
+        @"(?i)(?:(?<esc>\\)?(?<q>['""])(?<pre>[\w-]{0,64}?)|(?<uq>\\u00(?:22|27))(?<pre>[\w-]{0,64}?))?(?<key>authorization)" +
+        // lq: the key stands right after a quote. A quoted header this rule already wrote must not be taken again as
+        // an unquoted one (checked after the key, so the look back runs only where the key is).
+        // (An alternation, not "(…)?": the optimizer drops an optional zero-width group and its capture.)
+        @"(?:(?<lq>(?<=['""][\w-]{0,64}authorization))|(?<!['""][\w-]{0,64}authorization))" +
         // The separator and the scheme are atomic: giving back a space or the scheme word must not let a value this
         // rule wrote ("Basic ***") match again as a new value.
-        @"(?i)(?:(?<esc>\\)?(?<q>['""])(?<pre>[\w-]*?))?(?<key>authorization)" +
-        @"(?>(?<sep>[ \t]*[=:]\s*)(?:(?<scheme>Basic|Bearer|Digest|Negotiate|NTLM)\s+)?)" +
-        @"(?!\*\*\*(?:\s|$|\\?['""]|\\u00(?:22|27)))" +
-        @"(?(q)(?(esc)(?:(?!\\\k<q>)[^\r\n])+|(?:\\[^\r\n]|(?!\k<q>)[^\r\n\\])+)" +
-        @"|(?:(?!\\['""]|\\u00(?:22|27))[^\r\n])+)",
+        // Separators: ":", "=", "->" and URL-encoded (%3A, %20, +).
+        @"(?>(?<sep>[ \t]*(?:[=:]|->|%3A)(?:\s|%20|\+)*)(?:(?<scheme>Basic|Bearer|Digest|Negotiate|NTLM)(?:\s|%20|\+)+)?)" +
+        @"(?(q)" +
+            // escaped opening quote: up to the matching escaped quote
+            $@"(?(esc)(?!{FinishedQuoted})(?>(?:\\\\\\\k<q>|\\\r?\n|(?!\\\k<q>)[^\r\n])+)" +
+            // plain opening quote: up to the unescaped closing quote, which must not be glued to more text
+            // (whitespace, the end or , ; ) ] } may follow it)
+            $@"|(?!{FinishedQuoted})(?>(?:\\(?:\r?\n|[^\r\n])|(?!\k<q>)[^\r\n\\])+)(?!\k<q>[^\s,;)\]}}]))" +
+        @"|(?(uq)" +
+            // a deeper-escaped unicode quote (\\ in front) belongs to the value
+            $@"(?!{FinishedQuoted})(?>(?:\\\\\k<uq>|(?!\k<uq>)[^\r\n])+)" +
+            $@"|(?(lq)(?!{FinishedQuoted})|(?!{Finished}))[^\r\n]+))",
         RegexOptions.Compiled);
 
-    // A single-quoted key, as a Python dict or a log prints headers: 'Authorization': 'Basic x'  →  'Authorization': '***'
-    // (the double-quoted JSON form is JsonSecret's).
+    // A quoted key and value, as a Python dict, a PHP array, a log or an escaped JSON string print headers:
+    // 'Authorization': 'Basic x', "Authorization" => "x", \"Authorization\": \"Basic x\" (also with deeper escapes
+    // or backslash-u0022 quotes)  →  the value becomes ***. The plain JSON form "authorization": "x" is JsonSecret's.
     private static readonly Pair QuotedAuthorizationKey = new(
-        @"(?i)(?<kq>')(?<key>[\w-]*authorization)\k<kq>(?<sep>\s*[=:]\s*)(?<vq>['""])(?:\\.|(?!\k<vq>)[^\\\r\n])*\k<vq>",
+        // Up to three levels of escaping, bounded so a run of backslashes costs linear time.
+        @"(?i)(?<kq>'|""|(?:\\\\){0,3}\\""|\\u00(?:22|27))(?<key>[\w-]{0,64}authorization)\k<kq>(?<sep>\s*(?:=>|[=:])\s*)" +
+        @"(?<vq>'|""|(?:\\\\){0,3}\\""|\\u00(?:22|27))(?>(?:(?!\k<vq>)(?:\\[^\r\n]|[^\\\r\n]))*)\k<vq>",
+        RegexOptions.Compiled);
+
+    // A Basic credential wherever it stands (nginx proxy_set_header, headers.Add("Authorization", "Basic …"), HAR
+    // files, URL-encoded): "Basic" and a base64-like word of 8+ characters with a digit, an uppercase letter after its
+    // first character, or + / =  →  "Basic ***". Prose ("Basic authentication") stays.
+    private static readonly Pair BasicCredential = new(
+        @"\b(?<scheme>(?i:basic))(?<sep>[ \t]+|%20|\+)(?=[A-Za-z0-9+/][A-Za-z0-9+/]*?[A-Z0-9+/=])[A-Za-z0-9+/]{8,}={0,2}",
         RegexOptions.Compiled);
 
     // JSON form: "password": "x"  →  "password":"***"  (the key is followed by a quote, so KeyedSecret misses it)
     private static readonly Pair JsonSecret = new(
-        $@"(?i)""([\w-]*(?:{SecretKeys})[\w-]*)""\s*:\s*""(?:[^""\\]|\\.)*""",
+        // The key is bounded (128): unbounded, a quote before a long word of repeated key names cost quadratic time.
+        $@"(?i)""(?=[\w-]{{0,128}}?(?:{SecretKeys}))([\w-]{{1,128}})""\s*:\s*""(?:[^""\\]|\\.)*""",
         RegexOptions.Compiled);
 
     // Authorization: Bearer <token> without a colon after "Bearer"  →  Bearer ***
@@ -228,8 +258,9 @@ public static class SecretRedactor
             $"{m.Groups["kq"].Value}{m.Groups["key"].Value}{m.Groups["kq"].Value}{m.Groups["sep"].Value}" +
             $"{m.Groups["vq"].Value}***{m.Groups["vq"].Value}");
         s = AuthorizationValue.Replace(s, m =>
-            $"{m.Groups["esc"].Value}{m.Groups["q"].Value}{m.Groups["pre"].Value}{m.Groups["key"].Value}{m.Groups["sep"].Value}" +
-            (m.Groups["scheme"].Success ? m.Groups["scheme"].Value + " " : "") + "***");
+            $"{m.Groups["esc"].Value}{m.Groups["q"].Value}{m.Groups["uq"].Value}{m.Groups["pre"].Value}{m.Groups["key"].Value}" +
+            $"{m.Groups["sep"].Value}" + (m.Groups["scheme"].Success ? m.Groups["scheme"].Value + " " : "") + "***");
+        s = BasicCredential.Replace(s, m => $"{m.Groups["scheme"].Value}{m.Groups["sep"].Value}***");
         s = BearerToken.Replace(s, "Bearer ***");
         s = KeyedSecret.Replace(s, m => $"{m.Groups[1].Value}=***");
         return s;

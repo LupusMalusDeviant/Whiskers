@@ -100,11 +100,53 @@ public sealed class SecretRedactorTests
     // A prefixed header inside a quoted argument keeps what follows the argument (m3).
     [InlineData("curl -H 'Proxy-Authorization: Basic hunter2secret' -H 'X: y' https://x",
         "curl -H 'Proxy-Authorization: Basic ***' -H 'X: y' https://x")]
+    // Outside a quoted argument an escaped quote does not end the value (delta review, M1').
+    [InlineData(@"Authorization: \""hunter2secret\""", "Authorization: ***")]
+    [InlineData(@"Authorization: \" + @"u0022hunter2secret\" + "u0022", "Authorization: ***")]
+    [InlineData(@"Authorization: tok\""hunter2secret", "Authorization: ***")]
+    [InlineData(@"Authorization: ***\" + "u0022hunter2secret", "Authorization: ***")]
+    [InlineData(@"{""msg"":""env AUTHORIZATION=\""hunter2secret\""""}" + "\n" + @"{""msg"":""next""}",
+        @"{""msg"":""env AUTHORIZATION=***" + "\n" + @"{""msg"":""next""}")]
+    [InlineData(@"level=debug msg=""headers: Authorization: Token token=\""hunter2secret\"", Accept: */*""",
+        @"level=debug msg=""headers: Authorization: ***")]
+    [InlineData(@"{""log"":""> Authorization: Digest username=\""u\"", response=\""hunter2secret\""\r\n"",""stream"":""stderr""}",
+        @"{""log"":""> Authorization: Digest ***")]
+    // A deeper-escaped quote inside an escaped header belongs to the value.
+    [InlineData(@"bash -c ""curl -H \""Authorization: Digest username=\\\""u\\\"", response=\\\""hunter2secret\\\""\"" https://x""",
+        @"bash -c ""curl -H \""Authorization: Digest ***\"" https://x""")]
+    [InlineData(@"{""cmd"":""curl -H <U>Authorization: Digest username=\\<U>u\\<U>, response=\\<U>hunter2secret\\<U><U> https://x"",""n"":""kept""}",
+        @"{""cmd"":""curl -H <U>Authorization: Digest ***<U> https://x"",""n"":""kept""}")]
+    // A closing quote glued to more text is no boundary.
+    [InlineData(@"""Authorization: Basic abc""hunter2secret"" tail", @"""Authorization: Basic ***")]
+    [InlineData(@"""Authorization: ***""hunter2secret"" tail", @"""Authorization: ***")]
+    // A backslash-newline continuation inside a quoted header belongs to the value (m-c).
+    [InlineData("\"Authorization: Basic x\\\nhunter2secret\" kept", "\"Authorization: Basic ***\" kept")]
+    // Quoted keys with escaped quotes (m-a), and a Basic credential without a key (m-b).
+    [InlineData(@"level=debug headers=""{\""Authorization\"": \""Basic hunter2secret\""}""",
+        @"level=debug headers=""{\""Authorization\"": \""***\""}""")]
+    [InlineData(@"""Authorization"" => ""Basic hunter2secret""", @"""Authorization"" => ""***""")]
+    [InlineData(@"proxy_set_header Authorization ""Basic aHVudGVyMnNlY3JldA=="";", @"proxy_set_header Authorization ""Basic ***"";")]
+    [InlineData(@"headers.Add(""Authorization"", ""Basic hunter2secret"");", @"headers.Add(""Authorization"", ""Basic ***"");")]
+    [InlineData("authorization=Basic%20hunter2secret&x=1", "authorization=Basic ***")]
+    [InlineData("Authorization%3A%20Basic%20hunter2secret", "Authorization%3A%20Basic ***")]
+    [InlineData("Authorization -> hunter2secret", "Authorization -> ***")]
+    [InlineData("'Authorization: tok'\"'\"'hunter2secret' tail", "'Authorization: ***")]
+    [InlineData("https://x/?a=1&b=Basic+aHVudGVyMnNlY3JldA%3D%3D", "https://x/?a=1&b=Basic+***%3D%3D")]
+    [InlineData("Basic authentication failed for the registry", "Basic authentication failed for the registry")]
+    // 1.0.0 rows stay as they are.
+    [InlineData(@"{""cmd"":""x authorization=***"",""n"":""kept""}", @"{""cmd"":""x authorization=***"",""n"":""kept""}")]
+    [InlineData(@"{""cmd"":""curl -H 'Authorization=***""}", @"{""cmd"":""curl -H 'Authorization=***""}")]
+    [InlineData("level=info authorization=*** user=bob", "level=info authorization=*** user=bob")]
+    [InlineData("authorization=***;next", "authorization=***;next")]
     // The credential on the next line after the scheme, and a single-quoted key.
     [InlineData("Authorization: Basic \nhunter2secret", "Authorization: Basic ***")]
     [InlineData("{'Authorization': 'Basic hunter2secret'}", "{'Authorization': '***'}")]
     public void An_authorization_value_is_redacted_down_to_its_scheme(string input, string expected)
     {
+        // <U> stands for a JSON unicode-escaped quote (backslash, u0022).
+        const string unicodeQuote = "\\" + "u0022";
+        input = input.Replace("<U>", unicodeQuote, StringComparison.Ordinal);
+        expected = expected.Replace("<U>", unicodeQuote, StringComparison.Ordinal);
         var redacted = SecretRedactor.Redact(input);
         Assert.Equal(expected, redacted);
         Assert.Equal(redacted, SecretRedactor.Redact(redacted));   // idempotent
@@ -128,6 +170,11 @@ public sealed class SecretRedactorTests
     [InlineData("newlines")]
     [InlineData("backslashes")]
     [InlineData("escaped-quotes")]
+    [InlineData("quote-word")]
+    [InlineData("quote-repeated-keys")]
+    [InlineData("escaped-keys")]
+    [InlineData("basic-words")]
+    [InlineData("deep-escapes")]
     public void The_authorization_rule_has_no_catastrophic_backtracking(string shape)
     {
         var input = shape switch
@@ -136,6 +183,11 @@ public sealed class SecretRedactorTests
             "quote-spaces" => string.Concat(Enumerable.Repeat("\"authorization" + new string(' ', 50), 5000)),
             "newlines" => string.Concat(Enumerable.Repeat("authorization:" + new string('\n', 300), 1000)) + "***",
             "backslashes" => "\"authorization: " + new string('\\', 300000),
+            "quote-word" => "\"" + new string('a', 1000000),
+            "quote-repeated-keys" => "\"" + string.Concat(Enumerable.Repeat("authorization_", 60000)),
+            "escaped-keys" => string.Concat(Enumerable.Repeat("\\\\\\\"authorization\\\\\\\": ", 20000)) + new string('\\', 100000),
+            "basic-words" => string.Concat(Enumerable.Repeat("Basic " + new string('a', 60) + " ", 5000)),
+            "deep-escapes" => "\\\"authorization: Basic " + string.Concat(Enumerable.Repeat("\\\\\\\"x", 100000)),
             _ => string.Concat(Enumerable.Repeat("\\\"authorization: Basic \\x", 20000)),
         };
 
