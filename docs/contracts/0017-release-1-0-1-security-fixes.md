@@ -451,3 +451,39 @@ the change for both.
 - **E1.** Non-PEM text outside the `CERTIFICATE REQUEST` block is ignored and never forwarded. A second PEM block is
   still refused.
 - **J.** The INV-40 row drops "cannot hold a slot indefinitely".
+
+## Amendment 3 (2026-11-15, from the S2 review)
+
+The review of the B implementation found bypasses through forms Docker accepts. Where it differs, this amendment wins
+over Amendments 1 and 2 for part B.
+
+### B — mount sources
+
+- **Keys in any case where Docker reads them.** Inside a `--mount` / `--mount=` value and a `-o` / `--opt` value, the
+  keys `source=`, `src=`, `device=` and the prefix `volume-opt=` match in any case, because Docker lower-cases the
+  keys. This reverses the lower-case-only narrowing of Amendment 1. In any other word the keys still count only in lower
+  case, at the start of the word or of a comma-separated part, so `echo SRC=./build` is no mount source.
+- **Keyed sources are not cut at `:`.** A `source=`, `src=` or `device=` value is a path. It is checked whole, and also
+  cut at its first `:`, so `source=/var/run:x` stays refused and `source=/tmp/a:b/../../var/run` is refused. The short
+  syntax (`-v a:b`) is still cut.
+- **Flag clusters.** A word `-<letters>v` (`-itv`, `-dv`) takes the next word as a volume, as `-v` does. A relative or
+  `~` source in it is unanalysable.
+- **Attached `-o`.** `-o<value>` (`-odevice=/var/run`, `-otype=none`) is read like `-o <value>`, `-o=` and `--opt`.
+- **Other processes' file systems.** A source under `/proc/<pid|self|thread-self>/root` or `/proc/*/cwd` cannot be
+  resolved and counts as unanalysable free text (INV-24).
+
+### Accepted overreach
+
+The rule ignores the command word, so these are refused for a key too. This is fail-closed and deliberate:
+- another tool's `-v` or flag cluster ending in `v` followed by `./`, `~` or a directory above a protected path, for
+  example `grep -v . file`, `mv -v ./a ./b`, `rsync -av ./a host:/b`, `grep -v /var /etc/fstab`;
+- a lower-case `src=./…` word, for example `curl -d src=./x`.
+
+### Gaps left for 1.1.0
+
+- `docker cp` into or out of a protected path;
+- `cp -s` / `cp -as`;
+- `bwrap --bind` and `systemd-nspawn --bind`;
+- `podman --rootfs`;
+- `--volumes-from`;
+- `-v /dev`.
