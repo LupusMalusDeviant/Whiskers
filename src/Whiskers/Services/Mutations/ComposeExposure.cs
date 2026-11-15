@@ -582,7 +582,7 @@ public static class ComposeExposures
     public static IReadOnlyList<ComposeExposure>? SocketMounts(string service, JsonElement container)
     {
         if (Property(container, "Mounts") is not { } mounts) return null;
-        if (mounts.ValueKind == JsonValueKind.Null) return [];
+        if (mounts.ValueKind == JsonValueKind.Null) return [];   // by intent: "Mounts": null is a container without mounts
         if (mounts.ValueKind != JsonValueKind.Array) return null;
         var found = new List<ComposeExposure>();
         foreach (var mount in mounts.EnumerateArray())

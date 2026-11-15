@@ -12,9 +12,9 @@ public sealed partial class ComposeExposureTests
 {
     private const string ProjectDirectory = "/opt/deployments/x";
 
-    /// <summary>What a plan decides for one compose file: the model's reading united with what
-    /// <c>docker compose config --format json</c> printed for it (<paramref name="config"/>: the output of Docker
-    /// Compose v5.6.1 for exactly <paramref name="yaml"/>), the way <see cref="ComposePlanner"/> unites them.</summary>
+    /// <summary>What a plan decides for one compose file: the model's reading united with
+    /// <paramref name="config"/>, a <c>docker compose config</c> model for the file (<paramref name="yaml"/>), the way
+    /// <see cref="ComposePlanner"/> unites them.</summary>
     private static ComposePlan Planned(string yaml, string config)
     {
         var prefixes = GuardrailPolicy.DefaultExposureLabelPrefixes;
