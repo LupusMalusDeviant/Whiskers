@@ -15,6 +15,20 @@ public class EnvMaskingTests
     [InlineData("BASE_URL", "https://example.com:8080/api", false)] // port (not creds); URL is not a keyword
     [InlineData("GREETING", "hello", false)]
     [InlineData("HOST", "db.internal", false)]
+    // Contract 0017 D: PASS and PWD in a key, and connection-string password pairs in a value.
+    [InlineData("DB_PASS", "x", true)]
+    [InlineData("SMTP_PASS", "x", true)]
+    [InlineData("MYSQL_PWD", "x", true)]
+    [InlineData("MYSQL_ROOT_PASSWD", "x", true)]
+    [InlineData("ConnectionStrings__Db", "Host=db;Database=app;Username=app;Password=s3cr3t", true)]
+    [InlineData("ODBC", "Driver={x};Server=db;Uid=app;Pwd=s3cr3t;", true)]
+    [InlineData("ConnectionStrings__Cache", "localhost:6379,abortConnect=false", false)]
+    [InlineData("JDBC_OPTS", "-Djavax.net.ssl.trustStorePassword=s3cr3t", true)]
+    [InlineData("ConnectionStrings__Pg", "Host=db;SslPassword=s3cr3t", true)]
+    [InlineData("KAFKA_OPTS", "ssl.keyPassword=s3cr3t", true)]
+    // The shell's working directories are no secret.
+    [InlineData("PWD", "/app", false)]
+    [InlineData("OLDPWD", "/", false)]
     public void ShouldMask(string key, string value, bool expected)
         => Assert.Equal(expected, EnvMasking.ShouldMask(key, value));
 

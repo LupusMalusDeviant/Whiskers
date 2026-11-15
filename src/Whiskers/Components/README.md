@@ -8,7 +8,7 @@ User-facing strings here are German (the product's UI language); in-code comment
 
 | File | Purpose |
 |---|---|
-| `App.razor` | Root HTML document / host page for the Blazor app. |
+| `App.razor` | Root HTML document / host page for the Blazor app. Carries no inline script (CSP `script-src 'self'`, contract 0017 F2): the theme bootstrap is `wwwroot/js/theme-init.js` (blocking, in `<head>`), the service-worker registration `wwwroot/js/sw-register.js`. |
 | `Routes.razor` | Router, maps URLs to page components and applies the layout. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
 | `PageReads.cs` | The role of each read a page guards itself (not capabilities): `migrate:status`, `nginx -t`, the container diff's environment. Every role in front of a capability comes from `CapabilityCatalog.RoleOf` instead (INV-13, `PageRoleScanTests`). |

@@ -136,7 +136,8 @@ public sealed class EndpointCheckStore : IEndpointCheckStore
             .Where(c => c.Id == id && c.Enabled && c.OwnerId == expectedOwnerId)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(c => c.Enabled, false)
-                .SetProperty(c => c.SuspendedReason, reason)
+                // A bulk update passes the save interceptor by: redacted here (INV-51, contract 0017 C1).
+                .SetProperty(c => c.SuspendedReason, Whiskers.Utils.SinkRedaction.Text(reason))
                 .SetProperty(c => c.UpdatedUtc, now), ct) > 0;
     }
 

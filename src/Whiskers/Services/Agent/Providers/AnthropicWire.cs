@@ -102,7 +102,7 @@ public static class AnthropicRequestMapper
                             ["type"] = "tool_use",
                             ["id"] = c.Id,
                             ["name"] = c.Name,
-                            ["input"] = JsonNode.Parse(string.IsNullOrWhiteSpace(c.ArgumentsJson) ? "{}" : c.ArgumentsJson),
+                            ["input"] = ToolCallArguments.ToObject(c.ArgumentsJson),
                         });
                     return new JsonObject { ["role"] = "assistant", ["content"] = content };
                 }

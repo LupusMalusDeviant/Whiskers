@@ -701,3 +701,7 @@ code, pre, .monospace {
     .sw-help-toc-item { width: auto; }
     .sw-help-content { max-width: 100%; }
 }
+
+/* Floating AI chat button (AiChat.razor): the hover zoom, formerly inline onmouseover/onmouseout handlers, which the
+   CSP (script-src 'self') blocks. */
+.sw-chat-fab:hover { transform: scale(1.06); }
