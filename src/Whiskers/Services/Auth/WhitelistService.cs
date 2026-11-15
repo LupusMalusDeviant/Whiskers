@@ -199,7 +199,7 @@ public class WhitelistService : IWhitelistService, IInitializable
         return true;
     }
 
-    public async Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default)
+    public async Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default, WhitelistWriteReceipt? receipt = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
         ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
@@ -218,7 +218,7 @@ public class WhitelistService : IWhitelistService, IInitializable
             AddedForAccounts = record.Count == 0 ? null : record
         };
         RequireDecision("account.delete", "account.create");   // account.create: the undo of a failed creation
-        await WriteAsync(lease, before, next, ct);
+        await WriteAsync(lease, before, next, ct, receipt);
         _logger.LogInformation("The whitelist entry of a deleted local account was removed");
         return true;
     }
@@ -244,7 +244,8 @@ public class WhitelistService : IWhitelistService, IInitializable
     /// <summary>One write of the local-account entries, under the held gate: bindings pruned first when the listed
     /// addresses change (contract 0003, rule 5 and amendment c; a failed prune throws, nothing written), persisted, then
     /// published and recorded in the caller's gateway operation (R1-22).</summary>
-    private async Task WriteAsync(AccessControlWriteGate.Lease lease, WhitelistData before, WhitelistData next, CancellationToken ct)
+    private async Task WriteAsync(AccessControlWriteGate.Lease lease, WhitelistData before, WhitelistData next, CancellationToken ct,
+        WhitelistWriteReceipt? receipt = null)
     {
         _gate.Demand(lease);
         if (_bindings is not null
@@ -252,6 +253,8 @@ public class WhitelistService : IWhitelistService, IInitializable
                 || Listed(next).Except(Listed(before), StringComparer.OrdinalIgnoreCase).Any()))
             await _bindings.PruneOrphansAsync(lease, nextWhitelist: next, ct: ct);
         await _store.SaveAsync(next);
+        // Persisted: whatever fails after this, the caller knows the write happened (contract 0017 H3 undo).
+        if (receipt is not null) receipt.Persisted = true;
         SetCache(next);
         Whiskers.Services.Mutations.ConfigChange.Record("whitelist", before, next);
     }

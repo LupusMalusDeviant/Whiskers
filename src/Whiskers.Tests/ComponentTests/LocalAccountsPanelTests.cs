@@ -121,6 +121,19 @@ public class LocalAccountsPanelTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_call_refused_before_any_write_does_not_ask_the_page_to_reload()
+    {
+        // Review N1: an invalid address is refused by the service's checks before anything is written.
+        var changes = 0;
+        var cut = RenderAs(await _world.SessionOfAsync(LocalAccountWorld.Root), () => changes++);
+
+        Set(cut, "_newEmail", "not-an-address");
+        await Invoke(cut, "Create");
+
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
     public async Task A_non_admin_sees_nothing()
     {
         await _world.AddUserAsync("viewer@local.test", AppRole.Viewer);

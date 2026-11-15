@@ -275,15 +275,15 @@ public sealed class LocalAccountService : ILocalAccountService
 
             // Contract 0017 H3: the whitelist entry this account's creation added goes too (an address listed before, or
             // changed by hand since, stays). A failed removal undoes the deletion, as a failed role removal would.
-            // Whether this account's record names the entry now: only then may a failure put an entry back (a removal
-            // that persisted before it threw), never an address the account never had.
-            var hadEntry = _whitelist is not null
-                && string.Equals(RecordOf(_whitelist.GetWhitelist(), target), user.Id, StringComparison.Ordinal);
+            // A failure puts the entry back only when the removal demonstrably reached whitelist.json (the receipt is set
+            // under the gate): a removal cancelled or refused before it wrote leaves the whitelist as it is now — also
+            // when another Admin removed the entry by hand while this one waited.
+            var receipt = new WhitelistWriteReceipt();
             var removedEntry = false;
-            try { removedEntry = _whitelist is not null && await _whitelist.RemoveLocalAccountEntryAsync(target, user.Id, ct); }
+            try { removedEntry = _whitelist is not null && await _whitelist.RemoveLocalAccountEntryAsync(target, user.Id, ct, receipt); }
             catch
             {
-                await RestoreEntryAsync(target, user.Id, hadEntry);
+                await RestoreEntryAsync(target, user.Id, receipt.Persisted);
                 await RestoreRoleAsync(target, removedRole);
                 throw;
             }
@@ -353,9 +353,6 @@ public sealed class LocalAccountService : ILocalAccountService
                 Whiskers.Utils.LogSafe.Account(email), ex.GetType().Name);
         }
     }
-
-    private static string? RecordOf(WhitelistData whitelist, string email) =>
-        whitelist.AddedForAccounts?.FirstOrDefault(r => SameEmail(r.Key, email)).Value;
 
     /// <summary>Takes back the whitelist entry a creation that then failed had written (contract 0017 H2); nothing
     /// without this account's record.</summary>

@@ -20,7 +20,7 @@ public sealed class FederatedSignInTests
         public Task SaveWhitelistAsync(WhitelistData data) => Task.CompletedTask;
         public Task AddFirstAdminAsync(string email, Whiskers.Services.Auth.AccessControlWriteGate.Lease lease) => throw new NotSupportedException();
         public Task<bool> AddLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default, WhitelistWriteReceipt? receipt = null) => throw new NotSupportedException();
         public Task RestoreLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
     }
 

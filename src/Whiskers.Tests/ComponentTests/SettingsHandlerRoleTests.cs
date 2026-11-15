@@ -156,6 +156,22 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Below_admin_the_whitelist_reload_reads_nothing()
+    {
+        // Review N4: the page loads no whitelist into a non-Admin's circuit, and the reload keeps it that way.
+        var page = Render<Settings>();   // a Viewer
+        _whitelist.Data = new WhitelistData { Enabled = true, Emails = ["root@local.test"] };
+
+        await page.InvokeAsync(() =>
+            typeof(Settings).GetMethod("ReloadWhitelist", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(page.Instance, null));
+
+        var buffer = (List<string>)typeof(Settings)
+            .GetField("_whitelistEmails", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page.Instance)!;
+        Assert.Empty(buffer);
+        Assert.Equal(0, _whitelist.Reads);
+    }
+
+    [Fact]
     public void The_local_accounts_panel_on_the_settings_page_triggers_the_reload()
     {
         var source = File.ReadAllText(Path.Combine(DeploymentScripts.RepoRoot(), "src", "Whiskers", "Components", "Pages", "Settings.razor"));
@@ -168,11 +184,16 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
         public WhitelistData Data { get; set; } = new();
         public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
         public bool IsEmailAllowed(string? email) => false;
-        public WhitelistData GetWhitelist() => new() { Enabled = Data.Enabled, Emails = [.. Data.Emails] };
+        public int Reads { get; private set; }
+        public WhitelistData GetWhitelist()
+        {
+            Reads++;
+            return new() { Enabled = Data.Enabled, Emails = [.. Data.Emails] };
+        }
         public Task SaveWhitelistAsync(WhitelistData data) => throw new NotSupportedException();
         public Task AddFirstAdminAsync(string email, AccessControlWriteGate.Lease lease) => throw new NotSupportedException();
         public Task<bool> AddLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default, WhitelistWriteReceipt? receipt = null) => throw new NotSupportedException();
         public Task RestoreLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => throw new NotSupportedException();
     }
 

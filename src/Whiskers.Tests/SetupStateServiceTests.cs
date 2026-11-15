@@ -125,7 +125,7 @@ public sealed class SetupStateServiceTests : IDisposable
         public WhitelistData GetWhitelist() => inner.GetWhitelist();
         public Task SaveWhitelistAsync(WhitelistData data) => inner.SaveWhitelistAsync(data);
         public Task<bool> AddLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => inner.AddLocalAccountEntryAsync(email, accountId, ct);
-        public Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => inner.RemoveLocalAccountEntryAsync(email, accountId, ct);
+        public Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default, WhitelistWriteReceipt? receipt = null) => inner.RemoveLocalAccountEntryAsync(email, accountId, ct, receipt);
         public Task RestoreLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default) => inner.RestoreLocalAccountEntryAsync(email, accountId, ct);
         public async Task AddFirstAdminAsync(string email, AccessControlWriteGate.Lease lease)
         {

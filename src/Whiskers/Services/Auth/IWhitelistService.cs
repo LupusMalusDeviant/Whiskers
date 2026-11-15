@@ -41,8 +41,9 @@ public interface IWhitelistService
     /// </summary>
     /// <remarks>All three local-account writes throw <see cref="InvalidOperationException"/>, with nothing written, when
     /// they would change the whitelist outside a gateway scope that decided their account operation (INV-46: no
-    /// whitelist write without its event). A call that changes nothing needs no decision.</remarks>
-    Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default);
+    /// whitelist write without its event). A call that changes nothing needs no decision. <paramref name="receipt"/>,
+    /// when given, records whether the removal was persisted, also when the call then throws.</remarks>
+    Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default, WhitelistWriteReceipt? receipt = null);
 
     /// <summary>
     /// Contract 0017 H3: puts back an entry <see cref="RemoveLocalAccountEntryAsync"/> removed for a deletion that then
@@ -50,4 +51,16 @@ public interface IWhitelistService
     /// Its only caller is <c>LocalAccountService.DeleteAsync</c> (pinned).
     /// </summary>
     Task RestoreLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Contract 0017 H3 (review): whether a local-account whitelist removal was persisted — also when the call then throws.
+/// A deletion that fails after its whitelist removal puts the entry back only when this says the removal was written,
+/// never because of what the whitelist looked like before the call (another Admin may have removed the entry by hand
+/// while the removal waited for the gate).
+/// </summary>
+public sealed class WhitelistWriteReceipt
+{
+    /// <summary>True once the write reached <c>whitelist.json</c>.</summary>
+    public bool Persisted { get; internal set; }
 }

@@ -151,15 +151,13 @@
         var role = _newRole;
         _issued = null;
         var result = await RunAsync(() => Mutations.RunAsync("account.create", new { account = email, role = role.ToString() },
-            (ResolvedNew rt, CancellationToken ct) => Accounts.CreateAsync(email, role, ct)));
+            (ResolvedNew rt, CancellationToken ct) => Accounts.CreateAsync(email, role, ct)), whitelistMayChange: true);
         if (result is { Success: true, RecoveryCode: { } code, RecoveryExpiresUtc: { } expires })
         {
             _issued = new Issued(email, code, expires);
             _newEmail = "";
             Snackbar.Add(L["LocalAccounts_Snackbar_Created", email].Value, Severity.Success);
         }
-        await LoadAsync();
-        await AccountsChanged.InvokeAsync();
     }
 
     private async Task Reset(string email)
@@ -172,7 +170,6 @@
             _issued = new Issued(email, code, expires);
             Snackbar.Add(L["LocalAccounts_Snackbar_Reset", email].Value, Severity.Success);
         }
-        await LoadAsync();
     }
 
     private async Task Delete(string email)
@@ -180,29 +177,46 @@
         _issued = null;
         _confirmDelete = null;
         var result = await RunAsync(() => Mutations.RunAsync("account.delete", new { account = email },
-            (ResolvedRecord rt, CancellationToken ct) => Accounts.DeleteAsync(rt.Id, ct)));
+            (ResolvedRecord rt, CancellationToken ct) => Accounts.DeleteAsync(rt.Id, ct)), whitelistMayChange: true);
         if (result is { Success: true }) Snackbar.Add(L["LocalAccounts_Snackbar_Deleted", email].Value, Severity.Success);
-        await LoadAsync();
-        await AccountsChanged.InvokeAsync();
     }
 
-    /// <summary>Runs one gated call and shows why it was refused; the result only when it succeeded.</summary>
-    private async Task<LocalAccountResult?> RunAsync(Func<Task<LocalAccountResult>> call)
+    /// <summary>Runs one gated call and shows why it was refused; the result only when it succeeded. Whatever happens,
+    /// the list is reloaded afterwards — and, for a call that may change the whitelist (contract 0017 H2/H3) and got
+    /// past the checks that come before any write, <see cref="AccountsChanged"/> is raised so the page reloads its
+    /// whitelist editor.</summary>
+    private async Task<LocalAccountResult?> RunAsync(Func<Task<LocalAccountResult>> call, bool whitelistMayChange = false)
     {
         _busy = true;
+        // A refusal before anything ran (the gateway's, or the service's own checks) changes nothing; a call that ran
+        // its writes — succeeded, failed after them (Conflict), or threw — may have.
+        var mayHaveWritten = true;
         try
         {
             var result = await call();
-            if (!result.Success) Snackbar.Add(ErrorText(result), Severity.Warning);
+            if (!result.Success)
+            {
+                Snackbar.Add(ErrorText(result), Severity.Warning);
+                mayHaveWritten = result.Error == LocalAccountErrors.Conflict;
+            }
             return result;
         }
-        catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        catch (MutationRefusedException ex)
+        {
+            mayHaveWritten = false;
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
         catch (Exception ex) when (ex is MutationFailedException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             // The type only: the message of a store failure is not shown (it is in the log).
             Snackbar.Add(L["LocalAccounts_Error_failed", ex.GetType().Name].Value, Severity.Error);
         }
-        finally { _busy = false; }
+        finally
+        {
+            _busy = false;
+            await LoadAsync();
+            if (whitelistMayChange && mayHaveWritten) await AccountsChanged.InvokeAsync();
+        }
         return null;
     }
 

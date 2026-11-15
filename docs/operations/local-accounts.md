@@ -69,8 +69,14 @@ listed cannot sign in, just like a Google or OIDC user.
   disabled in the meantime (the address stays in the stored list until then).
 - A record whose account vanished outside Whiskers (for example a database restored from an older backup) keeps its
   stale account id; the entry then stays until an Admin removes it by hand.
-- The whitelist editor in *Settings → Authentication* reloads after every account added or deleted on the same page,
-  so saving it never undoes these changes.
+- The whitelist editor in *Settings → Authentication* reloads after every account added or deleted **on the same
+  page**, so saving it there does not undo these changes. Another browser tab or another Admin with an older copy of
+  the list can still save it over them: the last save wins (as before 1.0.1; a version check is planned for 1.1.0).
+  Reload *Settings* before editing the whitelist after accounts changed elsewhere.
+- If a creation fails after its whitelist entry was written and the entry cannot be taken back either, the entry
+  stays (the error is logged); remove it in *Settings → Authentication*.
+- If a deletion fails after its whitelist entry was removed, the entry is put back — only when the removal was
+  really written, never because of what the list looked like before.
 - Whiskers keeps the record of which entries it added next to the list in `whitelist.json` (`AddedForAccounts`,
   address → account id). Saving the whitelist in *Settings → Authentication* keeps the record of every address that
   stays listed.

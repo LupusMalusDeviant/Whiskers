@@ -305,6 +305,44 @@ public sealed class WhitelistLocalAccountEntryTests
     }
 
     [Fact]
+    public async Task A_removal_cancelled_before_the_gate_never_re_lists_an_address_removed_by_hand_meanwhile()
+    {
+        // Review M1: the removal never wrote (cancelled while it waited for the gate); another Admin removed the entry by
+        // hand in the meantime. The undo must not put the address back — only a persisted removal is undone.
+        await using var world = await EnabledAsync();
+        Assert.True((await CreateAsync(world, New)).Success);
+        var id = await AccountIdAsync(world, New);
+        var racing = new FailingWhitelist(world.Whitelist) { HandRemovalThenCancel = true };
+
+        await Assert.ThrowsAnyAsync<Exception>(() => DeleteAsync(world, New, whitelist: racing));
+
+        Assert.Equal([LocalAccountWorld.Root], world.Whitelist.GetWhitelist().Emails);
+        Assert.False(world.Whitelist.IsEmailAllowed(New));
+        Assert.Equal(id, await AccountIdAsync(world, New));   // the deletion was undone
+        Assert.True(world.Roles.HasExplicitRole(New));
+    }
+
+    [Fact]
+    public async Task The_receipt_says_whether_a_removal_was_persisted()
+    {
+        await using var world = await EnabledAsync();
+        Assert.True((await CreateAsync(world, New)).Success);
+        var id = (await AccountIdAsync(world, New))!;
+
+        var cancelledReceipt = new WhitelistWriteReceipt();
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GatewayArrange.RunAsync("account.delete",
+            () => world.Whitelist.RemoveLocalAccountEntryAsync(New, id, cancelled.Token, cancelledReceipt)));
+        Assert.False(cancelledReceipt.Persisted);
+
+        var receipt = new WhitelistWriteReceipt();
+        Assert.True(await GatewayArrange.RunAsync("account.delete",
+            () => world.Whitelist.RemoveLocalAccountEntryAsync(New, id, receipt: receipt)));
+        Assert.True(receipt.Persisted);
+    }
+
+    [Fact]
     public async Task A_whitelist_carrying_the_record_round_trips_through_a_restart()
     {
         await using var world = await EnabledAsync();
@@ -368,6 +406,7 @@ public sealed class WhitelistLocalAccountEntryTests
         public bool FailRemove { get; init; }
         public bool FailAfterAdd { get; init; }
         public bool FailAfterRemove { get; init; }
+        public bool HandRemovalThenCancel { get; init; }
         public Task InitializeAsync(CancellationToken ct = default) => inner.InitializeAsync(ct);
         public bool IsEmailAllowed(string? email) => inner.IsEmailAllowed(email);
         public WhitelistData GetWhitelist() => inner.GetWhitelist();
@@ -381,10 +420,20 @@ public sealed class WhitelistLocalAccountEntryTests
             return added;
         }
 
-        public async Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default)
+        public async Task<bool> RemoveLocalAccountEntryAsync(string email, string accountId, CancellationToken ct = default, WhitelistWriteReceipt? receipt = null)
         {
             if (FailRemove) throw new IOException("whitelist.json could not be written");
-            var removed = await inner.RemoveLocalAccountEntryAsync(email, accountId, ct);
+            if (HandRemovalThenCancel)
+            {
+                // While this removal waits for the gate, another Admin removes the entry by hand; then the wait is cancelled.
+                var now = inner.GetWhitelist();
+                await inner.SaveWhitelistAsync(new WhitelistData
+                {
+                    Enabled = now.Enabled, Emails = now.Emails.Where(e => !string.Equals(e, email, StringComparison.OrdinalIgnoreCase)).ToList()
+                });
+                throw new OperationCanceledException("cancelled while waiting for the gate");
+            }
+            var removed = await inner.RemoveLocalAccountEntryAsync(email, accountId, ct, receipt);
             if (FailAfterRemove) throw new IOException("failed after the write");
             return removed;
         }
