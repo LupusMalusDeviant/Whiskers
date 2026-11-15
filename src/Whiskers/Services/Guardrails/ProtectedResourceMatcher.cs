@@ -121,6 +121,8 @@ public static class ProtectedResourceMatcher
                     {
                         if (word.StartsWith('/') && AncestorHit(word, pathPatterns) is { } above)
                             return above with { Argument = key, InFreeText = true };
+                        if (shell.Globs.Contains(word) && GlobAncestorHit(word, pathPatterns) is { } globAbove)
+                            return globAbove with { Argument = key, InFreeText = true };
                         // A relative operand (cd /app/data && rm -rf mtls) is judged by the directory it names.
                         if (!word.StartsWith('/') && ProtectedSegment(word, pathPatterns) is { } segment)
                             return new Hit(word, segment) { Argument = key, InFreeText = true };
@@ -532,6 +534,10 @@ public static class ProtectedResourceMatcher
     /// <summary>A word the shell expands as a glob hits when it could expand to a protected name or path.</summary>
     private static Hit? GlobHit(string glob, IReadOnlyList<string> patterns, IReadOnlyList<string> pathPatterns)
     {
+        // A segment with nested or several closing brackets ([[.o.]], [a\]o], [a]o]) is not read reliably: a hit
+        // (S2 round 8, M3).
+        if (pathPatterns.Count > 0 && glob.Split('/').Any(seg => seg.Contains("[[") || (seg.Contains('[') && seg.Count(ch => ch == ']') > 1)))
+            return new Hit(glob, UnreadableGlob);
         var asGlob = BracketsAsAnyCharacter(glob);
         // A glob of nothing but wildcards (the arguments of `rm *`, `count(*)` in quoted SQL) names no resource.
         if (!asGlob.Contains('/') && asGlob.Any(ch => ch is not ('*' or '?')))
@@ -544,11 +550,61 @@ public static class ProtectedResourceMatcher
                 if (GlobsIntersect(asGlob, pattern, starTakesLetters: false)) return new Hit(glob, pattern);
             }
         if (!asGlob.Contains('/')) return null;
-        var path = asGlob.TrimEnd('/');
+        // A relative glob is judged by the protected directory a wildcard segment could be (cd /app/data && cat
+        // mtl?/client.key); the working directory is unknown.
+        if (!asGlob.StartsWith('/'))
+        {
+            foreach (var pattern in pathPatterns)
+            {
+                var name = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(x => x != "*");
+                if (name is not null && asGlob.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(seg => seg.IndexOfAny(['*', '?']) >= 0 && GlobsIntersect(seg, name)))
+                    return new Hit(glob, pattern);
+            }
+            return null;
+        }
+        // Repeated slashes and '.' segments are collapsed; a '..' segment cannot be resolved in a glob: a hit (B17).
+        if (NormalizeGlobPath(asGlob) is not { } path) return pathPatterns.Count > 0 ? new Hit(glob, UnreadableGlob) : null;
         // The protected path itself and everything below it; the pattern's '*' crosses '/', the glob's does not.
         foreach (var pattern in pathPatterns)
             if (GlobsIntersect(path, pattern) || GlobsIntersect(path, pattern.TrimEnd('/') + "/*"))
                 return new Hit(glob, pattern);
+        return null;
+    }
+
+    /// <summary>The pattern a hit names when a glob in a path cannot be read reliably (a <c>..</c> segment, nested
+    /// brackets); it is no control-plane pattern, so not even an interactive Admin can approve it.</summary>
+    public const string UnreadableGlob = "(a glob path that cannot be read reliably)";
+
+    /// <summary>An absolute glob path with repeated slashes and <c>.</c> segments removed; <c>null</c> when a segment is
+    /// <c>..</c>, which only the file system resolves.</summary>
+    private static string? NormalizeGlobPath(string glob)
+    {
+        var parts = new List<string>();
+        foreach (var part in glob.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part == ".") continue;
+            if (part == "..") return null;
+            parts.Add(part);
+        }
+        return "/" + string.Join('/', parts);
+    }
+
+    /// <summary>M4: a glob that could name a directory above a literal protected path (rm -r /var/lib/dock?r,
+    /// chmod -R 000 /var/lib/docker/v*). A '..' segment counts as one.</summary>
+    private static Hit? GlobAncestorHit(string glob, IReadOnlyList<string> pathPatterns)
+    {
+        if (!glob.StartsWith('/')) return null;
+        if (NormalizeGlobPath(BracketsAsAnyCharacter(glob)) is not { } path) return pathPatterns.Count > 0 ? new Hit(glob, UnreadableGlob) : null;
+        foreach (var pattern in pathPatterns)
+        {
+            if (pattern.StartsWith('*')) continue;
+            var segments = pattern.TrimEnd('*').TrimEnd('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (path == "/") return new Hit(glob, pattern);
+            for (var k = 1; k < segments.Length; k++)
+                if (GlobsIntersect(path, "/" + string.Join('/', segments[..k])))
+                    return new Hit(glob, pattern);
+        }
         return null;
     }
 
@@ -591,8 +647,8 @@ public static class ProtectedResourceMatcher
             var j = i + 1;
             if (j < glob.Length && glob[j] is '!' or '^') j++;
             if (j < glob.Length && glob[j] == ']') j++;
-            while (j < glob.Length && glob[j] != ']') j++;
-            if (j >= glob.Length) { result.Append('['); continue; }
+            while (j < glob.Length && glob[j] != ']' && glob[j] != '/') j++;
+            if (j >= glob.Length || glob[j] == '/') { result.Append('['); continue; }
             result.Append('?');
             i = j;
         }
@@ -777,6 +833,7 @@ public static class ProtectedResourceMatcher
                 var roots = segment.TakeWhile(w => !w.StartsWith('-') && w is not "(" and not "!").ToList();
                 unanalyzable = roots.Count == 0 || roots.Any(r => !r.StartsWith('/')
                     || AncestorHit(r, ControlPlaneResources.PathPatterns) is not null
+                    || (globWords.Contains(r) && GlobAncestorHit(r, ControlPlaneResources.PathPatterns) is not null)
                     || Match(NormalizePath(r), ControlPlaneResources.PathPatterns) is not null);
             }
         }
@@ -880,6 +937,7 @@ public static class ProtectedResourceMatcher
     {
         if (depth > MaxShellDepth) return true;
         var unanalyzable = false;
+        var braces = BraceExpansions(text);
         var word = new StringBuilder();
         bool inWord = false, glob = false, quoted = false, escaped = false;
         // Whether the next word is a command word, and whether a prefix (sudo, env …) is still taking its options.
@@ -1007,7 +1065,7 @@ public static class ProtectedResourceMatcher
                     inWord = true;
                     i++;
                     continue;
-                case '{' when BraceExpansion(text, i):
+                case '{' when braces[i]:
                     unanalyzable = true;
                     word.Append(c);
                     inWord = true;
@@ -1044,14 +1102,25 @@ public static class ProtectedResourceMatcher
         text.IndexOfAny([' ', '\t', '\n', ';', '|', '&', '$', '`', '"', '\'', '\\', '{', '<', '>']) >= 0;
 
     // {a,b} and {1..3} are expanded by the shell; a lone brace (find -exec {} \;, awk '{…}' quoted) is not.
-    // The matching brace is found by depth, skipping escaped and quoted characters (whi{{},s}kers, whi{\},s}kers and
-    // whi{'}',s}kers all expand to whiskers); a ',' or '..' anywhere inside it counts. Without a matching brace a ','
-    // or '..' after the opening one counts too (fail-closed).
-    private static bool BraceExpansion(string text, int open)
+    // Decided for every brace of the text in one pass (S2 round 8, B18: a scan per brace was quadratic): the matching
+    // brace is found by depth, skipping escaped and quoted characters (whi{{},s}kers, whi{\},s}kers and whi{'}',s}kers
+    // all expand to whiskers); a ',' or '..' anywhere inside it counts, a nested brace passes its own on to the one
+    // around it. A brace without a match counts when a ',' or '..' follows it before the word ends (fail-closed).
+    private static bool[] BraceExpansions(string text)
     {
-        var depth = 0;
-        var separator = false;
-        for (var i = open; i < text.Length; i++)
+        var result = new bool[text.Length];
+        var open = new List<(int Index, bool Separator)>();
+        void Unmatched()
+        {
+            var separator = false;
+            for (var k = open.Count - 1; k >= 0; k--)
+            {
+                separator |= open[k].Separator;
+                result[open[k].Index] = separator;
+            }
+            open.Clear();
+        }
+        for (var i = 0; i < text.Length; i++)
         {
             var c = text[i];
             if (c == '\\') { i++; continue; }
@@ -1062,12 +1131,20 @@ public static class ProtectedResourceMatcher
                 i = end;
                 continue;
             }
-            if (c is ' ' or '\t' or '\n' or ';' or '|' or '&') break;
-            if (c == '{') depth++;
-            else if (c == '}' && --depth == 0) return separator;
-            else if (c == ',' || (c == '.' && i + 1 < text.Length && text[i + 1] == '.')) separator = true;
+            if (c is ' ' or '\t' or '\n' or ';' or '|' or '&') { Unmatched(); continue; }
+            if (c == '{') open.Add((i, false));
+            else if (c == '}' && open.Count > 0)
+            {
+                var (index, separator) = open[^1];
+                open.RemoveAt(open.Count - 1);
+                result[index] = separator;
+                if (separator && open.Count > 0) open[^1] = (open[^1].Index, true);
+            }
+            else if (open.Count > 0 && (c == ',' || (c == '.' && i + 1 < text.Length && text[i + 1] == '.')))
+                open[^1] = (open[^1].Index, true);
         }
-        return separator;
+        Unmatched();
+        return result;
     }
 
     // SQL that builds a statement at run time, or reaches the file system or a shell.

@@ -816,6 +816,47 @@ public class SelfProtectionTests
     public void Bypasses_from_the_S2_round_7_review_are_refused_for_a_key(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
+    /// <summary>B17, M3, M4, m5: unnormalised glob paths, brackets the shell reads differently, globs on a directory
+    /// above a protected path in a changing command, and relative glob segments.</summary>
+    [Theory]
+    [InlineData("cat /var//run/docker.s?ck")]
+    [InlineData("cat /var/./run/docker.s?ck")]
+    [InlineData("cat /var/run/../run/docker.s?ck")]
+    [InlineData("cat //var/run/docker.s?ck")]
+    [InlineData("curl --unix-socket /var//run/docker.s?ck http://x/containers/json")]
+    [InlineData("ssh host cat '/var//run/docker.s?ck'")]
+    [InlineData("cat /var/lib/docker//volumes/whis?ers_data/_data/vault.key")]
+    [InlineData("ls /var/lib/docker/volumes/../volumes/whis?ers_data")]
+    [InlineData("cat /var/run/docker.s[a\\]o]ck")]
+    [InlineData("cat /var/run/docker.s[[.o.]]ck")]
+    [InlineData("ssh host cat '/var/run/docker.s[[=o=]]ck'")]
+    [InlineData("cat /tmp/[/../../var/run/docker.soc[]k]")]
+    [InlineData("chmod -R 000 /var/lib/docker/v*")]
+    [InlineData("mv /var/lib/dock?r /tmp/x")]
+    [InlineData("mv /var/ru? /tmp/x")]
+    [InlineData("rm -r /var/lib/dock?r")]
+    [InlineData("chown -R nobody /var/lib/dock?r")]
+    [InlineData("find /var/lib/dock?r -delete")]
+    [InlineData("cd /app/data && cat mtl?/client.key")]
+    public void Bypasses_from_the_S2_round_8_review_are_refused_for_a_key(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
+    /// <summary>B18: braces up to the cap are decided in one pass, not one scan per brace.</summary>
+    [Theory]
+    [InlineData("{")]
+    [InlineData("{a")]
+    [InlineData("{{}}")]
+    public void Many_braces_up_to_the_limit_are_decided_quickly(string unit)
+    {
+        var body = string.Concat(Enumerable.Repeat(unit, (64 * 1024 - 10) / unit.Length));
+        foreach (var command in new[] { "echo " + body, "echo '" + body + "'", "sh -c 'sh -c \"echo " + body[..^20] + "\"'" })
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            ExecuteCommandAsAdminKey(command);
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"{command.Length} characters took {watch.Elapsed}");
+        }
+    }
+
     /// <summary>m3: glob words up to the cap are decided in time that grows with the command, not its square.</summary>
     [Fact]
     public void Many_glob_words_up_to_the_limit_are_decided_quickly()
@@ -840,6 +881,9 @@ public class SelfProtectionTests
     [InlineData("docker ps --format '{{.Names}},{{.Status}}'")]
     [InlineData("docker inspect -f '{{range.Mounts}}{{.Source}},{{end}}' app")]
     [InlineData("ls /srv/app/*.conf")]
+    [InlineData("rm -f /srv/app/logs/*.log")]
+    [InlineData("chmod 644 /srv/app/conf/*.yml")]
+    [InlineData("cat ./logs/app-?.log")]
     [InlineData("tar -czf /backup/logs.tgz --exclude='*.tmp' /var/log")]
     public void Quoted_patterns_that_name_nothing_protected_stay_allowed_for_a_key(string command) =>
         Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));

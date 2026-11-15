@@ -530,10 +530,17 @@ The rule ignores the command word, so these are refused for a key too. This is f
   `bash -c '{docker,stop,whiskers}'` is unanalysable; a quoted or escaped glob is tested as a glob
   (`ssh host rm '/var/lib/docker/volumes/whisk*'`);
 - round 7: a brace is matched by depth, skipping escaped and quoted characters, so `whi{{},s}kers`, `whi{\},s}kers`
-  and `whi{'}',s}kers` are unanalysable; a bracket expression is read as the shell reads it (`docker.soc[]k]`). A glob
+  and `whi{'}',s}kers` are unanalysable; every brace of a text is decided in one pass, so the time stays linear. A bracket expression
+  ends at its first `]` after a leading `]` (`docker.soc[]k]`) and never crosses `/`; a segment with `[[` or with
+  more than one `]` (`[[.o.]]`, `[a]o]`) counts as a hit (round 8). A glob
   in a path is tested against each protected path and everything below it as a real intersection of the two patterns
   (the glob's `*` and `?` stay within a segment, the pattern's `*` does not), in any segment and under a compose
-  prefix (`…/whis?ers_data/_data/vault.key`, `…/proj_whis[k]ers_data`); time is the product of the two lengths. A glob
+  prefix (`…/whis?ers_data/_data/vault.key`, `…/proj_whis[k]ers_data`); for each glob the time is the product of its
+  length and the pattern's. Repeated slashes and `.` segments are collapsed first; a `..` segment in a glob path counts
+  as a hit (round 8). In a command that changes or removes what it names (`rm`, `mv`, `chmod`, `chown`, `find …
+  -delete`), a glob that could name a directory above a protected path is a hit (`rm -r /var/lib/dock?r`,
+  `chmod -R 000 /var/lib/docker/v*`). A relative glob is a hit when a wildcard segment could be a protected
+  directory (`cd /app/data && cat mtl?/client.key`). A glob
   without `/` (a name) hits when it could spell a protected name with its `?` and `[…]` standing for letters, or when
   it matches the name's stem (`whis*`); its `*` does not stand for the protected letters, so `*.log` hits nothing.
   `fish -c` is unanalysable (fish substitutes commands with plain parentheses). A remote shell reached through `ssh` is
@@ -541,7 +548,8 @@ The rule ignores the command word, so these are refused for a key too. This is f
 - a quote inside double quotes (`echo "it's fine"`), a mount source with a space (`-v '/srv/my dir':/d`) and
   `docker compose -f … up` are refused for a key too, and so are quoted globs and programs that could reach a
   protected name or path the same way an unquoted one does: `find /etc -name 's*'`, `systemctl status 'nginx*'`,
-  `du -sh '/var/log/*'`, `ls '/srv/*/config.yml'`, `jq '{a:.x,b:.y}' f`.
+  `du -sh '/var/log/*'`, `ls '/srv/*/config.yml'`, `jq '{a:.x,b:.y}' f`, `ls /var/lib/docker/volumes/a*` (it could be
+  `a_whiskers…`).
 
 These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv ./a ./b`, `awk -v x=./y`, `grep -v foo`,
 `scp ./a host:/b`, `docker exec app cp -rv ./a ./b`, `-v /srv/app:/app:ro` and named volumes.
@@ -556,7 +564,8 @@ These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv 
 - relative paths outside a mount (`cat ../var/run/docker.sock`, `cat ~/../var/run/docker.sock`): the working directory
   is unknown, so only mount sources are decided by how they are written;
 - a name glob whose `*` stands for protected letters under a compose prefix (`proj_whis*` in the working directory),
-  zsh globs and extglob forms (`whis(k)ers`, `@(k)`), and a non-POSIX login shell behind `ssh`;
+  zsh globs and extglob forms (`whis(k)ers`, `@(k)`), a non-POSIX login shell behind `ssh` or `su -c`, and other
+  non-POSIX shells run with `-c` (`nu`, `xonsh`, `rc`, `es`);
 - the classes that need a real shell parser rather than a word reader: command words hidden behind option values of
   prefixes (`sudo -u`, `env -u`, `exec -a`, `flock`, `chroot`, `timeout -s`), functions and aliases defined in the
   same text, redirections between words, and nested shells beyond four levels. Round 4 does not rely on reading
