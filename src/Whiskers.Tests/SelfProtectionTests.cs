@@ -589,6 +589,8 @@ public class SelfProtectionTests
     [Theory]
     [InlineData("docker run -v /srv/app:/app alpine ls")]
     [InlineData("docker run -v data:/var/run alpine ls")]                              // a named volume
+    [InlineData("echo SRC=./build")]                                                   // not Docker's lower-case key
+    [InlineData("export MYSRC=/var/run")]                                              // not a key of its own
     public void A_key_may_still_mount_an_ordinary_directory_through_execute_command(string command) =>
         Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 

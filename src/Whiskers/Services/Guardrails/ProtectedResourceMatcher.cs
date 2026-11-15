@@ -324,26 +324,25 @@ public static class ProtectedResourceMatcher
 
         static string BeforeColon(string value) => value.IndexOf(':') is var colon and >= 0 ? value[..colon] : value;
 
-        // In each comma-separated part, the value after the first source / src / device key, wherever it stands
-        // (--mount=src=…, volume-opt=device=…, --opt=device=…).
+        // The value of a source= / src= / device= key (Docker's keys, lower case only) that starts a comma-separated
+        // part of the word, also after volume-opt= or a flag's own = (--mount=src=…, --opt=device=…, -o=device=…).
+        // Another word's key (make SRC=…, MYSRC=…) is no mount source.
         static IEnumerable<string> KeyedSources(string word)
         {
             if (!word.Contains('=')) yield break;
-            foreach (var option in word.Split(','))
+            foreach (var part in word.Split(','))
             {
-                var parts = option.Split('=');
-                for (var p = 0; p < parts.Length - 1; p++)
-                    if (parts[p].Trim().TrimStart('-') is var name
-                        && (name.Equals("source", StringComparison.OrdinalIgnoreCase)
-                            || name.Equals("src", StringComparison.OrdinalIgnoreCase)
-                            || name.Equals("device", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        yield return string.Join('=', parts[(p + 1)..]).Trim();
-                        break;
-                    }
+                var option = part;
+                while (KeyPrefixes.FirstOrDefault(p => option.StartsWith(p, StringComparison.Ordinal)) is { } prefix)
+                    option = option[prefix.Length..];
+                if (SourceKeys.FirstOrDefault(k => option.StartsWith(k, StringComparison.Ordinal)) is { } sourceKey)
+                    yield return option[sourceKey.Length..];
             }
         }
     }
+
+    private static readonly string[] SourceKeys = ["source=", "src=", "device="];
+    private static readonly string[] KeyPrefixes = ["volume-opt=", "--mount=", "--opt=", "-o="];
 
     /// <summary>The value attached to <c>-v</c> or to a short-flag cluster ending in <c>v</c> (<c>-v/src:dst</c>,
     /// <c>-itv/src:dst</c>, <c>-v=src:dst</c>, <c>-v./x:/y</c>, <c>-v~/x:/y</c>), as Docker's flag parser reads it: the

@@ -231,6 +231,8 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "docker run -itv/srv/app:/app alpine ls")]
     [InlineData("command", "docker volume create -o type=none -o o=bind -o device=/srv/data x")]
     [InlineData("command", "docker run --mount type=volume,volume-opt=device=/srv/data,dst=/d alpine ls")]
+    [InlineData("command", "echo SRC=./build")]                               // not Docker's lower-case key
+    [InlineData("command", "export MYSRC=/var/run")]                          // a key must start the word or a part
     [InlineData("command", "docker run --mount type=bind,source=/srv/app,target=/app alpine ls")]
     [InlineData("command", "docker run -v data:/var/run alpine ls")]          // a named volume; the container side
     [InlineData("yaml", "services:\n  t:\n    ports: [\"${PORT:-8080}:80\"]\n    volumes:\n      - ${DATA:-./data}:/data\n")]
