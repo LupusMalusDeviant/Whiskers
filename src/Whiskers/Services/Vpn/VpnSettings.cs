@@ -12,7 +12,7 @@ public class VpnSettings
     /// <summary>Active provider: "none" (VPN on host/sidecar), "tailscale", or "netbird".</summary>
     public string Provider { get; set; } = "none";
 
-    /// <summary>Hostname to register on the mesh. Falls back to the container hostname.</summary>
+    /// <summary>Hostname to register on the mesh. Empty or whitespace counts as unset and falls back to the container hostname.</summary>
     public string? Hostname { get; set; }
 
     /// <summary>
