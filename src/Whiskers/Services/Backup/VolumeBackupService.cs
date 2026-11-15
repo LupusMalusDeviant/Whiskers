@@ -47,48 +47,67 @@ public class VolumeBackupService : IVolumeBackupService
     {
         var sid = OmittedServer.For<IVolumeBackupService>(serverId);   // the declared fallback the scope guard resolves too
         ValidateName(volumeName, "volume name");
-        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        var fileName = $"{volumeName}_{timestamp}.tar.gz";
+        // A random suffix keeps two backups of one volume within one second apart: a shared name would let the second
+        // overwrite the first's archive and the deletion of either remove the other's file.
+        var fileName = NewFileName(volumeName, DateTime.UtcNow);
 
         // Ensure backup directory exists
         await _executor.ExecuteAsync(sid, $"mkdir -p {ShellUtils.Quote(_backupDir)}", TimeSpan.FromSeconds(5));
 
-        // Create backup using a temporary alpine container
-        var result = await _executor.ExecuteAsync(sid,
-            $"docker run --rm -v {ShellUtils.Quote(volumeName + ":/data")} -v {ShellUtils.Quote(_backupDir + ":/backup")} {BackupImage} tar czf {ShellUtils.Quote("/backup/" + fileName)} -C /data . 2>&1",
-            TimeSpan.FromMinutes(10));
-
-        if (!result.Success)
-            throw new Exception($"Backup failed: {result.Output} {result.Error}");
-
-        // Get file size
-        var sizeResult = await _executor.ExecuteAsync(sid,
-            $"stat -c %s {ShellUtils.Quote(_backupDir + "/" + fileName)}",
-            TimeSpan.FromSeconds(5));
-
-        long sizeBytes = 0;
-        if (sizeResult.Success)
-            long.TryParse(sizeResult.Output.Trim(), out sizeBytes);
-
-        // Save metadata
-        var entity = new VolumeBackupEntity
+        VolumeBackupEntity entity;
+        try
         {
-            VolumeName = volumeName,
-            ContainerName = containerName,
-            ServerId = sid,
-            FileName = fileName,
-            SizeBytes = sizeBytes,
-            Notes = notes
-        };
+            // Create backup using a temporary alpine container
+            var result = await _executor.ExecuteAsync(sid,
+                $"docker run --rm -v {ShellUtils.Quote(volumeName + ":/data")} -v {ShellUtils.Quote(_backupDir + ":/backup")} {BackupImage} tar czf {ShellUtils.Quote("/backup/" + fileName)} -C /data . 2>&1",
+                TimeSpan.FromMinutes(10));
 
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
-        db.VolumeBackups.Add(entity);
-        await db.SaveChangesAsync();
+            if (!result.Success)
+                throw new Exception($"Backup failed: {result.Output} {result.Error}");
 
-        _logger.LogInformation("Volume backup created: {Volume} → {File} ({Size} bytes)", volumeName, fileName, sizeBytes);
+            // Get file size
+            var sizeResult = await _executor.ExecuteAsync(sid,
+                $"stat -c %s {ShellUtils.Quote(_backupDir + "/" + fileName)}",
+                TimeSpan.FromSeconds(5));
+
+            long sizeBytes = 0;
+            if (sizeResult.Success)
+                long.TryParse(sizeResult.Output.Trim(), out sizeBytes);
+
+            // Save metadata
+            entity = new VolumeBackupEntity
+            {
+                VolumeName = volumeName,
+                ContainerName = containerName,
+                ServerId = sid,
+                FileName = fileName,
+                SizeBytes = sizeBytes,
+                Notes = notes
+            };
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
+            db.VolumeBackups.Add(entity);
+            await db.SaveChangesAsync();
+        }
+        catch
+        {
+            // Without a record nothing lists or prunes the archive: a partial (or unrecorded) file is removed. The name
+            // is this backup's own (random suffix), so no other backup's file can be hit.
+            var cleanup = await _executor.ExecuteAsync(sid,
+                $"rm -f {ShellUtils.Quote(_backupDir + "/" + fileName)}", TimeSpan.FromSeconds(10));
+            if (!cleanup.Success)
+                _logger.LogWarning("Failed volume backup: its archive {File} on {Server} could not be removed", fileName, sid);
+            throw;
+        }
+
+        _logger.LogInformation("Volume backup created: {Volume} → {File} ({Size} bytes)", volumeName, fileName, entity.SizeBytes);
         return entity;
     }
+
+    /// <summary><c>&lt;volume&gt;_&lt;yyyyMMdd_HHmmss&gt;_&lt;8 hex&gt;.tar.gz</c>: sortable by time, unique per backup.</summary>
+    internal static string NewFileName(string volumeName, DateTime utcNow)
+        => $"{volumeName}_{utcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid().ToString("N")[..8]}.tar.gz";
 
     public async Task RestoreVolumeAsync(string backupId, string? targetVolume = null)
     {
@@ -160,9 +179,14 @@ public class VolumeBackupService : IVolumeBackupService
 
         // Delete file
         ValidateName(backup.FileName, "backup file name");
-        await _executor.ExecuteAsync(backup.ServerId,
+        var removed = await _executor.ExecuteAsync(backup.ServerId,
             $"rm -f {ShellUtils.Quote(_backupDir + "/" + backup.FileName)}",
             TimeSpan.FromSeconds(5));
+        // The record goes only with its file: a failed rm keeps it listed (and deletable again) instead of leaving an
+        // archive on the host that nothing lists or prunes.
+        if (!removed.Success)
+            throw new Exception($"Backup '{backupId}' was not deleted: its archive {backup.FileName} could not be removed " +
+                                $"(exit {removed.ExitCode}). {removed.Error}".TrimEnd());
 
         // Delete metadata
         db.VolumeBackups.Remove(backup);

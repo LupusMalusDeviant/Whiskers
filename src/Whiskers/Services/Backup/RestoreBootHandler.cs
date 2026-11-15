@@ -67,7 +67,7 @@ public static class RestoreBootHandler
         {
             if (string.Equals(parsed.Provider, SelfBackupFormat.ProviderPostgres, StringComparison.OrdinalIgnoreCase))
                 RestoreDatabase(dataPaths, staging, configuration, pgTools);
-            SwapStagingOverLive(dataPaths, staging);
+            SwapStagingOverLive(dataPaths, staging, SqliteTarget(dataPaths, parsed, configuration));
         }
         catch (Exception ex)
         {
@@ -155,7 +155,24 @@ public static class RestoreBootHandler
             .AddJsonFile(Path.GetFullPath(Path.Combine(directory, Path.GetFileName(dataPaths.AppSettingsJson))), optional: true, reloadOnChange: false)
             .Build();
 
-    private static void SwapStagingOverLive(DataPathOptions dataPaths, string staging)
+    /// <summary>The SQLite file the app opens after this start: the one its configuration names (with the data
+    /// directory's layers, as the app reads them), else the one the app had open when the restore was committed (marker),
+    /// else the default <c>metrics.db</c>. A custom <c>WHISKERS_DB_CONNECTION</c> must get the archive's database, not
+    /// a file the app never opens (review 1.0.0, Data).</summary>
+    internal static string SqliteTarget(DataPathOptions dataPaths, RestoreMarker marker, IConfiguration? configuration)
+    {
+        if (configuration is not null)
+        {
+            var (provider, connection) = DatabaseRegistration.Resolve(WithDataLayers(configuration, dataPaths, dataPaths.RootDir));
+            if (provider == SelfBackupFormat.ProviderSqlite)
+                return DatabaseRegistration.SqliteFilePath(connection) ?? Path.GetFullPath(dataPaths.DbPath);
+        }
+        return string.IsNullOrWhiteSpace(marker.DatabasePath)
+            ? Path.GetFullPath(dataPaths.DbPath)
+            : Path.GetFullPath(marker.DatabasePath);
+    }
+
+    private static void SwapStagingOverLive(DataPathOptions dataPaths, string staging, string databaseFile)
     {
         var root = dataPaths.RootDir;
         Directory.CreateDirectory(root);
@@ -176,7 +193,7 @@ public static class RestoreBootHandler
         foreach (var name in SelfBackupLayout.Files)
         {
             var staged = Path.Combine(staging, name);
-            var live = Path.Combine(root, name);
+            var live = name == SelfBackupFormat.DbEntryName ? databaseFile : Path.Combine(root, name);
             // R1-35: a JSON store's previous generation belongs to the replaced data; left in place it would come back
             // the first time the restored file cannot be read, or bring back a store the archive does not hold.
             var previous = live + DurableFile.BackupSuffix;
@@ -191,7 +208,7 @@ public static class RestoreBootHandler
                     // A failure throws like any other step: a stale journal must never meet the restored file.
                     foreach (var suffix in new[] { "-wal", "-shm", "-journal" })   // a hot journal would be rolled back into it
                     {
-                        var journal = Path.Combine(root, SelfBackupFormat.DbEntryName + suffix);
+                        var journal = databaseFile + suffix;
                         Retry(() => { if (File.Exists(journal)) File.Delete(journal); });
                     }
                 }
