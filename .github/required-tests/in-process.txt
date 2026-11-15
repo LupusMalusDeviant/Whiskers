@@ -43,6 +43,10 @@
 14 Whiskers.Tests.BorgFleetScriptTests
 8 Whiskers.Tests.TailnetGuardScriptTests
 
+# The database tool reads each client's output by its own format, and a Redis command reaches redis-cli as quoted argv
+# elements whose first one is no option (review of 1.0.0, area Fleet).
+30 Whiskers.Tests.DatabaseServiceOutputParsingTests
+
 # BEGIN release-gate (generated)
 # Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md, docs/v1/RELEASE_GATE.md and docs/v1/CLAIMS.md
 # (contract 0008, R8; contract 0011): one entry per test method named by a ✅ invariant, an accepted exception or a
