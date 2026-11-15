@@ -309,8 +309,9 @@ public static class ProtectedResourceMatcher
             var next = i + 1 < words.Count ? words[i + 1] : null;
             if (word is "-v" or "--volume" && next is not null) yield return BeforeColon(next);
             else if (word.StartsWith("--volume=", StringComparison.Ordinal)) yield return BeforeColon(word["--volume=".Length..]);
-            // The attached short form (-v/var/run:/r) is the same value after -v, as Docker parses it.
-            else if (word.StartsWith("-v/", StringComparison.Ordinal)) yield return BeforeColon(word[2..]);
+            // The attached short form (-v/var/run:/r, also at the end of a flag cluster: -itv/var/run:/r) is the same
+            // value after -v, as Docker parses it.
+            else if (AttachedVolume(word) is { } attached) yield return BeforeColon(attached);
             else if (word == "--mount" && next is not null)
                 foreach (var source in MountOptionSources(next)) yield return source;
             else if (word.StartsWith("--mount=", StringComparison.Ordinal))
@@ -331,6 +332,16 @@ public static class ProtectedResourceMatcher
                     yield return option[(eq + 1)..].Trim();
             }
         }
+    }
+
+    /// <summary>The value of a short-flag cluster ending in <c>v</c> with the volume attached (<c>-v/src:dst</c>,
+    /// <c>-itv/src:dst</c>, i.e. <c>^-[A-Za-z]*v/</c>): the text from that <c>/</c> on; <c>null</c> for any other word.</summary>
+    private static string? AttachedVolume(string word)
+    {
+        if (word.Length < 3 || word[0] != '-') return null;
+        var i = 1;
+        while (i < word.Length && char.IsAsciiLetter(word[i]) && !(word[i] == 'v' && i + 1 < word.Length && word[i + 1] == '/')) i++;
+        return i + 1 < word.Length && word[i] == 'v' && word[i + 1] == '/' ? word[(i + 1)..] : null;
     }
 
     // A mount of a directory that contains a protected path: the root for any of them, and every parent of an

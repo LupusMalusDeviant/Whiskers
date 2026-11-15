@@ -573,6 +573,9 @@ public class SelfProtectionTests
     [InlineData("docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
     [InlineData("docker run --rm -v/var/run:/r alpine ls /r")]                       // the attached short form
     [InlineData("docker run --rm -v/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("docker run --rm -itv/var/run:/r alpine ls /r")]                     // a flag cluster ending in v
+    [InlineData("docker run -dv/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("docker run --rm -itv /var/run:/r alpine ls /r")]                    // the cluster, value apart
     public void A_key_cannot_mount_the_control_plane_through_mount_or_volume_forms(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
@@ -580,4 +583,9 @@ public class SelfProtectionTests
     public void A_key_may_still_mount_an_ordinary_directory_through_execute_command() =>
         Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow,
             ExecuteCommandAsAdminKey("docker run -v /srv/app:/app alpine ls"));
+
+    [Fact]
+    public void A_key_may_still_mount_an_ordinary_directory_through_a_flag_cluster() =>
+        Assert.Equal(Whiskers.Services.Guardrails.GuardrailVerdict.Allow,
+            ExecuteCommandAsAdminKey("docker run -itv/srv/app:/app alpine ls"));
 }

@@ -201,6 +201,9 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "docker run --rm --volume /var/run:/r alpine ls /r")]
     [InlineData("command", "docker run --rm -v/var/run:/r alpine ls /r")]                    // the attached short form
     [InlineData("command", "docker run --rm -v/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm -itv/var/run:/r alpine ls /r")]                  // a flag cluster ending in v
+    [InlineData("command", "docker run -dv/var/lib/docker/volumes:/v alpine ls /v")]
+    [InlineData("command", "docker run --rm -itv /var/run:/r alpine ls /r")]                 // the cluster, value apart
     [InlineData("command", "docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
     [InlineData("command", "docker run --rm --mount type=bind,source=/var/run,target=/r alpine ls /r")]
     [InlineData("command", "docker run --rm --mount=type=bind,src=/,dst=/host alpine ls /host")]
@@ -218,6 +221,7 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "rm -rf /tmp/build")]
     [InlineData("command", "docker run -v /srv/app:/app alpine ls")]          // contract 0017 B: an ordinary mount
     [InlineData("command", "docker run -v/srv/app:/app alpine ls")]
+    [InlineData("command", "docker run -itv/srv/app:/app alpine ls")]
     [InlineData("command", "docker run --mount type=bind,source=/srv/app,target=/app alpine ls")]
     [InlineData("command", "docker run -v data:/var/run alpine ls")]          // a named volume; the container side
     [InlineData("yaml", "services:\n  t:\n    ports: [\"${PORT:-8080}:80\"]\n    volumes:\n      - ${DATA:-./data}:/data\n")]
