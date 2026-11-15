@@ -99,7 +99,7 @@ internal sealed class ContainerLifecycleOperations
             NetworkingConfig = new NetworkingConfig { EndpointsConfig = firstNetwork }
         };
 
-        string newId;
+        string? newId = null;
         try
         {
             progress?.Report("Creating new container...");
@@ -119,18 +119,19 @@ internal sealed class ContainerLifecycleOperations
         }
         catch (Exception ex)
         {
-            // Roll back: restore the old container's name and restart it so recreate never loses a container.
+            // Roll back so recreate never loses a container: remove the new container (it holds the name), then
+            // restore the old container's name and start it. A failed rollback is thrown, not only logged.
             _logger.LogError(ex, "Recreate of {Name} failed — rolling back to the previous container", name);
             progress?.Report("Recreate failed — rolling back...");
             try
             {
-                await client.Containers.RenameContainerAsync(containerId,
-                    new ContainerRenameParameters { NewName = name }, CancellationToken.None);
-                await client.Containers.StartContainerAsync(containerId, new ContainerStartParameters());
+                await ContainerRestore.RestorePreviousAsync(new DockerClientContainerRestore(client), newId, containerId,
+                    name, oldName, ex, "Update");
             }
             catch (Exception rollbackEx)
             {
                 _logger.LogError(rollbackEx, "Rollback of {Name} failed; old container remains as {OldName}", name, oldName);
+                throw;
             }
             throw;
         }
@@ -234,7 +235,7 @@ internal sealed class ContainerLifecycleOperations
             NetworkingConfig = new NetworkingConfig { EndpointsConfig = firstNetwork }
         };
 
-        string newId;
+        string? newId = null;
         try
         {
             progress?.Report("Creating rollback container...");
@@ -252,20 +253,21 @@ internal sealed class ContainerLifecycleOperations
         }
         catch (Exception ex)
         {
-            // Rollback of the rollback: restore the stashed container so we never lose it.
+            // Rollback of the rollback: remove the rollback container (it holds the name), then restore the stashed
+            // container so we never lose it. A failed restore is thrown, not only logged.
             _logger.LogError(ex, "Rollback recreate of {Name} failed — restoring the stashed container", containerName);
             progress?.Report("Rollback failed — restoring previous container...");
             if (currentId != null)
             {
                 try
                 {
-                    await client.Containers.RenameContainerAsync(currentId,
-                        new ContainerRenameParameters { NewName = containerName }, CancellationToken.None);
-                    await client.Containers.StartContainerAsync(currentId, new ContainerStartParameters());
+                    await ContainerRestore.RestorePreviousAsync(new DockerClientContainerRestore(client), newId, currentId,
+                        containerName, stashName, ex, "Rollback");
                 }
                 catch (Exception rex)
                 {
                     _logger.LogError(rex, "Restoring stashed container {Name} failed; it remains as {Stash}", containerName, stashName);
+                    throw;
                 }
             }
             throw;
