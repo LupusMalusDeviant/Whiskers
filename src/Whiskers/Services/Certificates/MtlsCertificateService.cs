@@ -214,12 +214,13 @@ public sealed partial class MtlsCertificateService : IMtlsCertificateService
 
     private async Task<X509Certificate2> IssueAndStageAsync(string serverId, MtlsIdentity identity, CancellationToken ct)
     {
-        var csrB64 = (await RunAsync(serverId, MtlsCertificateCommands.GenerateKeyAndCsr(identity), ct)).Output.Trim();
-        var csrKey = MtlsCertificateValidator.ValidateCsr(FromB64(csrB64, "CSR"), identity);
+        var answer = (await RunAsync(serverId, MtlsCertificateCommands.GenerateKeyAndCsr(identity), ct)).Output;
+        // Contract 0017 E1: the CA host gets a PEM Whiskers writes from the verified CSR's DER, never the host's answer.
+        var csr = MtlsCertificateValidator.ValidateCsrAnswer(answer, identity);
 
-        var bundleB64 = (await RunAsync("local", MtlsCertificateCommands.SignCsr(csrB64, identity.CommonName), ct)).Output.Trim();
+        var bundleB64 = (await RunAsync("local", MtlsCertificateCommands.SignCsr(csr.Der, identity.CommonName), ct)).Output.Trim();
         var caB64 = (await RunAsync("local", MtlsCertificateCommands.ReadCaBundle(), ct)).Output.Trim();
-        var issued = MtlsCertificateValidator.ValidateIssued(FromB64(bundleB64, "certificate"), FromB64(caB64, "CA bundle"), csrKey, identity);
+        var issued = MtlsCertificateValidator.ValidateIssued(FromB64(bundleB64, "certificate"), FromB64(caB64, "CA bundle"), csr.PublicKey, identity);
 
         await RunAsync(serverId, MtlsCertificateCommands.StageCertificate(bundleB64, caB64), ct);
         return issued;
