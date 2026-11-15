@@ -13,11 +13,11 @@
 # (borg-fleet-prune) with a separate, unrestricted admin key.
 #
 # Tools (no Python — contract 0017 part I):
-#   whole script: bash, coreutils (install, mv, rm, head, od, tr, date, timeout), sed, find, flock, borg
-#   prepare/init: apt-get (only if borg is missing), ssh-keygen, ssh-keyscan, systemctl
-#   DB dumps:     docker, gzip — without docker no dumps are made (as before)
-#   SQLite copies: sqlite3 (.timeout, .backup) — without it the snapshot is skipped with a WARN, the run
-#                  status reports "sqlite_snapshot":"skipped" and the backup itself still runs
+#   whole script: bash, coreutils (install, mv, rm, cat, head, od, tr, date, timeout), sed, grep, find, flock, borg
+#   prepare/init: apt-get (only if borg is missing), awk, base64, hostname, ssh-keygen, ssh-keyscan, systemctl
+#   DB dumps:     docker, gzip, xargs, sort — without docker no dumps are made (as before)
+#   SQLite copies: sqlite3 (-init /dev/null, .timeout, .backup) — without it the snapshot is skipped with a WARN,
+#                  the run status reports "sqlite_snapshot":"skipped" (result warning) and the backup itself still runs
 set -euo pipefail
 
 # BORG_FLEET_TEST_ROOT prefixes every fixed path; only the tests set it (systemd and sudo start with a clean
@@ -170,16 +170,23 @@ snapshot_sqlite() {  # consistent copies of SQLite files via the online-backup A
     for root in "$@"; do
         [ -d "$root" ] || continue
         # Regular files only (find does not follow symlinks), 512 bytes up to 8 GiB, never inside the output dir.
+        local h
         while IFS= read -r -d '' p; do
+            # A builtin prefilter on the first 15 bytes spares three processes for every non-SQLite file; the od check
+            # then confirms the 16th byte (NUL) the builtin cannot see.
+            h=
+            LC_ALL=C IFS= read -r -d '' -n 15 h 2>/dev/null < "$p" || :
+            [ "$h" = 'SQLite format 3' ] || continue
             [ "$(head -c 16 -- "$p" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "$SQLITE_HEADER" ] || continue
             dst="$out/$(printf '%s' "${p#/}" | sed 's|/|__|g')"
             # Each copy runs with a deadline: the backup retries while another process holds a write lock (seen
             # with Kira's library.db), which would stall the run. It writes a fixed name in the output dir first
             # and is moved into place only when complete, so no half copy is ever left.
             rm -f "$out/.partial"
-            if (cd "$out" && timeout 300 sqlite3 -bail -readonly "$p" ".timeout 30000" ".backup .partial") >/dev/null 2>&1 \
+            if (cd "$out" && timeout 300 sqlite3 -init /dev/null -bail -readonly "$p" ".timeout 30000" ".backup .partial") >/dev/null 2>&1 \
                && [ "$(head -c 16 "$out/.partial" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "$SQLITE_HEADER" ]; then
-                mv -f "$out/.partial" "$dst"
+                mv -f "$out/.partial" "$dst" || { echo "sqlite skip $p (cannot move the copy into place)" >&2
+                                                 rm -f "$out/.partial"; errors=1; }
             else
                 echo "sqlite skip $p" >&2
                 rm -f "$out/.partial" "$dst"   # no half copies
@@ -187,6 +194,7 @@ snapshot_sqlite() {  # consistent copies of SQLite files via the online-backup A
             fi
         done < <(find "$root" -path "$out" -prune -o -type f -size +511c ! -size +8589934592c -print0 2>/dev/null)
     done
+    rm -f "$out/.partial"   # whatever happened above, no half copy goes into the archive
     if [ "$errors" = 1 ]; then
         log "WARN: sqlite snapshot had errors"
         SQLITE_STATUS=errors
@@ -215,7 +223,7 @@ stage_backup() {
     local existing=(); for p in "${paths[@]}"; do [ -e "$p" ] && existing+=("$p"); done
 
     snapshot_sqlite "$ROOT/opt" "$ROOT/srv" "$ROOT/home" "$ROOT/root" "$ROOT/var/lib/docker/volumes" || true
-    if [ "$SQLITE_STATUS" = skipped ]; then warn=1; fi
+    if [ "$SQLITE_STATUS" != ok ]; then warn=1; fi   # skipped or errors: the run is a warning
 
     local excludes=(--exclude-caches --exclude-if-present .nobackup
         --exclude '/root/.cache' --exclude '/home/*/.cache' --exclude 'sh:**/node_modules'

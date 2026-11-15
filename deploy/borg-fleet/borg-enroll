@@ -24,12 +24,15 @@
 # Exit codes: 0 = enrolled; 1 = anything else (usage, missing tool, API/MCP/SFTP failure), message on stderr.
 #
 # Tools (POSIX sh, no Python — contract 0017 part I): every one is needed, the script refuses to start without it.
-#   curl jq base64 sha256sum awk sed tr head tail cut grep cp date mktemp ssh-keygen sshpass sftp
+#   curl jq base64 sha256sum awk sed tr head tail cut grep cp cat rm mkdir chmod dirname date sleep mktemp
+#   ssh-keygen sshpass sftp
+# Secrets (API token, MCP key, sub-account passwords) never stand in a program's arguments: they travel in 0600
+# files or on stdin.
 set -eu
+umask 077   # every file this script writes (headers, bodies, escrow, records) is private to root
 
-TOOLS="curl jq base64 sha256sum awk sed tr head tail cut grep cp date mktemp ssh-keygen sshpass sftp"
+TOOLS="curl jq base64 sha256sum awk sed tr head tail cut grep cp cat rm mkdir chmod dirname date sleep mktemp ssh-keygen sshpass sftp"
 CFG_DIR=${BORG_FLEET_CFG_DIR:-/root/.config/borg-fleet}
-CLIENT="$(cd "$(dirname "$0")" && pwd)/borg-fleet-client"
 API=https://api.hetzner.com/v1
 
 die() {
@@ -44,6 +47,7 @@ usage() {
 for tool in $TOOLS; do
     command -v "$tool" >/dev/null 2>&1 || die "missing tool: $tool"
 done
+CLIENT="$(cd "$(dirname "$0")" && pwd)/borg-fleet-client"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -62,10 +66,10 @@ box_call() {  # method path [json-body] [allow-404]  -> response in $TMP/resp, s
     rm -f "$TMP/resp"
     if [ -n "$_b" ]; then
         printf '%s' "$_b" > "$TMP/body"
-        BOX_STATUS=$(curl -sS -X "$_m" -H @"$TMP/hz.hdr" -H 'Content-Type: application/json' --max-time 30 \
+        BOX_STATUS=$(curl -q -sS -X "$_m" -H @"$TMP/hz.hdr" -H 'Content-Type: application/json' --max-time 30 \
             --data-binary @"$TMP/body" -o "$TMP/resp" -w '%{http_code}' "$API$_p") || die "Hetzner API $_m $_p: no answer"
     else
-        BOX_STATUS=$(curl -sS -X "$_m" -H @"$TMP/hz.hdr" --max-time 30 \
+        BOX_STATUS=$(curl -q -sS -X "$_m" -H @"$TMP/hz.hdr" --max-time 30 \
             -o "$TMP/resp" -w '%{http_code}' "$API$_p") || die "Hetzner API $_m $_p: no answer"
     fi
     [ -f "$TMP/resp" ] || : > "$TMP/resp"
@@ -106,7 +110,7 @@ wait_action() {  # action JSON in $TMP/action
 
 reset_password() {  # sub-id password
     box_call POST "/storage_boxes/$BOX_ID/subaccounts/$1/actions/reset_subaccount_password" \
-        "$(jq -cn --arg p "$2" '{password: $p}')"
+        "$(printf '%s' "$2" | jq -Rsc '{password: .}')"
     jq -c '.action' "$TMP/resp" > "$TMP/action"
     wait_action
 }
@@ -127,7 +131,7 @@ mcp_post() {  # json-payload -> answer (one JSON message or empty) in $TMP/mcp.m
     } > "$TMP/mcp.hdr"
     printf '%s' "$1" > "$TMP/mcp.req"
     rm -f "$TMP/mcp.body" "$TMP/mcp.resphdr"
-    curl -sS -f -H @"$TMP/mcp.hdr" -H 'Content-Type: application/json' --max-time 700 \
+    curl -q -sS -f -H @"$TMP/mcp.hdr" -H 'Content-Type: application/json' --max-time 700 \
         --data-binary @"$TMP/mcp.req" -D "$TMP/mcp.resphdr" -o "$TMP/mcp.body" "$MCP_URL" >/dev/null \
         || die "MCP request to $MCP_URL failed"
     [ -f "$TMP/mcp.body" ] || : > "$TMP/mcp.body"
@@ -205,7 +209,7 @@ sftp_write_authorized_keys() {  # user host password content-file
 case $1 in -*) usage ;; esac
 SERVER_ID=$1
 shift
-case $SERVER_ID in */*|.*) die "invalid server id: $SERVER_ID" ;; esac
+case $SERVER_ID in ''|*/*|.*) die "invalid server id: '$SERVER_ID'" ;; esac
 FIRST_RUN=0 TIME_SLOT=""
 while [ $# -gt 0 ]; do
     case $1 in
@@ -219,7 +223,7 @@ done
 jq -e . "$CFG_DIR/fleet.json" >/dev/null 2>&1 || die "$CFG_DIR/fleet.json is not JSON"
 [ -n "$TIME_SLOT" ] || TIME_SLOT=$(slot "$SERVER_ID")
 case $TIME_SLOT in
-    [0-2][0-9]:[0-5][0-9]) ;;
+    [01][0-9]:[0-5][0-9]|2[0-3]:[0-5][0-9]) ;;
     *) die "invalid time slot: $TIME_SLOT (HH:MM)" ;;
 esac
 
@@ -269,10 +273,10 @@ jq -c --arg id "$SERVER_ID" \
     'first(.subaccounts[]? | select(((.labels // {})["whiskers-server"]) == $id)) // empty' "$TMP/resp" > "$TMP/sub"
 PASSWORD=$(new_password)
 if [ ! -s "$TMP/sub" ]; then
-    box_call POST "/storage_boxes/$BOX_ID/subaccounts" "$(jq -cn --arg id "$SERVER_ID" --arg pw "$PASSWORD" '{
+    box_call POST "/storage_boxes/$BOX_ID/subaccounts" "$(printf '%s' "$PASSWORD" | jq -Rsc --arg id "$SERVER_ID" '{
         name: ("whiskers-" + $id)[0:64],
         home_directory: ("whiskers-" + $id),
-        password: $pw,
+        password: .,
         description: ("borg-fleet backup of Whiskers server " + $id),
         labels: {"whiskers-server": $id, "managed-by": "borg-fleet"},
         access_settings: {reachable_externally: true, ssh_enabled: true, samba_enabled: false,
@@ -308,12 +312,12 @@ RES_TIMER=$(kv TIMER "$TMP/init") || RES_TIMER=None
 
 # 5: escrow
 ESC="$CFG_DIR/escrow/$SERVER_ID"
-mkdir -p "$ESC"
-chmod 700 "$ESC"
-(umask 077
- printf '%s\n' "$PASSPHRASE" > "$ESC/passphrase"
- printf '%s' "$REPOKEY_B64" | base64 -d > "$ESC/repokey") || die "escrow of $SERVER_ID failed"
-chmod 600 "$ESC/passphrase" "$ESC/repokey"
+mkdir -p "$ESC" \
+    && chmod 700 "$ESC" \
+    && printf '%s\n' "$PASSPHRASE" > "$ESC/passphrase" \
+    && printf '%s' "$REPOKEY_B64" | base64 -d > "$ESC/repokey" \
+    && chmod 600 "$ESC/passphrase" "$ESC/repokey" \
+    || die "escrow of $SERVER_ID failed"
 unset PASSPHRASE
 mkdir -p "$CFG_DIR/servers"
 chmod 700 "$CFG_DIR/servers"

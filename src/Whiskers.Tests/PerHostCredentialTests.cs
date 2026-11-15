@@ -749,7 +749,7 @@ public sealed class PerHostCredentialTests
 
         Assert.True(result.Success, result.Error);
         var edited = ScrapeConfigEditor.AddTarget(exec.ScrapeYaml, "neuhof", "100.64.0.20").Yaml!;
-        var write = OnboardingCommands.WriteFileB64("/opt/telemetry-vm/scrape.yml", SimulatedProxyHost.B64(edited));
+        var write = OnboardingCommands.WriteFileAsRootB64("/opt/telemetry-vm/scrape.yml", SimulatedProxyHost.B64(edited));
         Assert.Contains(write, exec.Scripts);
         Assert.DoesNotContain(exec.Scripts, s => s.Contains("python", StringComparison.Ordinal));
     }

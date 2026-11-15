@@ -39,9 +39,9 @@
 
 # No Python in the repository or on the Whiskers host (contract 0017 part I): the guard, and the shell scripts that
 # replaced the Python calls, run against stubs (bash, jq and sqlite3 are on the runner).
-14 Whiskers.Tests.NoPythonGuardTests
-11 Whiskers.Tests.BorgFleetScriptTests
-7 Whiskers.Tests.TailnetGuardScriptTests
+26 Whiskers.Tests.NoPythonGuardTests
+14 Whiskers.Tests.BorgFleetScriptTests
+8 Whiskers.Tests.TailnetGuardScriptTests
 
 # BEGIN release-gate (generated)
 # Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md, docs/v1/RELEASE_GATE.md and docs/v1/CLAIMS.md
@@ -1251,6 +1251,7 @@
 1 Whiskers.Tests.OnboardingCommandsTests.AddScrapeTarget_reads_the_file_base64_and_runs_no_interpreter
 1 Whiskers.Tests.OnboardingCommandsTests.AddScrapeTarget_with_the_address_already_present_changes_nothing
 1 Whiskers.Tests.OnboardingCommandsTests.AddScrapeTarget_without_a_static_configs_line_changes_nothing
+1 Whiskers.Tests.OnboardingCommandsTests.AddScrapeTarget_writes_as_root_like_the_ca_steps_sh_when_root_else_sudo_sh
 1 Whiskers.Tests.OnboardingCommandsTests.DockerProxyCompose_publishes_2376_on_the_tailnet_ip_and_keeps_dangerous_verbs_off
 1 Whiskers.Tests.OnboardingCommandsTests.Every_step_has_an_actionable_hint
 1 Whiskers.Tests.OnboardingCommandsTests.Generated_compose_files_contain_no_carriage_returns

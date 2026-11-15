@@ -55,8 +55,26 @@ public sealed class TailnetGuardScriptTests : IDisposable
     {
         var (exit, output) = Guard(["grep", "jq"]);
         Assert.Equal(0, exit);
-        Assert.Contains("tailnet OK", output);
-        Assert.Equal("-z -w5 100.64.0.5 2376\n", NcLog.Replace("\r", ""));   // the first enabled peer answered
+        Assert.Contains("tailnet OK\n", output.Replace("\r", ""));
+        Assert.DoesNotContain("WARN", output);
+        Assert.Equal("-z -w5 -- 100.64.0.5 2376\n", NcLog.Replace("\r", ""));   // the first enabled peer answered
+    }
+
+    [SkippableFact]
+    public void An_nc_without_z_falls_back_to_dev_tcp_before_a_peer_counts_as_unreachable()
+    {
+        // busybox's nc has no -z: it fails on every call, which must not read as "peer unreachable".
+        _h.Stub("nc", "#!/bin/bash\necho \"$*\" >> \"$STUB_DIR/nc.log\"\necho 'nc: invalid option -- z' >&2\nexit 1\n");
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        File.WriteAllText(Path.Combine(_h.Root, "servers.json"), "[{\"TcpHost\":\"127.0.0.1\"}]");
+
+        var (exit, output) = Guard(["grep", "jq", "timeout", "bash"], new() { ["TAILNET_GUARD_PORT"] = port.ToString() });
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("tailnet OK\n", output.Replace("\r", ""));
+        Assert.Contains($"-z -w5 -- 127.0.0.1 {port}", NcLog);   // nc was tried first
     }
 
     [SkippableFact]
@@ -65,7 +83,7 @@ public sealed class TailnetGuardScriptTests : IDisposable
         var (exit, output) = Guard(["grep", "jq"], new() { ["STUB_NC_EXIT"] = "1" });
         Assert.Equal(1, exit);
         Assert.Contains("no tailnet peer answered on :2376", output);
-        Assert.Equal("-z -w5 100.64.0.5 2376\n-z -w5 100.64.0.7 2376\n", NcLog.Replace("\r", ""));
+        Assert.Equal("-z -w5 -- 100.64.0.5 2376\n-z -w5 -- 100.64.0.7 2376\n", NcLog.Replace("\r", ""));
         Assert.False(File.Exists(Path.Combine(_h.Root, "systemctl.log")));   // check-only restarts nothing
     }
 
@@ -74,7 +92,8 @@ public sealed class TailnetGuardScriptTests : IDisposable
     {
         var (exit, output) = Guard(["grep"], new() { ["STUB_NC_EXIT"] = "1" });
         Assert.Equal(0, exit);
-        Assert.Contains("tailnet OK", output);
+        Assert.Contains("WARN: tailnet checked by address only: jq missing", output);
+        Assert.Contains("tailnet OK (address only: jq missing)", output);
         Assert.Equal("", NcLog);
         Assert.Equal(1, Guard(["grep"], new() { ["STUB_NO_ADDR"] = "1" }).Exit);
     }
@@ -102,7 +121,8 @@ public sealed class TailnetGuardScriptTests : IDisposable
         _h.Unstub("nc");
         var (exit, output) = Guard(["grep", "jq"]);
         Assert.Equal(0, exit);
-        Assert.Contains("tailnet OK", output);
+        Assert.Contains("WARN: tailnet checked by address only: neither nc nor timeout", output);
+        Assert.Contains("tailnet OK (address only: neither nc nor timeout for the TCP probe)", output);
     }
 
     [SkippableFact]

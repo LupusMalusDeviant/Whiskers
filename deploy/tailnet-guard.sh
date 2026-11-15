@@ -16,9 +16,10 @@
 #
 # Tools (no Python — contract 0017 part I):
 #   whole script: ip, grep (the address check) — without `ip` the script refuses to start, it cannot judge anything
-#   repair:       systemctl, flock, logger (as before)
-#   peer list:    jq — without it there are no probe targets and only the address is checked
-#   TCP probe:    nc (-z -w5), else bash /dev/tcp under timeout 5 — without either only the address is checked
+#   repair:       systemctl, flock, sleep, logger (as before)
+#   peer list:    jq — without it only the address is checked, with a WARN: "tailnet OK (address only: jq missing)"
+#   TCP probe:    nc (-z -w5); when nc fails, bash /dev/tcp under timeout 5 — without either only the address is
+#                 checked, with a WARN
 set -u
 
 PROBE_PORT=${TAILNET_GUARD_PORT:-2376}
@@ -58,25 +59,28 @@ probe_targets() {
 
 has_v4() { ip -4 addr show tailscale0 2>/dev/null | grep -q 'inet '; }
 
-# The TCP probe: `nc -z -w5`, else bash's /dev/tcp under `timeout 5`. Without either the probe cannot run, and
-# the address check is all we assert (as without targets).
+# The TCP probe: `nc -z -w5`, and when nc fails (or is a variant without -z, like busybox's) bash's /dev/tcp
+# under `timeout 5` before a peer counts as unreachable. Without either the probe cannot run, and the address
+# check is all we assert (as without targets).
 can_probe() { command -v nc >/dev/null 2>&1 || command -v timeout >/dev/null 2>&1; }
 
 tcp_ok() {
-    if command -v nc >/dev/null 2>&1; then
-        nc -z -w5 "$1" "$PROBE_PORT" >/dev/null 2>&1
-    else
-        timeout 5 bash -c 'exec 3<>"/dev/tcp/$1/$2"' tcp-probe "$1" "$PROBE_PORT" >/dev/null 2>&1
+    if command -v nc >/dev/null 2>&1 && nc -z -w5 -- "$1" "$PROBE_PORT" >/dev/null 2>&1; then
+        return 0
     fi
+    command -v timeout >/dev/null 2>&1 \
+        && timeout 5 bash -c 'exec 3<>"/dev/tcp/$1/$2"' tcp-probe "$1" "$PROBE_PORT" >/dev/null 2>&1
 }
 
 healthy() {
     has_v4 || { REASON="tailscale0 has no IPv4 address"; return 1; }
     local reached=0 target targets
+    # A missing tool degrades the check to the address alone; DEGRADED says why, and the result says so.
+    command -v jq >/dev/null 2>&1 || { DEGRADED="jq missing"; return 0; }
     targets=$(probe_targets)
-    # No configured TCP peers at all, or no probe tool → the address check is all we can assert.
+    # No configured TCP peers at all → the address check is all we can assert (not a degradation).
     [ -z "$targets" ] && return 0
-    can_probe || return 0
+    can_probe || { DEGRADED="neither nc nor timeout for the TCP probe"; return 0; }
     for target in $targets; do
         if tcp_ok "$target"; then reached=1; break; fi
     done
@@ -84,9 +88,19 @@ healthy() {
     return 0
 }
 
-REASON=""
+report_ok() {
+    if [ -n "$DEGRADED" ]; then
+        log "WARN: tailnet checked by address only: $DEGRADED"
+        [ "$CHECK_ONLY" = 1 ] && echo "tailnet OK (address only: $DEGRADED)"
+    else
+        [ "$CHECK_ONLY" = 1 ] && echo "tailnet OK"
+    fi
+    return 0
+}
+
+REASON="" DEGRADED=""
 if healthy; then
-    [ "$CHECK_ONLY" = 1 ] && echo "tailnet OK"
+    report_ok
     exit 0
 fi
 
@@ -97,7 +111,9 @@ log "restarting tailscaled"
 systemctl restart tailscaled || { log "FAILED: systemctl restart tailscaled"; exit 1; }
 sleep 8
 
+DEGRADED=""
 if healthy; then
+    report_ok
     log "tailnet restored after tailscaled restart"
     exit 0
 fi

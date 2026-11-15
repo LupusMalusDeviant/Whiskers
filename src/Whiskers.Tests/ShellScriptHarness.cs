@@ -2,7 +2,8 @@ namespace Whiskers.Tests;
 
 /// <summary>Runs a repository shell script under a PATH that holds only stubs and the host tools a test names
 /// (contract 0017 part I: the Python-free scripts). A tool left out of both is missing for the script, so the
-/// missing-tool paths are testable on any machine. Needs bash (Git Bash on Windows); on CI a missing bash or host
+/// missing-tool paths are testable on any machine. Every wrapped host tool appends its argv to
+/// <c>argv.log</c> in <see cref="Root"/>, so a test can prove a secret never stood in a program's arguments. Needs bash (Git Bash on Windows); on CI a missing bash or host
 /// tool fails instead of skipping.</summary>
 internal sealed class ShellScriptHarness : IDisposable
 {
@@ -42,7 +43,7 @@ internal sealed class ShellScriptHarness : IDisposable
             "B=\"$(cd \"$STUB_BIN\" && pwd)\"; " +
             "for t in $HOST_TOOLS; do [ -e \"$B/$t\" ] && continue; " +
             "p=$(command -v \"$t\") || { echo \"host tool missing: $t\" >&2; exit 98; }; " +
-            "printf '#!/bin/bash\\nexec \"%s\" \"$@\"\\n' \"$p\" > \"$B/$t\"; chmod +x \"$B/$t\"; done; " +
+            "printf '#!/bin/bash\\necho \"%s $*\" >> \"$STUB_DIR/argv.log\"\\nexec \"%s\" \"$@\"\\n' \"$t\" \"$p\" > \"$B/$t\"; chmod +x \"$B/$t\"; done; " +
             "if [ \"$RUN_SHELL\" = sh ]; then S=$(command -v sh); else S=$BASH; fi; " +
             "PATH=\"$B\"; export PATH; exec \"$S\" \"$0\" \"$@\"";
         var path = DeploymentScripts.ForBash(DeploymentScripts.RepoFile(script));

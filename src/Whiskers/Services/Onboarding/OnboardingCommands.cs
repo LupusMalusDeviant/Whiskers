@@ -47,6 +47,23 @@ public static class OnboardingCommands
     /// and writes it back with <see cref="WriteFileB64"/>; no interpreter runs on the host (contract 0017 part I1).</summary>
     public static string ReadFileB64(string path) => $"base64 -w0 {path}";
 
+    /// <summary>Writes a code-owned file on the Whiskers host ("local") as root, the way the CA steps do
+    /// (<see cref="Whiskers.Services.Certificates.MtlsCertificateCommands.AsRootScript"/>: <c>sh</c> when already root,
+    /// else <c>sudo sh</c>). The content is decoded into a temporary file first, so a failed decode never truncates the
+    /// file; it is then copied over the original in place (owner and mode stay). Path and directory must be fixed,
+    /// code-owned paths; the content travels base64 inside a base64 script.</summary>
+    public static string WriteFileAsRootB64(string path, string b64)
+    {
+        var dir = path[..path.LastIndexOf('/')];
+        return Whiskers.Services.Certificates.MtlsCertificateCommands.AsRootScript($"""
+            set -e
+            mkdir -p {dir}
+            echo {b64} | base64 -d > {path}.whiskers-new
+            cat {path}.whiskers-new > {path}
+            rm -f {path}.whiskers-new
+            """.Replace("\r\n", "\n", StringComparison.Ordinal));   // a CRLF checkout must not put CRs into the script
+    }
+
     // Host files are LF: normalise, so a CRLF checkout of this source cannot put CR characters into them.
     public static string NodeExporterCompose(string tsIp) => NodeExporterComposeFor(tsIp).Replace("\r\n", "\n", StringComparison.Ordinal);
 

@@ -89,7 +89,7 @@ public sealed class BorgFleetScriptTests : IDisposable
                 if [ "$method" = POST ]; then echo "$body" > "$STUB_DIR/create.req"; resp='{"subaccount":{"id":42}}'
                 else resp='{"subaccounts":[{"id":1,"username":"u1-sub1","labels":{"whiskers-server":"other"}}]}'; fi ;;
               */storage_boxes/7/subaccounts/42) resp='{"subaccount":{"id":42,"username":"u1-sub9"}}' ;;
-              */reset_subaccount_password) resp='{"action":{"id":5,"status":"running","command":"reset_subaccount_password"}}' ;;
+              */reset_subaccount_password) echo "$body" >> "$STUB_DIR/reset.req"; resp='{"action":{"id":5,"status":"running","command":"reset_subaccount_password"}}' ;;
               */storage_boxes/actions/5) resp='{"action":{"id":5,"status":"success","command":"reset_subaccount_password"}}' ;;
               *) code=404; resp='{"error":"not found"}' ;;
             esac
@@ -167,10 +167,17 @@ public sealed class BorgFleetScriptTests : IDisposable
             Assert.Equal("1.4.1", r.GetProperty("borg_version").GetString());
         }
 
-        // The secrets travel in header files, never in curl's arguments; the MCP session id is carried along.
-        var args = Stub("curl.args");
-        Assert.DoesNotContain(Token, args);
-        Assert.DoesNotContain(McpKey, args);
+        // The secrets travel in header files or on stdin, never in a program's arguments (review M1): neither the API
+        // token, the MCP key, nor any sub-account password — the one used for the upload and the final lock one.
+        var args = Stub("curl.args") + Stub("argv.log") + Stub("sshpass.log");
+        Assert.Contains("jq ", Stub("argv.log"));   // the wrapped tools did log
+        var passwords = new List<string> { JsonDocument.Parse(Stub("create.req")).RootElement.GetProperty("password").GetString()! };
+        passwords.AddRange(Stub("reset.req").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => JsonDocument.Parse(l).RootElement.GetProperty("password").GetString()!));
+        Assert.Equal(2, passwords.Count);
+        Assert.NotEqual(passwords[0], passwords[1]);   // the lock password is a fresh one
+        foreach (var secret in passwords.Append(Token).Append(McpKey))
+            Assert.DoesNotContain(secret, args);
         Assert.Contains($"Authorization: Bearer {Token}", Stub("curl.headers"));
         Assert.Contains($"Authorization: Bearer {McpKey}", Stub("curl.headers"));
         Assert.Contains("Mcp-Session-Id: sess-1", Stub("curl.headers"));
@@ -194,6 +201,8 @@ public sealed class BorgFleetScriptTests : IDisposable
     [InlineData("hetzner-api")]
     [InlineData("prepare-failed")]
     [InlineData("bad-time")]
+    [InlineData("hour-24")]
+    [InlineData("empty-id")]
     public void Borg_enroll_exits_1_with_a_message_on_every_failure(string failure)
     {
         EnrollStubs();
@@ -207,6 +216,8 @@ public sealed class BorgFleetScriptTests : IDisposable
             case "missing-tool": _h.Unstub("sshpass"); expected = "borg-enroll: missing tool: sshpass"; break;
             case "hetzner-api": env["STUB_HZ_FAIL"] = "1"; expected = "borg-enroll: Hetzner API GET /storage_boxes/7 -> 500: {\"error\":\"down\"}"; break;
             case "prepare-failed": env["STUB_PREPARE_EXIT"] = "3"; expected = "borg-enroll: prepare failed on neuhof:\nExit code: 3\nprepare broke"; break;
+            case "hour-24": args = ["neuhof", "--time", "24:00"]; expected = "borg-enroll: invalid time slot: 24:00"; break;
+            case "empty-id": args = [""]; expected = "borg-enroll: invalid server id: ''"; break;
             default: args = ["neuhof", "--time", "1;reboot"]; expected = "borg-enroll: invalid time slot"; break;
         }
 
@@ -301,8 +312,28 @@ public sealed class BorgFleetScriptTests : IDisposable
         Assert.True(exit == 0, output);
         Assert.Contains("WARN: sqlite snapshot had errors", output);
         Assert.Equal("errors", status.GetProperty("sqlite_snapshot").GetString());
+        Assert.Equal("warning", status.GetProperty("result").GetString());   // review m5: errors make the run a warning
         Assert.Contains("borg create", Stub("borg.log"));
         Assert.Empty(Directory.GetFileSystemEntries(SnapshotDir));
+    }
+
+    [SkippableFact]
+    public void A_copy_that_cannot_be_moved_into_place_leaves_no_partial_and_counts_as_an_error()
+    {
+        ClientStubs();
+        File.WriteAllBytes(Path.Combine(TestRoot, "opt/app/data.db"), SqliteHeaderFile());
+        // The copy itself succeeds; moving it into place fails (a full disk, a read-only mount).
+        _h.Stub("sqlite3", "#!/bin/bash\nprintf 'SQLite format 3\\0padding' > .partial\nexit 0\n");
+        _h.Stub("mv", "#!/bin/bash\ncase \"$*\" in *.partial*) echo 'mv: no space left' >&2; exit 1 ;; esac\nexec /usr/bin/mv \"$@\"\n");
+
+        var (exit, output, status) = RunBackup("timeout");
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("cannot move the copy into place", output);
+        Assert.Equal("errors", status.GetProperty("sqlite_snapshot").GetString());
+        Assert.Equal("warning", status.GetProperty("result").GetString());
+        Assert.Contains("borg create", Stub("borg.log"));
+        Assert.Empty(Directory.GetFileSystemEntries(SnapshotDir));   // no .partial, no half copy
     }
 
     /// <summary>1 KiB that starts with the SQLite header (enough for the header check, not a database).</summary>

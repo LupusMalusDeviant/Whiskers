@@ -107,9 +107,27 @@ public class OnboardingCommandsTests
         Assert.Contains(("100.64.0.1:9100", (string?)"host-a"), targets);
         // The written file is shipped through the base64 writer: the values never stand in the shell line.
         var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(yaml));
-        var write = OnboardingCommands.WriteFileB64("/opt/telemetry-vm/scrape.yml", b64);
+        var write = OnboardingCommands.WriteFileAsRootB64("/opt/telemetry-vm/scrape.yml", b64);
         Assert.DoesNotContain("srv-1", write);
         Assert.DoesNotContain("100.64.0.7", write);
+    }
+
+    [Fact]
+    public void AddScrapeTarget_writes_as_root_like_the_ca_steps_sh_when_root_else_sudo_sh()
+    {
+        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(ScrapeTemplate));
+        var cmd = OnboardingCommands.WriteFileAsRootB64("/opt/telemetry-vm/scrape.yml", b64);
+
+        Assert.Equal(Whiskers.Services.Certificates.MtlsCertificateCommands.AsRootScript(MtlsCertificateRenewalTests.Decode(cmd)), cmd);
+        Assert.EndsWith("| { if [ \"$(id -u)\" -eq 0 ]; then sh; else sudo sh; fi; }", cmd);
+        Assert.DoesNotContain("sudo tee", cmd);
+        Assert.Equal(
+            "set -e\n" +
+            "mkdir -p /opt/telemetry-vm\n" +
+            $"echo {b64} | base64 -d > /opt/telemetry-vm/scrape.yml.whiskers-new\n" +
+            "cat /opt/telemetry-vm/scrape.yml.whiskers-new > /opt/telemetry-vm/scrape.yml\n" +
+            "rm -f /opt/telemetry-vm/scrape.yml.whiskers-new",
+            MtlsCertificateRenewalTests.Decode(cmd));   // LF only, whatever the checkout
     }
 
     [Fact]

@@ -13,10 +13,10 @@
 #   borg-fleet-prune [server-id ...]     (default: all enrolled servers)
 #
 # Tools (no Python — contract 0017 part I), all needed by the whole script, which refuses to start without them:
-#   jq borg sftp ssh sed grep comm sort mktemp wc
+#   jq borg sftp ssh sed grep comm sort mktemp wc rm cat basename
 set -uo pipefail
 
-for tool in jq borg sftp ssh sed grep comm sort mktemp wc; do
+for tool in jq borg sftp ssh sed grep comm sort mktemp wc rm cat basename; do
     command -v "$tool" >/dev/null 2>&1 || { echo "borg-fleet-prune: missing tool: $tool" >&2; exit 1; }
 done
 
