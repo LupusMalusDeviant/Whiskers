@@ -217,6 +217,10 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "docker volume create -odevice=/var/lib/docker/volumes x")]                     // attached -o
     [InlineData("command", "docker volume create --opt DEVICE=/var/run x")]
     [InlineData("command", "docker run --rm -dv /var/run:/r alpine ls /r")]
+    [InlineData("command", "docker run --mount \\\n type=bind,SOURCE=/var/run,target=/r alpine")]   // a line continuation
+    [InlineData("command", "docker service update --mount-add type=bind,source=/var/run,target=/r app")]
+    [InlineData("command", "docker service update --mount-add=type=bind,SRC=/var/lib/docker/volumes,dst=/v app")]
+    [InlineData("command", "/tmp/d run --rm -itv /var/run:/r alpine ls /r")]                         // a staged copy
     [InlineData("command", "docker run --rm --volume=/var/lib/docker/volumes:/v alpine ls /v")]
     [InlineData("command", "docker run --rm --mount type=bind,source=/var/run,target=/r alpine ls /r")]
     [InlineData("command", "docker run --rm --mount=type=bind,src=/,dst=/host alpine ls /host")]
@@ -244,6 +248,10 @@ public class ProtectedResourceMatcherTests
     [InlineData("command", "rsync -av ./a host:/b")]                         // a cluster ending in v, no runtime
     [InlineData("command", "tar -czvf ./a.tgz ./dir")]
     [InlineData("command", "cp -rv ./a ./b")]
+    [InlineData("command", "docker exec app cp -rv ./a ./b")]                // no ':' after the cluster
+    [InlineData("command", "awk -v x=./y 1 /etc/hosts")]                     // not an absolute path, no ./ start
+    [InlineData("command", "docker run -v /srv/app:/app:ro alpine ls")]
+    [InlineData("command", "docker run --mount type=volume,src=data,dst=/var/run alpine ls")]
     [InlineData("command", "export MYSRC=/var/run")]                          // a key must start the word or a part
     [InlineData("command", "docker run --mount type=bind,source=/srv/app,target=/app alpine ls")]
     [InlineData("command", "docker run -v data:/var/run alpine ls")]          // a named volume; the container side
@@ -264,6 +272,14 @@ public class ProtectedResourceMatcherTests
     [InlineData("sudo nerdctl run -dv ../run:/r alpine ls /r")]
     [InlineData("alias d=docker; d run -itv ./x:/r alpine ls /r")]
     [InlineData("docker-compose run -itv ./x:/r t ls /r")]
+    [InlineData("cd /var && docker run -v \\\n ./run:/r alpine")]                   // a line continuation
+    [InlineData("docker run --mount 'type=bind,\"source=/tmp/a,b/../../var/run\",target=/r' alpine")]  // CSV quotes
+    [InlineData("cd /var && /usr/bin/docke? run -itv ./run:/r alpine")]             // a glob in the command word
+    [InlineData("docker run -v /proc/1/task/1/root:/h alpine")]                     // under /proc
+    [InlineData("docker run -v /sys/fs/cgroup:/c alpine")]                          // under /sys
+    [InlineData("docker run -v /dev/sda:/d alpine")]                                // under /dev
+    [InlineData("cd /var && finch run -dv ./run:/r alpine")]                        // a runtime of another name
+    [InlineData("docker run -v '/srv/a b':/r alpine")]                              // not a plain absolute path
     [InlineData("docker run --rm --mount type=bind,SRC=./x,target=/r alpine ls /r")]
     [InlineData("docker run --rm -v /proc/1/root:/h alpine ls /h")]                // another process's file system
     [InlineData("docker run --rm -v /proc/self/root/var/run:/r alpine ls /r")]

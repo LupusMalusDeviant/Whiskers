@@ -644,6 +644,61 @@ public class SelfProtectionTests
     public void Mount_forms_from_the_S2_review_are_refused_for_a_key(string command) =>
         Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
 
+    /// <summary>Contract 0017 B, amendment 3, round 3 (the S2 delta review): the classes behind each bypass are closed
+    /// fail-closed — only a plain absolute path is analysable as a mount source.</summary>
+    [Theory]
+    // B5: a line continuation starts no word of its own
+    [InlineData("cd /var && docker run -v \\\n ./run:/r alpine")]
+    [InlineData("cd /var && docker run -itv \\\n ./run:/r alpine")]
+    [InlineData("cd /var && docker run --volume \\\n  ./run:/r alpine")]
+    [InlineData("docker run --mount \\\n type=bind,SOURCE=/var/run,target=/r alpine")]
+    [InlineData("docker run --mount \\\n type=bind,source=/var/run,target=/r alpine")]
+    [InlineData("docker run -v \\\n /var/run:/r alpine")]
+    // B6: a CSV-quoted --mount field
+    [InlineData("docker run --rm --mount 'type=bind,\"source=/tmp/a,b/../../var/run\",target=/r' alpine ls /r")]
+    [InlineData("docker run --rm --mount 'type=bind,source=\"/srv/x\",target=/r' alpine ls /r")]
+    // B7: --mount-add reads like --mount
+    [InlineData("docker service update --mount-add type=bind,source=/var/run,target=/r app")]
+    [InlineData("docker service update --mount-add=type=bind,SRC=/var/lib/docker/volumes,dst=/v app")]
+    // B8: a glob in the command word
+    [InlineData("cd /var && /usr/bin/docke? run -v ./run:/r alpine")]
+    [InlineData("cd /var && /usr/bin/docke? run -itv /var/run:/r alpine")]
+    [InlineData("cd /var && /usr/bin/dock* run --rm -itv ./run:/r alpine ls /r")]
+    [InlineData("cd /var && /usr/bin/podma? run --rm -itv ./run:/r alpine ls /r")]
+    [InlineData("cd /var && /usr/bin/nerdct[l] run --rm -dv ./run:/r alpine ls /r")]
+    [InlineData("cd /var && [d]ocker run --rm -itv ./run:/r alpine ls /r")]
+    // M4: anything under /proc, /sys or /dev
+    [InlineData("docker run --rm -v /proc/1/task/1/root:/h alpine ls /h")]
+    [InlineData("docker run --rm -v /proc/self/task/7/cwd:/c alpine ls /c")]
+    [InlineData("docker run --rm -v /sys:/s alpine ls /s")]
+    [InlineData("docker run --rm -v /dev:/d alpine ls /d")]
+    // M5: a runtime under another name (the cluster rule no longer needs a runtime word)
+    [InlineData("cd /var && podman-remote run --rm -itv ./run:/r alpine ls /r")]
+    [InlineData("cd /var && docker-current run --rm -itv ./run:/r alpine ls /r")]
+    [InlineData("cd /var && finch run --rm -dv ./run:/r alpine ls /r")]
+    [InlineData("cp /usr/bin/docker /tmp/d && cd /var && /tmp/d run --rm -itv ./run:/r alpine ls /r")]
+    [InlineData("/tmp/d run --rm --mount type=bind,SOURCE=/var/run,target=/r alpine ls /r")]
+    // the allow-list: any other character in an absolute source
+    [InlineData("docker run --rm -v '/var/r un':/r alpine ls /r")]
+    [InlineData("docker run --rm -v /var/ru?:/r alpine ls /r")]
+    public void Mount_bypass_classes_from_the_S2_delta_review_are_refused_for_a_key(string command) =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow, ExecuteCommandAsAdminKey(command));
+
+    [Fact]
+    public void A_command_longer_than_the_matcher_reads_is_refused_for_a_key() =>
+        Assert.NotEqual(Whiskers.Services.Guardrails.GuardrailVerdict.Allow,
+            ExecuteCommandAsAdminKey("echo " + new string('a', Whiskers.Services.Guardrails.ProtectedResourceMatcher.MaxShellLength)));
+
+    [Fact]
+    public void Many_commands_up_to_the_limit_are_decided_quickly()
+    {
+        var command = string.Concat(Enumerable.Repeat("a b; ", Whiskers.Services.Guardrails.ProtectedResourceMatcher.MaxShellLength / 5 - 1));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        ExecuteCommandAsAdminKey(command);
+        // About a second locally; the per-command checks over the whole text took ~9 s at this size.
+        Assert.True(watch.ElapsedMilliseconds < 5000, $"took {watch.ElapsedMilliseconds} ms");
+    }
+
     [Theory]
     [InlineData("docker run -v /srv/app:/app alpine ls")]
     [InlineData("docker run -v /srv/app:/app:ro alpine ls")]
@@ -653,6 +708,23 @@ public class SelfProtectionTests
     [InlineData("rsync -av ./a host:/b")]                                              // another tool's verbose cluster
     [InlineData("tar -czvf ./a.tgz ./dir")]
     [InlineData("cp -rv ./a ./b")]
+    [InlineData("rsync -av /srv/a/ /srv/b/")]
+    [InlineData("tar -xzvf ./a.tgz")]
+    [InlineData("awk -v x=1 1 /etc/hosts")]
+    [InlineData("awk -v x=./y 1 /etc/hosts")]
+    [InlineData("grep -iv foo /etc/hosts")]
+    [InlineData("scp ./a host:/tmp/h")]
+    [InlineData("ls -lav ./x")]
+    [InlineData("docker exec app cp -rv ./a ./b")]
+    [InlineData("docker exec app ls -lav ./x")]
+    [InlineData("docker ps && rsync -av ./a host:/b")]
+    [InlineData("ssh -oStrictHostKeyChecking=no host uptime")]
+    [InlineData("mount -o remount,ro /srv")]
+    [InlineData("journalctl -u docker -o short")]
+    [InlineData("systemctl status docker && ls -lv ./x")]
+    [InlineData("docker run --mount type=volume,src=data,dst=/var/run alpine ls")]      // a named volume, keyed
+    [InlineData("[ -f /etc/hosts ] && echo ok")]                                       // [ is a command, not a glob
+    [InlineData("psql -c \"select count(*) from orders\"")]
     [InlineData("docker run -v data:/var/run alpine ls")]                              // a named volume
     [InlineData("echo SRC=./build")]                                                   // not Docker's lower-case key
     [InlineData("export MYSRC=/var/run")]                                              // not a key of its own
