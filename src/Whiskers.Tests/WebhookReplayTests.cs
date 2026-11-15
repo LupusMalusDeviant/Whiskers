@@ -587,14 +587,27 @@ public sealed class WebhookReplayTests : IDisposable
     /// (and the lock) before it — nothing they prove depends on the deadline being short.</summary>
     private static readonly TimeSpan LockTestRunTimeout = TimeSpan.FromMilliseconds(2500);
 
+    /// <summary>Waits for a page Test's answer while the test holds the database lock; a missing answer fails with
+    /// what it means, not a bare <see cref="TimeoutException"/>.</summary>
+    private static async Task<T> AnsweredWhileLocked<T>(Task<T> answer, TimeSpan guard)
+    {
+        try { return await answer.WaitAsync(guard); }
+        catch (TimeoutException)
+        {
+            Assert.Fail($"The worker did not answer within {guard.TotalSeconds:0} s while the test held the database lock.");
+            throw;
+        }
+    }
+
     /// <summary>The answer of a page Test came while the database still held it up: the run's start had taken the
     /// lock (premise) and was still waiting for it, and no other command had failed or been cancelled — so the answer
-    /// did not wait for the locked start; that it waited for no other bounded wait either rests on
-    /// <see cref="HangGuard"/>.</summary>
+    /// did not wait for the locked start. That it waited for no other bounded wait either rests on
+    /// <see cref="HangGuard"/> where a refusal write can meet the lock (it is given up without a command event), and on
+    /// <see cref="Faults.EndedBadlySinceArmed"/> for commands. The page Test's own wait exceeds both guards.</summary>
     private void AssertAnsweredBeforeTheDatabase()
     {
-        // The proof is by order (the lock is still held when the answer comes), so the wait is the generous signal guard.
-        Assert.True(_options.TestRunTimeout > SignalGuard, "premise: the page Test waits longer than the signal guard");
+        Assert.True(_options.TestRunTimeout > SignalGuard && SignalGuard > HangGuard,
+            "premise: the page Test waits longer than either guard");
         Assert.True(_faults.LockTaken.IsCompleted,
             "premise: the run's start reached the lock before its deadline (a setup or runner problem, not the product)");
         Assert.Equal(1, _faults.Tripped);
@@ -752,7 +765,9 @@ public sealed class WebhookReplayTests : IDisposable
         var service = Service();
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
-        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(SignalGuard);
+        // Refusals are recorded here, so an answer that waited for a refusal write behind the lock (given up after
+        // 20 s without a command event) is caught only by the hang guard's bound.
+        var (success, _) = await AnsweredWhileLocked(service.TriggerSignedTestAsync(wh.WebhookId), HangGuard);
         // Answered while its start still waited for the lock: the start lands only after the deadline.
         AssertAnsweredBeforeTheDatabase();
         Assert.False(success);
@@ -1541,7 +1556,10 @@ public sealed class WebhookReplayTests : IDisposable
         // a timeout (until the test unlocks it), as SQLite waits synchronously and does not cancel a command under way.
         _faults.Arm("UPDATE \"WebhookDeliveries\"", Fault.LockDatabase, runsOnly: true, skip: 1);   // after its acceptance, the first run write
 
-        var (success, _) = await service.TriggerSignedTestAsync(wh.WebhookId).WaitAsync(SignalGuard);
+        // No refusal is recorded in this test, so no wait without a command event meets the lock: a command that
+        // waited in SQLite fails after its busy timeout and shows in EndedBadlySinceArmed. The proof is by order, and
+        // the generous signal guard is enough.
+        var (success, _) = await AnsweredWhileLocked(service.TriggerSignedTestAsync(wh.WebhookId), SignalGuard);
 
         // The worker came back within the deadline, not the database's timeout — proven by order: its start was still
         // waiting for the lock when it answered. Once the lock is gone the start that landed late is recorded as
@@ -1908,7 +1926,7 @@ public sealed class WebhookReplayTests : IDisposable
 
         /// <summary>Commands that failed or were cancelled since the last <see cref="Arm"/> — any command, not only the
         /// locked one (a command that met the lock fails after SQLite's 30 s busy timeout). A wait abandoned without
-        /// its command ending does not show here; the lock tests' hang guard covers that.</summary>
+        /// its command ending does not show here; the hang guard covers that where a refusal write can meet the lock.</summary>
         public int EndedBadlySinceArmed => Volatile.Read(ref _endedBadly);
 
         private void Ended(DbCommand command)
