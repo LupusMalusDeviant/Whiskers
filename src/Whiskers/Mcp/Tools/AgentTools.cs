@@ -44,7 +44,10 @@ public class AgentTools
             Guid.NewGuid().ToString("N"), principal, AgentOrigin.McpTool, guardrailStore.Current);
 
         // INV-40 (Fable review): the call ends with its caller — a closed MCP request stops the agent and the tools it
-        // runs — and never outlives its deadline, so a run that loops cannot hold the hosts for good.
+        // runs — and its deadline cancels the token the session and its tools get, so a run that loops stops at the next
+        // point that observes it. Both cancellations are cooperative: the invoker releases the run from an awaiting read
+        // at once, but a mutation that ignores the token runs to its end (the gateway never abandons one), and this call
+        // waits for it.
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(Deadline);
         var ct = deadline.Token;

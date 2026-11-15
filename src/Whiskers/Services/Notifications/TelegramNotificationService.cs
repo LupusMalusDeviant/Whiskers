@@ -17,7 +17,7 @@ public class TelegramNotificationService : ITelegramNotificationService
         _http = http;
         _settings = settings;
         _logger = logger;
-        _throttler = new NotificationThrottler(settings.CurrentValue.ThrottleMinutes);
+        _throttler = new NotificationThrottler();
     }
 
     /// <summary>The fixed Bot API host; it goes through the outbound guard like every channel (R1-54).</summary>
@@ -30,7 +30,7 @@ public class TelegramNotificationService : ITelegramNotificationService
         if (!c.Enabled || string.IsNullOrWhiteSpace(c.BotToken) || string.IsNullOrWhiteSpace(c.ChatId)) return false;
         if (!evt.IsRedelivery && _throttler.IsThrottled(evt, _settings.CurrentValue.ThrottleMinutes)) return false;
         await PostAsync(c, NotificationFormatter.PlainText(evt), ct);
-        _throttler.Record(evt);
+        _throttler.Record(evt, _settings.CurrentValue.ThrottleMinutes);
         _logger.LogInformation("Telegram notification sent: {EventType}", evt.EventType);
         return true;
     }
