@@ -44,7 +44,8 @@ public class ReleaseGateBaseTests
 
         var baseline = new GateSnapshot(Show(reference, GateFiles.Csproj), Show(reference, GateFiles.Invariants),
             Show(reference, GateFiles.ReleaseGateDoc), Show(reference, GateFiles.Contract));
-        var findings = BaseComparison.Compare(current, baseline, label, tag);
+        // The resolved full commit ID, never the reference as given: only that can match Amendment 3's admitted reset.
+        var findings = BaseComparison.Compare(current, baseline, label, tag, baseCommit: output.Trim());
         Assert.True(findings.Count == 0, $"Against {label}:\n" + string.Join("\n", findings));
     }
 
