@@ -860,6 +860,10 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
       keeps its working automation; nothing is held. If the state cannot be read, the result is not `Active`
       (`OwnerAccounts.cs:85` gives `Unverified`), so the items are held (fail closed). Test:
       `Creating_a_local_account_for_a_federated_user_removed_from_the_whitelist_holds_their_items`.
+      The resolver is `IAutomationOwnerResolver.Describe` (`AutomationMutationRunner.cs:114-121`), injected into
+      `LocalAccountService` for this. Its interface default returns `Active` (`:121`), which would hold nothing, so
+      the registered resolver must implement `Describe` itself (pinned by a test), and an exception from `Describe`
+      counts as not `Active`: the items are held.
     - The capability `automation.hold` is nested only: `MutationCompositions` gets
       `("account.create", ["config.roles", "automation.hold"])` (today `["config.roles"]`, `MutationCompositions.cs:61`).
   - **Order.** `OwnerAccounts.StateOf` reads the Identity table directly (`OwnerAccounts.cs:89`). So the address
