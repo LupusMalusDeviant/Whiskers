@@ -1,6 +1,6 @@
 # Contract 0021 — LAN networks as an exposure (macvlan / ipvlan)
 
-Status: **Draft — awaiting the maintainer's acceptance** · 16 November 2026.
+Status: **Accepted by the maintainer on 16 November 2026; all decisions as recommended.**
 
 The direction was decided by the maintainer on 16 November 2026: a new exposure kind **`LanNetwork`** in the detection
 table of [contract 0006](0006-exposure-changes.md). This contract fixes how it is built. It **amends contract 0006**
@@ -379,7 +379,7 @@ No new path: every path exists. **Total unchanged** — 116 after contracts 0018
 4. Compose v2 on the host fills `services.<s>.networks.default` in `docker compose config --format json` for a service
    without `networks:` (the model rule covers it either way; this checks the config rule).
 
-## 5. Decisions for the maintainer
+## 5. Decisions (maintainer, 16 November 2026: all as recommended)
 
 - **D1 — Class of `LanNetwork`.** Options: (a) `host`; (b) `published`, literally "like a published port"; (c) a new
   class `lan` added to the default `ExposureConfirmClasses`. **Recommended: (a) `host`.** The decision of 2026-11-16

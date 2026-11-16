@@ -1,6 +1,6 @@
 # Contract 0020 — Handing over the automation of an unusable owner
 
-Status: **Draft — awaiting the maintainer's acceptance (2026-11-16).** The direction is the maintainer's decision of
+Status: **Accepted by the maintainer on 16 November 2026; all decisions as recommended, D11 option (c).** The direction is the maintainer's decision of
 16 November 2026 and is not open here: **no automatic re-linking by e-mail**. Instead, an Admin hands the automation of
 an owner who can no longer act over to another existing, usable account. The handover is explicit, interactive,
 audited and goes through the Mutation Gateway. The open points are listed under "Decisions for the maintainer".
@@ -747,7 +747,7 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
     CAPABILITY_INVENTORY, `Services/Mutations/README.md`, `Components/Shared/README.md`, CHANGELOG.
 - **[braucht Nutzer/Hardware]** the three checks in the real application above.
 
-## Decisions for the maintainer
+## Decisions (maintainer, 16 November 2026: all as recommended, D11 option (c))
 
 - **D1 — All at once or per item.**
   - Options:
