@@ -68,7 +68,9 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
         {
             if (!t.Enabled || !Matches(t, evt)) continue;
 
-            var key = $"{t.Id}|{evt.ContainerId}";
+            // Per trigger AND server (review 1.0.0): a server-level event carries no container id, so keyed on the
+            // container alone one host's event used up the cooldown of every other host.
+            var key = $"{t.Id}|{evt.ServerId}|{evt.ContainerId}";
             if (_lastRun.TryGetValue(key, out var last) && (now - last).TotalSeconds < t.CooldownSeconds) continue;
             _lastRun[key] = now;
 

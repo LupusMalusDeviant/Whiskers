@@ -27,6 +27,9 @@ public class OsCveScanner : IOsCveScanner
 
     private static readonly Regex CveIdRegex = new(@"CVE-\d{4}-\d+", RegexOptions.Compiled);
 
+    /// <summary>Printed by the list command only when apt exists on the host (positive proof, see <see cref="ScanAsync"/>).</summary>
+    internal const string AptPresentMarker = "whiskers-apt-present";
+
     public OsCveScanner(
         IHostCommandExecutor executor,
         IOptionsMonitor<CveMonitorSettings> settings,
@@ -55,7 +58,11 @@ public class OsCveScanner : IOsCveScanner
                 serverId, update.ExitCode, Truncate(update.Error ?? update.Output, 200));
 
         // 2. List upgradable security-pocket packages.
-        var listCmd = "LC_ALL=C.UTF-8 apt list --upgradable 2>/dev/null | grep -E -- '-security[ /]' || true";
+        // Review 1.0.0: the pipeline ends in "|| true", so on a host without apt it exits 0 with no output — exactly what
+        // a clean host answers. The marker is positive proof that apt exists; without it the host is not scannable and
+        // its state is unknown, which is never stored as "clean".
+        var listCmd = $"LC_ALL=C.UTF-8 command -v apt >/dev/null 2>&1 && echo {AptPresentMarker}; " +
+                      "LC_ALL=C.UTF-8 apt list --upgradable 2>/dev/null | grep -E -- '-security[ /]' || true";
         var list = await _executor.ExecuteAsync(serverId, listCmd, TimeSpan.FromSeconds(30), ct);
         if (list.ExitCode is not 0 and not 1)
         {
@@ -63,6 +70,14 @@ public class OsCveScanner : IOsCveScanner
             // but be defensive.
             result.Error = $"apt list failed (exit {list.ExitCode}): " +
                 Truncate(string.IsNullOrEmpty(list.Error) ? list.Output : list.Error, 200);
+            return result;
+        }
+
+        if (!(list.Output ?? "").Split('\n').Any(l => l.Trim() == AptPresentMarker))
+        {
+            result.Error = "Not scannable: apt was not found on this host. The OS scan covers Debian/Ubuntu (apt) only, " +
+                           "so the state of this host's packages is unknown — not clean.";
+            _logger.LogInformation("OS CVE scan {Server}: no apt on the host, not scannable", serverId);
             return result;
         }
 

@@ -30,7 +30,10 @@ public sealed class DiskHealthAlerts
 
     /// <summary>1/0 against threshold 1: 0 is below the clear bound (1 − 0.5); no escalation, no gap reset, no cool-down.</summary>
     public static readonly BreachRules Rules = new(HoldFor, ClearMargin: 0.5, ClearedFor: HoldFor,
-        EscalationStep: double.PositiveInfinity, GapTolerance: null, MinimumGap: TimeSpan.Zero);
+        EscalationStep: double.PositiveInfinity, GapTolerance: null, MinimumGap: TimeSpan.Zero,
+        // A flapping SMART item or array is a failing one: good readings in between do not end its confirmation until
+        // they lasted HoldFor (review 1.0.0 keeps this; the threshold alerts reset on one reading below the line).
+        UnbrokenConfirmation: false);
 
     private const double Threshold = 1;
 

@@ -33,7 +33,14 @@ public sealed class SelfMetrics : ISelfMetrics
 
     // A queue per server rather than a lock-free structure: a median needs the samples themselves, and the
     // lock is held for a handful of instructions on a path that runs once per server per cycle.
-    private readonly ConcurrentDictionary<string, Queue<TimeSpan>> _latencies = new(StringComparer.Ordinal);
+    // Review 1.0.0: with the time of the newest sample, kept under the same lock so a reader never pairs one with the other's.
+    private readonly ConcurrentDictionary<string, LatencySeries> _latencies = new(StringComparer.Ordinal);
+
+    private sealed class LatencySeries
+    {
+        public readonly Queue<TimeSpan> Samples = new(LatencyWindow);
+        public DateTime LastAtUtc;
+    }
 
     private static string Key(string loop, string serverId) => $"{loop}|{serverId}";
 
@@ -82,18 +89,19 @@ public sealed class SelfMetrics : ISelfMetrics
 
     public void RecordApiCall(string serverId, TimeSpan duration)
     {
-        var window = _latencies.GetOrAdd(serverId, _ => new Queue<TimeSpan>(LatencyWindow));
-        lock (window)
+        var series = _latencies.GetOrAdd(serverId, _ => new LatencySeries());
+        lock (series)
         {
-            window.Enqueue(duration);
-            while (window.Count > LatencyWindow) window.Dequeue();
+            series.Samples.Enqueue(duration);
+            while (series.Samples.Count > LatencyWindow) series.Samples.Dequeue();
+            series.LastAtUtc = DateTime.UtcNow;
         }
     }
 
-    public IReadOnlyDictionary<string, IReadOnlyList<TimeSpan>> ApiLatencies() =>
+    public IReadOnlyDictionary<string, ApiLatencyWindow> ApiLatencies() =>
         _latencies.ToDictionary(
             kv => kv.Key,
-            kv => { lock (kv.Value) { return (IReadOnlyList<TimeSpan>)kv.Value.ToList(); } },
+            kv => { lock (kv.Value) { return new ApiLatencyWindow(kv.Value.Samples.ToList(), kv.Value.LastAtUtc); } },
             StringComparer.Ordinal);
 
     public IReadOnlyList<LoopHealth> Loops() =>

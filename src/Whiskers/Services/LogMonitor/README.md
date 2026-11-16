@@ -17,6 +17,10 @@ same fleet-wide list `ContainerHealthMonitor` uses). Consequences worth knowing:
 
 - Hosts are scanned in parallel, the containers of one host sequentially; each log fetch is bounded by a
   15 s timeout so one wedged connection can't stall the cycle.
+- Three timeouts in a row suspend a container (`log_scan_suspended`, backoff 5 → 15 → 60 min). When a
+  suspension runs out and the next fetch still times out, the container is suspended again one step longer and
+  announced again (review 1.0.0; it used to stay unsuspended and unlisted). A readable fetch ends the run and
+  sends `log_scan_resumed`.
 - Watermarks (`_lastLogCheck`) and cooldowns are keyed by `{serverId}:{containerId}` — container ids are
   unique per host only.
 - A rule counts as "all containers" only when **both** `ContainerId` and `ContainerName` are null. A

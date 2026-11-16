@@ -138,11 +138,13 @@ public sealed class ActionOutcomeTests : IDisposable
         var service = Service();
         var now = DateTime.UtcNow;
 
-        _metrics.RecordApiCall("srv", TimeSpan.FromMilliseconds(100));
         _metrics.RecordCycle("logmonitor", "srv", TimeSpan.FromMilliseconds(50), success: true, TimeSpan.FromMinutes(1));
 
         foreach (var kind in ActionCriteria.Declared)
             await service.RecordAsync(kind, "srv", "c1", "container-1");
+
+        // After the actions: a latency measured before them says nothing about what they did (review 1.0.0).
+        _metrics.RecordApiCall("srv", TimeSpan.FromMilliseconds(100));
 
         using (var db = Db())
         {
