@@ -1,7 +1,8 @@
 @page "/logs"
 @attribute [Authorize]
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Log-Suche - Whiskers</PageTitle>
+<PageTitle>@L["LogSearchView_Header_Title"] - Whiskers</PageTitle>
 
 @* RoadToSAP Phase 1: thin route wrapper. ModuleGuard renders the interactive LogSearchView only when the
    LogMonitor module is enabled; otherwise it shows a clean "module disabled" notice (and LogSearchView —

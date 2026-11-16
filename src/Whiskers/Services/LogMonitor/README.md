@@ -7,6 +7,7 @@ Log search and **pattern-based log alerts**. Search container logs on demand, an
 | File | Purpose |
 |---|---|
 | `ILogSearchService.cs` / `LogSearchService.cs` | Full-text / regex search across container logs. A long matched line is shortened at a complete word (`ShellUtils.CutAtBoundary`, also for an alert's matched line), never inside a credential (R1-24). |
+| `InvalidSearchPatternException.cs` | The one exception an unparsable search regex becomes (review 1.0.0, T3); the page and `search_logs` catch exactly this type. |
 | `ILogMonitorService.cs` / `LogMonitorService.cs` | Background log-pattern monitor; manages the alert rules and raises notifications on matches. The matched line is redacted before it is cut, logged or sent (R1-25). R1-41: a failed cycle is logged and the next one runs; the cycle is owned to its end (no `WaitAsync` backstop) — the stop reaches the fleet listing, each log fetch (including its wait for a client and a budget slot, as the caller's token — never held against the server, while the fetch timeout stays the server's deadline; a fetch that runs out while still queued for a budget slot keeps its watermark, does not count toward suspending the container and is counted as `log_fetch_saturation`) and each notification, and a stop advances no watermark, records no cycle and sends no alert. A rule whose regex runs into its time limit (1 s per line) is skipped for that container and cycle alone — counted as `log_rule_regex_timeouts` with a warning naming the rule — never the container's other rules, and never as unreadable logs (Fable review). |
 | `NoopLogMonitorService.cs` | Core default `ILogMonitorService` (no rules, no monitor). Registered before the module loop so the AI-triggers page still resolves it when the **LogMonitor module** is off; the real `LogMonitorService` wins by last-registration when on (RoadToSAP Phase 1). |
 
@@ -32,7 +33,9 @@ same fleet-wide list `ContainerHealthMonitor` uses). Consequences worth knowing:
 
 `LogSearchService` follows the same rule: without an explicit `serverId` it searches every server and
 fetches each container's logs from its own host; results carry `ServerId`/`ServerName` because container
-names repeat across a fleet.
+names repeat across a fleet. A container picked by name is searched also when stopped (its logs stay readable, and the page offers it);
+a search across all containers reads the running ones. An invalid regular expression throws
+`InvalidSearchPatternException` instead of answering with no hits; `search_logs` and the page say so (review 1.0.0, T3).
 
 Per cycle a container transfers at most `TailLines` (200) lines: the Docker call applies the tail limit
 even when a `since` watermark is set, so one very chatty container can no longer pull its whole burst over

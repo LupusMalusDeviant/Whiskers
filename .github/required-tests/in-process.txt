@@ -44,6 +44,12 @@
 # saves show and log a failure only redacted (UiFailure).
 14 Whiskers.Tests.ComponentTests.UiCrashRegressionTests
 
+# Review 1.0.0 (T3): the remaining UI findings — a hidden setting survives its save, a refusal or failure says what it is
+# and only that, a filter offers what it searches, a button only where the gateway allows it, a tab switch neither
+# empties the terminal nor loads the .env twice; the audit filters also match the gateway's capability ids.
+26 Whiskers.Tests.ComponentTests.UiReviewFindingsTests
+6 Whiskers.Tests.AuditActionFilterTests
+
 # mTLS names that reach a shell line on a host end at the end of the text (\z, not $): a client name, compose path,
 # project or run suffix with a trailing line break is refused.
 5 Whiskers.Tests.MtlsNameAnchorTests
@@ -126,7 +132,7 @@
 6 Whiskers.Tests.CloudTargetResolutionTests
 2 Whiskers.Tests.ComponentTests.AiOperationsViewPrincipalTests
 5 Whiskers.Tests.ComponentTests.AuditPagesAccessTests
-9 Whiskers.Tests.ComponentTests.ContainerDatabasePanelTests
+13 Whiskers.Tests.ComponentTests.ContainerDatabasePanelTests
 20 Whiskers.Tests.ComponentTests.CredentialPageSaveTests
 12 Whiskers.Tests.ComponentTests.DiskHealthPanelTests
 8 Whiskers.Tests.ComponentTests.EndpointChecksPageTests
@@ -267,7 +273,7 @@
 1 Whiskers.Tests.LogRuleRegexTimeoutTests
 15 Whiskers.Tests.LogSafeTests
 10 Whiskers.Tests.LogScanExclusionTests
-4 Whiskers.Tests.LogSearchFleetTests
+7 Whiskers.Tests.LogSearchFleetTests
 4 Whiskers.Tests.LoginHardeningTests
 6 Whiskers.Tests.LoopSuspensionTests
 3 Whiskers.Tests.LoopSuspensionTrafficTests

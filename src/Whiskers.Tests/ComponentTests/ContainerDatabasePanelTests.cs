@@ -220,6 +220,48 @@ public class ContainerDatabasePanelTests : BunitContext, IAsyncLifetime
         Assert.Equal([new KeyValuePair<string, string>("PGPASSWORD", "pw")], delivered);
     }
 
+    // Review 1.0.0 (T3): a file the database does not import echoed a hint with exit code 0 and was shown as a success.
+    [Theory]
+    [InlineData("seed.csv")]
+    [InlineData("seed.json")]
+    public async Task A_file_the_database_does_not_import_is_refused_before_anything_runs(string file)
+    {
+        Services.AddSingleton(ConfirmingDialogs.Create());
+        var state = new ContainerDatabaseState { SeedFileData = "a,b\n1,2"u8.ToArray(), SeedFileName = file };
+        var panel = RenderPanel(AppRole.Admin, state);
+        await panel.InvokeAsync(panel.Instance.EnsureLoadedAsync);
+
+        await InvokePrivate(panel, "ExecuteSeedFile");
+
+        Assert.Empty(_host.Calls);
+        Assert.False(state.SeedSuccess);
+        Assert.Contains("ContainerDetail_Db_ImportUnsupported", state.SeedOutput);
+    }
+
+    // Review 1.0.0 (T3): an Operator was offered the query builder's Execute and the table's quick queries, all
+    // db.query (Admin), which the gateway then refused.
+    [Theory]
+    [InlineData(AppRole.Operator, true)]
+    [InlineData(AppRole.Admin, false)]
+    public async Task The_query_buttons_are_disabled_below_the_gateway_level(AppRole role, bool disabled)
+    {
+        var state = new ContainerDatabaseState();
+        var panel = RenderPanel(role, state);
+        await panel.InvokeAsync(panel.Instance.EnsureLoadedAsync);
+        state.DbSelectedTable = "users";
+        state.QbTable = "users";
+        state.NotifyChanged();
+
+        panel.WaitForAssertion(() => Assert.Contains("ContainerDetail_Db_Preview50", panel.Markup));
+        var quick = panel.FindAll("button").Where(b => b.TextContent.Trim() is "ContainerDetail_Db_Preview50" or "COUNT"
+            or "ContainerDetail_Db_AllCsv").ToList();
+        var execute = panel.FindAll("button").Where(b => b.TextContent.Trim() == "ContainerDetail_Db_Execute").ToList();
+        Assert.Equal(3, quick.Count);
+        Assert.NotEmpty(execute);   // the builder's (and, for an Admin, the editor's)
+        Assert.All(quick, b => Assert.Equal(disabled, b.HasAttribute("disabled")));
+        if (disabled) Assert.All(execute, b => Assert.True(b.HasAttribute("disabled")));
+    }
+
     [Fact]
     public void No_command_on_the_database_panel_carries_the_password_itself()
     {

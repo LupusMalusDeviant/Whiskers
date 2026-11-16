@@ -42,6 +42,7 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
         Services.AddSingleton<ICveFindingsStore>(new NoopCveFindingsStore());
         Services.AddSingleton<INotificationService>(Recording<INotificationService>.Create(_sent, "channels"));
         Services.AddSingleton<IMatrixNotificationService>(Recording<IMatrixNotificationService>.Create(_sent, "matrix"));
+        Services.AddSingleton<IMattermostNotificationService>(Recording<IMattermostNotificationService>.Create(_sent, "mattermost"));
         Services.AddSingleton(NullProxy<Whiskers.Modules.IModuleRegistry>.Create());
         Services.AddSingleton<Whiskers.Services.Auth.IWhitelistService>(_whitelist);
         Services.AddSingleton(NullProxy<IRoleService>.Create());
@@ -128,8 +129,9 @@ public class SettingsHandlerRoleTests : BunitContext, IAsyncLifetime
         await Invoke(page, "TestMattermost");
         await Invoke(page, "TestMatrix");
 
-        // Mattermost has no service of its own: its test goes through the channel service.
-        lock (_sent) Assert.Equal(["channels.SendTestAsync", "channels.SendTestAsync", "matrix.SendTestAsync"], _sent);
+        // "Test all" goes through the channel service; the Mattermost button tests the Mattermost channel alone (review
+        // 1.0.0, T3 — it used to test every channel).
+        lock (_sent) Assert.Equal(["channels.SendTestAsync", "mattermost.SendTestAsync", "matrix.SendTestAsync"], _sent);
         Assert.Contains(Snackbars(), s => s.Message == "Settings_Snackbar_MattermostTestSent");
     }
 

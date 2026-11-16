@@ -272,7 +272,7 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _showRegistryDialog = false)" Disabled="@_deploying">@L["AppStore_Button_Cancel"]</MudButton>
-        @if (_role >= AppRole.Operator)
+        @if (_role >= CapabilityCatalog.RoleOf("app.deploy"))
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployRegistryImage"
                        Disabled="@(_deploying || string.IsNullOrWhiteSpace(_deployProjectName))">
@@ -330,7 +330,7 @@
         </DialogContent>
         <DialogActions>
             <MudButton OnClick="@(() => _showDialog = false)" Disabled="@_deploying">@L["AppStore_Button_Cancel"]</MudButton>
-            @if (_role >= AppRole.Operator)
+            @if (_role >= CapabilityCatalog.RoleOf("app.deploy"))
             {
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DeployTemplate"
                            Disabled="@(_deploying || string.IsNullOrWhiteSpace(_deployProjectName) || _portConflicts.Any())">
@@ -561,10 +561,12 @@
         finally { _deploying = false; }
     }
 
-    private void SelectRegistry(string? registryId)
+    // Returns the search, so the chip's click awaits it and the page renders once it ends (review 1.0.0, T3): started
+    // and dropped, it ended without a render and the progress bar kept running.
+    private Task SelectRegistry(string? registryId)
     {
         _selectedRegistryId = registryId;
-        if (_searchPerformed) _ = SearchRegistry();
+        return _searchPerformed ? SearchRegistry() : Task.CompletedTask;
     }
 
     private async Task OnRegistrySearchKey(KeyboardEventArgs e)

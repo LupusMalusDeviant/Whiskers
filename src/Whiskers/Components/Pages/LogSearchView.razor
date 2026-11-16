@@ -193,6 +193,12 @@ else
         {
             _results = await SearchService.SearchAsync(_searchPattern, _isRegex, _searchContainer);
         }
+        catch (Whiskers.Services.LogMonitor.InvalidSearchPatternException ex)
+        {
+            // An invalid regex (review 1.0.0, T3): said as such, and no previous hits stay under the new pattern.
+            _results = null;
+            Snackbar.Add(L["LogSearchView_Snackbar_InvalidPattern", ex.Message].Value, Severity.Error);
+        }
         catch (Exception ex)
         {
             Snackbar.Add(L["LogSearchView_Snackbar_SearchError", ex.Message].Value, Severity.Error);

@@ -132,9 +132,13 @@ internal sealed class FakeDocker : IDockerService
         list.Add((at, text));
     }
 
+    /// <summary>Containers that are not running: a listing with <c>all: false</c> leaves them out, as Docker does.</summary>
+    public HashSet<string> StoppedContainerIds { get; } = new(StringComparer.Ordinal);
+
     public Task<FleetContainerListing> ListAllContainersDetailedAsync(bool all = true)
     {
-        var reachable = _containers.Where(c => !UnreachableServerIds.Contains(c.ServerId)).ToList();
+        var reachable = _containers.Where(c => !UnreachableServerIds.Contains(c.ServerId))
+            .Where(c => all || !StoppedContainerIds.Contains(c.Id)).ToList();
         var serverNames = _containers.GroupBy(c => c.ServerId)
             .ToDictionary(g => g.Key, g => g.First().ServerName, StringComparer.OrdinalIgnoreCase);
 
@@ -203,7 +207,7 @@ internal sealed class FakeDocker : IDockerService
         if (ListContainersException is { } thrown) throw thrown;
         // Like the real service, an id in another case names the same server.
         return _containers.Where(c => string.Equals(c.ServerId, serverId ?? DefaultServerId,
-            StringComparison.OrdinalIgnoreCase)).ToList();
+            StringComparison.OrdinalIgnoreCase) && (all || !StoppedContainerIds.Contains(c.Id))).ToList();
     }
 
     /// <summary>How long a log fetch takes. Zero (the default) keeps every existing test synchronous; a value

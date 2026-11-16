@@ -17,6 +17,7 @@
 @inject Whiskers.Services.Notifications.IInAppNotificationStore Alerts
 @inject Whiskers.Services.Observability.Outcomes.IActionOutcomeService Outcomes
 @using Whiskers.Services.Observability.Outcomes
+@inject IStringLocalizer<SharedResource> L
 @implements IDisposable
 
 @* "Is Whiskers still working?" — Plan-0003 WP4.
@@ -30,15 +31,15 @@
    different threshold would be worse than none: it would look authoritative while contradicting the alert
    that woke someone up. *@
 
-<PageTitle>Whiskers self-status</PageTitle>
+<PageTitle>@L["SelfStatus_PageTitle"]</PageTitle>
 
 <div class="sw-page-header">
     <MudStack Row="true" AlignItems="AlignItems.Center">
         <div class="sw-page-icon"><MudIcon Icon="@Icons.Material.Filled.Insights" Size="Size.Large" /></div>
         <div>
-            <MudText Typo="Typo.h5">Whiskers about itself</MudText>
+            <MudText Typo="Typo.h5">@L["SelfStatus_Header_Title"]</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Whether the background checks are actually running — read this before trusting an absence of alerts.
+                @L["SelfStatus_Header_Subtitle"]
             </MudText>
         </div>
     </MudStack>
@@ -47,84 +48,81 @@
 @if (_stalled > 0)
 {
     <MudAlert Severity="Severity.Error" Class="mb-4">
-        @_stalled of @_loops.Count loop/server pairs have not completed a cycle recently.
-        While a loop is stalled its silence means nothing — findings from those servers are neither good news nor bad.
+        @L["SelfStatus_Alert_Stalled", _stalled, _loops.Count]
     </MudAlert>
 }
 else if (_loops.Count > 0)
 {
     <MudAlert Severity="Severity.Success" Class="mb-4">
-        Every loop with a declared cadence has completed a cycle recently, so an absence of findings can be taken
-        at face value.
+        @L["SelfStatus_Alert_AllRunning"]
     </MudAlert>
 }
 else
 {
     <MudAlert Severity="Severity.Warning" Class="mb-4">
-        No loop has recorded a cycle yet. Just after a start that is ordinary; ten minutes in it means every
-        background loop is failing before it can record anything.
+        @L["SelfStatus_Alert_NoCycleYet"]
     </MudAlert>
 }
 
-<MudText Typo="Typo.h6" Class="mb-2">Loops</MudText>
+<MudText Typo="Typo.h6" Class="mb-2">@L["SelfStatus_Heading_Loops"]</MudText>
 <MudTable Items="@_loops" Dense="true" Hover="true" Class="mb-6">
     <HeaderContent>
-        <MudTh>Loop</MudTh>
-        <MudTh>Server</MudTh>
-        <MudTh>State</MudTh>
-        <MudTh>Last success</MudTh>
-        <MudTh>Cycle</MudTh>
-        <MudTh>Cycles / failed</MudTh>
-        <MudTh>Cadence</MudTh>
+        <MudTh>@L["SelfStatus_Th_Loop"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_Server"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_State"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_LastSuccess"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_Cycle"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_CyclesFailed"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_Cadence"]</MudTh>
     </HeaderContent>
     <RowTemplate>
-        <MudTd DataLabel="Loop">@context.Loop</MudTd>
-        <MudTd DataLabel="Server">@context.ServerName</MudTd>
-        <MudTd DataLabel="State">
+        <MudTd DataLabel="@L["SelfStatus_Th_Loop"]">@context.Loop</MudTd>
+        <MudTd DataLabel="@L["SelfStatus_Th_Server"]">@context.ServerName</MudTd>
+        <MudTd DataLabel="@L["SelfStatus_Th_State"]">
             <MudChip T="string" Size="Size.Small" Color="@ColourFor(context.Verdict)" Variant="Variant.Filled">
                 @LabelFor(context)
             </MudChip>
         </MudTd>
         @* An age, never a timestamp: "14:02" makes the reader do the subtraction, and doing it wrong is
            exactly how a six-day-old failure goes unnoticed. *@
-        <MudTd DataLabel="Last success">@SelfStatusPresenter.Age(context.Age)</MudTd>
-        <MudTd DataLabel="Cycle">@($"{context.LastDuration.TotalMilliseconds:0} ms")</MudTd>
-        <MudTd DataLabel="Cycles / failed">@context.Cycles / @context.Failures</MudTd>
-        <MudTd DataLabel="Cadence">
+        <MudTd DataLabel="@L["SelfStatus_Th_LastSuccess"]">@SelfStatusPresenter.Age(context.Age)</MudTd>
+        <MudTd DataLabel="@L["SelfStatus_Th_Cycle"]">@($"{context.LastDuration.TotalMilliseconds:0} ms")</MudTd>
+        <MudTd DataLabel="@L["SelfStatus_Th_CyclesFailed"]">@context.Cycles / @context.Failures</MudTd>
+        <MudTd DataLabel="@L["SelfStatus_Th_Cadence"]">
             @(context.ExpectedInterval is { } i ? SelfStatusPresenter.Age(i).Replace(" ago", "") : "—")
         </MudTd>
     </RowTemplate>
 </MudTable>
 
-<MudText Typo="Typo.h6" Class="mb-2">Load and circuit state</MudText>
+<MudText Typo="Typo.h6" Class="mb-2">@L["SelfStatus_Heading_Load"]</MudText>
 <MudTable Items="@_servers" Dense="true" Hover="true">
     <HeaderContent>
-        <MudTh>Server</MudTh>
-        <MudTh>Circuit</MudTh>
-        <MudTh>Background</MudTh>
-        <MudTh>Interactive</MudTh>
-        <MudTh>Background checks</MudTh>
+        <MudTh>@L["SelfStatus_Th_Server"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_Circuit"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_Background"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_Interactive"]</MudTh>
+        <MudTh>@L["SelfStatus_Th_BackgroundChecks"]</MudTh>
     </HeaderContent>
     <RowTemplate>
-        <MudTd DataLabel="Server">@context.ServerName</MudTd>
-        <MudTd DataLabel="Circuit">
+        <MudTd DataLabel="@L["SelfStatus_Th_Server"]">@context.ServerName</MudTd>
+        <MudTd DataLabel="@L["SelfStatus_Th_Circuit"]">
             <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
                      Color="@(context.Circuit == ServerCircuitState.Closed ? Color.Success : Color.Warning)">
                 @context.Circuit
             </MudChip>
         </MudTd>
-        <MudTd DataLabel="Background">@context.BackgroundInFlight / @context.BackgroundLimit</MudTd>
-        <MudTd DataLabel="Interactive">@context.InteractiveInFlight / @context.InteractiveLimit</MudTd>
-        <MudTd DataLabel="Background checks">
+        <MudTd DataLabel="@L["SelfStatus_Th_Background"]">@context.BackgroundInFlight / @context.BackgroundLimit</MudTd>
+        <MudTd DataLabel="@L["SelfStatus_Th_Interactive"]">@context.InteractiveInFlight / @context.InteractiveLimit</MudTd>
+        <MudTd DataLabel="@L["SelfStatus_Th_BackgroundChecks"]">
             @if (context.Paused)
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">
-                    paused — @context.PauseReason
+                    @L["SelfStatus_Paused", context.PauseReason ?? ""]
                 </MudChip>
             }
             else
             {
-                <MudText Typo="Typo.body2">running</MudText>
+                <MudText Typo="Typo.body2">@L["SelfStatus_Running"]</MudText>
             }
         </MudTd>
     </RowTemplate>
@@ -134,31 +132,31 @@ else
    the same from outside (no findings) and mean completely different things, so they are named apart here:
    one is a fault the scan is backing off from, the other is a deliberate exclusion. Neither is "healthy",
    and neither is "failed". *@
-<MudText Typo="Typo.h6" Class="mt-6 mb-2">Containers not being read</MudText>
+<MudText Typo="Typo.h6" Class="mt-6 mb-2">@L["SelfStatus_Heading_NotRead"]</MudText>
 
 @if (_suspendedContainers.Count == 0 && _exclusions.Count == 0)
 {
-    <MudText Typo="Typo.body2" Class="mb-4">Every container's logs are being scanned.</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4">@L["SelfStatus_AllScanned"]</MudText>
 }
 else
 {
     <MudTable Items="@_notRead" Dense="true" Hover="true" Class="mb-4">
         <HeaderContent>
-            <MudTh>Container</MudTh>
-            <MudTh>Server</MudTh>
-            <MudTh>Why</MudTh>
-            <MudTh>Detail</MudTh>
+            <MudTh>@L["SelfStatus_Th_Container"]</MudTh>
+            <MudTh>@L["SelfStatus_Th_Server"]</MudTh>
+            <MudTh>@L["SelfStatus_Th_Why"]</MudTh>
+            <MudTh>@L["SelfStatus_Th_Detail"]</MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd DataLabel="Container">@context.Container</MudTd>
-            <MudTd DataLabel="Server">@context.ServerName</MudTd>
-            <MudTd DataLabel="Why">
+            <MudTd DataLabel="@L["SelfStatus_Th_Container"]">@context.Container</MudTd>
+            <MudTd DataLabel="@L["SelfStatus_Th_Server"]">@context.ServerName</MudTd>
+            <MudTd DataLabel="@L["SelfStatus_Th_Why"]">
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
                          Color="@(context.IsFault ? Color.Warning : Color.Info)">
-                    @(context.IsFault ? "unreadable" : "excluded")
+                    @(context.IsFault ? L["SelfStatus_Unreadable"] : L["SelfStatus_Excluded"])
                 </MudChip>
             </MudTd>
-            <MudTd DataLabel="Detail">@context.Detail</MudTd>
+            <MudTd DataLabel="@L["SelfStatus_Th_Detail"]">@context.Detail</MudTd>
         </RowTemplate>
     </MudTable>
 }
@@ -169,31 +167,31 @@ else
 @* These two database-backed sections are not on the five-second timer (see RefreshTimelineAsync), so
    each gets an explicit refresh — both buttons reload both sections. *@
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-6 mb-2">
-    <MudText Typo="Typo.h6">Did the automatic actions help?</MudText>
+    <MudText Typo="Typo.h6">@L["SelfStatus_Heading_Outcomes"]</MudText>
     <MudSpacer />
     <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh"
-               Disabled="_timelineLoading" OnClick="RefreshTimelineOnDemandAsync">Refresh</MudButton>
+               Disabled="_timelineLoading" OnClick="RefreshTimelineOnDemandAsync">@L["SelfStatus_Button_Refresh"]</MudButton>
 </MudStack>
 
 @if (_outcomeRows.Count == 0)
 {
     <MudText Typo="Typo.body2" Class="mb-4">
-        Whiskers has taken no automatic actions in the last 7 days.
+        @L["SelfStatus_NoActions"]
     </MudText>
 }
 else
 {
     <MudTable Items="@_outcomeRows" Dense="true" Hover="true" Class="mb-2">
         <HeaderContent>
-            <MudTh>Action</MudTh>
-            <MudTh>Effective</MudTh>
-            <MudTh>Worked / changed nothing</MudTh>
-            <MudTh>Not measurable</MudTh>
-            <MudTh>Still open</MudTh>
+            <MudTh>@L["SelfStatus_Th_Action"]</MudTh>
+            <MudTh>@L["SelfStatus_Th_Effective"]</MudTh>
+            <MudTh>@L["SelfStatus_Th_Worked"]</MudTh>
+            <MudTh>@L["SelfStatus_Th_NotMeasurable"]</MudTh>
+            <MudTh>@L["SelfStatus_Th_StillOpen"]</MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd DataLabel="Action">@context.ActionKind</MudTd>
-            <MudTd DataLabel="Effective">
+            <MudTd DataLabel="@L["SelfStatus_Th_Action"]">@context.ActionKind</MudTd>
+            <MudTd DataLabel="@L["SelfStatus_Th_Effective"]">
                 @if (context.HitRate is { } rate)
                 {
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
@@ -202,7 +200,7 @@ else
                     </MudChip>
                     @if (context.Trust == RateTrust.Unreliable)
                     {
-                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-inline ml-1">unreliable</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="d-inline ml-1">@L["SelfStatus_Unreliable"]</MudText>
                     }
                 }
                 else
@@ -210,11 +208,11 @@ else
                     <MudText Typo="Typo.caption">—</MudText>
                 }
             </MudTd>
-            <MudTd DataLabel="Worked / changed nothing">@context.Worked / @context.DidNotWork</MudTd>
+            <MudTd DataLabel="@L["SelfStatus_Th_Worked"]">@context.Worked / @context.DidNotWork</MudTd>
             @* Never folded into the rate, and never left out either: a gap that is not shown is coverage
                the table is silently claiming. *@
-            <MudTd DataLabel="Not measurable">@context.NotMeasurable</MudTd>
-            <MudTd DataLabel="Still open">@context.Pending</MudTd>
+            <MudTd DataLabel="@L["SelfStatus_Th_NotMeasurable"]">@context.NotMeasurable</MudTd>
+            <MudTd DataLabel="@L["SelfStatus_Th_StillOpen"]">@context.Pending</MudTd>
         </RowTemplate>
     </MudTable>
 
@@ -230,9 +228,7 @@ else
 }
 
 <MudText Typo="Typo.caption" Class="mb-4 d-block">
-    An action that changed nothing usually means the cause was somewhere other than where the action was
-    aimed. For Whiskers' own throttles it means something sharper: monitoring was taken off a server for no
-    benefit. Rollback is deliberately not automatic yet — the plan asks for four weeks of these numbers first.
+    @L["SelfStatus_Outcomes_Note"]
 </MudText>
 
 @* Plan-0003 WP5 — "what happened at 14:02?". Self-inflicted load is the hardest kind to attribute: the
@@ -243,16 +239,16 @@ else
    in it is worse than no timeline — it will confidently suggest that the thing which happened AFTER the
    spike caused it. *@
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-6 mb-2">
-    <MudText Typo="Typo.h6">What has been happening</MudText>
+    <MudText Typo="Typo.h6">@L["SelfStatus_Heading_Timeline"]</MudText>
     <MudSpacer />
-    <MudText Typo="Typo.caption">last 6 hours · times shown in @_timeZoneLabel</MudText>
+    <MudText Typo="Typo.caption">@L["SelfStatus_Timeline_Window", _timeZoneLabel]</MudText>
     <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh"
-               Disabled="_timelineLoading" OnClick="RefreshTimelineOnDemandAsync">Refresh</MudButton>
+               Disabled="_timelineLoading" OnClick="RefreshTimelineOnDemandAsync">@L["SelfStatus_Button_Refresh"]</MudButton>
 </MudStack>
 
 @if (_timeline.Count == 0)
 {
-    <MudText Typo="Typo.body2">Nothing has changed on the fleet in the last six hours.</MudText>
+    <MudText Typo="Typo.body2">@L["SelfStatus_Timeline_Empty"]</MudText>
 }
 else
 {
@@ -265,18 +261,18 @@ else
                     <b>@Local(entry.AtUtc)</b> — @entry.Summary
                     @if (!entry.Success)
                     {
-                        <MudText Typo="Typo.caption" Color="Color.Error" Class="d-inline"> (failed)</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Error" Class="d-inline"> (@L["SelfStatus_Failed"])</MudText>
                     }
                 </MudText>
                 <MudText Typo="Typo.caption">
-                    @(entry.Actor ?? "unknown")
+                    @(entry.Actor ?? L["SelfStatus_UnknownActor"].Value)
                     @if (entry.ServerId is { } sid)
                     {
                         @($" · {ServerName(sid)}")
                     }
                     @if (entry.AuditId is not null)
                     {
-                        <MudLink Href="/audit-log" Typo="Typo.caption" Class="ml-2">audit log</MudLink>
+                        <MudLink Href="audit-log" Typo="Typo.caption" Class="ml-2">@L["SelfStatus_AuditLogLink"]</MudLink>
                     }
                 </MudText>
             </MudTimelineItem>
@@ -285,12 +281,7 @@ else
 }
 
 <MudText Typo="Typo.caption" Class="mt-4 d-block">
-    A <b>skipped</b> server is deliberately not covered by that loop — not a fault, but no findings will come
-    from it either. <b>Unjudged</b> means the loop declares no cadence, so there is no basis for a verdict;
-    inventing a threshold would make this page a source of noise.
-    <b>Unreadable</b> containers are a fault the scan is backing off from and will retry;
-    <b>excluded</b> ones are deliberate — Whiskers' own access path, whose logs are the record of this scan.
-    Both still get health, metric and CVE monitoring; only their log content is skipped.
+    @((MarkupString)L["SelfStatus_Legend"].Value)
 </MudText>
 
 @code {
@@ -395,12 +386,12 @@ else
         _ => Color.Success
     };
 
-    private static string LabelFor(LoopRow row) => row.Verdict switch
+    private string LabelFor(LoopRow row) => row.Verdict switch
     {
-        LoopVerdict.Stalled => "stalled",
-        LoopVerdict.Skipped => $"skipped — {row.SkipReason}",
-        LoopVerdict.Unjudged => "unjudged",
-        _ => "ok"
+        LoopVerdict.Stalled => L["SelfStatus_Verdict_Stalled"].Value,
+        LoopVerdict.Skipped => L["SelfStatus_Verdict_Skipped", row.SkipReason ?? ""].Value,
+        LoopVerdict.Unjudged => L["SelfStatus_Verdict_Unjudged"].Value,
+        _ => L["SelfStatus_Verdict_Ok"].Value
     };
 
     public void Dispose() => _timer?.Dispose();

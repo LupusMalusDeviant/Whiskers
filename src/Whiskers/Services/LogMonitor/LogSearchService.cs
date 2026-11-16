@@ -36,13 +36,18 @@ public class LogSearchService : ILogSearchService
 
         if (isRegex)
         {
+            // Review 1.0.0 (T3): an invalid pattern is the caller's error to see, not "0 hits".
             try { regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(2)); }
-            catch { return results; }
+            catch (RegexParseException ex) { throw new InvalidSearchPatternException(ex); }
         }
 
+        // A container picked by name is found stopped too (review 1.0.0, T3): its logs stay readable, and the page's
+        // picker offers it — a running-only listing answered "no matches" for a container that was never searched. A
+        // search across all containers stays with the running ones, so it does not read every exited container's log.
+        var all = containerId != null;
         var containers = serverId != null
-            ? await _docker.ListContainersAsync(all: false, serverId: serverId, ct: ct)
-            : await _docker.ListAllContainersAsync(false, ct);
+            ? await _docker.ListContainersAsync(all: all, serverId: serverId, ct: ct)
+            : await _docker.ListAllContainersAsync(all, ct);
         var targets = containerId != null
             ? containers.Where(c => c.Id == containerId || c.Name == containerId).ToList()
             : containers.ToList();

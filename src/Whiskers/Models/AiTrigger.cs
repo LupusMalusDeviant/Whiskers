@@ -5,7 +5,7 @@ namespace Whiskers.Models;
 public class AiTrigger
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
-    public string Name { get; set; } = "Neuer Trigger";
+    public string Name { get; set; } = "New trigger";
     public bool Enabled { get; set; } = true;
 
     /// <summary>NotificationEvent.EventType values this trigger reacts to
@@ -47,26 +47,26 @@ public class AiTrigger
         WriteCapabilities.Count > 0 && WriteTargets.Count > 0 && !string.IsNullOrWhiteSpace(OwnerId);
 }
 
-/// <summary>The known event types a trigger can react to, with a German label for the UI.</summary>
+/// <summary>The known event types a trigger can react to, with an English label (the agent's task message; the page shows the localized text `AiTriggersView_Event_&lt;type&gt;`).</summary>
 public static class AiTriggerEvents
 {
     public static readonly IReadOnlyList<(string Type, string Label)> All = new[]
     {
         ("unhealthy",     "Container unhealthy"),
-        ("oom_killed",    "Container OOM-gekillt"),
-        ("stopped",       "Container gestoppt"),
-        ("restart_loop",  "Restart-Loop (Crash-Loop)"),
-        ("image_update",  "Image-Update verfügbar"),
-        ("cve_finding",   "Neue CVE gefunden"),
-        ("log_alert",     "Log-Alert / Fehler im Log"),
-        ("server_unreachable", "Server nicht erreichbar"),
-        ("server_recovered",   "Server wieder erreichbar"),
-        ("auto_update_failed", "Auto-Update fehlgeschlagen"),
-        ("high_cpu",      "Hohe CPU-Last (Schwellwert)"),
-        ("high_memory",   "Hohe RAM-Last (Schwellwert)"),
-        ("metric_anomaly", "Metrik-Ausreißer (Anomalie)"),
-        ("certificate_expiring", "Zertifikat läuft bald ab"),
-        ("certificate_expired",  "Zertifikat abgelaufen"),
+        ("oom_killed",    "Container OOM-killed"),
+        ("stopped",       "Container stopped"),
+        ("restart_loop",  "Restart loop (crash loop)"),
+        ("image_update",  "Image update available"),
+        ("cve_finding",   "New CVE found"),
+        ("log_alert",     "Log alert / error in the log"),
+        ("server_unreachable", "Server unreachable"),
+        ("server_recovered",   "Server reachable again"),
+        ("auto_update_failed", "Auto-update failed"),
+        ("high_cpu",      "High CPU load (threshold)"),
+        ("high_memory",   "High memory load (threshold)"),
+        ("metric_anomaly", "Metric outlier (anomaly)"),
+        ("certificate_expiring", "Certificate expiring soon"),
+        ("certificate_expired",  "Certificate expired"),
     };
 
     public static string Label(string type) =>

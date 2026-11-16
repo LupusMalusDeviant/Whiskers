@@ -3080,15 +3080,6 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Cves_Tooltip_Verified" xml:space="preserve">
     <value>Installierte Paketversion gematcht</value>
   </data>
-  <data name="Error_DevMode_Heading" xml:space="preserve">
-    <value>Entwicklungsmodus</value>
-  </data>
-  <data name="Error_DevMode_Info" xml:space="preserve">
-    <value>Der Wechsel zur &lt;strong&gt;Entwicklungs&lt;/strong&gt;umgebung zeigt detailliertere Informationen über den aufgetretenen Fehler an.</value>
-  </data>
-  <data name="Error_DevMode_Warning" xml:space="preserve">
-    <value>&lt;strong&gt;Die Entwicklungsumgebung sollte für bereitgestellte Anwendungen nicht aktiviert werden.&lt;/strong&gt; Sie kann dazu führen, dass sensible Informationen aus Ausnahmen an Endbenutzer angezeigt werden. Für lokales Debugging aktivieren Sie die &lt;strong&gt;Entwicklungs&lt;/strong&gt;umgebung, indem Sie die Umgebungsvariable &lt;strong&gt;ASPNETCORE_ENVIRONMENT&lt;/strong&gt; auf &lt;strong&gt;Development&lt;/strong&gt; setzen und die App neu starten.</value>
-  </data>
   <data name="Error_PageTitle" xml:space="preserve">
     <value>Fehler</value>
   </data>
@@ -6412,5 +6403,212 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="Common_Error_FileTooLarge" xml:space="preserve">
     <value>Die Datei ist größer als {0} KB.</value>
+  </data>
+  <data name="Settings_Snackbar_RoleExists" xml:space="preserve">
+    <value>{0} hat bereits eine Rolle — ändern Sie sie in der Liste.</value>
+  </data>
+  <data name="LogSearchView_Snackbar_InvalidPattern" xml:space="preserve">
+    <value>Suche nicht ausgeführt: {0}</value>
+  </data>
+  <data name="ContainerDetail_Db_SqlFileUnsupported" xml:space="preserve">
+    <value>{0} nimmt hier keine SQL-Dateien an — es wurde nichts ausgeführt.</value>
+  </data>
+  <data name="ContainerDetail_Db_ImportUnsupported" xml:space="preserve">
+    <value>Dateien vom Typ {0} werden für {1} hier nicht importiert (PostgreSQL und MySQL: .sql, MongoDB: .json) — es wurde nichts ausgeführt.</value>
+  </data>
+  <data name="Error_SeeLog" xml:space="preserve">
+    <value>Der Fehler wurde protokolliert. Nennen Sie bei einer Meldung die Anfrage-ID oben.</value>
+  </data>
+  <data name="AiTriggersView_Event_unhealthy" xml:space="preserve">
+    <value>Container unhealthy</value>
+  </data>
+  <data name="AiTriggersView_Event_oom_killed" xml:space="preserve">
+    <value>Container OOM-gekillt</value>
+  </data>
+  <data name="AiTriggersView_Event_stopped" xml:space="preserve">
+    <value>Container gestoppt</value>
+  </data>
+  <data name="AiTriggersView_Event_restart_loop" xml:space="preserve">
+    <value>Restart-Loop (Crash-Loop)</value>
+  </data>
+  <data name="AiTriggersView_Event_image_update" xml:space="preserve">
+    <value>Image-Update verfügbar</value>
+  </data>
+  <data name="AiTriggersView_Event_cve_finding" xml:space="preserve">
+    <value>Neue CVE gefunden</value>
+  </data>
+  <data name="AiTriggersView_Event_log_alert" xml:space="preserve">
+    <value>Log-Alert / Fehler im Log</value>
+  </data>
+  <data name="AiTriggersView_Event_server_unreachable" xml:space="preserve">
+    <value>Server nicht erreichbar</value>
+  </data>
+  <data name="AiTriggersView_Event_server_recovered" xml:space="preserve">
+    <value>Server wieder erreichbar</value>
+  </data>
+  <data name="AiTriggersView_Event_auto_update_failed" xml:space="preserve">
+    <value>Auto-Update fehlgeschlagen</value>
+  </data>
+  <data name="AiTriggersView_Event_high_cpu" xml:space="preserve">
+    <value>Hohe CPU-Last (Schwellwert)</value>
+  </data>
+  <data name="AiTriggersView_Event_high_memory" xml:space="preserve">
+    <value>Hohe RAM-Last (Schwellwert)</value>
+  </data>
+  <data name="AiTriggersView_Event_metric_anomaly" xml:space="preserve">
+    <value>Metrik-Ausreißer (Anomalie)</value>
+  </data>
+  <data name="AiTriggersView_Event_certificate_expiring" xml:space="preserve">
+    <value>Zertifikat läuft bald ab</value>
+  </data>
+  <data name="AiTriggersView_Event_certificate_expired" xml:space="preserve">
+    <value>Zertifikat abgelaufen</value>
+  </data>
+  <data name="SelfStatus_PageTitle" xml:space="preserve">
+    <value>Whiskers-Selbststatus</value>
+  </data>
+  <data name="SelfStatus_Header_Title" xml:space="preserve">
+    <value>Whiskers über sich selbst</value>
+  </data>
+  <data name="SelfStatus_Header_Subtitle" xml:space="preserve">
+    <value>Ob die Hintergrundprüfungen wirklich laufen — erst lesen, dann dem Ausbleiben von Alarmen trauen.</value>
+  </data>
+  <data name="SelfStatus_Alert_Stalled" xml:space="preserve">
+    <value>{0} von {1} Schleife/Server-Paaren haben zuletzt keinen Durchlauf abgeschlossen. Solange eine Schleife hängt, bedeutet ihr Schweigen nichts — Befunde dieser Server sind weder gute noch schlechte Nachrichten.</value>
+  </data>
+  <data name="SelfStatus_Alert_AllRunning" xml:space="preserve">
+    <value>Jede Schleife mit festgelegtem Takt hat zuletzt einen Durchlauf abgeschlossen — fehlende Befunde dürfen beim Wort genommen werden.</value>
+  </data>
+  <data name="SelfStatus_Alert_NoCycleYet" xml:space="preserve">
+    <value>Noch keine Schleife hat einen Durchlauf verbucht. Kurz nach dem Start ist das normal; nach zehn Minuten heißt es, dass jede Hintergrundschleife scheitert, bevor sie etwas verbuchen kann.</value>
+  </data>
+  <data name="SelfStatus_Heading_Loops" xml:space="preserve">
+    <value>Schleifen</value>
+  </data>
+  <data name="SelfStatus_Th_Loop" xml:space="preserve">
+    <value>Schleife</value>
+  </data>
+  <data name="SelfStatus_Th_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="SelfStatus_Th_State" xml:space="preserve">
+    <value>Zustand</value>
+  </data>
+  <data name="SelfStatus_Th_LastSuccess" xml:space="preserve">
+    <value>Letzter Erfolg</value>
+  </data>
+  <data name="SelfStatus_Th_Cycle" xml:space="preserve">
+    <value>Durchlauf</value>
+  </data>
+  <data name="SelfStatus_Th_CyclesFailed" xml:space="preserve">
+    <value>Durchläufe / fehlgeschlagen</value>
+  </data>
+  <data name="SelfStatus_Th_Cadence" xml:space="preserve">
+    <value>Takt</value>
+  </data>
+  <data name="SelfStatus_Heading_Load" xml:space="preserve">
+    <value>Last und Circuit-Zustand</value>
+  </data>
+  <data name="SelfStatus_Th_Circuit" xml:space="preserve">
+    <value>Circuit</value>
+  </data>
+  <data name="SelfStatus_Th_Background" xml:space="preserve">
+    <value>Hintergrund</value>
+  </data>
+  <data name="SelfStatus_Th_Interactive" xml:space="preserve">
+    <value>Interaktiv</value>
+  </data>
+  <data name="SelfStatus_Th_BackgroundChecks" xml:space="preserve">
+    <value>Hintergrundprüfungen</value>
+  </data>
+  <data name="SelfStatus_Paused" xml:space="preserve">
+    <value>pausiert — {0}</value>
+  </data>
+  <data name="SelfStatus_Running" xml:space="preserve">
+    <value>laufen</value>
+  </data>
+  <data name="SelfStatus_Heading_NotRead" xml:space="preserve">
+    <value>Container, die nicht gelesen werden</value>
+  </data>
+  <data name="SelfStatus_AllScanned" xml:space="preserve">
+    <value>Die Logs jedes Containers werden durchsucht.</value>
+  </data>
+  <data name="SelfStatus_Th_Container" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="SelfStatus_Th_Why" xml:space="preserve">
+    <value>Warum</value>
+  </data>
+  <data name="SelfStatus_Th_Detail" xml:space="preserve">
+    <value>Detail</value>
+  </data>
+  <data name="SelfStatus_Unreadable" xml:space="preserve">
+    <value>nicht lesbar</value>
+  </data>
+  <data name="SelfStatus_Excluded" xml:space="preserve">
+    <value>ausgenommen</value>
+  </data>
+  <data name="SelfStatus_Heading_Outcomes" xml:space="preserve">
+    <value>Haben die automatischen Aktionen geholfen?</value>
+  </data>
+  <data name="SelfStatus_Button_Refresh" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="SelfStatus_NoActions" xml:space="preserve">
+    <value>Whiskers hat in den letzten 7 Tagen keine automatischen Aktionen ausgeführt.</value>
+  </data>
+  <data name="SelfStatus_Th_Action" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="SelfStatus_Th_Effective" xml:space="preserve">
+    <value>Wirksam</value>
+  </data>
+  <data name="SelfStatus_Th_Worked" xml:space="preserve">
+    <value>Gewirkt / nichts geändert</value>
+  </data>
+  <data name="SelfStatus_Th_NotMeasurable" xml:space="preserve">
+    <value>Nicht messbar</value>
+  </data>
+  <data name="SelfStatus_Th_StillOpen" xml:space="preserve">
+    <value>Noch offen</value>
+  </data>
+  <data name="SelfStatus_Unreliable" xml:space="preserve">
+    <value>unzuverlässig</value>
+  </data>
+  <data name="SelfStatus_Outcomes_Note" xml:space="preserve">
+    <value>Eine Aktion, die nichts geändert hat, heißt meist: Die Ursache lag woanders als dort, wohin die Aktion zielte. Bei Whiskers' eigenen Drosselungen heißt es mehr: Ein Server wurde ohne Nutzen aus der Überwachung genommen. Das Zurücknehmen ist bewusst noch nicht automatisch — der Plan verlangt zuerst vier Wochen dieser Zahlen.</value>
+  </data>
+  <data name="SelfStatus_Heading_Timeline" xml:space="preserve">
+    <value>Was passiert ist</value>
+  </data>
+  <data name="SelfStatus_Timeline_Window" xml:space="preserve">
+    <value>letzte 6 Stunden · Zeiten in {0}</value>
+  </data>
+  <data name="SelfStatus_Timeline_Empty" xml:space="preserve">
+    <value>In den letzten sechs Stunden hat sich an der Flotte nichts geändert.</value>
+  </data>
+  <data name="SelfStatus_Failed" xml:space="preserve">
+    <value>fehlgeschlagen</value>
+  </data>
+  <data name="SelfStatus_UnknownActor" xml:space="preserve">
+    <value>unbekannt</value>
+  </data>
+  <data name="SelfStatus_AuditLogLink" xml:space="preserve">
+    <value>Audit-Log</value>
+  </data>
+  <data name="SelfStatus_Legend" xml:space="preserve">
+    <value>Ein &lt;b&gt;übersprungener&lt;/b&gt; Server wird von dieser Schleife bewusst nicht abgedeckt — kein Fehler, aber von ihm kommen auch keine Befunde. &lt;b&gt;Nicht bewertet&lt;/b&gt; heißt: Die Schleife nennt keinen Takt, also gibt es keine Grundlage für ein Urteil; eine erfundene Schwelle würde diese Seite zur Lärmquelle machen. &lt;b&gt;Nicht lesbare&lt;/b&gt; Container sind ein Fehler, vor dem der Scan zurückweicht und den er erneut versucht; &lt;b&gt;ausgenommene&lt;/b&gt; sind Absicht — Whiskers' eigener Zugangsweg, dessen Logs das Protokoll dieses Scans sind. Beide behalten Health-, Metrik- und CVE-Überwachung; nur ihr Log-Inhalt wird übersprungen.</value>
+  </data>
+  <data name="SelfStatus_Verdict_Stalled" xml:space="preserve">
+    <value>hängt</value>
+  </data>
+  <data name="SelfStatus_Verdict_Skipped" xml:space="preserve">
+    <value>übersprungen — {0}</value>
+  </data>
+  <data name="SelfStatus_Verdict_Unjudged" xml:space="preserve">
+    <value>nicht bewertet</value>
+  </data>
+  <data name="SelfStatus_Verdict_Ok" xml:space="preserve">
+    <value>ok</value>
   </data>
 </root>

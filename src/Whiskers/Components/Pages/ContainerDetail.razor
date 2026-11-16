@@ -17,6 +17,7 @@
 @inject IComposePlanner ComposePlanner
 @inject IComposeRunner ComposeRunner
 @inject IStringLocalizer<SharedResource> L
+@inject ILogger<ContainerDetail> Logger
 @using Whiskers.Models.Cve
 @implements IAsyncDisposable
 
@@ -79,7 +80,7 @@ else
     </MudStack>
     </div>
 
-    <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
+    <MudTabs ActivePanelIndex="_activeTab" ActivePanelIndexChanged="OnTabChanged" Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
         @* Overview Tab *@
         <MudTabPanel Text="@L["ContainerDetail_Tab_Overview"]" Icon="@Icons.Material.Filled.Info">
             <MudSimpleTable Striped="true" Dense="true">
@@ -520,6 +521,7 @@ else
     private Whiskers.Services.Terminal.TerminalSession? _termSession;
     private DotNetObjectReference<ContainerDetail>? _dotNetRef;
     private CancellationTokenSource? _termCts;
+    private int _termGeneration;   // moves on every close: an open that finishes later sees it is stale
     private string _termError = string.Empty;
     private bool _termInitialized;
 
@@ -609,6 +611,36 @@ else
         }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5)); // OPT-9: single-inspect + longer interval
     }
 
+    /// <summary>A tab switch (review 1.0.0, T3): MudTabs removes the inactive panel, so leaving the terminal tab takes
+    /// its xterm element away. The shell is closed then, and opening the tab again starts a fresh one in the new
+    /// element — before, the session lived on with nothing on screen to write to, and the tab came back empty.</summary>
+    private async Task OnTabChanged(int index)
+    {
+        var leftTerminal = _activeTab == TerminalTabIndex && index != TerminalTabIndex;
+        _activeTab = index;
+        if (leftTerminal && _termInitialized) await CloseTerminalAsync();
+    }
+
+    private async Task CloseTerminalAsync()
+    {
+        Interlocked.Increment(ref _termGeneration);   // an open still in flight is now stale and closes what it gets
+        _termInitialized = false;
+        _termError = string.Empty;
+        var session = _termSession;
+        _termSession = null;
+        _termCts?.Cancel();
+        _termCts?.Dispose();
+        _termCts = null;
+        try
+        {
+            if (session != null) await SessionManager.CloseAsync(session.SessionId);
+            await JS.InvokeVoidAsync("Whiskers.Terminal.dispose", "container-terminal");
+        }
+        catch (Exception ex) { Logger.LogDebug("Closing the container terminal failed: {Error}", ex.GetType().Name); }
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // Initialize terminal when tab is switched to terminal
@@ -618,10 +650,12 @@ else
             await InitTerminal();
         }
 
-        // Load env vars when tab is switched to env (Operator+ only — the tab does not exist for a Viewer)
+        // Load env vars when tab is switched to env (Operator+ only — the tab does not exist for a Viewer). One load at a
+        // time (review 1.0.0, T3): a render during the load came here again and started a second one, whose entries
+        // were added to the first's — every variable twice, and the save refused the duplicate keys.
         if (_activeTab == EnvTabIndex && !_envLoaded)
         {
-            await LoadEnvVars();
+            await EnsureEnvLoadedAsync();
             await InvokeAsync(StateHasChanged);
         }
 
@@ -639,23 +673,38 @@ else
             _termError = L["ContainerDetail_Terminal_NoPermission"].Value;
             return;
         }
+        // This open's generation (review 1.0.0, T3 follow-up): leaving the tab while it waits closes the terminal, so after
+        // every await a changed generation means this open is stale — it closes the session it got and touches nothing
+        // of the page's terminal state. Its token source and object reference are its own until it is still current.
+        var generation = Volatile.Read(ref _termGeneration);
+        bool Stale() => Volatile.Read(ref _termGeneration) != generation;
+        var dotNetRef = DotNetObjectReference.Create(this);
+        var cts = new CancellationTokenSource();
         try
         {
-            _dotNetRef = DotNetObjectReference.Create(this);
-            _termCts = new CancellationTokenSource();
+            _dotNetRef = dotNetRef;
+            _termCts = cts;
 
-            await JS.InvokeVoidAsync("Whiskers.Terminal.create", "container-terminal", _dotNetRef);
+            await JS.InvokeVoidAsync("Whiskers.Terminal.create", "container-terminal", dotNetRef);
+            if (Stale()) { DisposeStaleOpen(dotNetRef, cts); return; }
 
             // R1-17: opened through the gateway (Admin, kill switch, protected resources, audited open).
             var sessionId = Whiskers.Services.Terminal.TerminalSession.NewId();
             var sid = _resolvedServerId;
-            _termSession = await Mutations.RunAsync("terminal.container_open",
+            var opened = await Mutations.RunAsync("terminal.container_open",
                 new { containerId = ContainerId, serverId = sid },
                 (ResolvedContainer c, CancellationToken ct) => SessionManager.OpenContainerShellAsync(
                     new Whiskers.Services.Terminal.TerminalOpenRequest(sessionId, c.ServerId!, c.Id), ct));
+            if (Stale())
+            {
+                // The tab was left while the shell opened: no terminal shows it, so it is closed at once.
+                await SessionManager.CloseAsync(opened.SessionId);
+                DisposeStaleOpen(dotNetRef, cts);
+                return;
+            }
+            _termSession = opened;
 
-            var opened = _termSession;
-            _ = Task.WhenAll(ReadTermStreamAsync(opened.Output, _termCts.Token), ReadTermStreamAsync(opened.Errors, _termCts.Token))
+            _ = Task.WhenAll(ReadTermStreamAsync(opened.Output, cts.Token), ReadTermStreamAsync(opened.Errors, cts.Token))
                 .ContinueWith(async _ =>
                 {
                     // The shell ended (or was ended): its close event is recorded once, whoever gets there first.
@@ -665,9 +714,20 @@ else
         }
         catch (Exception ex)
         {
+            if (Stale()) { DisposeStaleOpen(dotNetRef, cts); return; }   // a later tab owns the error line now
             _termError = L["ContainerDetail_Terminal_InitError", ex.Message].Value;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    // The open's own token source and reference. The close that made it stale may already have cancelled and disposed
+    // them (they were the page's then); disposing twice is harmless, cancelling a disposed source throws.
+    private static void DisposeStaleOpen(DotNetObjectReference<ContainerDetail> dotNetRef, CancellationTokenSource cts)
+    {
+        try { cts.Cancel(); }
+        catch (ObjectDisposedException) { /* already cancelled and disposed by CloseTerminalAsync */ }
+        cts.Dispose();
+        dotNetRef.Dispose();
     }
 
     private async Task ReadTermStreamAsync(System.IO.StreamReader reader, CancellationToken ct)
@@ -814,7 +874,7 @@ else
             await Mutations.RunAsync("container.remove", new { containerId, name, serverId = sid },
                 (ResolvedContainer c, CancellationToken _) => DockerService.RemoveContainerAsync(c.Id, force: true, serverId: c.ServerId));
             Snackbar.Add(L["ContainerDetail_Snackbar_Removed"].Value, Severity.Success);
-            Nav.NavigateTo("/");
+            Nav.NavigateTo("");
         }
         catch (MutationRefusedException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
@@ -879,6 +939,11 @@ else
             Grid = new ApexCharts.Grid { BorderColor = "#333" }
         };
     }
+
+    // The env load in progress or done; every caller awaits this one instead of starting another.
+    private Task? _envLoad;
+
+    private Task EnsureEnvLoadedAsync() => _envLoad ??= LoadEnvVars();
 
     private async Task LoadEnvVars()
     {
@@ -994,10 +1059,11 @@ else
             if (restartResult.Success)
             {
                 Snackbar.Add(L["ContainerDetail_Env_SaveSuccess"].Value, Severity.Success);
-                // Reload env vars and container state
-                _envLoaded = false;
+                // Reload container state, then the env vars — through the one load (a render meanwhile joins it).
                 await LoadContainer();
-                await LoadEnvVars();
+                _envLoaded = false;
+                _envLoad = null;
+                await EnsureEnvLoadedAsync();
             }
             else
             {
@@ -1022,6 +1088,7 @@ else
     public async ValueTask DisposeAsync()
     {
         _refreshTimer?.Dispose();
+        Interlocked.Increment(ref _termGeneration);   // an open still in flight closes what it gets
         _termCts?.Cancel();
         try
         {

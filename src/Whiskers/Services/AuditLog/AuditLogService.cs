@@ -158,8 +158,7 @@ public class AuditLogService : IAuditLogService
 
         IQueryable<AuditLogEntity> query = db.AuditLog;
 
-        if (!string.IsNullOrEmpty(actionFilter))
-            query = query.Where(e => e.Action.StartsWith(actionFilter));
+        query = AuditActionFilter.Apply(query, actionFilter);
 
         if (!string.IsNullOrEmpty(targetTypeFilter))
             query = query.Where(e => e.TargetType == targetTypeFilter);
@@ -178,8 +177,7 @@ public class AuditLogService : IAuditLogService
 
         IQueryable<AuditLogEntity> query = db.AuditLog;
 
-        if (!string.IsNullOrEmpty(actionFilter))
-            query = query.Where(e => e.Action.StartsWith(actionFilter));
+        query = AuditActionFilter.Apply(query, actionFilter);
 
         if (!string.IsNullOrEmpty(targetTypeFilter))
             query = query.Where(e => e.TargetType == targetTypeFilter);

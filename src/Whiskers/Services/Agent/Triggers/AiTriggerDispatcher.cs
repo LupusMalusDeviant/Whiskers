@@ -310,7 +310,7 @@ public sealed class AiTriggerDispatcher : IAiTriggerDispatcher
                 ContainerId = evt.ContainerId,
                 ContainerName = evt.ContainerName,
                 Image = evt.Image,
-                ImageInfo = $"AI-Trigger '{t.Name}' auf {AiTriggerEvents.Label(evt.EventType)}:\n{summary}",
+                ImageInfo = $"AI trigger '{t.Name}' on {AiTriggerEvents.Label(evt.EventType)}:\n{summary}",
             });
         }
         catch (Exception ex) { _logger?.LogWarning(ex, "Notification of the AI trigger run failed."); }

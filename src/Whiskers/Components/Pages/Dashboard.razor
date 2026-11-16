@@ -49,7 +49,7 @@
                 $"{ServerName(p.ServerId)} ({(p.Automatic ? "Whiskers paused itself" : "paused by an operator")}, " +
                 $"{ServerMonitoring.Remaining(p.Until - DateTime.UtcNow)})"))
         </MudText>
-        <MudLink Href="/servers" Typo="Typo.caption">Manage on the servers page</MudLink>
+        <MudLink Href="servers" Typo="Typo.caption">Manage on the servers page</MudLink>
     </MudAlert>
 }
 
@@ -231,7 +231,7 @@
                 {
                     <MudTooltip Text="@L["Dashboard_Server_CachedAge", cachedAge.TotalSeconds.ToString("F0")]">
                         <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Small"
-                                 Style="color:rgba(255,255,255,0.35); margin-left:4px;" />
+                                 Style="color:var(--sw-text-muted); margin-left:4px;" />
                     </MudTooltip>
                 }
                 var cveSum = CveStore.SummarizeServer(serverGroup.ServerId);

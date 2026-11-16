@@ -258,8 +258,8 @@ public sealed class LocalAccountLifecycleTests
 
         // Demoting or removing the last explicit Admin is refused by the role store (TA-02).
         await using var lone = await LocalAccountWorld.CreateAsync();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => lone.Roles.SetRoleAsync(LocalAccountWorld.Root, AppRole.Operator));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => lone.Roles.RemoveRoleAsync(LocalAccountWorld.Root));
+        await Assert.ThrowsAsync<LastAdminException>(() => lone.Roles.SetRoleAsync(LocalAccountWorld.Root, AppRole.Operator));
+        await Assert.ThrowsAsync<LastAdminException>(() => lone.Roles.RemoveRoleAsync(LocalAccountWorld.Root));
 
         // R1-27 (contract 0003, rule 6): once the Google/OIDC Admin has an active identity binding there is another
         // Admin who can sign in. A federated session alone (it always has a binding) is no longer "seen signing in".
