@@ -24,7 +24,7 @@ and from that address does not pass the host's iptables chains that Docker maint
 `ports:` entry is needed: every port the container listens on is reachable from the LAN. For a host behind a firewall
 that only forwards published ports, this is a bigger exposure than a published port.
 
-Today none of the six paths that can bring a container onto such a network names that change:
+Today none of the four paths that can bring a container onto such a network names that change:
 
 1. a compose network with `driver: macvlan` or `driver: ipvlan`;
 2. an `external: true` network that already exists on the host with one of these drivers;
@@ -225,7 +225,8 @@ public static class LanDrivers
 - **Execution, `network.connect`.** `NetworkTools.ConnectContainerToNetwork` connects by the **resolved** network id
   (`MutationScope.Current` target id), not the caller's `networkId`. A network removed and re-created under the same
   name between decision and run has another id and fails. (Today the raw name passes `[MutationTarget]`, which accepts
-  id, name or alias.) The driver of a network id cannot change, so no further check is needed.
+  id, name or alias.) The resolved network id is part of the `ApprovalBinding`, so an approval names one network id,
+  never a name. The driver of a network id cannot change, so no further check is needed.
 - **MCP descriptions.** `create_network`'s `driver` description becomes: "Network driver: bridge (default), overlay,
   macvlan, ipvlan. macvlan, ipvlan and any other driver put containers on the host's LAN and need a confirmation for
   the agent." `connect_container_to_network`'s description adds: "Connecting to a macvlan/ipvlan network needs a
@@ -258,8 +259,9 @@ and never after a failed operation. No new event type.
 - **Roles and levels unchanged:** `network.create`, `network.connect` stay Admin (`McpPermissionLevels.Admin`,
   catalog `A`); `compose.deploy` / `app.deploy` stay Admin / Root.
 - **Gateway.** Every path already goes through the Mutation Gateway; this contract only adds entries to
-  `MutationTarget.Exposures`, which are part of the `ApprovalBinding` (contract 0006, Amendment 1). An approval given for
-  a `bridge` create does not cover a `macvlan` create.
+  `MutationTarget.Exposures`, which are part of the `ApprovalBinding` (contract 0006, Amendment 1). For `network.connect`
+  the `ApprovalBinding` also holds the **resolved network id** (`Target.Id`): an approval for network id X does not
+  cover a network re-created under the same name (another id), which is decided again.
 - **Under the standard policy** (`MaxAutonomousLevel = "read"`) all these capabilities are Confirm already. The new
   entries matter under an Admin-autonomous policy, where they still confirm, and they put the LAN reason on the card.
 - **Operator switch.** `ExposureConfirmClasses` stays the only switch. An operator who removed `host` from it has
@@ -279,7 +281,11 @@ and never after a failed operation. No new event type.
 
 **No new row.** `INV-62` ("an exposure change is decided as such") is extended; LAN reachability is an exposure change
 of the same kind as a published port or the host network, and the network operations belong to it. Contract 0020's
-new rows (INV-66, possibly INV-67) are not touched.
+new row INV-66 is not touched.
+
+**Edited when built (release-gate rule R5).** INV-62 is ✅, so its row is edited only in the implementing PR, together
+with tests that exist and pass in that PR. No planned test may stand on a ✅ row. Until then the row stays exactly as
+it is; the text below is what the implementing PR writes.
 
 INV-62 statement, after "takes the host's network,": insert **"or an address of its own on the host's LAN (a
 `macvlan`/`ipvlan` network or a driver Whiskers does not know, declared, external or attached later),"** and append
@@ -293,10 +299,10 @@ external network missing, ambiguous or unreadable refuses the plan), again at st
 `network.connect` to a LAN network carry it in the resolved target; any driver outside `bridge`, `overlay`, `host`,
 `none`, `null` counts."
 
-INV-62 tests, appended: the tests of § 4.
+INV-62 tests, appended in the implementing PR: the tests of § 4 as they exist there (never before).
 
 **Status.** INV-62 stays ✅: its current statement does not claim LAN networks, and the gap is named in the README's
-remaining risks until this contract is built (D6).
+remaining risks until this contract is built (D6). The row is edited when built, not at acceptance.
 
 ### § 7 path matrix
 
@@ -347,7 +353,9 @@ No new path: every path exists. **Total unchanged** — 116 after contracts 0018
 **Gateway / integration (`ComposeImpactExposureTests`, `NetworkToolsGatewayTests`, `WebhookMutationTests`)**
 
 - `Deploy_compose_with_macvlan_ends_in_confirm_under_an_admin_autonomous_policy`
-- `An_approval_for_a_bridge_network_does_not_cover_macvlan` (binding)
+- `An_approval_for_network_id_x_does_not_cover_a_network_recreated_under_the_same_name` (binding: `network.connect`
+  binds the resolved network id into the `ApprovalBinding`; a network removed and re-created as macvlan under the same
+  name has another id, so the approval does not apply and the call is decided again)
 - `Create_network_macvlan_over_mcp_ends_in_confirm_under_an_admin_autonomous_policy`
 - `Create_network_refuses_a_driver_changed_after_the_decision` (`EnsureLanDecided`)
 - `Connect_uses_the_resolved_network_id_not_the_callers_name`
@@ -401,7 +409,9 @@ No new path: every path exists. **Total unchanged** — 116 after contracts 0018
   container that is never started is better than one stopped after it was reachable.
 - **D6 — INV-62 status until built.** Options: (a) stays ✅, README remaining risks name macvlan/ipvlan now; (b) ⚠️
   from acceptance until built. **Recommended: (a).** The statement as written does not claim LAN networks; (b) would
-  reopen the release gate for a gap that was already deferred in 0017 A3.
+  reopen the release gate for a gap that was already deferred in 0017 A3. Either way the INV-62 row is edited only
+  when built (release-gate rule R5): in the implementing PR, with its tests existing; no planned test stands on a ✅
+  row.
 - **D7 — Driver list configurable?** Options: (a) fixed list in code; (b) a `GuardrailPolicy` key. **Recommended:
   (a).** A knob here could only widen `NotLan` (fail open); `ExposureConfirmClasses` already lets an operator turn the
   confirmation off.
@@ -418,7 +428,7 @@ No new path: every path exists. **Total unchanged** — 116 after contracts 0018
 
 ## 7. Documentation
 
-- `docs/v1/SECURITY_INVARIANTS.md`: INV-62 as in § 3.
+- `docs/v1/SECURITY_INVARIANTS.md`: INV-62 as in § 3, edited in the implementing PR only (R5).
 - `docs/v1/PRODUCT_CONTRACT.md` § 7: rows M-19, M-21, U-13 as in § 3.
 - README "remaining risks": macvlan/ipvlan until built (D6); after it, D4's bridge options.
 - Guardrails README: the new kind and its class.
