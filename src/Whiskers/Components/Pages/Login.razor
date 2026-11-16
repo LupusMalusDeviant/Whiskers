@@ -91,7 +91,7 @@
         // send users straight to the dashboard.
         if (Config.GetValue<bool>("Auth:Disabled"))
         {
-            Nav.NavigateTo("/", forceLoad: false);
+            Nav.NavigateTo("", forceLoad: false);
             return;
         }
 

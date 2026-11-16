@@ -326,8 +326,18 @@
         if (d <= 0) return L["Cves_Age_Today"].Value;
         if (d == 1) return L["Cves_Age_OneDay"].Value;
         if (d < 30) return L["Cves_Age_Days", d].Value;
-        if (d < 365) return L["Cves_Age_Months", d / 30].Value;
-        return L["Cves_Age_YearsMonths", d / 365, (d % 365) / 30].Value;
+        var (years, months) = AgeParts(d);
+        if (years == 0) return L["Cves_Age_Months", Math.Max(months, 1)].Value;
+        return L["Cves_Age_YearsMonths", years, months].Value;
+    }
+
+    /// <summary>Whole years and the months left over, 0–11 (review 1.0.0, T3): days / 30 of the rest of a year reached 12,
+    /// so 729 days read "1 yr 12 mo." and 364 days "12 mo.".</summary>
+    public static (int Years, int Months) AgeParts(int days)
+    {
+        var years = days / 365;
+        var months = Math.Min((days % 365) / 30, 11);
+        return (years, months);
     }
 
     private static Color AgeColor(TimeSpan age) => age.TotalDays switch

@@ -906,10 +906,15 @@ else
     {
         try
         {
+            // The section is written whole: the values this panel does not show (the unreachable-cycle counts) travel
+            // along as they are, or every save reset them to their defaults (review 1.0.0, T3).
+            var current = HealthOptions.CurrentValue;
             var health = new HealthMonitorSettings
             {
                 CheckIntervalSeconds = _hInterval, HistoryRetentionHours = _hRetention,
                 RestartLoopThreshold = _hLoopThreshold, RestartLoopWindowMinutes = _hLoopWindow,
+                ServerUnreachableCycles = current.ServerUnreachableCycles,
+                ServerUnreachableColdStartCycles = current.ServerUnreachableColdStartCycles,
             };
             // Follow-up (2026-11-03, review R1-41 round 7 NIT 5): an interval out of range is refused before the gateway
             // runs — not recorded as a failed config.save (the store refuses it again on its own).
@@ -1439,9 +1444,17 @@ else
     private async Task TestMattermost()
     {
         if (!await CanSendTestNotificationsAsync()) return;
+        // The Mattermost channel alone, resolved like Matrix below: the composite NotificationService tested every
+        // configured channel from this button (review 1.0.0, T3).
+        var mattermost = ServiceProvider.GetService<Whiskers.Services.Notifications.IMattermostNotificationService>();
+        if (mattermost is null)
+        {
+            Snackbar.Add(L["Settings_Snackbar_NotificationsModuleDisabled"].Value, Severity.Warning);
+            return;
+        }
         try
         {
-            await NotificationService.SendTestAsync();
+            await mattermost.SendTestAsync();
             Snackbar.Add(L["Settings_Snackbar_MattermostTestSent"].Value, Severity.Success);
         }
         catch (Exception ex)
@@ -1477,7 +1490,15 @@ else
     private async Task AddRole()
     {
         if (string.IsNullOrWhiteSpace(_newRoleEmail)) return;
-        _roleEntries.Add(new Whiskers.Models.UserRoleEntry { Email = _newRoleEmail.Trim(), Role = _newRoleRole });
+        var email = _newRoleEmail.Trim();
+        // One entry per address: a second one was saved but never took effect (the first match wins). Its role is
+        // changed in the list instead (review 1.0.0, T3).
+        if (_roleEntries.Any(r => r.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
+        {
+            Snackbar.Add(L["Settings_Snackbar_RoleExists", email].Value, Severity.Warning);
+            return;
+        }
+        _roleEntries.Add(new Whiskers.Models.UserRoleEntry { Email = email, Role = _newRoleRole });
         _newRoleEmail = "";
         await SaveRoles();
     }
@@ -1504,9 +1525,10 @@ else
             _defaultRole = stored.DefaultRole;
             return;
         }
-        catch (InvalidOperationException)
+        catch (Whiskers.Services.Auth.LastAdminException)
         {
-            // The service refuses to drop the last Admin; put the stored roles back on screen.
+            // The service refuses to drop the last Admin; put the stored roles back on screen. Any other failure is
+            // reported as what it is (below), not as this refusal.
             Snackbar.Add(L["Settings_Snackbar_LastAdmin"].Value, Severity.Error);
             var stored = RoleService.GetRoleData();
             _roleEntries = stored.Roles;
@@ -1593,11 +1615,8 @@ else
                     started: () => _ = InvokeAsync(() => Snackbar.Add(L["Settings_Snackbar_CveScanStarted"].Value, MudBlazor.Severity.Info))));
             }
             catch (MutationRefusedException ex) { refused = ex.Message; }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                Console.Error.WriteLine($"Manual CVE scan failed: {Whiskers.Utils.SinkRedaction.Text(ex.Message)}");
-            }
+            // Logged and shown only redacted (UiFailure), as every other failure on this page.
+            catch (Exception ex) { error = UiFailure.Report(Logger, "manual CVE scan", ex); }
 
             // Report completion and refresh the "last scan" line / button state.
             try

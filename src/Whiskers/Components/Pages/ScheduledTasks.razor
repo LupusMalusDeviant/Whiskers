@@ -1,7 +1,8 @@
 @page "/tasks"
 @attribute [Authorize]
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>Geplante Tasks - Whiskers</PageTitle>
+<PageTitle>@L["ScheduledTasksView_Header_Title"] - Whiskers</PageTitle>
 
 @* RoadToSAP Phase 1: thin route wrapper. ModuleGuard renders the interactive ScheduledTasksView only when the
    Scheduler module is enabled; otherwise it shows a clean "module disabled" notice (and ScheduledTasksView —

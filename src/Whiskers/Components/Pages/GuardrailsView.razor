@@ -21,7 +21,7 @@
         <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Primary" />
         <MudText Typo="Typo.h5">Guardrails</MudText>
     </div>
-    <MudText Typo="Typo.body2" Class="mb-4" Style="color: rgba(255,255,255,0.5);">
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--sw-text-secondary);">
         @L["GuardrailsView_Intro"]
     </MudText>
 
@@ -79,7 +79,7 @@
                 <MudIcon Icon="@Icons.Material.Filled.Block" Color="Color.Warning" Size="Size.Large" />
                 <div style="flex:1; min-width:220px;">
                     <MudText Typo="Typo.subtitle1">@L["GuardrailsView_KillSwitch_Title"]</MudText>
-                    <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.5);">
+                    <MudText Typo="Typo.caption" Style="color: var(--sw-text-secondary);">
                         @L["GuardrailsView_KillSwitch_Caption"]
                     </MudText>
                 </div>
@@ -183,7 +183,7 @@
                     <MudSelectItem Value="@("allow")">@L["GuardrailsView_ToolMode_Allow"]</MudSelectItem>
                 </MudSelect>
             </div>
-            <MudText Typo="Typo.caption" Class="mb-3" Style="color: rgba(255,255,255,0.5);">
+            <MudText Typo="Typo.caption" Class="mb-3" Style="color: var(--sw-text-secondary);">
                 @L["GuardrailsView_ToolHint"]
                 @(_edit.Policy.ToolMode == "allow" ? L["GuardrailsView_ToolHint_AllowMode"].Value : L["GuardrailsView_ToolHint_DenyMode"].Value)
             </MudText>
@@ -192,7 +192,7 @@
             {
                 <div class="mt-2 mb-1" style="display:flex; align-items:center; gap:8px;">
                     <MudText Typo="Typo.subtitle2" Color="Color.Primary">@grp.Key</MudText>
-                    <MudText Typo="Typo.caption" Style="color: rgba(255,255,255,0.4);">(@grp.Count())</MudText>
+                    <MudText Typo="Typo.caption" Style="color: var(--sw-text-muted);">(@grp.Count())</MudText>
                     <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SetCategory(grp, true))">@L["GuardrailsView_SelectAll_Button"]</MudButton>
                     <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SetCategory(grp, false))">@L["GuardrailsView_SelectNone_Button"]</MudButton>
                 </div>
@@ -203,7 +203,7 @@
                         <MudCheckBox T="bool" Dense="true" Color="Color.Primary"
                                      Value="@IsAllowed(name)" ValueChanged="@(v => SetAllowed(name, v))">
                             <span style="font-family:monospace; font-size:0.8rem;">@name</span>
-                            <span style="color:rgba(255,255,255,0.35); font-size:0.7rem;"> · @t.Level</span>
+                            <span style="color:var(--sw-text-muted); font-size:0.7rem;"> · @t.Level</span>
                         </MudCheckBox>
                     }
                 </div>

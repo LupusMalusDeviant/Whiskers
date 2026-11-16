@@ -4,6 +4,7 @@
 @inject Whiskers.Services.Auth.ICurrentUserService CurrentUser
 @inject IUiMutationRunner Mutations
 @inject IStringLocalizer<SharedResource> L
+@inject NavigationManager Nav
 @implements IAsyncDisposable
 
 @* The interactive server/host-shell UI. Rendered by ServerTerminal.razor only when the Terminal module is
@@ -11,7 +12,7 @@
    No explicit @rendermode — it inherits the app's global InteractiveServer, exactly as the page did before. *@
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
-    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="" />
+    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo(""))" />
     <MudText Typo="Typo.h5">@L["ServerTerminalView_Title"]</MudText>
     <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_serverName</MudChip>
 </MudStack>

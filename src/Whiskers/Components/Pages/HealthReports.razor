@@ -30,7 +30,7 @@
             <MudSelectItem T="string" Value="@("all")">@L["HealthReports_Filter_AllContainers"]</MudSelectItem>
             @foreach (var c in _containers)
             {
-                <MudSelectItem T="string" Value="@c.Id">@c.Name</MudSelectItem>
+                <MudSelectItem T="string" Value="@c.Id">@c.Name (@c.ServerName)</MudSelectItem>
             }
         </MudSelect>
     </MudItem>
@@ -101,7 +101,9 @@
         // records are still worth showing, so fail soft with a visible notice.
         try
         {
-            _containers = (await DockerService.ListContainersAsync()).ToList();
+            // The whole fleet (review 1.0.0, T3): the health records cover every server, so the filter offers every
+            // server's containers, not only the default server's.
+            _containers = (await DockerService.ListAllContainersAsync(all: true)).ToList();
         }
         catch (Exception ex)
         {

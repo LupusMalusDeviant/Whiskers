@@ -15,13 +15,9 @@
     </p>
 }
 
-<h3>@L["Error_DevMode_Heading"]</h3>
-<p>
-    @((MarkupString)L["Error_DevMode_Info"].Value)
-</p>
-<p>
-    @((MarkupString)L["Error_DevMode_Warning"].Value)
-</p>
+@* No advice to switch to the Development environment (review 1.0.0, T3): a deployed instance shows exception details
+   to every visitor there. The request id above finds the error in the log. *@
+<p>@L["Error_SeeLog"]</p>
 
 @code{
     [CascadingParameter]

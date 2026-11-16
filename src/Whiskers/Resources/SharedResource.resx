@@ -3080,15 +3080,6 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Cves_Tooltip_Verified" xml:space="preserve">
     <value>Installed package version matched</value>
   </data>
-  <data name="Error_DevMode_Heading" xml:space="preserve">
-    <value>Development Mode</value>
-  </data>
-  <data name="Error_DevMode_Info" xml:space="preserve">
-    <value>Switching to the &lt;strong&gt;Development&lt;/strong&gt; environment displays more detailed information about the error that occurred.</value>
-  </data>
-  <data name="Error_DevMode_Warning" xml:space="preserve">
-    <value>&lt;strong&gt;The Development environment shouldn't be enabled for deployed applications.&lt;/strong&gt; It can result in displaying sensitive information from exceptions to end users. For local debugging, enable the &lt;strong&gt;Development&lt;/strong&gt; environment by setting the &lt;strong&gt;ASPNETCORE_ENVIRONMENT&lt;/strong&gt; environment variable to &lt;strong&gt;Development&lt;/strong&gt; and restarting the app.</value>
-  </data>
   <data name="Error_PageTitle" xml:space="preserve">
     <value>Error</value>
   </data>
@@ -6409,5 +6400,212 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="Common_Error_FileTooLarge" xml:space="preserve">
     <value>The file is larger than {0} KB.</value>
+  </data>
+  <data name="Settings_Snackbar_RoleExists" xml:space="preserve">
+    <value>{0} already has a role — change it in the list.</value>
+  </data>
+  <data name="LogSearchView_Snackbar_InvalidPattern" xml:space="preserve">
+    <value>Search not run: {0}</value>
+  </data>
+  <data name="ContainerDetail_Db_SqlFileUnsupported" xml:space="preserve">
+    <value>{0} does not take SQL files here — nothing was run.</value>
+  </data>
+  <data name="ContainerDetail_Db_ImportUnsupported" xml:space="preserve">
+    <value>Files of type {0} are not imported for {1} here (PostgreSQL and MySQL: .sql, MongoDB: .json) — nothing was run.</value>
+  </data>
+  <data name="Error_SeeLog" xml:space="preserve">
+    <value>The error was logged. Quote the request ID above when you report it.</value>
+  </data>
+  <data name="AiTriggersView_Event_unhealthy" xml:space="preserve">
+    <value>Container unhealthy</value>
+  </data>
+  <data name="AiTriggersView_Event_oom_killed" xml:space="preserve">
+    <value>Container OOM-killed</value>
+  </data>
+  <data name="AiTriggersView_Event_stopped" xml:space="preserve">
+    <value>Container stopped</value>
+  </data>
+  <data name="AiTriggersView_Event_restart_loop" xml:space="preserve">
+    <value>Restart loop (crash loop)</value>
+  </data>
+  <data name="AiTriggersView_Event_image_update" xml:space="preserve">
+    <value>Image update available</value>
+  </data>
+  <data name="AiTriggersView_Event_cve_finding" xml:space="preserve">
+    <value>New CVE found</value>
+  </data>
+  <data name="AiTriggersView_Event_log_alert" xml:space="preserve">
+    <value>Log alert / error in the log</value>
+  </data>
+  <data name="AiTriggersView_Event_server_unreachable" xml:space="preserve">
+    <value>Server unreachable</value>
+  </data>
+  <data name="AiTriggersView_Event_server_recovered" xml:space="preserve">
+    <value>Server reachable again</value>
+  </data>
+  <data name="AiTriggersView_Event_auto_update_failed" xml:space="preserve">
+    <value>Auto-update failed</value>
+  </data>
+  <data name="AiTriggersView_Event_high_cpu" xml:space="preserve">
+    <value>High CPU load (threshold)</value>
+  </data>
+  <data name="AiTriggersView_Event_high_memory" xml:space="preserve">
+    <value>High memory load (threshold)</value>
+  </data>
+  <data name="AiTriggersView_Event_metric_anomaly" xml:space="preserve">
+    <value>Metric outlier (anomaly)</value>
+  </data>
+  <data name="AiTriggersView_Event_certificate_expiring" xml:space="preserve">
+    <value>Certificate expiring soon</value>
+  </data>
+  <data name="AiTriggersView_Event_certificate_expired" xml:space="preserve">
+    <value>Certificate expired</value>
+  </data>
+  <data name="SelfStatus_PageTitle" xml:space="preserve">
+    <value>Whiskers self-status</value>
+  </data>
+  <data name="SelfStatus_Header_Title" xml:space="preserve">
+    <value>Whiskers about itself</value>
+  </data>
+  <data name="SelfStatus_Header_Subtitle" xml:space="preserve">
+    <value>Whether the background checks are actually running — read this before trusting an absence of alerts.</value>
+  </data>
+  <data name="SelfStatus_Alert_Stalled" xml:space="preserve">
+    <value>{0} of {1} loop/server pairs have not completed a cycle recently. While a loop is stalled its silence means nothing — findings from those servers are neither good news nor bad.</value>
+  </data>
+  <data name="SelfStatus_Alert_AllRunning" xml:space="preserve">
+    <value>Every loop with a declared cadence has completed a cycle recently, so an absence of findings can be taken at face value.</value>
+  </data>
+  <data name="SelfStatus_Alert_NoCycleYet" xml:space="preserve">
+    <value>No loop has recorded a cycle yet. Just after a start that is ordinary; ten minutes in it means every background loop is failing before it can record anything.</value>
+  </data>
+  <data name="SelfStatus_Heading_Loops" xml:space="preserve">
+    <value>Loops</value>
+  </data>
+  <data name="SelfStatus_Th_Loop" xml:space="preserve">
+    <value>Loop</value>
+  </data>
+  <data name="SelfStatus_Th_Server" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="SelfStatus_Th_State" xml:space="preserve">
+    <value>State</value>
+  </data>
+  <data name="SelfStatus_Th_LastSuccess" xml:space="preserve">
+    <value>Last success</value>
+  </data>
+  <data name="SelfStatus_Th_Cycle" xml:space="preserve">
+    <value>Cycle</value>
+  </data>
+  <data name="SelfStatus_Th_CyclesFailed" xml:space="preserve">
+    <value>Cycles / failed</value>
+  </data>
+  <data name="SelfStatus_Th_Cadence" xml:space="preserve">
+    <value>Cadence</value>
+  </data>
+  <data name="SelfStatus_Heading_Load" xml:space="preserve">
+    <value>Load and circuit state</value>
+  </data>
+  <data name="SelfStatus_Th_Circuit" xml:space="preserve">
+    <value>Circuit</value>
+  </data>
+  <data name="SelfStatus_Th_Background" xml:space="preserve">
+    <value>Background</value>
+  </data>
+  <data name="SelfStatus_Th_Interactive" xml:space="preserve">
+    <value>Interactive</value>
+  </data>
+  <data name="SelfStatus_Th_BackgroundChecks" xml:space="preserve">
+    <value>Background checks</value>
+  </data>
+  <data name="SelfStatus_Paused" xml:space="preserve">
+    <value>paused — {0}</value>
+  </data>
+  <data name="SelfStatus_Running" xml:space="preserve">
+    <value>running</value>
+  </data>
+  <data name="SelfStatus_Heading_NotRead" xml:space="preserve">
+    <value>Containers not being read</value>
+  </data>
+  <data name="SelfStatus_AllScanned" xml:space="preserve">
+    <value>Every container's logs are being scanned.</value>
+  </data>
+  <data name="SelfStatus_Th_Container" xml:space="preserve">
+    <value>Container</value>
+  </data>
+  <data name="SelfStatus_Th_Why" xml:space="preserve">
+    <value>Why</value>
+  </data>
+  <data name="SelfStatus_Th_Detail" xml:space="preserve">
+    <value>Detail</value>
+  </data>
+  <data name="SelfStatus_Unreadable" xml:space="preserve">
+    <value>unreadable</value>
+  </data>
+  <data name="SelfStatus_Excluded" xml:space="preserve">
+    <value>excluded</value>
+  </data>
+  <data name="SelfStatus_Heading_Outcomes" xml:space="preserve">
+    <value>Did the automatic actions help?</value>
+  </data>
+  <data name="SelfStatus_Button_Refresh" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="SelfStatus_NoActions" xml:space="preserve">
+    <value>Whiskers has taken no automatic actions in the last 7 days.</value>
+  </data>
+  <data name="SelfStatus_Th_Action" xml:space="preserve">
+    <value>Action</value>
+  </data>
+  <data name="SelfStatus_Th_Effective" xml:space="preserve">
+    <value>Effective</value>
+  </data>
+  <data name="SelfStatus_Th_Worked" xml:space="preserve">
+    <value>Worked / changed nothing</value>
+  </data>
+  <data name="SelfStatus_Th_NotMeasurable" xml:space="preserve">
+    <value>Not measurable</value>
+  </data>
+  <data name="SelfStatus_Th_StillOpen" xml:space="preserve">
+    <value>Still open</value>
+  </data>
+  <data name="SelfStatus_Unreliable" xml:space="preserve">
+    <value>unreliable</value>
+  </data>
+  <data name="SelfStatus_Outcomes_Note" xml:space="preserve">
+    <value>An action that changed nothing usually means the cause was somewhere other than where the action was aimed. For Whiskers' own throttles it means something sharper: monitoring was taken off a server for no benefit. Rollback is deliberately not automatic yet — the plan asks for four weeks of these numbers first.</value>
+  </data>
+  <data name="SelfStatus_Heading_Timeline" xml:space="preserve">
+    <value>What has been happening</value>
+  </data>
+  <data name="SelfStatus_Timeline_Window" xml:space="preserve">
+    <value>last 6 hours · times shown in {0}</value>
+  </data>
+  <data name="SelfStatus_Timeline_Empty" xml:space="preserve">
+    <value>Nothing has changed on the fleet in the last six hours.</value>
+  </data>
+  <data name="SelfStatus_Failed" xml:space="preserve">
+    <value>failed</value>
+  </data>
+  <data name="SelfStatus_UnknownActor" xml:space="preserve">
+    <value>unknown</value>
+  </data>
+  <data name="SelfStatus_AuditLogLink" xml:space="preserve">
+    <value>audit log</value>
+  </data>
+  <data name="SelfStatus_Legend" xml:space="preserve">
+    <value>A &lt;b&gt;skipped&lt;/b&gt; server is deliberately not covered by that loop — not a fault, but no findings will come from it either. &lt;b&gt;Unjudged&lt;/b&gt; means the loop declares no cadence, so there is no basis for a verdict; inventing a threshold would make this page a source of noise. &lt;b&gt;Unreadable&lt;/b&gt; containers are a fault the scan is backing off from and will retry; &lt;b&gt;excluded&lt;/b&gt; ones are deliberate — Whiskers' own access path, whose logs are the record of this scan. Both still get health, metric and CVE monitoring; only their log content is skipped.</value>
+  </data>
+  <data name="SelfStatus_Verdict_Stalled" xml:space="preserve">
+    <value>stalled</value>
+  </data>
+  <data name="SelfStatus_Verdict_Skipped" xml:space="preserve">
+    <value>skipped — {0}</value>
+  </data>
+  <data name="SelfStatus_Verdict_Unjudged" xml:space="preserve">
+    <value>unjudged</value>
+  </data>
+  <data name="SelfStatus_Verdict_Ok" xml:space="preserve">
+    <value>ok</value>
   </data>
 </root>
