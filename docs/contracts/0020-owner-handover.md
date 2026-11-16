@@ -296,7 +296,7 @@ Task<HandoverWrite> HandOverAsync(string feature, string fromOwnerId, string toO
 | Webhook | existing switch (`WebhooksView.razor:477`) | `webhook.set_enabled` | no: `SetEnabledAsync` does not touch the owner (`WebhookService.cs:208-222`) |
 | AI trigger | existing switch on save | `aitrigger.save` | no: with `SuspendedReason` cleared, switching on is no takeover (`AiTriggerStore.cs:109-111`) |
 | Endpoint check | new **Resume** button | `endpointcheck.save` | `IEndpointCheckStore.ResumeAsync(string id, string expectedOwnerId, CancellationToken ct)`, `[MutatingOperation("endpointcheck.save")]`: `Enabled := true`, `SuspendedReason := null`, only while `OwnerId == expectedOwnerId`; the owner is kept |
-| Git deploy app | new **Resume** button | `gitdeploy.save` | `IGitDeployService.ResumeAsync(string appId, string expectedOwnerId)`, `[MutatingOperation("gitdeploy.save")]`: clears `HeldReason` only while `Owner == expectedOwnerId`; the owner is kept. Saving the app (`SaveAppAsync`) also clears it, but re-owns to the saver as today. |
+| Git deploy app | new **Resume** button | `gitdeploy.save` | `IGitDeployService.ResumeAsync(string appId, string expectedOwnerId, CancellationToken ct = default)`, `[MutatingOperation("gitdeploy.save")]`: clears `HeldReason` only while `Owner == expectedOwnerId`; the owner is kept. Saving the app (`SaveAppAsync`) also clears it, but re-owns to the saver as today. |
 | Fleet feature | new **Resume as {owner}** button | `automation.owner_set` | `IAutomationOwnerStore.ResumeAsync(string feature, string expectedOwnerId, CancellationToken ct)`, `[MutatingOperation("automation.owner_set")]`: clears the block only while that owner is recorded |
 
 - Before a resume of the last three kinds, the page checks the recorded owner with the run's own judgment. If the
@@ -311,24 +311,53 @@ Task<HandoverWrite> HandOverAsync(string feature, string fromOwnerId, string toO
 /// mutation, no gateway decision of its own; written only inside the handover and resume decisions.</summary>
 public interface IHandoverLedger
 {
+    /// <summary>Written <b>before</b> any item is changed, with every item as <c>Pending</c>. Throws when the file
+    /// cannot be written: the handover is then refused and nothing is changed.</summary>
     void RecordHandover(string operationId, string fromOwnerId, string toOwnerId, string actingAdminId,
         IReadOnlyList<AutomationItemRef> items);
+    /// <summary>After each item write: its status in that entry (<c>HandedOver</c>, <c>Skipped*</c>, <c>Failed</c>,
+    /// <c>NotAttempted</c>). Only <c>HandedOver</c> items stay in the ledger.</summary>
+    void Reconcile(string operationId, AutomationItemRef item, HandoverItemStatus status);
     /// <summary>Called inside a resume decision for an item in the ledger; remembers who resumed it and in which
     /// operation.</summary>
     void RecordResume(AutomationItemRef item, string resumedBy, string operationId);
-    /// <summary>For a runner's first run of a ledger item: the entry, removed once returned. Null otherwise.</summary>
-    HandoverEntry? TakeFirstRun(AutomationItemRef item);
+    /// <summary>For a runner's run of a ledger item: the entry, without removing it. Null otherwise.</summary>
+    HandoverEntry? PeekFirstRun(AutomationItemRef item);
+    /// <summary>Removes the entry, called only after a run of the item that the gateway <b>executed</b>. A run that was
+    /// refused (kill switch, level, policy, held) leaves the entry for the next run.</summary>
+    void ConsumeAfterExecuted(AutomationItemRef item, string runOperationId);
+    /// <summary>Removes the entry of an item that was deleted.</summary>
+    void Forget(AutomationItemRef item);
+    /// <summary>Removes entries whose item was handed over and not resumed for <paramref name="maxAge"/> (D14).
+    /// Recorded once per pruning as a log line naming the items; the handover event stays in the audit.</summary>
+    int Prune(TimeSpan maxAge, DateTime nowUtc);
 }
 
 public sealed record HandoverEntry(string HandoverOperationId, string FromOwnerId, string ToOwnerId,
-    string HandedOverBy, string? ResumedBy, string? ResumeOperationId);
+    string HandedOverBy, DateTime HandedOverAtUtc, string? ResumedBy, string? ResumeOperationId);
 ```
 
 - Stored as `automation-handovers.json` in the data directory, written atomically and flushed (`DurableFile`, R1-35).
   It is a new file, not a schema change.
-- Each runner (task executor, webhook delivery, Git deploy, AI trigger, endpoint-check monitor, AutoPatch, AutoUpdate,
-  VPN bring-up) calls `TakeFirstRun` once per run. On a hit it adds this note to the run's gateway event:
-  `handover = { operationId, from, to, handedOverBy, resumedBy, resumeOperationId }`.
+- **Order inside `HandOverAsync`:**
+  1. `Check` again under the lock;
+  2. `RecordHandover`, with every item `Pending`. A failure here refuses the whole handover (`HandoverRefusedException`,
+     outcome Failed, nothing changed);
+  3. each item write, followed by `Reconcile` with its status. If an item write fails after the ledger write, that item
+     is reconciled as `Failed` and the rest as `NotAttempted`.
+  4. If `Reconcile` itself cannot write, the item write stands (it is off, so safe). The stale `Pending` row is read as
+     "not handed over" and dropped at the next ledger write.
+- **First run:**
+  - Each runner (task executor, webhook delivery, Git deploy, AI trigger, endpoint-check monitor, AutoPatch,
+    AutoUpdate, VPN bring-up) calls `PeekFirstRun` before its gateway call. On a hit it adds the note
+    `handover = { operationId, from, to, handedOverBy, resumedBy, resumeOperationId }` to the run's event.
+  - The runner calls `ConsumeAfterExecuted` only when the outcome is Executed. A Denied run (kill switch, level, policy,
+    `AutomationHeld`) keeps the entry, so the first run that really executes names the handover.
+- **Pruning:**
+  - The delete paths of the six kinds call `Forget` inside their own decisions.
+  - A daily pass in the existing retention service calls `Prune` with the age from D14. The recommendation is
+    **30 days**, counted from the handover, for entries that were not resumed.
+  - A resumed entry is removed by its first executed run, or by `Forget`.
 - An unreadable ledger never blocks a run, because it only adds context. The run's event then says
   `handover = unknown (ledger unreadable)`, and the error is logged.
 
@@ -337,8 +366,19 @@ public sealed record HandoverEntry(string HandoverOperationId, string FromOwnerI
 | Capability | Level / role | MCP tool | RiskClass | Target | Notes |
 |---|---|---|---|---|---|
 | `automation.handover` | admin / Admin | none (UI only, D10) | RootEquivalent | new kind `automation-owner`, `ResolvedRecord`, argument key `fromOwner` | Deadline `Short`. Under PC-D1: no approval (D8). |
+| `automation.handover_acknowledge` | read / every signed-in user | none (UI only) | Reversible | new kind `handover-notice`, `ResolvedRecord`, argument key `notice` | Deadline `Short`. Own notices only. The service refuses a notice whose `ToOwnerId` is not the caller, past the page and the gateway, as `account.password_change` does. Passes the kill switch like every read-level capability. |
+| `automation.hold` (D11 c only) | admin / Admin | none (no page of its own) | Disruptive | `automation-owner`, argument key `fromOwner` | Only nested: `MutationCompositions` gains `("account.create", ["config.roles", "automation.hold"])`; a direct call outside `account.create` is refused by the scope guard. |
 
-- `CapabilityCatalog`: `yield return Ui("automation.handover", A, "automation-owner", Root, Short);`
+- `CapabilityCatalog`:
+  - `yield return Ui("automation.handover", A, "automation-owner", Root, Short);`
+  - `yield return Ui("automation.handover_acknowledge", McpPermissionLevels.Read, "handover-notice", Rev, Short);`
+  - `yield return Ui("automation.hold", A, "automation-owner", Dis, Short);` (D11 c only)
+- `IHandoverNotices.AcknowledgeAsync([MutationTarget] string noticeId, CancellationToken ct)` is marked
+  `[MutatingOperation("automation.handover_acknowledge")]`.
+- `MutationTargets` also maps `"handover-notice" => "notice"`, and `"handover-notice"` joins the `RecordAsync` branch.
+- The capabilities are counted in `MutationGatewayCoverageTests`, `CapabilityCatalogTests`,
+  `CapabilityTableConsistencyTests`, `docs/v1/CAPABILITY_INVENTORY.md` and `docs/v1/PATH_CAPABILITIES.md` (U-42).
+  `automation.hold` is listed under U-42 as nested in `account.create` (U-35).
 - `MutationTargets`: `"automation-owner" => "fromOwner"` joins the key map, and `"automation-owner"` joins the
   `RecordAsync` branch (contract 0012, D2: every kind has a branch). The record resolves when `fromOwner` is a
   principal id in the `PrincipalIds` scheme or a stored legacy value. It does not need to exist as an account.
@@ -455,10 +495,17 @@ No new configuration key.
   - a person (`user:<email>`), `OwnerState.Active` now, and not the old owner;
   - holds **now** the level of every capability every selected item needs, judged as a run would judge it (raised
     levels in Settings → MCP included).
-  - The new-owner check is **fail-closed** and does not rely on `LostAuthority` alone. An unknown capability id, a
-    resolver or store exception, and a runner whose `LostAuthority` is the interface default (`=> null`, `:299`) all
-    count as **refused**.
-  - The authority is still re-read on every run afterwards (INV-04). A handover never fixes a level.
+  - The new-owner check is **fail-closed** and does not rely on `LostAuthority` alone. Each of these counts as
+    **refused**:
+    - an unknown capability id;
+    - an exception from the resolver (`Describe` / `Resolve`);
+    - a runner whose `LostAuthority` is the interface default (`=> null`, `:299`);
+    - an MCP level override (`ICapabilityOverrides.Resolve`) that cannot be read. `LostAuthority` swallows that case
+      and keeps the catalog level (`AutomationMutationRunner.cs:440-448`), which could be lower than a raised level.
+      The check therefore resolves the override itself and refuses when it throws.
+  - The authority is still re-read on every run afterwards (INV-04). There the gateway refuses fail-closed on an
+    unreadable override, so a level a handover could not see is still enforced at the run. A handover never fixes a
+    level.
 - **No synthetic principal:** the handover runs as the signed-in Admin. The new owner does nothing and is not
   impersonated.
 - **Rule set (D5, D12):** no handed-over item moves from the agent rule set to the human rule set.
@@ -569,11 +616,16 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
 
 - **Rule R5:** INV-66 and the INV-04 / INV-19 additions land in the **implementing PR**, together with the tests they
   name, and those tests must exist and pass in that PR. A row whose tests are not there yet is not ✅. It is then listed
-  under *Open invariants* in `RELEASE_GATE.md` with its package.
+  under *Open invariants* in `RELEASE_GATE.md` with its package. From 1.0.0 on, such an open row also needs a
+  reference: a GHSA id or an issue URL of this repository, unless an exception has been accepted
+  (`src/Whiskers.Tests/ReleaseGate/ReleaseGate.cs:212-213`).
 - **`docs/v1/RELEASE_GATE.md:36`** reads "Highest invariant ID: INV-62" today.
   - It becomes **INV-66** once 0018 (INV-63/64), 0019 (INV-65) and 0020 (INV-66) have landed.
-  - Each implementing PR raises the pin to its own highest row. If 0020 lands before 0018 or 0019, the pin must still
-    name the highest ID present, and the rows in between must exist.
+  - **Rule R3** (`ReleaseGate.cs:299-305`) refuses any ID at or below the pin that is neither a row nor retired, and
+    any row above the pin. **Contract 0020 is implemented after 0018 and 0019 have landed INV-63 to INV-65.** If it
+    lands first, its row takes the next free ID at that time (then INV-63), and this contract, 0018, 0019 and 0021 are
+    renumbered in the same PR. It never leaves a gap.
+  - Each implementing PR raises the pin to its own highest row in the same PR.
 - **`docs/v1/SECURITY_INVARIANTS.md` §11** (`:144-152`, today ✅ 61, ⚠️ 1, total 62):
   - 0020 adds one row: total +1, and ✅ +1 when INV-66 lands ✅.
   - After 0018, 0019 and 0020 the total is **66**. The ✅ count is 61 plus every new row that lands ✅.
@@ -585,8 +637,14 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
 - **§7.5, new row U-42:**
   > "Hand over the automation of an owner who can no longer act (*Settings → Automation owners*,
   > `automation.handover`, contract 0020); the new owner acknowledges the notice (`automation.handover_acknowledge`, own
-  > notices) | Admin; acknowledge: the new owner | `NotVerifiable` + reason (Whiskers' own records) | GW ✅ (one event:
-  > old and new owner with authority, every item with its outcome; each store's versioned diff) | INV-04, 19, 66"
+  > notices) | Admin; acknowledge: read level, the notice's own addressee only | `NotVerifiable` + reason (Whiskers' own
+  > records) | GW ✅ (one event: old and new owner with authority, every item with its outcome; each store's versioned
+  > diff; the acknowledgement is its own event) | INV-04, 19, 66"
+  - With D11 (c), U-35 (`account.create`) also gets: "holds every automation still recorded on the address before the
+    account row exists (nested `automation.hold`, contract 0020)".
+  - §7.6 counts U-42 as **one** row, because both capabilities are on the same page. `AuditPathMatrixTests` and
+    `PATH_CAPABILITIES.md` map U-42 to `automation.handover` and `automation.handover_acknowledge`, and U-35 to
+    `automation.hold` (with c).
 - **Notes on existing rows:**
   - U-26, U-28, U-29, U-31, U-38 and U-34: "items can also be handed over (U-42); a resume never re-owns".
   - U-29 also: "Resume (`gitdeploy.save`) clears a handover hold".
@@ -629,7 +687,13 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
 - `A_returning_sso_sign_in_never_regains_handed_over_items`
 - `The_event_names_old_and_new_owner_with_authority_and_every_item`
 - `The_admin_notification_names_counts_only_and_the_new_owner_gets_a_personal_notice_until_acknowledged` (D13)
-- D11 (c) only: `Creating_an_account_for_an_address_with_owned_items_holds_them_in_the_same_decision`
+- `The_ledger_is_written_before_any_item_and_a_ledger_failure_changes_nothing`
+- `An_item_failure_after_the_ledger_write_is_reconciled_as_failed`
+- `A_denied_first_run_keeps_the_ledger_entry_and_the_first_executed_run_consumes_it`
+- `Deleting_a_handed_over_item_forgets_its_entry_and_unresumed_entries_age_out_after_30_days` (D14)
+- `Acknowledge_is_refused_for_another_persons_notice_and_passes_the_kill_switch`
+- `The_acknowledge_capability_is_read_level_reversible_on_handover_notice` (catalog and inventory consistency)
+- D11 (c) only: the five tests listed under D11.
 
 **`AutomationHandoverDialogTests`** (bUnit):
 - `Eligible_items_are_preselected_and_can_be_deselected`
@@ -772,10 +836,33 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
       (as by D2), recorded in the ledger, and listed in the event. The re-created person or an Admin resumes them by
       the D7 paths.
   - **Recommendation: (c).**
-  - Reason: it closes the silent revival without a tombstone and without locking out the person's new items. It reuses
-    the handover's store methods (with `from == to`) under a composition `account.create` → `automation.handover`
-    (`MutationCompositions`).
+  - Reason: it closes the silent revival without a tombstone and without locking out the person's new items.
   - (a) is the smallest change; (b) is the strictest. The maintainer chooses.
+  - **How (c) is built.** The handover methods are not reused: `Check` refuses `from == to`, and `HandOverAsync` stays
+    callable only from `AutomationHandover`.
+    - Each of the six stores gains `Task<HandoverWrite> HoldAsync(string itemId, string ownerId, CancellationToken ct)`,
+      marked `[MutatingOperation("automation.hold")]`. It switches the item off (Git app: `HeldReason`; fleet feature:
+      blocked) only while its owner is still `ownerId`, and leaves the owner as it is.
+    - `IAutomationHold.HoldAllAsync(string ownerId, CancellationToken ct)` calls them for every item recorded on
+      `user:<email>`. Each held item is recorded in the ledger (as a handover with `from == to`, acting Admin = the
+      creator), and the list goes into the `account.create` event.
+    - The capability `automation.hold` is nested only: `MutationCompositions` gets
+      `("account.create", ["config.roles", "automation.hold"])` (today `["config.roles"]`, `MutationCompositions.cs:61`).
+  - **Order.** `OwnerAccounts.StateOf` reads the Identity table directly (`OwnerAccounts.cs:89`). So the address
+    becomes `Present` as soon as `_users.CreateAsync` has saved the row (`LocalAccountService.cs:157`), even before
+    `RememberLocalAccounts` (`:199`). `HoldAllAsync` therefore runs inside `CreateAsync` under `AdminGate`, **before
+    `:157`**, and so also before `:199`. If the hold fails, the account is not created: the decision fails before any
+    account row exists.
+  - **Rollback.** If `account.create` fails after the hold (role write or whitelist entry, `LocalAccountService.cs:176-214`), the account is
+    deleted again but the items **stay held**. This is safe: they are off, owned by an address that is `Deleted` again
+    (as before), and can be resumed or handed over through the normal paths. Nothing runs. The `account.create`
+    outcome event lists the held items, so the state is on record.
+  - Tests (only with c):
+    - `Creating_an_account_for_an_address_with_owned_items_holds_them_before_the_identity_row_exists`
+    - `A_hold_failure_creates_no_account`
+    - `A_rolled_back_account_create_leaves_the_items_held_and_nothing_runs`
+    - `HoldAsync_is_called_only_inside_account_create` (architecture)
+    - `A_held_item_resumed_after_re_creation_keeps_the_re_created_owner_and_names_the_resumer`
 - **D12 — Items owned or created by an MCP key (from review).**
   - Facts:
     - key-owned and key-created scheduled tasks exist;
@@ -798,6 +885,17 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
   - **Recommendation: (a).**
   - Reason: the new owner learns of it on their next visit, and acknowledging is on record. There is no new outbound
     path, and no address beyond the configured recipients receives mail.
+- **D14 — Ledger age (from review).**
+  - The ledger only adds context to the first run. An entry for an item that is never resumed would stay forever.
+  - Options:
+    - (a) age out entries that were not resumed after 7 days;
+    - (b) after 30 days;
+    - (c) after 90 days;
+    - (d) never.
+  - **Recommendation: (b), 30 days.**
+  - Reason: it covers a holiday or a month-end before someone resumes the item. The handover itself stays in the audit
+    trail whatever the age, so pruning loses only the note on a run that comes later. Resumed entries are not aged:
+    they are removed by their first executed run or when the item is deleted.
 
 ## Out of scope
 
