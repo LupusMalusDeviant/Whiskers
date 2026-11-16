@@ -852,10 +852,14 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
     - `IAutomationHold.HoldAllAsync(string ownerId, CancellationToken ct)` calls them for every item recorded on
       `user:<email>`. Each held item is recorded in the ledger as an entry of kind `Hold` (`from == to`, acting Admin =
       the creator), and the list goes into the `account.create` event.
-    - **Only for an unusable address.** `HoldAllAsync` runs only when `IOwnerAccounts.StateOf(email)`, read before the
-      create, is `Deleted` or `Unverified`. An address that is `Present` (for example an Active federated user who now
-      also gets a local account) keeps its working automation; nothing is held. If the state cannot be read, the result
-      is `Unverified` (`OwnerAccounts.cs:85`), so the items are held (fail closed).
+    - **Only for an unusable owner.** `HoldAllAsync` runs only when the owner's resolved `OwnerState`, read before the
+      create with the same resolver the runs use, is anything but `Active`. That covers `Deleted`, `Unverified`, and a
+      `Present` federated user who was removed from the whitelist (`NotAllowedToSignIn`): `account.create` re-adds the
+      whitelist entry (contract 0017 H2), so without the hold their items would run again without anyone switching them
+      on. An owner who is `Active` (for example a federated user who signs in today and now also gets a local account)
+      keeps its working automation; nothing is held. If the state cannot be read, the result is not `Active`
+      (`OwnerAccounts.cs:85` gives `Unverified`), so the items are held (fail closed). Test:
+      `Creating_a_local_account_for_a_federated_user_removed_from_the_whitelist_holds_their_items`.
     - The capability `automation.hold` is nested only: `MutationCompositions` gets
       `("account.create", ["config.roles", "automation.hold"])` (today `["config.roles"]`, `MutationCompositions.cs:61`).
   - **Order.** `OwnerAccounts.StateOf` reads the Identity table directly (`OwnerAccounts.cs:89`). So the address
@@ -872,6 +876,7 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
     - `Creating_an_account_for_an_address_with_owned_items_holds_them_before_the_identity_row_exists`
     - `A_hold_failure_creates_no_account`
     - `Creating_a_local_account_for_an_active_federated_user_holds_nothing`
+    - `Creating_a_local_account_for_a_federated_user_removed_from_the_whitelist_holds_their_items`
     - `A_refused_account_create_holds_nothing`
     - `A_rolled_back_account_create_leaves_the_items_held_and_nothing_runs`
     - `HoldAsync_is_called_only_inside_account_create` (architecture)
