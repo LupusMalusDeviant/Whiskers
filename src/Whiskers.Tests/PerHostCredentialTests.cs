@@ -732,6 +732,35 @@ public sealed class PerHostCredentialTests
     }
 
     [Fact]
+    public async Task A_successful_onboarding_clears_the_password_by_a_store_write()
+    {
+        // Contract 0018 A6 (R3): the password used for the bootstrap is cleared by a write of a clone of the record the
+        // run holds, not by editing an instance the store happens to keep. This registry copies on every save, so an
+        // in-place edit after the switchover save would leave the password in it.
+        using var w = new CredentialWorld(true, ("neuhof", "100.64.0.20"));
+        var record = await SshRecordAsync(w, "neuhof");
+        var held = "held-" + Guid.NewGuid().ToString("N");   // made per run, never a literal
+        record.SshPassword = held;
+        await w.Servers.UpdateServerAsync(record);
+        var saved = new List<string?>();
+        w.Servers.BeforeSave = s => saved.Add(s.SshPassword);
+        var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
+            ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
+            NullLogger<OnboardingService>.Instance)
+        {
+            ProbeCredential = (_, _) => Task.FromResult(MtlsProbeOutcome.Refused),
+        };
+
+        var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Null(w.Server("neuhof").SshPassword);
+        Assert.Null(saved[^1]);                 // the last store write is the one that cleared it
+        Assert.Contains(held, saved);           // the switchover write still carried it: the clear is a write of its own
+    }
+
+    [Fact]
     public async Task Onboarding_edits_the_scrape_config_in_csharp_and_runs_no_python_on_the_whiskers_host()
     {
         // Contract 0017 I1: step 8 reads the scrape config base64, edits it in C# and writes it through the base64 writer.

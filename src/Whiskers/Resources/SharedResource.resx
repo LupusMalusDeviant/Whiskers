@@ -2483,6 +2483,15 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Servers_Error_KubeconfigRefused" xml:space="preserve">
     <value>This kubeconfig is refused: {0}. Whiskers runs no credential plugins (exec, auth-provider) and reads no files named in a kubeconfig. Paste a self-contained kubeconfig with an inline token or client-certificate-data/client-key-data, e.g. for a ServiceAccount.</value>
   </data>
+  <data name="Servers_Error_SshHostRequired" xml:space="preserve">
+    <value>An SSH server needs a host (host name or IP address).</value>
+  </data>
+  <data name="Servers_Error_SshUserRequired" xml:space="preserve">
+    <value>An SSH server needs a user.</value>
+  </data>
+  <data name="Servers_Field_SshPassword_HelperKeep" xml:space="preserve">
+    <value>A password is held in memory for this server and is used before the key. Leave the field empty to keep it, or switch off to use the key.</value>
+  </data>
   <data name="Servers_Error_SshHostInvalid" xml:space="preserve">
     <value>The SSH host must be a host name or an IP address (letters, digits, dots and inner hyphens; it must not start with "-").</value>
   </data>

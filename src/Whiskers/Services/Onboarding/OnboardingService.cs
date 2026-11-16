@@ -117,6 +117,9 @@ public class OnboardingService : IOnboardingService
             // 0) Bootstrap reachability ------------------------------------------------------------
             step = OnboardingStep.Bootstrap;
             progress.Report("① Bootstrap-Verbindung prüfen…");
+            // Contract 0018 A5: which destination and credential this run uses, from the record read above (a retry reads
+            // it again). The credential is named, never its value.
+            progress.Report(BootstrapLine(server));
             await Sh(serverId, "echo ok", TimeSpan.FromSeconds(20), ct);
             completed.Add(step);
 
@@ -312,7 +315,12 @@ public class OnboardingService : IOnboardingService
 
             // Onboarding succeeded over mTLS → drop the one-time bootstrap credentials so nothing
             // standing remains: clear the in-memory password and delete the SSH key from disk.
-            server.SshPassword = null;
+            // Contract 0018 A6: a store write of a clone of the record this run holds — not an edit of an instance the
+            // store may share, and never a re-read of the cached record, so a stale password cannot come back with it.
+            var cleared = server.Clone();
+            cleared.SshPassword = null;
+            await _serverConfig.UpdateServerAsync(cleared);
+            server = cleared;
             await _serverConfig.DeleteSshKeyAsync(serverId);
 
             progress.Report($"🎉 Fertig! {server.Name} ist im Mesh, läuft über mTLS ({info.ContainersRunning}/{info.ContainersTotal} Container, {info.OperatingSystem}). SSH-Bootstrap-Key + Passwort wurden entfernt — SSH wird nicht mehr benötigt.");
@@ -362,6 +370,28 @@ public class OnboardingService : IOnboardingService
             identity.CommonName, identity.Generation, sharedExists && !refused ? 4 : 5,
             sharedExists ? MtlsCertificateService.CommonNameOf(shared.Cert) : null, refused, DateTime.UtcNow,
             SharedCredentialAbsent: !sharedExists), ct);
+    }
+
+    /// <summary>
+    /// Contract 0018 A5 (R1, R4): the SSH destination and the credential the bootstrap uses, in the executor's order (a
+    /// transient password wins over the key, <see cref="HostCommandExecutor"/>). Names the key file or "Passwort" — never
+    /// a value, never a prefix of one.
+    /// </summary>
+    internal string BootstrapLine(Models.ServerConfig server)
+    {
+        if (server.ConnectionType != ConnectionType.SSH)
+            return $"🔑 Bootstrap über die bestehende {server.ConnectionType}-Verbindung (kein SSH-Zugang nötig).";
+        var destination = $"{server.SshUser}@{server.SshHost}:{server.SshPort}";
+        string credential;
+        if (!string.IsNullOrEmpty(server.SshPassword))
+            credential = "Passwort";
+        else if (string.IsNullOrEmpty(server.SshKeyFileName))
+            credential = "kein Schlüssel hinterlegt und kein Passwort";
+        else if (_serverConfig.GetSshKeyPath(server) is null)
+            credential = $"Schlüsseldatei {server.SshKeyFileName} (fehlt)";
+        else
+            credential = $"Schlüsseldatei {server.SshKeyFileName}";
+        return $"🔑 Bootstrap: ssh {destination} mit {credential}";
     }
 
     /// <summary>Reports the per-step hint + technical detail and builds the failure result.</summary>

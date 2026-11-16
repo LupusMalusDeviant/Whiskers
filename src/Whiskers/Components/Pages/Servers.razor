@@ -181,7 +181,8 @@
                           HelperText="@L["Servers_Field_Group_Help"]" />
             <MudTextField @bind-Value="_tagsCsv" Label="@L["Servers_Field_Tags"]" Variant="Variant.Outlined" Class="mb-3"
                           HelperText="@L["Servers_Field_Tags_Help"]" />
-            <MudSelect @bind-Value="_form.ConnectionType" Label="@L["Servers_Field_ConnectionType"]" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelect T="Whiskers.Models.ConnectionType" Value="_form.ConnectionType" ValueChanged="OnConnectionTypeChanged"
+                       Label="@L["Servers_Field_ConnectionType"]" Variant="Variant.Outlined" Class="mb-3">
                 <MudSelectItem Value="Whiskers.Models.ConnectionType.TCP">@L["Servers_ConnType_Tcp"]</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ConnectionType.SSH">@L["Servers_ConnType_Ssh"]</MudSelectItem>
                 <MudSelectItem Value="Whiskers.Models.ConnectionType.Kubernetes">@L["Servers_ConnType_Kubernetes"]</MudSelectItem>
@@ -228,17 +229,20 @@
             }
             else if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH)
             {
-                <MudTextField @bind-Value="_form.SshHost" Label="@L["Servers_Field_Host"]" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField @bind-Value="_form.SshHost" Label="@L["Servers_Field_Host"]" Variant="Variant.Outlined" Class="mb-3"
+                              Required="true" RequiredError="@L["Servers_Error_SshHostRequired"]" />
                 <MudNumericField @bind-Value="_form.SshPort" Label="@L["Servers_Field_SshPort"]" Variant="Variant.Outlined" Min="1" Max="65535" Class="mb-3" />
-                <MudTextField @bind-Value="_form.SshUser" Label="@L["Servers_Field_SshUser"]" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField @bind-Value="_form.SshUser" Label="@L["Servers_Field_SshUser"]" Variant="Variant.Outlined" Class="mb-3"
+                              Required="true" RequiredError="@L["Servers_Error_SshUserRequired"]" />
 
                 <MudSwitch @bind-Value="_useSshPassword" Color="Color.Primary" Class="mb-1"
                            Label="@L["Servers_Field_UseSshPassword"]" />
                 @if (_useSshPassword)
                 {
+                    @* Contract 0018 A4: a password held in memory is never prefilled; a blank field keeps it. *@
                     <MudTextField @bind-Value="_form.SshPassword" Label="@L["Servers_Field_SshPassword"]" Variant="Variant.Outlined"
                                   InputType="InputType.Password" Class="mb-2"
-                                  HelperText="@L["Servers_Field_SshPassword_Helper"]" />
+                                  HelperText="@(_hasStoredSshPassword ? L["Servers_Field_SshPassword_HelperKeep"].Value : L["Servers_Field_SshPassword_Helper"].Value)" />
                 }
                 else
                 {
@@ -287,13 +291,13 @@
             @if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH)
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="SaveAndOnboard"
-                           Disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name))"
+                           Disabled="@(_saving || !FormComplete)"
                            StartIcon="@Icons.Material.Filled.Hub">
                     @L["Servers_Button_SaveAndOnboard"]
                 </MudButton>
             }
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveServer"
-                       Disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name))">
+                       Disabled="@(_saving || !FormComplete)">
                 @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
                 @(_saving ? L["Servers_Button_Connecting"].Value : L["Servers_Button_Save"].Value)
             </MudButton>
@@ -355,6 +359,9 @@
     private bool _saving;
     private string? _connectError;
     private bool _useSshPassword;
+    // Contract 0018 A4: the edited record holds a transient SSH password in memory (e.g. after a failed onboarding). The
+    // dialog then opens with the password switch on, but never prefilled: a blank field keeps the held password.
+    private bool _hasStoredSshPassword;
     private Whiskers.Models.ServerConfig? _editingServer;
     private Whiskers.Models.ServerConfig _form = new();
     private string? _sshKeyFileName;
@@ -502,6 +509,7 @@
         _tagsCsv = "";
         _connectError = null;
         _useSshPassword = false;
+        _hasStoredSshPassword = false;
         _showDialog = true;
     }
 
@@ -509,6 +517,10 @@
     {
         _editingServer = server;
         _form = server.Clone();   // full copy — no field can be silently dropped on save
+        // Contract 0018 A4: show which method the bootstrap will use (a held password wins over the key in the executor),
+        // but never put the password itself into the form.
+        _hasStoredSshPassword = !string.IsNullOrEmpty(server.SshPassword);
+        _form.SshPassword = null;
         _sshKeyFileName = server.SshKeyFileName;
         _sshKeyData = null;
         _cloudApiKey = "";                                  // never prefill the secret
@@ -517,8 +529,27 @@
         _kubeNamespacesCsv = string.Join(", ", server.KubeNamespaces);
         _tagsCsv = string.Join(", ", server.Tags);
         _connectError = null;
-        _useSshPassword = false;
+        _useSshPassword = _hasStoredSshPassword;
         _showDialog = true;
+    }
+
+    /// <summary>Contract 0018 A2: a name, and for SSH a host and a user — otherwise neither save button is enabled.</summary>
+    private bool FormComplete =>
+        !string.IsNullOrWhiteSpace(_form.Name)
+        && (_form.ConnectionType != Whiskers.Models.ConnectionType.SSH
+            || (!string.IsNullOrWhiteSpace(_form.SshHost) && !string.IsNullOrWhiteSpace(_form.SshUser)));
+
+    /// <summary>Contract 0018 A3: TCP and SSH keep their own host fields. Switching fills an EMPTY host of the new type
+    /// from the other one; a filled field is never overwritten, and nothing is cleared.</summary>
+    private void OnConnectionTypeChanged(Whiskers.Models.ConnectionType type)
+    {
+        if (type == Whiskers.Models.ConnectionType.SSH && string.IsNullOrWhiteSpace(_form.SshHost)
+            && !string.IsNullOrWhiteSpace(_form.TcpHost))
+            _form.SshHost = _form.TcpHost.Trim();
+        else if (type == Whiskers.Models.ConnectionType.TCP && string.IsNullOrWhiteSpace(_form.TcpHost)
+            && !string.IsNullOrWhiteSpace(_form.SshHost))
+            _form.TcpHost = _form.SshHost.Trim();
+        _form.ConnectionType = type;
     }
 
     // Persists the form (add/update + SSH key) and returns the live in-memory ServerConfig — which
@@ -612,6 +643,11 @@
         {
             _form.SshHost = string.IsNullOrWhiteSpace(_form.SshHost) ? _form.SshHost : _form.SshHost.Trim();
             _form.SshUser = string.IsNullOrWhiteSpace(_form.SshUser) ? _form.SshUser : _form.SshUser.Trim();
+            // Contract 0018 A2: an SSH server needs both; a record shown as "@:22" is never written.
+            if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH && string.IsNullOrWhiteSpace(_form.SshHost))
+                throw new InvalidOperationException(L["Servers_Error_SshHostRequired"].Value);
+            if (_form.ConnectionType == Whiskers.Models.ConnectionType.SSH && string.IsNullOrWhiteSpace(_form.SshUser))
+                throw new InvalidOperationException(L["Servers_Error_SshUserRequired"].Value);
             if (!string.IsNullOrWhiteSpace(_form.SshHost) && !Whiskers.Utils.CommandOperands.IsSafeHost(_form.SshHost))
                 throw new InvalidOperationException(L["Servers_Error_SshHostInvalid"].Value);
             if (!string.IsNullOrWhiteSpace(_form.SshUser) && !Whiskers.Utils.CommandOperands.IsSafeSshUser(_form.SshUser))
@@ -688,6 +724,16 @@
 
         // Key vs password are mutually exclusive — drop a stale password if the user picked key auth.
         if (!_useSshPassword) _form.SshPassword = null;
+        // Contract 0018 A1/A4: a key uploaded with this save is what the record names (the store write below would
+        // otherwise put back the file name cloned when the dialog opened), and it replaces any password. Only while the
+        // password switch is off: a password the user turned on and typed wins over an upload. The upload is pending only
+        // until it is stored (reset below), so a later save in the same dialog never uploads it again.
+        var uploadsKey = !_useSshPassword && _sshKeyData != null && _sshKeyFileName != null;
+        if (uploadsKey)
+        {
+            _form.SshKeyFileName = Path.GetFileName(_sshKeyFileName);
+            _form.SshPassword = null;
+        }
 
         // F9 organization: normalize Group (blank → null) and Tags (trim, drop empties, dedupe
         // case-insensitively, preserve first-seen order).
@@ -722,8 +768,14 @@
                 {
                     if (Edited() is null)
                         throw new InvalidOperationException($"Server '{_editingServer.Name}' was removed meanwhile; nothing was saved.");
-                    if (_sshKeyData != null && _sshKeyFileName != null)
-                        await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
+                    if (uploadsKey)
+                    {
+                        await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName!, _sshKeyData!);
+                        _sshKeyData = null;   // stored; _form.SshKeyFileName keeps naming it (A1)
+                    }
+                    // A4: the password switch is on with a blank field — keep the password the record holds in memory.
+                    else if (_useSshPassword && string.IsNullOrEmpty(updated.SshPassword))
+                        updated.SshPassword = Edited()?.SshPassword;
                     return await ServerConfigService.UpdateServerAsync(updated, _newKubeconfigKey, cloudKey);
                 });
             if (_newKubeconfigKey is not null && previous is { ConnectionType: Whiskers.Models.ConnectionType.Kubernetes })
@@ -744,8 +796,11 @@
                     // The server now exists: if the connection probe (or the key upload) fails and the user fixes the
                     // form and saves again, that retry must UPDATE this entry instead of adding a duplicate id.
                     _editingServer = ServerConfigService.GetServer(_form.Id);
-                    if (_sshKeyData != null && _sshKeyFileName != null)
-                        await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName, _sshKeyData);
+                    if (uploadsKey)
+                    {
+                        await ServerConfigService.SaveSshKeyAsync(server.Id, _sshKeyFileName!, _sshKeyData!);
+                        _sshKeyData = null;   // stored; _form.SshKeyFileName keeps naming it (A1)
+                    }
                     return true;
                 });
 

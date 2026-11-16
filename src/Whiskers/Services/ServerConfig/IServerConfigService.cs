@@ -69,6 +69,8 @@ public interface IServerConfigService
         await RemoveServerAsync(serverId);
         return current;
     }
+    /// <summary>Stores the server's SSH key sealed and points the record at it; a transient SSH password the record held
+    /// is cleared in the same write (contract 0018 A4).</summary>
     [Whiskers.Services.Mutations.MutatingOperation("server.save")]
     Task SaveSshKeyAsync(string serverId, string fileName, byte[] keyData);
     string? GetSshKeyPath(Models.ServerConfig server);
