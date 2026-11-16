@@ -214,7 +214,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                             // indistinguishable from clean.
                             _store.Set(osResult);
                             _logger.LogWarning(
-                                "OS CVE scan on {Server} failed ({Error}) and there is no earlier result — " +
+                                "OS CVE scan on {Server} failed ({Error}) and there are no earlier findings — " +
                                 "recording the failure so the target is not invisible", server.Id, osResult.Error);
                         }
                         else
@@ -289,7 +289,7 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                                 _store.Set(result);
                                 _logger.LogWarning(
                                     "Container CVE scan for {Container} on {Server} failed ({Error}) and there " +
-                                    "is no earlier result — recording the failure so the target is not invisible",
+                                    "are no earlier findings — recording the failure so the target is not invisible",
                                     c.Name, server.Id, result.Error);
                             }
                             else
@@ -398,13 +398,22 @@ public class CveMonitorService : Whiskers.Services.FleetBackgroundService, ICveM
                 // ContainerId is used as part of the Mattermost throttler key — using
                 // server:containerId|os gives reasonable per-target granularity.
                 ContainerId = $"{target.ServerId}:{target.ContainerId ?? "os"}",
-                ContainerName = label,
+                // Review 1.0.0: the container's own name, because the per-container mute is looked up by it (a sentence
+                // like "container `web` on X" matched no mute); the server goes in ServerId/ServerName, so the alert
+                // history files it under its server instead of "local". The OS target is no container and keeps its label.
+                ContainerName = target.Source == CveSource.Os || string.IsNullOrWhiteSpace(target.ContainerName)
+                    ? label
+                    : target.ContainerName,
+                ServerId = target.ServerId,
+                ServerName = serverName,
                 Image = target.Image ?? "",
                 EventType = NotificationEventTypes.CveFinding,
                 // R1-56: structured, so the quiet-hours rule reads it rather than the text; one Critical finding makes
                 // the whole batch unsuppressible.
                 HighestCveSeverity = relevant.Count == 0 ? null : relevant.Max(f => f.Severity),
-                ImageName = $"{relevant.Count} new {(relevant.Count == 1 ? "finding" : "findings")}",
+                // The server stays in the text of the channels that print "<ImageName> for <ContainerName>".
+                ImageName = $"{relevant.Count} new {(relevant.Count == 1 ? "finding" : "findings")}" +
+                            (target.Source == CveSource.Os ? "" : $" on {serverName}"),
                 ImageInfo = top
             });
         }

@@ -26,7 +26,7 @@ Plain data models, DTOs, records and enums passed between services, the UI, and 
 | `VaultEntry.cs` | An encrypted vault entry. |
 | `AiTrigger.cs` | An AI trigger (events, name filter, prompt, guardrail preset, cooldown, and since R1-13 its write grant — `WriteCapabilities` + `WriteTargets` — with `OwnerId` and `SuspendedReason`, which only the store sets; no grant = read-only) + the `AiTriggerEvents` catalog of event types. |
 | `InAppNotification.cs` | A notification shown in the in-app bell/feed (title, detail, severity). |
-| `ContainerLogConfiguration.cs` | One container's Docker log driver, its `max-size` / `max-file` and the log file path (Plan-0007). |
+| `ContainerLogConfiguration.cs` | One container's Docker log driver, its `max-size` / `max-file` and the log file path (Plan-0007). `max-size=-1` (json-file's "unlimited") is no rotation limit. |
 | `FleetContainerListing.cs` | A fleet-wide container list plus which servers answered and which failed (`FleetServerFailure`). |
 | `GitDeployApp.cs` | A git-based deployment (repo cloned on the target, brought up with compose); its token lives in the vault. |
 | `RegistryConfig.cs` | A container registry for authenticated pulls; its credential lives in the vault. |

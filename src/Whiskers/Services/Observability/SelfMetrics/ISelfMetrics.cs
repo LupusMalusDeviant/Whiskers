@@ -1,5 +1,10 @@
 namespace Whiskers.Services.Observability.SelfMetrics;
 
+/// <summary>One server's recent Docker API call durations (Plan-0004 WP4).</summary>
+/// <param name="Samples">The durations, oldest first.</param>
+/// <param name="LastAtUtc">When the newest of them was recorded.</param>
+public sealed record ApiLatencyWindow(IReadOnlyList<TimeSpan> Samples, DateTime LastAtUtc);
+
 /// <summary>How one background loop is doing against one server.</summary>
 /// <param name="LastSuccess">When the loop last completed a cycle for this server. <b>The single most
 /// important number in this type.</b> Failures are only counted when something happens; a loop that has
@@ -73,8 +78,10 @@ public interface ISelfMetrics
     /// it.</para></summary>
     void RecordApiCall(string serverId, TimeSpan duration);
 
-    /// <summary>Recent call durations per server, oldest first. Bounded; see the implementation.</summary>
-    IReadOnlyDictionary<string, IReadOnlyList<TimeSpan>> ApiLatencies();
+    /// <summary>Recent call durations per server, oldest first, with the time the newest one was recorded — both read
+    /// under the same lock, so the time always belongs to the newest sample (review 1.0.0: a reader can tell a reading
+    /// taken after an event from one taken before it). Bounded; see the implementation.</summary>
+    IReadOnlyDictionary<string, ApiLatencyWindow> ApiLatencies();
 
     /// <summary>Named counters, as name → server → value.</summary>
     IReadOnlyDictionary<string, IReadOnlyDictionary<string, long>> Counters();
