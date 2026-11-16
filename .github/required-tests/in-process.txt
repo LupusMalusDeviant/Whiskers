@@ -23,7 +23,7 @@
 # The release gate itself (R1-51, contract 0008): it runs only in this run, so it is named here and cannot vanish behind
 # the floor — a lost [Fact], a class made internal or filtered out would otherwise pass every rule unchecked.
 1 Whiskers.Tests.ReleaseGate.ReleaseGateTests.The_repository_passes_the_gate_in_its_mode
-41 Whiskers.Tests.ReleaseGate.ReleaseGateTests
+49 Whiskers.Tests.ReleaseGate.ReleaseGateTests
 12 Whiskers.Tests.ReleaseGate.InvariantTableParserTests
 3 Whiskers.Tests.ReleaseGate.PathMatrixParserTests
 7 Whiskers.Tests.ReleaseGate.ReleaseGateDocumentTests
