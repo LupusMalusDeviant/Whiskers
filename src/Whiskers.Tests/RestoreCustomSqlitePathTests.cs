@@ -88,6 +88,122 @@ public sealed class RestoreCustomSqlitePathTests
         }
     }
 
+    [Fact]
+    public async Task A_restore_refused_for_a_file_uri_connection_string_takes_no_safety_backup()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"sw-review-restore-{Guid.NewGuid():N}");
+        var elsewhere = Path.Combine(Path.GetTempPath(), $"sw-review-db-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(elsewhere);
+        var paths = new DataPathOptions(root);
+        var custom = Path.Combine(elsewhere, "whiskers.db").Replace('\\', '/');
+        var sp = new ServiceCollection()
+            .AddWhiskersDbContexts("sqlite", $"Data Source=file:{custom}", paths)
+            .BuildServiceProvider();
+        try
+        {
+            using (var scope = sp.CreateScope())
+            {
+                scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.Migrate();
+                scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.Migrate();
+            }
+            var maintenance = new MaintenanceStateService();
+            var svc = new BackupService(sp.GetRequiredService<IServiceScopeFactory>(), maintenance,
+                new NoopLifetime(), new ConfigurationBuilder().Build(), NullLogger<BackupService>.Instance, paths);
+            var info = await svc.CreateBackupAsync("manual");
+            var before = (await svc.ListBackupsAsync()).Select(b => b.Id).ToList();
+
+            var refused = await Assert.ThrowsAsync<BackupValidationException>(
+                () => svc.BeginRestoreAsync(svc.ResolveArchivePath(info.Id)!, "tester"));
+
+            Assert.Contains("Nothing was changed", refused.Message);
+            Assert.Equal(before, (await svc.ListBackupsAsync()).Select(b => b.Id).ToList());   // no pre-restore safety backup
+            Assert.False(File.Exists(paths.RestorePendingMarker));
+            Assert.False(maintenance.IsMaintenance);
+        }
+        finally
+        {
+            sp.Dispose();
+            TestSqlite.ClearPools(root);
+            TestSqlite.ClearPool(custom);
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir */ }
+            try { Directory.Delete(elsewhere, recursive: true); } catch { /* temp dir */ }
+        }
+    }
+
+    /// <summary>A migrated SQLite store with one backup, and a restore service over it that waits <paramref name="budget"/>.</summary>
+    private static async Task<(BackupService Svc, MaintenanceStateService Maintenance, DataPathOptions Paths, string Archive,
+        Action Cleanup)> RestoreSetupAsync(TimeSpan budget)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"sw-review-restore-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var paths = new DataPathOptions(root);
+        var sp = new ServiceCollection().AddWhiskersDbContexts("sqlite", null, paths).BuildServiceProvider();
+        using (var scope = sp.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.Migrate();
+            scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.Migrate();
+        }
+        var maintenance = new MaintenanceStateService();
+        var svc = new BackupService(sp.GetRequiredService<IServiceScopeFactory>(), maintenance,
+            new NoopLifetime(), new ConfigurationBuilder().Build(), NullLogger<BackupService>.Instance, paths)
+        {
+            QuiesceBudget = budget,
+        };
+        var info = await svc.CreateBackupAsync("manual");
+        return (svc, maintenance, paths, svc.ResolveArchivePath(info.Id)!, () =>
+        {
+            sp.Dispose();
+            TestSqlite.ClearPools(root);
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir */ }
+        });
+    }
+
+    [Fact]
+    public async Task A_restore_waits_for_a_running_operation_before_its_safety_backup()
+    {
+        var (svc, maintenance, paths, archive, cleanup) = await RestoreSetupAsync(TimeSpan.FromSeconds(30));
+        try
+        {
+            // Admitted in a flow of its own, as a running operation is (not the restore caller's own admission).
+            var held = (await Task.Run(() => maintenance.TryEnter("operation container.restart")))!;
+            var before = (await svc.ListBackupsAsync()).Count;
+            var restore = svc.BeginRestoreAsync(archive, "tester");
+
+            await Task.Delay(500);
+            Assert.False(restore.IsCompleted);                          // waiting for the operation
+            Assert.True(maintenance.IsMaintenance);                     // and admitting nothing new meanwhile
+            Assert.Null(maintenance.TryEnter("operation container.stop"));
+            Assert.Equal(before, (await svc.ListBackupsAsync()).Count); // no safety backup yet
+
+            held.Dispose();
+            await restore.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(File.Exists(paths.RestorePendingMarker));
+            Assert.Equal(before + 1, (await svc.ListBackupsAsync()).Count);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public async Task A_restore_whose_running_operations_do_not_end_in_time_is_refused_and_leaves_maintenance()
+    {
+        var (svc, maintenance, paths, archive, cleanup) = await RestoreSetupAsync(TimeSpan.FromMilliseconds(200));
+        try
+        {
+            using var held = (await Task.Run(() => maintenance.TryEnter("operation container.restart")))!;
+            var before = (await svc.ListBackupsAsync()).Count;
+
+            var refused = await Assert.ThrowsAsync<BackupValidationException>(() => svc.BeginRestoreAsync(archive, "tester"));
+
+            Assert.Contains("operation container.restart", refused.Message);
+            Assert.Contains("Nothing was changed", refused.Message);
+            Assert.False(maintenance.IsMaintenance);
+            Assert.False(File.Exists(paths.RestorePendingMarker));
+            Assert.Equal(before, (await svc.ListBackupsAsync()).Count);   // no safety backup
+        }
+        finally { cleanup(); }
+    }
+
     private static IConfiguration Config(Dictionary<string, string?> values)
         => new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 

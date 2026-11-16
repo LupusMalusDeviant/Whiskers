@@ -54,7 +54,102 @@ public sealed class ScriptAutoPatchRunner : IAutoPatchRunner
             _logger.LogWarning("Auto-patch of {Container} on {Server} ended without a result (exit {Exit})",
                 containerName, serverId, result.ExitCode);
 
+        // Only after a verified update: the container runs the new image healthily, so its older backup tags are what
+        // OldImageCleanupPolicy decides on. Best effort — a failed cleanup never turns a good update into a failure.
+        if (!dryRun && outcome.Kind == AutoPatchResultKind.Updated && BackupRepository(log, containerName!) is { } repo)
+        {
+            // Its own short time limit, not the caller's token: a cancellation now (a stop, the preview deadline) must not
+            // turn the update that already happened into an exception that loses its outcome and history row.
+            using var pruneTime = new CancellationTokenSource(PruneTimeout);
+            try { await PruneBackupTagsAsync(serverId, containerName!, repo, pruneTime.Token); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Old backup tags of {Container} on {Server} were not pruned", containerName, serverId);
+            }
+        }
+
         return (outcome, Tail(log, 3000));
+    }
+
+    /// <summary>The time the backup-tag cleanup may take after a verified update.</summary>
+    internal static readonly TimeSpan PruneTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>The clock the grace period is measured on (tests).</summary>
+    internal Func<DateTime> UtcNow { get; init; } = () => DateTime.UtcNow;
+
+    /// <summary>The repository the script tagged the previous image in (<c>backup_tag=&lt;repo&gt;:pre-upd-…-&lt;c&gt;</c>),
+    /// or null when it tagged nothing.</summary>
+    internal static string? BackupRepository(string? log, string containerName)
+    {
+        var match = Regex.Match(log ?? "", @"^backup_tag=(?<repo>\S+):pre-upd-\d{8}-" + Regex.Escape(containerName) + @"\s*$",
+            RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups["repo"].Value : null;
+    }
+
+    private const string InUseMark = "--in-use--";
+
+    /// <summary>
+    /// Removes this container's older <c>pre-upd-&lt;yyyyMMdd&gt;-&lt;c&gt;</c> backup tags that
+    /// <see cref="ImageUpdate.OldImageCleanupPolicy"/> lets go: never the newest (the way back from the update just
+    /// made), never a database's, never an image any container on the host still uses (running or stopped), never one
+    /// inside the grace period — counted from the end of the tag's day, so a day-granular tag is never judged too old.
+    /// Removing a tag only untags (<c>docker image rm</c> without <c>-f</c>); Docker itself refuses an image a container
+    /// uses.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> PruneBackupTagsAsync(string serverId, string containerName, string repo,
+        CancellationToken ct)
+    {
+        var listing = await _executor.ExecuteAsync(serverId,
+            $"docker image ls --no-trunc --format '{{{{.Tag}}}} {{{{.ID}}}}' {Whiskers.Utils.ShellUtils.Quote(repo)} " +
+            // Every step must succeed and the host must list containers (the patched one at least): a failed or empty
+            // listing would read as "no image is in use" and is no basis to remove anything.
+            $"&& echo {InUseMark} && ids=$(docker ps -aq --no-trunc) && [ -n \"$ids\" ] && docker inspect --format '{{{{.Image}}}}' $ids",
+            TimeSpan.FromSeconds(30), ct);
+        if (!listing.Success) return [];
+
+        var lines = (listing.Output ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var mark = Array.IndexOf(lines, InUseMark);
+        if (mark < 0) return [];   // the in-use half is missing: nothing is decided without it
+        var inUse = lines[(mark + 1)..].ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (inUse.Count == 0) return [];   // the patched container runs an image: an empty list is a failed read
+        var tagPattern = new Regex(@"^pre-upd-(?<day>\d{8})-" + Regex.Escape(containerName) + @"$", RegexOptions.CultureInvariant);
+        var backups = lines[..mark]
+            .Select(l => l.Split(' ', 2))
+            .Where(p => p.Length == 2)
+            .Select(p => (Tag: p[0], Id: p[1], Match: tagPattern.Match(p[0])))
+            .Where(b => b.Match.Success)
+            .Select(b => (b.Tag, b.Id, Day: DateTime.TryParseExact(b.Match.Groups["day"].Value, "yyyyMMdd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+                out var day) ? day : (DateTime?)null))
+            .Where(b => b.Day is not null)
+            .OrderByDescending(b => b.Day)
+            .ToList();
+
+        var isDatabase = Whiskers.Services.Database.DatabaseDetector.DetectType(repo) != Whiskers.Models.DatabaseType.None;
+        var removed = new List<string>();
+        foreach (var backup in backups.Skip(1))   // the newest stays: the way back from the update just made
+        {
+            var since = UtcNow() - backup.Day!.Value.AddDays(1);
+            var decision = ImageUpdate.OldImageCleanupPolicy.Evaluate(isDatabase, since, containerHealthy: true,
+                imageStillInUse: inUse.Contains(backup.Id));
+            if (!decision.MayDelete)
+            {
+                _logger.LogDebug("Keeping {Repo}:{Tag}: {Reason}", repo, backup.Tag, decision.Reason);
+                continue;
+            }
+            var reference = $"{repo}:{backup.Tag}";
+            var rm = await _executor.ExecuteAsync(serverId,
+                $"docker image rm {Whiskers.Utils.ShellUtils.Quote(reference)}", TimeSpan.FromSeconds(30), ct);
+            if (rm.Success)
+            {
+                removed.Add(reference);
+                _logger.LogInformation("Removed old backup tag {Reference} on {Server}: {Reason}", reference, serverId, decision.Reason);
+            }
+            else
+                _logger.LogWarning("Old backup tag {Reference} on {Server} was not removed (exit {Exit})", reference, serverId, rm.ExitCode);
+        }
+        return removed;
     }
 
     /// <summary>One round trip: install if the hash differs, verify, run, print the log. Internal for tests.</summary>

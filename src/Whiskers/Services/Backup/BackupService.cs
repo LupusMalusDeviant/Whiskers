@@ -417,6 +417,10 @@ public sealed class BackupService : IBackupService
         }
     }
 
+    /// <summary>How long a restore waits, once in maintenance, for running operations before its safety backup — the
+    /// shutdown drain's budget. Settable for tests.</summary>
+    internal TimeSpan QuiesceBudget { get; set; } = Whiskers.Services.Mutations.ShutdownDrain.Budget;
+
     public Task BeginRestoreAsync(string uploadedPath, string actor, CancellationToken ct = default) =>
         BeginRestoreCoreAsync(uploadedPath, actor, RestoreTarget.ThisRelease, ct);
 
@@ -468,11 +472,42 @@ public sealed class BackupService : IBackupService
                 // release starts on the schema it knows); the history checks against the manifest stay.
                 else if (forward) await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
 
+                // The SQLite file this app has open: the swap replaces that one, whatever WHISKERS_DB_CONNECTION names.
+                // Read before the safety backup: a connection string whose file cannot be read off it (a file: URI,
+                // |DataDirectory|) refuses the restore, and a refused restore costs no safety backup.
+                string? databasePath = null;
+                if (!postgres)
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        databasePath = Whiskers.Services.Persistence.DatabaseRegistration.SqliteFilePath(
+                            scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetConnectionString());
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        throw new BackupValidationException($"Restore refused: {ex.Message}. Nothing was changed.");
+                    }
+                }
+
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
                 // nothing has been changed at this point. On PostgreSQL it is taken BEFORE the dry run (R1-33): the dry
                 // run executes the archive's SQL against the live database, and whatever a crafted script might get
                 // past its rollback, the safety backup holds the state from before (a refused restore leaves one extra
                 // archive).
+                // Maintenance admits nothing new since it was entered; what was already running (gateway operations,
+                // scheduled runs) must end before the safety backup, or its audit events would fall between the backup
+                // and the swap. Bounded like the shutdown drain; a restore that cannot get a quiet moment is refused.
+                if (!await _maintenance.WaitForIdleAsync(QuiesceBudget, ct))
+                {
+                    var running = _maintenance.InFlight;
+                    _logger.LogWarning("Restore refused: {Count} operation(s) still running after {Budget}s ({Work})",
+                        running.Count, QuiesceBudget.TotalSeconds, string.Join(", ", running));
+                    throw new BackupValidationException(
+                        $"Restore refused: {running.Count} operation(s) were still running after {QuiesceBudget.TotalSeconds:0} s " +
+                        $"({string.Join(", ", running)}). Nothing was changed; try again when they have finished.");
+                }
+
                 SelfBackupInfo safety;
                 try
                 {
@@ -484,13 +519,6 @@ public sealed class BackupService : IBackupService
                         $"Restore aborted: could not create a pre-restore safety backup ({ex.Message}). Nothing was changed.", ex);
                 }
                 if (postgres) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, safety.Id, forward, ct);
-
-                // The SQLite file this app has open: the swap replaces that one, whatever WHISKERS_DB_CONNECTION names.
-                string? databasePath = null;
-                if (!postgres)
-                    using (var scope = _scopeFactory.CreateScope())
-                        databasePath = Whiskers.Services.Persistence.DatabaseRegistration.SqliteFilePath(
-                            scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetConnectionString());
 
                 // Commit point: write the marker atomically (.tmp + rename) AFTER staging is fully populated.
                 var marker = new RestoreMarker

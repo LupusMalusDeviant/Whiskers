@@ -95,6 +95,7 @@ public class RegistryClient : IRegistryClient
     ///   "nginx" → ("registry-1.docker.io", "library/nginx", "latest")
     ///   "nginx:1.25" → ("registry-1.docker.io", "library/nginx", "1.25")
     ///   "ghcr.io/owner/repo:v1" → ("ghcr.io", "owner/repo", "v1")
+    ///   "docker.io/nginx:1.25" → ("registry-1.docker.io", "library/nginx", "1.25")
     /// </summary>
     public static (string registry, string repo, string tag)? ParseImageReference(string imageRef)
     {
@@ -116,7 +117,10 @@ public class RegistryClient : IRegistryClient
             var firstPart = imageRef[..firstSlash];
             if (firstPart.Contains('.') || firstPart.Contains(':'))
             {
-                registry = firstPart;
+                // Docker Hub's names are not its API host: https://docker.io/v2/ redirects to www.docker.com.
+                registry = firstPart.ToLowerInvariant() is "docker.io" or "index.docker.io" or "registry.hub.docker.com"
+                    ? "registry-1.docker.io"
+                    : firstPart;
                 repoAndTag = imageRef[(firstSlash + 1)..];
             }
             else

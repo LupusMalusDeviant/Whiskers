@@ -31,6 +31,8 @@ public class WebhookService : IWebhookService
     private readonly IStringLocalizer<SharedResource>? _text;
     // R1-31 (INV-52): the signing secrets are stored encrypted with a key derived from the vault's.
     private readonly Whiskers.Services.Vault.IVaultService? _vault;
+    // A restore is staged (F3): a valid delivery is not recorded or queued (its run would be refused by the gateway).
+    private readonly Whiskers.Services.Maintenance.IMaintenanceStateService? _maintenance;
 
     // R1-10 (INV-42): accepted deliveries wait here for one of a bounded number of workers; runs on the same resource
     // never overlap. A queue slot is reserved before a delivery is recorded, so an accepted delivery always runs. The
@@ -62,8 +64,9 @@ public class WebhookService : IWebhookService
         IHostCommandExecutor executor, IComposePlanner planner, ILogger<WebhookService> logger,
         IOptions<WebhookOptions>? options = null, TimeProvider? time = null, IHostApplicationLifetime? lifetime = null,
         IStringLocalizer<SharedResource>? text = null, ResourceLocks? locks = null, Whiskers.Services.Vault.IVaultService? vault = null,
-        IComposeRunner? composeRunner = null)
+        IComposeRunner? composeRunner = null, Whiskers.Services.Maintenance.IMaintenanceStateService? maintenance = null)
     {
+        _maintenance = maintenance;
         _vault = vault;
         // Built only when the parts it needs are there; a run without them is refused (fail closed).
         _composeRunner = composeRunner ?? (executor is null || docker is null ? null : new ComposeRunner(executor, docker));
@@ -273,6 +276,11 @@ public class WebhookService : IWebhookService
         // Signature and freshness by the webhook's provider; the key identifies the delivery (signed, never metadata).
         var (key, problem) = WebhookSignatures.Verify(webhook, request, _time.GetUtcNow(), _options.TimestampTolerance);
         if (key is null) return Reject(webhookId, problem!);
+        if (_maintenance?.IsMaintenance == true)
+        {
+            _logger.LogWarning("Webhook {Name}: a restore is in progress; the delivery is refused for now", webhook.Name);
+            return new WebhookAcceptance(WebhookReply.Maintenance);
+        }
         return await QueueAsync(webhook, key, request.SourceIp, null, ct);
     }
 

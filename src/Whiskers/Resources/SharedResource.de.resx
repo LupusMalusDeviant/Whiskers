@@ -4025,6 +4025,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="ScheduledTasksView_Snackbar_AlreadyRunning" xml:space="preserve">
     <value>Task '{0}' läuft bereits.</value>
   </data>
+  <data name="ScheduledTasksView_Snackbar_Maintenance" xml:space="preserve">
+    <value>Eine Wiederherstellung läuft und Whiskers startet gleich neu; Task '{0}' wurde nicht gestartet.</value>
+  </data>
   <data name="ScheduledTasksView_Stat_Active" xml:space="preserve">
     <value>Aktiv</value>
   </data>

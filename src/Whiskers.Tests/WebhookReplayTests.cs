@@ -1840,6 +1840,28 @@ public sealed class WebhookReplayTests : IDisposable
         Assert.Equal(StatusCodes.Status200OK, (await Endpoint(service, wh.WebhookId, Signed(wh, "delivery-0405"))).Status);
     }
 
+    [Fact]
+    public async Task During_a_restore_only_a_signed_delivery_learns_of_it_and_nothing_is_recorded()
+    {
+        var wh = Seed(WebhookSignatures.Whiskers);
+        var maintenance = new Whiskers.Services.Maintenance.MaintenanceStateService();
+        maintenance.EnterMaintenance("test restore");
+        var service = new WebhookService(_sp.GetRequiredService<IServiceScopeFactory>(), docker: null!, executor: null!,
+            planner: null!, NullLogger<WebhookService>.Instance, Options.Create(_options), _time,
+            lifetime: new StopsWith(_stop.Token), maintenance: maintenance);
+
+        // A stranger is answered as always: the restore is not revealed to an unsigned or forged request.
+        var valid = Signed(wh, "delivery-maint");
+        var forged = valid with { WhiskersSignature = WebhookSignatures.Sign("not-the-secret", valid.Body) };
+        Assert.Equal(StatusCodes.Status400BadRequest, (await Endpoint(service, wh.WebhookId, forged)).Status);
+
+        var (status, body) = await Endpoint(service, wh.WebhookId, valid);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, status);
+        Assert.Contains("maintenance", body);
+        using var scope = _sp.CreateScope();
+        Assert.False(await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().WebhookDeliveries.AnyAsync());
+    }
+
     private async Task<(int? Status, string? Body)> Endpoint(IWebhookService service, string webhookId, WebhookRequest request,
         Stream? body = null)
     {
