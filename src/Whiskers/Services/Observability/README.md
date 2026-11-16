@@ -11,7 +11,7 @@ Two separate things live here: what Whiskers **did** (governance recording, belo
 | `SelfMetrics/SelfMetricsRecorder.cs` | Writes those numbers to `SelfMetricSamples` once a minute, restores them on boot, and prunes them on their own retention. |
 | `SelfMetrics/SelfStatusPresenter.cs` | The judgement behind `/self-status` — stalled vs healthy vs skipped vs unjudged — using the supervisor's threshold rather than its own copy. |
 | `SelfMetrics/ActionTimeline.cs` | "What happened at 14:02?" — human actions and Whiskers' own decisions on one UTC timeline. |
-| `ScanSupervisor.cs` | Watches the watchers: raises `monitoring_stalled` when a loop has not completed a cycle for a server in three of its own intervals — whatever the cause. |
+| `ScanSupervisor.cs` | Watches the watchers: raises `monitoring_stalled` when a loop has not completed a cycle for a server in three of its own intervals — whatever the cause. A server no longer configured is skipped (review 1.0.0: nothing will ever run for it again); fleet-wide loops (`*`) are always judged. |
 | `ILoopSuspensionService.cs` / `LoopSuspensionService.cs` | The emergency stop: pause one server's background checks. Announced, time-bounded, fail-open, not persisted across restarts (deliberately — see the file). R1-48: the automatic end of a pause is not `checks.resume`: it removes only the expired entry it read, so a newer pause stays. |
 | `SuspensionReminder.cs` | Keeps saying that a paused server is still unwatched, every 24 h, for as long as it stays paused. |
 | `ServerSuspendedException.cs` | What a background caller gets when it reaches a paused server. Its own type so a pause is never counted as a failure. |

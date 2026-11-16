@@ -61,7 +61,7 @@ run fired from inside a held lock would be treated as holding it too. No trigger
 (none of `AiTriggerEvents.All` comes from a lock-holding flow); a new one that is would first need a way to drop the
 held locks for the run — `MutationScope.Detach` does not.
 
-Safety: recursion guard (ignores its own `agent_action` events), per-container cooldown, and a
+Safety: recursion guard (ignores its own `agent_action` events), cooldown per trigger, server and container (review 1.0.0: a server-level event has no container id), and a
 concurrency cap. Runs only when the agent is enabled.
 
 ## Files

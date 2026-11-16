@@ -42,6 +42,12 @@ public sealed class ApiLatencyEvaluator
     private readonly BreachTracker _tracker;
     private readonly ApiLatencySettings _settings;
 
+    /// <summary>The lower edge of the floor's hysteresis band, as a share of <see cref="ApiLatencySettings.Floor"/>.</summary>
+    internal const double FloorBand = 0.8;
+
+    /// <summary>The ratio's clear margin: the clear line is <see cref="ApiLatencySettings.Factor"/> minus this.</summary>
+    private readonly double _clearMargin;
+
     /// <summary>The hysteresis for this rule is on a RATIO, not a percentage.
     ///
     /// <para>Inheriting the host rules' defaults was the second mistake here: a five-point clear margin below
@@ -56,7 +62,9 @@ public sealed class ApiLatencyEvaluator
 
     public ApiLatencyEvaluator(HostLoadThresholds? thresholds = null, ApiLatencySettings? settings = null)
     {
-        _tracker = new BreachTracker(RatioScale(thresholds));
+        var scale = RatioScale(thresholds);
+        _tracker = new BreachTracker(scale);
+        _clearMargin = scale.ClearMargin;
         _settings = settings ?? new ApiLatencySettings();
     }
 
@@ -82,12 +90,35 @@ public sealed class ApiLatencyEvaluator
         // and each of the three sees something the others cannot.
         var baseline = Median(samples.Take(split).ToList());
 
+        // No usable baseline: nothing can be judged this time. An open alert stays open (Hold), never closed on a
+        // reading that says nothing.
+        if (baseline <= TimeSpan.Zero)
+        {
+            _tracker.Hold(serverId, Whiskers.Services.Notifications.NotificationEventTypes.HostApiSlow);
+            return null;
+        }
+
         // The floor is on the CURRENT median only. A recent median of 8 ms is not a problem whatever the
         // ratio says; a baseline of 100 ms is the healthy value from the incident itself and must not be
         // thrown away.
-        if (recent < _settings.Floor || baseline <= TimeSpan.Zero) return null;
-
+        //
+        // Review 1.0.0: under the floor is a healthy reading, and it is judged as one — fed to the tracker as clearly
+        // below the line — rather than skipped. Skipping it was why host_api_slow never closed: a daemon that recovers
+        // to its usual 100 ms is under the floor, so the tracker never saw the recovery and the alert stayed open.
+        // The floor has a hysteresis band of its own (review 1.0.0, T1): between 0.8 × floor and the floor the ratio still
+        // decides. Under the clear line it is fed, so a host whose usual speed lies in the band closes its alert; at or
+        // above the clear line the reading is held — neither opening nor closing — so a daemon hovering just under the
+        // floor does not flap between "slow" and "usual speed".
         var ratio = recent.TotalMilliseconds / baseline.TotalMilliseconds;
+        if (recent < _settings.Floor && recent >= _settings.Floor * FloorBand)
+        {
+            if (ratio >= _settings.Factor - _clearMargin)
+            {
+                _tracker.Hold(serverId, Whiskers.Services.Notifications.NotificationEventTypes.HostApiSlow);
+                return null;
+            }
+        }
+        else if (recent < _settings.Floor) ratio = 0;
 
         return _tracker.Consider(
             atUtc, serverId, serverName, Whiskers.Services.Notifications.NotificationEventTypes.HostApiSlow, ratio, _settings.Factor,

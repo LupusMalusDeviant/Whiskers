@@ -376,7 +376,7 @@ public class MetricsCollectorService : Whiskers.Services.FleetBackgroundService
                         // the case where the load is not on this host at all but on the link to it.
                         if (_selfMetrics.ApiLatencies().TryGetValue(serverId, out var latencies))
                         {
-                            var slow = _apiLatency.Evaluate(now, serverId, info.ServerName, latencies);
+                            var slow = _apiLatency.Evaluate(now, serverId, info.ServerName, latencies.Samples);
                             if (slow is not null) findings.Add(slow);
                         }
 

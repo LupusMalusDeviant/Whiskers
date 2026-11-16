@@ -85,9 +85,24 @@ public sealed class ScanSupervisor : Whiskers.Services.FleetBackgroundService
     public async Task CheckAsync()
     {
         var now = DateTime.UtcNow;
+        // Review 1.0.0: every configured server, enabled or not ("*" is a fleet-wide loop). A server the admin removed
+        // keeps its loop entries (and is restored from the stored samples at start-up), but nothing will ever run for it
+        // again — reporting it as stalled is a false alarm that never ends.
+        var configured = _servers.GetServers().Select(s => s.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var loop in _metrics.Loops())
         {
+            // Only when the fleet is known: an empty server list is no proof that every server was removed, and the
+            // supervisor must not go quiet on such a reading.
+            if (loop.ServerId != "*" && configured.Count > 0 && !configured.Contains(loop.ServerId))
+            {
+                // Its open stall, if any, is dropped without a "resumed": nothing resumed, the server is gone.
+                if (_reported.Remove($"{loop.Loop}|{loop.ServerId}"))
+                    _logger.LogInformation("Loop {Loop}: server {Server} was removed; its stall is no longer reported",
+                        loop.Loop, loop.ServerId);
+                continue;
+            }
+
             // A loop that deliberately skips this server is not stalled — it is explicitly not covering it,
             // which the metrics already say. Alarming here would drown the real cases.
             if (loop.SkipReason is not null) continue;
