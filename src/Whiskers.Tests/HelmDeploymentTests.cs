@@ -285,6 +285,52 @@ public class HelmDeploymentTests : IDisposable
         Assert.Equal("connectionString", Scalar(env, "valueFrom", "secretKeyRef", "key"));
     }
 
+    /// <summary>Review 1.0.0 (Deploy): <c>auth.adminEmail</c> without <c>adminPasswordSecret</c> was dropped, although
+    /// <c>WHISKERS_ADMIN_EMAIL</c> alone is a valid seed (OIDC-only). The structural half runs without helm.</summary>
+    [Fact]
+    public void The_admin_email_and_a_key_rotation_reach_the_app_without_helm()
+    {
+        var email = LineIndex(Deployment, "            - name: WHISKERS_ADMIN_EMAIL");
+        var emailGuard = Deployment.LastIndexOf("{{- if", email, StringComparison.Ordinal);
+        Assert.StartsWith("{{- if .Values.auth.adminEmail }}", Deployment[emailGuard..]);
+        Assert.Equal(1, TemplateDepthAt(Deployment, email));
+
+        var rotation = LineIndex(Deployment, "            - name: VAULT_KEY_NEW");
+        Assert.StartsWith("{{- if .Values.vault.newKeySecret }}", Deployment[Deployment.LastIndexOf("{{- if", rotation, StringComparison.Ordinal)..]);
+        Assert.Equal("", Scalar(Values(), "vault", "newKeySecret"));
+        Assert.Contains("vault.newKeySecret rotates the current key", Helpers);
+    }
+
+    [SkippableFact]
+    public void The_admin_email_alone_is_seeded_and_the_password_file_only_with_its_secret()
+    {
+        var alone = Container(Render("auth.adminEmail=admin@example.com"), "whiskers");
+        Assert.Equal("admin@example.com", Env(alone, "WHISKERS_ADMIN_EMAIL"));
+        Assert.Null(TryEnv(alone, "WHISKERS_ADMIN_PASSWORD_FILE"));
+
+        var docs = Render("auth.adminEmail=admin@example.com", "auth.adminPasswordSecret=whiskers-admin");
+        var both = Container(docs, "whiskers");
+        Assert.Equal("admin@example.com", Env(both, "WHISKERS_ADMIN_EMAIL"));
+        Assert.Equal("/run/secrets/whiskers-admin/adminPassword", Env(both, "WHISKERS_ADMIN_PASSWORD_FILE"));
+        Assert.Equal("whiskers-admin", Scalar(Volume(docs, "admin-password"), "secret", "secretName"));
+    }
+
+    [SkippableFact]
+    public void A_key_rotation_hands_the_new_key_next_to_the_current_one()
+    {
+        Assert.Null(EnvEntry(Container(Render("vault.existingSecret=whiskers-vault"), "whiskers"), "VAULT_KEY_NEW"));
+
+        var app = Container(Render("vault.existingSecret=whiskers-vault", "vault.newKeySecret=whiskers-vault-new"), "whiskers");
+        Assert.Equal("whiskers-vault", Scalar(EnvEntry(app, "VAULT_KEY")!, "valueFrom", "secretKeyRef", "name"));
+        var rotation = EnvEntry(app, "VAULT_KEY_NEW")!;
+        Assert.Equal("whiskers-vault-new", Scalar(rotation, "valueFrom", "secretKeyRef", "name"));
+        Assert.Equal("vaultKey", Scalar(rotation, "valueFrom", "secretKeyRef", "key"));
+
+        var (exit, output) = HelmTemplate("vault.newKeySecret=whiskers-vault-new");
+        Assert.NotEqual(0, exit);
+        Assert.Contains("vault.newKeySecret rotates the current key", output);
+    }
+
     [SkippableTheory]
     [InlineData("database.provider must be sqlite or postgres", "database.provider=mysql")]
     [InlineData("database.provider=postgres needs database.existingSecret", "database.provider=postgres")]

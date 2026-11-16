@@ -199,6 +199,36 @@ public sealed class MetricRetentionSettingsTests : IDisposable
         Assert.Equal(2, JsonNode.Parse(await File.ReadAllTextAsync(SettingsFile))!["Metrics"]!["RetentionDays"]!.GetValue<int>());
     }
 
+    /// <summary>Review 1.0.0 (Deploy): the compose files always set <c>Metrics__RetentionDays</c>, so the raw retention
+    /// could never be edited in the UI. They now pass <c>${METRICS_RETENTIONDAYS:-}</c>: an unset .env variable arrives as
+    /// an empty value, which counts as not set — the raw retention stays editable, and the options still bind.</summary>
+    [Fact]
+    public async Task An_empty_value_from_the_environment_counts_as_not_set_and_leaves_the_retention_editable()
+    {
+        await File.WriteAllTextAsync(SettingsFile, """{ "Metrics": { "RetentionDays": 3 } }""");
+        var environment = new Dictionary<string, string?> { ["Metrics:RetentionDays"] = "" };
+        var service = Service(environment);
+
+        Assert.Equal(3, service.Current.RawDays);
+        Assert.False(service.Settings.Single(s => s.Field.Key == "Metrics:RetentionDays").ReadOnly);
+        await Save(Runner(), service, Changed);
+        Assert.Equal(Changed, service.Current);
+
+        // The typed options bind the same section: an empty value must not stop them.
+        var settings = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>(environment) { ["Metrics:CollectionIntervalSeconds"] = "60" }).Build()
+            .GetSection(MetricsSettings.SectionName).Get<MetricsSettings>();
+        Assert.Equal(60, settings!.CollectionIntervalSeconds);
+
+        foreach (var compose in new[] { "docker-compose.yml", "docker-compose.hardened.yml" })
+        {
+            var text = DeploymentScripts.ReadRepoFile(compose);
+            Assert.Contains("      - Metrics__RetentionDays=${METRICS_RETENTIONDAYS:-}\n", text);
+            Assert.DoesNotContain("METRICS_RETENTIONDAYS:-7", text);
+        }
+        Assert.Matches(@"(?m)^# METRICS_RETENTIONDAYS=", DeploymentScripts.ReadRepoFile(".env.example"));
+    }
+
     [Theory]
     [InlineData("7d", 7)]
     [InlineData("0", 1)]

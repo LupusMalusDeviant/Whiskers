@@ -59,6 +59,9 @@ starts in an unintended mode.
 {{- if and (eq .Values.database.provider "postgres") (not .Values.database.existingSecret) (not .Values.database.connectionString) -}}
 {{- fail "database.provider=postgres needs database.existingSecret (a Secret with key connectionString) or database.connectionString" -}}
 {{- end -}}
+{{- if and .Values.vault.newKeySecret (not (or .Values.vault.existingSecret .Values.vault.key)) -}}
+{{- fail "vault.newKeySecret rotates the current key: it needs vault.existingSecret or vault.key (the current VAULT_KEY)" -}}
+{{- end -}}
 {{- if .Values.tailscaleSidecar.enabled -}}
 {{- $img := toString .Values.tailscaleSidecar.image -}}
 {{- if not (regexMatch "^[^@\\s]+(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(@sha256:[0-9a-f]{64})?$" $img) -}}
