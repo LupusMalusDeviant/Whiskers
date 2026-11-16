@@ -6,6 +6,80 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-11-16
+
+A security and stability release. A full review of 1.0.0 reproduced 98 findings, each with a failing test. The
+security fixes and the crash fixes ship here; the rest is planned for 1.1.0. INV-58 still ships at ⚠️ under the
+accepted exception RG-1.
+
+### Upgrading from 1.0.0
+
+- **OAuth whitelist on existing installs.** If your install runs with the whitelist enabled, add
+  `WHISKERS_ADMIN_EMAIL` to it by hand. 1.0.1 seeds that address only on a fresh install.
+- **Basic credentials.** 1.0.1 redacts the whole `Authorization` value from now on. Rows that 1.0.0 already stored as
+  `Authorization=*** <credential>` are not redacted again, so rotate the Basic credentials that appear in them or
+  in 1.0.0 logs.
+- **Masked environment values.** In the UI, `PWD`-like variables are now masked, as `get_container_env` masks them
+  (the exact names `PWD` and `OLDPWD` stay readable).
+- **Fleet hosts (borg-fleet).** Install `jq` on the Whiskers host and `sqlite3` on each fleet host, then run
+  `borg-enroll` again. The scripts no longer use Python. See `deploy/borg-fleet/README.md`.
+- **tailnet-guard.** Install `jq` wherever tailnet-guard runs (`netcat-openbsd` is optional).
+- **Content Security Policy.** Inline scripts are gone, and the CSP now sets `script-src 'self'`. A reverse proxy that
+  injects its own inline scripts into the pages will be blocked.
+
+### Security
+
+Contract 0017 (`docs/contracts/0017-release-1-0-1-security-fixes.md`, parts A–J) defines these fixes; it was
+accepted before the work started (#209).
+
+- **Approval notifications are never throttled.** A second approval request inside the throttle window used to reach
+  no external channel. An event that carries an approval id now always goes out, and pruning uses the live window
+  after an operator changes it (part G, #210).
+- **mTLS CSRs are re-encoded.** The host's answer to the key-and-CSR step no longer reaches the CA host as text:
+  Whiskers checks it, re-encodes it from DER and writes the PEM itself. The SAN count of the CSR and the issued
+  certificate must match exactly, so extra URI or e-mail SANs are refused (part E, #212).
+- **Agent chat rendering and CSP.** The Markdown pipeline uses an explicit list of extensions, and the sanitizer drops
+  `on*`, `style` and off-site images and escapes raw HTML it cannot read. The CSP is now
+  `frame-ancestors 'none'; script-src 'self'; object-src 'none'; base-uri 'self'`, with no inline scripts and no
+  `eval` interop. A tool call cut off by the token limit no longer breaks the next provider request (part F, #213).
+- **Compose: `use_api_socket` and privileged hooks.** `use_api_socket: true` now counts as a Docker-socket mount, so
+  an API key is refused as for any other socket mount. A privileged `post_start`/`pre_stop` hook is an exposure that
+  needs approval (part A, #215).
+- **Whitelist and local accounts.** With the OAuth whitelist enabled, the seeded local admin and local accounts an
+  Admin creates can sign in: the first seed adds `WHISKERS_ADMIN_EMAIL`, creating an account adds its address, and
+  deleting it removes only what was added for it (parts H1–H3, #216).
+- **Redaction and env masking.** Every string column the sinks write is redacted or has a stated exemption, bulk
+  updates redact explicitly, and an `Authorization` value is redacted whole, down to its scheme. A Basic credential
+  is caught without a header key. Container env and the UI share one masking rule (parts C and D, #218).
+- **Guardrails read mount sources as the shell does.** `execute_command` with an API key now decides every form of
+  mount source (`-v` clusters, `--mount`, `source=`/`src=`/`device=`, relative and `~` paths), quoting and escaping,
+  brace expansion and globs before it allows a command near the control plane. Accepted overreach and the gaps left
+  for 1.1.0 are listed in INV-59 (part B, #220).
+
+### Fixed
+
+- **Telemetry binds and security docs.** The telemetry compose files refuse to render without `TS_IP`, so
+  node-exporter and VictoriaMetrics no longer bind to every interface. `SECURITY.md`, the local-login switch and
+  INV-40's deadline wording now say what the code does (part J, #211).
+- **Failed container updates and rollbacks.** When the new container fails, it is removed and the previous one is
+  renamed back and started, so the service is never left without a container under its name (#214).
+- **No Python.** Onboarding, `borg-enroll`, `borg-fleet-client`, `borg-fleet-prune` and `tailnet-guard.sh` no longer
+  call Python; a guard test catches new uses. The onboarding tailnet address is accepted only as plain IPv4 (part I,
+  #217).
+- **Deadline tests under CI load.** Three timing tests that failed under load now run on a controlled clock or with
+  wider waits where the wait proves nothing. Test code only (#219).
+- **Tailscale with an empty `VPN_HOSTNAME`.** An empty or blank name now falls back to the container hostname, then
+  `serverwatch`, instead of stopping Tailscale with `InvalidSetting` (#221).
+- **Database tool.** PostgreSQL table lists show row count and size in the right columns, MySQL/MariaDB lists and
+  schemas work, query results keep rows starting with `(` or `--`, and Redis commands accept quoted arguments. A Redis
+  command that starts with `-` is refused, so it cannot pass options to `redis-cli` (#222).
+- **Backups.** A restore replaces the SQLite file the app actually opens, also with a custom connection string. A
+  failed volume backup removes its partial archive, a failed delete keeps the record and reports the error, and
+  archive names are unique (#223).
+- **UI crashes.** Invalid input, unreachable servers or a failing query no longer end the Blazor connection: the
+  dialogs stay open, the dashboard shows "no history", and errors are shown and logged redacted. An SSH key file over
+  100 KB is refused before it is read (#224).
+
 ## [1.0.0] — 2026-11-14
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in
