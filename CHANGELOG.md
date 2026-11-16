@@ -8,7 +8,7 @@ All notable changes to Whiskers are documented here. The format follows
 
 ## [1.0.1] — 2026-11-16
 
-A security and stability release. A full review of 1.0.0 reproduced 98 findings, each with a failing test. The
+A security and stability release. A full review of 1.0.0 reproduced 98 findings, most with a failing test. The
 security fixes and the crash fixes ship here; the rest is planned for 1.1.0. INV-58 still ships at ⚠️ under the
 accepted exception RG-1.
 
@@ -62,7 +62,7 @@ accepted before the work started (#209).
   node-exporter and VictoriaMetrics no longer bind to every interface. `SECURITY.md`, the local-login switch and
   INV-40's deadline wording now say what the code does (part J, #211).
 - **Failed container updates and rollbacks.** When the new container fails, it is removed and the previous one is
-  renamed back and started, so the service is never left without a container under its name (#214).
+  renamed back and started; every message reports the real outcome (#214).
 - **No Python.** Onboarding, `borg-enroll`, `borg-fleet-client`, `borg-fleet-prune` and `tailnet-guard.sh` no longer
   call Python; a guard test catches new uses. The onboarding tailnet address is accepted only as plain IPv4 (part I,
   #217).
@@ -71,14 +71,15 @@ accepted before the work started (#209).
 - **Tailscale with an empty `VPN_HOSTNAME`.** An empty or blank name now falls back to the container hostname, then
   `serverwatch`, instead of stopping Tailscale with `InvalidSetting` (#221).
 - **Database tool.** PostgreSQL table lists show row count and size in the right columns, MySQL/MariaDB lists and
-  schemas work, query results keep rows starting with `(` or `--`, and Redis commands accept quoted arguments. A Redis
-  command that starts with `-` is refused, so it cannot pass options to `redis-cli` (#222).
+  schemas work, databases whose name starts with "databases" are listed again, query results keep rows starting
+  with `(` or `--`, and Redis commands accept quoted arguments. A Redis command that starts with `-` is refused, so
+  it cannot pass options to `redis-cli` (#222).
 - **Backups.** A restore replaces the SQLite file the app actually opens, also with a custom connection string. A
   failed volume backup removes its partial archive, a failed delete keeps the record and reports the error, and
   archive names are unique (#223).
 - **UI crashes.** Invalid input, unreachable servers or a failing query no longer end the Blazor connection: the
-  dialogs stay open, the dashboard shows "no history", and errors are shown and logged redacted. An SSH key file over
-  100 KB is refused before it is read (#224).
+  dialogs stay open, the dashboard shows "no history", and errors in the new catch-alls are shown and logged
+  redacted. An SSH key file over 100 KB is refused before it is read (#224).
 
 ## [1.0.0] — 2026-11-14
 
