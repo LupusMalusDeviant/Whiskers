@@ -281,6 +281,9 @@ public class ExecutionDeadlineTests
         // The window hour comes while the preview runs: the night is deferred, not recorded as run.
         await service.RunNightlyRecordedAsync(CancellationToken.None);
         Assert.Null(service.LastNightlyRun);
+        Assert.Contains("deferred", service.NightDeferred);                       // and the status says so
+        Assert.Contains("deferred", Whiskers.Mcp.Tools.AutoPatchTools.Render(new AutoPatchSettings { Enabled = true }, service.LastCycle,
+            service.IsRunning, service.NightDeferred));
         Assert.True(AutoPatchService.IsDue(new AutoPatchSettings { Enabled = true, RunAtHourUtc = DateTime.UtcNow.Hour },
             DateTime.UtcNow, service.LastNightlyRun));
 

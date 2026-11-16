@@ -58,9 +58,10 @@ them elsewhere) fails instead of writing an archive without the database.
 - **Recovery point (RPO):** the newest archive you still have. With a daily *Self-backup* task you can lose up to a
   day of changes: metrics, audit events and settings. The restored database does not contain audit events written
   after the archive was taken; the pre-restore safety backup still holds them. From the moment a restore is staged
-  until the restart, MCP tool calls, webhook deliveries (503 with `Retry-After`) and scheduled tasks are refused, so
-  their audit events cannot fall between the safety backup and the swap. Avoid other changes (an open browser tab)
-  in that window.
+  until the restart, every change is refused (MCP calls, webhook deliveries with 503 and `Retry-After`, scheduled
+  tasks, UI actions, AutoUpdate and AutoPatch), and the restore waits up to 30 s for operations already running before
+  it takes the safety backup; if they do not finish, the restore is refused and nothing changes. So no audit event
+  falls between the safety backup and the swap.
 - **Recovery time (RTO):** start a Whiskers container, upload the archive and wait for one restart. On PostgreSQL,
   the database is restored during that restart, in one transaction, before Whiskers answers its health check. That
   takes about as long as the dry run did. On Kubernetes the Helm chart's startup probe allows five minutes

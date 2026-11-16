@@ -50,7 +50,7 @@
 
 # Backups (review 1.0.0, Data): a restore writes the database the app opens and refuses a settings mismatch first;
 # a volume backup leaves no unrecorded archive, keeps its record when its file stays, and names each archive alone.
-12 Whiskers.Tests.RestoreCustomSqlitePathTests
+14 Whiskers.Tests.RestoreCustomSqlitePathTests
 7 Whiskers.Tests.VolumeBackupServiceTests
 
 # Data fixes (review 1.0.0, T2): assess_update_risk compares with the running image also a second time; a task deleted
@@ -60,7 +60,12 @@
 1 Whiskers.Tests.UpdateRiskServiceTests.A_second_assessment_still_compares_the_candidate_with_the_running_image
 1 Whiskers.Tests.UpdateRiskServiceTests.A_container_listed_by_its_image_id_is_assessed_against_the_name_it_was_created_from
 1 Whiskers.Tests.RestoreMaintenanceTests.An_mcp_tool_call_during_a_restore_is_refused_before_anything_runs
-1 Whiskers.Tests.RestoreMaintenanceTests.A_webhook_delivery_during_a_restore_is_refused_with_retry_after_and_not_read
+1 Whiskers.Tests.RestoreMaintenanceTests.A_mutation_from_the_ui_during_a_restore_is_refused_by_the_gateway_and_writes_nothing
+1 Whiskers.Tests.RestoreMaintenanceTests.An_operation_running_when_the_restore_begins_is_waited_for
+1 Whiskers.Tests.RestoreCustomSqlitePathTests.A_restore_waits_for_a_running_operation_before_its_safety_backup
+1 Whiskers.Tests.RestoreCustomSqlitePathTests.A_restore_whose_running_operations_do_not_end_in_time_is_refused_and_leaves_maintenance
+1 Whiskers.Tests.AutoPatchTests.A_cancellation_during_the_cleanup_still_returns_the_successful_update
+3 Whiskers.Tests.AutoPatchTests.A_failed_or_empty_in_use_listing_prunes_nothing
 1 Whiskers.Tests.RestoreCustomSqlitePathTests.A_restore_refused_for_a_file_uri_connection_string_takes_no_safety_backup
 4 Whiskers.Tests.RegistryChallengeTests.A_docker_hub_image_is_asked_at_the_registry_api_host
 2 Whiskers.Tests.CronValidationTests.TryParseCron_ExpressionsThatNeverFire_AreInvalid
@@ -107,7 +112,7 @@
 4 Whiskers.Tests.AuditCheckpointServiceTests
 5 Whiskers.Tests.AuditRetentionWiringTests
 17 Whiskers.Tests.AuthBootstrapTests
-57 Whiskers.Tests.AutoPatchTests
+61 Whiskers.Tests.AutoPatchTests
 9 Whiskers.Tests.BackgroundServiceLaneTests
 10 Whiskers.Tests.BackupArchiveCipherTests
 10 Whiskers.Tests.BlastRadiusAssessorTests
@@ -2816,6 +2821,7 @@
 1 Whiskers.Tests.WebhookReplayTests.Concurrent_duplicates_run_once
 1 Whiskers.Tests.WebhookReplayTests.Deliveries_an_earlier_process_left_unsettled_are_recorded_once_at_the_next_start
 1 Whiskers.Tests.WebhookReplayTests.Deployments_of_one_compose_project_never_overlap_whatever_directory_names_it
+1 Whiskers.Tests.WebhookReplayTests.During_a_restore_only_a_signed_delivery_learns_of_it_and_nothing_is_recorded
 1 Whiskers.Tests.WebhookReplayTests.Every_invalid_request_gets_the_same_answer
 1 Whiskers.Tests.WebhookReplayTests.Every_test_waiting_at_a_stop_is_told_at_once
 1 Whiskers.Tests.WebhookReplayTests.Pruning_never_holds_a_worker

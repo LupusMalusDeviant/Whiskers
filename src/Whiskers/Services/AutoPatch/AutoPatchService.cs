@@ -103,6 +103,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
 
     public bool IsRunning => Volatile.Read(ref _running) == 1;
 
+    public string? NightDeferred { get; private set; }
+
     protected override async Task RunAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -175,6 +177,8 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         // the night recorded as run while nothing was patched (review 1.0.0, Data).
         if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
         {
+            NightDeferred = $"Tonight's window was deferred at {_utcNow():u}: a preview was running. It runs at the next check " +
+                            "in the window hour if the preview has ended by then; otherwise this night is skipped.";
             _logger.LogInformation("Auto-patch night deferred: a preview is running; the next check in the window tries again");
             return;
         }
@@ -190,6 +194,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
 
     private async Task RunNightlyClaimedAsync(CancellationToken ct)
     {
+        NightDeferred = null;
         var now = _utcNow();
         _lastNightlyRun = DateOnly.FromDateTime(now);
         var state = new AutoPatchNightlyState { Day = _lastNightlyRun, StartedAt = now, DryRun = _settings.CurrentValue.DryRun };

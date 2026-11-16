@@ -58,8 +58,11 @@ public sealed class ScriptAutoPatchRunner : IAutoPatchRunner
         // OldImageCleanupPolicy decides on. Best effort — a failed cleanup never turns a good update into a failure.
         if (!dryRun && outcome.Kind == AutoPatchResultKind.Updated && BackupRepository(log, containerName!) is { } repo)
         {
-            try { await PruneBackupTagsAsync(serverId, containerName!, repo, ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            // Its own short time limit, not the caller's token: a cancellation now (a stop, the preview deadline) must not
+            // turn the update that already happened into an exception that loses its outcome and history row.
+            using var pruneTime = new CancellationTokenSource(PruneTimeout);
+            try { await PruneBackupTagsAsync(serverId, containerName!, repo, pruneTime.Token); }
+            catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Old backup tags of {Container} on {Server} were not pruned", containerName, serverId);
             }
@@ -67,6 +70,9 @@ public sealed class ScriptAutoPatchRunner : IAutoPatchRunner
 
         return (outcome, Tail(log, 3000));
     }
+
+    /// <summary>The time the backup-tag cleanup may take after a verified update.</summary>
+    internal static readonly TimeSpan PruneTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>The clock the grace period is measured on (tests).</summary>
     internal Func<DateTime> UtcNow { get; init; } = () => DateTime.UtcNow;
@@ -94,8 +100,10 @@ public sealed class ScriptAutoPatchRunner : IAutoPatchRunner
         CancellationToken ct)
     {
         var listing = await _executor.ExecuteAsync(serverId,
-            $"docker image ls --no-trunc --format '{{{{.Tag}}}} {{{{.ID}}}}' {Whiskers.Utils.ShellUtils.Quote(repo)}; " +
-            $"echo {InUseMark}; docker ps -aq --no-trunc | xargs -r docker inspect --format '{{{{.Image}}}}'",
+            $"docker image ls --no-trunc --format '{{{{.Tag}}}} {{{{.ID}}}}' {Whiskers.Utils.ShellUtils.Quote(repo)} " +
+            // Every step must succeed and the host must list containers (the patched one at least): a failed or empty
+            // listing would read as "no image is in use" and is no basis to remove anything.
+            $"&& echo {InUseMark} && ids=$(docker ps -aq --no-trunc) && [ -n \"$ids\" ] && docker inspect --format '{{{{.Image}}}}' $ids",
             TimeSpan.FromSeconds(30), ct);
         if (!listing.Success) return [];
 
@@ -103,6 +111,7 @@ public sealed class ScriptAutoPatchRunner : IAutoPatchRunner
         var mark = Array.IndexOf(lines, InUseMark);
         if (mark < 0) return [];   // the in-use half is missing: nothing is decided without it
         var inUse = lines[(mark + 1)..].ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (inUse.Count == 0) return [];   // the patched container runs an image: an empty list is a failed read
         var tagPattern = new Regex(@"^pre-upd-(?<day>\d{8})-" + Regex.Escape(containerName) + @"$", RegexOptions.CultureInvariant);
         var backups = lines[..mark]
             .Select(l => l.Split(' ', 2))

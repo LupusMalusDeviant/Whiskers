@@ -118,6 +118,10 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
                 draining = _drain.TryEnter($"scheduled task '{task.Name}'");
                 if (draining is null)
                     break;
+                // A restore that began since the check above: it waits for admitted runs, so this one is not started.
+                draining = Both(draining, _maintenance, $"scheduled task '{task.Name}'");
+                if (draining is null)
+                    break;
 
                 // Never the same task twice at once: an occurrence that falls due while the task still runs (a run
                 // started by hand, or a long one) is skipped — NextRun moves on, LastRun stays the running one's.
@@ -221,6 +225,30 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         {
             _running.TryRemove(taskId, out _);
             draining.Dispose();
+        }
+    }
+
+    /// <summary>The run's drain entry together with its maintenance entry (a staged restore waits for it), or null — with
+    /// the drain entry released — when a restore is staged.</summary>
+    private static IDisposable? Both(IDisposable draining, Whiskers.Services.Maintenance.IMaintenanceStateService? maintenance,
+        string what)
+    {
+        if (maintenance is null) return draining;
+        var admitted = maintenance.TryEnter(what);
+        if (admitted is null)
+        {
+            draining.Dispose();
+            return null;
+        }
+        return new Handles(draining, admitted);
+    }
+
+    private sealed class Handles(IDisposable first, IDisposable second) : IDisposable
+    {
+        public void Dispose()
+        {
+            try { second.Dispose(); }
+            finally { first.Dispose(); }
         }
     }
 
@@ -420,6 +448,8 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         // and the drain waits for it until its result is recorded.
         using var draining = _drain.TryEnter($"scheduled task '{task.Name}' (run now)");
         if (draining is null) return (false, ShuttingDownResult);
+        using var admitted = _maintenance?.TryEnter($"scheduled task '{task.Name}' (run now)");
+        if (_maintenance is not null && admitted is null) return (false, MaintenanceResult);
         if (!_running.TryAdd(task.TaskId, 0)) return (false, AlreadyRunningResult);
         long? runId = null;
         try

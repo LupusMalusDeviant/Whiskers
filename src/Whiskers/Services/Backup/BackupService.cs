@@ -417,6 +417,10 @@ public sealed class BackupService : IBackupService
         }
     }
 
+    /// <summary>How long a restore waits, once in maintenance, for running operations before its safety backup — the
+    /// shutdown drain's budget. Settable for tests.</summary>
+    internal TimeSpan QuiesceBudget { get; set; } = Whiskers.Services.Mutations.ShutdownDrain.Budget;
+
     public Task BeginRestoreAsync(string uploadedPath, string actor, CancellationToken ct = default) =>
         BeginRestoreCoreAsync(uploadedPath, actor, RestoreTarget.ThisRelease, ct);
 
@@ -491,6 +495,19 @@ public sealed class BackupService : IBackupService
                 // run executes the archive's SQL against the live database, and whatever a crafted script might get
                 // past its rollback, the safety backup holds the state from before (a refused restore leaves one extra
                 // archive).
+                // Maintenance admits nothing new since it was entered; what was already running (gateway operations,
+                // scheduled runs) must end before the safety backup, or its audit events would fall between the backup
+                // and the swap. Bounded like the shutdown drain; a restore that cannot get a quiet moment is refused.
+                if (!await _maintenance.WaitForIdleAsync(QuiesceBudget, ct))
+                {
+                    var running = _maintenance.InFlight;
+                    _logger.LogWarning("Restore refused: {Count} operation(s) still running after {Budget}s ({Work})",
+                        running.Count, QuiesceBudget.TotalSeconds, string.Join(", ", running));
+                    throw new BackupValidationException(
+                        $"Restore refused: {running.Count} operation(s) were still running after {QuiesceBudget.TotalSeconds:0} s " +
+                        $"({string.Join(", ", running)}). Nothing was changed; try again when they have finished.");
+                }
+
                 SelfBackupInfo safety;
                 try
                 {

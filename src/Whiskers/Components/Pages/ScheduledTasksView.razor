@@ -206,7 +206,7 @@ else
         <RowTemplate>
             <MudTd>@context.TaskName</MudTd>
             <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text">@GetTypeLabel(context.TaskType)</MudChip></MudTd>
-            <MudTd>@context.StartedAt.ToLocalTime().ToString("dd.MM. HH:mm:ss")</MudTd>
+            <MudTd>@Whiskers.Services.Scheduler.SchedulerService.FormatUtc(context.StartedAt, "dd.MM. HH:mm:ss")</MudTd>
             <MudTd>@(context.CompletedAt is { } ended ? ended.Subtract(context.StartedAt).TotalSeconds.ToString("F1") + "s" : "—")</MudTd>
             <MudTd>
                 @if (context.CompletedAt is null)
