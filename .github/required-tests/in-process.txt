@@ -50,8 +50,25 @@
 
 # Backups (review 1.0.0, Data): a restore writes the database the app opens and refuses a settings mismatch first;
 # a volume backup leaves no unrecorded archive, keeps its record when its file stays, and names each archive alone.
-11 Whiskers.Tests.RestoreCustomSqlitePathTests
+12 Whiskers.Tests.RestoreCustomSqlitePathTests
 7 Whiskers.Tests.VolumeBackupServiceTests
+
+# Data fixes (review 1.0.0, T2): assess_update_risk compares with the running image also a second time; a task deleted
+# while it runs keeps its result; a preview does not use up the night; Docker Hub is asked at its API host; a restore
+# refuses MCP, webhooks and the scheduler and refuses a file: connection before its safety backup; old pre-upd tags are
+# pruned by OldImageCleanupPolicy; a never-firing cron is refused and task times are shown in UTC.
+1 Whiskers.Tests.UpdateRiskServiceTests.A_second_assessment_still_compares_the_candidate_with_the_running_image
+1 Whiskers.Tests.UpdateRiskServiceTests.A_container_listed_by_its_image_id_is_assessed_against_the_name_it_was_created_from
+1 Whiskers.Tests.RestoreMaintenanceTests.An_mcp_tool_call_during_a_restore_is_refused_before_anything_runs
+1 Whiskers.Tests.RestoreMaintenanceTests.A_webhook_delivery_during_a_restore_is_refused_with_retry_after_and_not_read
+1 Whiskers.Tests.RestoreCustomSqlitePathTests.A_restore_refused_for_a_file_uri_connection_string_takes_no_safety_backup
+4 Whiskers.Tests.RegistryChallengeTests.A_docker_hub_image_is_asked_at_the_registry_api_host
+2 Whiskers.Tests.CronValidationTests.TryParseCron_ExpressionsThatNeverFire_AreInvalid
+1 Whiskers.Tests.CronValidationTests.Task_times_are_shown_in_utc_like_the_cron_beside_them
+1 Whiskers.Tests.AutoPatchTests.The_script_tags_the_previous_image_only_for_an_update_it_really_applies
+1 Whiskers.Tests.AutoPatchTests.A_verified_update_prunes_only_the_old_backup_tags_the_cleanup_policy_lets_go
+3 Whiskers.Tests.AutoPatchTests.Only_a_verified_update_with_a_backup_tag_prunes_anything
+1 Whiskers.Tests.AutoPatchTests.A_database_keeps_all_its_old_backup_tags
 
 # The database tool reads each client's output by its own format, and a Redis command reaches redis-cli as quoted argv
 # elements whose first one is no option (review of 1.0.0, area Fleet).
@@ -90,7 +107,7 @@
 4 Whiskers.Tests.AuditCheckpointServiceTests
 5 Whiskers.Tests.AuditRetentionWiringTests
 17 Whiskers.Tests.AuthBootstrapTests
-51 Whiskers.Tests.AutoPatchTests
+57 Whiskers.Tests.AutoPatchTests
 9 Whiskers.Tests.BackgroundServiceLaneTests
 10 Whiskers.Tests.BackupArchiveCipherTests
 10 Whiskers.Tests.BlastRadiusAssessorTests
@@ -121,7 +138,7 @@
 5 Whiskers.Tests.ContainerEnvToolTests
 46 Whiskers.Tests.ContainerRestoreTests
 9 Whiskers.Tests.ContentSecurityPolicySourceTests
-7 Whiskers.Tests.CronValidationTests
+11 Whiskers.Tests.CronValidationTests
 2 Whiskers.Tests.CveAgePruneTests
 7 Whiskers.Tests.CveFindingsStorePruneTests
 4 Whiskers.Tests.CveGroupingTests
@@ -285,7 +302,7 @@
 8 Whiskers.Tests.PostgresOverlayTests
 7 Whiskers.Tests.ProviderErrorTests
 52 Whiskers.Tests.QuietHoursTests
-5 Whiskers.Tests.RegistryChallengeTests
+9 Whiskers.Tests.RegistryChallengeTests
 9 Whiskers.Tests.RegistryConfigTests
 7 Whiskers.Tests.ResolvedTargetRunnerTests
 3 Whiskers.Tests.ResumeWithoutStormTests
@@ -1092,6 +1109,7 @@
 1 Whiskers.Tests.ExecutionDeadlineTests.A_provider_that_stops_sending_mid_answer_times_out_and_its_response_is_released
 1 Whiskers.Tests.ExecutionDeadlineTests.A_provider_that_trickles_forever_hits_the_total_deadline
 1 Whiskers.Tests.ExecutionDeadlineTests.A_run_that_ends_quietly_on_its_deadline_is_still_reported_as_timed_out
+1 Whiskers.Tests.ExecutionDeadlineTests.A_running_preview_does_not_use_up_tonight_s_patch_window
 1 Whiskers.Tests.ExecutionDeadlineTests.A_stalled_trigger_run_is_cancelled_at_its_deadline_frees_its_slot_and_says_so
 1 Whiskers.Tests.ExecutionDeadlineTests.An_error_body_that_never_arrives_still_fails_the_call_with_its_status
 1 Whiskers.Tests.ExecutionDeadlineTests.Closing_the_chat_ends_the_advisor_call
@@ -1485,18 +1503,22 @@
 1 Whiskers.Tests.MutationScopeGuardTests.Unresolvable_server_identities_match_nothing
 1 Whiskers.Tests.MutationScopeGuardTests.Work_running_while_the_scope_is_open_is_inside_it
 1 Whiskers.Tests.MutationScopeGuardTests.Work_that_escaped_a_scope_is_refused_once_the_scope_closed
+1 Whiskers.Tests.MutationShutdownTests.A_cron_that_never_fires_is_refused_when_a_task_is_created
 1 Whiskers.Tests.MutationShutdownTests.A_drain_with_nothing_running_ends_at_once
 1 Whiskers.Tests.MutationShutdownTests.A_failed_skip_of_a_running_task_records_no_result_of_its_own
 1 Whiskers.Tests.MutationShutdownTests.A_forced_stop_leaves_the_run_open_and_the_next_start_reports_it_interrupted
+1 Whiskers.Tests.MutationShutdownTests.A_new_task_s_next_run_is_the_cron_time_in_utc_not_shifted_by_the_local_offset
 1 Whiskers.Tests.MutationShutdownTests.A_night_cancelled_before_its_first_container_is_not_recorded_as_complete
 1 Whiskers.Tests.MutationShutdownTests.A_night_cancelled_during_its_last_container_is_reported_after_a_restart
 1 Whiskers.Tests.MutationShutdownTests.A_night_stopped_early_still_says_why_after_a_restart
 1 Whiskers.Tests.MutationShutdownTests.A_night_whose_start_cannot_be_saved_patches_nothing
+1 Whiskers.Tests.MutationShutdownTests.A_restore_in_progress_starts_no_task_and_consumes_no_occurrence
 1 Whiskers.Tests.MutationShutdownTests.A_run_whose_record_cannot_be_saved_neither_runs_nor_consumes_its_occurrence
 1 Whiskers.Tests.MutationShutdownTests.A_running_operation_of_an_earlier_process_becomes_interrupted_and_never_runs_again
 1 Whiskers.Tests.MutationShutdownTests.A_stop_during_a_recreate_waits_for_it_and_updates_no_further_container
 2 Whiskers.Tests.MutationShutdownTests.A_stop_during_a_scheduled_run_waits_for_it_and_starts_no_due_task
 1 Whiskers.Tests.MutationShutdownTests.A_stop_during_the_nightly_cycle_patches_no_further_container
+1 Whiskers.Tests.MutationShutdownTests.A_task_deleted_during_its_scheduled_run_keeps_the_run_s_real_result
 1 Whiskers.Tests.MutationShutdownTests.An_interrupted_auto_update_is_not_tried_again_and_its_policy_is_switched_off
 1 Whiskers.Tests.MutationShutdownTests.An_interrupted_run_is_closed_only_together_with_its_task_result
 1 Whiskers.Tests.MutationShutdownTests.An_interrupted_update_is_closed_only_together_with_switching_its_policy_off
@@ -1507,6 +1529,7 @@
 1 Whiskers.Tests.MutationShutdownTests.Reconciling_never_replaces_the_result_of_a_later_run
 1 Whiskers.Tests.MutationShutdownTests.Reconciling_works_under_a_retrying_execution_strategy
 1 Whiskers.Tests.MutationShutdownTests.Run_now_is_admitted_like_a_scheduled_run
+1 Whiskers.Tests.MutationShutdownTests.Run_now_of_a_task_deleted_during_its_run_returns_its_result_instead_of_throwing
 1 Whiskers.Tests.MutationShutdownTests.The_drain_admits_work_until_stopping_and_waits_for_what_runs
 1 Whiskers.Tests.MutationShutdownTests.The_host_drains_before_it_cancels_the_loops_and_waits_for_running_work
 1 Whiskers.Tests.MutationShutdownTests.The_host_stops_after_the_budget_when_work_does_not_end

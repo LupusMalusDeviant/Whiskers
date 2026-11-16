@@ -11,13 +11,22 @@ namespace Whiskers.Services.Webhooks;
 /// <item>202 <c>{"status":"queued","runId":…}</c> — accepted;</item>
 /// <item>200 <c>{"status":"duplicate","runId":…,"state":…}</c> — delivered before; the first run's id and state;</item>
 /// <item>400 <c>{"status":"rejected"}</c> — any invalid request, without saying which check failed;</item>
-/// <item>429 / 503 with <c>Retry-After</c> — too many requests, or the queue is full.</item>
+/// <item>429 / 503 with <c>Retry-After</c> — too many requests, or the queue is full;</item>
+/// <item>503 <c>{"status":"maintenance"}</c> with <c>Retry-After</c> — a restore is staged and Whiskers restarts.</item>
 /// </list>
 /// </summary>
 public static class WebhookEndpoint
 {
     public static async Task<IResult> HandleAsync(string webhookId, HttpContext ctx)
     {
+        // A restore is staged and Whiskers is about to restart (F3): a delivery accepted now would run — and write its
+        // audit events — into the database the restore replaces. Refused with Retry-After, so the sender delivers it again
+        // after the restart; nothing is read, recorded or queued.
+        if (ctx.RequestServices.GetService<Whiskers.Services.Maintenance.IMaintenanceStateService>()?.IsMaintenance == true)
+        {
+            ctx.Response.Headers.RetryAfter = "30";
+            return Results.Json(new { status = "maintenance" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
         var options = ctx.RequestServices.GetService<IOptions<WebhookOptions>>()?.Value ?? new WebhookOptions();
         var webhooks = ctx.RequestServices.GetRequiredService<IWebhookService>();
         // Rates first: a limited request is answered without reading its body, an oversized one counts too.

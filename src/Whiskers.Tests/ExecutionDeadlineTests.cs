@@ -270,6 +270,23 @@ public class ExecutionDeadlineTests
         Assert.False(service.StartPreview("admin@example.com"));         // a stopped service starts nothing
     }
 
+    [Fact]
+    public async Task A_running_preview_does_not_use_up_tonight_s_patch_window()
+    {
+        var runner = new HangingRunner();
+        var service = AutoPatch(runner);
+        Assert.True(service.StartPreview("admin@example.com"));
+        await runner.Entered.Task.WaitAsync(Wait);
+
+        // The window hour comes while the preview runs: the night is deferred, not recorded as run.
+        await service.RunNightlyRecordedAsync(CancellationToken.None);
+        Assert.Null(service.LastNightlyRun);
+        Assert.True(AutoPatchService.IsDue(new AutoPatchSettings { Enabled = true, RunAtHourUtc = DateTime.UtcNow.Hour },
+            DateTime.UtcNow, service.LastNightlyRun));
+
+        await service.StopAsync(CancellationToken.None).WaitAsync(Wait);
+    }
+
     // ---- Helpers -----------------------------------------------------------
 
     private static OpenAiCompatibleProvider Provider(HttpMessageHandler handler, ProviderTimeouts timeouts) =>

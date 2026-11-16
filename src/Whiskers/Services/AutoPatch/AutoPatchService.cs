@@ -170,6 +170,26 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     /// is skipped instead). Its error, if it ended early, is saved with its end. Internal for tests.</summary>
     internal async Task RunNightlyRecordedAsync(CancellationToken ct)
     {
+        // A preview (or another cycle) runs: the night is not taken — neither recorded nor run — and the next tick in the
+        // window tries again. Claimed here, before the day is written, so a preview cannot start in between and leave
+        // the night recorded as run while nothing was patched (review 1.0.0, Data).
+        if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
+        {
+            _logger.LogInformation("Auto-patch night deferred: a preview is running; the next check in the window tries again");
+            return;
+        }
+        try
+        {
+            await RunNightlyClaimedAsync(ct);
+        }
+        finally
+        {
+            Volatile.Write(ref _running, 0);
+        }
+    }
+
+    private async Task RunNightlyClaimedAsync(CancellationToken ct)
+    {
         var now = _utcNow();
         _lastNightlyRun = DateOnly.FromDateTime(now);
         var state = new AutoPatchNightlyState { Day = _lastNightlyRun, StartedAt = now, DryRun = _settings.CurrentValue.DryRun };
@@ -178,7 +198,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             LastCycle = new(now, _utcNow(), state.DryRun, [], [], NightNotRecorded);
             return;
         }
-        var refused = await RunNightlyAsync(ct);
+        var refused = await RunNightlyAsync(ct, cycleClaimed: true);
         state.CompletedAt = _utcNow();
         // A night is recorded clean only when it ran to its end: a cycle error, a refused or failed run, or a stop
         // (also one that cut off the last container, which leaves no "stopped before" behind) is saved as its reason.
@@ -215,7 +235,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
     /// <summary>The nightly cycle, on the authority of the admin who took AutoPatch over. Without one it does not run:
     /// the configuration switch alone is not an owner. Returns why the night did not run through, or null. Internal
     /// for tests.</summary>
-    internal async Task<string?> RunNightlyAsync(CancellationToken ct)
+    internal async Task<string?> RunNightlyAsync(CancellationToken ct, bool cycleClaimed = false)
     {
         var dryRun = _settings.CurrentValue.DryRun;
         if (_owners.IsBlocked(IAutomationOwnerStore.AutoPatch))
@@ -245,7 +265,9 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
         var actor = AutomationActor.ForAutoPatch(owner);
         var outcome = await _automation.RunAsync(actor, "autopatch.run",
             new { dryRun }, async (ResolvedRecord _, CancellationToken token) =>
-                MutationResults.Report(await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
+                MutationResults.Report(cycleClaimed
+                    ? await RunCycleCoreAsync(_settings.CurrentValue.DryRun, actor, token)
+                    : await RunGuardedAsync(forceDryRun: false, actor, token)), ct);
         if (outcome.Status is MutationStatus.Denied or MutationStatus.PendingApproval)
         {
             _logger.LogWarning("Auto-patch cycle refused: {Reason}", outcome.Reason);

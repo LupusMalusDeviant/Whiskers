@@ -348,6 +348,7 @@ public class MutationGatewayCoverageTests
     /// helper serves the type's marked operations and its reads.</summary>
     public static readonly (string Owner, string Handler, string Why)[] PlainExecutorInPrivateHelpers =
     [
+        ("Whiskers.Services.AutoPatch.ScriptAutoPatchRunner", "PruneBackupTagsAsync", "container.update: after a verified update, lists the backup tags and untags the old ones OldImageCleanupPolicy lets go"),
         ("Whiskers.Services.Certificates.MtlsCertificateService", "ConfirmAsync", "certificate renewal: confirms the installed certificate"),
         ("Whiskers.Services.Certificates.MtlsCertificateService", "RunAsync", "certificate renewal / issue: installs the certificate"),
         ("Whiskers.Services.Certificates.MtlsClientCredentialStore", "SignAsync", "R1-44: step-ca on local signs a per-host client CSR (certificate.issue_mtls)"),

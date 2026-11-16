@@ -88,6 +88,49 @@ public sealed class RestoreCustomSqlitePathTests
         }
     }
 
+    [Fact]
+    public async Task A_restore_refused_for_a_file_uri_connection_string_takes_no_safety_backup()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"sw-review-restore-{Guid.NewGuid():N}");
+        var elsewhere = Path.Combine(Path.GetTempPath(), $"sw-review-db-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(elsewhere);
+        var paths = new DataPathOptions(root);
+        var custom = Path.Combine(elsewhere, "whiskers.db").Replace('\\', '/');
+        var sp = new ServiceCollection()
+            .AddWhiskersDbContexts("sqlite", $"Data Source=file:{custom}", paths)
+            .BuildServiceProvider();
+        try
+        {
+            using (var scope = sp.CreateScope())
+            {
+                scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.Migrate();
+                scope.ServiceProvider.GetRequiredService<WhiskersIdentityDbContext>().Database.Migrate();
+            }
+            var maintenance = new MaintenanceStateService();
+            var svc = new BackupService(sp.GetRequiredService<IServiceScopeFactory>(), maintenance,
+                new NoopLifetime(), new ConfigurationBuilder().Build(), NullLogger<BackupService>.Instance, paths);
+            var info = await svc.CreateBackupAsync("manual");
+            var before = (await svc.ListBackupsAsync()).Select(b => b.Id).ToList();
+
+            var refused = await Assert.ThrowsAsync<BackupValidationException>(
+                () => svc.BeginRestoreAsync(svc.ResolveArchivePath(info.Id)!, "tester"));
+
+            Assert.Contains("Nothing was changed", refused.Message);
+            Assert.Equal(before, (await svc.ListBackupsAsync()).Select(b => b.Id).ToList());   // no pre-restore safety backup
+            Assert.False(File.Exists(paths.RestorePendingMarker));
+            Assert.False(maintenance.IsMaintenance);
+        }
+        finally
+        {
+            sp.Dispose();
+            TestSqlite.ClearPools(root);
+            TestSqlite.ClearPool(custom);
+            try { Directory.Delete(root, recursive: true); } catch { /* temp dir */ }
+            try { Directory.Delete(elsewhere, recursive: true); } catch { /* temp dir */ }
+        }
+    }
+
     private static IConfiguration Config(Dictionary<string, string?> values)
         => new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 

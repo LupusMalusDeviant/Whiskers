@@ -19,7 +19,7 @@ point (e.g. the pre-restore safety backup could not be written) must not strand 
 ## Wiring
 
 Registered as a **Core** singleton in [`../../Startup/WhiskersHostingExtensions.cs`](../../Startup/WhiskersHostingExtensions.cs)
-— deliberately not a module, since a restore must be gateable in every configuration. Three consumers:
+— deliberately not a module, since a restore must be gateable in every configuration. Four kinds of consumer:
 
 - **The request gate** — an inline middleware in [`../../Startup/WhiskersPipelineExtensions.cs`](../../Startup/WhiskersPipelineExtensions.cs)
   at the same seam as the W1 setup redirect (after `UseAntiforgery()`, before `UseAuthentication()`, and
@@ -30,6 +30,14 @@ Registered as a **Core** singleton in [`../../Startup/WhiskersHostingExtensions.
   reports `Unhealthy` while in maintenance. It carries the `ready` tag only, so it gates `/readyz`
   (load balancers/orchestrators drain) but **not** `/healthz`: the container HEALTHCHECK probes
   liveness, so entering maintenance can never make Docker kill the app mid-restore.
+- **The machine entry points** — the paths the request gate exempts still must not act on state that is about to
+  be swapped: what they did would be audited into the database the restore replaces, after the pre-restore safety
+  backup was taken. So they refuse while the flag is set, before anything runs or is recorded:
+  [`../../Mcp/McpGuardrailFilter.cs`](../../Mcp/McpGuardrailFilter.cs) answers every tool call with
+  `MaintenanceRefusal`, [`../Webhooks/WebhookEndpoint.cs`](../Webhooks/WebhookEndpoint.cs) answers 503
+  `maintenance` with `Retry-After`, and [`../Scheduler/SchedulerService.cs`](../Scheduler/SchedulerService.cs) starts
+  no due task (consuming no occurrence) and refuses "Run now". A webhook run queued before the flag was set still runs.
+  Not covered: actions taken in an already open UI circuit (`/_blazor` stays exempt), and the AutoUpdate/AutoPatch loops.
 - **The writer** — [`../Backup/BackupService.cs`](../Backup/) enters maintenance before taking the
   pre-restore safety backup and staging the restore, and exits it again if the restore aborts before
   its commit point.

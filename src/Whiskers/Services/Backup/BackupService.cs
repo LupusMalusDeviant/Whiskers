@@ -468,6 +468,24 @@ public sealed class BackupService : IBackupService
                 // release starts on the schema it knows); the history checks against the manifest stay.
                 else if (forward) await ProbeMigrationAsync(Path.Combine(staging, SelfBackupFormat.DbEntryName), ct);
 
+                // The SQLite file this app has open: the swap replaces that one, whatever WHISKERS_DB_CONNECTION names.
+                // Read before the safety backup: a connection string whose file cannot be read off it (a file: URI,
+                // |DataDirectory|) refuses the restore, and a refused restore costs no safety backup.
+                string? databasePath = null;
+                if (!postgres)
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        databasePath = Whiskers.Services.Persistence.DatabaseRegistration.SqliteFilePath(
+                            scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetConnectionString());
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        throw new BackupValidationException($"Restore refused: {ex.Message}. Nothing was changed.");
+                    }
+                }
+
                 // Automatic pre-restore safety backup (DB-safety rule). Abort the whole restore if it fails —
                 // nothing has been changed at this point. On PostgreSQL it is taken BEFORE the dry run (R1-33): the dry
                 // run executes the archive's SQL against the live database, and whatever a crafted script might get
@@ -484,13 +502,6 @@ public sealed class BackupService : IBackupService
                         $"Restore aborted: could not create a pre-restore safety backup ({ex.Message}). Nothing was changed.", ex);
                 }
                 if (postgres) await ProbePostgresRestoreAsync(stagedDump, prepared.Manifest, safety.Id, forward, ct);
-
-                // The SQLite file this app has open: the swap replaces that one, whatever WHISKERS_DB_CONNECTION names.
-                string? databasePath = null;
-                if (!postgres)
-                    using (var scope = _scopeFactory.CreateScope())
-                        databasePath = Whiskers.Services.Persistence.DatabaseRegistration.SqliteFilePath(
-                            scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.GetConnectionString());
 
                 // Commit point: write the marker atomically (.tmp + rename) AFTER staging is fully populated.
                 var marker = new RestoreMarker

@@ -16,19 +16,24 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
     // Per-taskId in-flight guard so the same task never runs twice concurrently.
     private readonly ConcurrentDictionary<string, byte> _running = new();
     private readonly Whiskers.Services.Mutations.IShutdownDrain _drain;
+    // A restore is being staged (F3): nothing starts until the restart — its audit events would land in the database
+    // the restore replaces, after the pre-restore safety backup was taken.
+    private readonly Whiskers.Services.Maintenance.IMaintenanceStateService? _maintenance;
 
     public SchedulerService(
         IServiceScopeFactory scopeFactory,
         ITaskExecutor executor,
         Whiskers.Services.Observability.SelfMetrics.ISelfMetrics selfMetrics,
         ILogger<SchedulerService> logger,
-        Whiskers.Services.Mutations.IShutdownDrain? drain = null)
+        Whiskers.Services.Mutations.IShutdownDrain? drain = null,
+        Whiskers.Services.Maintenance.IMaintenanceStateService? maintenance = null)
     {
         _scopeFactory = scopeFactory;
         _executor = executor;
         _selfMetrics = selfMetrics;
         _logger = logger;
         _drain = drain ?? Whiskers.Services.Mutations.NoShutdownDrain.Instance;
+        _maintenance = maintenance;
     }
 
     protected override async Task RunAsync(CancellationToken stoppingToken)
@@ -62,6 +67,14 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
 
     internal async Task CheckAndRunDueTasks(CancellationToken ct)
     {
+        // Restore maintenance: no due task starts and no occurrence is consumed; after the restart the restored schedule
+        // decides. Nothing is written either — the database is about to be replaced.
+        if (_maintenance?.IsMaintenance == true)
+        {
+            _logger.LogInformation("Scheduler paused: a restore is staged and Whiskers is about to restart");
+            return;
+        }
+
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
 
@@ -195,9 +208,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
 
             var (success, output) = await _executor.ExecuteAsync(task);
 
-            task.LastResult = success ? output : $"FEHLER: {output}";
-            task.LastSuccess = success;
-            await CloseRunAsync(db, runId, success, output);
+            await RecordResultAsync(db, task, runId, success, output);
 
             _logger.LogInformation("Task {Name} completed: success={Success}", task.Name, success);
         }
@@ -244,6 +255,24 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         }
     }
 
+    /// <summary>Records a run's end together with its task's last result. A task deleted while it ran has no row to
+    /// update any more: its run keeps the result it really had (not "failed"), and nothing throws.</summary>
+    private async Task RecordResultAsync(MetricsDbContext db, ScheduledTaskEntity task, long runId, bool success, string output)
+    {
+        task.LastResult = success ? output : $"FEHLER: {output}";
+        task.LastSuccess = success;
+        try
+        {
+            await CloseRunAsync(db, runId, success, output);
+        }
+        catch (DbUpdateConcurrencyException ex) when (ex.Entries.All(e => e.Entity is ScheduledTaskEntity))
+        {
+            _logger.LogInformation("Task {Name} was deleted while it ran; its run is recorded without a task result", task.Name);
+            foreach (var entry in ex.Entries) entry.State = EntityState.Detached;
+            await db.SaveChangesAsync();
+        }
+    }
+
     /// <summary>Records the end of a run opened by <see cref="NewRun"/>, together with the tracked task's
     /// result. Not cancellable: a run that ended is recorded as such, also while Whiskers is stopping.</summary>
     private static async Task CloseRunAsync(MetricsDbContext db, long runId, bool success, string output)
@@ -259,13 +288,21 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         await db.SaveChangesAsync();
     }
 
-    /// <summary>Parses a cron expression, returning false instead of throwing on an invalid one.</summary>
+    /// <summary>How far ahead a schedule must fire at least once to count as valid: covers 29 February, which can be
+    /// eight years away (2096 → 2104).</summary>
+    private const int MaxYearsToNextOccurrence = 9;
+
+    /// <summary>Parses a cron expression, returning false instead of throwing on an invalid one — also for one that
+    /// parses but never fires (30 February, 31 April), whose next run would otherwise be the year 9999.</summary>
     public static bool TryParseCron(string expression, out CrontabSchedule? schedule)
     {
         try
         {
-            schedule = CrontabSchedule.Parse(expression, new CrontabSchedule.ParseOptions { IncludingSeconds = false });
-            return true;
+            var parsed = CrontabSchedule.Parse(expression, new CrontabSchedule.ParseOptions { IncludingSeconds = false });
+            var from = DateTime.UtcNow;
+            var horizon = from.AddYears(MaxYearsToNextOccurrence);
+            schedule = parsed.GetNextOccurrence(from, horizon) < horizon ? parsed : null;
+            return schedule is not null;
         }
         catch
         {
@@ -273,6 +310,21 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
             return false;
         }
     }
+
+    /// <summary>A task time as the cron reads it: in UTC and marked so. Shown in the server's local time beside a UTC
+    /// cron, "0 3 * * *" read as "04:00" on a CET host — the run looked shifted by the UTC offset.</summary>
+    public static string FormatUtc(DateTime? time, string format = "yyyy-MM-dd HH:mm")
+        => time is { } t
+            ? (t.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(t, DateTimeKind.Utc) : t.ToUniversalTime())
+                .ToString(format, System.Globalization.CultureInfo.InvariantCulture) + " UTC"
+            : "";
+
+    private static CrontabSchedule ParseOrThrow(string expression)
+        => TryParseCron(expression, out var cron)
+            ? cron!
+            : throw new ArgumentException(
+                $"Invalid cron expression '{expression}': it does not parse or never fires (e.g. 30 February).",
+                nameof(expression));
 
     // === Public API for manual task management ===
 
@@ -285,10 +337,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
 
     public async Task<ScheduledTaskEntity> CreateTaskAsync(ScheduledTaskEntity task)
     {
-        // Validate cron
-        CrontabSchedule.Parse(task.CronExpression, new CrontabSchedule.ParseOptions { IncludingSeconds = false });
-
-        var cron = CrontabSchedule.Parse(task.CronExpression, new CrontabSchedule.ParseOptions { IncludingSeconds = false });
+        var cron = ParseOrThrow(task.CronExpression);
         task.NextRun = cron.GetNextOccurrence(DateTime.UtcNow);
 
         using var scope = _scopeFactory.CreateScope();
@@ -306,6 +355,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var existing = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == task.TaskId);
         if (existing == null) return;
+        var cron = ParseOrThrow(task.CronExpression);   // before anything changes
 
         existing.Name = task.Name;
         existing.CronExpression = task.CronExpression;
@@ -316,7 +366,6 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
         existing.Enabled = task.Enabled;
         existing.Config = task.Config;
 
-        var cron = CrontabSchedule.Parse(task.CronExpression, new CrontabSchedule.ParseOptions { IncludingSeconds = false });
         existing.NextRun = cron.GetNextOccurrence(DateTime.UtcNow);
 
         await db.SaveChangesAsync();
@@ -356,8 +405,12 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
     /// <summary>Stable result of <see cref="RunNowAsync"/> while the task runs; the UI shows it translated.</summary>
     public const string AlreadyRunningResult = "The task is already running.";
 
+    /// <summary>Stable result of <see cref="RunNowAsync"/> while a restore is staged; the UI shows it translated.</summary>
+    public const string MaintenanceResult = "A restore is in progress and Whiskers is about to restart; the task was not started.";
+
     public async Task<(bool Success, string Output)> RunNowAsync(string taskId)
     {
+        if (_maintenance?.IsMaintenance == true) return (false, MaintenanceResult);
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MetricsDbContext>();
         var task = await db.ScheduledTasks.FirstOrDefaultAsync(t => t.TaskId == taskId);
@@ -383,9 +436,7 @@ public class SchedulerService : Whiskers.Services.FleetBackgroundService, ISched
 
             var (success, output) = await _executor.ExecuteAsync(task);
 
-            task.LastResult = success ? output : $"FEHLER: {output}";
-            task.LastSuccess = success;
-            await CloseRunAsync(db, run.Id, success, output);
+            await RecordResultAsync(db, task, run.Id, success, output);
             return (success, output);
         }
         catch (Exception ex) when (runId is { } opened)

@@ -75,7 +75,6 @@ if [ -z "$IGNORE_DRIFT" ] && ! grep -qE "Container $C +Running" <<< "$PLAN"; the
     echo "UPD-ABORT compose-drift $(grep -m1 -iE 'container|error' <<< "$PLAN" | tr -s ' ')"; exit 1
 fi
 
-docker tag "$OLD_ID" "$BK" && echo "backup_tag=$BK"
 docker pull -q "$IMG" >/dev/null 2>&1 && echo pulled || echo "pull failed - using local tag"
 NEW_ID=$(docker image inspect -f '{{.Id}}' "$IMG")
 if [ "$NEW_ID" = "$OLD_ID" ]; then echo UPD-NOCHANGE; exit 0; fi
@@ -139,6 +138,10 @@ check() {
     return 1
 }
 
+# The backup tag only for an update that is really applied: a no-change, skipped or dry-run night left one per day
+# and container before, and nothing ever removed them. Whiskers prunes the older ones after a verified update
+# (OldImageCleanupPolicy, ScriptAutoPatchRunner).
+docker tag "$OLD_ID" "$BK" && echo "backup_tag=$BK"
 dc up -d --no-deps --no-build --pull never "$SVC"
 if check && [ "$(docker inspect -f '{{.Image}}' "$C")" = "$NEW_ID" ]; then
     echo "UPD-OK $OLD_V -> $NEW_V"

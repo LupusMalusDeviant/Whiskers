@@ -305,13 +305,19 @@ internal sealed class FakeDocker : IDockerService
     public Task RestartContainerAsync(string containerId, string? serverId = null) =>
         Act("restart", containerId, serverId, Task.CompletedTask);
     public Task RemoveContainerAsync(string containerId, bool force = false, string? serverId = null) => throw new NotSupportedException();
-    public Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
+    /// <summary>What a pull does (by image reference); unset, a pull throws.</summary>
+    public Func<string, Task>? Pull { get; set; }
+    public Task PullImageAsync(string imageName, IProgress<string>? progress = null, string? serverId = null, CancellationToken ct = default)
+        => Pull?.Invoke(imageName) ?? throw new NotSupportedException();
     public Task<(string State, int ExitCode, bool OomKilled)> InspectContainerStateAsync(string containerId, string? serverId = null) =>
         AllowMutations ? Task.FromResult(("running", 0, false)) : throw new NotSupportedException();
     public Task<ServerSystemInfo> GetServerSystemInfoAsync(string? serverId = null, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<Dictionary<string, ServerSystemInfo>> GetAllServerSystemInfoAsync() => throw new NotSupportedException();
     public Task<Whiskers.Services.ImageUpdate.ImageContract?> GetImageContractAsync(string imageRef, string? serverId = null)
-        => Task.FromResult<Whiskers.Services.ImageUpdate.ImageContract?>(null);
+        => Task.FromResult(Contract?.Invoke(imageRef));
+
+    /// <summary>What an image inspect answers (by image reference); unset, null.</summary>
+    public Func<string, Whiskers.Services.ImageUpdate.ImageContract?>? Contract { get; set; }
 
     /// <summary>What <see cref="GetImageDigestAsync"/> answers (R1-41: a test can hold it to model a slow read).</summary>
     public Func<string, Task<string?>>? Digest { get; set; }
@@ -324,7 +330,10 @@ internal sealed class FakeDocker : IDockerService
 
     public Task<string?> GetImageDigestAsync(string imageRef, string? serverId, CancellationToken ct)
         => DigestWithToken?.Invoke(imageRef, ct) ?? GetImageDigestAsync(imageRef, serverId);
-    public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null) => throw new NotSupportedException();
+    /// <summary>The image a container was created from (by container id); unset, reading it throws.</summary>
+    public Func<string, string?>? ConfiguredImage { get; set; }
+    public Task<string?> GetConfiguredImageAsync(string containerId, string? serverId = null)
+        => ConfiguredImage is { } read ? Task.FromResult(read(containerId)) : throw new NotSupportedException();
     public Task<string> RecreateContainerAsync(string containerId, string? serverId = null, IProgress<string>? progress = null, CancellationToken ct = default) =>
         Act("recreate", containerId, serverId, Task.FromResult("recreated-" + containerId));
     /// <summary>The environment every container answers with; unset, reading it throws.</summary>
