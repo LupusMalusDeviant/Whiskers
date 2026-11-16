@@ -35,7 +35,7 @@ Repo of each: `ssh://<sub-account>@u699949.your-storagebox.de:23/./borg` (home d
 | `borg-fleet-prune` + `.service`/`.timer` (Badwolf) | weekly retention, Sun 07:30 |
 | `fleet.json.example` | copy to `/root/.config/borg-fleet/fleet.json` |
 
-### Tools (no Python since 1.0.1, contract 0017 part I)
+### Tools (no Python since 1.0.0, contract 0017 part I)
 
 | Script | Needs | Without it |
 |---|---|---|

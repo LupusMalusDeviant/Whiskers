@@ -71,7 +71,7 @@ listed cannot sign in, just like a Google or OIDC user.
   stale account id; the entry then stays until an Admin removes it by hand.
 - The whitelist editor in *Settings → Authentication* reloads after every account added or deleted **on the same
   page**, so saving it there does not undo these changes. Another browser tab or another Admin with an older copy of
-  the list can still save it over them: the last save wins (as before 1.0.1; a version check is planned for 1.1.0).
+  the list can still save it over them: the last save wins (a version check is planned for 1.1.0).
   Reload *Settings* before editing the whitelist after accounts changed elsewhere.
 - If a creation fails after its whitelist entry was written and the entry cannot be taken back either, the entry
   stays (the error is logged); remove it in *Settings → Authentication*.
@@ -80,7 +80,7 @@ listed cannot sign in, just like a Google or OIDC user.
 - Whiskers keeps the record of which entries it added next to the list in `whitelist.json` (`AddedForAccounts`,
   address → account id). Saving the whitelist in *Settings → Authentication* keeps the record of every address that
   stays listed.
-- Accounts that existed before 1.0.1, and the Admin seeded from `WHISKERS_ADMIN_EMAIL` on an install that already had
+- Accounts that existed before the update to 1.0.0 (from 0.15.0 or older), and the Admin seeded from `WHISKERS_ADMIN_EMAIL` on an install that already had
   a `whitelist.json`, are not added: list their addresses yourself.
 
 ### Sessions end on every credential change

@@ -88,11 +88,32 @@ public static class BaseComparison
             .FirstOrDefault();
 
     /// <summary>
+    /// The two <c>main</c> commits that carry the withdrawn 1.0.1 (contract 0008, Amendment 3): the merge of the 1.0.1
+    /// release PR and the next merge. Only against these may the version go from exactly 1.0.1 to exactly 1.0.0, once.
+    /// </summary>
+    public static readonly IReadOnlySet<string> WithdrawnReleaseCommits = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "c6e6629a8d15ace2a120c9d1636dd65bbff5aec5",
+        "58c2615be6259049a9426edef0e5bd61cc2bffef",
+    };
+
+    private static readonly GateVersion Withdrawn = new(1, 0, 1);
+
+    /// <summary>
+    /// The one admitted decrease (Amendment 3): 1.0.1 → 1.0.0 against a full commit ID from
+    /// <see cref="WithdrawnReleaseCommits"/>. Both versions are 1.0.0 or above, so the gate's mode does not drop.
+    /// </summary>
+    public static bool IsAdmittedReset(GateVersion now, GateVersion baseVersion, string? baseCommit) =>
+        now == GateVersion.One && baseVersion == Withdrawn
+        && baseCommit is not null && WithdrawnReleaseCommits.Contains(baseCommit);
+
+    /// <summary>
     /// Compares the current records with a base. <paramref name="tag"/> is the release tag the base was chosen by
     /// (previous-tag mode), or null for a pull request's base commit: a tag whose commit does not carry the tag's version
     /// in its csproj is not a release commit (every real release passed <c>prepare</c>'s version check), so it is refused.
     /// </summary>
-    public static IReadOnlyList<GateFinding> Compare(GateSnapshot current, GateSnapshot? baseline, string label, string? tag = null)
+    public static IReadOnlyList<GateFinding> Compare(GateSnapshot current, GateSnapshot? baseline, string label, string? tag = null,
+        string? baseCommit = null)
     {
         var findings = new List<GateFinding>();
         void Add(string rule, string subject, string message) => findings.Add(new(rule, subject, message));
@@ -113,7 +134,7 @@ public static class BaseComparison
         try
         {
             if (current.Csproj is null) Add("D2", "Whiskers.csproj", "the current commit has no src/Whiskers/Whiskers.csproj: its version cannot be compared with the base");
-            else if (ReleaseGate.ReadVersion(current.Csproj) is { } now && now < baseVersion)
+            else if (ReleaseGate.ReadVersion(current.Csproj) is { } now && now < baseVersion && !IsAdmittedReset(now, baseVersion, baseCommit))
                 Add("D2", "Whiskers.csproj", $"the version {now} is below {baseVersion} of {label}: the version (and with it the gate's mode) never goes down");
         }
         catch (FormatException ex) { Add("D2", "Whiskers.csproj", $"the current version cannot be read: {ex.Message}"); }
