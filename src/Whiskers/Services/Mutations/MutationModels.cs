@@ -116,6 +116,19 @@ public sealed record MutationTarget(string Kind, string Id, string? Name = null,
     /// approval binding, and checked again by the onboarding under the host lock: an approval given for one host is
     /// never used on another after the record was edited. Null for every other capability.</summary>
     public string? Connection { get; init; }
+
+    /// <summary>Contract 0018 (INV-30, INV-64): for <c>server.onboard</c> with a bootstrap, the bound cloud VM as the
+    /// resolver read it from the provider — <c>"{CloudServerId}|{vmName}|{publicIp}"</c>. Set by the gateway, never by a
+    /// caller; part of the approval binding, so a VM renamed, re-addressed or replaced after an approval makes the grant
+    /// unusable. Null for every other call.</summary>
+    public string? CloudVm { get; init; }
+
+    /// <summary>Contract 0018: the bound VM's facts a person compares on the approval card (created, labels), next to
+    /// <see cref="CloudVm"/>. Shown, not bound.</summary>
+    public string? CloudVmCreated { get; init; }
+
+    /// <inheritdoc cref="CloudVmCreated"/>
+    public string? CloudVmLabels { get; init; }
 }
 
 /// <summary>Everything the gateway needs to decide on and record one mutation.</summary>

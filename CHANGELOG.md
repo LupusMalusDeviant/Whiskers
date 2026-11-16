@@ -2238,6 +2238,14 @@ accepted before the work started (#209). They come from the full review of the w
 - **Compose: `use_api_socket` and privileged hooks.** `use_api_socket: true` now counts as a Docker-socket mount, so
   an API key is refused as for any other socket mount. A privileged `post_start`/`pre_stop` hook is an exposure that
   needs approval (part A, #215).
+- **SSH host-key pinning at onboarding (contract 0018 part C, INV-63, ADR-0002 amendment).** Every onboarding run of
+  an SSH server pins the host key before its first command and records type, fingerprint, source and time on the
+  server (`hostkey.pin` in the audit). A different key stops the run and shows both fingerprints. Only an interactive
+  Admin with an Admin approval can replace a pin (`server.hostkey_replace`, audited with both fingerprints).
+- **Cloud bootstrap leaves no standing access (contract 0018 part D, INV-64).** The Hetzner rescue bootstrap acts only
+  on the VM bound to the record by its exact public IP, needs a human Admin's approval for every non-interactive
+  principal, never keeps the rescue password, and removes the project key, the injected `authorized_keys` line and
+  the generated key. A run that fails after the injection reports the standing key until it is removed.
 - **Whitelist and local accounts.** With the OAuth whitelist enabled, the seeded local admin and local accounts an
   Admin creates can sign in: the first seed adds `WHISKERS_ADMIN_EMAIL`, creating an account adds its address, and
   deleting it removes only what was added for it (parts H1–H3, #216).
@@ -2302,6 +2310,12 @@ accepted before the work started (#209). They come from the full review of the w
   a digest now logs a warning.
 
 ### Added
+- **One-step server onboarding (contract 0018, PR 2).** *Servers → Add* registers a server from name and IP and binds
+  the cloud VM that holds exactly this IP in one stored credential (`server.create`). The onboarding dialog shows the
+  bound VM (name, id, created, labels, IP) and can bootstrap a fresh Hetzner VM through rescue mode with a generated
+  key. *Settings → Onboarding* stores a Tailscale auth key in the vault (`Onboarding:Tailscale:AuthKeyRef`). New
+  optional `servers.json` fields: `CloudServerId`, the `SshHostKey*` pin fields and the bootstrap-key fields. The MCP
+  tools come with PR 3.
 - **Mutation Gateway, step 2.3 (ADR-0005).** `IAutomationMutationRunner` runs scheduled tasks, AutoUpdate and
   AutoPatch through the gateway on their owner's authority. Owners are shown and taken over in Scheduled Tasks and
   in Settings → Automation owners (`automation-owners.json` in the data directory). The bypass baseline shrinks from

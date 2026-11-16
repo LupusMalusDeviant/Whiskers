@@ -30,6 +30,10 @@ public sealed class GuardrailRuleCatalog : IGuardrailRuleCatalog
             "A compose deployment that publishes a service (Tailscale Funnel, Traefik, caddy-docker-proxy) or gives it the " +
             "host's network, privileges or namespaces needs a confirmation from the agent and API keys.",
             GuardrailVerdict.Confirm, EmptySchema),
+        new GuardrailRuleDescriptor(CloudBootstrapRule.RuleId, "Cloud bootstrap",
+            "An onboarding that boots a cloud VM into its rescue system to inject a key needs an Admin's approval for the " +
+            "agent, API keys and automations, whatever the preset; the card names the VM.",
+            GuardrailVerdict.Confirm, EmptySchema),
         new GuardrailRuleDescriptor("confirmation", "Confirmation required",
             "Actions above the autonomous level require a UI confirmation.",
             GuardrailVerdict.Confirm, EmptySchema),

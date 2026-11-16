@@ -13,6 +13,7 @@ Credentials are **per Whiskers server** (each may live in a different Hetzner pr
 ## Behaviour notes
 
 - **`hetzner_delete_snapshot` is snapshot-only:** it loads the image first (`GetImageAsync`) and refuses anything whose `type` isn't `"snapshot"` — backups and system/custom images are protected from an accidental id typo.
+- **Rescue bootstrap calls (contract 0018 part D):** `EnableRescueWithKeysAsync` (`enable_rescue`, type `linux64`, `ssh_keys` ids; the `root_password` in the answer is never read into a result), `CreateSshKeyAsync` (`POST /ssh_keys` with name, public key and labels) and `DeleteSshKeyAsync` (`DELETE /ssh_keys/{id}`). They are used only by [`Onboarding/HetznerRescueBootstrap`](../Onboarding/HetznerRescueBootstrap.cs), which deletes the project key again on success and on failure.
 - **List endpoints paginate:** servers / snapshots / server-types are fetched page-by-page (`per_page=50`, the API max) until a short page, so an account with >50 entries is returned in full.
 
 ## Related

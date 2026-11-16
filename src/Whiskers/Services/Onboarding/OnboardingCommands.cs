@@ -23,6 +23,14 @@ public static class OnboardingCommands
     public static string TailscaleUp(string slug) =>
         $"sudo systemd-run --collect --unit=ts-up tailscale up --accept-dns=false --hostname={slug}";
 
+    /// <summary>Contract 0018 D9: <c>tailscale up</c> with the onboarding auth key as <c>--auth-key=file:&lt;path&gt;</c>. The key
+    /// is never in the command text: it arrives in the environment variable <paramref name="variable"/>
+    /// (<c>HostCommandSecrets</c>), is written into a 0600 temporary file and removed again whatever the outcome.</summary>
+    public static string TailscaleUpWithAuthKey(string slug, string variable) =>
+        "umask 077; f=$(mktemp); trap 'rm -f \"$f\"' EXIT; " +
+        $"printf '%s' \"${variable}\" > \"$f\"; " +
+        $"sudo tailscale up --accept-dns=false --hostname={slug} --auth-key=file:\"$f\"";
+
     /// <summary>Writes a file on the target by piping base64 through <c>sudo tee</c> — content
     /// never touches shell quoting. The directory part must be a fixed, code-owned path.</summary>
     public static string WriteFileB64(string path, string b64)

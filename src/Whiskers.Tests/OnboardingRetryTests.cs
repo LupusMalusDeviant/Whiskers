@@ -35,7 +35,8 @@ public class OnboardingRetryTests : IDisposable
         _servers.InitializeAsync().GetAwaiter().GetResult();
         _host = new RefusingHost(_servers);
         _onboarding = new OnboardingService(_host, _servers, NullProxy<IDockerService>.Create(),
-            NullProxy<IMtlsCertificateService>.Create(), EmptyClientCredentialStore(), NullLogger<OnboardingService>.Instance);
+            NullProxy<IMtlsCertificateService>.Create(), EmptyClientCredentialStore(), NullLogger<OnboardingService>.Instance,
+            hostKeys: new AcceptingHostKeyPins());
     }
 
     public void Dispose()

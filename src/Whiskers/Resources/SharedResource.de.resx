@@ -5822,6 +5822,36 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="IdentityBindings_Error_auth_disabled" xml:space="preserve">
     <value>Die Authentifizierung ist abgeschaltet; Anmelde-Identitäten lassen sich hier nicht ändern.</value>
   </data>
+  <data name="Onboarding_AuthKey_Panel" xml:space="preserve">
+    <value>Onboarding: Tailscale-Auth-Key</value>
+  </data>
+  <data name="Onboarding_AuthKey_Intro" xml:space="preserve">
+    <value>Optional. Mit einem Auth-Key nimmt das Onboarding neue Hosts ohne Login-Link ins Tailnet auf. Der Key liegt nur im Vault; einen kurzlebigen, getaggten Key verwenden.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Set" xml:space="preserve">
+    <value>Ein Auth-Key ist gespeichert.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Unset" xml:space="preserve">
+    <value>Kein Auth-Key gespeichert: Das Onboarding zeigt einen Login-Link.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Label" xml:space="preserve">
+    <value>Neuer Auth-Key</value>
+  </data>
+  <data name="Onboarding_AuthKey_Save" xml:space="preserve">
+    <value>Key speichern</value>
+  </data>
+  <data name="Onboarding_AuthKey_Clear" xml:space="preserve">
+    <value>Key entfernen</value>
+  </data>
+  <data name="Onboarding_AuthKey_NoVault" xml:space="preserve">
+    <value>Der Vault ist nicht nutzbar; ein Auth-Key kann nicht gespeichert werden.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Saved" xml:space="preserve">
+    <value>Auth-Key gespeichert.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Cleared" xml:space="preserve">
+    <value>Auth-Key entfernt.</value>
+  </data>
   <data name="DiskHealth_Panel" xml:space="preserve">
     <value>Datenträger-Zustand (SMART, RAID, ZFS)</value>
   </data>
@@ -6610,5 +6640,95 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   </data>
   <data name="SelfStatus_Verdict_Ok" xml:space="preserve">
     <value>ok</value>
+  </data>
+  <data name="Servers_O18_StandingKeyBadge" xml:space="preserve">
+    <value>Stehender Bootstrap-Key</value>
+  </data>
+  <data name="Servers_O18_PinnedHostKey" xml:space="preserve">
+    <value>Gepinnter SSH-Host-Key</value>
+  </data>
+  <data name="Servers_O18_MismatchText" xml:space="preserve">
+    <value>Der Host zeigt einen anderen SSH-Host-Key als den gepinnten: neu installiert, eine IP eines anderen Servers oder ein Angriff. Nichts wurde ersetzt. Beide Fingerprints vergleichen.</value>
+  </data>
+  <data name="Servers_O18_PinnedFingerprint" xml:space="preserve">
+    <value>Gepinnter Fingerprint</value>
+  </data>
+  <data name="Servers_O18_ServedFingerprint" xml:space="preserve">
+    <value>Jetzt gezeigter Fingerprint</value>
+  </data>
+  <data name="Servers_O18_ReplacePin" xml:space="preserve">
+    <value>Pin ersetzen…</value>
+  </data>
+  <data name="Servers_O18_RemoveBootstrapAccess" xml:space="preserve">
+    <value>Bootstrap-Zugang entfernen</value>
+  </data>
+  <data name="Servers_O18_PublicIp" xml:space="preserve">
+    <value>Öffentliche IP</value>
+  </data>
+  <data name="Servers_O18_PublicIp_Help" xml:space="preserve">
+    <value>Die öffentliche IPv4- (Hetzner) oder IPv6-Adresse; für den Bootstrap verbindet sich Whiskers als root auf Port 22.</value>
+  </data>
+  <data name="Servers_O18_Registered" xml:space="preserve">
+    <value>Server {0} angelegt.</value>
+  </data>
+  <data name="Servers_O18_MatchedVm" xml:space="preserve">
+    <value>Zugeordnete VM</value>
+  </data>
+  <data name="Servers_O18_Created" xml:space="preserve">
+    <value>erstellt</value>
+  </data>
+  <data name="Servers_O18_Labels" xml:space="preserve">
+    <value>Labels</value>
+  </data>
+  <data name="Servers_O18_CredentialOf" xml:space="preserve">
+    <value>Hinterlegter Zugang von Server {0}.</value>
+  </data>
+  <data name="Servers_O18_Advanced" xml:space="preserve">
+    <value>Erweitert</value>
+  </data>
+  <data name="Servers_O18_RescueOffer" xml:space="preserve">
+    <value>Zugang über das Hetzner-Rescue-System: der Server wird zweimal neu gestartet (jeweils normal, ein Hard-Reset nur, wenn er nicht zurückkommt; etwa 3 Minuten); seine Platte bleibt unverändert bis auf eine Zeile in /root/.ssh/authorized_keys, die am Ende wieder entfernt wird.</value>
+  </data>
+  <data name="Servers_O18_BoundVm" xml:space="preserve">
+    <value>Gebundene VM (wie Hetzner sie jetzt meldet)</value>
+  </data>
+  <data name="Servers_O18_VmNameDiffers" xml:space="preserve">
+    <value>Die VM heißt '{0}', der Server-Eintrag '{1}'. Prüfen, ob es die richtige VM ist.</value>
+  </data>
+  <data name="Servers_O18_ConfirmVm" xml:space="preserve">
+    <value>Das ist die richtige VM: '{0}'</value>
+  </data>
+  <data name="Servers_O18_ReplaceText" xml:space="preserve">
+    <value>Mit dem neuen Pin vertraut Whiskers dem Key, den der Host jetzt zeigt. Das braucht die Freigabe eines Admins (Seite Freigaben); nach der Freigabe erneut klicken.</value>
+  </data>
+  <data name="Servers_O18_ReplaceCompared" xml:space="preserve">
+    <value>Ich habe beide Fingerprints mit dem Host verglichen</value>
+  </data>
+  <data name="Servers_O18_PinnedBefore0018" xml:space="preserve">
+    <value>vor 0018 gepinnt</value>
+  </data>
+  <data name="Servers_O18_SourceRescueDisk" xml:space="preserve">
+    <value>von der Platte gelesen (Rescue)</value>
+  </data>
+  <data name="Servers_O18_SourceOperator" xml:space="preserve">
+    <value>von einem Admin ersetzt</value>
+  </data>
+  <data name="Servers_O18_SourceFirstContact" xml:space="preserve">
+    <value>Erstkontakt</value>
+  </data>
+  <data name="Servers_O18_NotAvailable" xml:space="preserve">
+    <value>Nicht verfügbar: die Cloud-VM oder der Dienst lässt sich nicht lesen.</value>
+  </data>
+  <data name="Servers_O18_CredentialPassword" xml:space="preserve">
+    <value>mit Passwort</value>
+  </data>
+  <data name="Servers_O18_CredentialKey" xml:space="preserve">
+    <value>mit der Schlüsseldatei {0}</value>
+  </data>
+  <data name="Servers_O18_CredentialNone" xml:space="preserve">
+    <value>kein Schlüssel und kein Passwort hinterlegt</value>
+  </data>
+  <data name="Servers_O18_PinReplaced" xml:space="preserve">
+    <value>Host-Key-Pin von {0} ersetzt: {1}</value>
   </data>
 </root>

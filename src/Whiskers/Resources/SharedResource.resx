@@ -5822,6 +5822,36 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="IdentityBindings_Error_auth_disabled" xml:space="preserve">
     <value>Authentication is disabled; sign-in identities cannot be changed here.</value>
   </data>
+  <data name="Onboarding_AuthKey_Panel" xml:space="preserve">
+    <value>Onboarding: Tailscale auth key</value>
+  </data>
+  <data name="Onboarding_AuthKey_Intro" xml:space="preserve">
+    <value>Optional. With an auth key, onboarding joins new hosts to the tailnet without a login link. The key is kept in the vault only; use a short-lived, tagged key.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Set" xml:space="preserve">
+    <value>An auth key is stored.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Unset" xml:space="preserve">
+    <value>No auth key stored: onboarding shows a login link.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Label" xml:space="preserve">
+    <value>New auth key</value>
+  </data>
+  <data name="Onboarding_AuthKey_Save" xml:space="preserve">
+    <value>Store key</value>
+  </data>
+  <data name="Onboarding_AuthKey_Clear" xml:space="preserve">
+    <value>Remove key</value>
+  </data>
+  <data name="Onboarding_AuthKey_NoVault" xml:space="preserve">
+    <value>The vault is not usable; an auth key cannot be stored.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Saved" xml:space="preserve">
+    <value>Auth key stored.</value>
+  </data>
+  <data name="Onboarding_AuthKey_Cleared" xml:space="preserve">
+    <value>Auth key removed.</value>
+  </data>
   <data name="DiskHealth_Panel" xml:space="preserve">
     <value>Disk health (SMART, RAID, ZFS)</value>
   </data>
@@ -6610,5 +6640,95 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   </data>
   <data name="SelfStatus_Verdict_Ok" xml:space="preserve">
     <value>ok</value>
+  </data>
+  <data name="Servers_O18_StandingKeyBadge" xml:space="preserve">
+    <value>Standing bootstrap key</value>
+  </data>
+  <data name="Servers_O18_PinnedHostKey" xml:space="preserve">
+    <value>Pinned SSH host key</value>
+  </data>
+  <data name="Servers_O18_MismatchText" xml:space="preserve">
+    <value>The host serves another SSH host key than the pinned one: a rebuild, an IP that belonged to another server, or an attack. Nothing was replaced. Compare both fingerprints.</value>
+  </data>
+  <data name="Servers_O18_PinnedFingerprint" xml:space="preserve">
+    <value>Pinned fingerprint</value>
+  </data>
+  <data name="Servers_O18_ServedFingerprint" xml:space="preserve">
+    <value>Fingerprint served now</value>
+  </data>
+  <data name="Servers_O18_ReplacePin" xml:space="preserve">
+    <value>Replace pin…</value>
+  </data>
+  <data name="Servers_O18_RemoveBootstrapAccess" xml:space="preserve">
+    <value>Remove bootstrap access</value>
+  </data>
+  <data name="Servers_O18_PublicIp" xml:space="preserve">
+    <value>Public IP</value>
+  </data>
+  <data name="Servers_O18_PublicIp_Help" xml:space="preserve">
+    <value>The server's public IPv4 (Hetzner) or IPv6 address; Whiskers connects as root on port 22 for the bootstrap.</value>
+  </data>
+  <data name="Servers_O18_Registered" xml:space="preserve">
+    <value>Server {0} registered.</value>
+  </data>
+  <data name="Servers_O18_MatchedVm" xml:space="preserve">
+    <value>Matched VM</value>
+  </data>
+  <data name="Servers_O18_Created" xml:space="preserve">
+    <value>created</value>
+  </data>
+  <data name="Servers_O18_Labels" xml:space="preserve">
+    <value>labels</value>
+  </data>
+  <data name="Servers_O18_CredentialOf" xml:space="preserve">
+    <value>Stored credential of server {0}.</value>
+  </data>
+  <data name="Servers_O18_Advanced" xml:space="preserve">
+    <value>Advanced</value>
+  </data>
+  <data name="Servers_O18_RescueOffer" xml:space="preserve">
+    <value>Get access via Hetzner rescue: the server is rebooted twice (a normal reboot each time, a hard reset only if it does not come back; about 3 minutes); its disk is not changed except for one line in /root/.ssh/authorized_keys, removed again at the end.</value>
+  </data>
+  <data name="Servers_O18_BoundVm" xml:space="preserve">
+    <value>Bound VM (as Hetzner reports it now)</value>
+  </data>
+  <data name="Servers_O18_VmNameDiffers" xml:space="preserve">
+    <value>The VM is named '{0}', the server record '{1}'. Check that this is the right VM.</value>
+  </data>
+  <data name="Servers_O18_ConfirmVm" xml:space="preserve">
+    <value>This is the right VM: '{0}'</value>
+  </data>
+  <data name="Servers_O18_ReplaceText" xml:space="preserve">
+    <value>Replacing the pin makes Whiskers trust the key the host serves now. It needs an Admin approval (Approvals page); click again after the approval.</value>
+  </data>
+  <data name="Servers_O18_ReplaceCompared" xml:space="preserve">
+    <value>I compared both fingerprints with the host</value>
+  </data>
+  <data name="Servers_O18_PinnedBefore0018" xml:space="preserve">
+    <value>pinned before 0018</value>
+  </data>
+  <data name="Servers_O18_SourceRescueDisk" xml:space="preserve">
+    <value>read from the disk (rescue)</value>
+  </data>
+  <data name="Servers_O18_SourceOperator" xml:space="preserve">
+    <value>replaced by an Admin</value>
+  </data>
+  <data name="Servers_O18_SourceFirstContact" xml:space="preserve">
+    <value>first contact</value>
+  </data>
+  <data name="Servers_O18_NotAvailable" xml:space="preserve">
+    <value>Not available: the cloud VM or the service cannot be read.</value>
+  </data>
+  <data name="Servers_O18_CredentialPassword" xml:space="preserve">
+    <value>with a password</value>
+  </data>
+  <data name="Servers_O18_CredentialKey" xml:space="preserve">
+    <value>with the key file {0}</value>
+  </data>
+  <data name="Servers_O18_CredentialNone" xml:space="preserve">
+    <value>no key and no password stored</value>
+  </data>
+  <data name="Servers_O18_PinReplaced" xml:space="preserve">
+    <value>Host key pin of {0} replaced: {1}</value>
   </data>
 </root>

@@ -43,9 +43,17 @@ public static class MutationCompositions
         ("registry.save", ["vault.secret_set", "vault.secret_delete"]),
         ("registry.delete", ["vault.secret_delete"]),
         // A server record owns its kubeconfig in the vault; removing the server removes it (ServerRemoval).
-        ("server.remove", ["vault.secret_delete"]),
+        // Contract 0018: removing a server with a bootstrap line on its host first runs the one fixed removal command
+        // there (IBootstrapCleanup), inside the same decision.
+        ("server.remove", ["vault.secret_delete", "host.exec"]),
         // Onboarding issues the server's mTLS client certificate and switches its record to the managed transport.
-        ("server.onboard", ["certificate.issue_mtls", "server.save"]),
+        // Contract 0018 part D: the cloud bootstrap enables / disables rescue, reboots (soft, hard reset as fallback) and
+        // creates / deletes the project SSH key of the rescue boot.
+        ("server.onboard", ["certificate.issue_mtls", "server.save", "hetzner.rescue_enable", "hetzner.rescue_disable",
+            "cloud.reboot", "cloud.hard_reset", "hetzner.ssh_key_create", "hetzner.ssh_key_delete"]),
+        // Contract 0018: registering a server writes its record; replacing a host-key pin mirrors the pin into it.
+        ("server.create", ["server.save"]),
+        ("server.hostkey_replace", ["server.save"]),
         // R1-44: a client-credential migration issues the host's own credential and switches its record to it; a
         // renewal or rotation issues the next certificate into a slot of its own and switches the record to it.
         ("mtls.client_migrate", ["certificate.issue_mtls", "server.save"]),

@@ -72,6 +72,8 @@ public sealed class ResolvedTargetFlowTests
         "Hetzner-only operation on the provider's numeric server or image id; the decided target is the Whiskers server.";
     private const string Entity =
         "Takes the stored entity (or the open request), not an id: the delegate passes the object read for the decision.";
+    private const string HetznerProjectKey =
+        "Contract 0018: a project-level Hetzner SSH key (no server id); composed only by server.onboard, whose decided target is the Whiskers server.";
     private const string RollbackRecord = "Takes the numeric rollback record; the decided target is the container.";
     private const string DerivedSecret =
         "Composed by server, registry and Git-app removal for a key derived from the decided record, not a decided name.";
@@ -107,6 +109,10 @@ public sealed class ResolvedTargetFlowTests
         ["Whiskers.Services.Hetzner.IHetznerService.DisableRescueAsync (hetzner.rescue_disable)"] = HetznerId,
         ["Whiskers.Services.Hetzner.IHetznerService.EnableBackupsAsync (hetzner.backups_enable)"] = HetznerId,
         ["Whiskers.Services.Hetzner.IHetznerService.EnableRescueAsync (hetzner.rescue_enable)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.EnableRescueWithKeysAsync (hetzner.rescue_enable)"] = HetznerId,
+        ["Whiskers.Services.Hetzner.IHetznerService.CreateSshKeyAsync (hetzner.ssh_key_create)"] = HetznerProjectKey,
+        ["Whiskers.Services.Hetzner.IHetznerService.DeleteSshKeyAsync (hetzner.ssh_key_delete)"] = HetznerProjectKey,
+        ["Whiskers.Services.Onboarding.IBootstrapCleanup.RemoveMarkerLinesAsync (server.remove)"] = Entity,
         ["Whiskers.Services.Hetzner.IHetznerService.PowerOnAsync (cloud.power_on)"] = ProviderTransport,
         ["Whiskers.Services.Hetzner.IHetznerService.RebootAsync (cloud.reboot)"] = ProviderTransport,
         ["Whiskers.Services.Hetzner.IHetznerService.ResetAsync (cloud.hard_reset)"] = ProviderTransport,

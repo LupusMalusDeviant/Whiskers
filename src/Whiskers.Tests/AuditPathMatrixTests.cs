@@ -361,6 +361,7 @@ public sealed class AuditPathMatrixTests : IDisposable
     [AuditPath("U-25", Pending, Approved)]
     [AuditPath("U-37", Pending, Approved)]
     [AuditPath("U-21", Pending, Approved)]
+    [AuditPath("U-41", Pending, Approved)]   // contract 0018: replacing a host-key pin is a control-plane change (INV-59, INV-63)
     public async Task Every_ui_and_terminal_capability_is_one_complete_event_per_attempt(string row, string capabilityId)
     {
         var capability = new CapabilityCatalog().Find(capabilityId);

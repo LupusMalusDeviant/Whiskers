@@ -69,5 +69,18 @@ sie (`ssh-keys/`).
   von der Platte des Servers, aber über eine SSH-Sitzung zum Rescue-System, und diese Sitzung ist selbst
   **Trust-On-First-Use auf dem Rescue-System** (`accept-new` gegen eine leere, laufeigene `known_hosts`). Der so
   gepinnte Key ist also so vertrauenswürdig wie diese eine Sitzung; er ist nicht „außerhalb geprüft".
+- **Umsetzung des Nachtrags (Vertrag 0018, PR 2, INV-63):** `Services/Server/SshHostKeyPins` mit dem Prozess-Seam
+  `SshToolchain`. Der Onboarding-Schritt `HostKey` läuft für jeden SSH-Datensatz vor dem ersten Befehl; ohne den Dienst
+  bricht der Lauf ab (fail closed). Erstkontakt: `ssh-keyscan` (ed25519, ecdsa, rsa), Vergleich je Schlüsseltyp mit der
+  eigenen `known_hosts` über `ssh-keygen -F` (auch gehashte Zeilen; `[host]:port` bei einem anderen Port als 22),
+  fehlende Typen werden als **ungehashte** Zeilen angehängt; der bevorzugte Key (ed25519 vor ecdsa vor rsa) steht mit
+  Typ, Fingerprint (immer aus `ssh-keygen -l`), Quelle (FirstContact / RescueDisk / Operator) und Zeitpunkt am Server
+  und im Audit (`hostkey.pin`). Ein Typ, den der Host nicht mehr anbietet, ist keine Abweichung; ein anderer Key
+  irgendeines Typs bricht bei `HostKey` ab und zeigt beide Fingerprints. Für vor 0018 onboardete Hosts zeigt die
+  Server-Seite einen aus `known_hosts` gelesenen Pin an (nur im Speicher, kein Schreiben, kein Audit-Ereignis).
+  Ersetzen: `server.hostkey_replace` (Admin, nur interaktiv, Freigabe wie INV-59, Grant einmal verwendet) liest den
+  angebotenen Key neu, lehnt ab, wenn einer der beiden Fingerprints nicht dem verglichenen entspricht, entfernt die
+  Zeilen mit `ssh-keygen -R`, hängt die neuen an und protokolliert alten und neuen Fingerprint (`hostkey.replace`).
+  `StrictHostKeyChecking=accept-new` auf den drei SSH-Pfaden bleibt unverändert.
 - Onboardete Hosts laufen danach ohne SSH über den mTLS-Kanal (`docs/ARCHITECTURE.md`); dieser ADR betrifft nur
   Bootstrap und nicht migrierte SSH-Server.

@@ -702,7 +702,7 @@ public sealed class PerHostCredentialTests
         var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance)
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins())
         {
             ProbeCredential = (server, _) => Task.FromResult(MtlsCertificateService.CommonNameOf(server.TcpClientCertPath!) == SharedCn
                 ? MtlsProbeOutcome.Refused
@@ -747,7 +747,7 @@ public sealed class PerHostCredentialTests
         var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance)
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins())
         {
             ProbeCredential = (_, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
@@ -769,7 +769,7 @@ public sealed class PerHostCredentialTests
         var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance)
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins())
         {
             ProbeCredential = (_, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
@@ -794,7 +794,7 @@ public sealed class PerHostCredentialTests
         var exec = new OnboardingExecutor(w.Fleet, payload);
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance);
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins());
 
         var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
@@ -819,7 +819,7 @@ public sealed class PerHostCredentialTests
         MtlsClientMigrationResult? renewal = null;
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance)
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins())
         {
             ProbeCredential = async (server, _) =>
             {
@@ -858,7 +858,7 @@ public sealed class PerHostCredentialTests
         await w.Servers.UpdateServerAsync(record);
         var onboarding = new OnboardingService(new OnboardingExecutor(w.Fleet, "100.64.0.20"), w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance);
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins());
 
         var gate = w.Store.HostLock("neuhof");
         Assert.True(await gate.WaitAsync(0));   // e.g. a removal or a migration of the same id
@@ -886,7 +886,7 @@ public sealed class PerHostCredentialTests
         var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance);
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins());
 
         var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
@@ -913,7 +913,7 @@ public sealed class PerHostCredentialTests
         };
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance);
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins());
 
         var result = await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
@@ -992,7 +992,7 @@ public sealed class PerHostCredentialTests
         var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20") { OnCommand = _ => throw new OperationCanceledException() };
         var onboarding = new OnboardingService(exec, servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance);
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins());
 
         await onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default);
 
@@ -1045,7 +1045,7 @@ public sealed class PerHostCredentialTests
         var exec = new OnboardingExecutor(w.Fleet, "100.64.0.9");
         var onboarding = new OnboardingService(exec, NameFallbackServers.Over(w.Servers), ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance);
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins());
 
         var result = await onboarding.OnboardServerAsync("neuhof", true, Decided(w, "neuhof"), new Progress<string>(), default);
 
@@ -1074,7 +1074,7 @@ public sealed class PerHostCredentialTests
         };
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance);
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins());
 
         await Record.ExceptionAsync(() => onboarding.OnboardServerAsync("neuhof", false, Decided(w, "neuhof"), new Progress<string>(), default));
 
@@ -1084,7 +1084,7 @@ public sealed class PerHostCredentialTests
     }
 
     /// <summary>The connection a run was decided on (INV-59, #187): the record's as it is now; a removed server has none.</summary>
-    private static string Decided(CredentialWorld w, string id) =>
+    internal static string Decided(CredentialWorld w, string id) =>
         w.Servers.GetServer(id) is { } server ? MtlsOnboardingState.ConnectionOf(server) : "gone";
 
     [Fact]
@@ -1102,7 +1102,7 @@ public sealed class PerHostCredentialTests
         var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20");
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance);
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins());
 
         var result = await onboarding.OnboardServerAsync("neuhof", true, decided, new Progress<string>(), default);
         var unknown = await onboarding.OnboardServerAsync("neuhof", true, null, new Progress<string>(), default);
@@ -1131,7 +1131,7 @@ public sealed class PerHostCredentialTests
         };
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance);
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins());
 
         var result = await onboarding.OnboardServerAsync("neuhof", false, decided, new Progress<string>(), default);
 
@@ -1192,7 +1192,7 @@ public sealed class PerHostCredentialTests
         gate.Release();
     }
 
-    private static async Task<ServerConfig> SshRecordAsync(CredentialWorld w, string id)
+    internal static async Task<ServerConfig> SshRecordAsync(CredentialWorld w, string id)
     {
         var record = w.Server(id).Clone();
         record.ConnectionType = ConnectionType.SSH;
@@ -1211,7 +1211,7 @@ public sealed class PerHostCredentialTests
         var exec = new OnboardingExecutor(w.Fleet, "100.64.0.20", w.Ca);
         var certificates = new MtlsCertificateService(exec, w.Servers, NullLogger<MtlsCertificateService>.Instance, w.Store);
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(), certificates, w.Store,
-            NullLogger<OnboardingService>.Instance)
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins())
         {
             ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
@@ -1241,7 +1241,7 @@ public sealed class PerHostCredentialTests
         };
         var onboarding = new OnboardingService(exec, w.Servers, ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
-            NullLogger<OnboardingService>.Instance)
+            NullLogger<OnboardingService>.Instance, hostKeys: new AcceptingHostKeyPins())
         {
             ProbeCredential = (server, _) => Task.FromResult(MtlsProbeOutcome.Refused),
         };
@@ -1698,7 +1698,7 @@ public sealed class PerHostCredentialTests
     // ---- doubles ----
 
     /// <summary>The onboarding's bootstrap and host commands: tailnet up, everything else succeeds; step-ca via the fleet.</summary>
-    private sealed class OnboardingExecutor(SimulatedFleet fleet, string ip, TestCa? ca = null) : IHostCommandExecutor
+    internal sealed class OnboardingExecutor(SimulatedFleet fleet, string ip, TestCa? ca = null) : IHostCommandExecutor
     {
         public List<string> Scripts { get; } = new();
         /// <summary>The scrape config the Whiskers host ("local") answers with.</summary>
@@ -1708,12 +1708,15 @@ public sealed class PerHostCredentialTests
         public Action<string>? OnCommand { get; set; }
         /// <summary>Whether the host was asked to activate a freshly staged server certificate.</summary>
         public bool ServerCertificateActivated { get; private set; }
+        /// <summary>Contract 0018 tests: an answer of its own for a command (null: the usual answer).</summary>
+        public Func<string, CommandResult?>? Answer { get; set; }
 
         public Task<CommandResult> ExecuteAsync(string serverId, string command, TimeSpan? timeout = null,
             CancellationToken ct = default, int? maxOutputChars = null)
         {
             Scripts.Add(command);
             OnCommand?.Invoke(command);
+            if (Answer?.Invoke(command) is { } answered) return Task.FromResult(answered);
             if (ca is not null && serverId != "local")
             {
                 // The server-certificate steps of the real MtlsCertificateService on the new host (key and CSR made there).

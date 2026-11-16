@@ -422,6 +422,8 @@ public static class ConfigSections
     {
         "agent", "aichat", "cvemonitor", "diskhealth", "dns", "guardrails", "healthmonitor", "imageupdate",
         "mcp-api-keys", "mcp-permissions", "metricalert", "metrics-retention", "notification-channels", "notifications",
+        // Contract 0018 D9: the onboarding Tailscale auth key reference (the key itself lives in the vault).
+        "onboarding",
         "outbound-exceptions", "quiet-hours", "registries", "roles", "terminal", "vault", "whitelist",
     };
 }

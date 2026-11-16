@@ -324,6 +324,18 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsClientCredentialStore, Whiskers.Services.Certificates.MtlsClientCredentialStore>();
         builder.Services.AddSingleton<Whiskers.Services.Certificates.IMtlsCertificateService, Whiskers.Services.Certificates.MtlsCertificateService>();
         builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingService, Whiskers.Services.Onboarding.OnboardingService>();
+        // Contract 0018: registration from name + IP (B), SSH host-key pins (C), the Hetzner rescue bootstrap and the
+        // bootstrap-line clean-up (D). The provider clients are resolved per call (the cloud module may be off).
+        builder.Services.Configure<Whiskers.Configuration.OnboardingSettings>(
+            builder.Configuration.GetSection(Whiskers.Configuration.OnboardingSettings.SectionName));
+        builder.Services.AddSingleton<Whiskers.Services.Server.ISshProcessRunner, Whiskers.Services.Server.SshProcessRunner>();
+        builder.Services.AddSingleton<Whiskers.Services.Server.ISshToolchain, Whiskers.Services.Server.SshToolchain>();
+        builder.Services.AddSingleton<Whiskers.Services.Server.ISshHostKeyPins, Whiskers.Services.Server.SshHostKeyPins>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.ICloudBootstrap, Whiskers.Services.Onboarding.HetznerRescueBootstrap>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.IBootstrapCleanup, Whiskers.Services.Onboarding.BootstrapCleanup>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.ServerRegistration>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.IServerRegistration>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.ServerRegistration>());
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.ICloudVmReader>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.ServerRegistration>());
 
         // Metrics database — SQLite (zero-config default) or PostgreSQL, selected by Database:Provider
         // (WHISKERS_DB_PROVIDER / _CONNECTION[_FILE]). SQLite default is byte-identical to before. (stableDB.md)

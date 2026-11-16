@@ -33,7 +33,7 @@ full profile by design.
 
 Both profiles run the same image. It carries the programs Whiskers starts and none of the Docker engine:
 the static docker CLI (the local web terminal's `docker exec`; every other Docker call goes through the API, and
-`docker compose` runs on the managed host), `nsenter` (host shell, full profile only), `ssh`/`sshpass`,
+`docker compose` runs on the managed host), `nsenter` (host shell, full profile only), `ssh`/`sshpass` (with `ssh-keyscan`/`ssh-keygen` for host-key pinning, contract 0018),
 `tailscale`/`tailscaled` with `iptables`, the PostgreSQL 18 client tools and `curl` for the health probe. Until
 R1-52 it installed Ubuntu's `docker.io` package, which also brought `dockerd`, `containerd` and `runc` — never
 started, but scanned, patched and shipped. Base images are pinned by digest (see

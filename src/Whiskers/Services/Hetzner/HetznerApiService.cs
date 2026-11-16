@@ -138,6 +138,20 @@ public class HetznerApiService : IHetznerService
     public async Task<HetznerActionResponse?> EnableRescueAsync(string token, long id, CancellationToken ct = default)
         => await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/enable_rescue", new { type = "linux64" }, ct);
 
+    public async Task<HetznerActionResponse?> EnableRescueWithKeysAsync(string token, long id, IReadOnlyList<long> sshKeyIds,
+        CancellationToken ct = default)
+        => await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/enable_rescue",
+            new { type = "linux64", ssh_keys = sshKeyIds.ToArray() }, ct);
+
+    public async Task<HetznerSshKey> CreateSshKeyAsync(string token, string name, string publicKey,
+        IReadOnlyDictionary<string, string> labels, CancellationToken ct = default)
+        => (await SendAsync<HetznerSshKeyResponse>(token, HttpMethod.Post, "/ssh_keys",
+               new { name, public_key = publicKey, labels = new Dictionary<string, string>(labels) }, ct)).SshKey
+           ?? throw new InvalidOperationException("Hetzner answered the SSH key creation without a key.");
+
+    public async Task DeleteSshKeyAsync(string token, long sshKeyId, CancellationToken ct = default)
+        => await SendAsync(token, HttpMethod.Delete, $"/ssh_keys/{sshKeyId}", ct: ct);
+
     public async Task<HetznerAction?> DisableRescueAsync(string token, long id, CancellationToken ct = default)
         => (await SendAsync<HetznerActionResponse>(token, HttpMethod.Post, $"/servers/{id}/actions/disable_rescue", ct: ct)).Action;
 
