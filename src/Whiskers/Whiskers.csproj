@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Blazor-ApexCharts" Version="7.1.0" />
+    <PackageReference Include="Blazor-ApexCharts" Version="8.0.0" />
     <PackageReference Include="Docker.DotNet" Version="3.125.15" />
     <PackageReference Include="Docker.DotNet.X509" Version="3.125.15" />
     <PackageReference Include="KubernetesClient" Version="21.0.8" />

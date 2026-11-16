@@ -4,9 +4,9 @@
     "net10.0": {
       "Blazor-ApexCharts": {
         "type": "Direct",
-        "requested": "[7.1.0, )",
-        "resolved": "7.1.0",
-        "contentHash": "QR5xWNETy0DkgFQ0TFQIdmHi7J402hBRpegzOlbFAAaYgcgM+YZs5LL1qaZRf8nMWP+jRE/R4JbnxFUqOPbZNw=="
+        "requested": "[8.0.0, )",
+        "resolved": "8.0.0",
+        "contentHash": "oQzHx0yiqlnM1EgaXv64tuQm+Silxbddb3zujIByjBsK/a3Tanm+U9LFRG/bbG1mcuF2tSFuhFWYaY7mkTx4bg=="
       },
       "Docker.DotNet": {
         "type": "Direct",
