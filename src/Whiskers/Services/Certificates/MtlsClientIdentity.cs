@@ -94,6 +94,7 @@ public sealed partial record MtlsClientIdentity
     public static bool IsValidCommonName(string? value) =>
         value is { Length: > 0 and <= MaxCommonNameLength } && LabelRegex().IsMatch(value);
 
-    [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")]
+    // \z, not $: a .NET "$" also matches before a final "\n", which would carry a line break into the shell line.
+    [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\z")]
     private static partial Regex LabelRegex();
 }

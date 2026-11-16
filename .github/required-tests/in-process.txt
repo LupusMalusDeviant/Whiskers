@@ -40,8 +40,13 @@
 14 Whiskers.Tests.BorgFleetScriptTests
 8 Whiskers.Tests.TailnetGuardScriptTests
 
-# Review 1.0.0 (U1): page handlers and renders that failed ended the Blazor circuit.
-12 Whiskers.Tests.ComponentTests.UiCrashRegressionTests
+# Review 1.0.0 (U1): page handlers and renders that failed ended the Blazor circuit; the MCP-permission and whitelist
+# saves show and log a failure only redacted (UiFailure).
+14 Whiskers.Tests.ComponentTests.UiCrashRegressionTests
+
+# mTLS names that reach a shell line on a host end at the end of the text (\z, not $): a client name, compose path,
+# project or run suffix with a trailing line break is refused.
+5 Whiskers.Tests.MtlsNameAnchorTests
 
 # Backups (review 1.0.0, Data): a restore writes the database the app opens and refuses a settings mismatch first;
 # a volume backup leaves no unrecorded archive, keeps its record when its file stays, and names each archive alone.
@@ -1404,6 +1409,7 @@
 1 Whiskers.Tests.MtlsClientKeyLoaderTests.Without_a_usable_vault_no_client_key_is_made
 1 Whiskers.Tests.MtlsCsrReencodeTests.A_csr_with_data_after_the_request_is_refused_before_the_ca_host
 1 Whiskers.Tests.MtlsCsrReencodeTests.A_hosts_csr_with_a_subject_alternative_name_of_another_kind_is_refused
+2 Whiskers.Tests.MtlsCsrReencodeTests.A_hosts_csr_with_one_extra_uri_or_email_san_is_refused
 1 Whiskers.Tests.MtlsCsrReencodeTests.A_managed_hosts_csr_answer_cannot_add_command_lines_to_the_root_script_on_the_ca_host
 1 Whiskers.Tests.MtlsCsrReencodeTests.A_new_certificate_request_block_is_refused_before_the_ca_host
 1 Whiskers.Tests.MtlsCsrReencodeTests.A_second_pem_block_in_the_answer_is_refused_before_the_ca_host
