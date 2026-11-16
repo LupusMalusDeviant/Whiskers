@@ -769,6 +769,7 @@ public sealed class MutationGateway : IMutationGateway
                 {
                     // Contract 0006: which rule set decided, for the re-check after a compose run.
                     scope.SetDecision(decision.AgentRuleSet, decision.ExposureConfirmClasses);
+                    scope.DecidedLevel = capability.RequiredLevel;
                     // The person whose approval was used for this run (approvers are always people, by email).
                     if (approval is { Approved: true, ApprovedBy: { } approver } && approver.Contains('@'))
                         scope.ApprovedBy = PrincipalIds.User(approver);

@@ -50,12 +50,25 @@ public sealed class SchedulerRequirementResolver : IEffectiveRequirementResolver
                 // Fail closed: without the scheduler the task's requirement cannot be known.
                 var scheduler = _services.GetService<ISchedulerService>()
                     ?? throw new InvalidOperationException("The scheduler is not available.");
-                var task = (await scheduler.GetTasksAsync()).FirstOrDefault(x => x.TaskId == taskId);
+                var task = FindTask(await scheduler.GetTasksAsync(), taskId);
                 return task is null ? McpPermissionLevels.Admin : LevelFor(task.TaskType, TaskExecutor.RetentionOf(task) > 0);
 
             default:
                 return capability.RequiredLevel;
         }
+    }
+
+    /// <summary>The task a run names, found the way the gateway resolves its target (<c>MutationTargets</c>): by id,
+    /// else by a name that exactly one task has. So a task named by its name needs the same level as by its id; an
+    /// ambiguous name finds none (the caller is held to Admin, and the target resolution refuses it anyway).</summary>
+    internal static ScheduledTaskEntity? FindTask(IEnumerable<ScheduledTaskEntity> tasks, string idOrName)
+    {
+        var all = tasks.ToList();
+        var byId = all.FirstOrDefault(t => t.TaskId == idOrName);
+        if (byId is not null)
+            return byId;
+        var byName = all.Where(t => t.Name == idOrName).Take(2).ToList();
+        return byName.Count == 1 ? byName[0] : null;
     }
 
     /// <summary>The level running <paramref name="task"/> needs — the same answer <c>scheduler.run</c> gets, for pages

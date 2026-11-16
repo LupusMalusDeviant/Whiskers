@@ -54,6 +54,12 @@
 # project or run suffix with a trailing line break is refused.
 5 Whiskers.Tests.MtlsNameAnchorTests
 
+# Security LOW (review 1.0.0, T4): whiskers://me/permissions lists only tools a call would pass; the Docker workload
+# provider hands the caller's token on; a Neo4j password with '/' is read whole.
+3 Whiskers.Tests.MyPermissionsResourceTests
+2 Whiskers.Tests.DockerWorkloadProviderCancellationTests
+3 Whiskers.Tests.DatabaseDetectorTests.A_neo4j_password_with_a_slash_is_kept_whole
+
 # Backups (review 1.0.0, Data): a restore writes the database the app opens and refuses a settings mismatch first;
 # a volume backup leaves no unrecorded archive, keeps its record when its file stays, and names each archive alone.
 14 Whiskers.Tests.RestoreCustomSqlitePathTests
@@ -83,7 +89,7 @@
 
 # The database tool reads each client's output by its own format, and a Redis command reaches redis-cli as quoted argv
 # elements whose first one is no option (review of 1.0.0, area Fleet).
-30 Whiskers.Tests.DatabaseServiceOutputParsingTests
+36 Whiskers.Tests.DatabaseServiceOutputParsingTests
 
 # Server form and onboarding retry (contract 0018 part A): an uploaded key is what the record names, an SSH server needs
 # host and user, a type switch loses nothing, a key replaces a held password, every run names its credential (never its
@@ -146,7 +152,7 @@
 13 Whiskers.Tests.ComponentTests.ServersKubeconfigSaveTests
 5 Whiskers.Tests.ComponentTests.UiCreatedResourceAuditTests
 8 Whiskers.Tests.ConcurrencyCacheAliasingTests
-5 Whiskers.Tests.ContainerEnvToolTests
+6 Whiskers.Tests.ContainerEnvToolTests
 46 Whiskers.Tests.ContainerRestoreTests
 9 Whiskers.Tests.ContentSecurityPolicySourceTests
 11 Whiskers.Tests.CronValidationTests
@@ -172,7 +178,7 @@
 69 Whiskers.Tests.DiskHealthReadingTests
 12 Whiskers.Tests.DiskHealthSettingTests
 8 Whiskers.Tests.DnsModuleTests
-46 Whiskers.Tests.DnsRecordServiceTests
+49 Whiskers.Tests.DnsRecordServiceTests
 2 Whiskers.Tests.DockerBudgetCoverageTests
 4 Whiskers.Tests.DockerConnectionFailureTests
 9 Whiskers.Tests.DotEnvDocumentTests
@@ -417,14 +423,18 @@
 4 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_decision_without_a_resolver_or_a_level_decides_nothing
 1 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_disabled_underlying_capability_refuses
 1 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_raised_level_of_the_underlying_capability_applies
+1 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_run_without_a_gateway_decision_is_refused
 1 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_second_approver_policy_stops_self_confirm_in_the_chat_both_ways
+4 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_task_changed_after_the_decision_is_not_run_above_the_decided_level
 1 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_task_id_is_read_like_the_agent_binder_hands_it_to_the_tool
+1 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_task_named_by_its_name_needs_the_same_level_as_by_its_id
 1 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_viewer_can_neither_approve_nor_reject_anything
 3 Whiskers.Tests.ApprovalSeparationOfDutyTests.A_web_user_decides_at_the_level_of_their_current_role
 1 Whiskers.Tests.ApprovalSeparationOfDutyTests.After_an_upgrade_a_pending_approval_without_requesters_is_cancelled_so_the_caller_asks_again
 1 Whiskers.Tests.ApprovalSeparationOfDutyTests.An_approval_that_does_not_say_who_asked_is_decided_by_nobody
 3 Whiskers.Tests.ApprovalSeparationOfDutyTests.An_approval_with_an_unreadable_level_needs_an_admin
 3 Whiskers.Tests.ApprovalSeparationOfDutyTests.An_interactive_request_may_be_decided_by_its_requester_and_is_recorded_as_such
+1 Whiskers.Tests.ApprovalSeparationOfDutyTests.An_unchanged_task_runs_at_its_decided_level
 3 Whiskers.Tests.ApprovalSeparationOfDutyTests.An_unrecognized_task_type_fails_closed
 1 Whiskers.Tests.ApprovalSeparationOfDutyTests.Custom_command_requires_an_admin_approver
 5 Whiskers.Tests.ApprovalSeparationOfDutyTests.Every_accepted_task_type_form_is_resolved
@@ -2174,23 +2184,29 @@
 22 Whiskers.Tests.SecretHygieneTests.Redact_hides_sql_password_literals
 1 Whiskers.Tests.SecretHygieneTests.Redact_hides_the_rescue_password_in_german_tool_output
 1 Whiskers.Tests.SecretHygieneTests.Redact_keeps_the_rest_of_a_sql_statement
+1 Whiskers.Tests.SecretRedactorTests.A_bare_value_with_a_quote_inside_is_masked_to_the_next_space
 1 Whiskers.Tests.SecretRedactorTests.A_basic_authorization_header_is_redacted
 1 Whiskers.Tests.SecretRedactorTests.A_json_key_beyond_the_bound_that_names_a_secret_is_masked
 1 Whiskers.Tests.SecretRedactorTests.A_logged_authorization_header_in_a_json_document_keeps_the_fields_after_it
 1 Whiskers.Tests.SecretRedactorTests.A_long_ordinary_log_is_redacted_not_withheld
 1 Whiskers.Tests.SecretRedactorTests.A_pattern_that_times_out_withholds_the_whole_text
+1 Whiskers.Tests.SecretRedactorTests.A_redacted_json_document_stays_json_and_keeps_its_other_fields
+15 Whiskers.Tests.SecretRedactorTests.A_secret_named_key_in_free_text_loses_its_value_in_every_quoting
 4 Whiskers.Tests.SecretRedactorTests.A_secret_that_starts_with_the_mask_is_still_redacted
 1 Whiskers.Tests.SecretRedactorTests.A_token_alone_in_front_of_the_host_is_removed_by_the_sink_rule
+8 Whiskers.Tests.SecretRedactorTests.A_token_count_stays_readable_and_a_token_does_not
 1 Whiskers.Tests.SecretRedactorTests.An_authorization_header_in_json_keeps_the_document_valid
 67 Whiskers.Tests.SecretRedactorTests.An_authorization_value_is_redacted_down_to_its_scheme
 3 Whiskers.Tests.SecretRedactorTests.Credentials_in_urls_are_redacted_and_the_host_kept
 1 Whiskers.Tests.SecretRedactorTests.Json_values_are_redacted_one_by_one_with_escaped_quotes_decoded
 1 Whiskers.Tests.SecretRedactorTests.Multiline_material_is_redacted_on_every_line
 1 Whiskers.Tests.SecretRedactorTests.Pathological_input_ends_in_bounded_time_without_leaking
+7 Whiskers.Tests.SecretRedactorTests.Private_keys_and_credentials_are_secret_names
 2 Whiskers.Tests.SecretRedactorTests.Redacting_twice_changes_nothing
 1 Whiskers.Tests.SecretRedactorTests.Removing_url_user_info_ends_in_bounded_time_on_hostile_input
 4 Whiskers.Tests.SecretRedactorTests.Sql_password_literals_are_redacted_and_the_statement_kept
 10 Whiskers.Tests.SecretRedactorTests.The_authorization_rule_has_no_catastrophic_backtracking
+1 Whiskers.Tests.SecretRedactorTests.The_quoted_key_rule_ends_in_bounded_time_on_hostile_input
 1 Whiskers.Tests.SecretsAtRestTests.A_dns_save_keeps_a_hidden_environment_token_hidden_and_never_writes_plaintext
 1 Whiskers.Tests.SecretsAtRestTests.A_file_that_cannot_be_rewritten_keeps_its_plaintext_and_does_not_stop_the_start
 1 Whiskers.Tests.SecretsAtRestTests.A_legacy_to_vault_move_leaves_no_plaintext_in_the_recorded_audit_results

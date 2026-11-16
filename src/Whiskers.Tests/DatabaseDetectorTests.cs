@@ -24,4 +24,18 @@ public class DatabaseDetectorTests
         Assert.Equal("app", creds.User);
         Assert.Equal("right", creds.Password);   // never the lower-case one listed first
     }
+
+    /// <summary>NEO4J_AUTH is "user/password": the password is everything after the first '/', also when it contains
+    /// '/' itself; "none" (authentication off) is no password.</summary>
+    [Theory]
+    [InlineData("neo4j/s3cr/et/x", "neo4j", "s3cr/et/x")]
+    [InlineData("neo4j/plain", "neo4j", "plain")]
+    [InlineData("none", "neo4j", "")]
+    public void A_neo4j_password_with_a_slash_is_kept_whole(string auth, string user, string password)
+    {
+        var creds = DatabaseDetector.ExtractCredentials([new("NEO4J_AUTH", auth)], DatabaseType.Neo4j);
+
+        Assert.Equal(user, creds.User);
+        Assert.Equal(password, creds.Password);
+    }
 }

@@ -350,6 +350,11 @@ public sealed class MutationScope : IDisposable
     /// deployment later runs, so the provisioning tools make them its owner.</summary>
     public string? ApprovedBy { get; internal set; }
 
+    /// <summary>The level the gateway decided this operation at (the capability's, raised by a stored level and by what
+    /// the arguments make of it, R1-05), set for this scope only; <c>null</c> outside the gateway. A delegate whose
+    /// object can change between the decision and the run (a scheduled task) checks that it still needs no more.</summary>
+    public string? DecidedLevel { get; internal set; }
+
     /// <summary>
     /// Reports on the current scope that the mutation failed although the code returns normally — for tools that
     /// answer with an error text instead of throwing. The gateway then records the operation as <c>Failed</c> and

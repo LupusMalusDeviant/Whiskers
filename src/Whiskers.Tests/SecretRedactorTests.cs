@@ -346,4 +346,102 @@ public sealed class SecretRedactorTests
         Assert.DoesNotContain(Canary, redacted);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
     }
+
+    /// <summary>INV-51: what the plain JSON rule left readable in free text — a non-string value, a key with '.' or ' ',
+    /// an escaped JSON object, a single-quoted key, an unclosed value, '=>' — loses its value; redacting twice changes
+    /// nothing.</summary>
+    [Theory]
+    [InlineData("{\"password\": 82741936}", "82741936")]
+    [InlineData("{\"api_key\": [\"canary-value-r124\", \"b\"]}", Canary)]
+    [InlineData("{\"secret\": {\"user\": \"a\", \"value\": \"canary-value-r124\"}}", Canary)]
+    [InlineData("{\"db.password\": \"canary-value-r124\"}", Canary)]
+    [InlineData("{\"admin password\": \"canary-value-r124\"}", Canary)]
+    [InlineData("{\\\"password\\\": \\\"canary-value-r124\\\", \\\"user\\\": \\\"app\\\"}", Canary)]
+    [InlineData("{'password': 'canary-value-r124', 'user': 'app'}", Canary)]
+    [InlineData("{\"token\": \"canary-value-r124", Canary)]
+    [InlineData("$config = ['db_password' => 'canary-value-r124'];", Canary)]
+    [InlineData("{\"token\": true, \"password\": null, \"pwd\": canary-value-r124}", Canary)]
+    [InlineData("\"password\": \"canary-value-r124\\", Canary)]
+    [InlineData("\"password\": \"canary-value-r124\\\nnext line", Canary)]
+    [InlineData("'private_key': 'MIIEvQIBcanary-value-r124\\", Canary)]
+    [InlineData("\"password\": \\x41canary-value-r124", Canary)]
+    [InlineData("\"api_key\"=abc\"canary-value-r124\"", Canary)]
+    public void A_secret_named_key_in_free_text_loses_its_value_in_every_quoting(string text, string secret)
+    {
+        var redacted = SecretRedactor.Redact(text);
+
+        Assert.DoesNotContain(secret, redacted);
+        Assert.Equal(redacted, SecretRedactor.Redact(redacted));
+    }
+
+    /// <summary>A numeric count under a key with a count suffix stays readable; any other token key is masked, whatever
+    /// its value.</summary>
+    [Theory]
+    [InlineData("{\"input_tokens\": 1234}", "1234", true)]
+    [InlineData("{\"output_tokens\": 99, \"total_tokens\": 1333}", "1333", true)]
+    [InlineData("{\"token_count\": 56}", "56", true)]
+    [InlineData("{\"token\": 82741936}", "82741936", false)]
+    [InlineData("{\"access_token\": 82741936}", "82741936", false)]
+    [InlineData("{\"api_token\": 82741936}", "82741936", false)]
+    [InlineData("{\"tokens\": 82741936}", "82741936", false)]
+    [InlineData("{\"input_tokens\": abc82741936}", "abc82741936", false)]
+    public void A_token_count_stays_readable_and_a_token_does_not(string text, string value, bool readable)
+    {
+        var redacted = SecretRedactor.Redact(text);
+
+        Assert.Equal(readable, redacted.Contains(value, StringComparison.Ordinal));
+        Assert.Equal(redacted, SecretRedactor.Redact(redacted));
+    }
+
+    [Fact]
+    public void A_bare_value_with_a_quote_inside_is_masked_to_the_next_space()
+    {
+        var redacted = SecretRedactor.Redact("\"api_key\"=abc\"def\" next=1");
+
+        Assert.DoesNotContain("def", redacted);
+        Assert.DoesNotContain("abc", redacted);
+        Assert.EndsWith(" next=1", redacted);
+    }
+
+    [Fact]
+    public void A_redacted_json_document_stays_json_and_keeps_its_other_fields()
+    {
+        var redacted = SecretRedactor.RedactJson("{\"password\": 82741936, \"tokens\": [\"x1\", \"x2\"], \"user\": \"app\", \"port\": 5432}");
+
+        using var doc = System.Text.Json.JsonDocument.Parse(redacted);
+        Assert.Equal("***", doc.RootElement.GetProperty("password").GetString());
+        Assert.Equal("***", doc.RootElement.GetProperty("tokens").GetString());
+        Assert.Equal("app", doc.RootElement.GetProperty("user").GetString());
+        Assert.Equal(5432, doc.RootElement.GetProperty("port").GetInt32());
+    }
+
+    /// <summary>INV-51: <c>private_key</c> and <c>credentials</c> name secrets like <c>password</c> does.</summary>
+    [Theory]
+    [InlineData("PRIVATE_KEY=canary-value-r124")]
+    [InlineData("private-key: canary-value-r124")]
+    [InlineData("privatekey=canary-value-r124")]
+    [InlineData("credentials=canary-value-r124")]
+    [InlineData("AWS credential: canary-value-r124")]
+    [InlineData("{\"private_key\": \"canary-value-r124\"}")]
+    [InlineData("{\"credentials\": \"canary-value-r124\"}")]
+    public void Private_keys_and_credentials_are_secret_names(string text) =>
+        Assert.DoesNotContain(Canary, SecretRedactor.Redact(text));
+
+    [Fact]
+    public void The_quoted_key_rule_ends_in_bounded_time_on_hostile_input()
+    {
+        // Long runs of key characters between quotes, escaped quotes and an unclosed value: the worst cases for the key
+        // look-ahead, the escape levels and the mask-to-the-end branch.
+        var input = string.Concat(Enumerable.Repeat("'" + new string('a', 120) + " password", 2_000))
+                    + string.Concat(Enumerable.Repeat("\\\\\\\"token\\\\\\\": [", 5_000))
+                    + string.Concat(Enumerable.Repeat("'token': 'a\\\\\\", 10_000))
+                    + string.Concat(Enumerable.Repeat("\"pwd\": x\"\\", 10_000))
+                    + "\"password\": \"" + Canary + string.Concat(Enumerable.Repeat("\\x", 50_000));
+
+        var watch = Stopwatch.StartNew();
+        var redacted = SecretRedactor.Redact(input);
+
+        Assert.DoesNotContain(Canary, redacted);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+    }
 }

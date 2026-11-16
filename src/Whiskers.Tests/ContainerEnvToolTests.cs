@@ -85,4 +85,33 @@ public sealed class ContainerEnvToolTests
         Assert.Contains("TZ=Europe/Berlin", text);
         Assert.DoesNotContain("k-123", text);
     }
+
+    /// <summary><c>set_container_env</c> changes only the variables it sets: comments, blank lines, the other variables,
+    /// their order and line endings stay; a duplicate assignment gets the new value too, a new variable comes last.</summary>
+    [Fact]
+    public void Setting_variables_keeps_comments_and_unrelated_lines_of_the_env_file()
+    {
+        const string existing =
+            "# Database\r\n" +
+            "DB_HOST=db\r\n" +
+            "\r\n" +
+            "  # keep this note\r\n" +
+            "TAG=1\r\n" +
+            "export-me not a var\r\n" +
+            "TAG=0\r\n";
+
+        var (content, changed) = Whiskers.Mcp.Tools.DotEnvMerge.Merge(existing, "TAG=2, NEW_KEY=x");
+
+        Assert.Equal(
+            "# Database\r\n" +
+            "DB_HOST=db\r\n" +
+            "\r\n" +
+            "  # keep this note\r\n" +
+            "TAG=2\r\n" +
+            "export-me not a var\r\n" +
+            "TAG=2\r\n" +
+            "NEW_KEY=x\n", content);
+        Assert.Equal(["TAG", "NEW_KEY"], changed);
+        Assert.Equal("A=1\n", Whiskers.Mcp.Tools.DotEnvMerge.Merge(null, "A=1").Content);
+    }
 }

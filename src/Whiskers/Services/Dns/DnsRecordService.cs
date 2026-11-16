@@ -19,7 +19,7 @@ public sealed class DnsRecordService : IDnsRecordService
     public const int MaxTtl = 86400;
 
     private static readonly Regex LabelPattern = new(
-        @"^(?!-)[A-Za-z0-9_-]{1,63}(?<!-)$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+        @"^(?!-)[A-Za-z0-9_-]{1,63}(?<!-)\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     private readonly IEnumerable<IDnsProviderClient> _clients;
     private readonly IOptionsMonitor<DnsSettings> _settings;

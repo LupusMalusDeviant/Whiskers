@@ -14,7 +14,7 @@ The authoritative level of every mutating tool is the capability table [`../../S
 | `DatabaseTools.cs` | In-container databases, detect, list, schema, query, backup |
 | `MonitoringTools.cs` | Health summary and metrics (`get_health_summary`, `get_container_metrics`, `get_server_metrics`, `get_server_logs`) |
 | `LogTools.cs` | Log search and log alerts |
-| `SchedulerTools.cs` | Scheduled tasks, list/create/delete/run |
+| `SchedulerTools.cs` | Scheduled tasks, list/create/delete/run. `run_scheduled_task` runs the decided task id and checks it again before the run: a task whose type or retention now needs more than the level the gateway decided at (`MutationScope.DecidedLevel`) is refused, for every task type; a run without a gateway decision is refused too. |
 | `CveTools.cs` | CVE summaries (server/container) + `list_cve_groups` (de-duplicated: one CVE-ID with all affected targets, age, fix availability) |
 | `CloudTools.cs` | Out-of-band cloud control (provider-agnostic). A cloud API key kept in a disabled or locked vault (R1-29) is answered with that reason, never a tool exception or a silent "no key". |
 | `HetznerTools.cs` | Hetzner-specific extras (rescue, backups, snapshots, server type). Same locked-vault answer as `CloudTools` (R1-29). |
@@ -39,7 +39,7 @@ Every tool declares its permission level via `[McpToolLevel]` and appears in
 
 ## Behaviour notes
 
-- **Compose plans** (R1-07): `deploy_compose`, `deploy_app` (contract 0013, D5: from its arguments through `DeploymentCompose`) and `set_container_env` are planned by the gateway's resolver before policy — every existing container the deployment recreates, removes or collides with is a related resource of the decision — and the tool plans again, refuses if a container was not decided, and runs the plan with explicit `-p` / `-f`. `DotEnvMerge` (in `ContainerTools.cs`) is the one merge both use.
+- **Compose plans** (R1-07): `deploy_compose`, `deploy_app` (contract 0013, D5: from its arguments through `DeploymentCompose`) and `set_container_env` are planned by the gateway's resolver before policy — every existing container the deployment recreates, removes or collides with is a related resource of the decision — and the tool plans again, refuses if a container was not decided, and runs the plan with explicit `-p` / `-f`. `DotEnvMerge` (in `ContainerTools.cs`) is the one merge both use; it changes only the assignments of the variables it sets (every line that assigns one, so no older duplicate wins) and appends new ones, and keeps comments, blank lines, other variables, order and line endings.
 - **Cancellation** (INV-40): a read tool that reaches a host, Docker, a cloud or DNS provider ends with a `CancellationToken cancellationToken = default` parameter — the MCP SDK binds it from the request, the agent invoker passes the chat's, the trigger run's or `instruct_agent`'s — and hands it to every service call that takes one, so a stop reaches the host. `ReadToolCancellationScanTests` fails for a network read tool without it; reads of Whiskers' own state (stores, settings) may omit it.
 - **Input validation** at the boundary (`McpInputValidation.cs`): `deploy_compose` rejects unsafe project names (`..` / leading-non-alphanumeric) and quotes the target directory; container ids resolve to a **unique** match (exact id/name, else a single id-prefix) — an ambiguous prefix or no match returns a clear error instead of acting on the wrong container.
 
