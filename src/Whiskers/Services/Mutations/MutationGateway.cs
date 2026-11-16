@@ -113,6 +113,14 @@ public sealed class MutationGateway : IMutationGateway
     private readonly ITriggerAuthority? _triggers;
     private readonly IOperationJournal? _journal;
     private readonly IAuditRecovery? _recovery;
+    // A restore is staged (F3): no operation is admitted, and the ones running are counted so the restore waits for
+    // them before its safety backup.
+    private readonly Whiskers.Services.Maintenance.IMaintenanceStateService? _maintenance;
+
+    /// <summary>The reason of every mutation refused while a restore is staged. Not written to the audit trail: the
+    /// database it would land in is replaced at the restart, after the pre-restore safety backup; it is logged.</summary>
+    public const string MaintenanceRefusal =
+        "A restore is in progress and Whiskers is about to restart; the change was not made. Retry after the restart.";
     // Admission locks by approval binding (striped, so they never grow): choosing the operation id of an
     // approve-then-retry and the approval gate's answer happen under one of them (R1-18).
     private readonly SemaphoreSlim[] _admission = Enumerable.Range(0, 32).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
@@ -142,8 +150,10 @@ public sealed class MutationGateway : IMutationGateway
         IPolicyDecisionStore? decisions = null,
         ITriggerAuthority? triggers = null,
         IOperationJournal? journal = null,
-        IAuditRecovery? recovery = null)
+        IAuditRecovery? recovery = null,
+        Whiskers.Services.Maintenance.IMaintenanceStateService? maintenance = null)
     {
+        _maintenance = maintenance;
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
@@ -551,6 +561,23 @@ public sealed class MutationGateway : IMutationGateway
         RejectEventKey(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CapabilityId);
         ArgumentNullException.ThrowIfNull(execute);
+
+        // A restore is staged: nothing is decided, run or written — its audit events would land in the database the
+        // restore replaces, after the safety backup. A nested operation runs inside an admitted one and is counted by it.
+        IDisposable? admitted = null;
+        if (_maintenance is not null && MutationScope.Current is null)
+        {
+            admitted = _maintenance.TryEnter($"operation {request.CapabilityId}");
+            if (admitted is null)
+            {
+                var refusedId = string.IsNullOrWhiteSpace(request.OperationId) ? Guid.NewGuid().ToString("N") : request.OperationId;
+                _logger.LogWarning("{Capability} refused: a restore is in progress (operation {OperationId})",
+                    request.CapabilityId, refusedId);
+                return new MutationOutcome<T>(refusedId, MutationStatus.Denied, default, MaintenanceRefusal,
+                    VerificationStatus.NotRun);
+            }
+        }
+        using var admittedHandle = admitted;
 
         var prepared = await PrepareAsync(request, ct);
         if (prepared.Refusal is { } refusal) return Cast<T>(refusal);

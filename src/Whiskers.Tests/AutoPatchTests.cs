@@ -363,6 +363,156 @@ public class AutoPatchTests
         return (p.ExitCode, output);
     }
 
+    // ---------------------------------------------------------------- old backup tags (review 1.0.0, Data)
+
+    [Fact]
+    public void The_script_tags_the_previous_image_only_for_an_update_it_really_applies()
+    {
+        var text = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(ScriptAutoPatchRunner.LoadScript().Base64));
+        var tag = text.IndexOf("docker tag \"$OLD_ID\" \"$BK\"", StringComparison.Ordinal);
+
+        Assert.True(tag > 0);
+        // After every exit that changes nothing (no change, major skips, dry run, unverified dump) …
+        foreach (var exit in new[] { "UPD-NOCHANGE", "UPD-SKIP-MAJOR", "UPD-SKIP-UNKNOWN-MAJOR", "UPD-WOULD-UPDATE", "db-dump-unverified" })
+            Assert.True(text.IndexOf(exit, StringComparison.Ordinal) < tag, exit);
+        // … and right before the recreate.
+        Assert.True(tag < text.IndexOf("dc up -d --no-deps --no-build --pull never \"$SVC\"\nif check", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_verified_update_prunes_only_the_old_backup_tags_the_cleanup_policy_lets_go()
+    {
+        const string old = "sha256:aaaa", inUse = "sha256:bbbb", newest = "sha256:cccc", recent = "sha256:dddd";
+        var executor = new ScriptedExecutor(command => command switch
+        {
+            _ when command.Contains("/bin/bash /root/.whiskers/img-update.sh web", StringComparison.Ordinal) =>
+                "backup_tag=nginx:pre-upd-20261116-web\nUPD-OK 1.27.1 -> 1.27.2\n",
+            _ when command.StartsWith("docker image ls", StringComparison.Ordinal) => string.Join('\n',
+                "1.27 sha256:eeee",
+                $"pre-upd-20261116-web {newest}",          // the update just made: the way back, always kept
+                $"pre-upd-20261115-web {recent}",          // inside the grace period (counted from the end of its day)
+                $"pre-upd-20261101-web {old}",             // old and unused: goes
+                $"pre-upd-20261102-web {inUse}",           // a container still uses it: stays
+                "pre-upd-20261101-other sha256:ffff",      // another container's backup: not this run's to decide
+                "--in-use--", "sha256:eeee", inUse),
+            _ => "",
+        });
+        var runner = new ScriptAutoPatchRunner(executor, NullLogger<ScriptAutoPatchRunner>.Instance)
+        {
+            UtcNow = () => new DateTime(2026, 11, 16, 3, 20, 0, DateTimeKind.Utc),
+        };
+
+        var (outcome, _) = await runner.PatchAsync("local", "web", dryRun: false);
+
+        Assert.Equal(AutoPatchResultKind.Updated, outcome.Kind);
+        Assert.Equal(["docker image rm 'nginx:pre-upd-20261101-web'"],
+            executor.Commands.Where(c => c.StartsWith("docker image rm", StringComparison.Ordinal)));
+    }
+
+    [Theory]
+    [InlineData(true, "UPD-WOULD-UPDATE 1 -> 2")]
+    [InlineData(false, "UPD-FAILED-ROLLBACK-VERIFIED")]
+    [InlineData(false, "UPD-OK 1 -> 2")]                         // no backup tag in the log: nothing to prune
+    public async Task Only_a_verified_update_with_a_backup_tag_prunes_anything(bool dryRun, string result)
+    {
+        var log = result.StartsWith("UPD-OK", StringComparison.Ordinal) ? result : "backup_tag=nginx:pre-upd-20261116-web\n" + result;
+        var executor = new ScriptedExecutor(command => command.Contains("img-update.sh web", StringComparison.Ordinal) ? log : "");
+        var runner = new ScriptAutoPatchRunner(executor, NullLogger<ScriptAutoPatchRunner>.Instance);
+
+        await runner.PatchAsync("local", "web", dryRun);
+
+        Assert.Single(executor.Commands);                          // the patch itself, no listing, no removal
+    }
+
+    [Fact]
+    public async Task A_database_keeps_all_its_old_backup_tags()
+    {
+        var executor = new ScriptedExecutor(command => command switch
+        {
+            _ when command.Contains("img-update.sh db", StringComparison.Ordinal) =>
+                "backup_tag=postgres:pre-upd-20261116-db\nUPD-OK 16.1 -> 16.2\n",
+            _ when command.StartsWith("docker image ls", StringComparison.Ordinal) =>
+                "pre-upd-20261116-db sha256:1\npre-upd-20260101-db sha256:2\n--in-use--\nsha256:1\n",
+            _ => "",
+        });
+        var runner = new ScriptAutoPatchRunner(executor, NullLogger<ScriptAutoPatchRunner>.Instance)
+        {
+            UtcNow = () => new DateTime(2026, 11, 16, 3, 20, 0, DateTimeKind.Utc),
+        };
+
+        await runner.PatchAsync("local", "db", dryRun: false);
+
+        Assert.DoesNotContain(executor.Commands, c => c.StartsWith("docker image rm", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_cancellation_during_the_cleanup_still_returns_the_successful_update()
+    {
+        using var stop = new CancellationTokenSource();
+        var executor = new ListingExecutor("web", "backup_tag=nginx:pre-upd-20261116-web\nUPD-OK 1 -> 2\n",
+            listing: () =>
+            {
+                stop.Cancel();                                       // the host stops while the cleanup lists the tags
+                throw new OperationCanceledException(stop.Token);
+            });
+        var runner = new ScriptAutoPatchRunner(executor, NullLogger<ScriptAutoPatchRunner>.Instance);
+
+        var (outcome, _) = await runner.PatchAsync("local", "web", dryRun: false, stop.Token);
+
+        Assert.Equal(AutoPatchResultKind.Updated, outcome.Kind);     // the update happened; its outcome is kept
+        Assert.True(outcome.Attempted);                              // so the cycle records its history row
+    }
+
+    [Theory]
+    [InlineData(1, "pre-upd-20261116-web sha256:new\npre-upd-20261101-web sha256:old\n--in-use--\n")]   // docker ps failed
+    [InlineData(0, "pre-upd-20261116-web sha256:new\npre-upd-20261101-web sha256:old\n--in-use--\n")]   // nothing listed in use
+    [InlineData(0, "pre-upd-20261116-web sha256:new\npre-upd-20261101-web sha256:old\n")]                // the in-use half is missing
+    public async Task A_failed_or_empty_in_use_listing_prunes_nothing(int exit, string output)
+    {
+        var executor = new ListingExecutor("web", "backup_tag=nginx:pre-upd-20261116-web\nUPD-OK 1 -> 2\n",
+            listing: () => new Whiskers.Services.Server.CommandResult { ExitCode = exit, Output = output });
+        var runner = new ScriptAutoPatchRunner(executor, NullLogger<ScriptAutoPatchRunner>.Instance)
+        {
+            UtcNow = () => new DateTime(2026, 11, 16, 3, 20, 0, DateTimeKind.Utc),
+        };
+
+        var (outcome, _) = await runner.PatchAsync("local", "web", dryRun: false);
+
+        Assert.Equal(AutoPatchResultKind.Updated, outcome.Kind);
+        Assert.DoesNotContain(executor.Commands, c => c.StartsWith("docker image rm", StringComparison.Ordinal));
+    }
+
+    /// <summary>Answers the patch with <paramref name="patchLog"/> and the tag listing with <paramref name="listing"/>.</summary>
+    private sealed class ListingExecutor(string container, string patchLog,
+        Func<Whiskers.Services.Server.CommandResult> listing) : Whiskers.Services.Server.IHostCommandExecutor
+    {
+        public List<string> Commands { get; } = [];
+
+        public Task<Whiskers.Services.Server.CommandResult> ExecuteAsync(string serverId, string command,
+            TimeSpan? timeout = null, CancellationToken ct = default, int? maxOutputChars = null)
+        {
+            Commands.Add(command);
+            if (command.Contains($"img-update.sh {container}", StringComparison.Ordinal))
+                return Task.FromResult(new Whiskers.Services.Server.CommandResult { Output = patchLog });
+            if (command.StartsWith("docker image ls", StringComparison.Ordinal))
+                return Task.FromResult(listing());
+            return Task.FromResult(new Whiskers.Services.Server.CommandResult());
+        }
+    }
+
+    /// <summary>Answers each command with the given output (exit 0) and records the commands in order.</summary>
+    private sealed class ScriptedExecutor(Func<string, string> answer) : Whiskers.Services.Server.IHostCommandExecutor
+    {
+        public List<string> Commands { get; } = [];
+
+        public Task<Whiskers.Services.Server.CommandResult> ExecuteAsync(string serverId, string command,
+            TimeSpan? timeout = null, CancellationToken ct = default, int? maxOutputChars = null)
+        {
+            Commands.Add(command);
+            return Task.FromResult(new Whiskers.Services.Server.CommandResult { ExitCode = 0, Output = answer(command) });
+        }
+    }
+
     private sealed class ThrowingExecutor : Whiskers.Services.Server.IHostCommandExecutor
     {
         public Task<Whiskers.Services.Server.CommandResult> ExecuteAsync(string serverId, string command,

@@ -24,6 +24,10 @@ namespace Whiskers.Mcp;
 /// </summary>
 public static class McpGuardrailFilter
 {
+    /// <summary>The answer to every tool call while a restore is staged (maintenance); retry after the restart.</summary>
+    public const string MaintenanceRefusal =
+        "A restore is in progress and Whiskers is about to restart; the call was not executed. Retry after the restart.";
+
     public static McpRequestHandler<CallToolRequestParams, CallToolResult> Create(
         McpRequestHandler<CallToolRequestParams, CallToolResult> next) => (request, ct) =>
         HandleAsync(request.Services, request.Params, McpCallOutcomes.KeyOf(request.JsonRpcRequest?.Id),
@@ -37,6 +41,12 @@ public static class McpGuardrailFilter
             return await next(ct);
         if (services is null)
             return Refuse("Guardrails are unavailable; the call was not executed.");
+        // A restore is staged and Whiskers is about to restart (F3): no call runs — its audit events would land in the
+        // database the restore replaces, after the pre-restore safety backup was taken. Nothing is recorded either.
+        if (services.GetService<Whiskers.Services.Maintenance.IMaintenanceStateService>()?.IsMaintenance == true)
+            return McpErrorEnvelope.Tools.Contains(call.Name)
+                ? McpErrorEnvelope.Result(McpErrorEnvelope.Denied, MaintenanceRefusal)
+                : Refuse(MaintenanceRefusal);
 
         // Fail closed: a call whose caller cannot be identified, or with no policy to apply, does not run.
         var http = services.GetService<IHttpContextAccessor>()?.HttpContext;

@@ -1014,6 +1014,104 @@ public sealed class MutationShutdownTests : IDisposable
         }
     }
 
+    // ---- A task deleted while it runs; a restore in progress; cron times (review 1.0.0, Data) ----
+
+    [Fact]
+    public async Task A_task_deleted_during_its_scheduled_run_keeps_the_run_s_real_result()
+    {
+        await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var executor = new GatedExecutor();
+        var drain = Drain();
+        var scheduler = Scheduler(executor, drain);
+
+        await scheduler.CheckAndRunDueTasks(CancellationToken.None);
+        await executor.Entered.Task.WaitAsync(Wait);
+        await scheduler.DeleteTaskAsync("t1");
+        executor.Release.SetResult((true, "done"));
+        await drain.DrainAsync(CancellationToken.None).WaitAsync(Wait);   // the run has ended and is recorded
+
+        var run = await RunAsync("t1");
+        Assert.NotNull(run.CompletedAt);
+        Assert.True(run.Success, run.Error);                  // it succeeded: not "failed" because its task is gone
+        Assert.Equal("done", run.Output);
+    }
+
+    [Fact]
+    public async Task Run_now_of_a_task_deleted_during_its_run_returns_its_result_instead_of_throwing()
+    {
+        await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var executor = new GatedExecutor();
+        var scheduler = Scheduler(executor, Drain());
+
+        var running = scheduler.RunNowAsync("t1");
+        await executor.Entered.Task.WaitAsync(Wait);
+        await scheduler.DeleteTaskAsync("t1");
+        executor.Release.SetResult((true, "done"));
+
+        Assert.Equal((true, "done"), await running.WaitAsync(Wait));
+        var run = await RunAsync("t1");
+        Assert.True(run.Success);
+        Assert.NotNull(run.CompletedAt);
+        Assert.Equal((false, "Task not found"), await scheduler.RunNowAsync("t1"));   // the guard was released
+    }
+
+    [Fact]
+    public async Task A_restore_in_progress_starts_no_task_and_consumes_no_occurrence()
+    {
+        var due = await AddTaskAsync("t1", ScheduledTaskType.CustomCommand);
+        var executor = new GatedExecutor();
+        var maintenance = new Whiskers.Services.Maintenance.MaintenanceStateService();
+        maintenance.EnterMaintenance("test restore");
+        var drain = Drain();
+        var scheduler = new SchedulerService(Scopes, executor, null!, NullLogger<SchedulerService>.Instance, drain, maintenance);
+
+        await scheduler.CheckAndRunDueTasks(CancellationToken.None);
+        Assert.Equal((false, SchedulerService.MaintenanceResult), await scheduler.RunNowAsync("t1"));
+
+        Assert.Empty(executor.Ran);
+        Assert.False(await AnyRunAsync("t1"));
+        Assert.Equal(due, (await TaskAsync("t1")).NextRun);   // still due: it runs after the restart if the data keeps it
+        Assert.Null((await TaskAsync("t1")).LastRun);
+
+        maintenance.ExitMaintenance();                         // a restore aborted before its commit: service resumes
+        await scheduler.CheckAndRunDueTasks(CancellationToken.None);
+        await executor.Entered.Task.WaitAsync(Wait);
+        executor.Release.SetResult((true, "done"));
+        await drain.DrainAsync(CancellationToken.None).WaitAsync(Wait);
+    }
+
+    [Fact]
+    public async Task A_new_task_s_next_run_is_the_cron_time_in_utc_not_shifted_by_the_local_offset()
+    {
+        var scheduler = Scheduler(new GatedExecutor(), Drain());
+        var created = await scheduler.CreateTaskAsync(new ScheduledTaskEntity
+        {
+            TaskId = "t-utc", Name = "t-utc", CronExpression = "17 3 * * *", TaskType = ScheduledTaskType.CustomCommand,
+        });
+
+        Assert.Equal(DateTimeKind.Utc, created.NextRun!.Value.Kind);
+        var stored = (await TaskAsync("t-utc")).NextRun!.Value;
+        Assert.Equal((3, 17), (stored.Hour, stored.Minute));   // cron times are UTC (Services/Scheduler/README.md)
+        Assert.InRange(stored, DateTime.UtcNow, DateTime.UtcNow.AddDays(1));
+    }
+
+    [Fact]
+    public async Task A_cron_that_never_fires_is_refused_when_a_task_is_created()
+    {
+        var scheduler = Scheduler(new GatedExecutor(), Drain());
+        await Assert.ThrowsAsync<ArgumentException>(() => scheduler.CreateTaskAsync(new ScheduledTaskEntity
+        {
+            TaskId = "t-feb", Name = "t-feb", CronExpression = "0 0 30 2 *", TaskType = ScheduledTaskType.CustomCommand,
+        }));
+        Assert.False(await AnyTaskAsync("t-feb"));
+    }
+
+    private async Task<bool> AnyTaskAsync(string id)
+    {
+        using var scope = _sp.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<MetricsDbContext>().ScheduledTasks.AnyAsync(t => t.TaskId == id);
+    }
+
     private SchedulerService Scheduler(ITaskExecutor executor, IShutdownDrain drain) =>
         new(Scopes, executor, null!, NullLogger<SchedulerService>.Instance, drain);
 

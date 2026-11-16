@@ -27,7 +27,7 @@ public class SchedulerTools
         if (!tasks.Any()) return "No scheduled tasks configured.";
 
         var lines = tasks.Select(t =>
-            $"- [{(t.Enabled ? "ON" : "OFF")}] {t.Name} ({t.TaskType}) | Cron: {t.CronExpression} | Target: {t.TargetName ?? t.TargetId ?? "-"} | Next: {t.NextRun?.ToString("g") ?? "n/a"} | Last: {(t.LastSuccess ? "OK" : "FAIL")} {t.LastRun?.ToString("g") ?? "never"}");
+            $"- [{(t.Enabled ? "ON" : "OFF")}] {t.Name} ({t.TaskType}) | Cron: {t.CronExpression} | Target: {t.TargetName ?? t.TargetId ?? "-"} | Next: {(t.NextRun is null ? "n/a" : SchedulerService.FormatUtc(t.NextRun))} | Last: {(t.LastSuccess ? "OK" : "FAIL")} {(t.LastRun is null ? "never" : SchedulerService.FormatUtc(t.LastRun))}");
         return $"Scheduled tasks ({tasks.Count}):\n{string.Join('\n', lines)}";
     }
 
@@ -92,7 +92,7 @@ public class SchedulerTools
             : $"type={type}, cron={cronExpression}";
         await auditLog.LogAsync(actor, actorType, "scheduler.create", "scheduled-task", task.TaskId, task.Name, auditDetails, serverId);
 
-        return $"Task created:\n  Name: {task.Name}\n  Type: {task.TaskType}\n  Cron: {task.CronExpression}\n  Next run: {task.NextRun?.ToString("g")}";
+        return $"Task created:\n  Name: {task.Name}\n  Type: {task.TaskType}\n  Cron: {task.CronExpression}\n  Next run: {SchedulerService.FormatUtc(task.NextRun)}";
     }
 
     [McpToolLevel(McpPermissionLevels.Write)]

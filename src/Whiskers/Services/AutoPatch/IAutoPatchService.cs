@@ -19,6 +19,10 @@ public interface IAutoPatchService
 
     bool IsRunning { get; }
 
+    /// <summary>Why tonight's window has not run yet, when a preview held the cycle at the nightly check (shown by the
+    /// status tool), or null. Cleared once a night runs.</summary>
+    string? NightDeferred => null;
+
     /// <summary>Runs one cycle now on behalf of <paramref name="onBehalfOf"/> (an automation owner id: an email or
     /// <c>key:&lt;id&gt;</c>); every container is decided on that authority, re-read per container.
     /// <paramref name="forceDryRun"/> keeps it a dry run whatever the settings say; there is deliberately no way to

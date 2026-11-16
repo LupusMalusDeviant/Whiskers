@@ -11,7 +11,9 @@ namespace Whiskers.Services.Webhooks;
 /// <item>202 <c>{"status":"queued","runId":…}</c> — accepted;</item>
 /// <item>200 <c>{"status":"duplicate","runId":…,"state":…}</c> — delivered before; the first run's id and state;</item>
 /// <item>400 <c>{"status":"rejected"}</c> — any invalid request, without saying which check failed;</item>
-/// <item>429 / 503 with <c>Retry-After</c> — too many requests, or the queue is full.</item>
+/// <item>429 / 503 with <c>Retry-After</c> — too many requests, or the queue is full;</item>
+/// <item>503 <c>{"status":"maintenance"}</c> with <c>Retry-After</c> — a valid, signed delivery while a restore is staged
+/// (an unsigned or invalid one is rejected as always, so a stranger cannot learn of the restore).</item>
 /// </list>
 /// </summary>
 public static class WebhookEndpoint
@@ -46,6 +48,9 @@ public static class WebhookEndpoint
             case WebhookReply.RateLimited:
                 ctx.Response.Headers.RetryAfter = "60";
                 return Results.Json(new { status = "rate_limited" }, statusCode: StatusCodes.Status429TooManyRequests);
+            case WebhookReply.Maintenance:
+                ctx.Response.Headers.RetryAfter = "30";
+                return Results.Json(new { status = "maintenance" }, statusCode: StatusCodes.Status503ServiceUnavailable);
             case WebhookReply.Busy:
                 ctx.Response.Headers.RetryAfter = "30";
                 return Results.Json(new { status = "busy" }, statusCode: StatusCodes.Status503ServiceUnavailable);

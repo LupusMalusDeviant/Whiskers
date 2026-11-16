@@ -27,7 +27,7 @@ public class AutoPatchTools
     {
         var denied = McpPermissionCheck.CheckAccess(httpContextAccessor, permissionService, "get_auto_patch_status");
         if (denied != null) return denied;
-        return Render(settings.CurrentValue, autoPatch.LastCycle, autoPatch.IsRunning);
+        return Render(settings.CurrentValue, autoPatch.LastCycle, autoPatch.IsRunning, autoPatch.NightDeferred);
     }
 
     [McpToolLevel(McpPermissionLevels.Write)]
@@ -56,12 +56,13 @@ public class AutoPatchTools
         return "Dry run started. Nothing will be recreated. Read get_auto_patch_status in a few minutes.";
     }
 
-    internal static string Render(AutoPatchSettings s, AutoPatchCycleReport? r, bool running)
+    internal static string Render(AutoPatchSettings s, AutoPatchCycleReport? r, bool running, string? nightDeferred = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Auto-patch: {(s.Enabled ? (s.DryRun ? "ON (dry run)" : "ON") : "OFF")}, nightly at " +
                       $"{s.RunAtHourUtc:00}:00 UTC, severity >= {s.MinSeverity}, max {s.MaxPerCycle} per night" +
                       (running ? " — a cycle is running now" : ""));
+        if (nightDeferred is not null) sb.AppendLine($"  ** {nightDeferred} **");
 
         if (r is null)
         {

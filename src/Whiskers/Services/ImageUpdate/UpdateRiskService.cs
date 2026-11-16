@@ -55,14 +55,23 @@ public sealed class UpdateRiskService(
         if (target is null)
             return Failed(serverId, container, "", $"No container '{container}' on server '{serverId}'.");
 
-        var image = target.Image;
-        if (string.IsNullOrWhiteSpace(image))
+        if (string.IsNullOrWhiteSpace(target.Image))
             return Failed(serverId, target.Name, "", "The container reports no image reference.");
 
-        // Read the RUNNING image before pulling. Afterwards the tag points at the new digest and the
-        // comparison would be the candidate against itself — a guaranteed "nothing changed".
-        var before = await docker.GetImageContractAsync(image, serverId);
-        var currentDigest = await docker.GetImageDigestAsync(image, serverId);
+        // The reference to pull and the image that RUNS, read as the update check reads them: once an earlier
+        // assessment (or any pull) moved the tag on, the tag names the candidate while the container still runs the old
+        // image id — and Docker then lists the container's image as that bare id instead of the name.
+        var configured = ImageUpdateChecker.LooksLikeImageId(target.Image)
+            ? await docker.GetConfiguredImageAsync(target.Id, serverId)
+            : null;
+        var (image, running) = ImageUpdateChecker.ResolveCheckRefs(target.Image, configured, target.ImageId);
+        if (ImageUpdateChecker.LooksLikeImageId(image))
+            return Failed(serverId, target.Name, image, "The container's image name could not be read; only its id is known.");
+
+        // Read the RUNNING image (by its id), not what the tag points at: after a pull the tag names the candidate and
+        // the comparison would be the candidate against itself — a guaranteed "nothing changed".
+        var before = await docker.GetImageContractAsync(running, serverId);
+        var currentDigest = await docker.GetImageDigestAsync(running, serverId);
         if (before is null)
             return Failed(serverId, target.Name, image, "Could not inspect the running image.");
 
