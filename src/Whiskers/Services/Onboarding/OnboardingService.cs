@@ -553,13 +553,18 @@ public class OnboardingService : IOnboardingService
         MutationScope.Note($"abandon run for bootstrap line {fingerprint}");
         if (canRun && server.ConnectionType == ConnectionType.SSH)
         {
-            // INV-63: the removal talks SSH only to a host whose key is verified (a recorded pin or a known_hosts line) or
-            // pinned now; without the pins service no SSH command is sent at all.
+            // INV-63: the removal talks SSH only to a host whose key is verified (a recorded pin or a known_hosts line);
+            // without the pins service no SSH command is sent at all. A line was injected but nothing pinned: the run
+            // stopped between injection and the pin from the disk, and the VM may still be in rescue — a first contact now
+            // could trust the rescue system's key into known_hosts (contract 0018). Refused; the resume pins from the disk.
             if (_hostKeys is null) return "Kein Host-Key-Dienst konfiguriert; ohne Pin wird kein SSH-Befehl gesendet.";
             try
             {
-                if (await _hostKeys.BackfillAsync(server, ct) is not null) await _hostKeys.VerifyAsync(server, ct);
-                else await _hostKeys.PinFirstContactAsync(server, ct);
+                if (await _hostKeys.BackfillAsync(server, ct) is null)
+                    return "Kein gepinnter Host-Key: der Lauf endete nach dem Eintragen des Bootstrap-Keys und vor dem Pin " +
+                           "(die VM kann noch im Rescue-System sein). Bitte das Onboarding fortsetzen (Resume) — es pinnt die " +
+                           "Host-Keys von der Platte und entfernt die Zeile danach.";
+                await _hostKeys.VerifyAsync(server, ct);
             }
             catch (SshHostKeyMismatchException mismatch)
             {

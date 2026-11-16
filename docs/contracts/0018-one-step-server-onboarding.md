@@ -824,7 +824,7 @@ tests exist and are listed under *Open invariants* until then.
 
 ## Amendment (implementation, 16 November 2026)
 
-**Status: awaiting maintainer acceptance.** Draft. What PR 2 built differently from the text above, or added to it.
+**Status: accepted by the maintainer on 16 November 2026.** What PR 2 built differently from the text above, or added to it.
 
 - a) `ICloudBootstrap.PrepareAsync` has an overload with `OnboardingOptions`, which carries `ConfirmVmName`. The
   overload without options compares against no confirmed name.
@@ -834,8 +834,9 @@ tests exist and are listed under *Open invariants* until then.
 - e) `server.create` is UI only until PR 3.
 - f) The `HostKey` step is skipped for TCP (mTLS) records. For SSH records, removing a bootstrap line checks the host
   key first:
-  - An abandon verifies a known key (a recorded pin or a `known_hosts` line) or pins the first contact. It refuses
-    without the pins service, and on a different key.
+  - An abandon verifies a known key (a recorded pin or a `known_hosts` line). It refuses without the pins service and
+    on a different key. With no known key (a line injected, nothing pinned: the VM may still be in rescue) it sends no
+    SSH command and points to the resume, which pins the host keys read from the disk (review r2).
   - `server.remove` verifies a known key. Otherwise it sends no SSH command, names the dead line and goes on.
 - g) The audit path for U-41 (`server.hostkey_replace`) and its §7 row come in PR 2, because R13 needs a §7 row for the
   new capability. M-50…M-52 stay in PR 3.
@@ -864,3 +865,6 @@ tests exist and are listed under *Open invariants* until then.
     - `Remove_of_an_ssh_host_without_a_verified_key_sends_no_command_and_names_the_dead_line`
     - `Remove_goes_on_whatever_the_cleanup_throws`
   - `ServersOnboardDialogTests.Onboard_after_an_injection_without_a_pin_resumes_the_rescue_bootstrap`
+- i) A pin that the record cannot take (the store write fails) removes again the `known_hosts` lines it wrote for an
+  endpoint that had none, so a later rescue resume is not refused as "not fresh" (D2); the failure itself stands. If
+  that roll-back fails, the lines stay and a resume is refused (fail closed) until an Admin removes them (review r2).

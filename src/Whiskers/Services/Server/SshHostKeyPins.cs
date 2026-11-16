@@ -153,18 +153,50 @@ public sealed class SshHostKeyPins : ISshHostKeyPins
             ? await ScanAsync(e, ct)
             : Normalise(fromDisk) is { Count: > 0 } disk ? disk
             : throw new InvalidOperationException("No host key was read from the host's disk; nothing is pinned.");
+        var firstLines = false;
         await FileGate.WaitAsync(ct);
         try
         {
             var known = await _ssh.KnownHostsLookupAsync(e.Name, _knownHosts, ct);
             await CompareAsync(e.Name, known, keys, ct);
-            await AppendAsync(e.Name, keys.Where(k => !known.Any(n => SshHostKeys.Parse(n)?.Type == SshHostKeys.Parse(k)?.Type)), ct);
+            var missing = keys.Where(k => !known.Any(n => SshHostKeys.Parse(n)?.Type == SshHostKeys.Parse(k)?.Type)).ToList();
+            await AppendAsync(e.Name, missing, ct);
+            firstLines = known.Count == 0 && missing.Count > 0;
         }
         finally
         {
             FileGate.Release();
         }
-        return await RecordAsync(server.Id, e.Name, keys, source, "hostkey.pin", null, ct);
+        try
+        {
+            return await RecordAsync(server.Id, e.Name, keys, source, "hostkey.pin", null, ct);
+        }
+        catch (Exception) when (firstLines)
+        {
+            // The record could not take the pin: the endpoint's lines this call wrote first go again, so known_hosts and
+            // the record agree and a later resume is not refused as "not fresh" (D2). The failure itself still stands.
+            await RollBackAsync(e.Name);
+            throw;
+        }
+    }
+
+    /// <summary>Removes the endpoint's known_hosts lines after a pin that could not be recorded. A failing roll-back is
+    /// logged and leaves the lines (a later rescue resume is then refused, fail closed, until an Admin removes them).</summary>
+    private async Task RollBackAsync(string endpoint)
+    {
+        await FileGate.WaitAsync(CancellationToken.None);
+        try
+        {
+            await _ssh.KnownHostsRemoveAsync(endpoint, _knownHosts, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("known_hosts lines of {Endpoint} could not be rolled back after a failed pin: {Error}", endpoint, ex.GetType().Name);
+        }
+        finally
+        {
+            FileGate.Release();
+        }
     }
 
     public async Task<SshHostKeyPin> ReplaceAsync(string serverId, string expectedOldFingerprint, string expectedNewFingerprint,

@@ -1,3 +1,4 @@
+using Whiskers.Services.ServerConfig;
 using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Models;
 using Whiskers.Services.Mutations;
@@ -66,6 +67,30 @@ public sealed class SshHostKeyPinTests : IDisposable
         // Audited inside the decision.
         var audit = Assert.Single(scope.Results, r => r.Action == "hostkey.pin");
         Assert.Contains(pin.FingerprintSha256, audit.Details);
+    }
+
+    /// <summary>Review r2: a pin the record cannot take (the store write fails) takes back the known_hosts lines it wrote
+    /// first, so a later rescue resume is not refused as "not fresh" (D2); the failure still stands.</summary>
+    [Fact]
+    public async Task A_pin_the_record_cannot_take_rolls_back_its_known_hosts_lines()
+    {
+        var record = await RecordAsync();
+        var failing = ForwardingProxy<IServerConfigService>.Create(_store.Servers, new()
+        {
+            [nameof(IServerConfigService.UpdateServerAsync)] = _ => Task.FromException(new IOException("disk full")),
+        });
+        var pins = new SshHostKeyPins(_ssh, failing, NullLogger<SshHostKeyPins>.Instance, _store.Paths);
+
+        await Assert.ThrowsAsync<IOException>(() => pins.PinFromDiskAsync(record, [Ed], default));
+
+        Assert.Null(_store.Servers.GetServer("web-new")!.SshHostKeyFingerprint);
+        Assert.Empty(await _ssh.KnownHostsLookupAsync("203.0.113.20", KnownHosts, default));
+        Assert.Null(await Pins().BackfillAsync(record, default));   // fresh again: the resume may pin from the disk
+        // A line that was there before the failed pin stays.
+        KnownHostsHolds("203.0.113.20 " + Ed);
+        _ssh.LastScan = [Ed, Rsa];
+        await Assert.ThrowsAsync<IOException>(() => pins.PinFirstContactAsync(record, default));
+        Assert.Contains("203.0.113.20 " + Ed, File.ReadAllLines(KnownHosts));
     }
 
     [Fact]

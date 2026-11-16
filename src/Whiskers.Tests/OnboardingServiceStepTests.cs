@@ -311,8 +311,8 @@ public sealed class OnboardingServiceStepTests
         Assert.Null(w.Server(Id).BootstrapKeyInjectedFingerprint);
     }
 
-    /// <summary>Review r1 MEDIUM 2 (INV-63): an abandon over SSH verifies a known host key or pins the first contact
-    /// before its removal command; a different key or no pins service sends no command at all.</summary>
+    /// <summary>Review r1 MEDIUM 2 / r2 (INV-63): an abandon over SSH verifies a known host key; with none known (injected,
+    /// never pinned) it refuses and points to the resume; a different key or no pins service sends no command at all.</summary>
     [Theory]
     [InlineData("known")]
     [InlineData("first")]
@@ -345,10 +345,14 @@ public sealed class OnboardingServiceStepTests
                 Assert.Equal([Removal], exec.Scripts);
                 break;
             case "first":
-                Assert.True(result.Success, result.Error);
-                Assert.Equal(["pin:" + Id], pins.Calls);
-                Assert.Equal(0, commandsAtCheck);
-                Assert.Equal([Removal], exec.Scripts);
+                // Review r2: injected but never pinned — the VM may still be in rescue. No first contact (it could trust
+                // the rescue system's key); the person is pointed to the resume, which pins from the disk.
+                Assert.False(result.Success);
+                Assert.Contains("Resume", result.Error);
+                Assert.Empty(pins.Calls);
+                Assert.Equal(-1, commandsAtCheck);
+                Assert.Empty(exec.Scripts);
+                Assert.Equal("SHA256:injected", w.Server(Id).BootstrapKeyInjectedFingerprint);
                 break;
             default:
                 Assert.False(result.Success);

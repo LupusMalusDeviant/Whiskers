@@ -12,6 +12,31 @@ namespace Whiskers.Tests;
 /// <summary>Contract 0018 tests: an interface stand-in whose methods are answered by name. A handler returns the plain
 /// result (wrapped into a completed task for async members) or throws (a faulted task); an unknown member returns the
 /// default. Every call is recorded by name, in order.</summary>
+/// <summary>Forwards every call to a real <typeparamref name="T"/>, except the methods given a handler (e.g. a store
+/// write that fails).</summary>
+public class ForwardingProxy<T> : DispatchProxy where T : class
+{
+    private T _target = null!;
+    private Dictionary<string, Func<object?[], object?>> _handlers = new(StringComparer.Ordinal);
+
+    public static T Create(T target, Dictionary<string, Func<object?[], object?>> handlers)
+    {
+        var service = DispatchProxy.Create<T, ForwardingProxy<T>>();
+        var proxy = (ForwardingProxy<T>)(object)service;
+        proxy._target = target;
+        proxy._handlers = handlers;
+        return service;
+    }
+
+    protected override object? Invoke(MethodInfo? method, object?[]? args)
+    {
+        var m = method!;
+        if (_handlers.TryGetValue(m.Name, out var handler)) return handler(args ?? []);
+        try { return m.Invoke(_target, args); }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null) { throw ex.InnerException; }
+    }
+}
+
 public class ScriptedProxy<T> : DispatchProxy where T : class
 {
     public Dictionary<string, Func<object?[], object?>> Handlers { get; } = new(StringComparer.Ordinal);

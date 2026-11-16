@@ -382,7 +382,7 @@
 # Contract 0018 PR 2: registration by IP (part B), host-key pinning and its replacement (part C, INV-63), the Hetzner
 # rescue bootstrap, its clean-up and the onboarding steps (part D, INV-64), the plan and standing-key UI.
 35 Whiskers.Tests.ServerRegistrationTests
-10 Whiskers.Tests.SshHostKeyPinTests
+11 Whiskers.Tests.SshHostKeyPinTests
 10 Whiskers.Tests.HostKeyReplaceRuleTests
 22 Whiskers.Tests.HetznerRescueBootstrapTests
 7 Whiskers.Tests.RescueCommandsTests
@@ -2467,6 +2467,7 @@
 1 Whiskers.Tests.SinkRedactionTests.The_redaction_keeps_each_providers_own_filter_rules
 2 Whiskers.Tests.SinkRedactionTests.The_registered_context_carries_the_interceptor
 1 Whiskers.Tests.SinkRedactionTests.The_sink_redacts_webhook_logs_and_update_history_like_task_results
+1 Whiskers.Tests.SshHostKeyPinTests.A_pin_the_record_cannot_take_rolls_back_its_known_hosts_lines
 1 Whiskers.Tests.SshHostKeyPinTests.A_type_the_host_no_longer_offers_is_not_a_mismatch
 1 Whiskers.Tests.SshHostKeyPinTests.Backfill_writes_no_audit_event
 1 Whiskers.Tests.SshHostKeyPinTests.Different_existing_key_refuses_and_keeps_both_fingerprints
