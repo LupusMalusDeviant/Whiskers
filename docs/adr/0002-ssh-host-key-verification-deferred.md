@@ -63,5 +63,11 @@ sie (`ssh-keys/`).
   `docs/operations/troubleshooting.md`.
 - Der **erste** Kontakt wird nicht geprüft (Trust-On-First-Use). Wer das ausschließen will, seedet die `known_hosts`
   vorab mit einem außerhalb geprüften Host-Key.
+- **Nachtrag (Vertrag 0018, angenommen 2026-11-16; Umsetzung in dessen PR 2):** Das Onboarding pinnt den Host-Key
+  ausdrücklich vor dem ersten Befehl, hält ihn am Server fest und protokolliert ihn; ersetzen darf ihn nur ein
+  interaktiver Admin mit Freigabe (`server.hostkey_replace`, wie INV-59). Der Hetzner-Rescue-Weg liest die Host-Keys
+  von der Platte des Servers, aber über eine SSH-Sitzung zum Rescue-System, und diese Sitzung ist selbst
+  **Trust-On-First-Use auf dem Rescue-System** (`accept-new` gegen eine leere, laufeigene `known_hosts`). Der so
+  gepinnte Key ist also so vertrauenswürdig wie diese eine Sitzung; er ist nicht „außerhalb geprüft".
 - Onboardete Hosts laufen danach ohne SSH über den mTLS-Kanal (`docs/ARCHITECTURE.md`); dieser ADR betrifft nur
   Bootstrap und nicht migrierte SSH-Server.
