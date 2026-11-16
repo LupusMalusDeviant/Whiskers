@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Whiskers.Models;
 using Whiskers.Services.Database;
 using Whiskers.Services.Server;
+using Whiskers.Utils;
 
 namespace Whiskers.Tests;
 
@@ -101,16 +102,14 @@ public class DatabaseServiceOutputParsingTests
         Assert.Null(columns[1].Default);
     }
 
+    /// <summary>psql answers a query unaligned with control characters between fields and records and no footer.</summary>
+    private static string Psql(params string[][] records) =>
+        string.Join(DatabaseService.PsqlRecordSeparator, records.Select(r => string.Join(DatabaseService.PsqlFieldSeparator, r))) + "\n";
+
     [Fact]
     public async Task A_query_result_keeps_rows_whose_first_value_starts_with_a_parenthesis_or_two_dashes()
     {
-        const string psql =
-            "   phone    | name\n" +
-            "------------+------\n" +
-            " (555) 1234 | bob\n" +
-            " --none--   | al\n" +
-            " 030 1234   | eve\n" +
-            "(3 rows)\n";
+        var psql = Psql(["phone", "name"], ["(555) 1234", "bob"], ["--none--", "al"], ["030 1234", "eve"]);
         var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = psql });
 
         var result = await Db(host).ExecuteQueryAsync("c0ffee", "select phone, name from people", DatabaseType.PostgreSQL, Creds, "local");
@@ -125,30 +124,86 @@ public class DatabaseServiceOutputParsingTests
     [Fact]
     public async Task A_last_row_that_only_looks_like_the_psql_footer_is_kept()
     {
-        // psql's own footer counts the data rows; a value "(5 rows)" in the last data row is data.
-        const string psql =
-            " note\n" +
-            "----------\n" +
-            " a\n" +
-            " (5 rows)\n" +
-            "(2 rows)\n";
-        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = psql });
+        // psql runs without its footer; a value "(5 rows)" in the last data row is data.
+        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = Psql(["note"], ["a"], ["(5 rows)"]) });
 
         var result = await Db(host).ExecuteQueryAsync("c0ffee", "select note from notes", DatabaseType.PostgreSQL, Creds, "local");
 
         Assert.Equal(2, result.RowCount);
         Assert.Equal(["(5 rows)"], result.Rows[1]);
+        var command = Assert.Single(host.Commands);
+        Assert.Contains("'-P' 'footer=off'", command);
     }
 
     [Fact]
     public async Task An_empty_psql_result_has_its_columns_and_no_rows()
     {
-        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = " a | b\n---+---\n(0 rows)\n" });
+        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = Psql(["a", "b"]) });
 
         var result = await Db(host).ExecuteQueryAsync("c0ffee", "select a, b from t", DatabaseType.PostgreSQL, Creds, "local");
 
         Assert.Equal(["a", "b"], result.Columns);
         Assert.Equal(0, result.RowCount);
+    }
+
+    [Fact]
+    public async Task A_psql_value_with_line_breaks_or_a_pipe_stays_one_value_of_one_row()
+    {
+        var psql = Psql(["id", "note", "tail"], ["1", "line one\nline two\n", "x"], ["2", "a | b", "end+"]);
+        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = psql });
+
+        var result = await Db(host).ExecuteQueryAsync("c0ffee", "select id, note, tail from notes", DatabaseType.PostgreSQL, Creds, "local");
+
+        Assert.Equal(["id", "note", "tail"], result.Columns);
+        Assert.Equal(2, result.RowCount);
+        Assert.Equal(["1", "line one\nline two\n", "x"], result.Rows[0]);
+        Assert.Equal(["2", "a | b", "end+"], result.Rows[1]);
+        // The separators reach psql as single-quoted operands (unaligned, no footer).
+        var command = Assert.Single(host.Commands);
+        Assert.Contains($"'-A' '-F' '{DatabaseService.PsqlFieldSeparator}' '-R' '{DatabaseService.PsqlRecordSeparator}'", command);
+    }
+
+    [Theory]
+    [InlineData("-a bolt://attacker.example:7687 RETURN 1")]
+    [InlineData("  --file=/etc/passwd")]
+    [InlineData("--")]
+    public async Task A_cypher_statement_that_starts_with_a_dash_is_refused_and_nothing_runs(string statement)
+    {
+        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = "" });
+        var creds = new DatabaseCredentials { User = "neo4j", Password = "pw-for-neo4j" };
+
+        var result = await Db(host).ExecuteQueryAsync("c0ffee", statement, DatabaseType.Neo4j, creds, "local");
+
+        Assert.False(result.Success);
+        Assert.Empty(host.Commands);
+    }
+
+    [Fact]
+    public async Task A_cypher_statement_follows_the_end_of_options_and_a_dash_user_is_refused()
+    {
+        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = "n\n1\n" });
+        var creds = new DatabaseCredentials { User = "neo4j", Password = "pw-for-neo4j" };
+
+        await Db(host).ExecuteQueryAsync("c0ffee", "RETURN 1 AS n", DatabaseType.Neo4j, creds, "local");
+
+        Assert.EndsWith("'cypher-shell' '-u' 'neo4j' '--' 'RETURN 1 AS n'", Assert.Single(host.Commands));
+        await Assert.ThrowsAsync<UnsafeOperandException>(() => Db(host).ExecuteQueryAsync("c0ffee", "RETURN 1", DatabaseType.Neo4j,
+            new DatabaseCredentials { User = "-a", Password = "pw-for-neo4j" }, "local"));
+        await Assert.ThrowsAsync<UnsafeOperandException>(() => Db(host).GetDatabasesAsync("c0ffee", DatabaseType.Neo4j,
+            new DatabaseCredentials { User = "--address=x", Password = "pw-for-neo4j" }, "local"));
+        Assert.Single(host.Commands);
+    }
+
+    [Fact]
+    public async Task The_neo4j_database_list_skips_the_header_and_the_quotes()
+    {
+        var host = new ScriptedHost(_ => new CommandResult { ExitCode = 0, Output = "name\n\"neo4j\"\n\"name\"\n\"system\"\n" });
+
+        var databases = await Db(host).GetDatabasesAsync("c0ffee", DatabaseType.Neo4j,
+            new DatabaseCredentials { User = "neo4j", Password = "pw-for-neo4j" }, "local");
+
+        Assert.Equal(["neo4j", "name", "system"], databases);
+        Assert.Contains("'--' 'SHOW DATABASES YIELD name RETURN name'", Assert.Single(host.Commands));
     }
 
     [Fact]

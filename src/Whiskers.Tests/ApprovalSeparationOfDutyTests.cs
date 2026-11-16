@@ -1,3 +1,8 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Whiskers.Configuration;
+using Whiskers.Services.Mcp;
 using System.Reflection;
 using System.Text.Json;
 using Whiskers.Models;
@@ -126,6 +131,105 @@ public partial class ApprovalSeparationOfDutyTests
             await Resolver(task).ResolveAsync(Catalog.Find("scheduler.run")!, Args(new { }), CancellationToken.None));
         Assert.Equal(McpPermissionLevels.Admin,
             await Resolver(task).ResolveAsync(Catalog.Find("scheduler.run")!, Args(new { taskId = "nope" }), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_task_named_by_its_name_needs_the_same_level_as_by_its_id()
+    {
+        // The gateway resolves run_scheduled_task's taskId by id, else by a unique name (MutationTargets); the
+        // requirement must find the same task either way, never a different level for the same run.
+        var volume = new ScheduledTaskEntity { TaskId = "t-vol", Name = "Nightly volumes", TaskType = ScheduledTaskType.VolumeBackup };
+        var command = new ScheduledTaskEntity { TaskId = "t-cmd", Name = "Cleanup script", TaskType = ScheduledTaskType.CustomCommand };
+        var run = Catalog.Find("scheduler.run")!;
+        Task<string> By(string idOrName, params ScheduledTaskEntity[] tasks) =>
+            Resolver(tasks).ResolveAsync(run, Args(new { taskId = idOrName }), CancellationToken.None);
+
+        Assert.Equal(McpPermissionLevels.Write, await By("t-vol", volume, command));
+        Assert.Equal(McpPermissionLevels.Write, await By("Nightly volumes", volume, command));
+        Assert.Equal(McpPermissionLevels.Admin, await By("t-cmd", volume, command));
+        Assert.Equal(McpPermissionLevels.Admin, await By("Cleanup script", volume, command));
+        // An id wins over another task's equal name; an ambiguous name finds no task and stays at Admin.
+        var shadow = new ScheduledTaskEntity { TaskId = "x", Name = "t-vol", TaskType = ScheduledTaskType.CustomCommand };
+        Assert.Equal(McpPermissionLevels.Write, await By("t-vol", shadow, volume));
+        var twin = new ScheduledTaskEntity { TaskId = "t-vol2", Name = "Nightly volumes", TaskType = ScheduledTaskType.VolumeBackup };
+        Assert.Equal(McpPermissionLevels.Admin, await By("Nightly volumes", volume, twin));
+    }
+
+    /// <summary>The run is held to the task it actually runs: a task whose type, retention or name changed after the
+    /// gateway decided on it at Write is refused when it now needs more, for every task type.</summary>
+    [Theory]
+    [InlineData(ScheduledTaskType.CustomCommand, "{\"command\":\"id\"}")]
+    [InlineData(ScheduledTaskType.VolumeBackup, "{\"maxBackups\":\"3\"}")]
+    [InlineData(ScheduledTaskType.DbBackup, "{}")]
+    [InlineData(ScheduledTaskType.SelfBackup, "{}")]
+    public async Task A_task_changed_after_the_decision_is_not_run_above_the_decided_level(ScheduledTaskType now, string config)
+    {
+        // Decided as a VolumeBackup without retention (Write) under the name "Nightly"; meanwhile renamed and changed.
+        var task = new ScheduledTaskEntity { TaskId = "t1", Name = "Renamed", TaskType = now, Config = config };
+        var (http, permissions) = await AdminCallerAsync(task);
+        // Set here: the accessor keeps the context in an AsyncLocal, which an awaited helper would not hand back.
+        var accessor = new HttpContextAccessor { HttpContext = http };
+        using var scope = MutationScope.Begin("scheduler.run", "op-" + Guid.NewGuid().ToString("N"));
+        scope.DecidedLevel = McpPermissionLevels.Write;
+
+        var answer = await Whiskers.Mcp.Tools.SchedulerTools.RunScheduledTask(accessor, permissions,
+            SchedulerProxy.Create([task]), new NullToolAudit(), "t1");
+
+        Assert.Contains("was not run", answer);
+        Assert.Contains("was not run", scope.FailureReason);
+    }
+
+    [Fact]
+    public async Task An_unchanged_task_runs_at_its_decided_level()
+    {
+        var task = new ScheduledTaskEntity { TaskId = "t1", Name = "Nightly", TaskType = ScheduledTaskType.Cleanup };
+        var (http, permissions) = await AdminCallerAsync(task);
+        // Set here: the accessor keeps the context in an AsyncLocal, which an awaited helper would not hand back.
+        var accessor = new HttpContextAccessor { HttpContext = http };
+        using var scope = MutationScope.Begin("scheduler.run", "op-" + Guid.NewGuid().ToString("N"));
+        scope.DecidedLevel = McpPermissionLevels.Write;
+
+        // Past the check the proxy is asked to run it (it knows only GetTasksAsync).
+        await Assert.ThrowsAsync<NotSupportedException>(() => Whiskers.Mcp.Tools.SchedulerTools.RunScheduledTask(accessor,
+            permissions, SchedulerProxy.Create([task]), new NullToolAudit(), "t1"));
+    }
+
+    [Fact]
+    public async Task A_run_without_a_gateway_decision_is_refused()
+    {
+        var task = new ScheduledTaskEntity { TaskId = "t1", Name = "Nightly", TaskType = ScheduledTaskType.Cleanup };
+        var (http, permissions) = await AdminCallerAsync(task);
+        // Set here: the accessor keeps the context in an AsyncLocal, which an awaited helper would not hand back.
+        var accessor = new HttpContextAccessor { HttpContext = http };
+
+        // No scope with a decided level: the proxy would throw if the run were attempted.
+        var answer = await Whiskers.Mcp.Tools.SchedulerTools.RunScheduledTask(accessor, permissions,
+            SchedulerProxy.Create([task]), new NullToolAudit(), "t1");
+
+        Assert.Contains("was not run", answer);
+    }
+
+    private static async Task<(HttpContext, IMcpPermissionService)> AdminCallerAsync(ScheduledTaskEntity task)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sod-run-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var permissions = new McpPermissionService(NullLogger<McpPermissionService>.Instance, new DataPathOptions(dir));
+        await permissions.InitializeAsync();
+        var key = await permissions.AddApiKeyAsync("admin", McpPermissionLevels.Admin);
+        var http = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection()
+                .AddSingleton<IEffectiveRequirementResolver>(Resolver(task))
+                .BuildServiceProvider(),
+        };
+        http.Request.Headers.Authorization = "Bearer " + key.Key;
+        return (http, permissions);
+    }
+
+    private sealed class NullToolAudit : Whiskers.Services.AuditLog.IToolAuditLog
+    {
+        public Task LogAsync(string actor, string actorType, string action, string targetType, string targetId,
+            string targetName, string? details = null, string? serverId = null, bool success = true) => Task.CompletedTask;
     }
 
     [Fact]

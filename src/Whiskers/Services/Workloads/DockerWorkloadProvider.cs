@@ -24,28 +24,30 @@ public sealed class DockerWorkloadProvider : IWorkloadProvider
     private string? Sid => string.IsNullOrWhiteSpace(ServerId) ? null : ServerId;
 
     public Task<IList<ContainerInfo>> ListWorkloadsAsync(bool all = true, CancellationToken ct = default)
-        => _docker.ListContainersAsync(all, Sid);
+        => _docker.ListContainersAsync(all, Sid, ct);
 
     public Task<ContainerInfo?> GetWorkloadAsync(string id, CancellationToken ct = default)
-        => _docker.GetContainerAsync(id, Sid);
+        => _docker.GetContainerAsync(id, Sid).WaitAsync(ct);
 
     public async Task<WorkloadIdentity?> GetWorkloadIdentityAsync(string id, CancellationToken ct = default)
-        => WorkloadIdentity.OfContainer(await _docker.GetContainerAsync(id, Sid));
+        => WorkloadIdentity.OfContainer(await _docker.GetContainerAsync(id, Sid).WaitAsync(ct));
 
     // Contract 0012 (D8): the decided container id on this provider's server.
     public Task StartAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default)
-        => _docker.StartContainerAsync(Decided(workload), Sid);
+        => _docker.StartContainerAsync(Decided(workload, ct), Sid);
 
     public Task StopAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default)
-        => _docker.StopContainerAsync(Decided(workload), Sid);
+        => _docker.StopContainerAsync(Decided(workload, ct), Sid);
 
     public Task RestartAsync(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct = default)
-        => _docker.RestartContainerAsync(Decided(workload), Sid);
+        => _docker.RestartContainerAsync(Decided(workload, ct), Sid);
 
-    /// <summary>The decided container's id; a workload decided on another server is refused.</summary>
-    private string Decided(Whiskers.Services.Mutations.ResolvedWorkload workload)
+    /// <summary>The decided container's id; a workload decided on another server is refused. A stopped caller stops the
+    /// change before it starts; once started it runs to its known outcome (the Docker calls take no token).</summary>
+    private string Decided(Whiskers.Services.Mutations.ResolvedWorkload workload, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(workload);
+        ct.ThrowIfCancellationRequested();
         if (!string.IsNullOrEmpty(workload.ServerId) && !string.IsNullOrEmpty(Sid)
             && !string.Equals(workload.ServerId, Sid, StringComparison.Ordinal))
             throw new InvalidOperationException(
@@ -54,8 +56,8 @@ public sealed class DockerWorkloadProvider : IWorkloadProvider
     }
 
     public Task<string> GetLogsAsync(string id, int tailLines = 100, DateTime? since = null, CancellationToken ct = default)
-        => _docker.GetContainerLogsAsync(id, tailLines, Sid, since);
+        => _docker.GetContainerLogsAsync(id, tailLines, Sid, since, ct);
 
     public Task<ContainerStats?> GetStatsAsync(string id, CancellationToken ct = default)
-        => _docker.GetContainerStatsAsync(id, Sid);
+        => _docker.GetContainerStatsAsync(id, Sid, ct);
 }

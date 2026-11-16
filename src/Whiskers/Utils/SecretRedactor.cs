@@ -42,7 +42,7 @@ public static class SecretRedactor
     // Secret-bearing key names, English and German (UI strings and tool output are partly German:
     // "Temporäres root-Passwort: …" passed straight through before).
     private const string SecretKeys =
-        @"password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer";
+        @"password|passwd|pwd|passwort|kennwort|token|secret|api[_-]?key|access[_-]?key|authorization|bearer|credentials?|private[_-]?key";
 
     // password=x, token: x, api_key=x, Passwort: x, etc.  →  $1=***
     // "authorization" has its own rule (AuthorizationValue), which keeps the scheme; here it would cut the value
@@ -131,6 +131,30 @@ public static class SecretRedactor
     private static readonly Regex SecretKeyName = new(
         $@"(?i){SecretKeys}", RegexOptions.Compiled, Timeout);
 
+    // What JsonSecret leaves (INV-51): a secret-named key in double quotes, single quotes ({'password': 'x'}) or escaped
+    // quotes ({\"password\": \"x\"}, up to three levels), with '.' or ' ' in it ("db.password"), after ':', '=' or '=>',
+    // whose value is a quoted string (also unclosed: masked to the end of the line), an array or object (masked up to the
+    // first closing bracket or the end) or a bare word (a number, true, null)  →  the value becomes a quoted "***" in the
+    // key's quoting, so JSON stays JSON. The key is bounded (128) and taken atomically, the value's runs are atomic and
+    // their alternatives disjoint: linear.
+    private static readonly Pair QuotedSecretKey = new(
+        $@"(?i)(?<kq>\\{{0,3}}""|')(?=[\w. -]{{0,128}}?(?:{SecretKeys}))(?<key>(?>[\w. -]{{1,128}}))\k<kq>(?<sep>\s*(?:=>|[:=])\s*)" +
+        // A backslash that ends the line or the text belongs to an unclosed value (it escapes nothing).
+        @"(?<val>(?<vq>\\{0,3}""|')(?>(?:(?!\k<vq>)(?:\\[^\r\n]|\\(?=[\r\n]|$)|[^\\\r\n]))*)(?:\k<vq>|(?=[\r\n]|$))" +
+        @"|\[(?>[^\]]*)(?:\]|$)|\{(?>[^}]*)(?:\}|$)" +
+        // A bare word ends at whitespace or , ; } ] — unless it holds a quote or a backslash (abc"def", \x41…): then it
+        // runs to the next whitespace, so no tail after the quote stays readable.
+        @"|(?>[^\s,;}\]""'\\]*)[""'\\](?>\S*)|(?>[^\s,;}\]""'\\]+))",
+        RegexOptions.Compiled);
+
+    // A count of tokens ("input_tokens": 1234, "token_count": 56): a key whose name ends in a count suffix and whose value is
+    // digits only. A key without that suffix (token, access_token, api_token) is masked whatever its value.
+    private static readonly Regex TokenCountKey = new(
+        @"(?i)(?:[_. -]tokens|tokens?[_. -]?count)\z", RegexOptions.Compiled, Timeout);
+    private static readonly Regex Digits = new(@"\A[0-9]{1,18}\z", RegexOptions.Compiled, Timeout);
+
+    private static bool IsTokenCount(string key, string value) => TokenCountKey.IsMatch(key) && Digits.IsMatch(value);
+
     // Authorization: Bearer <token> without a colon after "Bearer"  →  Bearer ***
     private static readonly Pair BearerToken = new(
         @"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}",
@@ -149,7 +173,8 @@ public static class SecretRedactor
     // use RedactJson.
     private const string SqlGap = @"(?:\s|/\*.*?(?:\*/|$)|(?:--|\#)[^\n]*(?:\n|$))";
     private static readonly Pair SqlPassword = new(
-        $@"(?is)\b(PASSWORD|IDENTIFIED(?:{SqlGap}+WITH{SqlGap}+\S+)?{SqlGap}+(?:BY|AS))({SqlGap}*(?:={SqlGap}*|\({SqlGap}*)?)" +
+        // Not a quoted key ('password': 'x' is QuotedSecretKey's — read as SQL it masked the separator, not the value).
+        $@"(?is)(?<!['""])\b(PASSWORD|IDENTIFIED(?:{SqlGap}+WITH{SqlGap}+\S+)?{SqlGap}+(?:BY|AS))({SqlGap}*(?:={SqlGap}*|\({SqlGap}*)?)" +
         $@"(?:(?:[EBNX]|U&)?'(?:[^'\\]|''|\\.)*(?:'|$)|(?<=\s|=|\(|\*/)""(?:[^""\\]|""""|\\.)*(?:""|$)|\$(\w*)\$.*?(?:\$\3\$|$)|(?<=(?:BY|AS){SqlGap}*)[^\s;'""\\]+)",
         RegexOptions.Compiled);
 
@@ -278,6 +303,13 @@ public static class SecretRedactor
         s = AuthorizationValue.Replace(s, m =>
             $"{m.Groups["esc"].Value}{m.Groups["q"].Value}{m.Groups["uq"].Value}{m.Groups["pre"].Value}{m.Groups["key"].Value}" +
             $"{m.Groups["sep"].Value}" + (m.Groups["scheme"].Success ? m.Groups["scheme"].Value + " " : "") + "***");
+        s = QuotedSecretKey.Replace(s, m => m.Groups["key"].Value.Contains("authorization", StringComparison.OrdinalIgnoreCase)
+                                            || IsTokenCount(m.Groups["key"].Value, m.Groups["val"].Value)
+            ? m.Value   // QuotedAuthorizationKey's (with its escape levels; already applied above), or a token count
+            :
+            // The separator without its spaces, as JsonSecret writes it: a second pass changes nothing.
+            $"{m.Groups["kq"].Value}{m.Groups["key"].Value}{m.Groups["kq"].Value}{m.Groups["sep"].Value.Trim()}" +
+            $"{m.Groups["kq"].Value}***{m.Groups["kq"].Value}");
         s = BasicCredential.Replace(s, m => $"{m.Groups["scheme"].Value}{m.Groups["sep"].Value}***");
         s = BearerToken.Replace(s, "Bearer ***");
         s = KeyedSecret.Replace(s, m => $"{m.Groups[1].Value}=***");

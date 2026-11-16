@@ -72,6 +72,10 @@ public class DatabaseService : IDatabaseService
         List<string>? redisArgs = null;
         if (dbType == DatabaseType.Redis && !TryParseRedisArguments(query, out redisArgs, out var parseError))
             return new QueryResult { Error = parseError, DurationMs = sw.Elapsed.TotalMilliseconds };
+        // Neo4j: the statement goes after "--"; one that starts with '-' is no Cypher and is refused all the same, so it is
+        // never an option of cypher-shell whatever its argument parser makes of "--".
+        if (dbType == DatabaseType.Neo4j && (query ?? "").TrimStart().StartsWith('-'))
+            return new QueryResult { Error = "A Cypher statement cannot start with '-'.", DurationMs = sw.Elapsed.TotalMilliseconds };
         var cmd = redisArgs != null ? new[] { "redis-cli" }.Concat(redisArgs).ToArray() : BuildQueryCommand(dbType, creds, query);
         var (stdout, stderr, exitCode) = await ExecInContainer(containerId, cmd, serverId, TimeSpan.FromSeconds(30), dbType, creds);
         sw.Stop();
@@ -93,7 +97,7 @@ public class DatabaseService : IDatabaseService
             DatabaseType.MongoDB => new[] { "mongosh", "--quiet", "--eval", "db.adminCommand('listDatabases').databases.forEach(d => print(d.name))" },
             DatabaseType.Redis => new[] { "redis-cli", "CONFIG", "GET", "databases" },
             // The password from NEO4J_PASSWORD (ExecInContainer), never "-p <password>" in argv.
-            DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, "SHOW DATABASES YIELD name RETURN name" },
+            DatabaseType.Neo4j => new[] { "cypher-shell", "-u", CheckNeo4jUser(creds.User), "--", "SHOW DATABASES YIELD name RETURN name" },
             _ => Array.Empty<string>()
         };
 
@@ -107,12 +111,14 @@ public class DatabaseService : IDatabaseService
         if (dbType == DatabaseType.Redis)
             return ParseRedisDatabaseList(stdout);
 
-        // Only the header line of `mysql -e` batch output ("Database") is skipped, never a database whose name merely
-        // starts with a header word (Redis, whose CONFIG GET answer starts with "databases", returned above).
+        // Only the header line is skipped — of `mysql -e` batch output ("Database") and of cypher-shell's plain output
+        // ("name") — never a database whose name merely starts with a header word (Redis, whose CONFIG GET answer starts
+        // with "databases", returned above). cypher-shell prints a string value in double quotes; they are not the name.
         return stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Skip(dbType == DatabaseType.MySQL ? 1 : 0)
+            .Skip(dbType is DatabaseType.MySQL or DatabaseType.Neo4j ? 1 : 0)
             .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("+-"))
             .Select(l => l.Trim('|', ' '))
+            .Select(l => dbType == DatabaseType.Neo4j && l.Length >= 2 && l[0] == '"' && l[^1] == '"' ? l[1..^1] : l)
             .Where(l => !string.IsNullOrWhiteSpace(l))
             .ToList();
     }
@@ -275,17 +281,35 @@ public class DatabaseService : IDatabaseService
         return (true, hostPath, size, "");
     }
 
+    /// <summary>psql's field and record separators for a query result (unaligned output): control characters that a value
+    /// does not normally hold, so a value with a line break or a '|' stays one value of one row.</summary>
+    internal const string PsqlFieldSeparator = "\u001f";
+    internal const string PsqlRecordSeparator = "\u001e";
+
     private static string[] BuildQueryCommand(DatabaseType dbType, DatabaseCredentials creds, string query) => dbType switch
     {
-        DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", creds.Database, "-c", query },
+        // Unaligned, the separators above, no "(N rows)" footer: the output is the header and the rows, nothing else.
+        DatabaseType.PostgreSQL => new[] { "psql", "-U", creds.User, "-d", creds.Database, "-A", "-F", PsqlFieldSeparator,
+            "-R", PsqlRecordSeparator, "-P", "footer=off", "-c", query },
         DatabaseType.MySQL => BuildMysqlCmd(creds, "-D", creds.Database, "-e", query),
         DatabaseType.MongoDB => new[] { "mongosh", "--quiet", creds.Database, "--eval", query },
         // Redis never reaches this branch from ExecuteQueryAsync (TryParseRedisArguments); kept fail-safe all the same.
         DatabaseType.Redis => TryParseRedisArguments(query, out var args, out _) ? new[] { "redis-cli" }.Concat(args).ToArray()
             : new[] { "echo", "Unparseable Redis command" },
-        DatabaseType.Neo4j => new[] { "cypher-shell", "-u", creds.User, query },
+        // The statement after "--", so cypher-shell never reads it as an option (ExecuteQueryAsync also refuses one that
+        // starts with '-'); the user is checked by CheckNeo4jUser.
+        DatabaseType.Neo4j => new[] { "cypher-shell", "-u", CheckNeo4jUser(creds.User), "--", query },
         _ => new[] { "echo", "Unsupported database type" }
     };
+
+    /// <summary>The Neo4j user as the value of cypher-shell's <c>-u</c>: one that starts with '-' could be read as an
+    /// option (<c>-a</c> would send <c>NEO4J_PASSWORD</c> to another address), so it is refused before anything runs.</summary>
+    internal static string CheckNeo4jUser(string? user)
+    {
+        if (string.IsNullOrEmpty(user) || user.StartsWith('-') || user.Any(char.IsControl))
+            throw new UnsafeOperandException("Neo4j user", user, "it must not be empty, start with '-' or contain control characters");
+        return user;
+    }
 
     /// <summary>Splits a Redis command line into its arguments, redis-cli-like: arguments are separated by whitespace;
     /// one that starts with <c>"</c> runs to the matching <c>"</c> and knows the escapes <c>\" \\ \n \r \t</c>; one that
@@ -392,12 +416,11 @@ public class DatabaseService : IDatabaseService
     private static string[] BuildMysqlCmd(DatabaseCredentials creds, params string[] extraArgs) =>
         new[] { "mysql", "-u", creds.User }.Concat(extraArgs).ToArray();
 
-    private static readonly System.Text.RegularExpressions.Regex PsqlRule = new(@"^-+(\+-+)*$");
-    private static readonly System.Text.RegularExpressions.Regex PsqlFooter = new(@"^\((\d+) rows?\)$");
-
     private static QueryResult ParseQueryResult(string output, DatabaseType dbType, double durationMs)
     {
         var result = new QueryResult { DurationMs = durationMs };
+        if (dbType == DatabaseType.PostgreSQL)
+            return ParsePsqlUnaligned(output, result);
         var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
         if (lines.Length == 0)
@@ -420,29 +443,15 @@ public class DatabaseService : IDatabaseService
             return result;
         }
 
-        // Table output. psql -c (aligned): a header, the "----+----" rule right below it, the rows, and a "(N rows)"
-        // footer — only those two lines are skipped by position, so a row whose value starts with "(" or "--" stays.
-        // mysql -e (batch): a header and tab-separated rows, nothing to skip. Others: '|' if present, else tabs.
+        // Table output. mysql -e (batch): a header and tab-separated rows, nothing to skip (a line break in a value is
+        // written as "\n"). Others: '|' if present, else tabs.
         var rows = lines.Select(l => l.TrimEnd('\r')).Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
-        if (dbType == DatabaseType.PostgreSQL)
-        {
-            if (rows.Count > 1 && PsqlRule.IsMatch(rows[1].Trim()))
-            {
-                rows.RemoveAt(1);
-                // The footer counts the data rows (all but the header and the footer itself); a last row that only
-                // looks like "(N rows)" with another N is data.
-                if (rows.Count > 1 && PsqlFooter.Match(rows[^1].Trim()) is { Success: true } footer
-                    && int.TryParse(footer.Groups[1].Value, out var n) && n == rows.Count - 2)
-                    rows.RemoveAt(rows.Count - 1);
-            }
-        }
 
         bool headerParsed = false;
         foreach (var line in rows)
         {
             var cells = dbType switch
             {
-                DatabaseType.PostgreSQL => line.Split('|').Select(c => c.Trim()).ToList(),
                 DatabaseType.MySQL => line.Split('\t').Select(c => c.Trim()).ToList(),
                 _ => line.Trim().Contains('|')
                     ? line.Trim().Split('|').Select(c => c.Trim()).ToList()
@@ -460,6 +469,25 @@ public class DatabaseService : IDatabaseService
             }
         }
 
+        result.RowCount = result.Rows.Count;
+        return result;
+    }
+
+    /// <summary>psql's unaligned output with <see cref="PsqlRecordSeparator"/> between records and
+    /// <see cref="PsqlFieldSeparator"/> between fields, no footer (<see cref="BuildQueryCommand"/>): the first record is
+    /// the header, every further one a row. A line break, a '|', a leading "(" or "--" are all part of a value; the one
+    /// line break psql writes after the last record is not.</summary>
+    private static QueryResult ParsePsqlUnaligned(string output, QueryResult result)
+    {
+        var text = output ?? "";
+        if (text.EndsWith('\n')) text = text[..^1];
+        if (text.EndsWith('\r')) text = text[..^1];
+        if (text.Length == 0)
+            return result;
+        var records = text.Split(PsqlRecordSeparator);
+        result.Columns = records[0].Split(PsqlFieldSeparator).ToList();
+        foreach (var record in records.Skip(1))
+            result.Rows.Add(record.Split(PsqlFieldSeparator).ToList());
         result.RowCount = result.Rows.Count;
         return result;
     }

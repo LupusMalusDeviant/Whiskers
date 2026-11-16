@@ -357,6 +357,19 @@ public class DnsRecordServiceTests
     public void NormalizeName_rejects_invalid_labels(string input)
         => Assert.Throws<ArgumentException>(() => DnsRecordService.NormalizeName(input, "lupusmalus.dev"));
 
+    /// <summary>A line break at the end of a label is not part of a valid name ("$" would match before it).</summary>
+    [Theory]
+    [InlineData("name", "www\n.app")]
+    [InlineData("zone", "example\n.org")]
+    [InlineData("cname", "target\n.example.org")]
+    public void A_label_ending_in_a_line_break_is_refused(string kind, string input)
+        => Assert.Throws<ArgumentException>(() => _ = kind switch
+        {
+            "name" => DnsRecordService.NormalizeName(input, "lupusmalus.dev"),
+            "zone" => DnsRecordService.NormalizeZone(input),
+            _ => DnsRecordService.NormalizeValue("CNAME", input),
+        });
+
     [Theory]
     [InlineData("A", "1.2.3.4", "1.2.3.4")]
     [InlineData("AAAA", "2001:DB8::1", "2001:db8::1")]

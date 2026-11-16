@@ -72,8 +72,15 @@ public static class DatabaseDetector
                 break;
 
             case DatabaseType.Neo4j:
+                // NEO4J_AUTH is "user/password" (or "none"): the user ends at the first '/', the password is all the rest,
+                // so a password that contains '/' is kept whole.
                 creds.User = "neo4j";
-                creds.Password = GetFirst(dict, "NEO4J_AUTH")?.Split('/')?.LastOrDefault() ?? "";
+                creds.Password = "";
+                if (GetFirst(dict, "NEO4J_AUTH") is { } auth && auth.IndexOf('/') is var slash and > 0)
+                {
+                    creds.User = auth[..slash];
+                    creds.Password = auth[(slash + 1)..];
+                }
                 break;
         }
 
