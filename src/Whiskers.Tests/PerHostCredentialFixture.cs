@@ -41,7 +41,9 @@ internal sealed class MutableServerConfig(params ServerConfig[] servers) : IServ
     }
     public Task RemoveServerAsync(string serverId) { _servers.RemoveAll(s => s.Id == serverId); return Task.CompletedTask; }
     public Task SaveSshKeyAsync(string serverId, string fileName, byte[] keyData) => Task.CompletedTask;
-    public string? GetSshKeyPath(ServerConfig server) => null;
+    /// <summary>Where a record's key file is, as the real store answers it; null (no key) unless a test sets it.</summary>
+    public Func<ServerConfig, string?>? KeyPath { get; set; }
+    public string? GetSshKeyPath(ServerConfig server) => KeyPath?.Invoke(server);
     public Task DeleteSshKeyAsync(string serverId) => Task.CompletedTask;
     public Task<bool> AdoptCloudKeyRefAsync(string serverId, string plaintext, string vaultRef) => Task.FromResult(false);
 }

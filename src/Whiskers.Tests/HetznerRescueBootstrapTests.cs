@@ -167,16 +167,102 @@ public sealed class HetznerRescueBootstrapTests : IDisposable
         Assert.Null(record.BootstrapKeyInjectedFingerprint);
     }
 
-    public static TheoryData<string> NotFresh => ["pinned", "mtls"];
+    private static Exception Failure(string kind) => kind switch
+    {
+        "timeout" => new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"),
+        "json" => new System.Text.Json.JsonException("unexpected token"),
+        _ => new System.ComponentModel.Win32Exception(2, "the process could not start"),
+    };
+
+    /// <summary>Review r1 HIGH 1: a clean-up step that fails with a timeout or an unreadable answer never skips the next.</summary>
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("json")]
+    public async Task Failure_after_enable_rescue_with_a_failing_key_delete_still_disables_rescue_resets_and_drops_the_key(string kind)
+    {
+        _ssh.SshAnswer = (_, _) => new CommandResult { ExitCode = 3, Error = "no root partition" };
+        _cloud.On(nameof(IHetznerService.DeleteSshKeyAsync), _ => throw Failure(kind));
+
+        var result = await RunAsync(await RecordAsync());
+
+        Assert.False(result.Success);
+        var after = _cloud.Calls.SkipWhile(c => c != nameof(IHetznerService.EnableRescueWithKeysAsync)).ToList();
+        Assert.Contains(nameof(IHetznerService.DisableRescueAsync), after);
+        Assert.Equal(1, after.Count(c => c == nameof(IHetznerService.ResetAsync)));
+        Assert.Contains(result.CleanupWarnings, w => w.Contains($"project SSH key {ProjectKeyId}", StringComparison.Ordinal));
+        Assert.Null(_store.Servers.GetServer("web-new")!.SshKeyFileName);
+    }
+
+    /// <summary>Review r1 HIGH 1: a failure of a kind the bootstrap does not name still fails it closed with the full clean-up.</summary>
+    [Theory]
+    [InlineData("json")]
+    [InlineData("process")]
+    public async Task Failure_after_enable_rescue_of_an_unlisted_kind_still_cleans_up(string kind)
+    {
+        _cloud.On(nameof(IHetznerService.RebootAsync), _ => throw Failure(kind));
+
+        var result = await RunAsync(await RecordAsync());
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        var after = _cloud.Calls.SkipWhile(c => c != nameof(IHetznerService.EnableRescueWithKeysAsync)).ToList();
+        Assert.Contains(nameof(IHetznerService.DeleteSshKeyAsync), after);
+        Assert.Contains(nameof(IHetznerService.DisableRescueAsync), after);
+        Assert.Equal(1, after.Count(c => c == nameof(IHetznerService.ResetAsync)));
+        var record = _store.Servers.GetServer("web-new")!;
+        Assert.Null(record.SshKeyFileName);
+        Assert.False(record.BootstrapKeyGenerated);
+    }
+
+    /// <summary>Review r1 HIGH 1: the fingerprint of the generated key is taken inside the guarded part, so a failure
+    /// there drops the key instead of leaving it sealed and unreported.</summary>
+    [Fact]
+    public async Task Fingerprint_failure_drops_the_generated_key()
+    {
+        _ssh.FingerprintFails = Failure("process");
+
+        var result = await RunAsync(await RecordAsync());
+
+        Assert.False(result.Success);
+        Assert.Empty(Mutations());
+        var record = _store.Servers.GetServer("web-new")!;
+        Assert.Null(record.SshKeyFileName);
+        Assert.False(record.BootstrapKeyGenerated);
+    }
+
+    /// <summary>Review r1 LOW 5: a script that fails after the line was read back (here: the final unmount) leaves the
+    /// line on the disk — it is recorded and reported as a standing key, never dropped silently.</summary>
+    [Fact]
+    public async Task Failure_after_the_line_was_placed_reports_the_standing_key()
+    {
+        _ssh.SshAnswer = (_, _) => new CommandResult
+        {
+            ExitCode = 32, Error = "umount: target is busy",
+            Output = $"{RescueCommands.HostKeysBegin}\n{HostKey} root@web-new\n{RescueCommands.HostKeysEnd}\n",
+        };
+
+        var result = await RunAsync(await RecordAsync());
+
+        Assert.False(result.Success);
+        Assert.True(result.StandingBootstrapKey);
+        var record = _store.Servers.GetServer("web-new")!;
+        Assert.Equal(result.InjectedKeyFingerprint, record.BootstrapKeyInjectedFingerprint);
+        Assert.True(record.BootstrapKeyGenerated);   // kept: the line on the host is removed with it later
+    }
+
+    public static TheoryData<string> NotFresh => ["pinned", "mtls", "known_hosts"];
 
     [Theory]
     [MemberData(nameof(NotFresh))]
     public async Task Not_fresh_server_is_refused(string kind)
     {
+        // Review r1 MEDIUM 3: a known_hosts line for the endpoint also means the host is not fresh (D2).
+        if (kind == "known_hosts")
+            _pins.KnownHostsPin = new SshHostKeyPin("ssh-ed25519", "SHA256:known", SshHostKeySource.FirstContact, null, null);
         var server = await RecordAsync(r =>
         {
             if (kind == "pinned") r.SshHostKeyFingerprint = "SHA256:already";
-            else r.TcpClientCertPath = "/app/data/mtls/clients/web-new/1/client.crt";
+            else if (kind == "mtls") r.TcpClientCertPath = "/app/data/mtls/clients/web-new/1/client.crt";
         });
 
         var result = await RunAsync(server);

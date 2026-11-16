@@ -551,6 +551,21 @@ public class OnboardingService : IOnboardingService
                      || (server.ConnectionType == ConnectionType.SSH && server.SshKeyFileName is not null
                          && _serverConfig.GetSshKeyPath(server) is not null);
         MutationScope.Note($"abandon run for bootstrap line {fingerprint}");
+        if (canRun && server.ConnectionType == ConnectionType.SSH)
+        {
+            // INV-63: the removal talks SSH only to a host whose key is verified (a recorded pin or a known_hosts line) or
+            // pinned now; without the pins service no SSH command is sent at all.
+            if (_hostKeys is null) return "Kein Host-Key-Dienst konfiguriert; ohne Pin wird kein SSH-Befehl gesendet.";
+            try
+            {
+                if (await _hostKeys.BackfillAsync(server, ct) is not null) await _hostKeys.VerifyAsync(server, ct);
+                else await _hostKeys.PinFirstContactAsync(server, ct);
+            }
+            catch (SshHostKeyMismatchException mismatch)
+            {
+                return mismatch.Message;
+            }
+        }
         if (canRun) return await CleanupAsync(server.Id, ct);
         var dead = BootstrapCleanup.DeadLineWarning(fingerprint, server.SshHost);
         warnings.Add(dead);

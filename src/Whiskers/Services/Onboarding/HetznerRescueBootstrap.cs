@@ -79,8 +79,18 @@ public sealed class HetznerRescueBootstrap : ICloudBootstrap
         if (!settings.Enabled) return Refuse("The cloud bootstrap is switched off (Onboarding:CloudBootstrap:Enabled).");
         if (server.CloudProvider != CloudProvider.Hetzner) return Refuse("The rescue bootstrap needs a Hetzner server.");
         if (server.CloudServerId is not { } vmId) return Refuse("The record is bound to no Hetzner VM; register it with its IP first.");
-        if (server.SshHostKeyFingerprint is not null)
+        if (server.SshHostKeyFingerprint is not null || _pins.PinOf(server) is not null)
             return Refuse("The record already has a pinned host key: the rescue bootstrap runs on fresh servers only (D2).");
+        try
+        {
+            // A known_hosts line for the endpoint means Whiskers has talked to this host before: not fresh (D2).
+            if (await _pins.BackfillAsync(server, ct) is not null)
+                return Refuse("Whiskers' known_hosts already holds a host key for this address: the rescue bootstrap runs on fresh servers only (D2).");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
+            return Refuse($"The known_hosts file could not be checked: {ex.Message}");
+        }
         if (MtlsOnboardingState.Holds(server, _services.GetService<IMtlsClientCredentialStore>()))
             return Refuse("The record already holds mTLS state: the rescue bootstrap runs on fresh servers only (D2).");
         if (_servers.GetServers().Any(s => s.Id != server.Id && s.CloudProvider == CloudProvider.Hetzner && s.CloudServerId == vmId))
@@ -131,17 +141,20 @@ public sealed class HetznerRescueBootstrap : ICloudBootstrap
                 return Refuse($"The bootstrap key could not be prepared: {ex.Message}");
             }
         }
-        var injectedFingerprint = await _ssh.FingerprintAsync(publicLine, ct);
-
+        string? injectedFingerprint = null;
         long? projectKeyId = null;
         var rescueEnabled = false;
         var inRescue = false;
         var injectedNow = server.BootstrapKeyInjectedFingerprint is not null;
         var leftInRescue = false;
+        var succeeded = false;
         string? error = null;
         SshHostKeyPin? pin = null;
         try
         {
+            // Inside the try: a failure here still drops the key generated above.
+            injectedFingerprint = await _ssh.FingerprintAsync(publicLine, ct);
+
             // 3) Project key (also proves the token can write).
             HetznerSshKey key;
             try
@@ -166,10 +179,17 @@ public sealed class HetznerRescueBootstrap : ICloudBootstrap
             await RebootAsync(hetzner, token, vmId, ip, before, settings, Say, ct);
 
             // 5) + 6) Rescue session (trust on first use on the rescue system, run-scoped known_hosts) and the disk.
-            var hostKeys = await InjectAsync(server, ip, publicLine, marker, ct);
-            injectedNow = true;
-            await RecordInjectedAsync(server.Id, injectedFingerprint);
-            MutationScope.Note($"cloud bootstrap: bootstrap key {injectedFingerprint} appended to /root/.ssh/authorized_keys");
+            var inject = await InjectAsync(server, ip, publicLine, marker, ct);
+            if (inject.LinePlaced)
+            {
+                // The line is on the disk (read back by the script) even when a later part of the script failed: it is
+                // recorded and reported as a standing key until a resume, an abandon or a removal takes it.
+                injectedNow = true;
+                await RecordInjectedAsync(server.Id, injectedFingerprint!);
+                MutationScope.Note($"cloud bootstrap: bootstrap key {injectedFingerprint} appended to /root/.ssh/authorized_keys");
+            }
+            if (inject.Failure is not null) throw new BootstrapStepException(inject.Failure);
+            var hostKeys = inject.Keys;
             Say($"Bootstrap-Key eingetragen ({injectedFingerprint}); Host-Keys von der Platte gelesen.");
 
             // 7) Back to the real system.
@@ -184,6 +204,7 @@ public sealed class HetznerRescueBootstrap : ICloudBootstrap
             // 8) Pin the keys read from the disk before the first contact with the real system.
             var current = _servers.GetServer(server.Id)?.Clone() ?? throw new BootstrapStepException("The record was removed meanwhile.");
             pin = await _pins.PinFromDiskAsync(current, hostKeys, ct);
+            succeeded = true;
         }
         catch (BootstrapStepException ex) { error = ex.Message; }
         catch (SshHostKeyMismatchException ex) { error = ex.Message; }
@@ -192,41 +213,47 @@ public sealed class HetznerRescueBootstrap : ICloudBootstrap
         {
             error = Whiskers.Utils.SecretRedactor.Redact(ex.Message);
         }
+        catch (Exception ex)
+        {
+            // Any other failure (a JSON answer that does not parse, a process that cannot start, …) fails the bootstrap
+            // closed and still runs the full clean-up below.
+            error = $"The cloud bootstrap failed ({ex.GetType().Name}): {Whiskers.Utils.SecretRedactor.Redact(ex.Message)}";
+        }
         finally
         {
             // 9) Always: the project key goes; rescue is disabled; a VM still in rescue after a failure is reset once.
+            // Driven by "not succeeded", never by the kind of exception; each step catches everything, so one failing
+            // step (a timeout, an unreadable answer) never skips the next.
             var cleanupCt = CancellationToken.None;
+            if (!succeeded) error ??= "The cloud bootstrap did not finish.";
             if (projectKeyId is { } id)
             {
                 try { await hetzner.DeleteSshKeyAsync(token, id, cleanupCt); MutationScope.Note($"cloud bootstrap: project SSH key {id} deleted"); }
-                catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException) { warnings.Add($"project SSH key {id} could not be deleted: {ex.Message}"); }
+                catch (Exception ex) { warnings.Add($"project SSH key {id} could not be deleted: {CleanupReason(ex)}"); }
             }
             if (rescueEnabled)
             {
                 try { await hetzner.DisableRescueAsync(token, vmId, cleanupCt); MutationScope.Note("cloud bootstrap: rescue disabled (clean-up)"); }
-                catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
+                catch (Exception ex)
                 {
-                    warnings.Add($"rescue mode could not be disabled: {ex.Message}");
+                    warnings.Add($"rescue mode could not be disabled: {CleanupReason(ex)}");
                     leftInRescue = true;
                 }
             }
-            if (error is not null && inRescue)
+            if (!succeeded && inRescue)
             {
                 try { await hetzner.ResetAsync(token, vmId, cleanupCt); MutationScope.Note("cloud bootstrap: VM reset to leave rescue (clean-up)"); }
-                catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
+                catch (Exception ex)
                 {
-                    warnings.Add($"the VM could not be reset out of rescue: {ex.Message}");
+                    warnings.Add($"the VM could not be reset out of rescue: {CleanupReason(ex)}");
                     leftInRescue = true;
                 }
             }
             // Failed before the injection: the generated key is no access to anything; it goes at once.
-            if (error is not null && generatedNow && !injectedNow)
+            if (!succeeded && generatedNow && !injectedNow)
             {
                 try { await DropGeneratedKeyAsync(server.Id); }
-                catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
-                {
-                    warnings.Add($"the generated key could not be deleted: {ex.GetType().Name}");
-                }
+                catch (Exception ex) { warnings.Add($"the generated key could not be deleted: {ex.GetType().Name}"); }
             }
         }
         if (leftInRescue && error is null) error = "The VM may still be in rescue mode.";
@@ -302,7 +329,11 @@ public sealed class HetznerRescueBootstrap : ICloudBootstrap
 
     // ---- rescue session ------------------------------------------------------------------------------------------
 
-    private async Task<IReadOnlyList<string>> InjectAsync(Models.ServerConfig server, string ip, string publicLine, string marker,
+    /// <summary>The rescue session's outcome: whether the line is on the disk (the script printed the host-key begin marker,
+    /// which it does only after reading the line back), the host keys, and why it failed (null on success).</summary>
+    private sealed record InjectOutcome(bool LinePlaced, IReadOnlyList<string> Keys, string? Failure);
+
+    private async Task<InjectOutcome> InjectAsync(Models.ServerConfig server, string ip, string publicLine, string marker,
         CancellationToken ct)
     {
         var record = _servers.GetServer(server.Id) ?? throw new BootstrapStepException("The record was removed meanwhile.");
@@ -317,11 +348,14 @@ public sealed class HetznerRescueBootstrap : ICloudBootstrap
                                     ?? throw new BootstrapStepException("The generated key cannot be opened.");
             var r = await _ssh.SshAsync(new RescueSshCall(ip, 22, "root", lease.Path, knownHosts),
                 RescueCommands.InjectAndReadHostKeys(publicLine, marker), RescueCommandTimeout, ct);
+            var placed = (r.Output ?? "").Contains(RescueCommands.HostKeysBegin, StringComparison.Ordinal);
             if (!r.Success)
-                throw new BootstrapStepException("The rescue system could not prepare the disk: " +
-                                                 Whiskers.Utils.SecretRedactor.Redact(string.IsNullOrWhiteSpace(r.Error) ? $"exit {r.ExitCode}" : r.Error.Trim()));
-            var keys = RescueCommands.HostKeysOf(r.Output);
-            return keys.Count > 0 ? keys : throw new BootstrapStepException("No host key was found on the real disk.");
+                return new InjectOutcome(placed, [], "The rescue system could not prepare the disk: " +
+                    Whiskers.Utils.SecretRedactor.Redact(string.IsNullOrWhiteSpace(r.Error) ? $"exit {r.ExitCode}" : r.Error.Trim()));
+            var keys = RescueCommands.HostKeysOf(r.Output ?? "");
+            return keys.Count > 0
+                ? new InjectOutcome(placed, keys, null)
+                : new InjectOutcome(placed, [], "No host key was found on the real disk.");
         }
         finally
         {
@@ -383,6 +417,10 @@ public sealed class HetznerRescueBootstrap : ICloudBootstrap
         }
         return false;
     }
+
+    /// <summary>Why a clean-up step failed, fit for a warning: the exception type and its redacted message.</summary>
+    private static string CleanupReason(Exception ex) =>
+        $"{ex.GetType().Name}: {Whiskers.Utils.SecretRedactor.Redact(ex.Message)}";
 
     private static int Attempts(int seconds) => Math.Max(1, (int)Math.Ceiling(seconds / PollInterval.TotalSeconds));
 

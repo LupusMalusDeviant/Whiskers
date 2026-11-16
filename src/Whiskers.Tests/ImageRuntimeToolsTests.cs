@@ -32,6 +32,8 @@ public class ImageRuntimeToolsTests
         ["nsenter"] = "local host shell and host commands in the full profile (util-linux, base image)",
         ["ssh"] = "SSH terminal, SSH host commands, SSH Docker tunnel",
         ["sshpass"] = "SSH host commands with a password",
+        ["ssh-keyscan"] = "contract 0018 host-key pinning: reads the keys a host serves (openssh-client)",
+        ["ssh-keygen"] = "contract 0018: known_hosts lookup/removal, fingerprints, the generated bootstrap key (openssh-client)",
         ["tailscale"] = "in-app Tailscale provider and the legacy entrypoint bring-up",
         ["tailscaled"] = "in-app Tailscale provider and the legacy entrypoint bring-up",
         ["pg_dump"] = "PostgreSQL self-backup (WHISKERS_PG_BIN_DIR)",
@@ -60,6 +62,8 @@ public class ImageRuntimeToolsTests
         ("Services/Docker/SshTunnelManager.cs", ["Services/Docker/SshTunnelManager.cs"], new(@"FileName\s*=\s*""([^""]+)""")),
         ("Services/Agent/ClaudeCodeRuntime.cs", ["Services/Agent/ClaudeCodeRuntime.cs"], new(@"FileName\s*=\s*""([^""]+)""")),
         ("Services/Backup/PostgresDumpTool.cs", ["Services/Backup/PostgresDumpTool.cs"], new(@"\b(?:RunAsync|Start)\(\s*""([^""]+)""")),
+        // Contract 0018: the process seam of host-key pinning and the rescue bootstrap (OpenSSH tools only).
+        ("Services/Server/SshToolchain.cs", ["Services/Server/SshToolchain.cs"], new(@"_run\.RunAsync\(\s*""([^""]+)""")),
         // The VPN runner takes the program as a parameter; the providers name it.
         ("Services/Vpn/VpnProcessRunner.cs", ["Services/Vpn/Providers/TailscaleVpnProvider.cs", "Services/Vpn/Providers/NetbirdVpnProvider.cs"],
             new(@"_runner\.(?:RunAsync|StartDetached)\(\s*""([^""]+)""")),

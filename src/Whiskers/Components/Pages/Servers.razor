@@ -468,7 +468,8 @@
             <MudText Typo="Typo.body2" Class="mb-2" id="plan-destination">ssh @($"{plan.SshUser}@{plan.SshHost}:{plan.SshPort}") — @CredentialText(plan)</MudText>
             @if (RescueOffered(plan))
             {
-                <MudSwitch @bind-Value="_planRescue" Color="Color.Primary" Label="@L["Servers_O18_RescueOffer"]" id="plan-rescue" />
+                <MudSwitch @bind-Value="_planRescue" Color="Color.Primary" Label="@L["Servers_O18_RescueOffer"]" id="plan-rescue"
+                           Disabled="@RescueResumeForced(plan)" />
                 @if (_planRescue)
                 {
                     @if (_planVmError is not null)
@@ -1305,9 +1306,15 @@
     /// <summary>UI step 3: the rescue offer — a fresh Hetzner record bound to a VM, with no key, no password and no pin.</summary>
     private static bool RescueOffered(Whiskers.Models.ServerConfig server) =>
         server.ConnectionType == Whiskers.Models.ConnectionType.SSH
-        && string.IsNullOrEmpty(server.SshPassword) && server.SshKeyFileName is null
+        && string.IsNullOrEmpty(server.SshPassword) && (server.SshKeyFileName is null || RescueResumeForced(server))
         && server.CloudProvider == Whiskers.Models.CloudProvider.Hetzner && server.CloudServerId is not null
         && server.SshHostKeyFingerprint is null;
+
+    /// <summary>A rescue run that injected its key and stopped before the pin: the next run must resume the rescue
+    /// bootstrap (it pins the keys read from the disk), never a plain first contact with the stored bootstrap key.</summary>
+    private static bool RescueResumeForced(Whiskers.Models.ServerConfig server) =>
+        server.BootstrapKeyInjectedFingerprint is not null && server.SshHostKeyFingerprint is null
+        && server.CloudProvider == Whiskers.Models.CloudProvider.Hetzner && server.CloudServerId is not null;
 
     private bool VmNameDiffers => _planVm is not null && _planServer is not null
                                   && !string.Equals(_planVm.CloudServerName, _planServer.Name, StringComparison.OrdinalIgnoreCase);
@@ -1319,7 +1326,7 @@
     private async Task StartOnboarding(Whiskers.Models.ServerConfig server, bool skipPreflight = false)
     {
         if (!await RequireAsync("server.onboard", new { serverId = server.Id, name = server.Name })) return;
-        if (skipPreflight)
+        if (skipPreflight && !RescueResumeForced(ServerConfigService.GetServer(server.Id) ?? server))
         {
             await RunOnboarding(server, new Whiskers.Services.Onboarding.OnboardingOptions(Whiskers.Services.Onboarding.BootstrapMethod.None));
             return;
@@ -1355,7 +1362,7 @@
     {
         if (_planServer is not { } server || !PlanReady) return;
         _planOpen = false;
-        var rescue = _planRescue && RescueOffered(server);
+        var rescue = (_planRescue || RescueResumeForced(server)) && RescueOffered(server);
         var options = new Whiskers.Services.Onboarding.OnboardingOptions(
             rescue ? Whiskers.Services.Onboarding.BootstrapMethod.HetznerRescueKey : Whiskers.Services.Onboarding.BootstrapMethod.None,
             ConfirmVmName: rescue && VmNameDiffers && _planVmConfirmed ? _planVm!.CloudServerName : null);

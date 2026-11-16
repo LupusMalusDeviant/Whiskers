@@ -18,12 +18,18 @@ public sealed class AcceptingHostKeyPins : ISshHostKeyPins
                 server.SshHostKeyPinnedAtUtc, null)
             : null;
 
-    public Task<SshHostKeyPin?> BackfillAsync(ServerConfig server, CancellationToken ct) => Task.FromResult(PinOf(server));
+    /// <summary>A pin as if read from Whiskers' known_hosts for every endpoint (a host Whiskers has talked to before).</summary>
+    public SshHostKeyPin? KnownHostsPin { get; set; }
+
+    /// <summary>When set, <c>VerifyAsync</c> fails with it (a host that serves a different key).</summary>
+    public Exception? VerifyFails { get; set; }
+
+    public Task<SshHostKeyPin?> BackfillAsync(ServerConfig server, CancellationToken ct) => Task.FromResult(PinOf(server) ?? KnownHostsPin);
 
     public Task VerifyAsync(ServerConfig server, CancellationToken ct)
     {
         Calls.Add("verify:" + server.Id);
-        return Task.CompletedTask;
+        return VerifyFails is { } e ? Task.FromException(e) : Task.CompletedTask;
     }
 
     public Task<(string KeyType, string Fingerprint)?> ServedAsync(ServerConfig server, CancellationToken ct) =>

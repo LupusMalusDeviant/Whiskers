@@ -68,7 +68,7 @@ public static class ServerRemoval
         {
             using var cts = new CancellationTokenSource(Whiskers.Services.Onboarding.BootstrapCleanup.Bound);
             try { result = await cleanup.RemoveMarkerLinesAsync(stored, cts.Token); }
-            catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or IOException)
+            catch (Exception ex)   // contract 0018: whatever the clean-up throws, the removal goes on and names the line
             {
                 result = new(false, $"host not reachable ({ex.GetType().Name})");
             }

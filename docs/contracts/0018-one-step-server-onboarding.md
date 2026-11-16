@@ -821,3 +821,46 @@ tests exist and are listed under *Open invariants* until then.
 - Switching the existing `cloud_*` tools to the VM id (D11).
 - Any change to the mTLS layer, ghostunnel flags, the socket-proxy verb whitelist, auth middleware or OAuth whitelist.
 - Strict `StrictHostKeyChecking=yes` on all SSH paths (ADR-0002 option 3); this contract only pins during onboarding.
+
+## Amendment (implementation, 16 November 2026)
+
+**Status: awaiting maintainer acceptance.** Draft. What PR 2 built differently from the text above, or added to it.
+
+- a) `ICloudBootstrap.PrepareAsync` has an overload with `OnboardingOptions`, which carries `ConfirmVmName`. The
+  overload without options compares against no confirmed name.
+- b) `ServerConfig.SshHostKeyPinnedAtUtc` is nullable: null means a pin backfilled from `known_hosts`.
+- c) A `known_hosts` backfill is shown and kept in memory. It writes nothing to the record and raises no audit event.
+- d) Compositions `server.create → server.save` and `server.hostkey_replace → server.save`.
+- e) `server.create` is UI only until PR 3.
+- f) The `HostKey` step is skipped for TCP (mTLS) records. For SSH records, removing a bootstrap line checks the host
+  key first:
+  - An abandon verifies a known key (a recorded pin or a `known_hosts` line) or pins the first contact. It refuses
+    without the pins service, and on a different key.
+  - `server.remove` verifies a known key. Otherwise it sends no SSH command, names the dead line and goes on.
+- g) The audit path for U-41 (`server.hostkey_replace`) and its §7 row come in PR 2, because R13 needs a §7 row for the
+  new capability. M-50…M-52 stay in PR 3.
+- h) The tests as named in code. Tests not in the classes listed in the PR 2 test plan:
+  - `Resume_after_injection_before_pin_reuses_the_key` and
+    `Resume_after_injection_with_the_key_gone_is_refused_and_points_to_abandon` are in `HetznerRescueBootstrapTests`.
+  - `Cleanup_removes_every_bootstrap_line_of_the_server_and_no_other` is in `RescueCommandsTests`.
+  - `Vm_with_another_ip_is_refused` is in `HetznerRescueBootstrapTests`.
+  - `Unreadable_vm_refuses_without_raising_an_approval` and `A_readable_vm_raises_an_approval_naming_it` are in
+    `CloudBootstrapRuleTests`.
+  - `OnboardingSecretsSinkTests` (INV-51) and `CloudBindingResolutionTests` (INV-57) exist as named. Two related tests
+    stay where they are: `HetznerRescueBootstrapTests.Rescue_password_is_not_returned_or_logged` and
+    `OnboardingServiceStepTests.Tailscale_auth_key_reaches_the_host_only_through_the_secret_channel`.
+  - `ControlPlaneOnboardMcpTests` comes with PR 3.
+
+  Tests added after the PR 2 review:
+  - `HetznerRescueBootstrapTests`:
+    - `Failure_after_enable_rescue_with_a_failing_key_delete_still_disables_rescue_resets_and_drops_the_key`
+    - `Failure_after_enable_rescue_of_an_unlisted_kind_still_cleans_up`
+    - `Fingerprint_failure_drops_the_generated_key`
+    - `Failure_after_the_line_was_placed_reports_the_standing_key`
+    - `Not_fresh_server_is_refused`, extended with a `known_hosts` case
+  - `RescueCommandsTests.Nothing_after_the_host_keys_can_fail_the_injection`
+  - `OnboardingServiceStepTests.Abandon_over_ssh_checks_the_host_key_before_its_command`
+  - `ServerRemovalTests`:
+    - `Remove_of_an_ssh_host_without_a_verified_key_sends_no_command_and_names_the_dead_line`
+    - `Remove_goes_on_whatever_the_cleanup_throws`
+  - `ServersOnboardDialogTests.Onboard_after_an_injection_without_a_pin_resumes_the_rescue_bootstrap`

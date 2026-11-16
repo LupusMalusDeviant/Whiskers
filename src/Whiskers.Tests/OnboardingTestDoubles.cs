@@ -85,7 +85,11 @@ public sealed class FakeSshToolchain : ISshToolchain
         return Task.FromResult(LastScan);
     }
 
-    public Task<string> FingerprintAsync(string publicKey, CancellationToken ct) => Task.FromResult(FingerprintOf(publicKey));
+    /// <summary>When set, <c>FingerprintAsync</c> fails with it (a process that cannot start, a tool that answers nothing).</summary>
+    public Exception? FingerprintFails { get; set; }
+
+    public Task<string> FingerprintAsync(string publicKey, CancellationToken ct) =>
+        FingerprintFails is { } e ? Task.FromException<string>(e) : Task.FromResult(FingerprintOf(publicKey));
 
     /// <summary>Reads the real file (plain lines only, like <c>ssh-keygen -F</c> for unhashed entries).</summary>
     public Task<IReadOnlyList<string>> KnownHostsLookupAsync(string name, string knownHostsFile, CancellationToken ct)

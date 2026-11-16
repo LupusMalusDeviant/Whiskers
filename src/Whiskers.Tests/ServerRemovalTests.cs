@@ -44,6 +44,55 @@ public sealed class ServerRemovalTests : IDisposable
         return _store.Servers.GetServer(id)!;
     }
 
+    /// <summary>A host whose key Whiskers knows (a known_hosts line), so the removal may talk SSH to it after verifying.</summary>
+    private readonly AcceptingHostKeyPins _pins = new()
+    {
+        KnownHostsPin = new SshHostKeyPin("ssh-ed25519", "SHA256:known", SshHostKeySource.FirstContact, null, null),
+    };
+
+    private BootstrapCleanup Cleanup(IHostCommandExecutor exec) => new(exec, _pins);
+
+    /// <summary>Review r1 MEDIUM 2 (INV-63): the removal verifies the host key before its SSH command; with no pins
+    /// service, no pin or a different key it sends nothing, names the dead line and still removes the record and key.</summary>
+    [Theory]
+    [InlineData("no-service")]
+    [InlineData("no-pin")]
+    [InlineData("mismatch")]
+    public async Task Remove_of_an_ssh_host_without_a_verified_key_sends_no_command_and_names_the_dead_line(string kind)
+    {
+        var server = await StandingAsync();
+        var exec = new Executor((_, _) => Task.FromResult(new CommandResult { ExitCode = 0, Output = RescueCommands.Clean }));
+        var pins = new AcceptingHostKeyPins();
+        if (kind == "mismatch")
+        {
+            pins.KnownHostsPin = _pins.KnownHostsPin;
+            pins.VerifyFails = new SshHostKeyMismatchException("203.0.113.20", "ssh-ed25519", "SHA256:known", "SHA256:other");
+        }
+        using var scope = MutationScope.Begin("server.remove", "op-rm-pin");
+
+        var result = await ServerRemoval.RemoveWithReportAsync(_store.Servers, _store.Vault, server, null,
+            new BootstrapCleanup(exec, kind == "no-service" ? null : pins));
+
+        Assert.Empty(exec.Commands);
+        Assert.Equal(BootstrapCleanup.DeadLineWarning("SHA256:injected", "203.0.113.20"), result.StandingKeyWarning);
+        Assert.Null(_store.Servers.GetServer("web-new"));
+        Assert.False(Directory.EnumerateFiles(_store.Paths.SshKeysDir, HetznerRescueBootstrap.BootstrapKeyFileName("web-new") + "*").Any());
+    }
+
+    /// <summary>Review r1 LOW 6: whatever the clean-up throws, the removal goes on and names the dead line.</summary>
+    [Fact]
+    public async Task Remove_goes_on_whatever_the_cleanup_throws()
+    {
+        var server = await StandingAsync();
+        var (cleanup, script) = ScriptedProxy<IBootstrapCleanup>.Create();
+        script.On(nameof(IBootstrapCleanup.RemoveMarkerLinesAsync), _ => throw new System.Text.Json.JsonException("unexpected"));
+
+        var result = await ServerRemoval.RemoveWithReportAsync(_store.Servers, _store.Vault, server, null, cleanup);
+
+        Assert.Equal(BootstrapCleanup.DeadLineWarning("SHA256:injected", "203.0.113.20"), result.StandingKeyWarning);
+        Assert.Null(_store.Servers.GetServer("web-new"));
+    }
+
     private string KeyPath(string id) => Path.Combine(_store.Paths.SshKeysDir, HetznerRescueBootstrap.BootstrapKeyFileName(id));
 
     [Fact]
@@ -53,7 +102,7 @@ public sealed class ServerRemovalTests : IDisposable
         var exec = new Executor((_, _) => Task.FromResult(new CommandResult { ExitCode = 0, Output = RescueCommands.Clean }));
         using var scope = MutationScope.Begin("server.remove", "op-rm");
 
-        var result = await ServerRemoval.RemoveWithReportAsync(_store.Servers, _store.Vault, server, null, new BootstrapCleanup(exec));
+        var result = await ServerRemoval.RemoveWithReportAsync(_store.Servers, _store.Vault, server, null, Cleanup(exec));
 
         Assert.Equal([RescueCommands.RemoveMarkerLines("web-new")], exec.Commands);
         Assert.Null(result.StandingKeyWarning);
@@ -69,7 +118,7 @@ public sealed class ServerRemovalTests : IDisposable
         var exec = new Executor((_, _) => Task.FromResult(new CommandResult { ExitCode = 255, Error = "Connection refused" }));
         using var scope = MutationScope.Begin("server.remove", "op-rm2");
 
-        var result = await ServerRemoval.RemoveWithReportAsync(_store.Servers, _store.Vault, server, null, new BootstrapCleanup(exec));
+        var result = await ServerRemoval.RemoveWithReportAsync(_store.Servers, _store.Vault, server, null, Cleanup(exec));
 
         Assert.Equal(BootstrapCleanup.DeadLineWarning("SHA256:injected", "203.0.113.20"), result.StandingKeyWarning);
         Assert.Null(_store.Servers.GetServer("web-new"));
@@ -90,7 +139,7 @@ public sealed class ServerRemovalTests : IDisposable
         });
         Assert.Equal(TimeSpan.FromSeconds(30), BootstrapCleanup.Bound);
         // The bound is the cleanup's own: a token cancelled at once stands in for the 30 s elapsing.
-        var cleanup = new BootstrapCleanup(exec);
+        var cleanup = Cleanup(exec);
         var watch = Stopwatch.StartNew();
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
@@ -108,7 +157,7 @@ public sealed class ServerRemovalTests : IDisposable
             recordThere = _store.Servers.GetServer("web-new") is not null;
             return Task.FromResult(new CommandResult { ExitCode = 0, Output = RescueCommands.Clean });
         });
-        await ServerRemoval.RemoveWithReportAsync(_store.Servers, _store.Vault, server, null, new BootstrapCleanup(quick));
+        await ServerRemoval.RemoveWithReportAsync(_store.Servers, _store.Vault, server, null, Cleanup(quick));
         Assert.True(recordThere);
         Assert.Null(_store.Servers.GetServer("web-new"));
     }
@@ -120,7 +169,7 @@ public sealed class ServerRemovalTests : IDisposable
         var exec = new Executor((_, _) => Task.FromResult(new CommandResult { ExitCode = 0 }));
 
         var result = await ServerRemoval.RemoveWithReportAsync(_store.Servers, _store.Vault, _store.Servers.GetServer("plain")!, null,
-            new BootstrapCleanup(exec));
+            Cleanup(exec));
 
         Assert.Empty(exec.Commands);
         Assert.Null(result.StandingKeyWarning);

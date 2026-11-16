@@ -71,7 +71,7 @@ public static class RescueCommands
             "cat \"$mp\"/etc/ssh/ssh_host_*_key.pub",
             $"echo {HostKeysEnd}",
             "sync",
-            "umount \"$mp\"",
+            "umount \"$mp\" || true",   // the line is on the disk already (synced): a failing unmount must not fail the run
         ]);
     }
 

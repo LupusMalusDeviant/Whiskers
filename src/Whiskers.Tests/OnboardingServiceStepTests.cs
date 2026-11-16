@@ -18,11 +18,11 @@ namespace Whiskers.Tests;
 /// </summary>
 public sealed class OnboardingServiceStepTests
 {
-    private const string Id = "neuhof";
+    internal const string Id = "neuhof";
     private static readonly string Removal = RescueCommands.RemoveMarkerLines(Id);
     private static readonly CommandResult Clean = new() { ExitCode = 0, Output = RescueCommands.Clean + "\n" };
 
-    private sealed class Lines : IProgress<OnboardingProgress>
+    internal sealed class Lines : IProgress<OnboardingProgress>
     {
         public List<OnboardingProgress> All { get; } = [];
         public void Report(OnboardingProgress value) => All.Add(value);
@@ -76,7 +76,7 @@ public sealed class OnboardingServiceStepTests
         }
     }
 
-    private static OnboardingService Service(PerHostCredentialTests.OnboardingExecutor exec, IServerConfigService servers,
+    internal static OnboardingService Service(PerHostCredentialTests.OnboardingExecutor exec, IServerConfigService servers,
         CredentialWorld w, ISshHostKeyPins pins, ICloudBootstrap? bootstrap = null, IVaultService? vault = null,
         string? authKeyRef = null) =>
         new(exec, servers, PerHostCredentialTests.ReachableDocker.Create(),
@@ -88,7 +88,7 @@ public sealed class OnboardingServiceStepTests
             VerifyDelay = TimeSpan.Zero,
         };
 
-    private static Task<OnboardingResult> RunAsync(OnboardingService service, CredentialWorld w, Lines lines,
+    internal static Task<OnboardingResult> RunAsync(OnboardingService service, CredentialWorld w, Lines lines,
         BootstrapMethod bootstrap = BootstrapMethod.None, bool abandon = false, bool mayReplace = false) =>
         service.OnboardServerAsync(Id, mayReplace, PerHostCredentialTests.Decided(w, Id),
             new OnboardingOptions(bootstrap, AbandonBootstrap: abandon), lines, default);
@@ -309,6 +309,53 @@ public sealed class OnboardingServiceStepTests
         Assert.Equal([OnboardingStep.BootstrapCleanup], result.CompletedSteps);
         Assert.Equal([Removal], exec.Scripts);
         Assert.Null(w.Server(Id).BootstrapKeyInjectedFingerprint);
+    }
+
+    /// <summary>Review r1 MEDIUM 2 (INV-63): an abandon over SSH verifies a known host key or pins the first contact
+    /// before its removal command; a different key or no pins service sends no command at all.</summary>
+    [Theory]
+    [InlineData("known")]
+    [InlineData("first")]
+    [InlineData("mismatch")]
+    [InlineData("no-service")]
+    public async Task Abandon_over_ssh_checks_the_host_key_before_its_command(string kind)
+    {
+        using var w = new CredentialWorld(true, (Id, "100.64.0.20"));
+        var ssh = await PerHostCredentialTests.SshRecordAsync(w, Id);
+        ssh.SshKeyFileName = HetznerRescueBootstrap.BootstrapKeyFileName(Id);
+        await w.Servers.UpdateServerAsync(ssh);
+        w.Servers.KeyPath = s => s.SshKeyFileName is null ? null : "/data/ssh-keys/" + s.SshKeyFileName;   // the sealed bootstrap key is there
+        await InjectedAsync(w);
+        var exec = new PerHostCredentialTests.OnboardingExecutor(w.Fleet, "100.64.0.20") { Answer = c => c == Removal ? Clean : null };
+        var pins = new AcceptingHostKeyPins();
+        var commandsAtCheck = -1;
+        pins.BeforePin = () => commandsAtCheck = exec.Scripts.Count;
+        if (kind is "known" or "mismatch")
+            pins.KnownHostsPin = new SshHostKeyPin("ssh-ed25519", "SHA256:known", SshHostKeySource.FirstContact, null, null);
+        if (kind == "mismatch")
+            pins.VerifyFails = new SshHostKeyMismatchException("100.64.0.20", "ssh-ed25519", "SHA256:known", "SHA256:other");
+
+        var result = await RunAsync(Service(exec, w.Servers, w, kind == "no-service" ? null! : pins), w, new Lines(), abandon: true);
+
+        switch (kind)
+        {
+            case "known":
+                Assert.True(result.Success, result.Error);
+                Assert.Equal(["verify:" + Id], pins.Calls);
+                Assert.Equal([Removal], exec.Scripts);
+                break;
+            case "first":
+                Assert.True(result.Success, result.Error);
+                Assert.Equal(["pin:" + Id], pins.Calls);
+                Assert.Equal(0, commandsAtCheck);
+                Assert.Equal([Removal], exec.Scripts);
+                break;
+            default:
+                Assert.False(result.Success);
+                Assert.Empty(exec.Scripts);
+                Assert.Equal("SHA256:injected", w.Server(Id).BootstrapKeyInjectedFingerprint);   // still reported
+                break;
+        }
     }
 
     [Fact]

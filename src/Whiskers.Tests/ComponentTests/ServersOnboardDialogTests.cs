@@ -162,6 +162,31 @@ public class ServersOnboardDialogTests : BunitContext, IAsyncLifetime
         page.WaitForAssertion(() => Assert.True(Get<OnboardingOptions>(page, "_lastOnboardOptions").AbandonBootstrap), TimeSpan.FromSeconds(10));
     }
 
+    /// <summary>Review r1 LOW 4: after an injection without a pin, a new "Onboard" (the row button too) resumes the rescue
+    /// bootstrap — it never runs a plain first contact with the stored bootstrap key.</summary>
+    [Fact]
+    public async Task Onboard_after_an_injection_without_a_pin_resumes_the_rescue_bootstrap()
+    {
+        await FreshHetznerAsync();
+        await _servers.SaveSshKeyAsync("web-new", Whiskers.Services.Onboarding.HetznerRescueBootstrap.BootstrapKeyFileName("web-new"),
+            System.Text.Encoding.UTF8.GetBytes(SealedKeyFilesTests.NewPem()));
+        var injected = _servers.GetServer("web-new")!.Clone();
+        injected.BootstrapKeyGenerated = true;
+        injected.BootstrapKeyInjectedFingerprint = "SHA256:injected";
+        await _servers.UpdateServerAsync(injected);
+        var server = _servers.GetServer("web-new")!;
+        Assert.NotNull(server.SshKeyFileName);
+        var (page, dialog) = Open();
+
+        await InvokeAsync(page, "StartOnboarding", server, true);   // the row button skips the plan otherwise
+
+        Assert.DoesNotContain(nameof(IOnboardingService.OnboardServerAsync), _onboarding.Calls);
+        dialog.WaitForAssertion(() => Assert.False(Start(dialog).HasAttribute("disabled")), TimeSpan.FromSeconds(10));
+        await Start(dialog).ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => Assert.Contains(nameof(IOnboardingService.OnboardServerAsync), _onboarding.Calls), TimeSpan.FromSeconds(10));
+        Assert.Equal(BootstrapMethod.HetznerRescueKey, Get<OnboardingOptions>(page, "_lastOnboardOptions").Bootstrap);
+    }
+
     private static T Get<T>(IRenderedComponent<Servers> page, string field) =>
         (T)typeof(Servers).GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(page.Instance)!;
 

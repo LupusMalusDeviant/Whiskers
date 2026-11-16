@@ -51,6 +51,19 @@ public sealed class RescueCommandsTests
         Assert.Empty(RescueCommands.HostKeysOf(ed));
     }
 
+    /// <summary>Review r1 LOW 5: under <c>set -eu</c>, nothing after the read-back of the host keys may fail the script —
+    /// the line is on the disk by then.</summary>
+    [Fact]
+    public void Nothing_after_the_host_keys_can_fail_the_injection()
+    {
+        var lines = RescueCommands.InjectAndReadHostKeys($"ssh-ed25519 {Blob} {Marker}", Marker).Split('\n');
+        var after = lines.SkipWhile(l => !l.Contains(RescueCommands.HostKeysEnd, StringComparison.Ordinal)).Skip(1).ToList();
+
+        Assert.Contains(after, l => l.StartsWith("umount ", StringComparison.Ordinal));
+        Assert.All(after.Where(l => l.StartsWith("umount ", StringComparison.Ordinal)),
+            l => Assert.EndsWith("|| true", l, StringComparison.Ordinal));
+    }
+
     [Fact]
     public void The_marker_is_the_server_prefix_and_eight_hex_characters()
     {

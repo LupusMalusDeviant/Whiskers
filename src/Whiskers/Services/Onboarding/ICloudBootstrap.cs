@@ -1,3 +1,4 @@
+using Whiskers.Models;
 using Whiskers.Services.Mutations;
 using Whiskers.Services.Server;
 
@@ -49,8 +50,13 @@ public sealed class BootstrapCleanup : IBootstrapCleanup
     public static readonly TimeSpan Bound = TimeSpan.FromSeconds(30);
 
     private readonly IHostCommandExecutor _exec;
+    private readonly ISshHostKeyPins? _pins;
 
-    public BootstrapCleanup(IHostCommandExecutor exec) => _exec = exec;
+    public BootstrapCleanup(IHostCommandExecutor exec, ISshHostKeyPins? pins = null)
+    {
+        _exec = exec;
+        _pins = pins;
+    }
 
     public async Task<BootstrapCleanupResult> RemoveMarkerLinesAsync(Models.ServerConfig server, CancellationToken ct)
     {
@@ -59,7 +65,21 @@ public sealed class BootstrapCleanup : IBootstrapCleanup
         cts.CancelAfter(Bound);
         try
         {
+            // INV-63: an SSH record is reached only against a known host key. Without the pins service, or without a pin
+            // or known_hosts line to verify against, no SSH command is sent (accept-new could trust a rescue system's key):
+            // the caller reports the dead line and the removal goes on.
+            if (server.ConnectionType == ConnectionType.SSH)
+            {
+                if (_pins is null) return new BootstrapCleanupResult(false, "no host-key service; no SSH command sent");
+                if (await _pins.BackfillAsync(server, cts.Token) is null)
+                    return new BootstrapCleanupResult(false, "no pinned host key to verify against; no SSH command sent");
+                await _pins.VerifyAsync(server, cts.Token);
+            }
             return Judge(await _exec.ExecuteAsync(server.Id, RescueCommands.RemoveMarkerLines(server.Id), Bound, cts.Token));
+        }
+        catch (SshHostKeyMismatchException ex)
+        {
+            return new BootstrapCleanupResult(false, ex.Message);
         }
         catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or IOException)
         {
