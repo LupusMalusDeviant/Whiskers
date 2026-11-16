@@ -333,8 +333,12 @@ public interface IHandoverLedger
     int Prune(TimeSpan maxAge, DateTime nowUtc);
 }
 
-public sealed record HandoverEntry(string HandoverOperationId, string FromOwnerId, string ToOwnerId,
-    string HandedOverBy, DateTime HandedOverAtUtc, string? ResumedBy, string? ResumeOperationId);
+/// <summary><c>Handover</c>: written by <see cref="IAutomationHandover"/>. <c>Hold</c>: written by the
+/// <c>account.create</c> hold (D11 c); there From == To and nobody received anything.</summary>
+public enum HandoverEntryKind { Handover, Hold }
+
+public sealed record HandoverEntry(HandoverEntryKind Kind, string HandoverOperationId, string FromOwnerId,
+    string ToOwnerId, string HandedOverBy, DateTime HandedOverAtUtc, string? ResumedBy, string? ResumeOperationId);
 ```
 
 - Stored as `automation-handovers.json` in the data directory, written atomically and flushed (`DurableFile`, R1-35).
@@ -350,7 +354,9 @@ public sealed record HandoverEntry(string HandoverOperationId, string FromOwnerI
 - **First run:**
   - Each runner (task executor, webhook delivery, Git deploy, AI trigger, endpoint-check monitor, AutoPatch,
     AutoUpdate, VPN bring-up) calls `PeekFirstRun` before its gateway call. On a hit it adds the note
-    `handover = { operationId, from, to, handedOverBy, resumedBy, resumeOperationId }` to the run's event.
+    `handover = { operationId, from, to, handedOverBy, resumedBy, resumeOperationId }` to the run's event for a
+    `Handover` entry. For a `Hold` entry it adds `hold = { operationId, owner, heldBy, resumedBy, resumeOperationId }`
+    instead. A hold never claims a handover.
   - The runner calls `ConsumeAfterExecuted` only when the outcome is Executed. A Denied run (kill switch, level, policy,
     `AutomationHeld`) keeps the entry, so the first run that really executes names the handover.
 - **Pruning:**
@@ -844,15 +850,20 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
       marked `[MutatingOperation("automation.hold")]`. It switches the item off (Git app: `HeldReason`; fleet feature:
       blocked) only while its owner is still `ownerId`, and leaves the owner as it is.
     - `IAutomationHold.HoldAllAsync(string ownerId, CancellationToken ct)` calls them for every item recorded on
-      `user:<email>`. Each held item is recorded in the ledger (as a handover with `from == to`, acting Admin = the
-      creator), and the list goes into the `account.create` event.
+      `user:<email>`. Each held item is recorded in the ledger as an entry of kind `Hold` (`from == to`, acting Admin =
+      the creator), and the list goes into the `account.create` event.
+    - **Only for an unusable address.** `HoldAllAsync` runs only when `IOwnerAccounts.StateOf(email)`, read before the
+      create, is `Deleted` or `Unverified`. An address that is `Present` (for example an Active federated user who now
+      also gets a local account) keeps its working automation; nothing is held. If the state cannot be read, the result
+      is `Unverified` (`OwnerAccounts.cs:85`), so the items are held (fail closed).
     - The capability `automation.hold` is nested only: `MutationCompositions` gets
       `("account.create", ["config.roles", "automation.hold"])` (today `["config.roles"]`, `MutationCompositions.cs:61`).
   - **Order.** `OwnerAccounts.StateOf` reads the Identity table directly (`OwnerAccounts.cs:89`). So the address
     becomes `Present` as soon as `_users.CreateAsync` has saved the row (`LocalAccountService.cs:157`), even before
-    `RememberLocalAccounts` (`:199`). `HoldAllAsync` therefore runs inside `CreateAsync` under `AdminGate`, **before
-    `:157`**, and so also before `:199`. If the hold fails, the account is not created: the decision fails before any
-    account row exists.
+    `RememberLocalAccounts` (`:199`). `HoldAllAsync` therefore runs inside `CreateAsync` under `AdminGate`, **after the
+    refusal checks** (caller's authority, account already exists, role conflict, `LocalAccountService.cs:149-154`) and
+    **before `:157`**, and so also before `:199`. A refused create holds nothing. If the hold fails, the account is not
+    created: the decision fails before any account row exists.
   - **Rollback.** If `account.create` fails after the hold (role write or whitelist entry, `LocalAccountService.cs:176-214`), the account is
     deleted again but the items **stay held**. This is safe: they are off, owned by an address that is `Deleted` again
     (as before), and can be resumed or handed over through the normal paths. Nothing runs. The `account.create`
@@ -860,6 +871,8 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
   - Tests (only with c):
     - `Creating_an_account_for_an_address_with_owned_items_holds_them_before_the_identity_row_exists`
     - `A_hold_failure_creates_no_account`
+    - `Creating_a_local_account_for_an_active_federated_user_holds_nothing`
+    - `A_refused_account_create_holds_nothing`
     - `A_rolled_back_account_create_leaves_the_items_held_and_nothing_runs`
     - `HoldAsync_is_called_only_inside_account_create` (architecture)
     - `A_held_item_resumed_after_re_creation_keeps_the_re_created_owner_and_names_the_resumer`
