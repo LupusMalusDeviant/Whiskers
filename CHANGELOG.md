@@ -7,7 +7,9 @@ All notable changes to Whiskers are documented here. The format follows
 ## [Unreleased]
 
 v1.0.0 and v1.0.1 were published on 2026-11-14/16 and withdrawn on 2026-11-16; their content ships with the next
-1.0.0. This entry is that release.
+1.0.0. This entry is that release. Anyone who installed the withdrawn v1.0.0 or v1.0.1 updates to the new 1.0.0:
+from v1.0.0, the last six items of "Upgrading from 0.15.0" apply (OAuth whitelist to Content Security Policy); from
+v1.0.1, nothing further.
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in
 `docs/v1/SECURITY_INVARIANTS.md` is proven by named tests, which CI requires one by one. The exception is INV-58, which
@@ -146,7 +148,7 @@ Fixes from the full review of `main` before the tag (#190, #191, #192, #193):
   - `instruct_agent` ends with the MCP request that started it and after 10 minutes at the latest, answering with
     what it had and saying that the deadline cut it short.
 
-Earlier changes in 1.0.0:
+Earlier changes:
 
 - **Fix: re-onboarding a host needs the control-plane approval (INV-59, #187).** Onboarding issues mTLS material,
   writes the proxy configuration and starts ghostunnel. For a host that already holds mTLS state (TLS client material
