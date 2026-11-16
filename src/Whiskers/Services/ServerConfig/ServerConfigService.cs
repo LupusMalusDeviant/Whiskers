@@ -357,6 +357,9 @@ public class ServerConfigService : IServerConfigService, IInitializable
             if (server != null)
             {
                 server.SshKeyFileName = fileName;
+                // Contract 0018 A4: an uploaded key replaces a transient password held in memory; the record never
+                // carries both, so the executor's precedence (password first) cannot pick a stale password.
+                server.SshPassword = null;
                 await UpdateServerAsync(server);
             }
         }

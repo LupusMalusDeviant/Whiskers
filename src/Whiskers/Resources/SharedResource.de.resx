@@ -2483,6 +2483,15 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_Error_KubeconfigRefused" xml:space="preserve">
     <value>Dieses kubeconfig wird abgelehnt: {0}. Whiskers startet keine Credential-Plugins (exec, auth-provider) und liest keine Dateien, die ein kubeconfig nennt. Bitte ein in sich geschlossenes kubeconfig mit eingebettetem Token oder client-certificate-data/client-key-data einfügen, z. B. für einen ServiceAccount.</value>
   </data>
+  <data name="Servers_Error_SshHostRequired" xml:space="preserve">
+    <value>Ein SSH-Server braucht einen Host (Hostname oder IP-Adresse).</value>
+  </data>
+  <data name="Servers_Error_SshUserRequired" xml:space="preserve">
+    <value>Ein SSH-Server braucht einen Benutzer.</value>
+  </data>
+  <data name="Servers_Field_SshPassword_HelperKeep" xml:space="preserve">
+    <value>Für diesen Server ist ein Passwort im Speicher hinterlegt; es wird vor dem Schlüssel verwendet. Feld leer lassen, um es zu behalten, oder ausschalten, um den Schlüssel zu nutzen.</value>
+  </data>
   <data name="Servers_Error_SshHostInvalid" xml:space="preserve">
     <value>Der SSH-Host muss ein Hostname oder eine IP-Adresse sein (Buchstaben, Ziffern, Punkte und innere Bindestriche; er darf nicht mit „-“ beginnen).</value>
   </data>

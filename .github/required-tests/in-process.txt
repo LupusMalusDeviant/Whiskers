@@ -55,6 +55,12 @@
 # elements whose first one is no option (review of 1.0.0, area Fleet).
 30 Whiskers.Tests.DatabaseServiceOutputParsingTests
 
+# Server form and onboarding retry (contract 0018 part A): an uploaded key is what the record names, an SSH server needs
+# host and user, a type switch loses nothing, a key replaces a held password, every run names its credential (never its
+# value). The A6 test (a success clears the password by a store write) is in the generated block.
+9 Whiskers.Tests.ComponentTests.ServersFormTests
+2 Whiskers.Tests.OnboardingRetryTests
+
 # BEGIN release-gate (generated)
 # Rendered by ReleaseGateTests from docs/v1/SECURITY_INVARIANTS.md, docs/v1/RELEASE_GATE.md and docs/v1/CLAIMS.md
 # (contract 0008, R8; contract 0011): one entry per test method named by a ✅ invariant, an accepted exception or a
@@ -1504,6 +1510,7 @@
 4 Whiskers.Tests.PerHostCredentialTests.A_server_id_that_cannot_be_a_directory_name_is_refused
 1 Whiskers.Tests.PerHostCredentialTests.A_shared_credential_that_gets_no_tls_alert_is_not_proven_refused_and_nothing_is_confirmed
 1 Whiskers.Tests.PerHostCredentialTests.A_slot_a_server_record_references_is_never_deleted
+1 Whiskers.Tests.PerHostCredentialTests.A_successful_onboarding_clears_the_password_by_a_store_write
 1 Whiskers.Tests.PerHostCredentialTests.A_tailnet_answer_with_an_ipv6_zone_id_is_refused_and_never_reaches_a_command
 1 Whiskers.Tests.PerHostCredentialTests.After_migration_a_hosts_credential_is_refused_at_every_other_host_and_the_shared_one_everywhere
 1 Whiskers.Tests.PerHostCredentialTests.After_migration_renewal_rotation_and_onboarding_the_proxy_certificate_is_still_checked
