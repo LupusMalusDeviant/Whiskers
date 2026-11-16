@@ -41,11 +41,11 @@ helm install whiskers deploy/helm/whiskers --set vault.existingSecret=whiskers-v
 Open the UI (`kubectl port-forward svc/whiskers 8080:8080` → http://localhost:8080) — the
 first-run setup wizard creates the admin account; it asks for the one-time setup token
 (`kubectl exec deploy/whiskers -c whiskers -- cat /app/data/setup-token.txt`). For unattended installs set
-`auth.adminEmail` + `auth.adminPasswordSecret` (Secret key `adminPassword`).
+`auth.adminEmail` + `auth.adminPasswordSecret` (Secret key `adminPassword`); `auth.adminEmail` alone seeds that address as an Admin (OIDC-only installs).
 
 The chart **refuses to render** (fails closed) instead of deploying a pod that cannot work: `database.provider`
 other than `sqlite`/`postgres`, `postgres` without `database.existingSecret` or `database.connectionString`, an
-unpinned sidecar image (no tag/digest, or `latest`), `image.tag=latest`, and an `extraEnv` entry that would change
+unpinned sidecar image (no tag/digest, or `latest`), `image.tag=latest`, `vault.newKeySecret` without a current key, and an `extraEnv` entry that would change
 the VPN mode.
 
 ## Upgrade
@@ -71,6 +71,7 @@ fresh key); from then on it keeps its identity. If you overrode `tailscaleSideca
 | `persistence.enabled` / `size` | `true` / `2Gi` | `/app/data` PVC: SQLite DB, JSON stores, keys, certs. `existingClaim` supported. |
 | `database.provider` | `sqlite` | `postgres` needs `database.existingSecret` (key `connectionString`, preferred) or inline `connectionString` — without either the chart refuses to render. Strategy stays Recreate either way (JSON stores remain on the PVC until changeme C7). |
 | `vault.existingSecret` / `key` | unset | Secret key `vaultKey` → `VAULT_KEY`. Strongly recommended — without it the vault, kubeconfig-based K8s servers and encrypted backups are off. |
+| `vault.newKeySecret` | unset | Only for a key rotation ([`docs/operations/vault-key-rotation.md`](../../../docs/operations/vault-key-rotation.md)): a Secret with key `vaultKey` holding the new key → `VAULT_KEY_NEW`. Refused without `vault.existingSecret` or `vault.key`. |
 | `ingress.enabled` | `false` | See WebSockets below. |
 | `tailscaleSidecar.enabled` | `false` | Userspace tailscaled (no NET_ADMIN / /dev/net/tun) for outbound mesh access; `authKeySecret` key `authKey`. The key is mounted as a file (`/run/secrets/tailscale/authKey`, mode 0440, group 10001) and handed over as `TS_AUTHKEY=file:<path>`: the Tailscale image passes `TS_AUTHKEY` on to `tailscale up --authkey=…`, so a literal value would be on that command line — with `file:` only the path is. |
 | `tailscaleSidecar.image` | `tailscale/tailscale:v1.104.4@sha256:…` | Pinned (tag + index digest). No tag/digest or `latest` is refused. |
@@ -78,7 +79,7 @@ fresh key); from then on it keeps its identity. If you overrode `tailscaleSideca
 | VPN mode (fixed) | `VPN_PROVIDER=none`, `Vpn__Provider=none` | Set on every render (R1-46). The pod is non-root with a read-only root file system, where the image's legacy `tailscaled` bring-up cannot work; the in-app providers (`tailscale`/`netbird`) are not supported in the chart. Mesh access = the sidecar. `extraEnv` cannot override these names (also `DOTNET_`/`ASPNETCORE_`-prefixed, in any letter case and spelled with `:`, e.g. `Vpn:Provider`), `TAILSCALE_AUTHKEY` or `VPN_FORCE_LEGACY_TAILSCALE`. |
 | `localDocker.enabled` | `false` | Mounts the node's Docker socket. Root-equivalent on that node + node pinning — almost never what you want. |
 | `trustedProxyCidrs` | `[]` | Since R1-50 Whiskers trusts `X-Forwarded-*` from loopback only. **Behind an ingress, list the ingress controller's pod CIDR or addresses** (as narrowly as possible: anything in a listed range can claim any client address); without it every visitor has the controller's address, HTTPS is seen as HTTP (session cookie without `Secure`, Google/OIDC callback built with `http://`) and the login rate limit counts all visitors as one. `NOTES.txt` warns when `ingress.enabled` is set and the list is empty. An entry that is not a canonical CIDR or address stops the start (the message names the reason, e.g. host bits set). |
-| `auth.adminEmail` / `adminPasswordSecret` | unset | Unattended admin seed (`WHISKERS_ADMIN_EMAIL` + password file mount). |
+| `auth.adminEmail` / `adminPasswordSecret` | unset | `adminEmail` alone → `WHISKERS_ADMIN_EMAIL` (seeded as an Admin on first run, e.g. OIDC-only); with `adminPasswordSecret` also the password file mount for an unattended local login. |
 
 ## Uninstall
 

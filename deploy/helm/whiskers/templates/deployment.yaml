@@ -78,9 +78,21 @@ spec:
                   name: {{ .Values.vault.existingSecret | default (printf "%s-vault" (include "whiskers.fullname" .)) }}
                   key: vaultKey
             {{- end }}
-            {{- if and .Values.auth.adminEmail .Values.auth.adminPasswordSecret }}
+            {{- if .Values.vault.newKeySecret }}
+            # A VAULT_KEY rotation (contract 0015, docs/operations/vault-key-rotation.md): the new key, read like
+            # VAULT_KEY from a Secret key "vaultKey", so both reach Whiskers byte for byte the same way.
+            - name: VAULT_KEY_NEW
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.vault.newKeySecret }}
+                  key: vaultKey
+            {{- end }}
+            {{- if .Values.auth.adminEmail }}
+            # Seeded as an Admin on first run, also without a password (OIDC-only installs).
             - name: WHISKERS_ADMIN_EMAIL
               value: {{ .Values.auth.adminEmail | quote }}
+            {{- end }}
+            {{- if and .Values.auth.adminEmail .Values.auth.adminPasswordSecret }}
             - name: WHISKERS_ADMIN_PASSWORD_FILE
               value: /run/secrets/whiskers-admin/adminPassword
             {{- end }}

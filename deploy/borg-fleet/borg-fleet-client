@@ -113,12 +113,21 @@ EOF
 
 # --- backup ---------------------------------------------------------------------------------
 
+# True when the container holds a PostgreSQL server: the "postgres" server binary on the PATH or in Debian's versioned
+# directory, or a running "postgres" process. pg_dumpall alone is only the client tools: Whiskers' own image carries
+# them for its self-backup, and dumping such a container failed every night (a "warning" run).
+PG_SERVER_CHECK='command -v postgres >/dev/null 2>&1 && exit 0
+for b in /usr/lib/postgresql/*/bin/postgres; do [ -x "$b" ] && exit 0; done
+for p in /proc/[0-9]*/comm; do [ "$(cat "$p" 2>/dev/null)" = postgres ] && exit 0; done
+exit 1'
+
 db_kind() {  # prints gitlab|postgres|mysql|"" for a running container
     local env; env=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null) || return 0
     if docker exec "$1" sh -c 'command -v gitlab-ctl' >/dev/null 2>&1; then echo gitlab
     elif grep -qE '^(POSTGRES_PASSWORD|POSTGRES_USER|PGDATA)=' <<<"$env" \
-       || docker exec "$1" sh -c 'command -v pg_dumpall' >/dev/null 2>&1; then echo postgres
+       || docker exec "$1" sh -c "$PG_SERVER_CHECK" >/dev/null 2>&1; then echo postgres
     elif grep -qE '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD|MYSQL_DATABASE|MARIADB_DATABASE)=' <<<"$env"; then echo mysql
+    elif docker exec "$1" sh -c 'command -v pg_dumpall' >/dev/null 2>&1; then echo pgclient
     fi
 }
 
@@ -142,12 +151,14 @@ dump_databases() {
             docker exec "$c" sh -c 'export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}"; D=$(command -v mariadb-dump || command -v mysqldump);
                 exec "$D" --all-databases --single-transaction --routines --events -uroot' \
               | gzip -6 > "$DUMPDIR/db.new/$c.mysqldump.sql.gz" || { log "WARN: dump of $c failed"; rc=1; } ;;
+          pgclient)  # client tools only (e.g. Whiskers itself): nothing to dump here, said by name
+            log "WARN: $c has PostgreSQL client tools (pg_dumpall) but no PostgreSQL server; not dumped" ;;
         esac
         # Remember the live data dirs so borg skips them (dumps instead of hot copies).
         if [ "$kind" = gitlab ]; then
             docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/opt/gitlab"}}{{println .Source}}{{end}}{{end}}' "$c" \
               | grep -v '^$' | sed 's|$|/postgresql/data|' >> "$DUMPDIR/db.new/.live-datadirs" || true
-        elif [ -n "$kind" ]; then
+        elif [ "$kind" = postgres ] || [ "$kind" = mysql ]; then
             docker inspect -f '{{range .Mounts}}{{if or (eq .Destination "/var/lib/postgresql/data") (eq .Destination "/var/lib/postgresql") (eq .Destination "/var/lib/mysql")}}{{println .Source}}{{end}}{{end}}' "$c" \
               | grep -v '^$' >> "$DUMPDIR/db.new/.live-datadirs" || true
         fi
