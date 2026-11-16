@@ -86,7 +86,7 @@ The approval subject for the UI:
 - `UiMutationRunner.RunCoreAsync` turns every non-executed outcome into `MutationRefusedException`
   (`UiMutationRunner.cs:157-175`). The exception carries status, operation id and matched rules, but **not the approval
   id** (`:54-62`). The id is only inside the localized text.
-- 98 `catch (MutationRefusedException …)` sites in `Components/` show the text as a snackbar or as a log line. Example:
+- 93 `catch (MutationRefusedException …)` sites in `Components/` (counted at `a335de85`) show the text as a snackbar or as a log line. Example:
   the onboarding window writes `⛔ {message}` into its log (`Servers.razor:991-994`).
 
 ### What the audit records
@@ -103,7 +103,8 @@ The approval subject for the UI:
 2. If they may decide it (same rules as the Approvals page), they approve with **a separate, explicit button**. The
    action then continues as the **same operation**, uses the approval once, and reports its result in the dialog.
 3. If they may not (second approver required), the dialog says so, and they can wait in the dialog or close it.
-4. Closing the dialog leaves the approval pending on the Approvals page. Nothing ever runs after the dialog is gone.
+4. Closing the dialog leaves the approval pending on the Approvals page. Nothing ever runs by itself after the dialog
+   is gone.
 5. The audit tells "approved in the dialog" from "approved on the page" and "approved in the chat".
 
 ## Non-goals
@@ -175,7 +176,10 @@ public interface IInlineApprovalPrompt
     Task<InlineApprovalResult> AskAsync(InlineApprovalRequest request, CancellationToken ct);
 }
 
-public sealed record InlineApprovalRequest(string ApprovalId, string OperationId, string CapabilityId);
+/// <param name="RequesterPayloads">The payload arguments of the runner's own in-memory request (withheld from the stored
+/// card), shown to the requester only; never persisted or logged.</param>
+public sealed record InlineApprovalRequest(string ApprovalId, string OperationId, string CapabilityId,
+    IReadOnlyDictionary<string, System.Text.Json.JsonElement>? RequesterPayloads = null);
 
 public enum InlineApprovalOutcome
 {
@@ -227,8 +231,14 @@ test recognises.
    (R1-26), the same capability and the same arguments. Call `ExecuteAsync` once more with the same lambda. The gateway
    continues the original operation id through its existing approve-then-retry path (`MutationGateway.cs:430-451`).
    The outcome is handled by the same `switch` as step 1.
-4. If step 3 returns `PendingApproval` again with **another** approval id, the call drifted (D4). Show that one prompt
-   once more, marked "changed since you approved". A third `PendingApproval` is thrown as a refusal; there is no loop.
+4. If step 3 returns `PendingApproval` again with **another** approval id, the runner reads the **first** approval from
+   the store again and tells two cases apart:
+   - **Not consumed** (`ConsumedAt` is null): the binding changed, the call drifted (D4). Show the new approval's prompt
+     once more, marked "changed since you approved". A third `PendingApproval` is thrown as a refusal; there is no loop.
+   - **Consumed** (`ConsumedAt` set: another tab, a repeated click or another continuation used the grant first): no
+     second prompt. Throw `MutationRefusedException(Status = PendingApproval, ApprovalId = new id)` with the text
+     "Your approval was already used at {ConsumedAt} (operation {CorrelationId}); nothing ran here. The new approval
+     {id} is pending on the Approvals page." Nothing drifted, so the drift text is never shown in this case.
 5. `Rejected`, `LeftPending`, `Expired`: throw `MutationRefusedException(Status = PendingApproval or Denied,
    ApprovalId)` with a localized text ("left on the Approvals page", "rejected by {0}", "expired"). The page's existing
    `catch` shows it as today.
@@ -244,6 +254,8 @@ test recognises.
    - the reason (redacted, payloads withheld);
    - level Admin and the matched rule;
    - the arguments with payloads withheld;
+   - in a separate block, the requester's own payload input (for example the query of `db.query`), see "Payloads for
+     the requester" below;
    - the approval id and the time left until it expires;
    - for a self-decision, the line "You are approving your own request. This is recorded."
 3. Buttons: **Approve and run**, **Reject**, **Close (leave pending)**.
@@ -255,7 +267,24 @@ test recognises.
    - When another Admin rejects, it shows "Rejected by {0}".
 5. After "Approve and run" the dialog records the decision with `ApprovalChannel.Dialog`. It closes only when the
    decision is `Decided`. Any other result is shown in the dialog and nothing runs.
-6. The action continues. Its progress and result appear where they appear today (the onboarding log, a snackbar).
+6. The action continues **within the same runner call, directly after the decision** (runner step 3). Its progress and
+   result appear where they appear today (the onboarding log, a snackbar).
+   - If the circuit drops after the decision and before the runner's `ExecuteAsync` (step 3), nothing runs: the call
+     is cancelled with the circuit. The approval stays **approved and unused**, an open grant for its normal 10 minutes
+     (`ApprovalStore.cs:78`), and then lapses (INV-32). No one runs it by itself.
+   - If the same person repeats the identical click within those 10 minutes, the gateway finds the open approval with
+     the same binding (`IApprovalGate.OpenOperationOf`, `MutationGateway.cs:438`, `ApprovalGate.cs:211-215`), takes
+     over its operation id (R1-18, `MutationGateway.cs:430-451`) and uses the grant once (INV-35). A second repeat
+     finds no open approval and raises a new one.
+
+**Payloads for the requester (wave 2, `db.query` and other payload arguments).** The stored card withholds payloads
+for UI calls (`WithholdPayloads`, `MutationGateway.cs:997`; `ApprovalGate.cs:231-233`), so it cannot show the query.
+The dialog shows it anyway, to the requester only, in a separate block "Your input (not stored with the approval)":
+the runner passes the payload arguments of its own in-memory request to the prompt. The runner opens the prompt only
+for the person who is the approval's first requester (step 2), i.e. the person who typed it. What runs is still bound
+by the arguments hash (INV-30), so the text shown is the text approved. It is never written to the approval row, the
+audit, a notification or a log beyond what exists today; a second Admin deciding on the Approvals page sees the card
+with payloads withheld, as today.
 
 ### Configuration
 
@@ -313,8 +342,10 @@ No new configuration key. `RequireSecondApprover` in the guardrail policy stays 
 
 ### Secrets
 
-- The dialog shows only the persisted card. Payloads are withheld for UI calls (`WithholdPayloads`,
+- The dialog's summary is the persisted card. Payloads are withheld for UI calls (`WithholdPayloads`,
   `MutationGateway.cs:997`) and the reason is redacted (`ApprovalGate.cs:249`).
+- The one addition is the requester's own payload input, from the runner's memory, shown to that person only (they
+  typed it). It is not added to the approval row, the audit, the notification or any log.
 - The runner never logs arguments. A refusal log names the capability and the exception type only, as today
   (`UiMutationRunner.cs:194-199`).
 - `DecidedVia` is not secret.
@@ -329,6 +360,8 @@ No new configuration key. `RequireSecondApprover` in the guardrail policy stays 
 | Session revoked or role lowered between prompt and continuation | The rebuilt request is refused (R1-26) or the decision is refused (INV-34). |
 | Plan drift (target, connection, exposures, credential, policy version changed) | New binding → the approved grant is not used; a new approval is raised (D4). |
 | Circuit gone, dialog closed, page left | Cancellation; nothing runs. A later approval on the page runs nothing by itself (approve-then-retry needs a call). |
+| Circuit gone after the decision, before the continuation | Nothing runs. The grant stays approved and unused for its 10 minutes; an identical repeat click by the same person uses it once (`OpenOperationOf`, `MutationGateway.cs:438`); otherwise it lapses. |
+| The grant was used by another tab or call before the continuation | "Already used" refusal with the new approval's id; no second prompt, no drift text. |
 | Grant lapsed (10 min) before the continuation | Use refused (INV-32). |
 
 ## Invariant and §7 impact
@@ -351,8 +384,10 @@ No new configuration key. `RequireSecondApprover` in the guardrail policy stays 
 
 > **INV-65** — An approval given in the dialog of a UI action is a separate, explicit act on the recorded approval
 > raised by that very call (same operation id, the person as first requester), under the Approvals page's rules. The
-> call continues only through the gateway, on an identical binding, at most once, and only while the dialog is open.
-> Nothing continues after the dialog is gone. MCP, agent, trigger, scheduler and webhook calls have no in-band approval.
+> call continues only through the gateway, on an identical binding, at most once, and only within the same runner
+> call, directly after the decision. If that call ends first (dialog closed, circuit lost), nothing runs by itself; an
+> approved grant left unused lapses after its lifetime unless the same person repeats the identical action, which uses
+> it once. MCP, agent, trigger, scheduler and webhook calls have no in-band approval.
 >
 > Tests:
 > - `InlineApprovalRunnerTests`;
@@ -391,7 +426,10 @@ No new configuration key. `RequireSecondApprover` in the guardrail policy stays 
 - `A_second_drift_is_refused_without_a_third_prompt`
 - `A_revoked_session_between_approval_and_continuation_runs_nothing`
 - `Cancellation_runs_nothing_and_a_later_page_approval_runs_nothing`
+- `Decided_then_circuit_lost_runs_nothing_and_a_repeat_click_uses_the_grant_once`
+- `A_consumed_grant_reports_already_used_and_never_the_drift_text`
 - `A_prompt_that_throws_runs_nothing`
+- `Server_hostkey_replace_keeps_todays_refusal_with_the_approval_id` (contract 0018; not in waves 1–2)
 
 **`ApprovalChannelTests`:**
 - `DecidedVia_is_persisted_on_both_providers`
@@ -404,6 +442,7 @@ No new configuration key. `RequireSecondApprover` in the guardrail policy stays 
 - `No_button_is_default_and_Enter_approves_nothing`
 - `Approve_is_armed_only_after_the_delay`
 - `The_summary_comes_from_the_store_with_payloads_withheld`
+- `The_requesters_own_query_is_shown_in_the_dialog_and_never_persisted_or_logged`
 - `Another_admins_decision_updates_the_dialog`
 - `Expiry_closes_as_expired`
 
@@ -508,6 +547,9 @@ Docker):
        `mtls.shared_client_retire`, `volume.backup_delete`. Until then they keep today's refusal with the approval id
        and are approved on the Approvals page.
   - One PR per wave. Each wave adds its capabilities to `InlineApproval.Capabilities` and its §7 notes.
+  - Not in any wave yet: `server.hostkey_replace` (new in contract 0018, an INV-59 capability through
+    `ControlPlaneResources.Capabilities`). Until a later wave lists it, it keeps today's refusal with the approval id
+    and is approved on the Approvals page, as wave 3. Contract 0018 states the same (its UI step 5 and U-41).
   - Reason: the reported case and the frequent control-plane actions come first; the irreversible ones follow once
     the dialog has been used in practice.
 - **D8 — Notification on a dialog approval.**

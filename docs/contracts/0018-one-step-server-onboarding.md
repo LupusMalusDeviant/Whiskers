@@ -143,6 +143,8 @@ The work comes in three PRs, in this order:
 - **A5 (R1, R4).** The onboarding window states before each run which credential the bootstrap will use (key file name
   or "password", never the value) and the SSH destination. "Retry" shows that line again; it already re-reads the record.
 - **A6 (R3).** Clearing the password after success goes through a store write on a clone, not through the alias.
+  The clone is taken from the record the run already holds with `SshPassword = null` set on it; the write never
+  re-reads the store's cached record, so a stale `SshPassword` cannot come back with it.
 
 ### B — Registering a server from name, IP and an existing cloud credential
 
@@ -169,7 +171,7 @@ public sealed record ServerRegistrationResult(string ServerId, CloudBinding? Clo
 
 /// <summary>The provider VM the record was bound to at registration: by exact public IP, never by name.</summary>
 public sealed record CloudBinding(CloudProvider Provider, long CloudServerId, string CloudServerName,
-    string? CloudServerCreated, string Status);
+    string? CloudServerCreated, IReadOnlyDictionary<string, string> Labels, string Status);
 ```
 
 Rules:
@@ -213,8 +215,9 @@ public interface ISshHostKeyPins
     [MutatingOperation("server.onboard")]
     Task<SshHostKeyPin> PinFromDiskAsync(ServerConfig server, IReadOnlyList<string> publicKeyLines, CancellationToken ct);
 
-    /// <summary>Replaces a pin. Capability "server.hostkey_replace": Admin, interactive only (HOCH-11's "go").
-    /// Both fingerprints must match what the person saw; otherwise refused.</summary>
+    /// <summary>Replaces a pin. Capability "server.hostkey_replace": Admin, interactive only, with an Admin approval
+    /// exactly as INV-59 (HOCH-11's "go"; see "Gateway and approvals"). Both fingerprints must match what the person
+    /// saw; otherwise refused.</summary>
     [MutatingOperation("server.hostkey_replace")]
     Task<SshHostKeyPin> ReplaceAsync(string serverId, string expectedOldFingerprint, string expectedNewFingerprint,
         CancellationToken ct);
@@ -223,14 +226,26 @@ public interface ISshHostKeyPins
 
 - Fingerprints are computed by `ssh-keygen -lf` (OpenSSH in the image, `Dockerfile:79-81`), never by our own code.
   Preference order of key types: ed25519, ecdsa, rsa; all types the host offers are pinned.
+- **Which key the record mirrors.** known_hosts holds every type; the record holds one: the first type of the preference
+  order the host offers (ed25519, else ecdsa, else rsa). Step `HostKey` and the pin methods compare per type: for
+  **every** type known_hosts holds for the endpoint, the key `ssh-keyscan` returns for that type must be the same, and
+  the record's type must be among them with the recorded fingerprint. A type the host no longer offers is not a
+  mismatch; a different key of any type is.
+- **Reading and removing lines.** The runtime image is Debian (`mcr.microsoft.com/dotnet/aspnet`, `Dockerfile:55`), whose
+  `ssh_config` may set `HashKnownHosts yes`, so lines ssh appends itself can be hashed and cannot be found by text.
+  Lookup always uses `ssh-keygen -F <name> -f <known_hosts>`, removal `ssh-keygen -R <name> -f <known_hosts>`, where
+  `<name>` is written as ssh records it: the bare host for port 22, `"[host]:port"` for any other port. This holds for
+  the pin methods, the backfill and `ReplaceAsync`. Lines Whiskers writes itself are written in plain form.
 - The known_hosts file and `SshHostKeyPolicy.Options()` stay as they are (`accept-new`), so existing servers keep
   working. The difference: onboarding pins **explicitly** before its first SSH command, records the pin and audits it.
   Every later SSH call on any path then meets a present entry, so a changed key fails as today.
 - A mismatch during onboarding stops at the new step `HostKey` with both fingerprints and a hint (reused IP, rebuild, or
   an attack). Nothing is replaced automatically, on any path, for any principal.
 - The server list shows the pinned fingerprint (short form) and its source; the edit dialog shows it in full.
-- Existing servers without a recorded pin: a read-only backfill reads the line from known_hosts and records it as
-  `FirstContact` with `PinnedAtUtc = null` ("pinned before 0018"). No network access, no audit event (no change).
+- Existing servers without a recorded pin: a read-only backfill reads the line from known_hosts (`ssh-keygen -F`, above)
+  and records it as `FirstContact` with `PinnedAtUtc = null` ("pinned before 0018"). No network access, no audit event
+  (no change to what ssh trusts). INV-63 therefore covers onboardings run after 0018; a backfilled pin is shown, but it
+  was never audited.
 
 ### D — Cloud bootstrap and the onboarding steps
 
@@ -246,7 +261,12 @@ public enum BootstrapMethod
     HetznerRescueKey,
 }
 
-public sealed record OnboardingOptions(BootstrapMethod Bootstrap);
+/// <param name="ConfirmVmName">The VM name the person confirmed when it differs from the record's name (precondition 1);
+/// null otherwise. Part of the call's arguments, so the approval binds it.</param>
+/// <param name="AbandonBootstrap">Runs only `BootstrapCleanup` for a run that failed after injection (see "Standing
+/// bootstrap key"), then ends.</param>
+public sealed record OnboardingOptions(BootstrapMethod Bootstrap, string? ConfirmVmName = null,
+    bool AbandonBootstrap = false);
 ```
 
 There is no password-reset method (D1); `reset_password` is not wrapped.
@@ -263,34 +283,77 @@ public interface ICloudBootstrap
 }
 
 public sealed record CloudBootstrapResult(bool Success, string? Error, SshHostKeyPin? HostKeyFromDisk,
-    string? InjectedKeyFingerprint, IReadOnlyList<string> CleanupWarnings);
+    string? InjectedKeyFingerprint, bool StandingBootstrapKey, IReadOnlyList<string> CleanupWarnings);
 ```
 
 1. **Preconditions (fail closed).** Provider Hetzner; a binding (`CloudServerId`) exists; the VM by that id still has the
    record's public IP (else refused: "IP and VM no longer match"); the VM is `running`; the record has **no** host-key
    pin and **no** mTLS state (D2: fresh servers only); no other record is bound to the VM; the token works for writes.
-2. **Key.** `ssh-keygen -t ed25519 -N "" -C whiskers-bootstrap-{serverId}-{opId8}` into the memory-backed lease
-   directory of contract 0015; the private key is stored sealed with `SaveSshKeyAsync` and the plaintext file removed at
-   once. The record's `SshPassword` is cleared.
+   **VM name check:** the VM's current name must equal the record's name (ordinal, ignoring case). If it differs, the
+   run is refused ("the IP belongs to VM '{vmName}', not '{recordName}'") unless `ConfirmVmName` equals the VM's
+   current name exactly; a stale confirmation (the VM was renamed meanwhile) is refused as well. D2's "fresh" check
+   cannot tell a mistyped IP that hits another fresh VM of the same project; the name check and the VM facts in the
+   dialog and on the approval card (below) are what a person compares.
+2. **Key.** Prerequisite: contract 0015 Part A, which is in main (`Services/Server/SshKeyLeases.cs`: sealed keys and
+   leases in a memory-backed directory under `/dev/shm`, refused when it is not `tmpfs`/`ramfs`). PR 2 builds on it and
+   adds no lease directory of its own. `ssh-keygen -t ed25519 -N "" -C whiskers-bootstrap-{serverId}-{opId8}` writes
+   into a fresh 0700 directory under the same memory-backed base (`SshKeyLeases.DefaultBaseDir`, same
+   memory-backed check); the private key is stored sealed with `SaveSshKeyAsync` and the plaintext file removed at
+   once. Every later use goes through `ISshKeyLeases.AcquireAsync`. The record's `SshPassword` is cleared.
 3. **Project key.** `POST /ssh_keys` with name `whiskers-bootstrap-{serverId}-{opId8}` and label
    `managed-by=whiskers`; its id is kept in the run (and in the audit details) for the cleanup.
-4. **Rescue.** `enable_rescue` with `ssh_keys = [id]`, then `reset`; poll until the VM runs and port 22 answers (bounded).
+4. **Rescue.** `enable_rescue` with `ssh_keys = [id]`, then a **soft reboot** (`IHetznerService.RebootAsync`, ACPI
+   `reboot`, `HetznerApiService.cs:135`); if the VM has not gone down and come back within
+   `Onboarding:CloudBootstrap:SoftRebootSeconds`, a **hard reset** (`ResetAsync`, `:136`) follows once. Then poll until
+   the VM runs and port 22 answers (bounded by `BootTimeoutSeconds`). The audit names which of the two happened.
 5. **Rescue session.** SSH to the rescue system with the new key, using a **separate, run-scoped known_hosts file**
-   (`StrictHostKeyChecking=accept-new` against an empty file in the run's temp directory). The rescue system's key never
-   enters `<data>/ssh-keys/known_hosts`.
+   (`StrictHostKeyChecking=accept-new` against an empty file in the run's temp directory). This session is
+   **trust on first use on the rescue system**: nothing verifies the rescue system's host key. The rescue system's key
+   never enters `<data>/ssh-keys/known_hosts`.
 6. **On the real disk** (one fixed script built by a unit-tested command builder, values only through base64 or
    `HostCommandSecrets`): find the root partition (the one holding `/etc/ssh/sshd_config` and `/root`), mount it
    read-write, append the public key line with its marker comment to `/root/.ssh/authorized_keys` (create with 0700/0600
-   when missing, idempotent by marker), read `/etc/ssh/ssh_host_*_key.pub`, unmount, `sync`.
-7. **Back.** `disable_rescue`, then `reset`; poll as in 4.
+   when missing, idempotent by marker), read `/etc/ssh/ssh_host_*_key.pub`, unmount, `sync`. Once the append has
+   succeeded, the record's new field `BootstrapKeyInjectedFingerprint` is set (store write) **before** anything else
+   runs; from here on the host carries the line.
+7. **Back.** `disable_rescue`, then soft reboot with the hard-reset fallback as in 4; poll as in 4.
 8. **Pin.** `PinFromDiskAsync` with the keys read in 6 (source `RescueDisk`). The first contact with the real system is
-   therefore verified against keys read from its own disk, not trusted on first use.
+   therefore compared with keys read from its own disk. Those keys were read through the rescue session of step 5,
+   which is trust on first use on the rescue system: the pin is as good as that one session (an attacker on the path
+   at that moment could feed other keys). It is not trust on first use of the real system's sshd.
 9. **Always (finally):** delete the project SSH key resource; if rescue is still enabled, disable it; if the VM is still
    in rescue after a failure, reset it once more so it boots its own system. Every step that fails here is reported as a
    cleanup warning in the result **and** makes the run `Failed` when it leaves the VM in rescue.
 
 The rescue root password Hetzner returns is never read into a variable that outlives the call, never logged, never
 returned (the injected key is the access).
+
+#### Standing bootstrap key (a run that fails after injection)
+
+A run can fail after step 6 (rescue exit, pin, `Bootstrap`, Tailscale, certificate …). Then the host still carries the
+marker line, Whiskers still holds the sealed private key, `BootstrapKeyGenerated` stays true, and a resume uses that
+key. This is intended (resume needs it), but it is **standing access** and is treated as such:
+
+- **Marked.** A run that ends `Failed` while `BootstrapKeyInjectedFingerprint` is set carries
+  `OnboardingResult.StandingBootstrapKey = true` and the warning "standing bootstrap key {fingerprint} in
+  /root/.ssh/authorized_keys of {server}: resume the onboarding, abandon it, or remove the server". The warning is shown
+  in the run window and as a badge in the server list, written to the audit details of the run
+  (`standingBootstrapKey: true`, the public fingerprint), and returned by `onboard_server` and
+  `get_onboarding_status`.
+- **Removed by** whichever comes first:
+  - a resumed run that reaches `BootstrapCleanup`;
+  - **abandon**: `server.onboard` with `AbandonBootstrap = true` (UI button "Remove bootstrap access", MCP
+    `onboard_server` with `abandon: true`) runs only `BootstrapCleanup`, over the mTLS host shell when the host has it,
+    otherwise over SSH with the generated key;
+  - **`server.remove`**: before the record goes, `ServerRemoval` runs the same cleanup. If the host cannot be reached
+    (VM deleted, network down), the removal still goes on: the sealed private key is deleted with the record, so the
+    remaining line has no private key anywhere and grants nothing. The removal result and audit name the dead line
+    (fingerprint, host) as a warning.
+- **Order inside `BootstrapCleanup`:** remove the marker line from `/root/.ssh/authorized_keys` first, read the file
+  back and check the line is gone, clear `BootstrapKeyInjectedFingerprint`, **then** delete the sealed key
+  (`DeleteSshKeyAsync`) and clear `BootstrapKeyGenerated`. If removing the line fails, the run is `Failed` (not
+  `Success`) with the standing-key warning, and the sealed key is kept so that a resume or abandon can retry; only
+  `server.remove` deletes the key without the line gone (above).
 
 #### Onboarding steps
 
@@ -302,6 +365,9 @@ Task<OnboardingResult> OnboardServerAsync(string serverId, bool mayReplaceMtlsSt
     OnboardingOptions options, IProgress<OnboardingProgress> progress, CancellationToken ct = default);
 
 public sealed record OnboardingProgress(OnboardingStep Step, string Message, string? TailscaleLoginUrl = null);
+
+// OnboardingResult (OnboardingResult.cs:22) gains, additively:
+//     public bool StandingBootstrapKey { get; init; }   // see "Standing bootstrap key"
 ```
 
 `OnboardingStep` gains three members, **appended** after `Verify`: `CloudBootstrap`, `HostKey`, `BootstrapCleanup`. Run order:
@@ -312,7 +378,7 @@ public sealed record OnboardingProgress(OnboardingStep Step, string Message, str
 | 1 | `HostKey` | `PinOf` present → compare with `ssh-keyscan`; absent → `PinFirstContactAsync`. Mismatch → fail with both fingerprints. |
 | 2 | `Bootstrap` | As today, plus a clear reason: host / user / key / password / host key (R4). |
 | 3–10 | `TailscaleInstall` … `Verify` | As today. |
-| 11 | `BootstrapCleanup` | Only for a key Whiskers generated: remove the marker line from `/root/.ssh/authorized_keys` through the mTLS host shell, then `DeleteSshKeyAsync` (as today). For a user-supplied key: only `DeleteSshKeyAsync` (as today). |
+| 11 | `BootstrapCleanup` | Only for a key Whiskers generated: remove the marker line from `/root/.ssh/authorized_keys` through the mTLS host shell and check it is gone, **then** `DeleteSshKeyAsync` (order and failure as in "Standing bootstrap key"). A failure here makes the run `Failed`. For a user-supplied key: only `DeleteSshKeyAsync` (as today). |
 
 Tailscale enrollment (D9): when the vault holds an onboarding auth key (`Onboarding:Tailscale:AuthKeyRef`), step 3 runs
 `tailscale up --auth-key=file:<path>` with the key delivered as a `HostCommandSecrets` secret (as `TailscaleVpnProvider`
@@ -322,17 +388,25 @@ does for Whiskers itself); otherwise the login link as today.
 
 1. **Add server** opens a short form: Name, IP, Group, Cloud provider (preselected Hetzner when a Hetzner credential is
    stored). "Advanced" opens today's full form (TCP, SSH with key/password, Kubernetes).
-2. Save → `server.create`. The dialog shows the matched VM: name, type, created, status, and which stored credential
-   matched (by server name).
+2. Save → `server.create`. The dialog shows the matched VM: name, type, created, labels, status, and which stored
+   credential matched (by server name).
 3. **Onboard** shows the plan before anything runs: SSH destination, the credential the bootstrap will use, and — when
    the record has no key and no password and the provider is Hetzner — the offer
-   "Get access via Hetzner rescue: the server is rebooted twice (about 3 minutes); its disk is not changed except for
-   one line in /root/.ssh/authorized_keys, removed again at the end." The user confirms that dialog; the click is the
-   interactive Admin's decision (no auto-confirm).
+   "Get access via Hetzner rescue: the server is rebooted twice (a normal reboot each time, a hard reset only if it
+   does not come back; about 3 minutes); its disk is not changed except for one line in /root/.ssh/authorized_keys,
+   removed again at the end." The same dialog shows the bound VM as Hetzner reports it **now**: id, name, created
+   time, labels and public IP. When the VM's name differs from the record's name, the dialog says so in a warning and
+   the confirm button stays disabled until the person ticks "This is the right VM: '{vmName}'" (which sets
+   `ConfirmVmName`). The user confirms that dialog; the click is the interactive Admin's decision (no auto-confirm).
 4. The run window lists the steps with state, shows the pinned fingerprint and its source as soon as step `HostKey`
    finishes, and the Tailscale link (or "enrolled with auth key").
 5. A host-key mismatch shows both fingerprints and, for an Admin, **Replace pin…**, which asks for both fingerprints to be
-   confirmed and runs `server.hostkey_replace`.
+   confirmed and runs `server.hostkey_replace`. That call needs an Admin approval exactly as INV-59 (see "Gateway and
+   approvals"). `server.hostkey_replace` is **not** in contract 0019's waves 1 or 2 (D7 there), so the call ends in
+   today's `PendingApproval` refusal with the approval id; the Admin approves on the Approvals page (self-approval
+   under that page's rules, four-eyes with *Require a second approver*) and clicks **Replace pin…** again, which uses
+   the grant once. Adding it to the in-dialog list is a later wave of 0019.
+6. A run that ended with a standing bootstrap key shows the warning and **Remove bootstrap access** next to "Retry".
 
 ### E — MCP tools
 
@@ -342,8 +416,23 @@ Registered in `ServerTools` (module `AllInOnePseudoModule`, `Modules/AllInOnePse
 | Tool | Capability | Level | Parameters | Result |
 |---|---|---|---|---|
 | `add_server` | `server.create` (new) | admin | `name` (string), `ip` (string), `group` (string?), `cloudProvider` (`none`\|`hetzner`\|`hostinger`, default `none`), `cloudCredentialFrom` (server id?, D7) | `{ serverId, name, ssh: "root@<ip>:22", cloud: { provider, cloudServerId, cloudServerName, created, status } \| null, warnings[] , next: "onboard_server" }` |
-| `onboard_server` | `server.onboard` (now also an MCP tool) | admin | `server` (id), `bootstrap` (`none`\|`hetzner_rescue`, default `none`) | `{ operationId, success, completedSteps[], failedStep, error, hostKey: { type, fingerprint, source }, tailscaleIp, cleanupWarnings[] }` |
-| `get_onboarding_status` | read (no capability) | admin (D5) | `server` (id) | the in-memory snapshot of the latest run: `{ operationId, startedUtc, currentStep, finished, log[≤200], tailscaleLoginUrl?, result? }` |
+| `onboard_server` | `server.onboard` (now also an MCP tool) | admin | `server` (id), `bootstrap` (`none`\|`hetzner_rescue`, default `none`), `confirmVmName` (string?, precondition 1), `abandon` (bool, default `false`: run only `BootstrapCleanup`) | `{ operationId, success, completedSteps[], failedStep, error, hostKey: { type, fingerprint, source }, tailscaleIp, standingBootstrapKey, cleanupWarnings[] }` |
+| `get_onboarding_status` | read (no capability) | admin (D5) | `server` (id) | the in-memory snapshot of the latest run: `{ operationId, startedUtc, currentStep, finished, log[≤200], tailscaleLoginUrl?, standingBootstrapKey, result? }` |
+
+`get_onboarding_status` is the first tool that is admin-level **and** has no capability:
+
+- Its level comes from an explicit `[McpToolLevel(McpPermissionLevels.Admin)]` on the method
+  (`Mcp/McpToolLevelAttribute.cs`) and a matching `["get_onboarding_status"] = Admin` entry in
+  `McpPermissionLevels.DefaultToolLevels` (`Models/McpPermission.cs:98`); `McpToolLevelTests` keeps the two equal.
+  It is not in the capability catalog, so `CapabilityCatalog.McpToolLevels` does not name it.
+- `CapabilityTableConsistencyTests.Every_non_read_mcp_tool_has_a_capability` rejects today every tool whose level is
+  not `read` and that has no capability, because such a tool is decided by `DirectMcpCallGuard`, not the gateway.
+  PR 3 adds one named exception to that test, a set `AdminLevelReads = { "get_onboarding_status" }`, and a test that
+  every member of the set has no capability and carries `[McpToolLevel(Admin)]`. The tool only reads
+  `IOnboardingRuns.Latest`; adding a name to the set is a reviewed change of that test.
+- Consequence at run time: `DirectMcpCallGuard` evaluates it with level `admin` (`DirectMcpCallGuard.cs:57`), so
+  read-only mode (`ReadOnlyModeRule`) blocks it and a preset whose `ConfirmationRule` asks above the autonomous level
+  makes it approve-then-retry. See "Open point".
 
 - **No cloud key parameter** on any tool. `add_server` reuses a stored credential or none.
 - `onboard_server` blocks until the run ends (D8). It sends MCP progress notifications when the client passed a progress
@@ -375,6 +464,7 @@ public sealed record OnboardingRunSnapshot(string ServerId, string OperationId, 
 | `SshHostKeySource` | `SshHostKeySource?` | `FirstContact`, `RescueDisk`, `Operator`. |
 | `SshHostKeyPinnedAtUtc` | `DateTime?` | Null for the backfill. |
 | `BootstrapKeyGenerated` | `bool` | True while the stored SSH key is one Whiskers generated (drives `BootstrapCleanup`). |
+| `BootstrapKeyInjectedFingerprint` | `string?` | Public fingerprint of the marker line while it is on the host (set in step 6, cleared by `BootstrapCleanup`). Set on a record that is not being onboarded = standing bootstrap key. |
 
 Old files load unchanged (all fields optional); a record written by 0018 loads in an older build because unknown JSON
 fields are ignored. The known_hosts file stays the source of truth for ssh; the record mirrors it for display and audit.
@@ -384,6 +474,7 @@ fields are ignored. The known_hosts file stays the source of truth for ssh; the 
 | Key | Default | Meaning |
 |---|---|---|
 | `Onboarding:Tailscale:AuthKeyRef` | unset | Vault reference of a Tailscale auth key for new hosts (D9). Set in the UI (Settings), never in config files or over MCP. |
+| `Onboarding:CloudBootstrap:SoftRebootSeconds` | `60` | How long a soft reboot may take to bring the VM down and back before the one hard reset. |
 | `Onboarding:CloudBootstrap:BootTimeoutSeconds` | `240` | Bound for each "wait until the VM runs and port 22 answers". |
 | `Onboarding:CloudBootstrap:Enabled` | `true` | Off → `hetzner_rescue` is refused on every surface. |
 
@@ -395,22 +486,48 @@ fields are ignored. The known_hosts file stays the source of truth for ssh; the 
 |---|---|---|---|---|---|
 | `server.create` (new) | admin / Admin | `add_server` | RootEquivalent (as `server.save`: the record decides where root commands go) | Creates (`CapabilityCatalog.Creates`) | Deadline `Short`. |
 | `server.onboard` | admin / Admin | `onboard_server` (new) | RootEquivalent | Upsert (as today) | Deadline `Long`. Changes from `Ui(...)` to `Tool(...)`. |
-| `server.hostkey_replace` (new) | admin / Admin | — (UI only; no MCP tool, not an agent tool) | RootEquivalent | Server | Interactive Admin only (D3): a built-in rule denies every other principal, MCP and the agent included. |
+| `server.hostkey_replace` (new) | admin / Admin | — (UI only; no MCP tool, not an agent tool) | RootEquivalent | Server | Interactive Admin only (D3), by INV-59's own mechanism: `Confirm` (an Admin approval) for the interactive Admin, `Deny` for every other principal, MCP and the agent included. |
 | `hetzner.ssh_key_create`, `hetzner.ssh_key_delete` (new) | admin | — | Reversible | Composed only | Never decided on their own. |
 
 `MutationCompositions` gains: `("server.onboard", [..., "hetzner.rescue_enable", "hetzner.rescue_disable",
-"cloud.hard_reset", "hetzner.ssh_key_create", "hetzner.ssh_key_delete"])`. Every composed capability is Admin, so
+"cloud.reboot", "cloud.hard_reset", "hetzner.ssh_key_create", "hetzner.ssh_key_delete"])` (`cloud.reboot` for the soft
+reboot, `cloud.hard_reset` for its fallback). Every composed capability is Admin (`CapabilityCatalog.cs:310-314`), so
 `MutationGatewayCoverageTests` (composed ≤ composing) holds.
 
 ### Gateway and approvals
 
 - Every write goes through the gateway: `server.create` (UI and MCP), `server.onboard` (UI and MCP, now with the
   argument `bootstrap`), `server.hostkey_replace` (UI).
-- **New built-in rule `CloudBootstrapRule`:** `server.onboard` with `bootstrap != none` is `Confirm` for every principal
-  that is not an interactive Admin (`IsInteractiveAdmin`), **whatever the preset**. Over MCP this is approve-then-retry;
-  the approval hash covers `bootstrap`, the resolved server and its `CloudServerId` (INV-30), and the requester cannot
-  approve it (INV-33). In the UI the person's confirmation dialog in step 3 is the decision.
-- `server.hostkey_replace`: `Deny` for every principal except an interactive Admin (as INV-59's exception).
+- **New built-in rule `CloudBootstrapRule`:** `server.onboard` with `bootstrap != none` is `Confirm`, **whatever the
+  preset**.
+  - It is added to the non-human engine only (`GuardrailEngine.CreateDefault()`, next to `ExposureChangeRule`), never
+    to `GuardrailEngine.CreateForHumans()`, which keeps exactly its three rules (principal ceiling, kill switch,
+    protected resources; `GuardrailEngine.cs:35-40`). Contract 0019's `InlineApproval.Applies` relies on that.
+  - It is code, not policy: it reads no policy field, so no preset, tool list or saved policy can remove or weaken it.
+  - A person in the UI is judged by the human engine, where the rule does not exist; there the confirmation dialog of
+    UI step 3 is the decision. Every principal judged by the default engine (direct MCP keys, agents over MCP,
+    triggers, automations) gets `Confirm`. Over MCP this is approve-then-retry, and the requester cannot approve it
+    (INV-33).
+  - **Approval binding (INV-30).** For `bootstrap != none` the resolver of `server.onboard` reads the bound VM from
+    Hetzner and sets a new `MutationTarget.CloudVm` (`"{CloudServerId}|{vmName}|{publicIp}"`, gateway-set, never
+    from the caller). `ApprovalBinding.Of` hashes it as `targetCloudVm`, next to `targetConnection`
+    (`ApprovalBinding.cs:50-52`). The arguments hash already covers `bootstrap` and `confirmVmName`. A VM renamed,
+    re-addressed or replaced after the approval therefore makes the grant unusable.
+  - **Approval card.** For rule evaluation only (as `MutationPolicy.WithResolvedTarget`, `MutationPolicy.cs:126-150`)
+    the gateway adds `__resolvedCloudVm*` keys (id, name, created, labels, public IP); `CloudBootstrapRule` writes
+    them into its reason ("Hetzner VM '{name}' (id {id}, created {created}, labels {k=v,…}) at {ip} will be rebooted
+    twice"), so the approval card and the notification show the VM a second person approves. A caller's own `__…`
+    keys never reach the rules (`MutationPolicy.cs:132-134`).
+- **`server.hostkey_replace` uses INV-59's mechanism exactly.** The capability is added to
+  `ControlPlaneResources.Capabilities` (`ControlPlaneResources.cs:56-62`): it rewrites Whiskers' own trust anchor for a
+  host (`<data>/ssh-keys/known_hosts` in the data volume). `ProtectedResourceRule` then answers as for every INV-59
+  capability (`BuiltInGuardrailRules.cs:208-216`): `Confirm` for an interactive Admin (`IsInteractiveAdmin`,
+  `:242-246`), which needs an Admin approval (four-eyes with *Require a second approver*), and `Deny` for everyone
+  else. No new rule; both engines already contain `ProtectedResourceRule`. The INV-59 row's list of capabilities
+  gains `server.hostkey_replace`.
+  - **Contract 0019:** the approval matches `ProtectedResourceRule`, but `server.hostkey_replace` is in neither wave 1
+    nor wave 2 of 0019 (its D7). It keeps today's refusal with the approval id and is approved on the Approvals page
+    (UI step 5). Both contracts state this.
 - Re-onboarding a host with mTLS state stays as today: interactive Admin only (INV-59).
 - The kill switch denies all of them (INV-21).
 
@@ -419,17 +536,20 @@ fields are ignored. The known_hosts file stays the source of truth for ssh; the 
 One gateway event per attempt (INV-45). Details added by the run:
 
 - `server.create`: name, IP, provider, the credential's **source server id** (never the token), the bound VM id and name.
-- `server.onboard`: bootstrap method; VM id; project SSH key id created/deleted; rescue enabled/disabled; resets done;
-  the injected **public** key fingerprint; the pinned host-key type, fingerprint and source; cleanup warnings; the
-  server-record diff at the switchover (as today, R1-22).
-- `server.hostkey_replace`: old and new fingerprints, the endpoint.
+- `server.onboard`: bootstrap method; VM id, name and public IP; whether the VM name differed and was confirmed;
+  project SSH key id created/deleted; rescue enabled/disabled; soft reboots and hard resets done; the injected
+  **public** key fingerprint; the pinned host-key type, fingerprint and source; `standingBootstrapKey` when the run
+  ends with the line on the host; abandon runs; cleanup warnings; the server-record diff at the switchover (as today,
+  R1-22).
+- `server.remove`: for a record with `BootstrapKeyInjectedFingerprint`, whether the line was removed or left dead.
+- `server.hostkey_replace`: old and new fingerprints, the endpoint, the approval id (as every INV-59 approval).
 
 ### Secrets
 
 | Secret | Where it lives | How it stays out of sinks |
 |---|---|---|
 | Hetzner token | vault, `CloudKeyRef` (shared reference) | Read with `CloudCredentials.KeyOf` in process; never an argument, never in a result or audit detail. |
-| Generated private key | sealed at rest (contract 0015), lease in the memory-backed directory | Deleted after success (`DeleteSshKeyAsync`) and after a failed `CloudBootstrap` before injection. Never logged. |
+| Generated private key | sealed at rest (contract 0015 Part A), lease in the memory-backed directory | Deleted by `BootstrapCleanup` after the line is gone, after a failed `CloudBootstrap` before injection, and by `server.remove`. Kept, with the standing-key warning, after a failure after injection. Never logged. |
 | Rescue root password (API response) | not kept | Discarded at once; `HetznerActionResponse.RootPassword` is not passed on by the bootstrap. |
 | Tailscale login URL | progress, run snapshot (memory) | Admin-only views; not written to the audit detail (the event says "login link issued"). |
 | Tailscale auth key (D9) | vault | Delivered as a `HostCommandSecrets` secret (file / stdin), never in the command text. |
@@ -437,8 +557,10 @@ One gateway event per attempt (INV-45). Details added by the run:
 
 ### Fail closed
 
-- No binding, IP and VM no longer match, VM not running, record not fresh, token read-only, vault locked → the bootstrap
-  does not start.
+- No binding, IP and VM no longer match, VM name differs without a matching confirmation, VM not running, record not
+  fresh, token read-only, vault locked → the bootstrap does not start.
+- A failure after injection → `Failed` with the standing-key warning on every surface; a failed line removal in
+  `BootstrapCleanup` → `Failed`, never `Success`.
 - Any error between `enable_rescue` and `disable_rescue` → the finally block disables rescue, resets once, deletes the
   project key; the run is `Failed` and names what was left.
 - A host-key mismatch → stop; no automatic re-pin on any path.
@@ -454,8 +576,8 @@ in `RELEASE_GATE.md` becomes INV-65 once both contracts have landed.
 
 | ID | Statement | Test |
 |---|---|---|
-| INV-63 | Every managed host's SSH host key is pinned before Whiskers sends it a command during onboarding; the pin (type, fingerprint, source) is recorded on the server and audited. A different key refuses every SSH path, and the pin is replaced only by an interactive Admin through `server.hostkey_replace`, audited with both fingerprints. | `SshHostKeyPinTests`, `HostKeyReplaceRuleTests` *(planned, 0018)* |
-| INV-64 | A cloud bootstrap that changes access to a host acts only on the provider VM bound to the record and still holding its IP (never a name match), needs a human Admin's approval for every non-interactive principal, and leaves no standing access: the provider key resource, the injected `authorized_keys` line and the generated private key are removed, and a returned password is never stored or returned. | `CloudBootstrapRuleTests`, `HetznerRescueBootstrapTests` *(planned, 0018)* |
+| INV-63 | In every onboarding run after contract 0018, the host's SSH host key is pinned before Whiskers sends it a command; the pin (type, fingerprint, source) is recorded on the server and audited. (Pins backfilled from known_hosts for hosts onboarded earlier are recorded and shown, not audited.) A different key refuses every SSH path, and the pin is replaced only by an interactive Admin through `server.hostkey_replace`, with an Admin approval as INV-59 and audited with both fingerprints. | `SshHostKeyPinTests`, `HostKeyReplaceRuleTests`, `OnboardingServiceStepTests.Host_key_is_pinned_before_any_command`, `OnboardingServiceStepTests.Mismatch_stops_at_HostKey_and_runs_no_command` *(planned, 0018)* |
+| INV-64 | A cloud bootstrap that changes access to a host acts only on the provider VM bound to the record and still holding its IP (never a name match; a VM name other than the record's only with the person's explicit confirmation), needs a human Admin's approval for every non-interactive principal, bound to the VM's id, name and public IP, and never stores or returns a provider password. A run that ends `Success` leaves no standing access: the provider key resource, the injected `authorized_keys` line and the generated private key are removed, in that order for line and key. A run that ends `Failed` after the injection reports the standing bootstrap key on every surface (UI, audit, `onboard_server`, `get_onboarding_status`) until a resume, an abandon or `server.remove` removes it; `server.remove` deletes the private key in any case. | `CloudBootstrapRuleTests`, `HetznerRescueBootstrapTests`, `OnboardingServiceStepTests.BootstrapCleanup_removes_the_injected_line_before_the_key`, `OnboardingServiceStepTests.Failed_after_injection_reports_standing_key`, `OnboardingServiceStepTests.Cleanup_failure_fails_the_run`, `ServerRemovalTests.Remove_takes_the_standing_bootstrap_line_and_key` *(planned, 0018)* |
 
 ### Existing invariants touched (status unchanged ✅)
 
@@ -466,15 +588,18 @@ in `RELEASE_GATE.md` becomes INV-65 once both contracts have landed.
 - INV-51: the rescue password and the Tailscale URL → `OnboardingSecretsSinkTests`.
 - INV-52: no new plaintext credential; the shared reference → `ServerRemovalTests` (shared ref survives removal of one).
 - INV-57: the bootstrap acts on the bound VM id → `CloudBindingResolutionTests`.
-- INV-59: unchanged; `onboard_server` over MCP on a host with mTLS state is denied → `ControlPlaneOnboardMcpTests`.
+- INV-59: statement unchanged; its list of control-plane capabilities gains `server.hostkey_replace`
+  (`ControlPlaneResources.Capabilities`) → `HostKeyReplaceRuleTests`. `onboard_server` over MCP on a host with mTLS
+  state is denied → `ControlPlaneOnboardMcpTests`.
+- INV-30: the onboarding binding gains `targetCloudVm` → `CloudBootstrapRuleTests`.
 
 ### §7 path matrix
 
 | Row | Change |
 |---|---|
-| U-20 Servers add/update/delete | Adds the short "add server" form (`server.create`); SSH field validation (A2); key file name kept (A1); pinned host key shown. |
-| U-21 Server onboarding | Gains `bootstrap`, the steps `CloudBootstrap`, `HostKey`, `BootstrapCleanup`; audit details as above; gap column: INV-63, INV-64. |
-| U-41 (new) | Replace SSH host-key pin (`server.hostkey_replace`), Admin, interactive only, `NotVerifiable` + reason (Whiskers' own record and known_hosts; read back). |
+| U-20 Servers add/update/delete | Adds the short "add server" form (`server.create`); SSH field validation (A2); key file name kept (A1); pinned host key shown; removal takes a standing bootstrap line and key (INV-64). |
+| U-21 Server onboarding | Gains `bootstrap`, `confirmVmName`, abandon ("Remove bootstrap access"), the steps `CloudBootstrap`, `HostKey`, `BootstrapCleanup`; audit details as above; gap column: INV-63, INV-64. |
+| U-41 (new) | Replace SSH host-key pin (`server.hostkey_replace`), Admin, interactive only, INV-59 approval (on the Approvals page; not in 0019's waves 1–2), `NotVerifiable` + reason (Whiskers' own record and known_hosts; read back). |
 | M-50 (new) | `add_server` (`server.create`), admin, `NotVerifiable` + reason (Whiskers' own record; the tool reads it back), GW ✅ + details. |
 | M-51 (new) | `onboard_server` (`server.onboard`), admin, `NotVerifiable` + reason (as U-21), GW ✅ + details; not offered to the agent. |
 | M-52 (new) | `get_onboarding_status`, admin read; answers the run snapshot; not offered to the agent. |
@@ -500,20 +625,34 @@ tests exist and are listed under *Open invariants* until then.
   `New_record_shares_the_vault_reference_and_writes_no_secret`.
 - `SshHostKeyPinTests` (fake keyscan / known_hosts in a temp dir): first contact pins and records;
   `Different_existing_key_refuses_and_keeps_both_fingerprints`; backfill from known_hosts writes no audit event;
-  `Fingerprint_comes_from_ssh_keygen` (process seam).
-- `HostKeyReplaceRuleTests`: Deny for API key, agent, trigger, automation, Operator; Confirm/allow only for an
-  interactive Admin; wrong expected fingerprints refused.
+  `Fingerprint_comes_from_ssh_keygen` (process seam); `Hashed_known_hosts_lines_are_found_and_removed_with_ssh_keygen`;
+  `Non_default_port_is_looked_up_as_bracketed_host_port`; `Record_mirrors_the_preferred_key_type`;
+  `A_type_the_host_no_longer_offers_is_not_a_mismatch`.
+- `HostKeyReplaceRuleTests`: `server.hostkey_replace` is in `ControlPlaneResources.Capabilities`; Deny for API key,
+  agent, trigger, automation, Operator; Confirm (an Admin approval) only for an interactive Admin, in the human and in
+  the default engine; the replace runs only with a used grant; wrong expected fingerprints refused.
 - `HetznerRescueBootstrapTests` (fake `IHetznerService`, fake executor): happy path order (key create → rescue with
-  `ssh_keys` → reset → inject → read host keys → disable → reset → pin → key delete);
+  `ssh_keys` → soft reboot → inject → read host keys → disable → soft reboot → pin → key delete);
+  `Soft_reboot_that_does_not_come_back_falls_back_to_one_hard_reset`;
   `Failure_after_enable_rescue_disables_rescue_resets_and_deletes_the_key`; `Not_fresh_server_is_refused`;
-  `Vm_with_another_ip_is_refused`; `Rescue_host_key_never_reaches_the_main_known_hosts`;
-  `Rescue_password_is_not_returned_or_logged` (log capture).
+  `Vm_with_another_ip_is_refused`; `Vm_name_differing_from_the_record_is_refused_without_confirmation`;
+  `Confirmed_vm_name_must_equal_the_current_vm_name`; `Rescue_host_key_never_reaches_the_main_known_hosts`;
+  `Rescue_password_is_not_returned_or_logged` (log capture); `Generated_key_is_written_only_to_a_memory_backed_directory`.
 - `RescueCommandsTests`: the fixed script, idempotent marker, values only through base64 / secrets.
 - `OnboardingServiceStepTests` (first tests of the pipeline itself, blueprint gap): step order with and without bootstrap;
-  resume skips `CloudBootstrap` once pinned from disk; `BootstrapCleanup` removes only the marker line and only for a
-  generated key; mismatch stops at `HostKey`.
-- `CloudBootstrapRuleTests`: Confirm for direct MCP, agent, trigger with any preset; interactive Admin allowed;
-  approval hash changes with `bootstrap` and `CloudServerId`.
+  resume skips `CloudBootstrap` once pinned from disk; `Host_key_is_pinned_before_any_command` (the fake executor
+  records no command before the pin is written); `Mismatch_stops_at_HostKey_and_runs_no_command`;
+  `BootstrapCleanup_removes_the_injected_line_before_the_key` (only the marker line, only for a generated key, line
+  checked gone before `DeleteSshKeyAsync`); `Failed_after_injection_reports_standing_key` (result, audit detail, run
+  snapshot); `Cleanup_failure_fails_the_run` (line removal fails → `Failed`, key kept, warning);
+  `Abandon_runs_only_BootstrapCleanup`.
+- `ServerRemovalTests.Remove_takes_the_standing_bootstrap_line_and_key`; `Remove_of_an_unreachable_host_deletes_the_key_and_names_the_dead_line`.
+- `CloudBootstrapRuleTests`: Confirm for direct MCP, agent, trigger with any preset; the rule is in
+  `CreateDefault()` and not in `CreateForHumans()` (which keeps three rules); `No_preset_removes_the_rule`;
+  `Approval_binding_changes_with_vm_id_name_and_public_ip`; approval hash changes with `bootstrap` and
+  `confirmVmName`; `Card_reason_names_vm_name_created_labels_and_ip`.
+- `ServersOnboardDialogTests` (bUnit): `Onboard_dialog_shows_vm_name_created_labels_and_ip`;
+  `Differing_vm_name_keeps_confirm_disabled_until_ticked`; `Standing_key_warning_offers_remove_bootstrap_access`.
 - `HetznerApiServiceTests` (HttpMessageHandler fake): request bodies of `enable_rescue` with keys, `POST/DELETE /ssh_keys`.
 - Catalog and architecture tests named under INV-13/19/38 above.
 
@@ -521,7 +660,10 @@ tests exist and are listed under *Open invariants* until then.
 
 - `OnboardingMcpToolsTests`: levels from the catalog; no key parameter on any tool (reflection);
   `Onboard_server_with_rescue_returns_pending_approval_then_runs_once`; client disconnect does not cancel the run;
-  progress notifications per step; `Status_returns_latest_snapshot_admin_only`.
+  progress notifications per step; `Status_returns_latest_snapshot_admin_only`;
+  `Onboard_server_and_status_report_a_standing_bootstrap_key`; `Abandon_over_mcp_runs_only_the_cleanup`.
+- `CapabilityTableConsistencyTests.Admin_level_reads_have_no_capability_and_declare_admin` (the `AdminLevelReads`
+  exception for `get_onboarding_status`).
 - `AgentToolRegistryTests.Onboarding_tools_are_not_agent_tools`.
 - `AuditPathMatrixTests` rows M-50…M-52, U-41.
 
@@ -533,14 +675,24 @@ tests exist and are listed under *Open invariants* until then.
   rewrite `authorized_keys` at the next boot, and that the marker line is gone at the end.
 - H3 The same over MCP with an approval by a second session.
 - H4 A reused IP: host-key mismatch shown with both fingerprints; replace the pin in the UI.
-- H5 Tailscale auth key enrollment (if D9 is accepted).
+- H5 Tailscale auth key enrollment (D9).
+- H6 One fresh CX23 where the run is stopped after injection (e.g. the Tailscale step cut off): the standing-key warning
+  is shown, and "Remove bootstrap access" removes the line on the real host.
 
 ## Plan triage
 
-- [Claude-prüfbar] Everything in parts A–E with fakes; every test above except H1–H5; docs (`Services/Onboarding/README.md`,
+- [Claude-prüfbar] Everything in parts A–E with fakes; every test above except H1–H6; docs (`Services/Onboarding/README.md`,
   `Services/Hetzner/README.md`, ADR-0002 amendment, `docs/operations/troubleshooting.md` host-key section,
   SECURITY_INVARIANTS rows, PRODUCT_CONTRACT §7 rows, RELEASE_GATE, CHANGELOG).
-- [braucht Nutzer/Hardware] H1–H5.
+- [braucht Nutzer/Hardware] H1–H6.
+
+## Open point (review of 2026-11-16, needs the maintainer)
+
+- **How the guard judges `get_onboarding_status`.** D5 makes it Admin only. With today's code the level a key needs
+  and the level `DirectMcpCallGuard` judges with are the same value (`DefaultToolLevels`), so an admin-level read is
+  judged like an admin write: blocked in read-only mode, and approve-then-retry under a preset that confirms above the
+  autonomous level (see part E). This contract keeps that (fail closed). Judging it as a read while still requiring
+  an Admin key would need a separate "guard level" per tool; that is a design change and is not made here.
 
 ## Decisions (maintainer, 16 November 2026)
 
