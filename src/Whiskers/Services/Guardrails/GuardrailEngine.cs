@@ -24,6 +24,8 @@ public sealed class GuardrailEngine : IAgentGuardrailEngine
         new ForbiddenArgumentRule(),
         // Contract 0006: agent and API keys only (PC-D1 keeps it out of CreateForHumans).
         new ExposureChangeRule(),
+        // Contract 0018: a cloud bootstrap always needs an approval here, whatever the preset (never in CreateForHumans).
+        new CloudBootstrapRule(),
         new ConfirmationRule(),
     });
 

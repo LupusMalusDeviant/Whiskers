@@ -57,7 +57,7 @@ The joined view is generated into [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTO
 | U-17 | nginx.reload |
 | U-18 | systemd.manage |
 | U-19 | ssl.renew |
-| U-20 | server.save, server.remove |
+| U-20 | server.save, server.remove, server.create |
 | U-21 | server.onboard |
 | U-22 | checks.pause, checks.resume |
 | U-23 | cloud.power_on, cloud.shutdown, cloud.reboot, cloud.hard_reset, cloud.snapshot_create |
@@ -78,6 +78,7 @@ The joined view is generated into [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTO
 | U-38 | endpointcheck.save, endpointcheck.delete, endpointcheck.run |
 | U-39 | notifications.mark_read, notifications.clear |
 | U-40 | cve.scan |
+| U-41 | server.hostkey_replace |
 
 ## Capabilities without a path
 

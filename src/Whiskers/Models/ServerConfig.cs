@@ -18,6 +18,18 @@ public enum CloudProvider
     Hostinger
 }
 
+/// <summary>Contract 0018 part C: where a server's SSH host-key pin came from. Persisted as an int in servers.json —
+/// append new members only.</summary>
+public enum SshHostKeySource
+{
+    /// <summary>Read with ssh-keyscan at the first contact of an onboarding (or backfilled from known_hosts).</summary>
+    FirstContact,
+    /// <summary>Read from the host's own disk through the rescue system before the first contact (cloud bootstrap).</summary>
+    RescueDisk,
+    /// <summary>Replaced by an interactive Admin (<c>server.hostkey_replace</c>).</summary>
+    Operator,
+}
+
 public enum MetricsSourceKind
 {
     // Legacy pull: container stats via Docker API, host metrics via SSH /proc-exec.
@@ -96,6 +108,29 @@ public class ServerConfig
     /// with a usable vault and removed from servers.json once the vault holds it; the store never writes a new one.
     /// Until then (no vault) it is still used, and the readiness check reports it.</summary>
     public string? CloudApiKey { get; set; }
+
+    /// <summary>Contract 0018 (D11): the provider VM bound at registration (by exact public IP, never by name) or at the
+    /// first bootstrap. Null on records written before 0018. The cloud bootstrap acts only on this id.</summary>
+    public long? CloudServerId { get; set; }
+
+    // Contract 0018 part C: the pinned SSH host key of the SSH endpoint, mirrored from Whiskers' known_hosts file (which
+    // stays the source of truth for ssh) for display and audit. Public data.
+    /// <summary>The pinned key's type, e.g. <c>ssh-ed25519</c> (the first of ed25519, ecdsa, rsa the host offers).</summary>
+    public string? SshHostKeyType { get; set; }
+    /// <summary><c>SHA256:…</c> as <c>ssh-keygen -l</c> prints it.</summary>
+    public string? SshHostKeyFingerprint { get; set; }
+    /// <summary>Where the pin came from.</summary>
+    public SshHostKeySource? SshHostKeySource { get; set; }
+    /// <summary>When the pin was recorded; null for a pin backfilled from known_hosts ("pinned before 0018").</summary>
+    public DateTime? SshHostKeyPinnedAtUtc { get; set; }
+
+    /// <summary>Contract 0018 part D: true while the stored SSH key is one Whiskers generated (it drives the
+    /// <c>BootstrapCleanup</c> step).</summary>
+    public bool BootstrapKeyGenerated { get; set; }
+    /// <summary>Contract 0018 part D: the public fingerprint of the bootstrap line while it is in the host's
+    /// <c>/root/.ssh/authorized_keys</c> (set right after the injection, cleared by <c>BootstrapCleanup</c>). Set on a
+    /// record that is not being onboarded = a standing bootstrap key.</summary>
+    public string? BootstrapKeyInjectedFingerprint { get; set; }
 
     public bool IsDefault { get; set; }
     public bool Enabled { get; set; } = true;

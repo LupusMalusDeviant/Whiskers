@@ -168,7 +168,9 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             "host" => await HostAsync(request, capability, target, ct),
             "server" when capability.Id.StartsWith("endpointcheck.", StringComparison.Ordinal) =>
                 await RecordAsync(request, capability, target, ct),
-            "server" when capability.Id == "server.onboard" => OnboardTarget(target),
+            "server" when capability.Id == "server.onboard" => await WithCloudVmAsync(request, OnboardTarget(target), ct),
+            // Contract 0018 part B: a registration creates its record; the id is decided by the registration.
+            "server" when capability.Id == "server.create" => Pass(target),
             "server" => Server(target, NullIfEmpty(target.Id) ?? target.ServerId,
                 mustExist: capability.Id != "server.save"),
             "network" => await NetworkAsync(request, capability, target, ct),
@@ -505,6 +507,56 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             HasControlPlaneState = Whiskers.Services.Certificates.MtlsOnboardingState.Holds(existing,
                 _services.GetService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>()),
         });
+    }
+
+    /// <summary>
+    /// Contract 0018 (INV-30, INV-25, INV-64): an onboarding with a bootstrap (<c>bootstrap</c> other than <c>none</c>)
+    /// reads the record's bound VM from the provider and records it in <see cref="MutationTarget.CloudVm"/>, so the
+    /// approval binds the VM's id, name and public IP and the card names it. When the VM cannot be read — provider
+    /// error or timeout, vault locked, no credential, no binding, an empty answer, or a VM without the record's public IP
+    /// — the call is refused here, before policy runs: no approval is raised.
+    /// </summary>
+    private async Task<TargetResolution> WithCloudVmAsync(MutationRequest request, TargetResolution resolution, CancellationToken ct)
+    {
+        if (resolution.Target is not { } target) return resolution;
+        if (!request.Arguments.TryGetValue("bootstrap", out var bootstrap) || bootstrap.ValueKind == JsonValueKind.Null
+            || (bootstrap.ValueKind == JsonValueKind.String && string.Equals(bootstrap.GetString(), "none", StringComparison.OrdinalIgnoreCase)))
+            return resolution;
+        const string unreadable = "The bound cloud VM cannot be read, so the bootstrap is refused";
+        var server = _services.GetService<IServerConfigService>()?.GetServers().FirstOrDefault(s => s.Id == target.Id);
+        if (server is null) return Refuse($"{unreadable}: the server is gone.");
+        if (server.CloudProvider != Whiskers.Models.CloudProvider.Hetzner || server.CloudServerId is not { } vmId)
+            return Refuse($"{unreadable}: the record is bound to no Hetzner VM.");
+        if (_services.GetService<Whiskers.Services.Hetzner.IHetznerService>() is not { } hetzner
+            || _services.GetService<Whiskers.Services.Vault.IVaultService>() is not { } vault)
+            return Refuse($"{unreadable}: no Hetzner client or vault.");
+        try
+        {
+            var token = Whiskers.Services.Cloud.CloudCredentials.KeyOf(server, vault)
+                        ?? throw new InvalidOperationException("the record has no Hetzner token");
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            var vm = await hetzner.GetServerAsync(token, vmId, cts.Token)
+                     ?? throw new InvalidOperationException($"Hetzner knows no VM {vmId}");
+            var ip = server.SshHost?.Trim();
+            if (string.IsNullOrEmpty(ip) || !string.Equals(vm.Ipv4, ip, StringComparison.Ordinal))
+                throw new InvalidOperationException("IP and VM no longer match");
+            var labels = string.Join(",", (vm.Labels ?? []).OrderBy(l => l.Key, StringComparer.Ordinal).Select(l => $"{l.Key}={l.Value}"));
+            return resolution with
+            {
+                Target = target with
+                {
+                    CloudVm = $"{vm.Id}|{vm.Name}|{ip}",
+                    CloudVmCreated = vm.Created,
+                    CloudVmLabels = labels,
+                },
+            };
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or OperationCanceledException
+                                       or System.Text.Json.JsonException)
+        {
+            return Refuse($"{unreadable}: {Whiskers.Utils.SecretRedactor.Redact(ex.Message)}.");
+        }
     }
 
     private TargetResolution Server(MutationTarget target, string? idOrName, bool mustExist)

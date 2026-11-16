@@ -16,6 +16,7 @@
 @inject Whiskers.Services.Certificates.IMtlsClientCredentialStore ClientCredentials
 @inject Whiskers.Services.Certificates.IMtlsCertificateService Certificates
 @inject ILogger<Servers> Logger
+@inject IServiceProvider Services
 @inject IStringLocalizer<SharedResource> L
 @using Whiskers.Services.Observability
 
@@ -50,7 +51,7 @@
                            Disabled="_mtlsBusy" OnClick="RetireSharedClient">@L["Servers_Mtls_Retire"]</MudButton>
             }
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-                       OnClick="ShowAddDialog">@L["Servers_Button_Add"]</MudButton>
+                       OnClick="ShowQuickAdd">@L["Servers_Button_Add"]</MudButton>
         }
     </MudStack>
 </div>
@@ -89,6 +90,20 @@
                 case Whiskers.Models.ConnectionType.SSH:
                     @($"{context.SshUser}@{context.SshHost}:{context.SshPort}")
                     break;
+            }
+            @* Contract 0018 part C: the pinned SSH host key (short form) and its source. *@
+            @if (PinShown(context) is { } pin)
+            {
+                <MudText Typo="Typo.caption" Style="font-family: inherit; display: block;" title="@pin.FingerprintSha256">
+                    🔐 @ShortFingerprint(pin.FingerprintSha256) · @PinSourceText(pin)
+                </MudText>
+            }
+            @if (context.BootstrapKeyInjectedFingerprint is not null && !(_onboardBusy && _onboardingServer?.Id == context.Id))
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled"
+                         title="@Whiskers.Services.Onboarding.BootstrapCleanup.StandingKeyWarning(context.BootstrapKeyInjectedFingerprint, context.Name)">
+                    @L["Servers_O18_StandingKeyBadge"]
+                </MudChip>
             }
         </MudTd>
         <MudTd>
@@ -235,6 +250,12 @@
                 <MudTextField @bind-Value="_form.SshUser" Label="@L["Servers_Field_SshUser"]" Variant="Variant.Outlined" Class="mb-3"
                               Required="true" RequiredError="@L["Servers_Error_SshUserRequired"]" />
 
+                @if (_editingServer is not null && PinShown(_editingServer) is { } editPin)
+                {
+                    @* Contract 0018 part C: the edit dialog shows the pinned host key in full. *@
+                    <MudTextField T="string" Value="@($"{editPin.KeyType} {editPin.FingerprintSha256} ({PinSourceText(editPin)})")"
+                                  Label="@L["Servers_O18_PinnedHostKey"]" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                }
                 <MudSwitch @bind-Value="_useSshPassword" Color="Color.Primary" Class="mb-1"
                            Label="@L["Servers_Field_UseSshPassword"]" />
                 @if (_useSshPassword)
@@ -333,6 +354,12 @@
                     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="my-2" />
                 }
             </MudPaper>
+            @if (_onboardResult?.HostKey is { } runPin)
+            {
+                <MudText Typo="Typo.body2" Class="mt-2" id="onboard-pin">
+                    🔐 @L["Servers_O18_PinnedHostKey"]: <code>@runPin.KeyType @runPin.FingerprintSha256</code> (@PinSourceText(runPin))
+                </MudText>
+            }
             @if (!_onboardBusy && _onboardResult is { Success: false })
             {
                 <MudAlert Severity="Severity.Warning" Class="mt-3">
@@ -340,18 +367,162 @@
                     <br />@L["Servers_Onboard_IdempotentHint"]
                 </MudAlert>
             }
+            @if (!_onboardBusy && _onboardResult?.HostKeyMismatch is { } mismatch)
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-3" id="onboard-mismatch">
+                    @L["Servers_O18_MismatchText"]<br />
+                    @L["Servers_O18_PinnedFingerprint"]: <code>@mismatch.Pinned</code><br />
+                    @L["Servers_O18_ServedFingerprint"]: <code>@mismatch.Served</code>
+                </MudAlert>
+            }
+            @if (!_onboardBusy && _onboardResult is { StandingBootstrapKey: true })
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-3" id="onboard-standing-key">
+                    @foreach (var warning in _onboardResult.CleanupWarnings)
+                    {
+                        <div>⚠️ @warning</div>
+                    }
+                </MudAlert>
+            }
         </DialogContent>
         <DialogActions>
+            @if (!_onboardBusy && _onboardResult?.HostKeyMismatch is { } replace && _onboardingServer != null && _role >= AppRole.Admin)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" id="replace-pin"
+                           OnClick="@(() => OpenReplacePin(_onboardingServer, replace.Pinned, replace.Served))">@L["Servers_O18_ReplacePin"]</MudButton>
+            }
+            @if (!_onboardBusy && _onboardResult is { StandingBootstrapKey: true } && _onboardingServer != null)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" id="remove-bootstrap-access"
+                           OnClick="@(() => RemoveBootstrapAccess(_onboardingServer))">@L["Servers_O18_RemoveBootstrapAccess"]</MudButton>
+            }
             @if (!_onboardBusy && _onboardResult is { Success: false } && _onboardingServer != null)
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Replay"
-                           OnClick="@(() => StartOnboarding(_onboardingServer, skipPreflight: true))">@L["Servers_Button_Retry"]</MudButton>
+                           OnClick="@(() => RunOnboarding(_onboardingServer, _lastOnboardOptions with { AbandonBootstrap = false }))">@L["Servers_Button_Retry"]</MudButton>
             }
             <MudButton OnClick="@(() => { if (!_onboardBusy) _onboarding = false; })" Disabled="_onboardBusy">
                 @(_onboardBusy ? L["Servers_Button_Running"].Value : L["Servers_Button_Close"].Value)
             </MudButton>
         </DialogActions>
     </MudDialog>
+
+@* Contract 0018 part B, UI step 1–2: add a server from name and IP; the record is SSH to root@ip:22, the cloud VM is
+   found by its exact IP with a stored credential. "Advanced" opens the full form. *@
+<MudDialog Visible="_quickAdd" VisibleChanged="@(v => { if (!_quickBusy) _quickAdd = v; })"
+           Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>@L["Servers_Dialog_TitleAdd"]</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_quickName" Label="@L["Servers_Field_Name"]" Variant="Variant.Outlined" Class="mb-3" id="quick-name"
+                      Disabled="@(_registered is not null)" />
+        <MudTextField @bind-Value="_quickIp" Label="@L["Servers_O18_PublicIp"]" Variant="Variant.Outlined" Class="mb-3" id="quick-ip"
+                      HelperText="@L["Servers_O18_PublicIp_Help"]" Disabled="@(_registered is not null)" />
+        <MudTextField @bind-Value="_quickGroup" Label="@L["Servers_Field_Group"]" Variant="Variant.Outlined" Class="mb-3"
+                      Disabled="@(_registered is not null)" />
+        <MudSelect @bind-Value="_quickProvider" Label="@L["Servers_Field_CloudProvider"]" Variant="Variant.Outlined" Class="mb-3"
+                   Disabled="@(_registered is not null)">
+            <MudSelectItem Value="Whiskers.Models.CloudProvider.None">@L["Servers_Cloud_ProviderNone"]</MudSelectItem>
+            <MudSelectItem Value="Whiskers.Models.CloudProvider.Hetzner">Hetzner Cloud</MudSelectItem>
+            <MudSelectItem Value="Whiskers.Models.CloudProvider.Hostinger">Hostinger VPS</MudSelectItem>
+        </MudSelect>
+        @if (_registered is { } reg)
+        {
+            <MudAlert Severity="Severity.Success" Dense="true" Class="mt-2" id="quick-result">
+                @L["Servers_O18_Registered", reg.ServerId]
+                @if (reg.Cloud is { } vm)
+                {
+                    <div>@L["Servers_O18_MatchedVm"]: <strong>@vm.CloudServerName</strong> (id @vm.CloudServerId, @(vm.Type ?? "?"),
+                        @L["Servers_O18_Created"] @(vm.CloudServerCreated ?? "?"), @L["Servers_O18_Labels"] @Labels(vm.Labels), @vm.Status)</div>
+                    <div>@L["Servers_O18_CredentialOf", ServerNameOf(reg.CredentialFrom)]</div>
+                }
+            </MudAlert>
+            @foreach (var w in reg.Warnings)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@w</MudAlert>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _quickAdd = false)" Disabled="_quickBusy">@L["Servers_Button_Close"]</MudButton>
+        @if (_registered is null)
+        {
+            <MudButton Variant="Variant.Text" OnClick="@(() => { _quickAdd = false; ShowAddDialog(); })" Disabled="_quickBusy">@L["Servers_O18_Advanced"]</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RegisterServer" id="quick-save"
+                       Disabled="@(_quickBusy || string.IsNullOrWhiteSpace(_quickName) || string.IsNullOrWhiteSpace(_quickIp))">@L["Servers_Button_Save"]</MudButton>
+        }
+        else if (ServerConfigService.GetServer(_registered.ServerId) is { } registeredServer)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Hub"
+                       OnClick="@(() => { _quickAdd = false; return StartOnboarding(registeredServer); })">@L["Servers_Action_Onboard"]</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@* Contract 0018 UI step 3: the plan before anything runs — destination, credential, and for a fresh Hetzner record the
+   rescue offer with the bound VM as Hetzner reports it now. Clicking "Start" is the interactive Admin's decision. *@
+<MudDialog Visible="_planOpen" VisibleChanged="@(v => _planOpen = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>@L["Servers_Onboard_DialogTitle", _planServer?.Name ?? ""]</TitleContent>
+    <DialogContent>
+        @if (_planServer is { } plan)
+        {
+            <MudText Typo="Typo.body2" Class="mb-2" id="plan-destination">ssh @($"{plan.SshUser}@{plan.SshHost}:{plan.SshPort}") — @CredentialText(plan)</MudText>
+            @if (RescueOffered(plan))
+            {
+                <MudSwitch @bind-Value="_planRescue" Color="Color.Primary" Label="@L["Servers_O18_RescueOffer"]" id="plan-rescue" />
+                @if (_planRescue)
+                {
+                    @if (_planVmError is not null)
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_planVmError</MudAlert>
+                    }
+                    else if (_planVm is null)
+                    {
+                        <MudProgressLinear Indeterminate="true" Class="my-2" />
+                    }
+                    else
+                    {
+                        <MudPaper Outlined="true" Class="pa-2 mt-2" id="plan-vm">
+                            <div>@L["Servers_O18_BoundVm"]: <strong>@_planVm.CloudServerName</strong> (id @_planVm.CloudServerId)</div>
+                            <div>@L["Servers_O18_Created"] @(_planVm.CloudServerCreated ?? "?") · @L["Servers_O18_Labels"] @Labels(_planVm.Labels)</div>
+                            <div>@L["Servers_O18_PublicIp"]: @(_planVm.PublicIp ?? "?") · @_planVm.Status</div>
+                        </MudPaper>
+                        @if (VmNameDiffers)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" id="plan-name-differs">
+                                @L["Servers_O18_VmNameDiffers", _planVm.CloudServerName, plan.Name]
+                            </MudAlert>
+                            <MudCheckBox T="bool" @bind-Value="_planVmConfirmed" id="plan-confirm-vm"
+                                         Label="@L["Servers_O18_ConfirmVm", _planVm.CloudServerName]" />
+                        }
+                    }
+                }
+            }
+            <MudText Typo="Typo.body2" Class="mt-3">@((MarkupString)L["Servers_Dialog_TailscaleMessage"].Value)</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _planOpen = false)">@L["Servers_Button_Cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConfirmPlan" Disabled="@(!PlanReady)" id="plan-start">
+            @L["Servers_Button_ContinueTailscale"]
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* Contract 0018 UI step 5: replacing a pin needs both fingerprints confirmed; the gateway asks an Admin approval (INV-59). *@
+<MudDialog Visible="_replaceOpen" VisibleChanged="@(v => _replaceOpen = v)" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>@L["Servers_O18_ReplacePin"]</TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">@L["Servers_O18_ReplaceText"]</MudText>
+        <MudTextField @bind-Value="_replaceOld" Label="@L["Servers_O18_PinnedFingerprint"]" Variant="Variant.Outlined" Class="mb-2" />
+        <MudTextField @bind-Value="_replaceNew" Label="@L["Servers_O18_ServedFingerprint"]" Variant="Variant.Outlined" Class="mb-2" />
+        <MudCheckBox T="bool" @bind-Value="_replaceCompared" Label="@L["Servers_O18_ReplaceCompared"]" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _replaceOpen = false)">@L["Servers_Button_Cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="ReplacePin"
+                   Disabled="@(!_replaceCompared || string.IsNullOrWhiteSpace(_replaceOld) || string.IsNullOrWhiteSpace(_replaceNew))">@L["Servers_O18_ReplacePin"]</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @code {
     private List<Whiskers.Models.ServerConfig> _servers = new();
@@ -480,6 +651,7 @@
     {
         _role = await CurrentUser.GetRoleAsync();
         _servers = ServerConfigService.GetServers();
+        await BackfillPinsAsync();
 
         // Deep link from the dashboard empty state (W3): ?add=onboard preselects the SSH bootstrap
         // path (one-click onboarding), ?add=classic the plain Docker-API path.
@@ -958,11 +1130,14 @@
                 // The server record first, then its kubeconfig and cloud API key, as one decision (R1-11): a failed
                 // removal leaves a working server, a failed cleanup at most an unused secret.
                 ConnectionManager.InvalidateClient(server.Id);
-                return Whiskers.Services.ServerConfig.ServerRemoval.RemoveAsync(ServerConfigService, Vault, server, ClientCredentials);
+                // Contract 0018: a bootstrap line on the host is removed first (an unreachable host does not stop it).
+                return Whiskers.Services.ServerConfig.ServerRemoval.RemoveWithReportAsync(ServerConfigService, Vault, server, ClientCredentials,
+                    Services.GetService<Whiskers.Services.Onboarding.IBootstrapCleanup>());
             });
             _servers = ServerConfigService.GetServers();
             Snackbar.Add(L["Servers_Snackbar_Removed", server.Name].Value, Severity.Success);
-            if (!cleaned) Snackbar.Add(L["Servers_Snackbar_SecretCleanupFailed"].Value, Severity.Info);
+            if (!cleaned.SecretsCleaned) Snackbar.Add(L["Servers_Snackbar_SecretCleanupFailed"].Value, Severity.Info);
+            if (cleaned.StandingKeyWarning is { } standing) Snackbar.Add(standing, Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -1019,10 +1194,224 @@
         return choice == true;
     }
 
+    // ---- Contract 0018: registration, plan, pins, standing bootstrap key ------------------------------------------------
+
+    private bool _quickAdd, _quickBusy;
+    private string _quickName = "", _quickIp = "", _quickGroup = "";
+    private Whiskers.Models.CloudProvider _quickProvider;
+    private Whiskers.Services.Onboarding.ServerRegistrationResult? _registered;
+
+    private bool _planOpen, _planRescue, _planVmConfirmed;
+    private Whiskers.Models.ServerConfig? _planServer;
+    private Whiskers.Services.Onboarding.CloudBinding? _planVm;
+    private string? _planVmError;
+    private Whiskers.Services.Onboarding.OnboardingOptions _lastOnboardOptions = new(Whiskers.Services.Onboarding.BootstrapMethod.None);
+
+    private bool _replaceOpen, _replaceCompared;
+    private Whiskers.Models.ServerConfig? _replaceServer;
+    private string _replaceOld = "", _replaceNew = "";
+
+    // Pins backfilled from known_hosts for records without one (read-only, shown as "pinned before 0018").
+    private readonly Dictionary<string, Whiskers.Services.Server.SshHostKeyPin> _backfilled = new(StringComparer.Ordinal);
+
+    private Whiskers.Services.Server.ISshHostKeyPins? Pins => Services.GetService<Whiskers.Services.Server.ISshHostKeyPins>();
+
+    private Whiskers.Services.Server.SshHostKeyPin? PinShown(Whiskers.Models.ServerConfig server) =>
+        Pins?.PinOf(server) ?? (_backfilled.TryGetValue(server.Id, out var pin) ? pin : null);
+
+    private static string ShortFingerprint(string fingerprint) => fingerprint.Length > 19 ? fingerprint[..19] + "…" : fingerprint;
+
+    private string PinSourceText(Whiskers.Services.Server.SshHostKeyPin pin) => pin.PinnedAtUtc is null
+        ? L["Servers_O18_PinnedBefore0018"].Value
+        : pin.Source switch
+        {
+            Whiskers.Models.SshHostKeySource.RescueDisk => L["Servers_O18_SourceRescueDisk"].Value,
+            Whiskers.Models.SshHostKeySource.Operator => L["Servers_O18_SourceOperator"].Value,
+            _ => L["Servers_O18_SourceFirstContact"].Value,
+        };
+
+    private async Task BackfillPinsAsync()
+    {
+        if (Pins is not { } pins) return;
+        foreach (var server in _servers.Where(s => s.SshHostKeyFingerprint is null && !string.IsNullOrWhiteSpace(s.SshHost)))
+        {
+            try
+            {
+                if (await pins.BackfillAsync(server, CancellationToken.None) is { } pin) _backfilled[server.Id] = pin;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or Whiskers.Utils.UnsafeOperandException)
+            {
+                // A backfill is display only: a record whose line cannot be read simply shows no pin.
+            }
+        }
+    }
+
+    private static string Labels(IReadOnlyDictionary<string, string> labels) =>
+        labels.Count == 0 ? "—" : string.Join(", ", labels.OrderBy(l => l.Key, StringComparer.Ordinal).Select(l => $"{l.Key}={l.Value}"));
+
+    private string ServerNameOf(string? id) =>
+        id is null ? "—" : ServerConfigService.GetServer(id)?.Name ?? id;
+
+    private void ShowQuickAdd()
+    {
+        _registered = null;
+        _quickName = _quickIp = _quickGroup = "";
+        // Preselected Hetzner when a Hetzner credential is stored.
+        _quickProvider = ServerConfigService.GetServers().Any(s => s.CloudProvider == Whiskers.Models.CloudProvider.Hetzner
+                                                                 && !string.IsNullOrWhiteSpace(s.CloudKeyRef))
+            ? Whiskers.Models.CloudProvider.Hetzner : Whiskers.Models.CloudProvider.None;
+        _quickAdd = true;
+    }
+
+    private async Task RegisterServer()
+    {
+        var name = _quickName.Trim();
+        var ip = _quickIp.Trim();
+        var group = string.IsNullOrWhiteSpace(_quickGroup) ? null : _quickGroup.Trim();
+        var provider = _quickProvider;
+        var args = new { name, ip, group, cloudProvider = provider.ToString().ToLowerInvariant(), cloudCredentialFrom = (string?)null };
+        if (!await RequireAsync("server.create", args)) return;
+        if (Services.GetService<Whiskers.Services.Onboarding.IServerRegistration>() is not { } registration)
+        {
+            Snackbar.Add(L["Servers_O18_NotAvailable"].Value, Severity.Error);
+            return;
+        }
+        _quickBusy = true;
+        try
+        {
+            _registered = await Mutations.RunAsync("server.create", args, (ResolvedNew rt, CancellationToken token) =>
+                registration.AddAsync(new Whiskers.Services.Onboarding.ServerRegistrationRequest(name, ip, group, provider, null), token));
+            _servers = ServerConfigService.GetServers();
+        }
+        catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            ShowFailure("register server", ex);
+        }
+        finally
+        {
+            _quickBusy = false;
+        }
+    }
+
+    private string CredentialText(Whiskers.Models.ServerConfig server) =>
+        !string.IsNullOrEmpty(server.SshPassword) ? L["Servers_O18_CredentialPassword"].Value
+        : server.SshKeyFileName is { } key ? L["Servers_O18_CredentialKey", key].Value
+        : L["Servers_O18_CredentialNone"].Value;
+
+    /// <summary>UI step 3: the rescue offer — a fresh Hetzner record bound to a VM, with no key, no password and no pin.</summary>
+    private static bool RescueOffered(Whiskers.Models.ServerConfig server) =>
+        server.ConnectionType == Whiskers.Models.ConnectionType.SSH
+        && string.IsNullOrEmpty(server.SshPassword) && server.SshKeyFileName is null
+        && server.CloudProvider == Whiskers.Models.CloudProvider.Hetzner && server.CloudServerId is not null
+        && server.SshHostKeyFingerprint is null;
+
+    private bool VmNameDiffers => _planVm is not null && _planServer is not null
+                                  && !string.Equals(_planVm.CloudServerName, _planServer.Name, StringComparison.OrdinalIgnoreCase);
+
+    private bool PlanReady => _planServer is not null
+                              && (!(_planRescue && RescueOffered(_planServer))
+                                  || (_planVm is not null && _planVmError is null && (!VmNameDiffers || _planVmConfirmed)));
+
     private async Task StartOnboarding(Whiskers.Models.ServerConfig server, bool skipPreflight = false)
     {
         if (!await RequireAsync("server.onboard", new { serverId = server.Id, name = server.Name })) return;
-        if (!skipPreflight && !await ConfirmTailscalePreflight()) return;
+        if (skipPreflight)
+        {
+            await RunOnboarding(server, new Whiskers.Services.Onboarding.OnboardingOptions(Whiskers.Services.Onboarding.BootstrapMethod.None));
+            return;
+        }
+        // The plan, from the record as it is now.
+        _planServer = ServerConfigService.GetServer(server.Id) ?? server;
+        _planRescue = RescueOffered(_planServer);
+        _planVm = null;
+        _planVmError = null;
+        _planVmConfirmed = false;
+        _planOpen = true;
+        StateHasChanged();
+        if (_planRescue) await LoadPlanVmAsync(_planServer);
+    }
+
+    private async Task LoadPlanVmAsync(Whiskers.Models.ServerConfig server)
+    {
+        try
+        {
+            _planVm = Services.GetService<Whiskers.Services.Onboarding.ICloudVmReader>() is { } reader
+                ? await reader.BoundVmAsync(server, CancellationToken.None)
+                : null;
+            if (_planVm is null) _planVmError = L["Servers_O18_NotAvailable"].Value;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or OperationCanceledException)
+        {
+            _planVmError = Whiskers.Utils.SecretRedactor.Redact(ex.Message);
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ConfirmPlan()
+    {
+        if (_planServer is not { } server || !PlanReady) return;
+        _planOpen = false;
+        var rescue = _planRescue && RescueOffered(server);
+        var options = new Whiskers.Services.Onboarding.OnboardingOptions(
+            rescue ? Whiskers.Services.Onboarding.BootstrapMethod.HetznerRescueKey : Whiskers.Services.Onboarding.BootstrapMethod.None,
+            ConfirmVmName: rescue && VmNameDiffers && _planVmConfirmed ? _planVm!.CloudServerName : null);
+        await RunOnboarding(server, options);
+    }
+
+    private async Task RemoveBootstrapAccess(Whiskers.Models.ServerConfig server)
+    {
+        if (!await RequireAsync("server.onboard", new { serverId = server.Id, name = server.Name })) return;
+        await RunOnboarding(server, new Whiskers.Services.Onboarding.OnboardingOptions(
+            Whiskers.Services.Onboarding.BootstrapMethod.None, AbandonBootstrap: true));
+    }
+
+    private void OpenReplacePin(Whiskers.Models.ServerConfig server, string pinned, string served)
+    {
+        _replaceServer = server;
+        _replaceOld = pinned;
+        _replaceNew = served;
+        _replaceCompared = false;
+        _replaceOpen = true;
+    }
+
+    private async Task ReplacePin()
+    {
+        if (_replaceServer is not { } server) return;
+        var oldFingerprint = _replaceOld.Trim();
+        var newFingerprint = _replaceNew.Trim();
+        var args = new { serverId = server.Id, name = server.Name, oldFingerprint, newFingerprint };
+        if (!await RequireAsync("server.hostkey_replace", args)) return;
+        if (Pins is not { } pins)
+        {
+            Snackbar.Add(L["Servers_O18_NotAvailable"].Value, Severity.Error);
+            return;
+        }
+        try
+        {
+            var pin = await Mutations.RunAsync("server.hostkey_replace", args, (ResolvedServer rt, CancellationToken token) =>
+                pins.ReplaceAsync(rt.Id, oldFingerprint, newFingerprint, token));
+            _replaceOpen = false;
+            _servers = ServerConfigService.GetServers();
+            Snackbar.Add(L["Servers_O18_PinReplaced", server.Name, pin.FingerprintSha256].Value, Severity.Success);
+        }
+        catch (Exception ex) when (ex is MutationRefusedException or InvalidOperationException)
+        {
+            // Without a used grant the gateway answers with the pending approval (Approvals page), then a second click.
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            ShowFailure("replace host key pin", ex);
+        }
+    }
+
+    private async Task RunOnboarding(Whiskers.Models.ServerConfig server, Whiskers.Services.Onboarding.OnboardingOptions options)
+    {
+        _lastOnboardOptions = options;
         _onboardingServer = server;
         _onboardLog = new();
         _onboardResult = null;
@@ -1030,19 +1419,26 @@
         _onboardBusy = true;
         StateHasChanged();
 
-        var progress = new Progress<string>(msg =>
+        var progress = new Progress<Whiskers.Services.Onboarding.OnboardingProgress>(p =>
         {
-            _onboardLog.Add(msg);
+            _onboardLog.Add(p.TailscaleLoginUrl is { } url ? Whiskers.Services.Onboarding.OnboardingService.LinkMarker + url : p.Message);
             InvokeAsync(StateHasChanged);
         });
+        var args = new
+        {
+            serverId = server.Id, name = server.Name,
+            bootstrap = Whiskers.Services.Onboarding.OnboardingOptions.ArgumentOf(options.Bootstrap),
+            confirmVmName = options.ConfirmVmName,
+            abandon = options.AbandonBootstrap,
+        };
 
         try
         {
             // Root installs on the target host: through the gateway like every other root-equivalent action.
-            _onboardResult = await Mutations.RunAsync("server.onboard", new { serverId = server.Id, name = server.Name },
+            _onboardResult = await Mutations.RunAsync("server.onboard", args,
                 (ResolvedTarget rt, CancellationToken token) =>
                     Onboarding.OnboardServerAsync(rt.ServerId ?? rt.Id, rt.Record.HasControlPlaneState, rt.Record.Connection,
-                        progress, token));
+                        options, progress, token));
         }
         catch (MutationRefusedException ex)
         {

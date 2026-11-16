@@ -59,6 +59,9 @@ public static class ControlPlaneResources
         // R1-44: which client a host's proxy admits, and the fleet's shared client key.
         "mtls.client_migrate", "migrate_mtls_client_credential", "mtls.client_renew", "renew_mtls_client_credential",
         "mtls.shared_client_retire",
+        // Contract 0018 (D3, HOCH-11): replacing a host-key pin rewrites Whiskers' own trust anchor for a host
+        // (<data>/ssh-keys/known_hosts in the data volume).
+        "server.hostkey_replace",
     };
 
     /// <summary>INV-59 (#187): capabilities that change the control plane only when their target already holds

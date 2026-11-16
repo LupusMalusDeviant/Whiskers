@@ -327,6 +327,7 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Backup.VolumeBackupService", "RestoreVolumeAsync", "volume.restore"),
         ("Whiskers.Services.Database.DatabaseService", "BackupDatabaseAsync", "db.backup"),
         ("Whiskers.Services.GitDeploy.GitDeployService", "DeleteAppAsync", "gitdeploy.delete"),
+        ("Whiskers.Services.Onboarding.BootstrapCleanup", "RemoveMarkerLinesAsync", "server.remove"),   // contract 0018: removes the standing bootstrap line
         ("Whiskers.Services.GitDeploy.GitDeployService", "DeployAsync", "gitdeploy.deploy"),   // contract 0006: the compose run's pull, build and up
         ("Whiskers.Services.Server.FirewallService", "AddRuleAsync", "firewall.rule_add"),
         ("Whiskers.Services.Server.FirewallService", "RemoveRuleAsync", "firewall.rule_remove"),
@@ -357,6 +358,8 @@ public class MutationGatewayCoverageTests
         ("Whiskers.Services.Onboarding.OnboardingService", "ResolveVmEndpoint", "server.onboard: reads the host's address"),
         ("Whiskers.Services.Onboarding.OnboardingService", "Sh", "server.onboard: installs the socket proxy and the certificate"),
         ("Whiskers.Services.Onboarding.OnboardingService", "ShTry", "server.onboard: best-effort steps"),
+        ("Whiskers.Services.Onboarding.OnboardingService", "RunAsync", "server.onboard: the run behind OnboardServerAsync (bootstrap, Tailscale with the D9 auth key)"),
+        ("Whiskers.Services.Onboarding.OnboardingService", "CleanupAsync", "server.onboard: step BootstrapCleanup removes the bootstrap line (contract 0018)"),
     ];
 
     /// <summary>
@@ -604,6 +607,7 @@ public class MutationGatewayCoverageTests
         ("IServerBudget.RunAsync", "the per-server concurrency lane work runs in"),
         ("IComposeRunner.RunAsync", "runs a compose plan inside its caller's decision: every host write goes through the mutate delegate the caller passes (the primitive, or Git deploy's own executor inside gitdeploy.deploy) — contract 0006"),
         ("ITaskExecutor.ExecuteAsync", "runs a scheduled task inside the scheduler's automation-runner decision; each step it takes is marked or the primitive"),
+        ("ISshProcessRunner.RunAsync", "contract 0018: the process seam under ssh-keyscan / ssh-keygen / ssh; called only by ISshToolchain, whose writes run inside server.onboard, server.hostkey_replace or server.remove"),
         ("IVpnProcessRunner.RunAsync", "the process runner behind IVpnProvider.EnsureUpAsync (vpn.bootstrap); protected VPN layer"),
         ("IVpnProcessRunner.StartDetached", "the process runner behind IVpnProvider.EnsureUpAsync (vpn.bootstrap); protected VPN layer"),
         ("IOutboundHttp.CreateClient", "builds an HTTP client; no state"),

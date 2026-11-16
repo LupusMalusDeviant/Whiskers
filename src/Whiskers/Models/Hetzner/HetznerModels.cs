@@ -168,6 +168,20 @@ public class HetznerActionResponse
     [JsonPropertyName("image")] public HetznerImage? Image { get; set; }
 }
 
+/// <summary>A project SSH key (contract 0018 part D: created for one rescue boot, deleted at the end of the run).</summary>
+public class HetznerSshKey
+{
+    [JsonPropertyName("id")] public long Id { get; set; }
+    [JsonPropertyName("name")] public string? Name { get; set; }
+    [JsonPropertyName("fingerprint")] public string? Fingerprint { get; set; }
+    [JsonPropertyName("labels")] public Dictionary<string, string>? Labels { get; set; }
+}
+
+public class HetznerSshKeyResponse
+{
+    [JsonPropertyName("ssh_key")] public HetznerSshKey? SshKey { get; set; }
+}
+
 public class HetznerImagesResponse
 {
     [JsonPropertyName("images")] public List<HetznerImage> Images { get; set; } = new();

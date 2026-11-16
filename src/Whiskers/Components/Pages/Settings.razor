@@ -194,6 +194,11 @@ else
         <DiskHealthPanel />
     </MudExpansionPanel>
 
+    @* Contract 0018 D9: the optional Tailscale auth key for onboarding new hosts (vault only). *@
+    <MudExpansionPanel Text="@L["Onboarding_AuthKey_Panel"]" Icon="@Icons.Material.Filled.VpnKey">
+        <OnboardingAuthKeyPanel />
+    </MudExpansionPanel>
+
     @* Metric alerts *@
     <MudExpansionPanel Text="@L["Settings_Panel_MetricAlerts"]" Icon="@Icons.Material.Filled.Insights">
         <MudGrid>
