@@ -259,6 +259,50 @@ public sealed class UiCrashRegressionTests : BunitContext, IAsyncLifetime
         Assert.Contains(Snackbars(), s => s.Severity == Severity.Error);
     }
 
+    // ------------------------------------------------------------------ failures shown without secrets (UiFailure)
+
+    // A store failure whose message carries a secret-looking value next to a path and an address.
+    private const string LeakySecret = "Hunter2Secret";
+    private static IOException LeakyFailure() =>
+        new($"Cannot write /data/whitelist.json for admin@example.com: password={LeakySecret}");
+
+    // The real texts (as the app registers localization), so the snackbar carries the message the page put in.
+    private static IServiceCollection WithResources(IServiceCollection services) =>
+        services.Configure<Microsoft.Extensions.Localization.LocalizationOptions>(o => o.ResourcesPath = "Resources");
+
+    private void AssertShownRedacted(string handler)
+    {
+        var error = Assert.Single(Snackbars(), s => s.Severity == Severity.Error);
+        var text = error.Message.ToString() ?? "";
+        Assert.False(text.Contains(LeakySecret, StringComparison.Ordinal),
+            $"{handler} shows the store's error message unredacted: {text}");
+        Assert.Contains("password=***", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Settings_shows_a_failed_mcp_permission_save_without_its_secret()
+    {
+        var page = SettingsPage(s => WithResources(s).AddSingleton(Stub<Whiskers.Services.Mcp.IMcpPermissionService>()
+            .On("SavePermissionDataAsync", _ => Task.FromException(LeakyFailure())).Object));
+
+        var ex = await Record.ExceptionAsync(() => Invoke(page, "SaveMcpPermissions"));
+
+        Assert.True(ex is null, "Saving MCP permissions when the store fails escapes the click handler: " + Describe(ex));
+        AssertShownRedacted("SaveMcpPermissions");
+    }
+
+    [Fact]
+    public async Task Settings_shows_a_failed_whitelist_save_without_its_secret()
+    {
+        var page = SettingsPage(s => WithResources(s).AddSingleton(Stub<IWhitelistService>()
+            .On("SaveWhitelistAsync", _ => Task.FromException(LeakyFailure())).Object));
+
+        var ex = await Record.ExceptionAsync(() => Invoke(page, "SaveWhitelist"));
+
+        Assert.True(ex is null, "Saving the whitelist when the store fails escapes the click handler: " + Describe(ex));
+        AssertShownRedacted("SaveWhitelist");
+    }
+
     [Fact]
     public async Task Endpoint_checks_reports_a_delete_the_store_fails()
     {

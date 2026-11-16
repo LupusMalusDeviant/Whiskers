@@ -112,6 +112,27 @@ public sealed class MtlsCsrReencodeTests : IDisposable
             "A CSR that asks for a URI and an e-mail SAN besides the host's own names was accepted for signing.");
     }
 
+    /// <summary>Contract 0017 E2, each kind on its own: one extra URI or one extra e-mail SAN next to exactly the host's
+    /// own names is enough to refuse the CSR (the test above adds both at once).</summary>
+    [Theory]
+    [InlineData("uri")]
+    [InlineData("email")]
+    public void A_hosts_csr_with_one_extra_uri_or_email_san_is_refused(string kind)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var pem = HonestCsrPem(key, Web1, san =>
+        {
+            if (kind == "uri") san.AddUri(new Uri("spiffe://fleet/whiskers-client"));
+            else san.AddEmailAddress("root@fleet.example");
+        });
+
+        var refused = Assert.Throws<InvalidOperationException>(() => MtlsCertificateValidator.ValidateCsr(pem, Web1));
+        Assert.Contains("subject alternative names", refused.Message);
+        Assert.Throws<InvalidOperationException>(() => MtlsCertificateValidator.ValidateCsrAnswer(B64(pem), Web1));
+        // The same key and names without the extra SAN pass, so it is the extra name that is refused.
+        Assert.NotNull(MtlsCertificateValidator.ValidateCsr(HonestCsrPem(key, Web1), Web1));
+    }
+
     // ---- acceptance (contract 0017 E1, E2) ----
 
     /// <summary>An inserted line made only of base64-alphabet characters passes the decoder (it skips line breaks). It
