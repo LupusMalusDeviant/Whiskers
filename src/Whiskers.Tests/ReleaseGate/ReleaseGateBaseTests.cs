@@ -83,9 +83,17 @@ public class ReleaseGateBaseTests
         return text.Replace("\r\n", "\n");
     }
 
+    private static readonly System.Text.Encoding Utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     private static (int Exit, string Output) Git(params string[] args)
     {
-        var psi = new ProcessStartInfo("git") { WorkingDirectory = GateFiles.Root, RedirectStandardOutput = true, RedirectStandardError = true };
+        // git writes UTF-8; without an explicit encoding .NET decodes with the OEM code page on Windows and turns the
+        // gate's ⚠️ and — into mojibake, so R18 reported an unchanged exception row as edited there.
+        var psi = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = GateFiles.Root, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardOutputEncoding = Utf8, StandardErrorEncoding = Utf8,
+        };
         foreach (var a in args) psi.ArgumentList.Add(a);
         using var process = Process.Start(psi)!;
         var stdout = process.StandardOutput.ReadToEndAsync();

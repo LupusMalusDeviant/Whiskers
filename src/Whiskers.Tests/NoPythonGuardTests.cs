@@ -121,7 +121,13 @@ public class NoPythonGuardTests
 
     private static IEnumerable<string> TrackedFiles(string root)
     {
-        var psi = new ProcessStartInfo("git") { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true };
+        // core.quotepath=off makes git print non-ASCII paths as raw UTF-8, so read them as UTF-8 on every platform.
+        var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        var psi = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardOutputEncoding = utf8, StandardErrorEncoding = utf8,
+        };
         foreach (var a in new[] { "-c", "core.quotepath=off", "ls-files", "-z" }) psi.ArgumentList.Add(a);
         using var process = Process.Start(psi)!;
         var stdout = process.StandardOutput.ReadToEndAsync();
