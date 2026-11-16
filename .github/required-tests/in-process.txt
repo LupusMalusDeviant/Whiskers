@@ -37,7 +37,7 @@
 # No Python in the repository or on the Whiskers host (contract 0017 part I): the guard, and the shell scripts that
 # replaced the Python calls, run against stubs (bash, jq and sqlite3 are on the runner).
 26 Whiskers.Tests.NoPythonGuardTests
-14 Whiskers.Tests.BorgFleetScriptTests
+17 Whiskers.Tests.BorgFleetScriptTests
 8 Whiskers.Tests.TailnetGuardScriptTests
 
 # Review 1.0.0 (U1): page handlers and renders that failed ended the Blazor circuit; the MCP-permission and whitelist
@@ -163,6 +163,7 @@
 30 Whiskers.Tests.DbDumpFilesTests
 5 Whiskers.Tests.DbMigrationBaselineTests
 5 Whiskers.Tests.DefaultLocalServerTests
+8 Whiskers.Tests.DeployPlumbingTests
 8 Whiskers.Tests.DeploymentModuleTests
 8 Whiskers.Tests.DestructiveOpTargetingTests
 5 Whiskers.Tests.DirectMcpCallGuardTests
@@ -187,12 +188,15 @@
 5 Whiskers.Tests.HardenedProxySocketMigrationTests
 3 Whiskers.Tests.HealthCheckTests
 8 Whiskers.Tests.HealthRestartHeuristicTests
+1 Whiskers.Tests.HelmDeploymentTests.A_key_rotation_hands_the_new_key_next_to_the_current_one
 1 Whiskers.Tests.HelmDeploymentTests.A_non_persistent_sidecar_is_explicit_and_logs_in_every_start
 12 Whiskers.Tests.HelmDeploymentTests.A_render_that_cannot_work_is_refused
 1 Whiskers.Tests.HelmDeploymentTests.Chart_ci_checks_that_the_pinned_digest_is_the_tags_digest
 1 Whiskers.Tests.HelmDeploymentTests.Every_render_is_validated_first
 1 Whiskers.Tests.HelmDeploymentTests.No_secret_has_a_default_value
 1 Whiskers.Tests.HelmDeploymentTests.Postgres_reads_its_connection_string_from_the_named_secret
+1 Whiskers.Tests.HelmDeploymentTests.The_admin_email_alone_is_seeded_and_the_password_file_only_with_its_secret
+1 Whiskers.Tests.HelmDeploymentTests.The_admin_email_and_a_key_rotation_reach_the_app_without_helm
 2 Whiskers.Tests.HelmDeploymentTests.The_charts_environment_keeps_the_entrypoint_off_the_legacy_vpn_daemon
 1 Whiskers.Tests.HelmDeploymentTests.The_default_render_sets_the_vpn_mode_and_names_no_latest_image
 1 Whiskers.Tests.HelmDeploymentTests.The_depth_check_sees_a_conditional
@@ -283,7 +287,7 @@
 12 Whiskers.Tests.McpPermissionServiceTests
 1 Whiskers.Tests.McpPromptsAndResourcesTests
 3 Whiskers.Tests.McpToolCatalogSnapshotTests
-16 Whiskers.Tests.MetricRetentionSettingsTests
+17 Whiskers.Tests.MetricRetentionSettingsTests
 24 Whiskers.Tests.MetricRollupTests
 3 Whiskers.Tests.MetricsCollectorRetentionTests
 14 Whiskers.Tests.MetricsLabelEscapingTests

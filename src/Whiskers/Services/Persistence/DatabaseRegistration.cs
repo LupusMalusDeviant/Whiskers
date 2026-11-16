@@ -28,7 +28,31 @@ public static class DatabaseRegistration
         // A WHISKERS_DB_CONNECTION_FILE that cannot be read stops the start (SecretSource, R1-28).
         var connectionString = SecretSource.Read(configuration, "WHISKERS_DB_CONNECTION")
                                ?? configured.ConnectionString;
+        // A connection string from a secret file is complete as it is: a plain environment variable never changes it.
+        if (provider == "postgres" && !ConnectionFileConfigured(configuration))
+            connectionString = WithPassword(connectionString, configuration[PasswordVariable]);
         return (provider, connectionString);
+    }
+
+    /// <summary>True when <c>WHISKERS_DB_CONNECTION_FILE</c> names a file — the same test <see cref="SecretSource"/> uses.</summary>
+    private static bool ConnectionFileConfigured(IConfiguration configuration)
+        => !string.IsNullOrWhiteSpace(configuration["WHISKERS_DB_CONNECTION_FILE"]
+                                      ?? Environment.GetEnvironmentVariable("WHISKERS_DB_CONNECTION_FILE"));
+
+    /// <summary>The PostgreSQL password given apart from the connection string (the PostgreSQL overlay sets it from
+    /// <c>WHISKERS_DB_PASSWORD</c> in <c>.env</c>). A password pasted into a connection string breaks it when it holds a
+    /// <c>;</c> or starts or ends with a space; given here it is put in by Npgsql's builder, which quotes it. Order: a
+    /// <c>WHISKERS_DB_CONNECTION_FILE</c> is used as it is (this password is ignored); otherwise this password wins over a
+    /// <c>Password=</c> in <c>WHISKERS_DB_CONNECTION</c> or <c>Database:ConnectionString</c>.</summary>
+    public const string PasswordVariable = "WHISKERS_DB_PASSWORD";
+
+    /// <summary><paramref name="connectionString"/> with <paramref name="password"/> as its password, built with
+    /// <see cref="Npgsql.NpgsqlConnectionStringBuilder"/> (a password given here wins over one in the string). Unchanged
+    /// when either is empty: without a connection string the start still stops with its own message.</summary>
+    internal static string? WithPassword(string? connectionString, string? password)
+    {
+        if (string.IsNullOrEmpty(password) || string.IsNullOrWhiteSpace(connectionString)) return connectionString;
+        return new Npgsql.NpgsqlConnectionStringBuilder(connectionString) { Password = password }.ConnectionString;
     }
 
     /// <summary>The full path of the SQLite file a connection string opens, or null when it names none (empty, in-memory).

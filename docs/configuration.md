@@ -34,7 +34,7 @@ The app reads container environment variables; it does not read a `.env` file it
 | Image search | `HARBOR_URL`, `HARBOR_USERNAME`, `HARBOR_PASSWORD` | Add a self-hosted Harbor marketplace (Docker Hub + GHCR are on by default) |
 | Host binding | `HOST_BIND`, `HOST_PORT` | The container always listens on `8080` internally |
 | Data directory | `WHISKERS_DATA_DIR` | Root for SQLite, JSON stores, keys & certificates (default `/app/data`); repoint at any volume / host path |
-| Database | `WHISKERS_DB_PROVIDER`, `WHISKERS_DB_CONNECTION`, `WHISKERS_DB_CONNECTION_FILE` | `sqlite` (default, zero-config) or `postgres`. For Postgres set a connection string, or mount it as a file and point `_FILE` at it. Ready-to-run overlay: `deploy/docker-compose.postgres.yml`. |
+| Database | `WHISKERS_DB_PROVIDER`, `WHISKERS_DB_CONNECTION`, `WHISKERS_DB_CONNECTION_FILE`, `WHISKERS_DB_PASSWORD` | `sqlite` (default, zero-config) or `postgres`. For Postgres set a connection string, or mount it as a file and point `_FILE` at it. `WHISKERS_DB_PASSWORD` (Postgres only) is the password given apart from the connection string: Whiskers puts it in with Npgsql's builder, so a `;` or a leading/trailing space survives, and it wins over a `Password=` in `WHISKERS_DB_CONNECTION` or `Database:ConnectionString`. Order: a `WHISKERS_DB_CONNECTION_FILE` wins over everything and is used as it is (`WHISKERS_DB_PASSWORD` is then ignored); otherwise `WHISKERS_DB_CONNECTION` (then `Database:ConnectionString`), with `WHISKERS_DB_PASSWORD` put in. Ready-to-run overlay: `deploy/docker-compose.postgres.yml` (passes it that way). |
 
 ## Runtime details
 

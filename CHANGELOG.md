@@ -8,8 +8,8 @@ All notable changes to Whiskers are documented here. The format follows
 
 v1.0.0 and v1.0.1 were published on 2026-11-14/16 and withdrawn on 2026-11-16; their content ships with the next
 1.0.0. This entry is that release. Anyone who installed the withdrawn v1.0.0 or v1.0.1 updates to the new 1.0.0:
-from v1.0.0, the last six items of "Upgrading from 0.15.0" apply (OAuth whitelist to Content Security Policy); from
-v1.0.1, nothing further.
+from v1.0.0, the last seven items of "Upgrading from 0.15.0" apply (OAuth whitelist to Metric retention); from
+v1.0.1, the last one (Metric retention).
 
 Whiskers 1.0 is the first release covered by the release gate (contract 0008). Every security invariant in
 `docs/v1/SECURITY_INVARIANTS.md` is proven by named tests, which CI requires one by one. The exception is INV-58, which
@@ -78,6 +78,10 @@ Check these before or right after the update. Details are in the entries below.
 - **tailnet-guard.** Install `jq` wherever tailnet-guard runs (`netcat-openbsd` is optional).
 - **Content Security Policy.** Inline scripts are gone, and the CSP now sets `script-src 'self'`. A reverse proxy that
   injects its own inline scripts into the pages will be blocked.
+- **Metric retention (`.env`).** The compose files no longer default `Metrics__RetentionDays` to 7: an unset
+  `METRICS_RETENTIONDAYS` leaves the raw retention editable under Settings → Metric retention. A `.env` copied from
+  the old `.env.example` still holds `METRICS_RETENTIONDAYS=7`, which keeps the value fixed and read-only. Remove that
+  line (or leave it empty) to edit the retention in the UI.
 
 ### All changes since 0.15.0
 

@@ -41,9 +41,14 @@ vault:
   existingSecret: ""
   # Inline passphrase — the chart puts it into a Secret for you. Prefer existingSecret.
   key: ""
+  # Only for a VAULT_KEY rotation (docs/operations/vault-key-rotation.md): a Secret with key "vaultKey" holding the
+  # NEW key, handed over as VAULT_KEY_NEW next to the current one. After the rotated start, put the new key into the
+  # current key's Secret, clear this value and upgrade once more. Needs existingSecret or key.
+  newKeySecret: ""
 
-# First-run: the setup wizard creates the admin account in the browser. For unattended installs
-# set both (password comes from a Secret with key "adminPassword").
+# First-run: the setup wizard creates the admin account in the browser. adminEmail alone seeds that address as an
+# Admin on first run (e.g. OIDC-only); for an unattended local login also set adminPasswordSecret (a Secret with
+# key "adminPassword").
 auth:
   adminEmail: ""
   adminPasswordSecret: ""

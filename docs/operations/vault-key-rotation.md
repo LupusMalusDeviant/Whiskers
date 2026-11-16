@@ -20,8 +20,15 @@ everything at the next start, all or nothing, and keeps a journal so a crash at 
 
 1. Write the new key to a new secret file, for example `/opt/whiskers/secrets/vault_key_new` (mode 0600, owned by
    the user that runs Whiskers). Use a long random value, e.g. `openssl rand -base64 48`.
-2. Leave `VAULT_KEY_FILE` as it is (the current key) and set `VAULT_KEY_NEW_FILE` to the new file, e.g. in the compose
-   file or `.env`: `VAULT_KEY_NEW_FILE=/run/secrets/vault_key_new` (and mount the secret).
+2. Leave `VAULT_KEY_FILE` as it is (the current key) and set `VAULT_KEY_NEW_FILE` to the new file's path **inside the
+   container**, e.g. `VAULT_KEY_NEW_FILE=/run/secrets/vault_key_new`, and mount the file there:
+   - with `docker-compose.yml` / `docker-compose.hardened.yml`: set it in `.env` (both files pass it on);
+   - with the installer's compose file: add `- VAULT_KEY_NEW_FILE=/run/secrets/whiskers_vault_key_new` under
+     `environment:`, and the secret beside `whiskers_vault_key` (`secrets:` of the service and the top-level
+     `secrets:` entry with `file: ./secrets/vault_key_new`);
+   - with the Helm chart: put the new key into a Secret with key `vaultKey` and set `vault.newKeySecret` to its name
+     (the chart hands it over as `VAULT_KEY_NEW`). In step 5 put the new key into the current key's Secret and clear
+     `vault.newKeySecret`.
 3. Restart Whiskers. The start log shows `[vault-rotation]` lines:
    - a `pre-rotation` self-backup sealed with the **current** key,
    - the files re-sealed beside their originals (`*.rotating`) and read back,

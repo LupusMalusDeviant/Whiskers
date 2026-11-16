@@ -336,6 +336,127 @@ public sealed class BorgFleetScriptTests : IDisposable
         Assert.Empty(Directory.GetFileSystemEntries(SnapshotDir));   // no .partial, no half copy
     }
 
+    /// <summary>Review 1.0.0 (Deploy): the Whiskers container ships the PostgreSQL client tools (its self-backup), so the
+    /// former check "has pg_dumpall" took it for a PostgreSQL server, its dump failed and every night ended as a
+    /// "warning". A server is recognised by its environment or the <c>postgres</c> server binary; it is still dumped as
+    /// its own <c>POSTGRES_USER</c>.</summary>
+    [SkippableFact]
+    public void Only_a_postgres_server_is_dumped_not_a_container_with_the_client_tools()
+    {
+        ClientStubs();
+        // Two running containers: "whiskers" (client tools, no server, no POSTGRES_* env) and "pg" (a server).
+        _h.Stub("docker", """
+            #!/bin/bash
+            echo "docker $*" >> "$STUB_DIR/docker.log"
+            case "$1 $2" in
+              "ps --format") printf 'whiskers\npg\n' ;;
+              "ps -q") ;;
+              "inspect -f")
+                case "$3" in
+                  *Config.Env*) [ "$4" = pg ] && printf 'POSTGRES_USER=app\nPOSTGRES_PASSWORD=x\n' ;;
+                  *) ;;
+                esac ;;
+              "exec whiskers")
+                case "$*" in
+                  *"command -v pg_dumpall"*) exit 0 ;;
+                  *pg_dumpall*) echo 'pg_dumpall: error: connection to server failed' >&2; exit 2 ;;
+                  *) exit 1 ;;
+                esac ;;
+              "exec pg")
+                case "$*" in
+                  *"command -v gitlab-ctl"*) exit 1 ;;
+                  *pg_dumpall*) echo "-- dump as ${POSTGRES_USER:-app}" ;;
+                  *) exit 1 ;;
+                esac ;;
+            esac
+            exit 0
+            """);
+        // No SQLite file is present; the tools only have to exist so the snapshot is not reported as skipped.
+        _h.Stub("sqlite3", "#!/bin/bash\nexit 0\n");
+        _h.Stub("timeout", "#!/bin/bash\nshift; exec \"$@\"\n");
+
+        var (exit, output, status) = RunBackup("gzip", "grep", "xargs", "sort");
+
+        Assert.True(exit == 0, output);
+        Assert.Equal("ok", status.GetProperty("result").GetString());   // no failed dump, no warning
+        Assert.DoesNotContain("WARN: dump of whiskers failed", output);
+        Assert.DoesNotContain("dump postgres whiskers", output);
+        Assert.Contains("dump postgres pg", output);
+        var dumps = Path.Combine(TestRoot, "var/backups/borg-fleet/db");
+        Assert.True(File.Exists(Path.Combine(dumps, "pg.pg_dumpall.sql.gz")));
+        Assert.False(File.Exists(Path.Combine(dumps, "whiskers.pg_dumpall.sql.gz")));
+        Assert.Contains("exec pg sh -c exec pg_dumpall -U \"${POSTGRES_USER:-postgres}\"", Stub("docker.log"));
+        Assert.Contains("WARN: whiskers has PostgreSQL client tools (pg_dumpall) but no PostgreSQL server; not dumped", output);
+    }
+
+    /// <summary>Review of T6: a PostgreSQL server without <c>POSTGRES_*</c> variables and without <c>postgres</c> on the
+    /// PATH is still recognised, by Debian's versioned server binary or by a running <c>postgres</c> process. The client's
+    /// real check runs here against a fake root per container (its <c>bin</c> on the PATH, its <c>usr/lib</c> and
+    /// <c>proc</c>); a container with only the client tools is named in a WARN and not dumped.</summary>
+    [SkippableFact]
+    public void A_server_found_by_its_binary_or_its_process_is_dumped_and_client_tools_alone_are_named()
+    {
+        ClientStubs();
+        var ctr = Path.Combine(_h.Root, "ctr");
+        void Make(string container, string relative, string content)
+        {
+            var path = Path.Combine(ctr, container, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            DeploymentScripts.WriteExecutable(path, content);
+        }
+        Make("pgbin", "usr/lib/postgresql/18/bin/postgres", "#!/bin/sh\n");
+        Make("pgbin", "proc/1/comm", "sleep\n");
+        Make("pgproc", "proc/7/comm", "postgres\n");
+        Make("tools", "bin/pg_dumpall", "#!/bin/sh\n");
+        Make("tools", "proc/1/comm", "dotnet\n");
+        Make("plain", "proc/1/comm", "nginx\n");
+        _h.Stub("docker", """
+            #!/bin/bash
+            echo "docker $*" >> "$STUB_DIR/docker.log"
+            case "$1" in
+              ps) [ "$2" = --format ] && printf 'pgbin\npgproc\ntools\nplain\n'; exit 0 ;;
+              inspect) exit 0 ;;   # no environment, no mounts
+              exec)
+                c=$2; script=$5
+                case $script in
+                  *"exec pg_dumpall -U"*) [ "$c" = tools ] && exit 2; echo "-- dump of $c"; exit 0 ;;
+                esac
+                root="$(cd "$STUB_DIR" && pwd)/ctr/$c"
+                s=$(printf '%s' "$script" | sed "s#/usr/lib/postgresql#$root/usr/lib/postgresql#g; s#/proc/#$root/proc/#g")
+                PATH="$root/bin:$PATH" exec /bin/sh -c "$s" ;;
+            esac
+            exit 0
+            """);
+        _h.Stub("sqlite3", "#!/bin/bash\nexit 0\n");
+        _h.Stub("timeout", "#!/bin/bash\nshift; exec \"$@\"\n");
+
+        var (exit, output, status) = RunBackup("gzip", "grep", "xargs", "sort");
+
+        Assert.True(exit == 0, output);
+        Assert.Equal("ok", status.GetProperty("result").GetString());
+        Assert.Contains("dump postgres pgbin", output);
+        Assert.Contains("dump postgres pgproc", output);
+        Assert.DoesNotContain("dump postgres tools", output);
+        Assert.DoesNotContain("dump postgres plain", output);   // neither dumped nor warned about
+        Assert.DoesNotContain("WARN: plain", output);
+        Assert.Contains("WARN: tools has PostgreSQL client tools (pg_dumpall) but no PostgreSQL server; not dumped", output);
+        var dumps = Path.Combine(TestRoot, "var/backups/borg-fleet/db");
+        Assert.Equal(["pgbin.pg_dumpall.sql.gz", "pgproc.pg_dumpall.sql.gz"],
+            Directory.GetFiles(dumps, "*.gz").Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray());
+    }
+
+    /// <summary>Review 1.0.0 (Deploy): the restore in the README used the fixed role <c>postgres</c>, which an image
+    /// started with another <c>POSTGRES_USER</c> does not have. It restores as the role the dump was taken with.</summary>
+    [Fact]
+    public void The_restore_uses_the_role_the_dump_was_taken_with()
+    {
+        var readme = DeploymentScripts.ReadRepoFile("deploy", "borg-fleet", "README.md");
+        Assert.DoesNotContain("psql -U postgres", readme);
+        Assert.Contains("""docker exec -i <c> sh -c 'exec psql -U "${POSTGRES_USER:-postgres}" -d postgres'""", readme);
+        Assert.Contains("""exec pg_dumpall -U "${POSTGRES_USER:-postgres}" """.TrimEnd(),
+            DeploymentScripts.ReadRepoFile("deploy", "borg-fleet", "borg-fleet-client"));
+    }
+
     /// <summary>1 KiB that starts with the SQLite header (enough for the header check, not a database).</summary>
     private static byte[] SqliteHeaderFile()
     {
