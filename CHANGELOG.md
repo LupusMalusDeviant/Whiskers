@@ -2245,7 +2245,9 @@ accepted before the work started (#209). They come from the full review of the w
 - **Cloud bootstrap leaves no standing access (contract 0018 part D, INV-64).** The Hetzner rescue bootstrap acts only
   on the VM bound to the record by its exact public IP, needs a human Admin's approval for every non-interactive
   principal, never keeps the rescue password, and removes the project key, the injected `authorized_keys` line and
-  the generated key. A run that fails after the injection reports the standing key until it is removed.
+  the generated key. A run that fails after the injection reports the standing key until it is removed. The
+  onboarding service itself now refuses a run without a bootstrap on a record that carries an injected bootstrap key
+  and no host-key pin (before, only the Servers page did); it points to the rescue resume or to the abandon.
 - **Whitelist and local accounts.** With the OAuth whitelist enabled, the seeded local admin and local accounts an
   Admin creates can sign in: the first seed adds `WHISKERS_ADMIN_EMAIL`, creating an account adds its address, and
   deleting it removes only what was added for it (parts H1–H3, #216).
@@ -2314,8 +2316,14 @@ accepted before the work started (#209). They come from the full review of the w
   the cloud VM that holds exactly this IP in one stored credential (`server.create`). The onboarding dialog shows the
   bound VM (name, id, created, labels, IP) and can bootstrap a fresh Hetzner VM through rescue mode with a generated
   key. *Settings → Onboarding* stores a Tailscale auth key in the vault (`Onboarding:Tailscale:AuthKeyRef`). New
-  optional `servers.json` fields: `CloudServerId`, the `SshHostKey*` pin fields and the bootstrap-key fields. The MCP
-  tools come with PR 3.
+  optional `servers.json` fields: `CloudServerId`, the `SshHostKey*` pin fields and the bootstrap-key fields.
+- **Onboarding over MCP (contract 0018, PR 3).** Three Admin tools: `add_server` (`server.create`: name, IP, group,
+  provider and optionally the server whose stored cloud credential to reuse; never a key), `onboard_server`
+  (`server.onboard`: `bootstrap` `none` or `hetzner_rescue`, `confirmVmName`, `abandon`) and `get_onboarding_status`
+  (an Admin-level read of the latest run, kept in memory). `onboard_server` blocks until the run ends, sends a progress
+  notification per step and is bound to the 30-minute gateway deadline, not to the request. A rescue bootstrap over
+  MCP always waits for a human Admin's approval. A host that already holds mTLS state is re-onboarded or abandoned
+  only in the UI; the MCP refusal says so. Only `add_server` is offered to the in-app agent.
 - **Mutation Gateway, step 2.3 (ADR-0005).** `IAutomationMutationRunner` runs scheduled tasks, AutoUpdate and
   AutoPatch through the gateway on their owner's authority. Owners are shown and taken over in Scheduled Tasks and
   in Settings → Automation owners (`automation-owners.json` in the data directory). The bypass baseline shrinks from

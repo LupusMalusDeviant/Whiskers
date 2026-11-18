@@ -78,11 +78,11 @@ public sealed class OnboardingServiceStepTests
 
     internal static OnboardingService Service(PerHostCredentialTests.OnboardingExecutor exec, IServerConfigService servers,
         CredentialWorld w, ISshHostKeyPins pins, ICloudBootstrap? bootstrap = null, IVaultService? vault = null,
-        string? authKeyRef = null) =>
+        string? authKeyRef = null, IOnboardingRunRecorder? runs = null) =>
         new(exec, servers, PerHostCredentialTests.ReachableDocker.Create(),
             ComponentTests.ServersKubeconfigSaveTests.NullProxy<IMtlsCertificateService>.Create(), w.Store,
             NullLogger<OnboardingService>.Instance, hostKeys: pins, bootstraps: bootstrap is null ? null : [bootstrap],
-            vault: vault, settings: OnboardingOptionsFor.Settings(authKeyRef: authKeyRef))
+            vault: vault, settings: OnboardingOptionsFor.Settings(authKeyRef: authKeyRef), runs: runs)
         {
             ProbeCredential = (_, _) => Task.FromResult(MtlsProbeOutcome.Refused),
             VerifyDelay = TimeSpan.Zero,
@@ -93,12 +93,49 @@ public sealed class OnboardingServiceStepTests
         service.OnboardServerAsync(Id, mayReplace, PerHostCredentialTests.Decided(w, Id),
             new OnboardingOptions(bootstrap, AbandonBootstrap: abandon), lines, default);
 
-    private static async Task InjectedAsync(CredentialWorld w)
+    /// <param name="pinnedFromDisk">The rescue run also pinned the host keys read from the disk (it failed later): a run
+    /// without a bootstrap may then go on. Without the pin only a resume or an abandon may (see
+    /// <see cref="Injected_without_a_pin_refuses_a_run_without_bootstrap"/>).</param>
+    private static async Task InjectedAsync(CredentialWorld w, bool pinnedFromDisk = false)
     {
         var record = w.Server(Id).Clone();
         record.BootstrapKeyGenerated = true;
         record.BootstrapKeyInjectedFingerprint = "SHA256:injected";
+        if (pinnedFromDisk)
+        {
+            record.SshHostKeyType = "ssh-ed25519";
+            record.SshHostKeyFingerprint = AcceptingHostKeyPins.Fingerprint;
+            record.SshHostKeySource = SshHostKeySource.RescueDisk;
+            record.SshHostKeyPinnedAtUtc = DateTime.UtcNow;
+        }
         await w.Servers.UpdateServerAsync(record);
+    }
+
+    /// <summary>Carried over from the PR 2 review: the service itself (not only the UI's <c>RescueResumeForced</c>)
+    /// refuses a run with bootstrap <c>None</c> on a record that carries an injected bootstrap key and no host-key pin —
+    /// otherwise MCP <c>onboard_server</c> could pin the (maybe still rescue) host on first contact. Nothing is pinned,
+    /// no command runs, the line stays reported, and the answer points to the resume and to the abandon.</summary>
+    [Fact]
+    public async Task Injected_without_a_pin_refuses_a_run_without_bootstrap()
+    {
+        using var w = new CredentialWorld(true, (Id, "100.64.0.20"));
+        await PerHostCredentialTests.SshRecordAsync(w, Id);
+        await InjectedAsync(w);
+        var exec = new PerHostCredentialTests.OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var pins = new AcceptingHostKeyPins();
+
+        var result = await RunAsync(Service(exec, w.Servers, w, pins), w, new Lines());
+
+        Assert.False(result.Success);
+        Assert.Equal(OnboardingStep.HostKey, result.FailedStep);
+        Assert.Empty(result.CompletedSteps);
+        Assert.Contains("hetzner_rescue", result.Error);
+        Assert.Contains("abandon", result.Error);
+        Assert.Empty(pins.Calls);
+        Assert.Empty(exec.Scripts);
+        Assert.True(result.StandingBootstrapKey);
+        Assert.Equal("SHA256:injected", w.Server(Id).BootstrapKeyInjectedFingerprint);
+        Assert.Null(w.Server(Id).SshHostKeyFingerprint);
     }
 
     [Fact]
@@ -215,7 +252,7 @@ public sealed class OnboardingServiceStepTests
     {
         using var w = new CredentialWorld(true, (Id, "100.64.0.20"));
         await PerHostCredentialTests.SshRecordAsync(w, Id);
-        await InjectedAsync(w);
+        await InjectedAsync(w, pinnedFromDisk: true);
         var log = new List<string>();
         var exec = new PerHostCredentialTests.OnboardingExecutor(w.Fleet, "100.64.0.20")
         {
@@ -255,15 +292,16 @@ public sealed class OnboardingServiceStepTests
     {
         using var w = new CredentialWorld(true, (Id, "100.64.0.20"));
         await PerHostCredentialTests.SshRecordAsync(w, Id);
-        await InjectedAsync(w);
+        await InjectedAsync(w, pinnedFromDisk: true);
         var exec = new PerHostCredentialTests.OnboardingExecutor(w.Fleet, "100.64.0.20")
         {
             Answer = c => c == "echo ok" ? new CommandResult { ExitCode = 255, Error = "Connection refused" } : null,
         };
         var lines = new Lines();
+        var runs = new OnboardingRuns();
         using var scope = MutationScope.Begin("server.onboard", "op-s");
 
-        var result = await RunAsync(Service(exec, w.Servers, w, new AcceptingHostKeyPins()), w, lines);
+        var result = await RunAsync(Service(exec, w.Servers, w, new AcceptingHostKeyPins(), runs: runs), w, lines);
 
         Assert.False(result.Success);
         Assert.True(result.StandingBootstrapKey);
@@ -271,6 +309,13 @@ public sealed class OnboardingServiceStepTests
         Assert.Contains(warning, result.CleanupWarnings);
         Assert.Contains(lines.All, l => l.Message.Contains(warning, StringComparison.Ordinal));
         Assert.Contains(scope.Results, r => r.Details.Contains("standingBootstrapKey: true", StringComparison.Ordinal));
+        // Contract 0018 part E: the run snapshot (get_onboarding_status) carries it too.
+        var snapshot = runs.Latest(Id);
+        Assert.NotNull(snapshot);
+        Assert.Equal("op-s", snapshot.OperationId);
+        Assert.True(snapshot.Finished);
+        Assert.True(snapshot.Result!.StandingBootstrapKey);
+        Assert.Contains(snapshot.Log, l => l.Contains(warning, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -278,7 +323,7 @@ public sealed class OnboardingServiceStepTests
     {
         using var w = new CredentialWorld(true, (Id, "100.64.0.20"));
         await PerHostCredentialTests.SshRecordAsync(w, Id);
-        await InjectedAsync(w);
+        await InjectedAsync(w, pinnedFromDisk: true);
         var log = new List<string>();
         var exec = new PerHostCredentialTests.OnboardingExecutor(w.Fleet, "100.64.0.20")
         {

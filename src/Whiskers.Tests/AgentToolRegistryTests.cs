@@ -54,6 +54,24 @@ public class AgentToolRegistryTests
         Assert.Contains("instruct_agent", McpPermissionLevels.DefaultToolLevels.Keys); // aber im Permission-Register
     }
 
+    /// <summary>Contract 0018 (D6): the agent gets add_server, never onboard_server or get_onboarding_status (a run of
+    /// up to 30 minutes with reboots and a Tailscale login link a person must open).</summary>
+    [Fact]
+    public void Onboarding_tools_are_not_agent_tools()
+    {
+        Assert.Contains("onboard_server", AgentToolRegistry.NonAgentTools);
+        Assert.Contains("get_onboarding_status", AgentToolRegistry.NonAgentTools);
+        Assert.DoesNotContain("onboard_server", Registry.Tools.Keys);
+        Assert.DoesNotContain("get_onboarding_status", Registry.Tools.Keys);
+        Assert.Contains("add_server", Registry.Tools.Keys);
+        Assert.Contains("onboard_server", McpPermissionLevels.DefaultToolLevels.Keys);
+        Assert.Contains("get_onboarding_status", McpPermissionLevels.DefaultToolLevels.Keys);
+        // No secret parameter reaches the model through add_server's schema.
+        var schema = Registry.Tools["add_server"].Definition.JsonSchema.ToString();
+        Assert.DoesNotContain("token", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("apiKey", schema, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void Schema_excludes_di_parameters()
     {

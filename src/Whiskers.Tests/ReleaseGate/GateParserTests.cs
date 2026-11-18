@@ -71,7 +71,7 @@ public class PathMatrixParserTests
         var problems = new List<string>();
         var rows = PathMatrixParser.Parse(GateFiles.Require(GateFiles.Contract), GateFiles.Read(GateFiles.PathCapabilities), problems);
         Assert.Empty(problems);
-        Assert.Equal(49, rows.Count(r => r.Class == "M"));
+        Assert.Equal(52, rows.Count(r => r.Class == "M"));   // contract 0018 PR 3: M-50…M-52
         Assert.All(rows.Where(r => r.Class == "M"), r => Assert.NotNull(r.McpTool));
         Assert.Equal("pause_server_checks", rows.Single(r => r.Id == "M-38").McpTool);
         Assert.Equal(["checks.pause", "checks.resume"], rows.Single(r => r.Id == "U-22").Capabilities);

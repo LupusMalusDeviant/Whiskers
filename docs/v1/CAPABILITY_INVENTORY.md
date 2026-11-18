@@ -8,7 +8,7 @@ its compositions (`MutationCompositions`) and the rows of [`PRODUCT_CONTRACT.md`
 that name it (M rows through their tool, the others through [`PATH_CAPABILITIES.md`](PATH_CAPABILITIES.md)).
 Contract 0008, D7: §7 stays hand-written; this file is generated and the release gate joins the two (R12–R15).
 
-117 capabilities, 47 of them with an MCP tool; by level: admin 89, read 1, write 27.
+117 capabilities, 49 of them with an MCP tool; by level: admin 89, read 1, write 27.
 
 The column *Resolution* is how the target resolves and the object the execution receives (contract 0012, D2).
 
@@ -109,9 +109,9 @@ The column *Resolution* is how the target resolves and the object the execution 
 | `selfbackup.delete` | admin | whiskers | Object `ResolvedRecord` | Destructive | — | read back: the archive is no longer on disk. | ui | — | — | U-25 |
 | `selfbackup.prune` | admin | whiskers | Singleton `ResolvedRecord` | Destructive | — | read back: no more than the kept number of self-backups remain. | background | — | — | S-01 |
 | `selfbackup.restore` | admin | whiskers | Singleton `ResolvedRecord` | RootEquivalent | — | `NotVerifiable`: staged only: the restore is applied by the next start, before anything opens the database. | ui | — | — | U-25 |
-| `server.create` | admin | server | Creates `ResolvedNew` | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `server.save` | — | U-20 |
+| `server.create` | admin | server | Creates `ResolvedNew` | RootEquivalent | `add_server` | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | — | `server.save` | — | M-50, U-20 |
 | `server.hostkey_replace` | admin | server | Object `ResolvedServer` | RootEquivalent | — | `NotVerifiable`: Whiskers' own record and known_hosts file: the new line is read back with ssh-keygen before the pin is recorded. | — | `server.save` | — | U-41 |
-| `server.onboard` | admin | server | Creates `ResolvedTarget` | RootEquivalent | — | `NotVerifiable`: the agent stack is installed by a script; the next health check shows whether the host reports. | ui | `certificate.issue_mtls`, `cloud.hard_reset`, `cloud.reboot`, `hetzner.rescue_disable`, `hetzner.rescue_enable`, `hetzner.ssh_key_create`, `hetzner.ssh_key_delete`, `server.save` | — | U-21 |
+| `server.onboard` | admin | server | Creates `ResolvedTarget` | RootEquivalent | `onboard_server` | `NotVerifiable`: the agent stack is installed by a script; the next health check shows whether the host reports. | ui | `certificate.issue_mtls`, `cloud.hard_reset`, `cloud.reboot`, `hetzner.rescue_disable`, `hetzner.rescue_enable`, `hetzner.ssh_key_create`, `hetzner.ssh_key_delete`, `server.save` | — | M-51, U-21 |
 | `server.remove` | admin | server | Object `ResolvedServer` | Destructive | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | ui | `host.exec`, `vault.secret_delete` | — | U-20 |
 | `server.save` | admin | server | Creates `ResolvedTarget` | RootEquivalent | — | `NotVerifiable`: Whiskers' own configuration or record: the write is checked by its store, there is no external effect to read back. | ui | — | `mtls.client_migrate`, `mtls.client_renew`, `server.create`, `server.hostkey_replace`, `server.onboard` | U-20 |
 | `ssl.renew` | admin | host | Server `ResolvedHostObject` | Reversible | `renew_ssl_certificate` | read back: the certificate exists and is valid beyond certbot's 30-day renewal window. | — | — | — | M-13, U-19 |

@@ -214,6 +214,10 @@ public sealed class ProtectedResourceRule : IGuardrailRule
             reason += " An Admin may approve it explicitly.";
             return GuardrailVerdict.Confirm;
         }
+        // Contract 0018: a refused abandon (onboard_server with abandon: true) on a host with mTLS state names where it
+        // can run instead. Only the reason changes; the verdict stays Deny.
+        if (hit.Pattern == "control plane" && ControlPlaneResources.IsOnboardingAbandon(request.ToolName, request.Arguments))
+            reason += " " + ControlPlaneResources.AbandonInUiHint;
         return GuardrailVerdict.Deny;
     }
 

@@ -28,6 +28,8 @@ public static class McpErrorEnvelope
     {
         "create_git_deploy_app", "set_git_deploy_token", "get_git_deploy_app",
         "create_git_deploy_webhook", "rotate_git_deploy_webhook_secret",
+        // Contract 0018 part E.
+        "add_server", "onboard_server", "get_onboarding_status",
     };
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)

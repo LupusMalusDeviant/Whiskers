@@ -47,6 +47,7 @@ public sealed class MutationScope : IDisposable
         PinnedPolicy = request?.PinnedPolicy ?? parent?.PinnedPolicy;
         TriggerId = request?.TriggerId ?? parent?.TriggerId;
         _serverId = request?.Target.ServerId;
+        DecidedTarget = request?.Target;
         // What policy saw for this decision: the resolved target, what it also touches, and the string arguments.
         _decided = new HashSet<string>(StringComparer.Ordinal);
         if (request is not null)
@@ -329,6 +330,11 @@ public sealed class MutationScope : IDisposable
 
     public string CapabilityId { get; }
     public string OperationId { get; }
+
+    /// <summary>The target the gateway resolved and decided this operation on (the request's recorded form), for this
+    /// scope only; <c>null</c> outside the gateway. Contract 0018 part E: <c>onboard_server</c> runs with what the decision
+    /// saw — whether the host held mTLS state and which host the record reached (INV-59) — never a second lookup.</summary>
+    public MutationTarget? DecidedTarget { get; }
 
     /// <summary>Who the gateway let this mutation run for (an agent with its <c>OnBehalfOf</c>), when known.</summary>
     public MutationPrincipal? Principal { get; }

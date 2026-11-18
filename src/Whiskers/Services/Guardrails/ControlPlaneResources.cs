@@ -68,8 +68,19 @@ public static class ControlPlaneResources
     /// control-plane state. Onboarding a new host creates its mTLS state; re-onboarding one replaces it.</summary>
     public static readonly IReadOnlySet<string> CapabilitiesWhenStateExists = new HashSet<string>(StringComparer.Ordinal)
     {
-        "server.onboard",
+        // Contract 0018 part E: the MCP tool name too — the policy sees a capability by its tool name when it has one.
+        "server.onboard", "onboard_server",
     };
+
+    /// <summary>Contract 0018 ("Standing bootstrap key"): what a refused abandon of a host with mTLS state tells a
+    /// non-interactive caller — the removal runs only from the UI, by an interactive Admin with the INV-59 approval.</summary>
+    public const string AbandonInUiHint =
+        "The host holds mTLS state; remove the bootstrap access in the UI (Servers → Remove bootstrap access).";
+
+    /// <summary>Whether a call of <paramref name="capability"/> is an onboarding abandon (<c>abandon: true</c>).</summary>
+    public static bool IsOnboardingAbandon(string capability, IReadOnlyDictionary<string, System.Text.Json.JsonElement> arguments) =>
+        CapabilitiesWhenStateExists.Contains(capability)
+        && arguments.TryGetValue("abandon", out var abandon) && abandon.ValueKind == System.Text.Json.JsonValueKind.True;
 
     /// <summary>Set by the gateway (never by a caller) when the resolved target holds control-plane state
     /// (<see cref="Whiskers.Services.Mutations.MutationTarget.HasControlPlaneState"/>).</summary>

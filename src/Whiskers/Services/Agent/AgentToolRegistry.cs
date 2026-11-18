@@ -32,6 +32,9 @@ public sealed class AgentToolRegistry : IAgentToolRegistry
         {
             "instruct_agent", "create_git_deploy_app", "set_git_deploy_token", "create_git_deploy_webhook",
             "rotate_git_deploy_webhook_secret",
+            // Contract 0018 (D6): the agent cannot open the Tailscale link, and a run of up to 30 minutes with reboots does
+            // not belong in a chat turn; the status log carries the login link. add_server stays an agent tool.
+            "onboard_server", "get_onboarding_status",
         };
 
     public IReadOnlyDictionary<string, AgentToolEntry> Tools { get; }

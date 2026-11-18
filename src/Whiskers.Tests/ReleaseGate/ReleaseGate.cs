@@ -731,7 +731,10 @@ public static class ReleaseGate
                     if (r.McpTool is null) { Add("R14", r.Id, $"PRODUCT_CONTRACT.md:{r.Line}: the M row names no tool in backticks"); continue; }
                     if (catalog.FindByMcpTool(r.McpTool) is not null) continue;
                     if (!inputs.McpTools.Contains(r.McpTool)) Add("R14", r.Id, $"PRODUCT_CONTRACT.md:{r.Line}: '{r.McpTool}' is no MCP tool");
-                    else if (!r.LevelCell.Trim().StartsWith("read", StringComparison.Ordinal))
+                    else if (!r.LevelCell.Trim().StartsWith("read", StringComparison.Ordinal)
+                             // Contract 0018 part E: an Admin-level read (no capability, D5) is named at admin.
+                             && !(CapabilityTableConsistencyTests.AdminLevelReads.Contains(r.McpTool)
+                                  && r.LevelCell.Trim().StartsWith("admin", StringComparison.Ordinal)))
                         Add("R14", r.Id, $"PRODUCT_CONTRACT.md:{r.Line}: '{r.McpTool}' performs no catalog capability, so the row must name it as a read tool");
                     continue;
                 }

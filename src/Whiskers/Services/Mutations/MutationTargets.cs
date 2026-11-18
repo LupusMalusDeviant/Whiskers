@@ -82,6 +82,9 @@ public static class MutationTargets
         "config" => "section",
         "account" => "account",
         "identity" => "binding",
+        // Contract 0018 part E: MCP onboard_server names its server `server` (the Servers page passes `serverId`, which wins
+        // when both are given; the tool runs on the decided target either way).
+        "server" when capability.Id == "server.onboard" && !Has(args, "serverId") && Has(args, "server") => "server",
         "host" or "server" => "serverId",
         _ => null,
     };
