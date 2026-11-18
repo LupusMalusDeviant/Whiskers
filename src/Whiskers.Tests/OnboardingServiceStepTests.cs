@@ -124,11 +124,16 @@ public sealed class OnboardingServiceStepTests
         var exec = new PerHostCredentialTests.OnboardingExecutor(w.Fleet, "100.64.0.20");
         var pins = new AcceptingHostKeyPins();
 
-        var result = await RunAsync(Service(exec, w.Servers, w, pins), w, new Lines());
+        var lines = new Lines();
+
+        var result = await RunAsync(Service(exec, w.Servers, w, pins), w, lines);
 
         Assert.False(result.Success);
         Assert.Equal(OnboardingStep.HostKey, result.FailedStep);
         Assert.Empty(result.CompletedSteps);
+        // Review r1: no step hint and no "a re-run is safe" — a plain re-run is what is refused.
+        Assert.DoesNotContain(OnboardingResult.Hint(OnboardingStep.HostKey), result.Error);
+        Assert.DoesNotContain(lines.All, l => l.Message.Contains("gefahrlos", StringComparison.Ordinal));
         Assert.Contains("hetzner_rescue", result.Error);
         Assert.Contains("abandon", result.Error);
         Assert.Empty(pins.Calls);
@@ -136,6 +141,39 @@ public sealed class OnboardingServiceStepTests
         Assert.True(result.StandingBootstrapKey);
         Assert.Equal("SHA256:injected", w.Server(Id).BootstrapKeyInjectedFingerprint);
         Assert.Null(w.Server(Id).SshHostKeyFingerprint);
+    }
+
+    /// <summary>Contract 0018 Amendment 2 e (review r1): a run is recorded only once it holds the host lock, so a call
+    /// refused because another run holds it never replaces that run's snapshot; a finished run's step is its last one.</summary>
+    [Fact]
+    public async Task A_run_refused_at_the_host_lock_keeps_the_latest_snapshot()
+    {
+        using var w = new CredentialWorld(true, (Id, "100.64.0.20"));
+        await PerHostCredentialTests.SshRecordAsync(w, Id);
+        var exec = new PerHostCredentialTests.OnboardingExecutor(w.Fleet, "100.64.0.20");
+        var runs = new OnboardingRuns();
+        var service = Service(exec, w.Servers, w, new AcceptingHostKeyPins(), runs: runs);
+        using (MutationScope.Begin("server.onboard", "op-first"))
+            Assert.True((await RunAsync(service, w, new Lines())).Success);
+        var first = runs.Latest(Id)!;
+        Assert.Equal(OnboardingStep.BootstrapCleanup, first.CurrentStep);   // Finish set the last step
+
+        var gate = w.Store.HostLock(Id);
+        Assert.True(await gate.WaitAsync(0));
+        try
+        {
+            using (MutationScope.Begin("server.onboard", "op-refused"))
+                Assert.False((await RunAsync(service, w, new Lines())).Success);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        var latest = runs.Latest(Id)!;
+        Assert.Equal("op-first", latest.OperationId);
+        Assert.True(latest.Finished);
+        Assert.True(latest.Result!.Success);
     }
 
     [Fact]

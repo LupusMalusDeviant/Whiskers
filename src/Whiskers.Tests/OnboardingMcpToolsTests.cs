@@ -174,7 +174,7 @@ public sealed class OnboardingMcpToolsTests : IDisposable
         _onboarding.Report =
         [
             new OnboardingProgress(OnboardingStep.HostKey, "host key pinned"),
-            new OnboardingProgress(OnboardingStep.Bootstrap, "bootstrap ok"),
+            new OnboardingProgress(OnboardingStep.Bootstrap, "bootstrap ok PGPASSWORD=s3cr3t-value"),
             new OnboardingProgress(OnboardingStep.TailscaleLogin, "Tailscale-Login-Link", "https://login.tailscale.com/a/abc123"),
         ];
         var notes = new Notifications();
@@ -186,6 +186,8 @@ public sealed class OnboardingMcpToolsTests : IDisposable
         Assert.Contains("HostKey", notes.All[0].Message);
         Assert.Contains("bootstrap ok", notes.All[1].Message);
         Assert.Contains("https://login.tailscale.com/a/abc123", notes.All[2].Message);   // the Admin client opens it
+        // Review r1: the lines are redacted like the status log; only the login link is passed on as it is (D5).
+        Assert.DoesNotContain("s3cr3t-value", notes.All[1].Message);
     }
 
     [Fact]
@@ -299,6 +301,15 @@ public sealed class OnboardingMcpToolsTests : IDisposable
             Assert.Equal(JsonValueKind.Null, root.GetProperty("result").ValueKind);
         }
 
+        // Once the run has finished, the login link is no longer shown.
+        second.Finish(OnboardingResult.Ok([OnboardingStep.HostKey, OnboardingStep.TailscaleLogin]));
+        NewRequest();
+        using (var done = JsonDocument.Parse((await StatusAsync()).Answer))
+        {
+            Assert.True(done.RootElement.GetProperty("finished").GetBoolean());
+            Assert.Equal(JsonValueKind.Null, done.RootElement.GetProperty("tailscaleLoginUrl").ValueKind);
+        }
+
         // A write-level key never reads it (D5): refused by the filter, the tool does not run.
         NewRequest();
         _mcp.Principal = new AgentPrincipal(AgentPrincipalKind.McpKey, "write-key", McpPermissionLevels.Write, null, McpKeyId: "k2");
@@ -313,6 +324,46 @@ public sealed class OnboardingMcpToolsTests : IDisposable
             Code(Text(ServerTools.GetOnboardingStatus(_http, _permissions, new OnboardingRuns(), _servers, Id))));
         Assert.Equal(McpErrorEnvelope.NotFound,
             Code(Text(ServerTools.GetOnboardingStatus(_http, _permissions, _runs, _servers, "nobody"))));
+    }
+
+    /// <summary>Review r1 (INV-64): while a run is going on, the record's standing bootstrap line is still reported.</summary>
+    [Fact]
+    public async Task Status_reports_the_standing_key_while_a_run_is_going()
+    {
+        Bound(injected: "SHA256:injected");
+        _runs.Begin(Id, "op-running").Report(new OnboardingProgress(OnboardingStep.CloudBootstrap, "rescue"));
+
+        var status = await StatusAsync();
+
+        using var json = JsonDocument.Parse(status.Answer);
+        Assert.False(json.RootElement.GetProperty("finished").GetBoolean());
+        Assert.True(json.RootElement.GetProperty("standingBootstrapKey").GetBoolean());
+        Assert.Equal("SHA256:injected", json.RootElement.GetProperty("standingBootstrapKeyFingerprint").GetString());
+    }
+
+    /// <summary>Review r1: a call that names two different servers (<c>server</c> and <c>serverId</c>) is refused before
+    /// anything runs, never decided on one of them silently.</summary>
+    [Fact]
+    public async Task Server_and_serverId_naming_two_servers_are_refused()
+    {
+        Bound();
+        var other = new ServerConfig { Id = "other", Name = "other", ConnectionType = ConnectionType.SSH, SshHost = "203.0.113.21", SshUser = "root" };
+        var (mtls, mtlsScript) = ScriptedProxy<IMtlsClientCredentialStore>.Create();
+        mtlsScript.On(nameof(IMtlsClientCredentialStore.HoldsState), _ => false);
+        _mcp.Targets = new MutationTargetResolver(new TestServices(new FakeServerConfig(_server, other), _store.Vault, mtls));
+
+        var result = await _mcp.CallAsync("onboard_server", _ => throw new InvalidOperationException("must not run"),
+            new { server = Id, serverId = "other", bootstrap = "none" });
+
+        Assert.Equal(McpCallResult.Denied, McpCallOutcomes.Get(_mcp.Http).Last().Result);
+        Assert.Equal(McpErrorEnvelope.InvalidArgument, Code(Text(result)));
+        Assert.Equal(0, _onboarding.Runs);
+
+        // The same server in another case is one server.
+        NewRequest();
+        var same = await _mcp.CallAsync("onboard_server", McpFilterHarness.Ok, new { server = Id.ToUpperInvariant(), serverId = Id, bootstrap = "none" });
+        Assert.Equal(McpCallResult.Executed, McpCallOutcomes.Get(_mcp.Http).Last().Result);
+        Assert.Equal("done", Text(same));
     }
 
     // ---- add_server -----------------------------------------------------------------------------------------------

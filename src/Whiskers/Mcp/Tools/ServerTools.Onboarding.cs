@@ -138,7 +138,7 @@ public partial class ServerTools
         var notify = new SynchronousProgress(p => progress.Report(new ProgressNotificationValue
         {
             Progress = Interlocked.Increment(ref step),
-            Message = p.TailscaleLoginUrl is { } url ? $"[{p.Step}] Tailscale login link: {url}" : $"[{p.Step}] {p.Message}",
+            Message = p.TailscaleLoginUrl is { } url ? $"[{p.Step}] Tailscale login link: {url}" : $"[{p.Step}] {SecretRedactor.Redact(p.Message)}",
         }));
 
         // D8: bound to the gateway's deadline, not to the request — a client that disconnects does not cut the run in the
@@ -194,10 +194,9 @@ public partial class ServerTools
         var id = record?.Id ?? server;
         var snapshot = runs.Latest(id);
         // INV-64: the standing key is reported until a resume, an abandon or server.remove removes it — also when no run
-        // is in memory any more (after a restart). While a run is going on, its own result says it when it ends.
+        // is in memory any more (after a restart), and while a run is going on: the line stands until the record says otherwise.
         var standingFingerprint = record?.BootstrapKeyInjectedFingerprint;
-        var standing = snapshot is { Finished: false } ? false
-            : snapshot?.Result?.StandingBootstrapKey == true || standingFingerprint is not null;
+        var standing = standingFingerprint is not null || snapshot?.Result?.StandingBootstrapKey == true;
         if (snapshot is null && !standing)
             return McpErrorEnvelope.Result(McpErrorEnvelope.NotFound,
                 record is null ? $"Unknown server '{server}'." : $"No onboarding run of '{id}' since Whiskers started.");

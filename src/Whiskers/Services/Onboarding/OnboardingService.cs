@@ -212,7 +212,8 @@ public class OnboardingService : IOnboardingService
             {
                 step = OnboardingStep.HostKey;
                 Say($"❌ {resumeOnly}");
-                return Failed(resumeOnly);
+                // No per-step hint and no "a re-run is safe": a plain re-run is exactly what is refused here.
+                return OnboardingResult.Fail(completed, step, resumeOnly);
             }
 
             // Abandon (contract 0018): only BootstrapCleanup, then the run ends.

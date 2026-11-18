@@ -386,7 +386,7 @@
 10 Whiskers.Tests.HostKeyReplaceRuleTests
 22 Whiskers.Tests.HetznerRescueBootstrapTests
 7 Whiskers.Tests.RescueCommandsTests
-18 Whiskers.Tests.OnboardingServiceStepTests
+19 Whiskers.Tests.OnboardingServiceStepTests
 9 Whiskers.Tests.ServerRemovalTests
 12 Whiskers.Tests.CloudBootstrapRuleTests
 4 Whiskers.Tests.HetznerApiServiceTests
@@ -396,7 +396,8 @@
 
 # Contract 0018 PR 3 (part E): the MCP tools add_server, onboard_server and get_onboarding_status (INV-59, INV-64), and
 # the controls of the MCP refusal on a host with mTLS state.
-12 Whiskers.Tests.OnboardingMcpToolsTests
+14 Whiskers.Tests.OnboardingMcpToolsTests
+2 Whiskers.Tests.OnboardingRunsTests
 4 Whiskers.Tests.ControlPlaneOnboardMcpTests
 
 # BEGIN release-gate (generated)
@@ -1754,6 +1755,8 @@
 1 Whiskers.Tests.OnboardingMcpToolsTests.Onboard_server_and_status_report_a_standing_bootstrap_key
 1 Whiskers.Tests.OnboardingMcpToolsTests.Onboard_server_with_rescue_returns_pending_approval_then_runs_once
 1 Whiskers.Tests.OnboardingMcpToolsTests.Progress_notifications_per_step
+1 Whiskers.Tests.OnboardingMcpToolsTests.Server_and_serverId_naming_two_servers_are_refused
+1 Whiskers.Tests.OnboardingMcpToolsTests.Status_reports_the_standing_key_while_a_run_is_going
 1 Whiskers.Tests.OnboardingMcpToolsTests.Status_returns_latest_snapshot_admin_only
 1 Whiskers.Tests.OnboardingMcpToolsTests.Without_a_bootstrap_the_preset_decides
 1 Whiskers.Tests.OnboardingSecretsSinkTests.Rescue_password_is_neither_returned_logged_audited_nor_stored

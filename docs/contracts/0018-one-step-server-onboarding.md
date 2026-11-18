@@ -878,21 +878,28 @@ tests exist and are listed under *Open invariants* until then.
   `onboard_server` next to `server.onboard`; without it a re-onboarding over MCP would not count as a control-plane
   change (INV-59). `ControlPlaneOnboardMcpTests` pins it.
 - b) **The `server` argument.** The target resolver takes `server` as the id of `server.onboard` only when no
-  `serverId` is given (the Servers page passes `serverId`). The tool runs on the decided target in any case: a new
+  `serverId` is given (the Servers page passes `serverId`). A call that passes both and names two different servers
+  (compared ignoring case) is refused over MCP before policy (`invalid_argument`). The tool runs on the decided target in any case: a new
   read-only `MutationScope.DecidedTarget` hands it the server, its mTLS state and the host it reached (INV-59), and
   outside a `server.onboard` decision the tool refuses (fail closed).
 - c) **Abandon refusal text.** `ProtectedResourceRule` appends "remove the bootstrap access in the UI (Servers →
   Remove bootstrap access)" to its `Deny` reason when the refused call is an abandon. Only the text changes.
 - d) **Run token.** The tool ignores the token of the call (it is linked to the request) and runs on its own token
   that ends with `server.onboard`'s catalog deadline (30 minutes). A client that disconnects leaves the run going.
+  Caveat: the gateway itself is unchanged, and its `deadline.Token` stays linked to the request
+  (`MutationGateway.cs`, the execution's linked token source). A verifier that awaited it would record a run that
+  succeeded after a client disconnect as "cancelled, effect unknown". `server.onboard` has `VerificationContract.None`,
+  so nothing awaits it today; a verifier added later must not await that token, or the gateway must change first.
 - e) **Run snapshot.** `OnboardingRuns` is filled by `OnboardingService` for every surface (UI and MCP), once the run
   holds the host lock, so a call refused because another run holds the lock does not replace that run's snapshot.
   `IOnboardingRunRecorder.Begin` is in-memory only and listed in `WriteNamedButNotGated`.
 - f) **Additive answer fields.** `add_server` also returns `credentialFrom` (a server id). `get_onboarding_status` also
-  returns `serverId` and `standingBootstrapKeyFingerprint`. It reports the standing key from the record when no run is
-  in memory (after a restart), shows the Tailscale login link only while the run is unfinished, and answers
-  `not_found` when there is neither a run nor a standing key. A progress notification of the login step carries the
-  link (Admin keys only, D5).
+  returns `serverId` and `standingBootstrapKeyFingerprint`. It reports the standing key whenever the record carries
+  `BootstrapKeyInjectedFingerprint` (while a run is going on, after it, and when no run is in memory after a
+  restart) or the latest result says so (review r1; it used to answer `false` during a run). It shows the Tailscale login link only while the run is unfinished, and answers
+  `not_found` when there is neither a run nor a standing key. Progress notifications are redacted with
+  `SecretRedactor` like the status log; the notification of the login step carries the link as it is (Admin keys
+  only, D5).
 - g) **Argument checks.** `onboard_server` refuses `abandon` with a bootstrap other than `none`, `confirmVmName` with
   bootstrap `none`, and an unknown bootstrap value (`invalid_argument`). Any value other than `none` makes the resolver
   read the VM and `CloudBootstrapRule` ask for the approval first (fail closed), so an unknown value is refused after
@@ -907,7 +914,10 @@ tests exist and are listed under *Open invariants* until then.
   `Progress_notifications_per_step`, plus `Without_a_bootstrap_the_preset_decides`,
   `Invalid_bootstrap_is_refused_before_the_run` and `Add_server_runs_through_the_gateway_and_reads_the_record_back`.
   `OnboardingServiceStepTests.Injected_without_a_pin_refuses_a_run_without_bootstrap` covers h.
-  `ControlPlaneOnboardMcpTests` comes with this PR, as amendment h of PR 2 said.
+  `ControlPlaneOnboardMcpTests` comes with this PR, as amendment h of PR 2 said. Review r1 added
+  `OnboardingMcpToolsTests.Status_reports_the_standing_key_while_a_run_is_going`,
+  `OnboardingMcpToolsTests.Server_and_serverId_naming_two_servers_are_refused`,
+  `OnboardingServiceStepTests.A_run_refused_at_the_host_lock_keeps_the_latest_snapshot` and `OnboardingRunsTests`.
 - j) **Records and the gate.** The release gate's rule R14 accepts an M row without a capability at level `admin` only
   for a tool in `AdminLevelReads` (M-52); every other such row must still say `read`. The tests that took "not read"
   to mean "mutating" (`CapabilityCatalogTests`, `AuditCompletenessTests`, `AuditPathMatrixTests`,
