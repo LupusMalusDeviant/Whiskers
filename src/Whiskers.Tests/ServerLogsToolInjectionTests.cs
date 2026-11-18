@@ -22,7 +22,7 @@ public class ServerLogsToolInjectionTests
     public async Task A_priority_outside_journalctls_vocabulary_never_reaches_the_host(string priority)
     {
         var exec = new RecordingExecutor();
-        var result = await MonitoringTools.GetServerLogs(Caller(), null!, exec, "badwolf", priority: priority);
+        var result = await MonitoringTools.GetServerLogs(Caller(), null!, exec, "host-a", priority: priority);
 
         Assert.StartsWith("Error: Invalid priority", result);
         Assert.Empty(exec.Commands);
@@ -34,7 +34,7 @@ public class ServerLogsToolInjectionTests
     public async Task A_service_name_with_shell_characters_never_reaches_the_host(string serviceName)
     {
         var exec = new RecordingExecutor();
-        var result = await MonitoringTools.GetServerLogs(Caller(), null!, exec, "badwolf", serviceName: serviceName);
+        var result = await MonitoringTools.GetServerLogs(Caller(), null!, exec, "host-a", serviceName: serviceName);
 
         Assert.StartsWith("Error: Invalid service name", result);
         Assert.Empty(exec.Commands);
@@ -47,7 +47,7 @@ public class ServerLogsToolInjectionTests
     public async Task Valid_priorities_still_work(string priority, string expected)
     {
         var exec = new RecordingExecutor();
-        await MonitoringTools.GetServerLogs(Caller(), null!, exec, "badwolf", serviceName: "nginx", lines: 50, priority: priority);
+        await MonitoringTools.GetServerLogs(Caller(), null!, exec, "host-a", serviceName: "nginx", lines: 50, priority: priority);
 
         Assert.Equal(expected, Assert.Single(exec.Commands));
     }

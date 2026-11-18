@@ -27,7 +27,7 @@ public class ServerCircuitBreakerTests
         services.AddSingleton<INotificationService>(sent);
         if (lifetime is not null) services.AddSingleton(lifetime);
         services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(
-            new FakeServerConfig(new ServerConfig { Id = "badwolf", Name = "Badwolf", IsDefault = true }));
+            new FakeServerConfig(new ServerConfig { Id = "host-a", Name = "Host-A", IsDefault = true }));
 
         var circuit = new ServerCircuitBreaker(
             new StaticOptionsMonitor<ServerBudgetSettings>(new ServerBudgetSettings
@@ -59,11 +59,11 @@ public class ServerCircuitBreakerTests
         var (circuit, sent) = Build(threshold: 2, lifetime: lifetime);
         lifetime.StopApplication();
 
-        circuit.RecordFailure("badwolf", new OperationCanceledException());
-        circuit.RecordFailure("badwolf", new OperationCanceledException());
-        circuit.RecordFailure("badwolf", new TaskCanceledException());
+        circuit.RecordFailure("host-a", new OperationCanceledException());
+        circuit.RecordFailure("host-a", new OperationCanceledException());
+        circuit.RecordFailure("host-a", new TaskCanceledException());
 
-        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("badwolf").State);
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("host-a").State);
         Assert.Empty(sent.Events);
     }
 
@@ -71,9 +71,9 @@ public class ServerCircuitBreakerTests
     public void A_timeout_still_counts_while_running_normally()
     {
         var (circuit, _) = Build(threshold: 2, lifetime: new StoppingLifetime()); // not stopping
-        circuit.RecordFailure("badwolf", new OperationCanceledException());
-        circuit.RecordFailure("badwolf", new OperationCanceledException());
-        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("badwolf").State);
+        circuit.RecordFailure("host-a", new OperationCanceledException());
+        circuit.RecordFailure("host-a", new OperationCanceledException());
+        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("host-a").State);
     }
 
     [Fact]
@@ -81,20 +81,20 @@ public class ServerCircuitBreakerTests
     {
         var (circuit, sent) = Build(threshold: 3);
 
-        circuit.RecordFailure("badwolf", TransportFailure());
-        circuit.RecordFailure("badwolf", TransportFailure());
-        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("badwolf").State);
+        circuit.RecordFailure("host-a", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("host-a").State);
         Assert.Empty(sent.Events);   // two failures are a blip, not a verdict
 
-        circuit.RecordFailure("badwolf", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
 
-        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("badwolf").State);
-        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("badwolf"));
+        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("host-a").State);
+        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("host-a"));
 
         // The part that matters: nobody may have to guess why the server went quiet.
         var announcement = Assert.Single(sent.Events);
         Assert.Equal("server_throttled", announcement.EventType);
-        Assert.Equal("badwolf", announcement.ServerId);
+        Assert.Equal("host-a", announcement.ServerId);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class ServerCircuitBreakerTests
     {
         var (circuit, sent) = Build(threshold: 2);
 
-        for (var i = 0; i < 20; i++) circuit.RecordFailure("badwolf", TransportFailure());
+        for (var i = 0; i < 20; i++) circuit.RecordFailure("host-a", TransportFailure());
 
         // A storm of failures is one event, not twenty. An alert channel that gets twenty is an alert
         // channel people mute.
@@ -114,13 +114,13 @@ public class ServerCircuitBreakerTests
     {
         var (circuit, sent) = Build(threshold: 3);
 
-        circuit.RecordFailure("badwolf", TransportFailure());
-        circuit.RecordFailure("badwolf", TransportFailure());
-        circuit.RecordSuccess("badwolf");
-        circuit.RecordFailure("badwolf", TransportFailure());
-        circuit.RecordFailure("badwolf", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
+        circuit.RecordSuccess("host-a");
+        circuit.RecordFailure("host-a", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
 
-        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("badwolf").State);
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("host-a").State);
         Assert.Empty(sent.Events);
     }
 
@@ -128,22 +128,22 @@ public class ServerCircuitBreakerTests
     public void After_the_cooldown_one_probe_gets_through_and_recovery_closes_the_circuit()
     {
         var (circuit, sent) = Build(threshold: 1, cooldownSeconds: 1);
-        circuit.RecordFailure("badwolf", TransportFailure());
-        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("badwolf"));
+        circuit.RecordFailure("host-a", TransportFailure());
+        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("host-a"));
 
         Thread.Sleep(1100);
 
         // First caller after the cooldown becomes the probe...
-        circuit.ThrowIfOpen("badwolf");
-        Assert.Equal(ServerCircuitState.HalfOpen, circuit.Snapshot("badwolf").State);
+        circuit.ThrowIfOpen("host-a");
+        Assert.Equal(ServerCircuitState.HalfOpen, circuit.Snapshot("host-a").State);
 
         // ...and everyone else still fails fast, so a recovering host gets one request, not a stampede.
-        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("badwolf"));
+        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("host-a"));
 
-        circuit.RecordSuccess("badwolf");
+        circuit.RecordSuccess("host-a");
 
-        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("badwolf").State);
-        circuit.ThrowIfOpen("badwolf");   // no longer throws
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("host-a").State);
+        circuit.ThrowIfOpen("host-a");   // no longer throws
 
         // A server that comes back on its own must say so too — otherwise the operator is left believing
         // it is still down.
@@ -154,14 +154,14 @@ public class ServerCircuitBreakerTests
     public void A_failed_probe_reopens_the_circuit_without_a_second_announcement()
     {
         var (circuit, sent) = Build(threshold: 1, cooldownSeconds: 1);
-        circuit.RecordFailure("badwolf", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
         Thread.Sleep(1100);
 
-        circuit.ThrowIfOpen("badwolf");                        // probe
-        circuit.RecordFailure("badwolf", TransportFailure());  // still broken
+        circuit.ThrowIfOpen("host-a");                        // probe
+        circuit.RecordFailure("host-a", TransportFailure());  // still broken
 
-        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("badwolf").State);
-        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("badwolf"));
+        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("host-a").State);
+        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("host-a"));
         Assert.Single(sent.Events);   // still just the one "throttled" — a failed retry is not news
     }
 
@@ -172,11 +172,11 @@ public class ServerCircuitBreakerTests
 
         // "No such container" says nothing about whether the HOST is reachable. Counting it would pause a
         // perfectly healthy server because someone asked about a container that no longer exists.
-        circuit.RecordFailure("badwolf", new InvalidOperationException("No such container: abc"));
-        circuit.RecordFailure("badwolf", new ArgumentException("bad parameter"));
-        circuit.RecordFailure("badwolf", new KeyNotFoundException());
+        circuit.RecordFailure("host-a", new InvalidOperationException("No such container: abc"));
+        circuit.RecordFailure("host-a", new ArgumentException("bad parameter"));
+        circuit.RecordFailure("host-a", new KeyNotFoundException());
 
-        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("badwolf").State);
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("host-a").State);
         Assert.Empty(sent.Events);
     }
 
@@ -184,48 +184,48 @@ public class ServerCircuitBreakerTests
     public void A_probe_that_hits_an_application_error_lets_the_next_caller_probe_again()
     {
         var (circuit, _) = Build(threshold: 1, cooldownSeconds: 1);
-        circuit.RecordFailure("badwolf", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
         Thread.Sleep(1100);
 
-        circuit.ThrowIfOpen("badwolf");                                                     // probe
-        circuit.RecordFailure("badwolf", new InvalidOperationException("No such container")); // host answered
+        circuit.ThrowIfOpen("host-a");                                                     // probe
+        circuit.RecordFailure("host-a", new InvalidOperationException("No such container")); // host answered
 
         // Before the fix the slot stayed taken here and every later call failed fast until a restart.
-        Assert.Equal(ServerCircuitState.HalfOpen, circuit.Snapshot("badwolf").State);
-        circuit.ThrowIfOpen("badwolf");   // the next caller becomes the probe instead of being refused
+        Assert.Equal(ServerCircuitState.HalfOpen, circuit.Snapshot("host-a").State);
+        circuit.ThrowIfOpen("host-a");   // the next caller becomes the probe instead of being refused
     }
 
     [Fact]
     public void A_probe_released_without_a_verdict_does_not_keep_the_server_paused()
     {
         var (circuit, _) = Build(threshold: 1, cooldownSeconds: 1);
-        circuit.RecordFailure("badwolf", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
         Thread.Sleep(1100);
 
-        circuit.ThrowIfOpen("badwolf");   // probe, which then never reaches the host (client build threw)
-        circuit.ReleaseProbe("badwolf");
+        circuit.ThrowIfOpen("host-a");   // probe, which then never reaches the host (client build threw)
+        circuit.ReleaseProbe("host-a");
 
-        circuit.ThrowIfOpen("badwolf");   // a new probe is allowed
-        circuit.RecordSuccess("badwolf");
-        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("badwolf").State);
+        circuit.ThrowIfOpen("host-a");   // a new probe is allowed
+        circuit.RecordSuccess("host-a");
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("host-a").State);
     }
 
     [Fact]
     public void Releasing_after_the_probe_was_settled_changes_nothing()
     {
         var (circuit, sent) = Build(threshold: 1, cooldownSeconds: 1);
-        circuit.RecordFailure("badwolf", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
         Thread.Sleep(1100);
 
-        circuit.ThrowIfOpen("badwolf");
-        circuit.RecordFailure("badwolf", TransportFailure());   // probe failed → open again
-        circuit.ReleaseProbe("badwolf");                         // the finally in the caller runs anyway
+        circuit.ThrowIfOpen("host-a");
+        circuit.RecordFailure("host-a", TransportFailure());   // probe failed → open again
+        circuit.ReleaseProbe("host-a");                         // the finally in the caller runs anyway
 
-        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("badwolf").State);
-        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("badwolf"));
+        Assert.Equal(ServerCircuitState.Open, circuit.Snapshot("host-a").State);
+        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("host-a"));
 
-        circuit.ReleaseProbe("burgcloud");                       // never seen, closed: harmless
-        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("burgcloud").State);
+        circuit.ReleaseProbe("host-b");                       // never seen, closed: harmless
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("host-b").State);
         Assert.Single(sent.Events);
     }
 
@@ -234,10 +234,10 @@ public class ServerCircuitBreakerTests
     {
         var (circuit, _) = Build(threshold: 1);
 
-        circuit.RecordFailure("badwolf", TransportFailure());
+        circuit.RecordFailure("host-a", TransportFailure());
 
-        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("badwolf"));
-        circuit.ThrowIfOpen("burgcloud");   // untouched
-        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("burgcloud").State);
+        Assert.Throws<ServerCircuitOpenException>(() => circuit.ThrowIfOpen("host-a"));
+        circuit.ThrowIfOpen("host-b");   // untouched
+        Assert.Equal(ServerCircuitState.Closed, circuit.Snapshot("host-b").State);
     }
 }

@@ -23,7 +23,7 @@ public class ApiLatencyTests
         for (var i = 0; i < series.Count; i++)
         {
             window.Add(series[i]);
-            var finding = evaluator.Evaluate(Noon.AddMinutes(i), "badwolf", "Badwolf", window);
+            var finding = evaluator.Evaluate(Noon.AddMinutes(i), "host-a", "Host-A", window);
             if (finding is not null) findings.Add(finding);
         }
 

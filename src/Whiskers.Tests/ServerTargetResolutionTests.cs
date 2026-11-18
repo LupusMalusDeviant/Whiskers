@@ -6,8 +6,8 @@ using Whiskers.Services.ServerConfig;
 
 namespace Whiskers.Tests;
 
-/// <summary>Everything a human or an agent reads names a server by its DISPLAY NAME ("Rabenhof (Hetzner)"),
-/// while every tool takes the id ("rabenhof"). Once alerts started arriving from remote hosts, an agent
+/// <summary>Everything a human or an agent reads names a server by its DISPLAY NAME ("Host-D (Hetzner)"),
+/// while every tool takes the id ("host-d"). Once alerts started arriving from remote hosts, an agent
 /// acting on one passed the name, got "Server not found" and concluded the container did not exist — so the
 /// lookup accepts both, with ids winning.</summary>
 public sealed class ServerTargetResolutionTests : IDisposable
@@ -41,42 +41,42 @@ public sealed class ServerTargetResolutionTests : IDisposable
     [Fact]
     public async Task Resolves_by_id()
     {
-        var svc = await ServiceWith(Server("local", "Badwolf (local)", isDefault: true), Server("rabenhof", "Rabenhof (Hetzner)"));
-        Assert.Equal("Rabenhof (Hetzner)", svc.GetServer("rabenhof")?.Name);
+        var svc = await ServiceWith(Server("local", "Host-A (local)", isDefault: true), Server("host-d", "Host-D (Hetzner)"));
+        Assert.Equal("Host-D (Hetzner)", svc.GetServer("host-d")?.Name);
     }
 
     [Fact]
     public async Task Resolves_by_display_name()
     {
-        var svc = await ServiceWith(Server("local", "Badwolf (local)", isDefault: true), Server("rabenhof", "Rabenhof (Hetzner)"));
-        Assert.Equal("rabenhof", svc.GetServer("Rabenhof (Hetzner)")?.Id);
+        var svc = await ServiceWith(Server("local", "Host-A (local)", isDefault: true), Server("host-d", "Host-D (Hetzner)"));
+        Assert.Equal("host-d", svc.GetServer("Host-D (Hetzner)")?.Id);
     }
 
     [Fact]
     public async Task Resolution_is_case_insensitive()
     {
-        var svc = await ServiceWith(Server("local", "Badwolf (local)", isDefault: true), Server("rabenhof", "Rabenhof (Hetzner)"));
-        Assert.Equal("rabenhof", svc.GetServer("RABENHOF")?.Id);
-        Assert.Equal("rabenhof", svc.GetServer("rabenhof (hetzner)")?.Id);
+        var svc = await ServiceWith(Server("local", "Host-A (local)", isDefault: true), Server("host-d", "Host-D (Hetzner)"));
+        Assert.Equal("host-d", svc.GetServer("HOST-D")?.Id);
+        Assert.Equal("host-d", svc.GetServer("host-d (hetzner)")?.Id);
     }
 
     [Fact]
     public async Task An_id_wins_over_another_servers_name()
     {
-        // Pathological but decidable: "rabenhof" is one server's id and another's name. The id wins, so a
+        // Pathological but decidable: "host-d" is one server's id and another's name. The id wins, so a
         // tool call can never be silently redirected to a different host.
         var svc = await ServiceWith(
-            Server("local", "Badwolf (local)", isDefault: true),
-            Server("rabenhof", "Rabenhof (Hetzner)"),
-            Server("other", "rabenhof"));
+            Server("local", "Host-A (local)", isDefault: true),
+            Server("host-d", "Host-D (Hetzner)"),
+            Server("other", "host-d"));
 
-        Assert.Equal("Rabenhof (Hetzner)", svc.GetServer("rabenhof")?.Name);
+        Assert.Equal("Host-D (Hetzner)", svc.GetServer("host-d")?.Name);
     }
 
     [Fact]
     public async Task An_unknown_target_still_resolves_to_nothing()
     {
-        var svc = await ServiceWith(Server("local", "Badwolf (local)", isDefault: true));
+        var svc = await ServiceWith(Server("local", "Host-A (local)", isDefault: true));
         Assert.Null(svc.GetServer("f7d10a7c-770e-4d1e-a09e-51a32246171a"));  // an id a model invented
         Assert.Null(svc.GetServer(""));
     }

@@ -47,7 +47,7 @@ public sealed class SelfMetricsPersistenceTests : IDisposable
 
     private static ScanSupervisor Supervisor(ISelfMetrics metrics, FakeNotifications sent) =>
         new(metrics, sent,
-            new FakeServerConfig(new Models.ServerConfig { Id = "badwolf", Name = "Badwolf", IsDefault = true }),
+            new FakeServerConfig(new Models.ServerConfig { Id = "host-a", Name = "Host-A", IsDefault = true }),
             NullLogger<ScanSupervisor>.Instance,
             TimeSpan.Zero);
 
@@ -58,11 +58,11 @@ public sealed class SelfMetricsPersistenceTests : IDisposable
         // thing it measures is the same mistake it exists to reveal, one level up. Not "few calls" — none.
         var docker = new FakeDocker(new ContainerInfo
         {
-            Id = "c1", Name = "burg-web", ServerId = "badwolf", ServerName = "Badwolf"
+            Id = "c1", Name = "web", ServerId = "host-a", ServerName = "Host-A"
         });
 
         var metrics = new SelfMetrics();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
 
         var recorder = RecorderFor(metrics);
         await recorder.SampleAsync();
@@ -77,8 +77,8 @@ public sealed class SelfMetricsPersistenceTests : IDisposable
     public async Task A_sample_writes_one_row_per_loop_and_server()
     {
         var metrics = new SelfMetrics();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
-        metrics.RecordCycle("health", "badwolf", TimeSpan.FromMilliseconds(80), success: false, TimeSpan.FromSeconds(30));
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        metrics.RecordCycle("health", "host-a", TimeSpan.FromMilliseconds(80), success: false, TimeSpan.FromSeconds(30));
 
         await RecorderFor(metrics).SampleAsync();
 
@@ -98,7 +98,7 @@ public sealed class SelfMetricsPersistenceTests : IDisposable
         // THE test for this work package. Before the restore existed, every restart produced a fleet-wide
         // "nothing is being checked" — and an alarm that fires on every deploy is one people mute.
         var before = new SelfMetrics();
-        before.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        before.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
         await RecorderFor(before).SampleAsync();
 
         // A new process: fresh, empty in-memory state.
@@ -127,7 +127,7 @@ public sealed class SelfMetricsPersistenceTests : IDisposable
         // it would be worse than no restore at all: a loop that died before the restart would come back
         // looking alive.
         var before = new SelfMetrics();
-        before.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        before.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
         await RecorderFor(before).SampleAsync();
 
         // Age the stored success by two hours — 120 intervals for a one-minute loop.
@@ -154,7 +154,7 @@ public sealed class SelfMetricsPersistenceTests : IDisposable
         // timestamp win there would make a working loop look older than it is — the restore would be
         // manufacturing exactly the false alarm it exists to prevent.
         var before = new SelfMetrics();
-        before.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        before.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
         await RecorderFor(before).SampleAsync();
 
         using (var db = Db())
@@ -165,7 +165,7 @@ public sealed class SelfMetricsPersistenceTests : IDisposable
         }
 
         var after = new SelfMetrics();
-        after.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(90), success: true, TimeSpan.FromMinutes(1));
+        after.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(90), success: true, TimeSpan.FromMinutes(1));
         var live = after.Loops().Single().LastSuccess;
 
         await RecorderFor(after).RestoreAsync();
@@ -179,7 +179,7 @@ public sealed class SelfMetricsPersistenceTests : IDisposable
         // Beyond a week the stored success says nothing about now. Restoring it would let a loop that has
         // been dead for a month come back looking recently alive.
         var before = new SelfMetrics();
-        before.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        before.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
         await RecorderFor(before).SampleAsync();
 
         using (var db = Db())
@@ -199,12 +199,12 @@ public sealed class SelfMetricsPersistenceTests : IDisposable
     public async Task Only_the_newest_reading_per_loop_is_restored()
     {
         var metrics = new SelfMetrics();
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(120), success: true, TimeSpan.FromMinutes(1));
         var recorder = RecorderFor(metrics);
 
         await recorder.SampleAsync();
         await Task.Delay(10);
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromMilliseconds(130), success: true, TimeSpan.FromMinutes(1));
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromMilliseconds(130), success: true, TimeSpan.FromMinutes(1));
         await recorder.SampleAsync();
 
         using var db = Db();

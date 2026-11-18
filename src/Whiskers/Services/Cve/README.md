@@ -24,7 +24,7 @@ Findings are **de-duplicated per CVE-ID** for display (one CVE > all real affect
 
 A failed scan deliberately keeps the previous results rather than reporting a false all-clear. That is the
 right trade, and it has a cost nobody had measured: a target whose scanner broke months ago looks exactly like
-one scanned this morning — same findings, still plausible, simply never changing. The Authentik image sat like
+one scanned this morning — same findings, still plausible, simply never changing. An identity-provider image sat like
 that from July to late August. The only thing separating the two was the age of the data, and nothing watched
 it.
 
@@ -111,7 +111,7 @@ nothing about the host — a server that is gone has no host left to protect). T
 
 ## Large reports (2026-08-27)
 
-Trivy's JSON for a large image runs to several megabytes — the Authentik server image measures 3.4 MB. The host
+Trivy's JSON for a large image runs to several megabytes — an identity-provider server image measures 3.4 MB. The host
 executor capped command output at 1 MB, so the document arrived cut in half with a truncation marker appended,
 and the scan failed every cycle with `'0xE2' is an invalid start of a value` — the marker's first byte. The
 error named the parser, the cause was the limit, and that image silently kept its stale findings for months.

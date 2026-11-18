@@ -11,7 +11,7 @@ namespace Whiskers.Services.Cve;
 /// image digest scans perfectly on a host with the classic driver, a fresh pull changes nothing, and neither
 /// does a fresh Trivy cache. It is the export path, not the image.</para>
 ///
-/// <para><b>What it cost.</b> Two running containers on infomaniak had no vulnerability data at all — for
+/// <para><b>What it cost.</b> Two running containers on web-02 had no vulnerability data at all — for
 /// weeks, in one case — and because a target that has never been scanned was stored nowhere, they were
 /// invisible rather than visibly broken. The host looked clean because nobody was looking at it.</para>
 ///

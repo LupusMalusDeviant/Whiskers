@@ -1,5 +1,5 @@
 #!/bin/sh
-# borg-enroll — enrol one Whiskers-managed server into the borg fleet backup (runs on Badwolf).
+# borg-enroll — enrol one Whiskers-managed server into the borg fleet backup (runs on the control host).
 #
 #     borg-enroll <whiskers-server-id> [--time HH:MM] [--first-run]
 #
@@ -10,11 +10,11 @@
 #   2. `prepare` on the target  -> borg installed, backup key + passphrase created, pubkey returned
 #   3. Storage Box sub-account "whiskers-<id>" (Hetzner API) -> authorized_keys written via SFTP:
 #        the server's key forced to `borg serve --append-only` (cannot delete), plus the
-#        Badwolf admin key (unrestricted, used only by borg-fleet-prune)
+#        control-host admin key (unrestricted, used only by borg-fleet-prune)
 #   4. `init` on the target    -> repo created (repokey-blake2, append_only=1), nightly timer
 #   5. passphrase + repokey escrowed under /root/.config/borg-fleet/escrow/<id>/ (0600)
 #
-# Files (Badwolf, root only):
+# Files (control host, root only):
 #   /root/.config/borg-fleet/fleet.json        box id/host, Whiskers MCP URL, timer slots
 #   /root/.config/borg-fleet/hetzner-token     Hetzner API token (project of the Storage Box)
 #   /root/.config/borg-fleet/whiskers-mcp-key  Whiskers MCP API key with execute_command
@@ -241,7 +241,7 @@ box_call GET "/storage_boxes/$BOX_ID"
 HOST=$(jq -r '.storage_box.server // empty' "$TMP/resp")
 [ -n "$HOST" ] || die "Hetzner API: storage box $BOX_ID has no server name"
 if ! jq -e '.storage_box.snapshot_plan' "$TMP/resp" >/dev/null 2>&1; then
-    # Box-side daily snapshots: out of reach of every SSH key, incl. Badwolf's admin key.
+    # Box-side daily snapshots: out of reach of every SSH key, incl. the control host's admin key.
     box_call POST "/storage_boxes/$BOX_ID/actions/enable_snapshot_plan" \
         '{"max_snapshots":14,"hour":6,"minute":30,"day_of_week":null,"day_of_month":null}'
     echo "box: snapshot plan enabled (daily 06:30 UTC, keep 14)"
@@ -249,7 +249,7 @@ fi
 mcp_connect
 
 ADMIN_KEY="$CFG_DIR/admin_ed25519"
-[ -e "$ADMIN_KEY" ] || ssh-keygen -q -t ed25519 -N '' -C borg-fleet-admin@badwolf -f "$ADMIN_KEY" \
+[ -e "$ADMIN_KEY" ] || ssh-keygen -q -t ed25519 -N '' -C borg-fleet-admin@control-host -f "$ADMIN_KEY" \
     || die "ssh-keygen failed"
 
 # 1+2: client script + prepare

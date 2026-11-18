@@ -10,12 +10,12 @@ namespace Whiskers.Tests;
 public class OnboardingCommandsTests
 {
     /// <summary>R1-44 (D6): the per-host client name a new host's ghostunnel admits — the only value that changed.</summary>
-    private const string HostClientCn = "whiskers-client-rabenhof-g1";
+    private const string HostClientCn = "whiskers-client-host-d-g1";
 
     // --- Slug: the single sanitizer between user input and the shell -----------------------------
 
     [Theory]
-    [InlineData("Badwolf", "badwolf")]
+    [InlineData("Host-A", "host-a")]
     [InlineData("My Server 01", "my-server-01")]
     [InlineData("Über-Später!", "ber-sp-ter")]                    // non-ascii collapses, no specials survive
     [InlineData("a;rm -rf /;b", "a-rm-rf-b")]                     // injection attempt → hyphens

@@ -18,10 +18,10 @@ public class LogSearchFleetTests
     private static FakeDocker TwoHosts()
     {
         var docker = new FakeDocker(
-            Container("c-local", "authentik-worker-1", "local", "Badwolf (local)"),
-            Container("c-remote", "burg-web", "infomaniak", "LupusMalus"));
+            Container("c-local", "idp-worker-1", "local", "Host-A (local)"),
+            Container("c-remote", "web", "host-f", "Host-F"));
         docker.Logs["local/c-local"] = "nothing to see";
-        docker.Logs["infomaniak/c-remote"] = "ERROR: remote boom";
+        docker.Logs["host-f/c-remote"] = "ERROR: remote boom";
         return docker;
     }
 
@@ -31,8 +31,8 @@ public class LogSearchFleetTests
         var result = await Search(TwoHosts()).SearchAsync("boom");
 
         var hit = Assert.Single(result);
-        Assert.Equal("burg-web", hit.ContainerName);
-        Assert.Equal("LupusMalus", hit.ServerName);   // results must say which host they came from
+        Assert.Equal("web", hit.ContainerName);
+        Assert.Equal("Host-F", hit.ServerName);   // results must say which host they came from
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public class LogSearchFleetTests
         await Search(docker).SearchAsync("nothing-matches-this");
 
         Assert.Equal(
-            new[] { ("c-local", "local"), ("c-remote", "infomaniak") },
+            new[] { ("c-local", "local"), ("c-remote", "host-f") },
             docker.LogCalls.Select(c => (c.ContainerId, c.ServerId)).ToArray());
     }
 
@@ -60,9 +60,9 @@ public class LogSearchFleetTests
     public async Task A_container_filter_matches_by_name_across_servers()
     {
         var docker = TwoHosts();
-        var result = await Search(docker).SearchAsync("boom", containerId: "burg-web");
+        var result = await Search(docker).SearchAsync("boom", containerId: "web");
 
-        Assert.Equal("infomaniak", Assert.Single(result).ServerId);
+        Assert.Equal("host-f", Assert.Single(result).ServerId);
     }
 
     // Review 1.0.0 (T3): the page offers stopped containers (their logs stay readable), the search listed running ones only
@@ -73,11 +73,11 @@ public class LogSearchFleetTests
         var docker = TwoHosts();
         docker.StoppedContainerIds.Add("c-remote");
 
-        var picked = await Search(docker).SearchAsync("boom", containerId: "burg-web");
-        var pickedOnItsServer = await Search(docker).SearchAsync("boom", containerId: "burg-web", serverId: "infomaniak");
+        var picked = await Search(docker).SearchAsync("boom", containerId: "web");
+        var pickedOnItsServer = await Search(docker).SearchAsync("boom", containerId: "web", serverId: "host-f");
 
-        Assert.Equal("burg-web", Assert.Single(picked).ContainerName);
-        Assert.Equal("burg-web", Assert.Single(pickedOnItsServer).ContainerName);
+        Assert.Equal("web", Assert.Single(picked).ContainerName);
+        Assert.Equal("web", Assert.Single(pickedOnItsServer).ContainerName);
     }
 
     // A search across all containers stays with the running ones: it does not read the log of every exited container.
@@ -88,7 +88,7 @@ public class LogSearchFleetTests
         docker.StoppedContainerIds.Add("c-remote");
 
         var everywhere = await Search(docker).SearchAsync("boom");
-        var onItsServer = await Search(docker).SearchAsync("boom", serverId: "infomaniak");
+        var onItsServer = await Search(docker).SearchAsync("boom", serverId: "host-f");
 
         Assert.Empty(everywhere);
         Assert.Empty(onItsServer);

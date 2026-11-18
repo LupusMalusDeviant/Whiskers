@@ -296,8 +296,8 @@ operations guide says to delete or check the bindings in that case.
 
 **Taken on 4 November 2026:** 1 → **a)** refuse federated sign-in until an Admin exists. 2 → **a)** automatic binding
 at the first sign-in for a trusted provider with `email_verified=true`, everything else pending. 3 → **b)** Google
-trusted, OIDC **not** trusted by default (`Oidc:TrustEmailVerified=false`): every OIDC user, the Authentik admin on
-Badwolf included, is pending once after the upgrade and confirmed by an Admin or the host CLI. 4 → **a)** pending, Admin
+trusted, OIDC **not** trusted by default (`Oidc:TrustEmailVerified=false`): every OIDC user, the OIDC admin on
+the production instance included, is pending once after the upgrade and confirmed by an Admin or the host CLI. 4 → **a)** pending, Admin
 confirms. 5 and 6 → **a)** as recommended (confirmed with the acceptance of this contract).
 
 1. **Federated sign-in on an instance without an Admin (before setup).**
@@ -319,7 +319,7 @@ confirms. 5 and 6 → **a)** as recommended (confirmed with the acceptance of th
 3. **Whether `email_verified` is trusted by default (`GoogleAuth:TrustEmailVerified`, `Oidc:TrustEmailVerified`).**
    - a) Google true, OIDC true; operators of IdPs with self-registration or user-editable addresses set OIDC to false
      (documented).
-   - b) Google true, OIDC false: every OIDC user (Authentik on Badwolf included) is pending after the upgrade until the
+   - b) Google true, OIDC false: every OIDC user (the production instance's own IdP included) is pending after the upgrade until the
      operator flips the flag or runs the CLI.
    - c) Both false.
    - **Recommendation: a)** — keeps the upgrade lockout-free for Google and honest OIDC IdPs, while unverified addresses

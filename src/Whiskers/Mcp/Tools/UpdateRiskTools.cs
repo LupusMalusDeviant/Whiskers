@@ -23,7 +23,7 @@ public class UpdateRiskTools
         IHttpContextAccessor httpContextAccessor,
         IMcpPermissionService permissionService,
         IUpdateRiskService assessor,
-        [Description("Server id, e.g. 'local' or 'burgcloud'.")] string serverId,
+        [Description("Server id, e.g. 'local' or 'web-01'.")] string serverId,
         [Description("Container name or id prefix.")] string container,
         [Description("Scan the candidate image for CVEs so the benefit has a number. Costs tens of seconds; " +
                      "without it the benefit is reported as unknown, never as zero.")] bool scanCandidate = true)
@@ -47,7 +47,7 @@ public class UpdateRiskTools
         IMcpPermissionService permissionService,
         Whiskers.Services.Docker.IDockerService docker,
         Whiskers.Services.ServerConfig.IServerConfigService serverConfig,
-        [Description("Server id, e.g. 'local' or 'infomaniak'.")] string serverId,
+        [Description("Server id, e.g. 'local' or 'web-02'.")] string serverId,
         [Description("Container name or id prefix.")] string container,
         [Description("True when the change touches the compose project's configuration — a new or edited " +
                      "override file, a changed environment. Then EVERY service in the project is recreated, " +

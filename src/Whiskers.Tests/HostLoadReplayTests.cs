@@ -6,14 +6,14 @@ namespace Whiskers.Tests;
 /// <summary>
 /// The replay harness and the rules it proves (Plan-0004 WP0/WP1/WP2).
 ///
-/// <para>Whiskers recorded roughly 8,900 measurements of BurgCloud over six days, practically every one above
+/// <para>Whiskers recorded roughly 8,900 measurements of Host-B over six days, practically every one above
 /// 98%, and evaluated none of them — the load fell through the gap between "per container" and "disk",
 /// because <c>dockerd</c> runs in no container. These tests push a reconstruction of that week through the
 /// new rules and demand that they <b>fire</b>, at the right time, with the right cause named.</para>
 ///
 /// <para>What this cannot show: whether the rules stay quiet through a normal week. The series has no daily
 /// cycle, no backup peak and no noise, because inventing those would produce evidence about false alarms that
-/// the data cannot actually support. See <see cref="BurgCloudIncidentSeries"/>.</para>
+/// the data cannot actually support. See <see cref="CpuIncidentSeries"/>.</para>
 /// </summary>
 public class HostLoadReplayTests
 {
@@ -33,11 +33,11 @@ public class HostLoadReplayTests
     {
         // The plan's acceptance criterion for WP0, checked against the series itself rather than against a
         // rule — if the test bench does not contain the incident, nothing measured on it means anything.
-        var series = BurgCloudIncidentSeries.Build();
+        var series = CpuIncidentSeries.Build();
 
-        var beforeStep = series.Last(s => s.AtUtc < BurgCloudIncidentSeries.IncidentStart);
-        var plateau = series.First(s => s.AtUtc >= BurgCloudIncidentSeries.IncidentStart.AddMinutes(5));
-        var afterRecovery = series.First(s => s.AtUtc >= BurgCloudIncidentSeries.IncidentEnd);
+        var beforeStep = series.Last(s => s.AtUtc < CpuIncidentSeries.IncidentStart);
+        var plateau = series.First(s => s.AtUtc >= CpuIncidentSeries.IncidentStart.AddMinutes(5));
+        var afterRecovery = series.First(s => s.AtUtc >= CpuIncidentSeries.IncidentEnd);
 
         Assert.Equal(12.0, beforeStep.HostCpuPercent, precision: 1);
         Assert.Equal(98.3, plateau.HostCpuPercent, precision: 1);
@@ -53,7 +53,7 @@ public class HostLoadReplayTests
     {
         // The property that makes a replay worth anything. A rule reading DateTime.UtcNow would report today
         // and prove nothing about August.
-        var findings = Replay(BurgCloudIncidentSeries.Build());
+        var findings = Replay(CpuIncidentSeries.Build());
 
         Assert.NotEmpty(findings);
         Assert.All(findings, f => Assert.True(
@@ -68,12 +68,12 @@ public class HostLoadReplayTests
     {
         // The acceptance criterion of WP1, and the whole reason this package exists: six days versus twenty
         // minutes. The report itself says a host threshold "hätte am 20.08. um 14:17 gemeldet".
-        var findings = Replay(BurgCloudIncidentSeries.Build());
+        var findings = Replay(CpuIncidentSeries.Build());
 
         var first = findings.Where(f => f.Kind == "host_cpu_high").OrderBy(f => f.AtUtc).FirstOrDefault();
 
         Assert.NotNull(first);
-        var delay = first!.AtUtc - BurgCloudIncidentSeries.IncidentStart;
+        var delay = first!.AtUtc - CpuIncidentSeries.IncidentStart;
         Assert.True(delay <= TimeSpan.FromMinutes(20),
             $"the host-CPU rule took {delay.TotalMinutes:F0} minutes; the incident ran for six days");
         Assert.Contains("whole machine", first.Summary);
@@ -97,7 +97,7 @@ public class HostLoadReplayTests
             // Five minutes at 99%, then back to idle.
             var cpu = i is >= 10 and < 15 ? 99.0 : 11.0;
             series.Add(new HostSample(
-                start.AddMinutes(i), "burgcloud", "BurgCloud", cpu, 24.0, 1e9, 4e9, CoreCount: 2));
+                start.AddMinutes(i), "host-b", "Host-B", cpu, 24.0, 1e9, 4e9, CoreCount: 2));
         }
 
         Assert.Empty(Replay(series).Where(f => f.Kind == "host_cpu_high"));
@@ -107,7 +107,7 @@ public class HostLoadReplayTests
     public void A_lasting_breach_is_reported_once_rather_than_every_minute()
     {
         // Six days at one alert a minute is 8,900 alerts, which is the same as none.
-        var findings = Replay(BurgCloudIncidentSeries.Build()).Where(f => f.Kind == "host_cpu_high").ToList();
+        var findings = Replay(CpuIncidentSeries.Build()).Where(f => f.Kind == "host_cpu_high").ToList();
 
         Assert.True(findings.Count is > 0 and < 30,
             $"{findings.Count} host-CPU alerts over six days — escalation should repeat rarely, not hourly");
@@ -118,7 +118,7 @@ public class HostLoadReplayTests
     {
         // If this ever fires, the rule is reading the wrong field — and an alert about the wrong resource
         // sends someone looking in the wrong place while the real cause keeps running.
-        Assert.Empty(Replay(BurgCloudIncidentSeries.Build()).Where(f => f.Kind == "host_memory_high"));
+        Assert.Empty(Replay(CpuIncidentSeries.Build()).Where(f => f.Kind == "host_memory_high"));
     }
 
     // --- WP5: one open finding, escalation, all-clear -----------------------------------------------------
@@ -130,7 +130,7 @@ public class HostLoadReplayTests
         var series = new List<HostSample>();
         for (var i = 0; i < highMinutes + tailMinutes; i++)
             series.Add(new HostSample(
-                start.AddMinutes(i), "badwolf", "Badwolf",
+                start.AddMinutes(i), "host-a", "Host-A",
                 i < highMinutes ? high : after, 24.0, 1e9, 4e9, CoreCount: 2));
         return series;
     }
@@ -235,7 +235,7 @@ public class HostLoadReplayTests
     {
         // WP5.3. "98%" is a different problem at two minutes and at six days, and an alert that cannot be
         // triaged is one that gets triaged last.
-        var raised = Replay(BurgCloudIncidentSeries.Build())
+        var raised = Replay(CpuIncidentSeries.Build())
             .First(f => f.Kind == "host_cpu_high" && f.What == FindingKind.Raised);
 
         Assert.Equal(TimeSpan.FromMinutes(10), raised.OpenFor);
@@ -249,15 +249,15 @@ public class HostLoadReplayTests
         // WP5.4: if this list only ever grows, the closing path is broken — and a monitor whose alerts never
         // close stops being read long before anyone works out why.
         var evaluator = new HostLoadEvaluator();
-        foreach (var sample in BurgCloudIncidentSeries.Build(
-                     BurgCloudIncidentSeries.IncidentStart, BurgCloudIncidentSeries.IncidentStart.AddDays(3)))
+        foreach (var sample in CpuIncidentSeries.Build(
+                     CpuIncidentSeries.IncidentStart, CpuIncidentSeries.IncidentStart.AddDays(3)))
             evaluator.Evaluate(sample);
 
         var open = evaluator.OpenFindings();
 
         Assert.Contains(open, f => f.Kind == "host_cpu_high");
         var oldest = open.First();
-        Assert.True(oldest.SinceUtc < BurgCloudIncidentSeries.IncidentStart.AddMinutes(15));
+        Assert.True(oldest.SinceUtc < CpuIncidentSeries.IncidentStart.AddMinutes(15));
     }
 
     [Fact]
@@ -295,11 +295,11 @@ public class HostLoadReplayTests
     {
         // The most specific signal of the whole incident: the containers accounted for 12% of the machine
         // while the machine sat at 98%. Establishing that by hand took six days.
-        var findings = Replay(BurgCloudIncidentSeries.Build())
+        var findings = Replay(CpuIncidentSeries.Build())
             .Where(f => f.Kind == "host_cpu_unexplained").OrderBy(f => f.AtUtc).ToList();
 
         var first = Assert.IsType<HostLoadFinding>(findings.FirstOrDefault());
-        Assert.True(first.AtUtc - BurgCloudIncidentSeries.IncidentStart <= TimeSpan.FromMinutes(20));
+        Assert.True(first.AtUtc - CpuIncidentSeries.IncidentStart <= TimeSpan.FromMinutes(20));
         Assert.Contains("host process is the likely cause", first.Summary);
         Assert.Contains("hint rather than proof", first.Summary);
     }
@@ -312,7 +312,7 @@ public class HostLoadReplayTests
         // them raw gives a negative "unexplained" load on a busy machine — the alert would be silent exactly
         // when it is needed.
         var sample = new HostSample(
-            DateTime.UtcNow, "burgcloud", "BurgCloud",
+            DateTime.UtcNow, "host-b", "Host-B",
             HostCpuPercent: 98.0,
             ContainerCpuPercentSum: 120.0,   // Docker scale: 1.2 cores busy
             MemoryUsedBytes: 1e9, MemoryTotalBytes: 4e9, CoreCount: 2);
@@ -330,7 +330,7 @@ public class HostLoadReplayTests
         //
         // Here: a 4-core host at 95% of the machine, containers accounting for 30% of it (120 in Docker's
         // scale). Converted, 65 points are unexplained and the rule fires. Compared raw, 95 − 120 is negative,
-        // the gap clamps to zero, and six days pass with nobody told. BurgCloud's own numbers do not catch
+        // the gap clamps to zero, and six days pass with nobody told. Host-B's own numbers do not catch
         // this — 98 − 24 is still over the threshold either way — so it takes a bigger box to expose it.
         var start = new DateTime(2026, 8, 19, 0, 0, 0, DateTimeKind.Utc);
         var series = Enumerable.Range(0, 60).Select(i => new HostSample(

@@ -1,8 +1,8 @@
 # Contract 0007 — Per-host mTLS client credentials (R1-44)
 
 Status: **Accepted** · 6 November 2026 by the maintainer, with the decisions D1–D6 at the end as recommended. R1-44
-touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with Bifröst
-and the whiskers.site host. **Amendments 1–9** (review rounds 1–8 and implementation alignment, at the end) were accepted by
+touches the protected mTLS layer; the maintainer approved that work on 5 November 2026. The rollout starts with the gateway host
+and the public website host. **Amendments 1–9** (review rounds 1–8 and implementation alignment, at the end) were accepted by
 the maintainer as one set on 6 November 2026. **Amendment 10** (implementation review) was accepted on 6 November 2026.
 
 ## Purpose
@@ -182,7 +182,7 @@ to run while any `ServerConfig` still points to the shared paths.
 
 - [Claude-prüfbar] Identity, store, issuing, validator, rollout logic with a fake host, command lines, tool and UI wiring,
   readiness, every test listed above, docs.
-- [braucht Nutzer/Hardware] Real rollout: Bifröst first, then the whiskers.site host (hetzner-apps), then host by host. Run
+- [braucht Nutzer/Hardware] Real rollout: the gateway host first, then the public website host, then host by host. Run
   the guarded restarts against live ghostunnel. After the last host, the user decides on `mtls.shared_client_retire`.
 
 ## Decisions for the maintainer

@@ -37,7 +37,7 @@ public sealed class BorgFleetScriptTests : IDisposable
         _h.Stub("ssh-keygen", """
             #!/bin/bash
             while [ $# -gt 0 ]; do [ "$1" = -f ] && f=$2; shift; done
-            echo private > "$f"; echo 'ssh-ed25519 AAAAadmin borg-fleet-admin@badwolf' > "$f.pub"
+            echo private > "$f"; echo 'ssh-ed25519 AAAAadmin borg-fleet-admin@control-host' > "$f.pub"
             """);
         _h.Stub("sftp", "#!/bin/bash\nexit 0\n");
         _h.Stub("sshpass", """
@@ -135,7 +135,7 @@ public sealed class BorgFleetScriptTests : IDisposable
         // The authorized_keys: the server key forced to append-only, then the admin key.
         Assert.Equal(
             "command=\"borg-1.4 serve --append-only --restrict-to-repository borg\",restrict ssh-ed25519 AAAAserver borg-fleet@neuhof\n" +
-            "ssh-ed25519 AAAAadmin borg-fleet-admin@badwolf\n", Stub("authorized_keys"));
+            "ssh-ed25519 AAAAadmin borg-fleet-admin@control-host\n", Stub("authorized_keys"));
         Assert.Contains("-P 23", Stub("sshpass.log"));
         Assert.Contains("SSHPASS=set", Stub("sshpass.log"));
         Assert.Contains("u1-sub9@u1.your-storagebox.de", Stub("sshpass.log"));

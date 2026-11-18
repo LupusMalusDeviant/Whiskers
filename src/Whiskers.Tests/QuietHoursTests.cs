@@ -106,7 +106,7 @@ public sealed class QuietHoursTests : IDisposable
 
     private static NotificationEvent Alert(string type = "high_cpu", string container = "web", DateTime? at = null) => new()
     {
-        EventType = type, ContainerId = "c-" + container, ContainerName = container, ServerId = "local", ServerName = "Badwolf",
+        EventType = type, ContainerId = "c-" + container, ContainerName = container, ServerId = "local", ServerName = "Host-A",
         ImageInfo = $"{container}: CPU at 97%", Timestamp = at ?? InWindow,
     };
 
@@ -187,7 +187,7 @@ public sealed class QuietHoursTests : IDisposable
         Assert.Single(History());                             // and AlertHistory
         Assert.Equal(1, _triggers.Calls);                     // AI-trigger dispatch is not held
         var held = Assert.Single(Held());
-        Assert.Equal(("night", "2026-11-03", "web @ Badwolf", 1), (held.RuleId, held.WindowKey, held.Target, held.Count));
+        Assert.Equal(("night", "2026-11-03", "web @ Host-A", 1), (held.RuleId, held.WindowKey, held.Target, held.Count));
 
         // Outside the window it is delivered as before.
         _clock.Now = new DateTimeOffset(AfterWindow);
@@ -227,7 +227,7 @@ public sealed class QuietHoursTests : IDisposable
         await Composite().SendAsync(high);
 
         Assert.Equal("web", Assert.Single(_channel.Sent).ContainerName);
-        Assert.Equal("api @ Badwolf", Assert.Single(Held()).Target);
+        Assert.Equal("api @ Host-A", Assert.Single(Held()).Target);
     }
 
     [Fact]
@@ -323,7 +323,7 @@ public sealed class QuietHoursTests : IDisposable
         await summarizer.SummarizeDueAsync(AfterWindow);
         await Worker(outbox, slack).RedeliverDueAsync(AfterWindow, CancellationToken.None);
         Assert.Equal(2, handler.Requests);                                       // the second is not throttled
-        Assert.Contains(handler.Bodies, b => b.Contains("held back 3 notifications for 2 targets") && b.Contains("web @ Badwolf (2)"));
+        Assert.Contains(handler.Bodies, b => b.Contains("held back 3 notifications for 2 targets") && b.Contains("web @ Host-A (2)"));
         Assert.Contains(handler.Bodies, b => b.Contains("held back 1 notification for 1 target"));
         Assert.All(handler.Bodies, b => Assert.Contains("Held back during quiet hours", b));
 
@@ -453,7 +453,7 @@ public sealed class QuietHoursTests : IDisposable
         var summarizer = Summarizer(outbox, null, _channel.WithTarget());
         await summarizer.SummarizeDueAsync(AfterWindow);
         await Worker(outbox, _channel).RedeliverDueAsync(AfterWindow, CancellationToken.None);
-        Assert.Contains("web @ Badwolf", Assert.Single(_channel.Sent).ImageInfo);
+        Assert.Contains("web @ Host-A", Assert.Single(_channel.Sent).ImageInfo);
 
         var longer = Night();
         longer.End = "09:00";
@@ -466,7 +466,7 @@ public sealed class QuietHoursTests : IDisposable
         await summarizer.SummarizeDueAsync(later);
         await Worker(outbox, _channel).RedeliverDueAsync(later, CancellationToken.None);
         Assert.Equal(2, _channel.Sent.Count);
-        Assert.Contains("api @ Badwolf", _channel.Sent[1].ImageInfo);
+        Assert.Contains("api @ Host-A", _channel.Sent[1].ImageInfo);
         Assert.NotEqual(_channel.Sent[0].DeliveryId, _channel.Sent[1].DeliveryId);
         Assert.All(Held(), h => Assert.NotNull(h.SummarizedAt));
     }

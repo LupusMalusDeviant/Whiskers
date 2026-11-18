@@ -145,12 +145,12 @@ public class AutoPatchTests
     {
         // A scan from before last night's recreate carries the OLD id; the name is what survives.
         var plan = AutoPatchPlanner.Plan(
-            [Compose("caddy", server: "rabenhof"), Compose("caddy", server: "zirkuswagen")],
-            [Scan("CADDY", "rabenhof", (CveSeverity.High, "1"))],
+            [Compose("caddy", server: "host-d"), Compose("caddy", server: "host-e")],
+            [Scan("CADDY", "host-d", (CveSeverity.High, "1"))],
             new AutoPatchSettings());
 
         var c = Assert.Single(plan.Candidates);
-        Assert.Equal("rabenhof", c.Container.ServerId);
+        Assert.Equal("host-d", c.Container.ServerId);
     }
 
     [Fact]
@@ -188,10 +188,10 @@ public class AutoPatchTests
     {
         // The second dry run: nine of ten slots went to self-built images, where a pull can only say "no change".
         var plan = AutoPatchPlanner.Plan(
-            [Compose("edda-web", image: "edda-web"), Compose("caddy")],
-            [Scan("edda-web", "local", (CveSeverity.High, "1")), Scan("caddy", "local", (CveSeverity.High, "1"))],
+            [Compose("site-web", image: "site-web"), Compose("caddy")],
+            [Scan("site-web", "local", (CveSeverity.High, "1")), Scan("caddy", "local", (CveSeverity.High, "1"))],
             new AutoPatchSettings(),
-            isLocalBuild: c => c.Name == "edda-web");
+            isLocalBuild: c => c.Name == "site-web");
 
         Assert.Equal(["caddy"], plan.Candidates.Select(c => c.Container.Name));
         Assert.Contains("rebuild with --pull", Assert.Single(plan.Skipped).Reason);
@@ -204,7 +204,7 @@ public class AutoPatchTests
         static ImageContract With(Dictionary<string, string>? labels)
             => ImageContract.Empty with { Labels = labels };
 
-        Assert.True(With(new() { ["com.docker.compose.project"] = "edda", ["com.docker.compose.service"] = "web" }).IsComposeBuilt);
+        Assert.True(With(new() { ["com.docker.compose.project"] = "site", ["com.docker.compose.service"] = "web" }).IsComposeBuilt);
         Assert.False(With(new() { ["org.opencontainers.image.version"] = "2.11.7" }).IsComposeBuilt);
         Assert.False(With(null).IsComposeBuilt);
     }
@@ -232,7 +232,7 @@ public class AutoPatchTests
     [InlineData("UPD-WOULD-UPDATE 16.14 -> 16.15", AutoPatchResultKind.WouldUpdate, "16.14 -> 16.15")]
     [InlineData("UPD-SKIP-MAJOR 2.11 -> 3.0", AutoPatchResultKind.SkippedMajor, "2.11 -> 3.0")]
     [InlineData("UPD-SKIP-UNKNOWN-MAJOR tag=latest", AutoPatchResultKind.SkippedUnknownMajor, "tag=latest")]
-    [InlineData("UPD-SKIP-LOCAL-BUILD project=edda", AutoPatchResultKind.SkippedLocalBuild, "project=edda")]
+    [InlineData("UPD-SKIP-LOCAL-BUILD project=site", AutoPatchResultKind.SkippedLocalBuild, "project=site")]
     [InlineData("UPD-ABORT compose-drift run=a file=b", AutoPatchResultKind.Aborted, "compose-drift run=a file=b")]
     [InlineData("UPD-FAILED-ROLLBACK-VERIFIED", AutoPatchResultKind.RolledBack, "")]
     [InlineData("UPD-FAILED-ROLLBACK-NOT-VERIFIED", AutoPatchResultKind.RollbackNotVerified, "")]
@@ -288,7 +288,7 @@ public class AutoPatchTests
         Assert.DoesNotContain("dc config --hash", text);
         // The host-side second line for self-built images, read from the image label.
         Assert.Contains("UPD-SKIP-LOCAL-BUILD", text);
-        // 2026-10-25: a date-only backup tag let authentik's postgres overwrite pack-postgres' on the same host.
+        // 2026-10-25: a date-only backup tag let idp's postgres overwrite pack-postgres' on the same host.
         Assert.Contains("BK=\"$REPO:pre-upd-${TS:0:8}-$C\"", text);
         Assert.Matches("^[0-9a-f]{64}$", sha);
     }
@@ -296,13 +296,13 @@ public class AutoPatchTests
     [Fact]
     public void The_command_installs_verifies_and_only_then_runs()
     {
-        var cmd = ScriptAutoPatchRunner.BuildCommand("rabenhof-caddy", dryRun: true, "QUJD", new string('a', 64));
+        var cmd = ScriptAutoPatchRunner.BuildCommand("host-d-caddy", dryRun: true, "QUJD", new string('a', 64));
 
         var install = cmd.IndexOf("base64 -d", StringComparison.Ordinal);
         var verify = cmd.IndexOf("script-integrity", StringComparison.Ordinal);
         var run = cmd.IndexOf("DRY_RUN=1 /bin/bash", StringComparison.Ordinal);
         Assert.True(install >= 0 && install < verify && verify < run, cmd);
-        Assert.EndsWith("tail -c 6000 /var/log/img-update-rabenhof-caddy.log", cmd);
+        Assert.EndsWith("tail -c 6000 /var/log/img-update-host-d-caddy.log", cmd);
         Assert.DoesNotContain("DRY_RUN", ScriptAutoPatchRunner.BuildCommand("x", dryRun: false, "QUJD", "a"));
     }
 

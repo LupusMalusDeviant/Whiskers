@@ -21,11 +21,11 @@ namespace Whiskers.Mcp.Tools;
 public class DnsTools
 {
     [McpToolLevel(McpPermissionLevels.Read)]
-    [McpServerTool, Description("List the DNS records of a zone (e.g. 'lupusmalus.dev') at the configured DNS provider. Names are relative to the zone ('@' = the zone itself). Optionally filter by name and/or type. Read-only.")]
+    [McpServerTool, Description("List the DNS records of a zone (e.g. 'example.com') at the configured DNS provider. Names are relative to the zone ('@' = the zone itself). Optionally filter by name and/or type. Read-only.")]
     public static async Task<string> ListDnsRecords(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
         IDnsRecordService dns,
-        [Description("Zone / domain, e.g. lupusmalus.dev")] string zone,
+        [Description("Zone / domain, e.g. example.com")] string zone,
         [Description("Optional: only records with this name (relative, e.g. 'holler.app' or '@')")] string? name = null,
         [Description("Optional: only records of this type (A, AAAA, CNAME, TXT, …)")] string? type = null,
         CancellationToken cancellationToken = default)
@@ -67,7 +67,7 @@ public class DnsTools
     public static async Task<string> SetDnsRecord(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
         IDnsRecordService dns, IToolAuditLog auditLog,
-        [Description("Zone / domain, e.g. lupusmalus.dev")] string zone,
+        [Description("Zone / domain, e.g. example.com")] string zone,
         [Description("Record name relative to the zone, e.g. 'holler.app' or '@' for the zone itself")] string name,
         [Description("Record type: A, AAAA, CNAME or TXT")] string type,
         [Description("Record value: IPv4 for A, IPv6 for AAAA, hostname for CNAME, text for TXT")] string value,
@@ -128,7 +128,7 @@ public class DnsTools
     public static async Task<string> DeleteDnsRecord(
         IHttpContextAccessor httpContextAccessor, IMcpPermissionService permissionService,
         IDnsRecordService dns, IToolAuditLog auditLog,
-        [Description("Zone / domain, e.g. lupusmalus.dev")] string zone,
+        [Description("Zone / domain, e.g. example.com")] string zone,
         [Description("Record name relative to the zone, e.g. 'holler.app' or '@'")] string name,
         [Description("Record type: A, AAAA, CNAME or TXT")] string type,
         [Description("Optional: delete only the record(s) with this value; without it every record of name and type goes")] string? value = null)

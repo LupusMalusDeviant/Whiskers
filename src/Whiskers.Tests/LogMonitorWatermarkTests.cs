@@ -52,7 +52,7 @@ public sealed class LogMonitorWatermarkTests : IDisposable
         // request was never sent — the lines of that window are still unread and must not be skipped, nor may the
         // container count as unreadable.
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-web", Name = "web", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+            new ContainerInfo { Id = "c-web", Name = "web", Image = "img:1", ServerId = "local", ServerName = "Host-A" });
         var metrics = new Whiskers.Services.Observability.SelfMetrics.SelfMetrics();
         var notifications = new FakeNotifications();
         var monitor = Monitor(docker, notifications, metrics);
@@ -84,7 +84,7 @@ public sealed class LogMonitorWatermarkTests : IDisposable
         // shorter than it waited). That request reached the host: it is a timeout like any other — the window moves on
         // and the container's unreadable streak grows — and not a queue wait.
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-web", Name = "web", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+            new ContainerInfo { Id = "c-web", Name = "web", Image = "img:1", ServerId = "local", ServerName = "Host-A" });
         var metrics = new Whiskers.Services.Observability.SelfMetrics.SelfMetrics();
         var monitor = Monitor(docker, new FakeNotifications(), metrics);
 
@@ -109,7 +109,7 @@ public sealed class LogMonitorWatermarkTests : IDisposable
         Whiskers.Services.Observability.SelfMetrics.SelfMetrics? metrics = null) =>
         new(_sp.GetRequiredService<IServiceScopeFactory>(),
             docker,
-            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }),
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true }),
             notifications,
             NullLogger<LogMonitorService>.Instance,
             TestBudget.Create(), metrics ?? new Whiskers.Services.Observability.SelfMetrics.SelfMetrics(),
@@ -117,7 +117,7 @@ public sealed class LogMonitorWatermarkTests : IDisposable
             FetchTimeout);
 
     private static FakeDocker WedgedContainer() =>
-        new(new ContainerInfo { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Badwolf" })
+        new(new ContainerInfo { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Host-A" })
         {
             // NOT a long delay. "Eight times the timeout" reads decisive and is not: under thread-pool
             // starvation the cancellation timer lands late and a 400 ms fetch completes — measured at 16 of 60
@@ -136,7 +136,7 @@ public sealed class LogMonitorWatermarkTests : IDisposable
         // and the window stays flat whether the bug is present or not. An earlier version of this test skipped
         // the healthy cycle and therefore passed against the unfixed code, proving nothing.
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+            new ContainerInfo { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Host-A" });
         var monitor = Monitor(docker, new FakeNotifications());
 
         await monitor.RunScanCycleAsync(CancellationToken.None);   // healthy: sets the watermark
@@ -255,7 +255,7 @@ public sealed class LogMonitorWatermarkTests : IDisposable
         // The other direction: if everything appeared here, the list would say nothing. A view that always
         // shows something is a view people stop reading.
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-ok", Name = "burg-web", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+            new ContainerInfo { Id = "c-ok", Name = "app-web", Image = "img:1", ServerId = "local", ServerName = "Host-A" });
         var monitor = Monitor(docker, new FakeNotifications());
 
         for (var i = 0; i < 5; i++)
@@ -268,7 +268,7 @@ public sealed class LogMonitorWatermarkTests : IDisposable
     public async Task A_healthy_container_is_never_suspended()
     {
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-ok", Name = "burg-web", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+            new ContainerInfo { Id = "c-ok", Name = "app-web", Image = "img:1", ServerId = "local", ServerName = "Host-A" });
         var notifications = new FakeNotifications();
         var monitor = Monitor(docker, notifications);
 
@@ -284,7 +284,7 @@ public sealed class LogMonitorWatermarkTests : IDisposable
         // "Container is gone" and "container's logs are unreadable" are different facts. Counting the first
         // as the second would page someone every time a container is legitimately removed.
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-gone", Name = "old-job", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+            new ContainerInfo { Id = "c-gone", Name = "old-job", Image = "img:1", ServerId = "local", ServerName = "Host-A" });
         docker.FailingServerIds.Add("local");   // fetch throws immediately, no timeout involved
         var notifications = new FakeNotifications();
         var monitor = Monitor(docker, notifications);

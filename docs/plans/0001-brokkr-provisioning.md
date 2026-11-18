@@ -1,3 +1,5 @@
+> Historical document, kept for reference; names anonymised.
+
 # Plan 0001 — Brokkr provisioning tools (work package BK-1)
 
 Status: **In progress.** Contract `docs/contracts/0001-brokkr-provisioning-tools.md` accepted on 2 November 2026
@@ -18,9 +20,9 @@ Proposed slot: right after R1-38, before R1-39 (open point 1 of the contract).
 | 5 | Read-back contracts for the new paths (INV-43), `VerificationContracts` and the four-direction test | [Claude-prüfbar] ✅ |
 | 6 | Pending-approval round trip: call → `pending_approval` + operation id → approve as a different principal → repeat with the operation id → executed once (INV-39, PC-D4) | [Claude-prüfbar] ✅ |
 | 7 | `McpToolRegistrationTests`, permission tests (read key refused, admin key without the tool in `AllowedTools` refused), docs: CHANGELOG, `docs/mcp-tool-catalog.md`, READMEs, SECURITY_INVARIANTS | [Claude-prüfbar] ✅ |
-| 8 | Create the Brokkr key on Badwolf (level `admin`, `AllowedTools` limited) and store it where Brokkr reads `WHISKERS_API_KEY` | [braucht Nutzer] |
+| 8 | Create the Brokkr key on the production Whiskers instance (level `admin`, `AllowedTools` limited) and store it where Brokkr reads `WHISKERS_API_KEY` | [braucht Nutzer] |
 | 9 | Fine-grained GitHub read token per repository (`WHISKERS_REPO_TOKEN`) | [braucht Nutzer] |
-| 10 | End-to-end: `brokkr deploy setup` against Badwolf for one test repository, webhook delivery shows up, deploy runs | [braucht Nutzer] (approval click, real repository) |
+| 10 | End-to-end: `brokkr deploy setup` against the production Whiskers instance for one test repository, webhook delivery shows up, deploy runs | [braucht Nutzer] (approval click, real repository) |
 
 ## Risks
 
@@ -29,7 +31,7 @@ Proposed slot: right after R1-38, before R1-39 (open point 1 of the contract).
 - **Approval friction.** With the normal policy, each setup waits for a click in Whiskers. That is intended (open
   point 2), and Brokkr must handle `pending_approval`.
 - **Deployment of the change.** Brokkr can only use the tools once the Whiskers build that contains them runs on
-  Badwolf, which needs a release or a deploy. Both are the owner's decision.
+  the production instance, which needs a release or a deploy. Both are the owner's decision.
 
 ## Done when
 

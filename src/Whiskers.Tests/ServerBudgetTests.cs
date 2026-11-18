@@ -59,7 +59,7 @@ public class ServerBudgetTests
     {
         var budget = TestBudget.Create(background: 3, interactive: 4);
 
-        var peak = await PeakConcurrencyAsync(budget, "badwolf", callers: 12, background: true, expected: 3);
+        var peak = await PeakConcurrencyAsync(budget, "host-a", callers: 12, background: true, expected: 3);
 
         Assert.Equal(3, peak);
     }
@@ -69,7 +69,7 @@ public class ServerBudgetTests
     {
         // The counter-proof for the test above: if the cap were not actually enforced, both cases would show
         // the same number and the assertion would be measuring nothing.
-        var peak = await PeakConcurrencyAsync(TestBudget.Create(background: 8), "badwolf", callers: 12, background: true, expected: 8);
+        var peak = await PeakConcurrencyAsync(TestBudget.Create(background: 8), "host-a", callers: 12, background: true, expected: 8);
 
         Assert.Equal(8, peak);
     }
@@ -79,8 +79,8 @@ public class ServerBudgetTests
     {
         var budget = TestBudget.Create(background: 2);
 
-        var a = PeakConcurrencyAsync(budget, "badwolf", callers: 6, background: true, expected: 2);
-        var b = PeakConcurrencyAsync(budget, "burgcloud", callers: 6, background: true, expected: 2);
+        var a = PeakConcurrencyAsync(budget, "host-a", callers: 6, background: true, expected: 2);
+        var b = PeakConcurrencyAsync(budget, "host-b", callers: 6, background: true, expected: 2);
         await Task.WhenAll(a, b);
 
         // A busy host must not throttle a healthy one — the fleet is not one queue.
@@ -98,14 +98,14 @@ public class ServerBudgetTests
         var blocked = Enumerable.Range(0, 6).Select(_ => Task.Run(async () =>
         {
             using var scope = budget.BackgroundScope();
-            await budget.RunAsync("badwolf", async () => { await hold.Task; return 0; });
+            await budget.RunAsync("host-a", async () => { await hold.Task; return 0; });
         })).ToArray();
 
         await Task.Delay(100);
 
         // No BackgroundScope → interactive lane. This is the property that keeps a CVE scan from making the
         // UI look frozen, which in turn is what makes people think the server is down.
-        var interactive = budget.RunAsync("badwolf", () => Task.FromResult(42));
+        var interactive = budget.RunAsync("host-a", () => Task.FromResult(42));
         var winner = await Task.WhenAny(interactive, Task.Delay(TimeSpan.FromSeconds(2)));
 
         Assert.True(winner == interactive, "an interactive call waited behind saturated background work");
@@ -122,11 +122,11 @@ public class ServerBudgetTests
         var hold = new TaskCompletionSource();
 
         using var occupied = budget.BackgroundScope();
-        var holder = budget.RunAsync("badwolf", async () => { await hold.Task; return 0; });
+        var holder = budget.RunAsync("host-a", async () => { await hold.Task; return 0; });
         await Task.Delay(50);
 
         using var cts = new CancellationTokenSource(50);
-        var queued = budget.RunAsync("badwolf", () => Task.FromResult(1), cts.Token);
+        var queued = budget.RunAsync("host-a", () => Task.FromResult(1), cts.Token);
 
         // A timed-out caller must not keep its place — otherwise the backlog outlives the callers and the
         // next free slot is handed to someone who stopped caring, which is the incident's shape once more.
@@ -136,7 +136,7 @@ public class ServerBudgetTests
         await holder;
 
         // And the slot is genuinely free again afterwards.
-        Assert.Equal(7, await budget.RunAsync("badwolf", () => Task.FromResult(7)));
+        Assert.Equal(7, await budget.RunAsync("host-a", () => Task.FromResult(7)));
     }
 
     [Fact]
@@ -146,10 +146,10 @@ public class ServerBudgetTests
         var hold = new TaskCompletionSource();
 
         using var scope = budget.BackgroundScope();
-        var running = budget.RunAsync("badwolf", async () => { await hold.Task; return 0; });
+        var running = budget.RunAsync("host-a", async () => { await hold.Task; return 0; });
         await Task.Delay(50);
 
-        var snapshot = budget.Snapshot("badwolf");
+        var snapshot = budget.Snapshot("host-a");
         Assert.Equal(1, snapshot.BackgroundInFlight);
         Assert.Equal(2, snapshot.BackgroundLimit);
         Assert.True(snapshot.Started >= 1);

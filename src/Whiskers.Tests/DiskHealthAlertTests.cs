@@ -24,8 +24,8 @@ public sealed class DiskHealthAlertTests
         var findings = new List<HostLoadFinding>();
         foreach (var queries in cycles)
         {
-            var reading = DiskHealthParser.Parse("badwolf", queries, at, previous, DiskHealthParser.DefaultFreshness);
-            findings.AddRange(alerts.Evaluate("badwolf", "Badwolf", reading, previous, at));
+            var reading = DiskHealthParser.Parse("host-a", queries, at, previous, DiskHealthParser.DefaultFreshness);
+            findings.AddRange(alerts.Evaluate("host-a", "Host-A", reading, previous, at));
             previous = reading;
             at += Cycle;
         }
@@ -51,8 +51,8 @@ public sealed class DiskHealthAlertTests
         var findings = new List<HostLoadFinding>();
         foreach (var make in cycles)
         {
-            var reading = DiskHealthParser.Parse("badwolf", make(at), at, previous, DiskHealthParser.DefaultFreshness);
-            findings.AddRange(alerts.Evaluate("badwolf", "Badwolf", reading, previous, at));
+            var reading = DiskHealthParser.Parse("host-a", make(at), at, previous, DiskHealthParser.DefaultFreshness);
+            findings.AddRange(alerts.Evaluate("host-a", "Host-A", reading, previous, at));
             previous = reading;
             at += Cycle;
         }
@@ -204,7 +204,7 @@ public sealed class DiskHealthAlertTests
         // After a restart without saved readings the host may read Unsupported: no reading, so no clear.
         var unsupported = Read(DiskHealthQueries.WithoutEndpoint());
         for (var i = 0; i < 12; i++)
-            Assert.Empty(alerts.Evaluate("badwolf", "Badwolf", unsupported, null, Now.AddMinutes(15 + 5 * i)));
+            Assert.Empty(alerts.Evaluate("host-a", "Host-A", unsupported, null, Now.AddMinutes(15 + 5 * i)));
         Assert.Single(alerts.OpenFindings());
     }
 
@@ -216,7 +216,7 @@ public sealed class DiskHealthAlertTests
         var alerts = new DiskHealthAlerts();
         DriveFresh(alerts, Enumerable.Repeat<Func<DateTime, DiskHealthQueries>>(at => FreshAt(at, smart: SmartFailed, md: MdFailedDisk), 3));
 
-        var closed = alerts.Close("badwolf", Now.AddHours(1), "disk-health readings were switched off");
+        var closed = alerts.Close("host-a", Now.AddHours(1), "disk-health readings were switched off");
 
         Assert.Equal(2, closed.Count);
         Assert.All(closed, c => Assert.True(c.Unconfirmed));
@@ -262,8 +262,8 @@ public sealed class DiskHealthAlertTests
     {
         // sda has no usable SMART (Unknown from the first reading); nvme0, md0 and tank read healthy.
         var unavailable = SmartHealthy.Replace(
-            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
-            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"0\"]");
+            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_available\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"0\"]");
         var alerts = new DiskHealthAlerts();
         var cycles = new[] { Queries(smart: unavailable) }
             .Concat(Repeat(DiskHealthQueries.AllFailed("the metrics endpoint could not be reached (ConnectionError)"), 3));
@@ -278,13 +278,13 @@ public sealed class DiskHealthAlertTests
     /// smartmon variant) — and a failing nvme0 next to it. Two items of one name must not stop the alerts for the host.</summary>
     internal static string SmartFailingNvmeWithDuplicateSda => SmartHealthy
         .Replace(
-            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/nvme0\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"nvme\"},\"value\":[1793880000.123,\"1\"]",
-            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/nvme0\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"nvme\"},\"value\":[1793880000.123,\"0\"]")
+            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/nvme0\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"nvme\"},\"value\":[1793880000.123,\"1\"]",
+            "\"smartmon_device_smart_healthy\",\"disk\":\"/dev/nvme0\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"nvme\"},\"value\":[1793880000.123,\"0\"]")
         .Replace("\"result\":[", """
             "result":[
-              {"metric":{"__name__":"smartmon_device_smart_available","disk":"/dev/sda","instance":"100.64.0.7:9100","job":"node","server":"badwolf","type":"scsi"},"value":[1793880000.123,"1"]},
-              {"metric":{"__name__":"smartmon_device_smart_enabled","disk":"/dev/sda","instance":"100.64.0.7:9100","job":"node","server":"badwolf","type":"scsi"},"value":[1793880000.123,"1"]},
-              {"metric":{"__name__":"smartmon_device_smart_healthy","disk":"/dev/sda","instance":"100.64.0.7:9100","job":"node","server":"badwolf","type":"scsi"},"value":[1793880000.123,"1"]},
+              {"metric":{"__name__":"smartmon_device_smart_available","disk":"/dev/sda","instance":"100.64.0.7:9100","job":"node","server":"host-a","type":"scsi"},"value":[1793880000.123,"1"]},
+              {"metric":{"__name__":"smartmon_device_smart_enabled","disk":"/dev/sda","instance":"100.64.0.7:9100","job":"node","server":"host-a","type":"scsi"},"value":[1793880000.123,"1"]},
+              {"metric":{"__name__":"smartmon_device_smart_healthy","disk":"/dev/sda","instance":"100.64.0.7:9100","job":"node","server":"host-a","type":"scsi"},"value":[1793880000.123,"1"]},
             """);
 
     [Fact]
@@ -304,7 +304,7 @@ public sealed class DiskHealthAlertTests
     public void A_saved_reading_with_two_items_of_one_name_is_evaluated_without_throwing()
     {
         // A disk-health.json written before review round 2 can hold two items with the same kind and name.
-        var duplicate = new DiskHealthReading("badwolf", DiskHealthState.Healthy,
+        var duplicate = new DiskHealthReading("host-a", DiskHealthState.Healthy,
         [
             new DiskHealthItem(DiskHealthKinds.Smart, "/dev/sda", DiskHealthState.Healthy, "SMART overall-health passed", Now),
             new DiskHealthItem(DiskHealthKinds.Smart, "/dev/sda", DiskHealthState.Unknown, "no smartctl run time", Now),
@@ -335,11 +335,11 @@ public sealed class DiskHealthAlertTests
         // Ten more minutes of good readings do clear it.
         var more = new List<HostLoadFinding>();
         var at = Now + Cycle * 29;
-        var previous = DiskHealthParser.Parse("badwolf", FreshAt(at - Cycle), at - Cycle, null, DiskHealthParser.DefaultFreshness);
+        var previous = DiskHealthParser.Parse("host-a", FreshAt(at - Cycle), at - Cycle, null, DiskHealthParser.DefaultFreshness);
         for (var i = 0; i < 2; i++, at += Cycle)
         {
-            var reading = DiskHealthParser.Parse("badwolf", FreshAt(at), at, previous, DiskHealthParser.DefaultFreshness);
-            more.AddRange(alerts.Evaluate("badwolf", "Badwolf", reading, previous, at));
+            var reading = DiskHealthParser.Parse("host-a", FreshAt(at), at, previous, DiskHealthParser.DefaultFreshness);
+            more.AddRange(alerts.Evaluate("host-a", "Host-A", reading, previous, at));
             previous = reading;
         }
         Assert.Contains(more, f => f.EventType == "disk_failing_recovered");
@@ -351,8 +351,8 @@ public sealed class DiskHealthAlertTests
         var alerts = new DiskHealthAlerts();
         var cycles = new Func<DateTime, DiskHealthQueries>[] { at => FreshAt(at, smart: SmartFailed) }
             .Concat(Enumerable.Repeat<Func<DateTime, DiskHealthQueries>>(_ => Queries(smart: SmartFailed.Replace(
-                "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
-                "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"badwolf\",\"type\":\"sat\"},\"value\":[1793880000.123,\"0\"]")), 24))
+                "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"1\"]",
+                "\"smartmon_device_smart_enabled\",\"disk\":\"/dev/sda\",\"instance\":\"100.64.0.7:9100\",\"job\":\"node\",\"server\":\"host-a\",\"type\":\"sat\"},\"value\":[1793880000.123,\"0\"]")), 24))
             .Append(at => FreshAt(at, smart: SmartFailed));
 
         Assert.DoesNotContain(DriveFresh(alerts, cycles), f => f.EventType == NotificationEventTypes.DiskFailing);

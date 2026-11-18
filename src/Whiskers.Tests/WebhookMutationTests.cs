@@ -521,11 +521,11 @@ public sealed partial class WebhookMutationTests : IDisposable
     [Fact]
     public void Every_alias_of_a_server_is_one_lock()
     {
-        var locks = new ResourceLocks(new FakeServerConfig(new ServerConfig { Id = "rabenhof", Name = "Rabenhof (Hetzner)" }));
+        var locks = new ResourceLocks(new FakeServerConfig(new ServerConfig { Id = "host-d", Name = "Host-D (Hetzner)" }));
 
-        Assert.Equal(ResourceLocks.Server("rabenhof"), locks.ServerKey("rabenhof"));
-        Assert.Equal(ResourceLocks.Server("rabenhof"), locks.ServerKey("RABENHOF"));
-        Assert.Equal(ResourceLocks.Server("rabenhof"), locks.ServerKey("rabenhof (hetzner)"));
+        Assert.Equal(ResourceLocks.Server("host-d"), locks.ServerKey("host-d"));
+        Assert.Equal(ResourceLocks.Server("host-d"), locks.ServerKey("HOST-D"));
+        Assert.Equal(ResourceLocks.Server("host-d"), locks.ServerKey("host-d (hetzner)"));
         Assert.Equal(ResourceLocks.Server("gone"), locks.ServerKey("gone"));
     }
 

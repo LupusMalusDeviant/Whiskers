@@ -391,7 +391,7 @@ internal sealed class CredentialWorld : IDisposable
 
     public CredentialWorld(bool withSharedCredential = true, params (string Id, string Ip)[] hosts)
     {
-        if (hosts.Length == 0) hosts = [("rabenhof", "100.64.0.9")];
+        if (hosts.Length == 0) hosts = [("host-d", "100.64.0.9")];
         Paths = new DataPathOptions(Root);
         KeyFiles = new SealedKeyFiles(TestVault.Usable, Paths);
         KeyLoader = new MtlsClientKeyLoader(KeyFiles, Paths);

@@ -46,13 +46,13 @@ public sealed class SelfMetricsTests : IDisposable
     {
         var metrics = new SelfMetrics();
 
-        metrics.Count("log_fetch_timeouts", "badwolf");
-        metrics.Count("log_fetch_timeouts", "badwolf");
-        metrics.Count("log_fetch_timeouts", "burgcloud");
+        metrics.Count("log_fetch_timeouts", "host-a");
+        metrics.Count("log_fetch_timeouts", "host-a");
+        metrics.Count("log_fetch_timeouts", "host-b");
 
         var counter = metrics.Counters()["log_fetch_timeouts"];
-        Assert.Equal(2, counter["badwolf"]);
-        Assert.Equal(1, counter["burgcloud"]);
+        Assert.Equal(2, counter["host-a"]);
+        Assert.Equal(1, counter["host-b"]);
     }
 
     [Fact]
@@ -60,11 +60,11 @@ public sealed class SelfMetricsTests : IDisposable
     {
         var metrics = new SelfMetrics();
 
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromSeconds(1), success: true);
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromSeconds(1), success: true);
         var afterSuccess = metrics.Loops().Single().LastSuccess;
 
         Thread.Sleep(20);
-        metrics.RecordCycle("logmonitor", "badwolf", TimeSpan.FromSeconds(1), success: false);
+        metrics.RecordCycle("logmonitor", "host-a", TimeSpan.FromSeconds(1), success: false);
 
         var loop = metrics.Loops().Single();
         Assert.Equal(afterSuccess, loop.LastSuccess);   // the point: failures must not refresh it
@@ -96,7 +96,7 @@ public sealed class SelfMetricsTests : IDisposable
         var metrics = new SelfMetrics();
         var fleet = new[]
         {
-            new ServerConfig { Id = "badwolf", Name = "Badwolf", ConnectionType = ConnectionType.Local },
+            new ServerConfig { Id = "host-a", Name = "Host-A", ConnectionType = ConnectionType.Local },
             new ServerConfig { Id = "k3s", Name = "k3s cluster", ConnectionType = ConnectionType.Kubernetes }
         };
 
@@ -116,7 +116,7 @@ public sealed class SelfMetricsTests : IDisposable
         Assert.All(skipped, l => Assert.Contains("Kubernetes", l.SkipReason));
 
         // And the Docker host must NOT be marked as skipped — a false skip would hide a real gap.
-        Assert.DoesNotContain(metrics.Loops(), l => l.ServerId == "badwolf");
+        Assert.DoesNotContain(metrics.Loops(), l => l.ServerId == "host-a");
     }
 
     // --- wired into the real loop ------------------------------------------------------------------------
@@ -124,7 +124,7 @@ public sealed class SelfMetricsTests : IDisposable
     private LogMonitorService Monitor(FakeDocker docker, ISelfMetrics metrics, TimeSpan? timeout = null) =>
         new(_sp.GetRequiredService<IServiceScopeFactory>(),
             docker,
-            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }),
+            new FakeServerConfig(new ServerConfig { Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true }),
             new FakeNotifications(),
             NullLogger<LogMonitorService>.Instance,
             TestBudget.Create(),
@@ -137,7 +137,7 @@ public sealed class SelfMetricsTests : IDisposable
     {
         var metrics = new SelfMetrics();
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-ok", Name = "burg-web", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+            new ContainerInfo { Id = "c-ok", Name = "web", Image = "img:1", ServerId = "local", ServerName = "Host-A" });
 
         await Monitor(docker, metrics).RunScanCycleAsync(CancellationToken.None);
 
@@ -153,7 +153,7 @@ public sealed class SelfMetricsTests : IDisposable
     {
         var metrics = new SelfMetrics();
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Badwolf" })
+            new ContainerInfo { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Host-A" })
         {
             // Hangs rather than answering late: a finite delay raced the 40 ms timeout, and on a starved CI
             // runner both timers came due together and the fetch could "succeed" (CI run 38304968400).
@@ -171,7 +171,7 @@ public sealed class SelfMetricsTests : IDisposable
         // A self-measurement that talks to the daemon would be the incident one level up.
         var metrics = new SelfMetrics();
         var docker = new FakeDocker(
-            new ContainerInfo { Id = "c-ok", Name = "burg-web", Image = "img:1", ServerId = "local", ServerName = "Badwolf" });
+            new ContainerInfo { Id = "c-ok", Name = "web", Image = "img:1", ServerId = "local", ServerName = "Host-A" });
 
         await Monitor(docker, metrics).RunScanCycleAsync(CancellationToken.None);
         var callsAfterScan = docker.Calls.Count;

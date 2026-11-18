@@ -9,7 +9,7 @@ namespace Whiskers.Tests;
 /// <para>A failed CVE scan deliberately keeps the previous results rather than reporting a false all-clear.
 /// That is the right trade, and it has a consequence nobody had measured: a target whose scanner broke months
 /// ago looks exactly like one scanned this morning — the same findings, still plausible, simply never
-/// changing. The Authentik image sat like that from July to late August. The only thing that told the two
+/// changing. The identity-provider image sat like that from July to late August. The only thing that told the two
 /// apart was the age of the data, and nothing was watching it.</para>
 ///
 /// <para>So these tests care mostly about staleness: that it is noticed, that it is not invented, and that one
@@ -43,10 +43,10 @@ public class CveMetricsTests
     [Fact]
     public void A_target_frozen_since_July_is_counted_as_stale()
     {
-        // The Authentik case, to the week. Its findings were present and unchanged the whole time; the data
+        // The identity-provider case, to the week. Its findings were present and unchanged the whole time; the data
         // age is the only signal that separates that from a healthy target.
         var result = CveMetrics.Build(
-            [Target("local", "authentik-worker", Now.AddDays(-50), CveSeverity.High)], Interval, Now);
+            [Target("local", "idp-worker", Now.AddDays(-50), CveSeverity.High)], Interval, Now);
 
         var server = Only(result);
         Assert.Equal(1, server.StaleTargets);
@@ -87,7 +87,7 @@ public class CveMetricsTests
         // wrong about the only target that matters.
         var targets = Enumerable.Range(0, 9)
             .Select(i => Target("local", $"c{i}", Now.AddHours(-1), CveSeverity.Low))
-            .Append(Target("local", "authentik", Now.AddDays(-50), CveSeverity.Critical))
+            .Append(Target("local", "idp", Now.AddDays(-50), CveSeverity.Critical))
             .ToList();
 
         var server = Only(CveMetrics.Build(targets, Interval, Now));
@@ -164,12 +164,12 @@ public class CveMetricsTests
     [Fact]
     public void Servers_are_kept_apart_and_matched_without_regard_to_case()
     {
-        // servers.json is hand-edited; "BurgCloud" and "burgcloud" are one machine and must not become two
+        // servers.json is hand-edited; "Host-B" and "host-b" are one machine and must not become two
         // series that each tell half the story.
         var result = CveMetrics.Build(
         [
-            Target("BurgCloud", "a", Now, CveSeverity.High),
-            Target("burgcloud", "b", Now.AddDays(-50), CveSeverity.Low)
+            Target("Host-B", "a", Now, CveSeverity.High),
+            Target("host-b", "b", Now.AddDays(-50), CveSeverity.Low)
         ], Interval, Now);
 
         var server = Only(result);
@@ -196,12 +196,12 @@ public class CveMetricsTests
         var stale = CveMetrics.StaleTargets(
         [
             Target("local", "fresh", Now.AddHours(-1), CveSeverity.Low),
-            Target("local", "authentik-worker", Now.AddDays(-50), CveSeverity.High),
+            Target("local", "idp-worker", Now.AddDays(-50), CveSeverity.High),
             Target("local", "old-web", Now.AddDays(-3), CveSeverity.Low)
         ], Interval, Now);
 
         Assert.Equal(2, stale.Count);
-        Assert.Equal("authentik-worker", stale[0].Target);
+        Assert.Equal("idp-worker", stale[0].Target);
         Assert.Equal("old-web", stale[1].Target);
         Assert.DoesNotContain(stale, t => t.Target == "fresh");
     }
@@ -213,7 +213,7 @@ public class CveMetricsTests
         // somebody who then has nothing to search for.
         var stale = CveMetrics.StaleTargets(
         [
-            new CveScanResult { ServerId = "badwolf", Source = CveSource.Os, ScannedAt = Now.AddDays(-40) }
+            new CveScanResult { ServerId = "host-a", Source = CveSource.Os, ScannedAt = Now.AddDays(-40) }
         ], Interval, Now);
 
         Assert.Equal("host OS", Assert.Single(stale).Target);
@@ -240,13 +240,13 @@ public class CveMetricsTests
     [Fact]
     public void A_target_whose_scan_failed_is_counted_and_not_mistaken_for_clean()
     {
-        // The 2026-08-28 case: two running containers on infomaniak could not be scanned because their local
+        // The 2026-08-28 case: two running containers on host-f could not be scanned because their local
         // image layers were damaged. Neither had ever been scanned successfully, so nothing was stored and
         // they were absent from every list — which reads exactly like "no findings".
         var server = Only(CveMetrics.Build(
         [
-            Target("infomaniak", "caddy", Now, CveSeverity.Low),
-            Failed("infomaniak", "ghostunnel", "not found in tar", Now)
+            Target("host-f", "caddy", Now, CveSeverity.Low),
+            Failed("host-f", "ghostunnel", "not found in tar", Now)
         ], Interval, Now));
 
         Assert.Equal(1, server.FailedTargets);
@@ -271,9 +271,9 @@ public class CveMetricsTests
         // and WHY, because the fix differs (damaged image layer, missing credentials, host unreachable).
         var failed = CveMetrics.FailedTargets(
         [
-            Target("infomaniak", "caddy", Now, CveSeverity.Low),
-            Failed("infomaniak", "ghostunnel", "not found in tar", Now),
-            Failed("infomaniak", "fenrir-sentinel", "not found in tar", Now)
+            Target("host-f", "caddy", Now, CveSeverity.Low),
+            Failed("host-f", "ghostunnel", "not found in tar", Now),
+            Failed("host-f", "sentinel", "not found in tar", Now)
         ]);
 
         Assert.Equal(2, failed.Count);

@@ -1,13 +1,15 @@
+> Historical document, kept for reference; names anonymised.
+
 # Vorfall 2026-08-26: Der Log-Monitor legt dockerd lahm
 
-**Betroffen:** BurgCloud (Hetzner, 2 Kerne, Debian 12) — Docker 29.5.2, 10 Container
+**Betroffen:** host-b (Hetzner, 2 Kerne, Debian 12) — Docker 29.5.2, 10 Container
 **Dauer:** 20.08.2026 14:02 UTC bis 26.08.2026 15:07 UTC (6 Tage)
 **Komponente:** `Services/LogMonitor/LogMonitorService.cs`, `Services/Docker/Operations/ContainerOperations.cs`
 **Status:** Auf dem Server entschärft; im Code behoben (v0.12.x/0.13.0: Abbruch bis in die Leseschleife, Lastbudget und Schutzschalter, Fensterdeckel und Aussperrung, Selbstbeobachtung, Host-/Baseline-Alarme, Hygiene-Inventar — siehe CHANGELOG)
 
 ## Kurzfassung
 
-Sechs Tage lang lief BurgCloud durchgehend bei 98 % CPU. Verursacher war nicht die überwachte
+Sechs Tage lang lief host-b durchgehend bei 98 % CPU. Verursacher war nicht die überwachte
 Anwendung, sondern Whiskers selbst.
 
 Der Log-Monitor startete alle 60 Sekunden neue Log-Abrufe gegen zwei Container, deren Logs er nicht
@@ -142,7 +144,7 @@ CPU- und RAM-Alarme gibt es **je Container**. Verbrannt hat die CPU aber `docker
 Host-Prozess, der in keinem Container läuft. Für Platten existiert ein Host-Schlüssel
 (`disk:{server}`), für CPU und RAM des Hosts nichts.
 
-Ergebnis: Whiskers hat sechs Tage lang etwa 8.900 Messpunkte für BurgCloud aufgezeichnet, davon
+Ergebnis: Whiskers hat sechs Tage lang etwa 8.900 Messpunkte für host-b aufgezeichnet, davon
 praktisch jeden über 98 %, und keinen einzigen bewertet. Aufgefallen ist es, weil ein Mensch auf die
 Übersichtsseite geschaut hat.
 

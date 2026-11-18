@@ -42,7 +42,7 @@ public class LogMonitorService : Whiskers.Services.FleetBackgroundService, ILogM
     private readonly ConcurrentDictionary<string, int> _backoffStep = new();
 
     // Container names, kept for the status view: a suspended container is no longer scanned, so its name
-    // cannot reliably be looked up in the live list afterwards — and "badwolf:abc123f" is a riddle, not a report.
+    // cannot reliably be looked up in the live list afterwards — and "web-01:abc123f" is a riddle, not a report.
     private readonly ConcurrentDictionary<string, string> _suspendedNames = new();
 
     /// <summary>Timeouts in a row before a container is taken out of the scan (Plan-0002 WP3).</summary>

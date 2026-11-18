@@ -64,7 +64,7 @@ fi
 
 # Drift guard: would `up` change anything about this container other than its image? Not by comparing
 # the config-hash label with `config --hash`: for every service with an env_file the two never match,
-# not even right after compose created the container (2026-10-25, all six env_file services on Badwolf).
+# not even right after compose created the container (2026-10-25, all six env_file services on one production host).
 # So compose is asked directly, with a dry run, while the tag points at the image that runs - then
 # "Running" means the file still describes this container and anything else is drift.
 TAG_BEFORE=$(docker image inspect -f '{{.Id}}' "$IMG" 2>/dev/null)

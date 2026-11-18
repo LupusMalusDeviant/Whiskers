@@ -112,7 +112,7 @@ public sealed class MetricRollupTests : IDisposable
         await using (var db = Db())
         {
             for (var t = T0; t < T0.AddMinutes(20); t = t.AddMinutes(1))
-                db.ServerMetrics.Add(new ServerMetricEntity { ServerId = "s1", ServerName = "Badwolf", Timestamp = t,
+                db.ServerMetrics.Add(new ServerMetricEntity { ServerId = "s1", ServerName = "Host-A", Timestamp = t,
                     CpuPercent = t == T0.AddMinutes(3) ? 95 : 5, MemoryUsedBytes = 25, MemoryTotalBytes = 100 });
             await db.SaveChangesAsync();
             await RollUpAllAsync(db, T0.AddMinutes(25));
@@ -120,7 +120,7 @@ public sealed class MetricRollupTests : IDisposable
 
         await using var check = Db();
         var first = await check.ServerMetricRollups.SingleAsync(r => r.TierMinutes == 10 && r.WindowStart == T0);
-        Assert.Equal((10, 95.0, 25.0, "Badwolf"), (first.SampleCount, first.CpuMax, first.MemoryPercentAvg, first.ServerName));
+        Assert.Equal((10, 95.0, 25.0, "Host-A"), (first.SampleCount, first.CpuMax, first.MemoryPercentAvg, first.ServerName));
         Assert.Equal((9 * 5 + 95) / 10.0, first.CpuAvg, 9);
     }
 
@@ -289,7 +289,7 @@ public sealed class MetricRollupTests : IDisposable
             if (t >= outage && t < outage.AddHours(2)) continue;
             var cpu = InSpike(t, spike) ? 99 : t > now.AddMinutes(-2) ? 77 : 10;
             samples.Add((t, cpu));
-            db.ServerMetrics.Add(new ServerMetricEntity { ServerId = "s1", ServerName = "Badwolf", Timestamp = t, CpuPercent = cpu,
+            db.ServerMetrics.Add(new ServerMetricEntity { ServerId = "s1", ServerName = "Host-A", Timestamp = t, CpuPercent = cpu,
                 MemoryUsedBytes = 40, MemoryTotalBytes = 100 });
         }
         await db.SaveChangesAsync();

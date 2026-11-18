@@ -160,8 +160,8 @@ public class ServerConfigService : IServerConfigService, IInitializable
 
     /// <summary>Resolves a server by id, falling back to its display name. Ids win, so a name that happens
     /// to equal another server's id cannot shadow it. The fallback exists because everything a human or an
-    /// agent reads — dashboards, notifications, log lines — shows the NAME ("Rabenhof (Hetzner)"), while the
-    /// tools want the id ("rabenhof"); an agent acting on a fleet-wide alert otherwise fails with
+    /// agent reads — dashboards, notifications, log lines — shows the NAME ("Web 01 (Hetzner)"), while the
+    /// tools want the id ("web-01"); an agent acting on a fleet-wide alert otherwise fails with
     /// "Server not found" and concludes the container does not exist.</summary>
     public Models.ServerConfig? GetServer(string serverId)
     {

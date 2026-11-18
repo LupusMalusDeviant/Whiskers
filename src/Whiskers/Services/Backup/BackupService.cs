@@ -247,7 +247,7 @@ public sealed class BackupService : IBackupService
     /// <para>SQLite's online backup API copies the pages in file order, in one step under one read transaction, so it sees
     /// exactly one committed state while writers go on. It replaced <c>VACUUM INTO</c>, which rebuilds the database in
     /// b-tree order and reads the file out of order: on a spinning disk with a cold cache, a 780 MB database took 1089 s
-    /// that way and 52 s with the backup API (Badwolf, 2026-11-12). The pre-upgrade backup runs before the app is ready, so
+    /// that way and 52 s with the backup API (production host, 2026-11-12). The pre-upgrade backup runs before the app is ready, so
     /// that was the time the first start of an upgrade stood still.</para>
     /// <para>The copy is not compacted (free pages travel along; gzip shrinks them to almost nothing). Its header still says
     /// WAL from the source, so it is switched to a rollback journal to leave a single file a restore can use as it is.</para>

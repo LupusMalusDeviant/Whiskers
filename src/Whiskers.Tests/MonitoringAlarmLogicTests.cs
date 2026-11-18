@@ -40,7 +40,7 @@ public sealed class MonitoringAlarmLogicTests
             {
                 window.Add(TimeSpan.FromMilliseconds(ms));
                 var recent = window.Skip(Math.Max(0, window.Count - 120)).ToList();   // bounded, as the loop keeps it
-                if (evaluator.Evaluate(Noon.AddMinutes(window.Count), "badwolf", "Badwolf", recent) is { } f) findings.Add(f);
+                if (evaluator.Evaluate(Noon.AddMinutes(window.Count), "host-a", "Host-A", recent) is { } f) findings.Add(f);
             }
         }
 
@@ -65,7 +65,7 @@ public sealed class MonitoringAlarmLogicTests
             {
                 window.Add(TimeSpan.FromMilliseconds(ms));
                 var recent = window.Skip(Math.Max(0, window.Count - 120)).ToList();
-                if (evaluator.Evaluate(Noon.AddMinutes(window.Count), "badwolf", "Badwolf", recent) is { } f) findings.Add(f);
+                if (evaluator.Evaluate(Noon.AddMinutes(window.Count), "host-a", "Host-A", recent) is { } f) findings.Add(f);
             }
         return (findings, evaluator);
     }
@@ -105,7 +105,7 @@ public sealed class MonitoringAlarmLogicTests
         for (var i = 0; i < 115; i++)
         {
             window.Add(TimeSpan.FromMilliseconds(i < 100 ? 100 : 5000));
-            if (evaluator.Evaluate(Noon.AddMinutes(window.Count), "badwolf", "Badwolf", window.ToList()) is { } f) findings.Add(f);
+            if (evaluator.Evaluate(Noon.AddMinutes(window.Count), "host-a", "Host-A", window.ToList()) is { } f) findings.Add(f);
         }
 
         Assert.Contains(findings, f => f.What == FindingKind.Raised);
@@ -131,11 +131,11 @@ public sealed class MonitoringAlarmLogicTests
                 db.SaveChanges();
             }
             var docker = new FakeDocker(new ContainerInfo
-                { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Badwolf" })
+                { Id = "c-tunnel", Name = "ghostunnel", Image = "img:1", ServerId = "local", ServerName = "Host-A" })
                 { FetchHangs = true };
             var notifications = new FakeNotifications();
             var monitor = new LogMonitorService(sp.GetRequiredService<IServiceScopeFactory>(), docker,
-                new FakeServerConfig(new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }),
+                new FakeServerConfig(new ServerConfig { Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true }),
                 notifications, NullLogger<LogMonitorService>.Instance, TestBudget.Create(),
                 new SelfMetricsImpl(), new NoExclusions(), new NoOutcomes(), TimeSpan.FromMilliseconds(50));
 
@@ -170,15 +170,15 @@ public sealed class MonitoringAlarmLogicTests
         var notifications = new FakeNotifications();
         var finding = new CveFinding { CveId = "CVE-2026-0001", Severity = CveSeverity.High, Package = "openssl" };
         var target = source == CveSource.Os
-            ? new CveScanResult { ServerId = "burgcloud", Source = CveSource.Os, Findings = [finding] }
+            ? new CveScanResult { ServerId = "host-b", Source = CveSource.Os, Findings = [finding] }
             : new CveScanResult
             {
-                ServerId = "burgcloud", Source = CveSource.Container, ContainerId = "abc123", ContainerName = "web",
+                ServerId = "host-b", Source = CveSource.Container, ContainerId = "abc123", ContainerName = "web",
                 Image = "nginx:1", Findings = [finding],
             };
         var send = typeof(CveMonitorService).GetMethod("TrySendAggregateNotificationAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         ((Task)send.Invoke(monitor, [notifications, target, new List<CveFinding> { finding },
-            new Dictionary<string, string> { ["burgcloud"] = "BurgCloud" }])!).GetAwaiter().GetResult();
+            new Dictionary<string, string> { ["host-b"] = "Host-B" }])!).GetAwaiter().GetResult();
         return Assert.Single(notifications.Events);
     }
 
@@ -187,9 +187,9 @@ public sealed class MonitoringAlarmLogicTests
     {
         // CompositeNotificationService files `evt.ServerId ?? "local"` in AlertHistory.
         var evt = CveEvent(CveSource.Container);
-        Assert.Equal("burgcloud", evt.ServerId);
-        Assert.Equal("BurgCloud", evt.ServerName);
-        Assert.Contains("BurgCloud", evt.ImageName);
+        Assert.Equal("host-b", evt.ServerId);
+        Assert.Equal("Host-B", evt.ServerName);
+        Assert.Contains("Host-B", evt.ImageName);
     }
 
     [Fact]
@@ -203,8 +203,8 @@ public sealed class MonitoringAlarmLogicTests
     public void Cve_notification_of_the_os_names_its_server()
     {
         var evt = CveEvent(CveSource.Os);
-        Assert.Equal("burgcloud", evt.ServerId);
-        Assert.Equal("OS on BurgCloud", evt.ContainerName);
+        Assert.Equal("host-b", evt.ServerId);
+        Assert.Equal("OS on Host-B", evt.ContainerName);
     }
 
     // ---- 4: two single spikes are not a sustained breach --------------------------------------------------------------
@@ -250,10 +250,10 @@ public sealed class MonitoringAlarmLogicTests
                 ? Whiskers.Services.Metrics.DiskHealth.DiskHealthState.DegradedOrFailing
                 : Whiskers.Services.Metrics.DiskHealth.DiskHealthState.Healthy;
             var at = Noon.AddMinutes(m);
-            var reading = new Whiskers.Services.Metrics.DiskHealth.DiskHealthReading("badwolf", state,
+            var reading = new Whiskers.Services.Metrics.DiskHealth.DiskHealthReading("host-a", state,
                 [new Whiskers.Services.Metrics.DiskHealth.DiskHealthItem(Whiskers.Services.Metrics.DiskHealth.DiskHealthKinds.Smart,
                     "/dev/sda", state, "SMART overall-health", at)], at);
-            findings.AddRange(alerts.Evaluate("badwolf", "Badwolf", reading, previous, at));
+            findings.AddRange(alerts.Evaluate("host-a", "Host-A", reading, previous, at));
             previous = reading;
         }
         Assert.Contains(findings, f => f.Kind == NotificationEventTypes.DiskFailing && f.What == FindingKind.Raised);
@@ -289,9 +289,9 @@ public sealed class MonitoringAlarmLogicTests
         NotificationEvent HostCpu(string id, string name) => new()
             { EventType = NotificationEventTypes.HostCpuHigh, ServerId = id, ServerName = name, ContainerName = name };
 
-        await dispatcher.OnEventAsync(HostCpu("badwolf", "Badwolf"));
-        await dispatcher.OnEventAsync(HostCpu("burgcloud", "BurgCloud"));
-        await dispatcher.OnEventAsync(HostCpu("badwolf", "Badwolf"));   // inside Badwolf's cooldown
+        await dispatcher.OnEventAsync(HostCpu("host-a", "Host-A"));
+        await dispatcher.OnEventAsync(HostCpu("host-b", "Host-B"));
+        await dispatcher.OnEventAsync(HostCpu("host-a", "Host-A"));   // inside Host-A's cooldown
         await Task.Delay(200);
 
         Assert.Equal(2, runs.Runs);
@@ -459,19 +459,19 @@ public sealed class MonitoringAlarmLogicTests
         var metrics = new SelfMetricsImpl();
         var sent = new FakeNotifications();
         var supervisor = new ScanSupervisor(metrics, sent,
-            new FakeServerConfig(new ServerConfig { Id = "badwolf", Name = "Badwolf", IsDefault = true }),
+            new FakeServerConfig(new ServerConfig { Id = "host-a", Name = "Host-A", IsDefault = true }),
             NullLogger<ScanSupervisor>.Instance, TimeSpan.Zero);
         // "old-host" was removed; its loop ran until then (or was restored from the stored samples) and never runs again.
         metrics.Restore("logmonitor", "old-host", DateTime.UtcNow.AddHours(-1), TimeSpan.FromMinutes(1));
         // A configured server and a fleet-wide loop stalled the same way are still reported.
-        metrics.Restore("logmonitor", "badwolf", DateTime.UtcNow.AddHours(-1), TimeSpan.FromMinutes(1));
+        metrics.Restore("logmonitor", "host-a", DateTime.UtcNow.AddHours(-1), TimeSpan.FromMinutes(1));
         metrics.Restore("scheduler", "*", DateTime.UtcNow.AddHours(-1), TimeSpan.FromMinutes(1));
 
         await supervisor.CheckAsync();
 
         var stalled = sent.Events.Where(e => e.EventType == NotificationEventTypes.MonitoringStalled)
             .Select(e => e.ServerId).OrderBy(s => s, StringComparer.Ordinal).ToList();
-        Assert.Equal(["*", "badwolf"], stalled);
+        Assert.Equal(["*", "host-a"], stalled);
     }
 
     // ---- Contract 0017, amendment 4 (G2): two loops stalling on one server are two alerts in every channel -------------

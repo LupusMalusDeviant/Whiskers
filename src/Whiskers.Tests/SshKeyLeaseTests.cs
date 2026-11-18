@@ -79,14 +79,14 @@ public sealed class SshKeyLeaseTests : IDisposable
         await servers.InitializeAsync();
         await servers.AddServerAsync(new ServerConfig
         {
-            Id = "zirkus", Name = "edge", ConnectionType = ConnectionType.SSH, SshHost = "127.0.0.1", SshPort = 22, SshUser = "probe"
+            Id = "host-e", Name = "edge", ConnectionType = ConnectionType.SSH, SshHost = "127.0.0.1", SshPort = 22, SshUser = "probe"
         });
-        Assert.Equal("zirkus", servers.GetServer("edge")!.Id);   // the fallback this test is about
+        Assert.Equal("host-e", servers.GetServer("edge")!.Id);   // the fallback this test is about
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             servers.SaveSshKeyAsync("edge", "id_ecdsa", System.Text.Encoding.UTF8.GetBytes(SealedKeyFilesTests.NewPem())));
 
-        Assert.Null(servers.GetServer("zirkus")!.SshKeyFileName);
+        Assert.Null(servers.GetServer("host-e")!.SshKeyFileName);
         Assert.False(Directory.Exists(Path.Combine(_paths.SshKeysDir, "edge")));
     }
 

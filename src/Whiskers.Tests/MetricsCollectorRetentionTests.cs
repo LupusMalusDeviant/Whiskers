@@ -69,7 +69,7 @@ public sealed class MetricsCollectorRetentionTests : IDisposable
         services.AddSingleton<Whiskers.Services.AuditLog.IAuditChain>(_auditChain);   // records each audit retention run
         services.AddDbContext<MetricsDbContext>(o => o.UseSqlite($"Data Source={_path}"));
         services.AddSingleton<Whiskers.Services.ServerConfig.IServerConfigService>(new FakeServerConfig(
-            new ServerConfig { Id = "local", Name = "Badwolf", ConnectionType = ConnectionType.Local, IsDefault = true }));
+            new ServerConfig { Id = "local", Name = "Host-A", ConnectionType = ConnectionType.Local, IsDefault = true }));
         var sp = services.BuildServiceProvider();
         using (var scope = sp.CreateScope()) scope.ServiceProvider.GetRequiredService<MetricsDbContext>().Database.EnsureCreated();
 

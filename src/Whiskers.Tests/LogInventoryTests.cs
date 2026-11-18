@@ -33,11 +33,11 @@ public class LogInventoryTests
 
     private static CommandResult Says(string output) => new() { ExitCode = 0, Output = output };
 
-    private static readonly Models.ServerConfig Badwolf = new() { Id = "badwolf", Name = "Badwolf" };
+    private static readonly Models.ServerConfig HostA = new() { Id = "host-a", Name = "Host-A" };
 
     private static ContainerInfo Container(string name, params (string Key, string Value)[] labels)
     {
-        var c = new ContainerInfo { Id = "id-" + name, Name = name, ServerId = "badwolf", ServerName = "Badwolf" };
+        var c = new ContainerInfo { Id = "id-" + name, Name = name, ServerId = "host-a", ServerName = "Host-A" };
         foreach (var (k, v) in labels) c.Labels[k] = v;
         return c;
     }
@@ -56,7 +56,7 @@ public class LogInventoryTests
 
         var inventory = Build(host, new ContainerLogConfiguration("json-file", null, null, "/var/lib/docker/x-json.log"));
 
-        var entry = Assert.Single(await inventory.SurveyAsync(Badwolf, new[] { Container("ghostunnel") }));
+        var entry = Assert.Single(await inventory.SurveyAsync(HostA, new[] { Container("ghostunnel") }));
 
         Assert.Equal(157286400, entry.SizeBytes);
         Assert.True(entry.IsUnbounded);
@@ -70,7 +70,7 @@ public class LogInventoryTests
         // is empty" — the opposite of the truth on a host we simply cannot see into.
         var inventory = Build(new FakeHost(), new ContainerLogConfiguration("json-file", null, null, "/var/lib/docker/x.log"));
 
-        var entry = Assert.Single(await inventory.SurveyAsync(Badwolf, new[] { Container("ghostunnel") }));
+        var entry = Assert.Single(await inventory.SurveyAsync(HostA, new[] { Container("ghostunnel") }));
 
         Assert.Null(entry.SizeBytes);
         Assert.NotNull(entry.UnknownReason);
@@ -85,7 +85,7 @@ public class LogInventoryTests
         host.Responses["stat -c %s"] = Says("999999999");
 
         var inventory = Build(host, new ContainerLogConfiguration("syslog", null, null, null));
-        var entry = Assert.Single(await inventory.SurveyAsync(Badwolf, new[] { Container("app") }));
+        var entry = Assert.Single(await inventory.SurveyAsync(HostA, new[] { Container("app") }));
 
         Assert.Null(entry.SizeBytes);
         Assert.Contains("syslog", entry.UnknownReason);
@@ -100,7 +100,7 @@ public class LogInventoryTests
         host.Responses["df -B1"] = Says("209715200");
 
         var inventory = Build(host, new ContainerLogConfiguration("json-file", "50m", "3", "/var/lib/docker/x.log"));
-        var entry = Assert.Single(await inventory.SurveyAsync(Badwolf, new[] { Container("well-behaved") }));
+        var entry = Assert.Single(await inventory.SurveyAsync(HostA, new[] { Container("well-behaved") }));
 
         Assert.False(entry.IsUnbounded);
         Assert.Equal(LogHygieneSeverity.None, LogHygieneAdvice.Severity(entry));
@@ -115,7 +115,7 @@ public class LogInventoryTests
         host.Responses["stat -c %s"] = Says("1024");
 
         var inventory = Build(host, new ContainerLogConfiguration("json-file", null, null, "/var/lib/docker/a b;rm -rf /.log"));
-        await inventory.SurveyAsync(Badwolf, new[] { Container("odd") });
+        await inventory.SurveyAsync(HostA, new[] { Container("odd") });
 
         var stat = Assert.Single(host.Commands, c => c.Contains("stat -c %s"));
         Assert.Contains("'/var/lib/docker/a b;rm -rf /.log'", stat);
@@ -148,7 +148,7 @@ public class LogInventoryTests
     [Fact]
     public void A_single_reading_admits_it_has_no_trend()
     {
-        var text = LogHygieneAdvice.Describe(Entry(size: 157_286_400, free: 209_715_200), "Badwolf");
+        var text = LogHygieneAdvice.Describe(Entry(size: 157_286_400, free: 209_715_200), "Host-A");
 
         Assert.Contains("No growth rate yet", text);
     }
@@ -159,7 +159,7 @@ public class LogInventoryTests
         // The number that makes people act is not the size, it is "this fills the disk on Thursday".
         var entry = Entry(size: 157_286_400, free: 209_715_200) with { GrowthBytesPerDay = 52_428_800 };  // 50 MB/day
 
-        var text = LogHygieneAdvice.Describe(entry, "Badwolf");
+        var text = LogHygieneAdvice.Describe(entry, "Host-A");
 
         Assert.Contains("50 MB per day", text);
         Assert.Contains("fills the remaining disk in roughly 4 days", text);
@@ -206,7 +206,7 @@ public class LogInventoryTests
     }
 
     private static LogInventoryEntry Entry(long? size, long? free) => new(
-        "badwolf", "id-x", "ghostunnel",
+        "host-a", "id-x", "ghostunnel",
         new ContainerLogConfiguration("json-file", null, null, "/var/lib/docker/x.log"),
         size, size is null ? "unreadable" : null, null, free, DateTime.UtcNow);
 }

@@ -318,9 +318,9 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
         await _servers.RemoveServerAsync("edge");
         await _servers.AddServerAsync(new ServerConfig
         {
-            Id = "zirkus", Name = "edge", ConnectionType = ConnectionType.SSH, SshUser = "root", SshHost = "other.example.com", SshPort = 22
+            Id = "host-e", Name = "edge", ConnectionType = ConnectionType.SSH, SshUser = "root", SshHost = "other.example.com", SshPort = 22
         });
-        var gate = Services.GetRequiredService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>().HostLock("zirkus");
+        var gate = Services.GetRequiredService<Whiskers.Services.Certificates.IMtlsClientCredentialStore>().HostLock("host-e");
         Assert.True(await gate.WaitAsync(0));   // an onboarding of the other server
         try
         {
@@ -330,7 +330,7 @@ public class ServersKubeconfigSaveTests : BunitContext, IAsyncLifetime
 
         Assert.Empty(recorder.Uploads);
         Assert.DoesNotContain(_servers.GetServers(), s => s.Id == "edge");   // not written back
-        Assert.Equal("other.example.com", _servers.GetServer("zirkus")!.SshHost);
+        Assert.Equal("other.example.com", _servers.GetServer("host-e")!.SshHost);
     }
 
     [Fact]

@@ -12,7 +12,7 @@ public class NotificationRenderingTests
     {
         EventType = "log_alert:error",
         ContainerName = "web",
-        ServerName = "Rabenhof",
+        ServerName = "Host-D",
         ImageInfo = detail
     };
 
@@ -20,7 +20,7 @@ public class NotificationRenderingTests
     public void The_html_body_encodes_the_matched_log_line()
     {
         var (_, html) = MatrixNotificationService.FormatMessage(
-            LogAlert("rule · web @ Rabenhof — FATAL <img src=x onerror=alert(1)> & done"));
+            LogAlert("rule · web @ Host-D — FATAL <img src=x onerror=alert(1)> & done"));
 
         Assert.DoesNotContain("<img", html);
         Assert.Contains("&lt;img", html);
@@ -63,13 +63,13 @@ public class NotificationRenderingTests
         var (plain, html) = MatrixNotificationService.FormatMessage(new NotificationEvent
         {
             EventType = "server_unreachable",
-            ServerId = "rabenhof",
-            ServerName = "Rabenhof (Hetzner)",
-            ImageInfo = "Rabenhof (Hetzner) — Connection failed"
+            ServerId = "host-d",
+            ServerName = "Host-D (Hetzner)",
+            ImageInfo = "Host-D (Hetzner) — Connection failed"
         });
 
         Assert.Contains("Server Unreachable", plain);
-        Assert.Contains("Rabenhof (Hetzner)", plain);
+        Assert.Contains("Host-D (Hetzner)", plain);
         Assert.Contains("<strong>Server Unreachable</strong>", html);
     }
 
@@ -81,18 +81,18 @@ public class NotificationRenderingTests
         {
             EventType = "stopped",
             ContainerName = "web",
-            ServerName = "Rabenhof",
+            ServerName = "Host-D",
             Image = "img:1"
         });
 
         Assert.Contains("web", detail);
-        Assert.Contains("@ Rabenhof", detail);
+        Assert.Contains("@ Host-D", detail);
     }
 
     [Fact]
     public void Server_events_get_their_own_title_and_link()
     {
-        var evt = new NotificationEvent { EventType = "server_unreachable", ServerId = "rabenhof" };
+        var evt = new NotificationEvent { EventType = "server_unreachable", ServerId = "host-d" };
         var (title, severity) = NotificationFormatter.Describe(evt);
 
         Assert.Equal("Server unreachable", title);

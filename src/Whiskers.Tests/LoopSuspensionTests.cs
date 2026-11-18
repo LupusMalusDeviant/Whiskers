@@ -23,7 +23,7 @@ public class LoopSuspensionTests
         var sent = new FakeNotifications();
         return (new LoopSuspensionService(
             sent,
-            new FakeServerConfig(new ServerConfig { Id = "badwolf", Name = "Badwolf", IsDefault = true }),
+            new FakeServerConfig(new ServerConfig { Id = "host-a", Name = "Host-A", IsDefault = true }),
             NullLogger<LoopSuspensionService>.Instance, new NoOutcomes()), sent);
     }
 
@@ -31,11 +31,11 @@ public class LoopSuspensionTests
     public void A_pause_takes_effect_and_is_announced()
     {
         var (service, sent) = Build();
-        Assert.False(service.IsSuspended("badwolf"));
+        Assert.False(service.IsSuspended("host-a"));
 
-        service.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "investigating high load");
+        service.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "investigating high load");
 
-        Assert.True(service.IsSuspended("badwolf"));
+        Assert.True(service.IsSuspended("host-a"));
 
         // Never silent. An unannounced pause turns "quiet" into "blind" and hides the next incident behind
         // the fix for the last one.
@@ -50,9 +50,9 @@ public class LoopSuspensionTests
         // A pause that must be revoked by hand is a pause that gets forgotten, and a forgotten pause is an
         // unmonitored server nobody remembers creating.
         var (service, sent) = Build();
-        service.Suspend("badwolf", DateTime.UtcNow.AddMilliseconds(-1), "already over");
+        service.Suspend("host-a", DateTime.UtcNow.AddMilliseconds(-1), "already over");
 
-        Assert.False(service.IsSuspended("badwolf"));
+        Assert.False(service.IsSuspended("host-a"));
         Assert.Equal(new[] { "loops_paused", "loops_resumed" }, sent.Events.Select(e => e.EventType));
     }
 
@@ -61,7 +61,7 @@ public class LoopSuspensionTests
     {
         // If a self-imposed pause looks like the operator's own, they stop looking for a cause.
         var (service, sent) = Build();
-        service.Suspend("badwolf", DateTime.UtcNow.AddMinutes(5), "5 failures in a row", automatic: true);
+        service.Suspend("host-a", DateTime.UtcNow.AddMinutes(5), "5 failures in a row", automatic: true);
 
         Assert.True(Assert.Single(service.Current()).Automatic);
         Assert.Contains("by itself", Assert.Single(sent.Events).ImageInfo);
@@ -71,10 +71,10 @@ public class LoopSuspensionTests
     public void Resuming_says_so()
     {
         var (service, sent) = Build();
-        service.Suspend("badwolf", DateTime.UtcNow.AddMinutes(30), "maintenance");
-        service.Resume("badwolf");
+        service.Suspend("host-a", DateTime.UtcNow.AddMinutes(30), "maintenance");
+        service.Resume("host-a");
 
-        Assert.False(service.IsSuspended("badwolf"));
+        Assert.False(service.IsSuspended("host-a"));
         Assert.Equal(new[] { "loops_paused", "loops_resumed" }, sent.Events.Select(e => e.EventType));
     }
 
