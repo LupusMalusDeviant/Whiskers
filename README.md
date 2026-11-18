@@ -31,7 +31,9 @@ to `latest`, no generated vault key, no `VAULT_KEY_FILE`, no setup token); for t
 | Images | `ghcr.io/lupusmalusdeviant/whiskers`, amd64 + arm64, Trivy-gated, SBOM + provenance, keyless cosign signature. <!-- claim:RM-08 --> |
 | Stack | C# / .NET 10, ASP.NET Core, MudBlazor, EF Core, SignalR. License Apache 2.0. <!-- claim:RM-16 --> |
 
-The full tool list with permission levels is generated from the code: [docs/guide/mcp-tool-catalog.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/mcp-tool-catalog.md).
+What it does: [features](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/features.md) ·
+[governance and approvals](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/governance.md) ·
+[MCP tool list](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/mcp-tool-catalog.md) (generated from the code).
 
 ## Install
 
@@ -47,18 +49,8 @@ The installer installs exactly that release, generates the vault key on a new in
 image signature if cosign is installed, writes `./whiskers/` and waits until healthy. The UI is at
 `http://127.0.0.1:5100`. Flags: `install.sh --help`. <!-- claim:RM-09 -->
 
-Without the installer:
-
-```bash
-VER=X.Y.Z
-docker run -d --name whiskers -p 127.0.0.1:5100:8080 \
-  -v whiskers-data:/app/data -v /var/run/docker.sock:/var/run/docker.sock \
-  "ghcr.io/lupusmalusdeviant/whiskers:${VER}"
-```
-<!-- claim-free:advice -->
-
-This has no vault key; set `VAULT_KEY_FILE` before you store secrets. Compose, Helm, reverse proxy, Tailscale and the
-hardened profile: [docs/operations/installation.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/installation.md). <!-- claim-free:advice -->
+`docker run`, Compose, Helm, PostgreSQL, a reverse proxy, Tailscale, the hardened profile and verifying the image
+signature: [installation guide](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/installation.md). <!-- claim-free:pointer -->
 
 ## First sign-in
 
@@ -74,44 +66,14 @@ with MFA. <!-- claim:RM-10 -->
 
 ## Connect an MCP client
 
-Create a key under *Settings → MCP*, then:
+Create a key under *Settings → MCP*, then (Claude Code; other clients in the
+[installation guide](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/installation.md#mcp-clients)):
 
 ```bash
 export WHISKERS_MCP_API_KEY=…
 claude mcp add --transport http --scope project whiskers http://localhost:5100/mcp --header 'Authorization: Bearer ${WHISKERS_MCP_API_KEY}'
 ```
 <!-- claim-free:advice -->
-
-Any other client:
-
-```json
-{
-  "mcpServers": {
-    "whiskers": {
-      "type": "http",
-      "url": "http://localhost:5100/mcp",
-      "headers": { "Authorization": "Bearer <WHISKERS_MCP_API_KEY>" }
-    }
-  }
-}
-```
-<!-- claim-free:advice -->
-
-Crush and more: [docs/operations/installation.md → MCP clients](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/installation.md#mcp-clients). Scopes, prompts and
-resources: [docs/guide/mcp.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/mcp.md).
-
-## Verifying the image
-
-```bash
-VER=X.Y.Z
-cosign verify "ghcr.io/lupusmalusdeviant/whiskers:${VER}" \
-  --certificate-identity-regexp '^https://github.com/LupusMalusDeviant/Whiskers/.github/workflows/release.yml@refs/tags/v' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-<!-- claim-free:advice -->
-
-Images before v0.12.1 are not cosign-signed. Supply-chain details:
-[docs/architecture/security-architecture.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/architecture/security-architecture.md#supply-chain). <!-- claim-free:history -->
 
 ## Configuration
 
@@ -132,76 +94,15 @@ Everything is optional. Where a setting goes depends on the install path: <!-- c
 | `PATH_BASE` | `PathBase` | Subpath behind a reverse proxy. <!-- claim:RM-22 --> |
 | — (not mapped; add an `environment:` entry) | `ForwardedHeaders__TrustedNetworks__0` | Proxy whose `X-Forwarded-*` headers are believed; loopback only by default. <!-- claim:RM-12 --> |
 
-All keys: [docs/operations/configuration.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/configuration.md) and [.env.example](https://github.com/LupusMalusDeviant/Whiskers/blob/main/.env.example). <!-- claim-free:pointer -->
+All keys: [configuration](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/configuration.md) and [.env.example](https://github.com/LupusMalusDeviant/Whiskers/blob/main/.env.example). <!-- claim-free:pointer -->
 
-## Accepted limits (1.0)
+## Before production
 
-Deliberate limits of Whiskers 1.0
-([product contract §5](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/v1/PRODUCT_CONTRACT.md#5-scope-and-stated-limits)): <!-- claim-free:limit -->
+Whiskers 1.0 has deliberate limits: an Admin is root on every managed host, it runs as a single instance, roles are
+global, terminal sessions are not transcribed, changes made outside Whiskers are not attributed, and local accounts
+have no second factor. Read them, and the remaining risks of the compose exposure checks, in the
+[production checklist](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md#accepted-limits-10). <!-- claim-free:limit -->
 
-- **Root-equivalent administration.** An Admin, an Admin-level key or a compromised instance is root on every managed host. Whiskers governs who reaches that power and records it; it does not make it smaller. A shell on the Whiskers host itself is outside the contract. <!-- claim-free:limit -->
-- **Single instance.** One process and one data directory; no replica, no failover. Recovery comes from self-backups kept off the host. <!-- claim-free:limit -->
-- **Global roles.** Viewer, Operator and Admin (and key levels) apply to every managed server; there is no per-server or tenant scoping. <!-- claim-free:limit -->
-- **No terminal transcript.** Opening a terminal is authorized, kill-switch-checked and audited; what is typed inside is neither policy-checked nor recorded. <!-- claim-free:limit -->
-- **Out-of-band changes are invisible.** Changes made directly on a host, in a cloud console or by another tool are not governed or attributed. <!-- claim-free:limit -->
-- **No second factor for local accounts.** Production sign-in goes through your identity provider with MFA. <!-- claim-free:limit -->
-
-## Compose exposure checks: remaining risks
-
-Compose deployments are decided on their exposures (published ports, host network, privileges, route labels; contract
-0006, INV-62 — details in [docs/guide/features.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/features.md#compose-deployments-and-exposure-changes)). Not caught,
-or caught only after `up`: <!-- claim-free:limit -->
-
-- **Proxies and tunnels behind an unrecognisable entrypoint**: Traefik, cloudflared and Tailscale are recognised by
-  image name, `argv[0]`, a word of a `sh -c` string or an environment key (contract 0013); a binary renamed or started
-  some other way is not. <!-- claim-free:limit -->
-- **Tailscale serve state** is read from configuration (`TS_SERVE_CONFIG`), never from tailscaled at run time; a
-  sidecar with persistent state and no serve configuration counts as public and is decided. <!-- claim-free:limit -->
-- **A Traefik on the host** outside the project is recognised by its image name (`traefik`) only (contract 0013,
-  Amendment 2). <!-- claim-free:limit -->
-- **Bridge networks that reach the LAN by their options**: macvlan, ipvlan and unknown network drivers are decided as
-  a LAN exposure (contract 0021); a `bridge` network whose `driver_opts` make it reachable from the LAN
-  (`gateway_mode_ipv4/6` `nat-unprotected` or `routed`, or a named bridge that holds a physical NIC) is not. <!-- claim-free:limit -->
-- **Recreate and rollback reconnect networks by name**: recreating a container and the update rollback put the new
-  container back on the old container's networks by their names. A network removed and re-created under the same name
-  in between, for example with a LAN driver, is joined without a LAN decision (contract 0021). <!-- claim-free:limit -->
-- **The tag race**: putting a tag back after a refused run checks that it still points where this run left it; a tag
-  moved by another run in between is left alone (and so not restored). <!-- claim-free:limit -->
-- **`container.update` and `autopatch.run`** recreate containers from new images without this check — except a
-  container a compose run pinned (label `whiskers.image.ref`), which they refuse: it is updated by redeploying its
-  project (contract 0013). <!-- claim-free:limit -->
-- **Pinned containers show an image id**: `up` starts each image by its id (contract 0013, D10 as amended), so the
-  Image column of a container a compose run started shows `sha256:…`; the name the project uses is in the label
-  `whiskers.image.ref`. <!-- claim-free:limit -->
-- **Late daemon work after a timeout**: a pull, build or `up` the daemon finishes after Whiskers stopped waiting is not
-  re-checked. <!-- claim-free:limit -->
-- **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own
-  300 s / 600 s / 300 s. <!-- claim:RM-13 -->
-- **Legacy containers of the old Deploy page** (plain containers without compose labels) are left alone; a deployment
-  that would use one of their names is refused until the container is removed or another name is chosen (contract 0013,
-  D15). <!-- claim:RM-25 -->
-
-**Upgrade note (contract 0006).** The new policy defaults change every policy's version hash, so open approvals and
-the policy snapshots of pinned runs expire at the upgrade. `docker compose pull --ignore-buildable` needs Docker
-Compose v2.15 or newer on every managed host. A label key, a port, a network or a privilege field from an `.env`
-variable that is not set now refuses the plan. Redeploys of projects with `build:` services rebuild with `--pull`, and
-Git deploys now pull images as well. <!-- claim-free:history -->
-
-**Upgrade note (contract 0013).** The default exposure label prefix `traefik.` replaces `traefik.http.routers.` and
-`traefik.tcp.routers.` (a literal `traefik.enable=false` is no exposure), which changes every policy's version hash:
-open approvals expire at the upgrade. A Traefik with `exposedByDefault`, cloudflared and Tailscale serve/Funnel in a
-deployment — and a Traefik already running on the host — are decided as exposures; a proxy or tunnel whose configuration
-cannot be read (a variable that is not set, a config file on a named volume, a file larger than 1 MiB) refuses the
-plan. Containers a compose run starts are pinned to their image id; `container.update` and AutoPatch refuse a pinned
-container (redeploy its project to update it). The Deploy page (form and compose tab) and MCP `deploy_app` now create
-real compose projects in `/opt/deployments/<project>` instead of single containers: the form and `deploy_app` keep
-`network_mode: bridge`, a redeploy with the same name updates the project, `deploy_app` refuses a malformed port or
-environment entry instead of dropping it and answers with the project, its containers and the pinned image id. A plain
-container the old page created blocks a deployment that would reuse its name. <!-- claim-free:history -->
-
-## Operating it
-
-[Production checklist](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/production-checklist.md) ·
 [Upgrade and rollback](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/upgrade-and-rollback.md) ·
 [Backup and recovery](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/backup-and-recovery.md) ·
 [Troubleshooting](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/troubleshooting.md) ·
@@ -214,33 +115,13 @@ Requires the .NET SDK version in `global.json`. <!-- claim-free:advice -->
 ```bash
 dotnet build Whiskers.slnx -c Release
 dotnet test Whiskers.slnx -c Release
-dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --filter Category=RequiresDocker   # PostgreSQL suites: need Docker, skipped locally without it, mandatory on CI
-dotnet run --project src/Whiskers/Whiskers.csproj                                       # http://localhost:5041 (launchSettings.json)
+dotnet run --project src/Whiskers/Whiskers.csproj   # http://localhost:5041 (launchSettings.json)
 ```
 <!-- claim-free:advice -->
 
-After changing a package reference: `dotnet restore Whiskers.slnx --force-evaluate` and commit the lock files
-([deploy/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/deploy/README.md#pinned-build-inputs-r1-52)). Pull requests: [CONTRIBUTING.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/CONTRIBUTING.md).
-CI checks the build, the tests, the image, the PostgreSQL suites, dependencies, secrets and static analysis: [docs/operations/ci-and-release-checks.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/ci-and-release-checks.md). <!-- claim-free:advice -->
-
-## Documentation
-
-| Topic | File |
-|---|---|
-| Governance model, hero workflow, policy layer | [docs/guide/governance.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/governance.md) |
-| Features | [docs/guide/features.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/features.md) |
-| Installation (all paths) | [docs/operations/installation.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/installation.md) <!-- claim-free:pointer --> |
-| Configuration | [docs/operations/configuration.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/operations/configuration.md) |
-| MCP server | [docs/guide/mcp.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/mcp.md) |
-| In-process AI agent | [docs/guide/agent.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/agent.md) |
-| Security architecture and supply chain | [docs/architecture/security-architecture.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/architecture/security-architecture.md) |
-| Architecture | [docs/architecture/ARCHITECTURE.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/architecture/ARCHITECTURE.md) |
-| Screenshots | [docs/guide/screenshots.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/screenshots.md) |
-| Roadmap | [docs/guide/roadmap.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/guide/roadmap.md) |
-| Project structure | [docs/architecture/project-structure.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/architecture/project-structure.md) |
-| Everything else | [docs/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/README.md) <!-- claim-free:pointer --> |
-
-Security issues: report privately, see [SECURITY.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md).
+Pull requests: [CONTRIBUTING.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/CONTRIBUTING.md). All
+documentation, by reader: [docs/README.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/docs/README.md).
+Security issues: report privately, see [SECURITY.md](https://github.com/LupusMalusDeviant/Whiskers/blob/main/SECURITY.md). <!-- claim-free:pointer -->
 
 ## License
 

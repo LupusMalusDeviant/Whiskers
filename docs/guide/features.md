@@ -74,7 +74,7 @@ not set now refuses the plan (compose would read it from the host's environment)
 services rebuild with `--pull`, and Git deploys now pull images as well. With sign-in turned off, the readiness card
 checks whether Whiskers' own container carries a route label.
 
-The remaining risks of this check are listed in the [README](../../README.md#compose-exposure-checks-remaining-risks).
+The remaining risks of this check are listed in the [production checklist](../operations/production-checklist.md#compose-exposure-checks-remaining-risks).
 
 ## Security
 

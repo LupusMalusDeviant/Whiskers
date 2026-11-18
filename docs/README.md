@@ -34,8 +34,15 @@ The docs are sorted by reader. Start with the [README](../README.md) for the fac
 | [architecture/CODEBASE_MAP.md](architecture/CODEBASE_MAP.md) | Orientation in the code: projects and areas with their sizes, how a call flows to the host, where state lives, where to start a change, hotspots |
 | [architecture/project-structure.md](architecture/project-structure.md) | Source layout and code conventions |
 | [architecture/adr/](architecture/adr/) | Architecture decision records |
-| [contracts/](contracts/README.md) | Accepted interface contracts per work package |
-| [v1/](v1/README.md) | The 1.0 product contract, security invariants, release gate, claim register and work packages |
+| [contracts/](contracts/README.md) | Accepted contracts: every change is specified and accepted here before it is built |
+
+## Checking the promises — [v1/](v1/README.md)
+
+| Document | What |
+|---|---|
+| [v1/PRODUCT_CONTRACT.md](v1/PRODUCT_CONTRACT.md) | What Whiskers 1.0 promises, its decisions and the path matrix |
+| [v1/SECURITY_INVARIANTS.md](v1/SECURITY_INVARIANTS.md) | Every security invariant with the tests that prove it |
+| [v1/README.md](v1/README.md) | The release gate, the claim register and the other process artefacts the tests read |
 
 ## Product and reference
 

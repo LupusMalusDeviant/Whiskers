@@ -47,8 +47,6 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | RM-21 | `README.md` | `112a971c683a` | Published address; default `127.0.0.1:5100`. | artifact | `SelfReportClaimTests.The_release_compose_maps_each_env_name_of_the_readme_table_to_its_variable` |
 | RM-22 | `README.md` | `d304424dbc9d` | `PATH_BASE` \| `PathBase` | artifact | `SelfReportClaimTests.The_release_compose_maps_each_env_name_of_the_readme_table_to_its_variable` |
 | RM-12 | `README.md` | `2807a5ff5649` | loopback only by default. | default | `ForwardedHeadersConfigTests.Without_configuration_only_loopback_is_trusted`, `SelfReportClaimTests.The_release_compose_maps_each_env_name_of_the_readme_table_to_its_variable` |
-| RM-13 | `README.md` | `232138d9f27d` | **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own 300 s / 600 s / 300 s. | constant | `SelfReportClaimTests.The_compose_run_budget_is_five_minutes_and_git_deploy_keeps_300_600_300_seconds` |
-| RM-25 | `README.md` | `f8ce97a70a2e` | a deployment that would use one of their names is refused until the container is removed or another name is chosen | behaviour | `DeployAppComposeTests.A_legacy_container_with_the_name_is_refused_with_the_ways_out`, `DeployPageComposeTests.The_form_refuses_a_legacy_container_with_its_name`, `DeployPageComposeTests.The_compose_tab_refuses_a_legacy_container_with_a_name_it_would_use` |
 | RM-23 | `README.md` | `fcbeb0625505` | Apache License 2.0 | artifact | `SelfReportClaimTests.The_stack_is_dotnet_10_under_the_apache_license_2` |
 | SEC-01 | `SECURITY.md` | `30036fb4eb56` | This source tree is the **stable** (`1.0.x`) line. | artifact | `SelfReportClaimTests.The_supported_line_is_the_version_of_this_source_tree` |
 | SEC-02 | `SECURITY.md` | `2c3376c66abd` | Helm chart pins `replicas: 1` with a `Recreate` strategy | artifact | `SelfReportClaimTests.The_helm_chart_runs_one_replica_with_recreate` |
@@ -110,6 +108,8 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | PC-15 | `docs/operations/production-checklist.md` | `e86143438aa0` | (`Metrics__ScrapeToken`; without one the endpoint is off) | behaviour | `MetricsScrapeAuthTests.Check_NoConfiguredToken_Disabled` |
 | PC-16 | `docs/operations/production-checklist.md` | `2cd98751f4e9` | (`Audit__RetentionDays`, default 365, at least 30) | default | `AuditRetentionTests.The_default_keeps_a_year`, `AuditRetentionTests.Retention_is_configurable_but_never_below_the_floor` |
 | PC-17 | `docs/operations/production-checklist.md` | `46664e021d9d` | Whiskers' own control plane is protected by a built-in rule (INV-59) | behaviour | `SelfProtectionTests.Keys_agents_over_MCP_automations_and_operators_are_refused`, `SelfProtectionTests.An_interactive_Admin_needs_an_explicit_Admin_approval` |
+| PC-18 | `docs/operations/production-checklist.md` | `232138d9f27d` | **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own 300 s / 600 s / 300 s. | constant | `SelfReportClaimTests.The_compose_run_budget_is_five_minutes_and_git_deploy_keeps_300_600_300_seconds` |
+| PC-19 | `docs/operations/production-checklist.md` | `f8ce97a70a2e` | a deployment that would use one of their names is refused until the container is removed or another name is chosen | behaviour | `DeployAppComposeTests.A_legacy_container_with_the_name_is_refused_with_the_ways_out`, `DeployPageComposeTests.The_form_refuses_a_legacy_container_with_its_name`, `DeployPageComposeTests.The_compose_tab_refuses_a_legacy_container_with_a_name_it_would_use` |
 
 ## Claim-free blocks
 
@@ -118,40 +118,16 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `README.md` | `edf4bc7be19b` | policy | **Status: 1.0.0 in preparation.** No 1.0 |
 | `README.md` | `941b3da88f96` | history | **Scope of this README:** `main`, i.e. t |
 | `README.md` | `323ff41f5965` | advice | ```bash VER=X.Y.Z # a release from https |
-| `README.md` | `8e38830acb63` | advice | ```bash VER=X.Y.Z docker run -d --name w |
-| `README.md` | `91c6b0a1e1db` | advice | This has no vault key; set `VAULT_KEY_FI |
+| `README.md` | `94d427f5b74e` | pointer | `docker run`, Compose, Helm, PostgreSQL, |
 | `README.md` | `5e10ca319749` | advice | ```bash docker exec whiskers cat /app/da |
 | `README.md` | `92d3708115e3` | advice | ```bash export WHISKERS_MCP_API_KEY=… cl |
-| `README.md` | `347d236a9d4a` | advice | ```json { "mcpServers": { "whiskers": { |
-| `README.md` | `88b08bffdb1d` | advice | ```bash VER=X.Y.Z cosign verify "ghcr.io |
-| `README.md` | `36d9f10fb978` | history | Images before v0.12.1 are not cosign-sig |
 | `README.md` | `7b6ff0ec096d` | advice | Everything is optional. Where a setting |
 | `README.md` | `272aa341265e` | advice | - **`docker run`:** nothing is set; pass |
-| `README.md` | `1a1cdfbbdcf5` | pointer | All keys: [docs/operations/configuration |
-| `README.md` | `0f986ac3dd73` | limit | Deliberate limits of Whiskers 1.0 ([prod |
-| `README.md` | `79ff0f69e977` | limit | - **Root-equivalent administration.** An |
-| `README.md` | `024c9da26d23` | limit | - **Single instance.** One process and o |
-| `README.md` | `44b6eb673e50` | limit | - **Global roles.** Viewer, Operator and |
-| `README.md` | `0f8418efa46a` | limit | - **No terminal transcript.** Opening a |
-| `README.md` | `3a0cc64255b0` | limit | - **Out-of-band changes are invisible.** |
-| `README.md` | `d5a1a574b44a` | limit | - **No second factor for local accounts. |
-| `README.md` | `f1c14d86e3a4` | limit | Compose deployments are decided on their |
-| `README.md` | `568319d4e1e3` | limit | - **Proxies and tunnels behind an unreco |
-| `README.md` | `7d874a4c037c` | limit | - **Tailscale serve state** is read from |
-| `README.md` | `ce0710612c8e` | limit | - **A Traefik on the host** outside the |
-| `README.md` | `8beb86d9f1a2` | limit | - **Bridge networks that reach the LAN b |
-| `README.md` | `6af52c1a39c8` | limit | - **Recreate and rollback reconnect netw |
-| `README.md` | `6d29e54a90ac` | limit | - **The tag race**: putting a tag back a |
-| `README.md` | `a7343775105d` | limit | - **`container.update` and `autopatch.ru |
-| `README.md` | `4fa80a44962e` | limit | - **Pinned containers show an image id** |
-| `README.md` | `11f26aced0e7` | limit | - **Late daemon work after a timeout**: |
-| `README.md` | `3b05cab3b9c3` | history | **Upgrade note (contract 0006).** The ne |
-| `README.md` | `573b0dab3b01` | history | **Upgrade note (contract 0013).** The de |
+| `README.md` | `699d892653f9` | pointer | All keys: [configuration](https://github |
+| `README.md` | `ead6efa0398e` | limit | Whiskers 1.0 has deliberate limits: an A |
 | `README.md` | `f7af4d73bc43` | advice | Requires the .NET SDK version in `global |
-| `README.md` | `2319ae6706c7` | advice | ```bash dotnet build Whiskers.slnx -c Re |
-| `README.md` | `fc3e806e0705` | advice | After changing a package reference: `dot |
-| `README.md` | `7753b065881b` | pointer | \| Installation (all paths) \| [docs/opera |
-| `README.md` | `22a2a8ef1298` | pointer | \| Everything else \| [docs/README.md](htt |
+| `README.md` | `cf22ef5c911f` | advice | ```bash dotnet build Whiskers.slnx -c Re |
+| `README.md` | `be8d5be2f302` | pointer | Pull requests: [CONTRIBUTING.md](https:/ |
 | `SECURITY.md` | `e233f1b70b26` | policy | **Please report vulnerabilities privatel |
 | `SECURITY.md` | `873df784dcd1` | policy | Whiskers has a single maintainer, so the |
 | `SECURITY.md` | `c459f437f7d9` | policy | \| Acknowledgement of your report \| withi |
@@ -192,8 +168,20 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `docs/operations/production-checklist.md` | `a2c321045126` | limit | - **No terminal transcript.** Opening an |
 | `docs/operations/production-checklist.md` | `2d1f4bd3ad69` | limit | - **Out-of-band changes are invisible.** |
 | `docs/operations/production-checklist.md` | `63941bcee530` | limit | - **No second factor for local accounts. |
+| `docs/operations/production-checklist.md` | `dc12f6104a20` | limit | Compose deployments are decided on their |
+| `docs/operations/production-checklist.md` | `568319d4e1e3` | limit | - **Proxies and tunnels behind an unreco |
+| `docs/operations/production-checklist.md` | `7d874a4c037c` | limit | - **Tailscale serve state** is read from |
+| `docs/operations/production-checklist.md` | `ce0710612c8e` | limit | - **A Traefik on the host** outside the |
+| `docs/operations/production-checklist.md` | `8beb86d9f1a2` | limit | - **Bridge networks that reach the LAN b |
+| `docs/operations/production-checklist.md` | `6af52c1a39c8` | limit | - **Recreate and rollback reconnect netw |
+| `docs/operations/production-checklist.md` | `6d29e54a90ac` | limit | - **The tag race**: putting a tag back a |
+| `docs/operations/production-checklist.md` | `a7343775105d` | limit | - **`container.update` and `autopatch.ru |
+| `docs/operations/production-checklist.md` | `4fa80a44962e` | limit | - **Pinned containers show an image id** |
+| `docs/operations/production-checklist.md` | `11f26aced0e7` | limit | - **Late daemon work after a timeout**: |
 
 ## Retired claims
 
 | Claim | Why |
 | --- | --- |
+| RM-13 | Moved with its block to the production checklist as PC-18 (D3c, 18 November 2026). |
+| RM-25 | Moved with its block to the production checklist as PC-19 (D3c, 18 November 2026). |

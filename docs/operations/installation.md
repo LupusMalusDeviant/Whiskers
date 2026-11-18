@@ -55,6 +55,18 @@ docker compose up -d
 Optional settings go in a `.env` beside it; not every key is mapped (see [configuration.md](configuration.md)). The app
 listens on `127.0.0.1:5100` by default (`HOST_BIND` / `HOST_PORT`) and binds publicly only if you change the bind.
 
+## Verifying the image
+
+```bash
+VER=X.Y.Z
+cosign verify "ghcr.io/lupusmalusdeviant/whiskers:${VER}" \
+  --certificate-identity-regexp '^https://github.com/LupusMalusDeviant/Whiskers/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Images before v0.12.1 are not cosign-signed. Supply-chain details:
+[security architecture](../architecture/security-architecture.md#supply-chain).
+
 ## First sign-in
 
 On first launch a setup wizard in the browser creates the admin account; no `.env` and no config file are required.
@@ -261,6 +273,13 @@ identity lives on its own PVC. All values, ingress/WebSocket notes and the Postg
 git clone https://github.com/LupusMalusDeviant/Whiskers.git
 cd Whiskers
 docker compose up -d          # builds the image locally
+```
+
+Building and testing without Docker needs the .NET SDK version in `global.json`. The PostgreSQL suites need Docker;
+they are skipped locally without it and mandatory on CI:
+
+```bash
+dotnet test src/Whiskers.Tests/Whiskers.Tests.csproj --filter Category=RequiresDocker
 ```
 
 Copy [.env.example](../../.env.example) to `.env` to override any defaults. `.env` is gitignored, so secrets never land in

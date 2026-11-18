@@ -121,3 +121,38 @@ These are deliberate limits of Whiskers 1.0 (product contract §5). They are not
 - **Out-of-band changes are invisible.** Changes made directly on a host, in a cloud console or by another tool are not
   governed. Whiskers may see their effects; it does not attribute them. <!-- claim-free:limit -->
 - **No second factor for local accounts.** Use your identity provider's MFA. <!-- claim-free:limit -->
+
+## Compose exposure checks: remaining risks
+
+Compose deployments are decided on their exposures (published ports, host network, privileges, route labels, LAN
+networks; contract 0006, INV-62, details in [features](../guide/features.md#compose-deployments-and-exposure-changes)).
+Not caught, or caught only after `up`: <!-- claim-free:limit -->
+
+- **Proxies and tunnels behind an unrecognisable entrypoint**: Traefik, cloudflared and Tailscale are recognised by
+  image name, `argv[0]`, a word of a `sh -c` string or an environment key (contract 0013); a binary renamed or started
+  some other way is not. <!-- claim-free:limit -->
+- **Tailscale serve state** is read from configuration (`TS_SERVE_CONFIG`), never from tailscaled at run time; a
+  sidecar with persistent state and no serve configuration counts as public and is decided. <!-- claim-free:limit -->
+- **A Traefik on the host** outside the project is recognised by its image name (`traefik`) only (contract 0013,
+  Amendment 2). <!-- claim-free:limit -->
+- **Bridge networks that reach the LAN by their options**: macvlan, ipvlan and unknown network drivers are decided as
+  a LAN exposure (contract 0021); a `bridge` network whose `driver_opts` make it reachable from the LAN
+  (`gateway_mode_ipv4/6` `nat-unprotected` or `routed`, or a named bridge that holds a physical NIC) is not. <!-- claim-free:limit -->
+- **Recreate and rollback reconnect networks by name**: recreating a container and the update rollback put the new
+  container back on the old container's networks by their names. A network removed and re-created under the same name
+  in between, for example with a LAN driver, is joined without a LAN decision (contract 0021). <!-- claim-free:limit -->
+- **The tag race**: putting a tag back after a refused run checks that it still points where this run left it; a tag
+  moved by another run in between is left alone (and so not restored). <!-- claim-free:limit -->
+- **`container.update` and `autopatch.run`** recreate containers from new images without this check — except a
+  container a compose run pinned (label `whiskers.image.ref`), which they refuse: it is updated by redeploying its
+  project (contract 0013). <!-- claim-free:limit -->
+- **Pinned containers show an image id**: `up` starts each image by its id (contract 0013, D10 as amended), so the
+  Image column of a container a compose run started shows `sha256:…`; the name the project uses is in the label
+  `whiskers.image.ref`. <!-- claim-free:limit -->
+- **Late daemon work after a timeout**: a pull, build or `up` the daemon finishes after Whiskers stopped waiting is not
+  re-checked. <!-- claim-free:limit -->
+- **The 5-minute budget** of a compose run (per command) can be too short for large builds; Git deploy keeps its own
+  300 s / 600 s / 300 s. <!-- claim:PC-18 -->
+- **Legacy containers of the old Deploy page** (plain containers without compose labels) are left alone; a deployment
+  that would use one of their names is refused until the container is removed or another name is chosen (contract 0013,
+  D15). <!-- claim:PC-19 -->
