@@ -49,6 +49,7 @@ public class OnboardingService : IOnboardingService
     private readonly IReadOnlyList<ICloudBootstrap> _bootstraps;
     private readonly IVaultService? _vault;
     private readonly IOptionsMonitor<OnboardingSettings>? _settings;
+    private readonly IOnboardingRunRecorder? _runs;
 
     // Deployment-specific paths (match this Whiskers install). Since R1-44 each host gets its own client
     // credential from IMtlsClientCredentialStore ({MtlsDir}/hosts/{id}/); the CA bundle stays {MtlsDir}/ca.crt.
@@ -76,8 +77,10 @@ public class OnboardingService : IOnboardingService
         ISshHostKeyPins? hostKeys = null,
         IEnumerable<ICloudBootstrap>? bootstraps = null,
         IVaultService? vault = null,
-        IOptionsMonitor<OnboardingSettings>? settings = null)
+        IOptionsMonitor<OnboardingSettings>? settings = null,
+        IOnboardingRunRecorder? runs = null)
     {
+        _runs = runs;
         _exec = exec;
         _certificates = certificates;
         _clientCredentials = clientCredentials;
@@ -113,29 +116,44 @@ public class OnboardingService : IOnboardingService
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(progress);
         var standing = new StandingKeyProbe();
+        // Contract 0018 part E: every line also goes to the run's record (get_onboarding_status), once the run holds
+        // the host lock — a call refused because another run holds it does not replace that run's snapshot.
+        progress = new RecordingProgress(progress, standing);
         var result = await RunAsync(serverId, mayReplaceMtlsState, decidedConnection, options, progress, standing, ct);
-        if (result.Success) return result;
         // Contract 0018 (INV-64): a run that ends Failed while the bootstrap line is on the host says so on every surface.
         // The record was read while the run still held the host lock (INV-59: no lookup outside it).
-        if (standing.Fingerprint is { } fingerprint)
+        if (!result.Success && standing.Fingerprint is { } fingerprint)
         {
             var warning = BootstrapCleanup.StandingKeyWarning(fingerprint, standing.Name ?? serverId);
             progress.Report(new OnboardingProgress(result.FailedStep ?? OnboardingStep.Bootstrap, $"⚠️ {warning}"));
             MutationScope.Note($"standingBootstrapKey: true, fingerprint {fingerprint}", success: false);
-            return result with
+            result = result with
             {
                 StandingBootstrapKey = true,
                 CleanupWarnings = [.. result.CleanupWarnings.Where(w => w != warning), warning],
             };
         }
+        standing.Record?.Finish(result);
         return result;
     }
 
-    /// <summary>The standing bootstrap line as the record named it when the run released the host lock.</summary>
+    /// <summary>The standing bootstrap line as the record named it when the run released the host lock, and the run's
+    /// record in <see cref="IOnboardingRunRecorder"/> (contract 0018 part E) once the run holds the host lock.</summary>
     private sealed class StandingKeyProbe
     {
         public string? Fingerprint { get; set; }
         public string? Name { get; set; }
+        public IOnboardingRunRecord? Record { get; set; }
+    }
+
+    /// <summary>Reports to the caller's progress and to the run's record (when there is one yet).</summary>
+    private sealed class RecordingProgress(IProgress<OnboardingProgress> caller, StandingKeyProbe run) : IProgress<OnboardingProgress>
+    {
+        public void Report(OnboardingProgress value)
+        {
+            run.Record?.Report(value);
+            caller.Report(value);
+        }
     }
 
     private async Task<OnboardingResult> RunAsync(string serverId, bool mayReplaceMtlsState, string? decidedConnection,
@@ -167,6 +185,7 @@ public class OnboardingService : IOnboardingService
                 return Failed($"Für {serverId} läuft gerade ein Zertifikatsschritt (Migration, Erneuerung, Rotation oder Entfernen); " +
                               "Onboarding erneut starten, sobald er fertig ist.");
             hostLock = gate;
+            standing.Record = _runs?.Begin(serverId, MutationScope.Current?.OperationId ?? Guid.NewGuid().ToString("N"));
             // INV-59 (#187): exactly the server the decision named, by its id — never another server that a display
             // name or an id in another case would select.
             if (Exact(serverId)?.Clone() is not { } found)   // edited below, saved once at the switchover
@@ -183,6 +202,19 @@ public class OnboardingService : IOnboardingService
             if (!mayReplaceMtlsState && MtlsOnboardingState.Holds(server, _clientCredentials))
                 return Failed($"{server.Name} hat inzwischen mTLS-Zustand (ein anderes Onboarding ist fertig geworden). " +
                               "Erneutes Onboarding braucht die Freigabe eines Admins; bitte neu starten.");
+
+            // Contract 0018 (INV-63, INV-64): a rescue run injected its key and stopped before the pin from the disk. A run
+            // without the bootstrap would now pin the host on first contact with the stored bootstrap key, and the VM may
+            // still be in rescue: refused on every surface (the UI's RescueResumeForced, MCP onboard_server) before any
+            // command. Only the resume (it pins the keys read from the disk) or the abandon may go on.
+            if (!options.AbandonBootstrap && options.Bootstrap == BootstrapMethod.None
+                && RescueResumeRequired(server) is { } resumeOnly)
+            {
+                step = OnboardingStep.HostKey;
+                Say($"❌ {resumeOnly}");
+                // No per-step hint and no "a re-run is safe": a plain re-run is exactly what is refused here.
+                return OnboardingResult.Fail(completed, step, resumeOnly);
+            }
 
             // Abandon (contract 0018): only BootstrapCleanup, then the run ends.
             if (options.AbandonBootstrap)
@@ -498,6 +530,19 @@ public class OnboardingService : IOnboardingService
             }
         }
     }
+
+    /// <summary>
+    /// Contract 0018: why a run without a bootstrap may not start on <paramref name="server"/> — a bootstrap key was
+    /// injected (<see cref="Models.ServerConfig.BootstrapKeyInjectedFingerprint"/>) and no host key is pinned on the record —
+    /// or null. Such a record only resumes the rescue bootstrap (<see cref="BootstrapMethod.HetznerRescueKey"/>) or is
+    /// abandoned. Names the fingerprint (public), never a secret.
+    /// </summary>
+    internal static string? RescueResumeRequired(Models.ServerConfig server) =>
+        server.BootstrapKeyInjectedFingerprint is { } fingerprint && server.SshHostKeyFingerprint is null
+            ? $"Bootstrap-Key {fingerprint} eingetragen, aber kein Host-Key gepinnt (die VM kann noch im Rescue-System " +
+              "sein): ein Lauf ohne Bootstrap wird abgelehnt. Fortsetzen mit dem Rescue-Bootstrap (bootstrap=hetzner_rescue, " +
+              "pinnt die Host-Keys von der Platte) oder den Bootstrap-Zugang entfernen (abandon)."
+            : null;
 
     /// <summary>Test seam: the pause before the mTLS verification.</summary>
     internal TimeSpan VerifyDelay { get; set; } = TimeSpan.FromSeconds(3);

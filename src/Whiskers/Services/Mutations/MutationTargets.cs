@@ -82,6 +82,9 @@ public static class MutationTargets
         "config" => "section",
         "account" => "account",
         "identity" => "binding",
+        // Contract 0018 part E: MCP onboard_server names its server `server` (the Servers page passes `serverId`, which wins
+        // when both are given; the tool runs on the decided target either way).
+        "server" when capability.Id == "server.onboard" && !Has(args, "serverId") && Has(args, "server") => "server",
         "host" or "server" => "serverId",
         _ => null,
     };
@@ -168,7 +171,7 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             "host" => await HostAsync(request, capability, target, ct),
             "server" when capability.Id.StartsWith("endpointcheck.", StringComparison.Ordinal) =>
                 await RecordAsync(request, capability, target, ct),
-            "server" when capability.Id == "server.onboard" => await WithCloudVmAsync(request, OnboardTarget(target), ct),
+            "server" when capability.Id == "server.onboard" => await WithCloudVmAsync(request, ServerArgumentAgrees(request, OnboardTarget(target)), ct),
             // Contract 0018 part B: a registration creates its record; the id is decided by the registration.
             "server" when capability.Id == "server.create" => Pass(target),
             "server" => Server(target, NullIfEmpty(target.Id) ?? target.ServerId,
@@ -477,6 +480,22 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         {
             return Refuse($"The compose deployment's impact cannot be determined: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Contract 0018 part E (review r1): <c>onboard_server</c> names its server <c>server</c>; when a call also passes
+    /// <c>serverId</c> (which decides), a <c>server</c> naming another server is refused, never silently ignored. Only on
+    /// the MCP surface, where <c>server</c> is the tool's argument; a page passes <c>serverId</c> only.
+    /// </summary>
+    private static TargetResolution ServerArgumentAgrees(MutationRequest request, TargetResolution resolution)
+    {
+        if (resolution.Target is not { } target || request.Surface != MutationSurface.Mcp) return resolution;
+        if (MutationTargets.String(request.Arguments, "server") is not { } named
+            || MutationTargets.String(request.Arguments, "serverId") is null)
+            return resolution;
+        return string.Equals(named.Trim(), target.Id, StringComparison.OrdinalIgnoreCase)
+            ? resolution
+            : Refuse($"The arguments name two servers: server '{named}' and serverId '{target.Id}'; name one.");
     }
 
     /// <summary>

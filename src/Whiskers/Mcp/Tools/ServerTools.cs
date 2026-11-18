@@ -13,7 +13,7 @@ using Whiskers.Services.Mutations;
 namespace Whiskers.Mcp.Tools;
 
 [McpServerToolType]
-public class ServerTools
+public partial class ServerTools
 {
     [McpToolLevel(McpPermissionLevels.Admin)]
     [McpServerTool, Description("Renew the mTLS certificate of a server's Docker proxy (ghostunnel). A new key is generated on the host, " +

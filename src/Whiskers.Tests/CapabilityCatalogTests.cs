@@ -13,7 +13,8 @@ public class CapabilityCatalogTests
     public void Every_write_or_admin_mcp_tool_maps_to_exactly_one_capability_with_the_same_level()
     {
         var mutatingTools = McpPermissionLevels.DefaultToolLevels
-            .Where(kv => kv.Value != McpPermissionLevels.Read && kv.Key != "instruct_agent")
+            .Where(kv => kv.Value != McpPermissionLevels.Read && kv.Key != "instruct_agent"
+                         && !CapabilityTableConsistencyTests.AdminLevelReads.Contains(kv.Key))   // contract 0018: reads
             .ToList();
 
         foreach (var (tool, level) in mutatingTools)

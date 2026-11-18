@@ -22,6 +22,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | Tool | Level | Description |
 |---|---|---|
 | `add_firewall_rule` | admin | Add a firewall rule (UFW) to allow or deny traffic on a port. |
+| `add_server` | admin | Add a server from its name and public IP (contract 0018). The record is SSH to root@<ip>:22 without a credential; Whiskers moves it to TCP + mTLS when it is onboarded (onboard_server). With cloudProvider hetzner or hostinger, the VM is found by its exact public IP across the stored credentials of that provider (never by name) and the credential is shared by reference; cloudCredentialFrom names the server whose stored credential to use instead. No API key is ever passed here. Answers JSON. Admin only. |
 | `backup_database` | admin | Create a database backup (dump) for a database container. |
 | `connect_container_to_network` | admin | Connect a container to a Docker network. |
 | `create_network` | admin | Create a new Docker network. |
@@ -40,6 +41,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `get_health_summary` | read | Get a health summary of all containers across all servers. |
 | `get_host_load` | read | Report each server's current host load and how much of it the containers actually account for. Use this when a host looks busy but no container explains it — that gap means a process outside the containers (dockerd, a backup job, a runaway service) is the likely cause, which per-container stats can never show. The two CPU figures use different conventions and are reconciled here. Read-only. |
 | `get_nginx_config` | read | Get the Nginx configuration for a specific site. |
+| `get_onboarding_status` | admin | Read the latest onboarding run of a server (contract 0018): operation id, start, current step, whether it finished, the last 200 progress lines, the Tailscale login link while one is open, whether a standing bootstrap key is on the host, and the result. Kept in memory since Whiskers started. Admin only (the log carries the login link and host details). |
 | `get_schema` | read | Get the schema (columns, types, keys) of a table. |
 | `get_server_info` | read | Get detailed system information for a server (OS, CPU, RAM, disk, Docker version, containers). |
 | `get_server_logs` | read | Get system logs from a server via journalctl. Can filter by service name. |
@@ -58,6 +60,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `list_tables` | read | List tables in a database with row counts and sizes. |
 | `manage_systemd_service` | admin | Manage a systemd service (start, stop, restart, enable, disable). |
 | `migrate_mtls_client_credential` | admin | Move one server from the fleet's shared mTLS client credential to its own (per-host identity whiskers-client-<id>-g<n>). Issues the credential, lets the host's proxy admit it besides the old one, switches Whiskers to it, then narrows the proxy to the new identity after proving the shared one is refused. Every host step rolls back by itself after 3 minutes unless confirmed through the new credential; a second call resumes. One server per call. Admin only. |
+| `onboard_server` | admin | Onboard a server into the mesh + mTLS stack (contract 0018): pin its SSH host key, install Tailscale, node-exporter, the server certificate and the mTLS proxy, then switch it to TCP + mTLS. Blocks until the run ends (up to 30 minutes) and sends progress notifications when the client passes a progress token; a disconnect does not stop the run (see get_onboarding_status). bootstrap=hetzner_rescue gives Whiskers SSH access to a fresh Hetzner VM through the rescue system (two reboots) and always needs a human Admin's approval; confirmVmName is the VM name when it differs from the server's name. abandon=true only removes a standing bootstrap key. A host that already holds mTLS state is re-onboarded (or abandoned) only in the UI. Answers JSON. Admin only. |
 | `pause_server_checks` | write | Pause Whiskers' own background checks (health, logs, metrics, CVE, image updates) for one server, for a bounded number of minutes. Use this when Whiskers itself is the load on a host. Interactive access keeps working, so the server can still be inspected. The pause is announced, expires by itself, and is reminded about if it outlives its reason. This does NOT stop the containers on that server and does NOT block anything running there. |
 | `remove_firewall_rule` | admin | Remove a firewall rule by its number. |
 | `remove_network` | admin | Remove a Docker network by name or ID. |
@@ -166,5 +169,5 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 |---|---|
 | read | 47 |
 | write | 14 |
-| admin | 33 |
-| **total** | **94** |
+| admin | 36 |
+| **total** | **97** |

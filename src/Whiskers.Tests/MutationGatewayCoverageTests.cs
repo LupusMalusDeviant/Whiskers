@@ -484,6 +484,8 @@ public class MutationGatewayCoverageTests
             // admin tools (agent and key administration, which change no infrastructure).
             if (McpPermissionLevels.Normalize(level) == McpPermissionLevels.Read) continue;
             if (Catalog.FindByMcpTool(name) is not null) continue;
+            // Contract 0018 part E: an Admin-level read (it changes nothing; the level guards what it shows).
+            if (CapabilityTableConsistencyTests.AdminLevelReads.Contains(name)) continue;
             Assert.Contains(name, NonInfrastructureTools);
         }
     }
@@ -573,6 +575,7 @@ public class MutationGatewayCoverageTests
         ("IUiMutationRunner.RunAsync", "the gateway entry for the UI"),
         // Designed exemptions with pinned callers (start-up, before the gateway can decide; the first admin).
         ("IMtlsClientCredentialStore.WriteJournalAsync", "R1-44: the rollout journal, Whiskers' own record of the phase a host reached (written inside mtls.client_migrate / mtls.client_renew / server.onboard decisions)"),
+        ("IOnboardingRunRecorder.Begin", "contract 0018 part E: the in-memory snapshot of an onboarding run for get_onboarding_status (no persistence), written by the run inside its server.onboard decision"),
         ("IAgentSettingsStore.AdoptApiKeyRefAsync", "start-up credential migration (R1-30), pinned by CredentialAdoptionCallersTests"),
         ("IAppSettingsStore.AdoptDnsTokenRefAsync", "start-up credential migration (R1-29), pinned by CredentialAdoptionCallersTests"),
         ("IAppSettingsStore.AdoptSettingRefAsync", "start-up credential migration (R1-30), pinned by CredentialAdoptionCallersTests"),

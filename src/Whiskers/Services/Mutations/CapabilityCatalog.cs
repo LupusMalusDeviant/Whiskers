@@ -288,15 +288,15 @@ public sealed class CapabilityCatalog : ICapabilityCatalog
         yield return Tool("dns.record_delete", "delete_dns_record", W, "dns-zone", Des, Short);
 
         // Cloud servers
-        // Servers page: onboarding installs the agent stack on the host as root.
-        yield return Ui("server.onboard", A, "server", Root, Long);
+        // Servers page and (contract 0018 part E) MCP onboard_server: onboarding installs the agent stack on the host as root.
+        yield return Tool("server.onboard", "onboard_server", A, "server", Root, Long);
         // Servers page: add / edit a server (host, credentials, SSH key, kubeconfig) or remove it.
         yield return Ui("server.save", A, "server", Root, Short);
         yield return Ui("server.remove", A, "server", Des, Short);
         // Contract 0018 part B: a server from name and public IP (SSH to root@ip:22, a stored cloud credential found by the
         // VM's exact IP and shared by reference). Root-equivalent as server.save: the record decides where root commands
-        // go. The MCP tool add_server follows with part E.
-        yield return Ui("server.create", A, "server", Root, Short);
+        // go. Part E: the MCP tool add_server (never a cloud key parameter).
+        yield return Tool("server.create", "add_server", A, "server", Root, Short);
         // Contract 0018 part C (D3, INV-59): replaces a server's pinned SSH host key — Whiskers' own trust anchor for the
         // host. Interactive Admin only, with an Admin approval (ControlPlaneResources); no MCP tool, not an agent tool.
         yield return Ui("server.hostkey_replace", A, "server", Root, Short);

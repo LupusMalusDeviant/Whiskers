@@ -138,7 +138,8 @@ public sealed class AuditPathMatrixTests : IDisposable
 
     /// <summary>Whether a tool mutates: above <c>read</c>, or performing a catalog capability.</summary>
     private static bool Mutates(string tool) =>
-        (McpPermissionLevels.DefaultToolLevels.TryGetValue(tool, out var level) && level != McpPermissionLevels.Read)
+        (McpPermissionLevels.DefaultToolLevels.TryGetValue(tool, out var level) && level != McpPermissionLevels.Read
+         && !CapabilityTableConsistencyTests.AdminLevelReads.Contains(tool))
         || new CapabilityCatalog().FindByMcpTool(tool) is not null;
 
     internal static IReadOnlyList<(string Test, AuditPathAttribute Mark)> Marks() =>

@@ -336,6 +336,10 @@ public static class WhiskersHostingExtensions
         builder.Services.AddSingleton<Whiskers.Services.Onboarding.ServerRegistration>();
         builder.Services.AddSingleton<Whiskers.Services.Onboarding.IServerRegistration>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.ServerRegistration>());
         builder.Services.AddSingleton<Whiskers.Services.Onboarding.ICloudVmReader>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.ServerRegistration>());
+        // Contract 0018 part E: the latest run per server in memory, for get_onboarding_status (Admin only).
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.OnboardingRuns>();
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingRuns>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.OnboardingRuns>());
+        builder.Services.AddSingleton<Whiskers.Services.Onboarding.IOnboardingRunRecorder>(sp => sp.GetRequiredService<Whiskers.Services.Onboarding.OnboardingRuns>());
 
         // Metrics database — SQLite (zero-config default) or PostgreSQL, selected by Database:Provider
         // (WHISKERS_DB_PROVIDER / _CONNECTION[_FILE]). SQLite default is byte-identical to before. (stableDB.md)
