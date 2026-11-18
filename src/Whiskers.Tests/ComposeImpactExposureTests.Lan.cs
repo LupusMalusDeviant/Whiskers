@@ -71,6 +71,18 @@ public sealed partial class ComposeImpactExposureTests
     }
 
     [Fact]
+    public async Task A_cancelled_run_is_not_reported_as_unreadable_networks()
+    {
+        _docker.NetworksFail = true;
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        // The caller's cancellation goes on as it is; only a failure of the read itself is "cannot be read".
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ComposePlanner.LiveNetworksAsync(_docker, "local", cancelled.Token));
+        await Assert.ThrowsAsync<ComposePlanException>(() => ComposePlanner.LiveNetworksAsync(_docker, "local", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_pre_existing_non_external_network_is_decided_by_its_live_driver()
     {
         const string config = """{"name":"shop","networks":{"default":{"name":"shop_default"}},"services":{"web":{"image":"nginx","networks":{"default":null}}}}""";

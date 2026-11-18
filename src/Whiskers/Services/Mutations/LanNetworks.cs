@@ -14,7 +14,11 @@ public static class LanDrivers
     /// <summary>True for macvlan, ipvlan and every driver not in <see cref="NotLan"/> (decision D2). The comparison is
     /// ordinal and exact after trimming: <c>Macvlan</c> is not the built-in driver, and a plugin-qualified name
     /// (<c>vendor/driver:latest</c>) is not in the list either — both count as LAN.</summary>
-    public static bool IsLan(string? driver) => !NotLan.Contains((driver ?? "").Trim());
+    public static bool IsLan(string? driver) => !NotLan.Contains(Normalize(driver));
+
+    /// <summary>The driver as <see cref="IsLan"/> judges it and as a network is created with: trimmed, never
+    /// <c>null</c>.</summary>
+    public static string Normalize(string? driver) => (driver ?? "").Trim();
 
     /// <summary>The service part of a network operation's identity (<c>network.create</c>): <c>network &lt;name&gt;</c>.</summary>
     public static string NetworkService(string networkName) => $"network {networkName}";
@@ -34,7 +38,7 @@ public static class LanDrivers
     /// <summary>The identity <c>network.create</c> of <paramref name="networkName"/> with <paramref name="driver"/> carries
     /// in its resolved target, or <c>null</c> when the driver is not LAN.</summary>
     public static string? CreateIdentity(string networkName, string driver) =>
-        IsLan(driver) ? ComposeExposures.Identity(NetworkService(networkName), ExposureKind.LanNetwork, networkName, driver) : null;
+        IsLan(driver) ? ComposeExposures.Identity(NetworkService(networkName), ExposureKind.LanNetwork, networkName, Normalize(driver)) : null;
 
     /// <summary>
     /// Contract 0021: the LAN exposure this call produces was decided in the open scope; refused otherwise. A call whose

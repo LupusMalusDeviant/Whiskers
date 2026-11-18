@@ -22,7 +22,7 @@ public static partial class ComposeModel
     /// (<c>name:</c>, else <c>&lt;project&gt;_&lt;key&gt;</c>) — a service with neither <c>networks:</c> nor
     /// <c>network_mode</c> joins <c>default</c>. Withheld when the driver, the name or the project name came from a
     /// variable. External networks and <c>network_mode: &lt;name&gt;</c> are decided by the live driver
-    /// (<see cref="NetworksOf"/>, the planner).</remarks>
+    /// (<see cref="PlanModelOf"/>, the planner).</remarks>
     public static (IReadOnlyDictionary<string, IReadOnlyList<ComposeExposure>> Exposures,
         IReadOnlyList<ComposeSharedNamespace> Shared) ExposuresOf(IReadOnlyList<(string Path, string Content)> files,
         IReadOnlyDictionary<string, string?> env, IReadOnlyList<string> prefixes, string? project = null,
@@ -33,22 +33,24 @@ public static partial class ComposeModel
     }
 
     /// <summary>
-    /// Contract 0021 (§ 1.4): every network a service joins as the plan model reads it — its name on the host, whether it
-    /// must already exist (an external network, or a <c>network_mode: &lt;name&gt;</c>), and whether its name came from
-    /// a variable — for the planner's live lookup. <paramref name="project"/> is the effective project name.
+    /// <see cref="ExposuresOf"/> and, from the same read with the same <paramref name="prefixes"/>, contract 0021 (§ 1.4):
+    /// every network a service joins as the plan model reads it — its name on the host, whether it must already exist (an
+    /// external network, or a <c>network_mode: &lt;name&gt;</c>), and whether its name came from a variable — for the
+    /// planner's live lookup. <paramref name="project"/> is the effective project name.
     /// </summary>
-    public static IReadOnlyList<ComposeNetworkRef> NetworksOf(IReadOnlyList<(string Path, string Content)> files,
-        IReadOnlyDictionary<string, string?> env, string project, bool projectFromVariable = false) =>
-        Read(files, env, Whiskers.Configuration.GuardrailPolicy.DefaultExposureLabelPrefixes, project, projectFromVariable).Networks;
+    public static (IReadOnlyDictionary<string, IReadOnlyList<ComposeExposure>> Exposures,
+        IReadOnlyList<ComposeSharedNamespace> Shared, IReadOnlyList<ComposeNetworkRef> Networks) PlanModelOf(
+        IReadOnlyList<(string Path, string Content)> files, IReadOnlyDictionary<string, string?> env,
+        IReadOnlyList<string> prefixes, string project, bool projectFromVariable = false) =>
+        Read(files, env, prefixes, project, projectFromVariable);
 
     /// <summary>A top-level network as the files declare it (interpolated).</summary>
     private sealed record TopNet(string? Name, bool External, string? Driver, bool Withheld);
 
-    /// <summary>What a service's network settings say: it declares <c>networks:</c>, a <c>network_mode</c>, and the
-    /// network names a <c>network_mode</c> gives.</summary>
+    /// <summary>What a service's network settings say: a <c>network_mode</c>, and the network names a
+    /// <c>network_mode</c> gives.</summary>
     private sealed class Networking
     {
-        public HashSet<string> Declares { get; } = new(StringComparer.Ordinal);
         public HashSet<string> Mode { get; } = new(StringComparer.Ordinal);
         public List<(string Service, string Name, bool FromVariable)> ModeNames { get; } = [];
     }
@@ -187,7 +189,6 @@ public static partial class ComposeModel
         }
         if (source.Children.TryGetValue(new YamlScalarNode("networks"), out var networks))
         {
-            networking.Declares.Add(service);
             var keys = networks switch
             {
                 YamlSequenceNode seq => seq.Children.OfType<YamlScalarNode>().Select(s => s.Value),

@@ -152,7 +152,8 @@ public class DockerService : IDockerService
     public Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null)
     {
         // Contract 0021: a LAN driver creates exactly the network the open decision decided (name and driver), else
-        // the call is refused before Docker is asked.
+        // the call is refused before Docker is asked. Docker gets the driver as it was judged, trimmed.
+        driver = Whiskers.Services.Mutations.LanDrivers.Normalize(driver);
         Whiskers.Services.Mutations.LanDrivers.EnsureLanDecided(serverId, name, driver);
         return _networks.CreateNetworkAsync(name, driver, serverId);
     }

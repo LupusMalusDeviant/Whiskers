@@ -616,8 +616,9 @@ public static class ComposeExposures
     /// Contract 0021: the <see cref="ExposureKind.LanNetwork"/> exposures of a container (<c>docker inspect</c>): each
     /// entry of <c>NetworkSettings.Networks</c>, its <c>NetworkID</c> looked up in <paramref name="networks"/> (the
     /// host's networks, read fresh); a LAN driver (<see cref="LanDrivers.IsLan"/>) gives key = the network's name,
-    /// value = the driver. <c>null</c> when they cannot be read: no <c>NetworkSettings</c>, an entry without a
-    /// <c>NetworkID</c>, or an id that is not in the list (fail closed). <c>"Networks": null</c> is a container without
+    /// value = the driver. An entry with an empty <c>NetworkID</c> (a container created but never started) is looked
+    /// up by its key, the network's name. <c>null</c> when they cannot be read: no <c>NetworkSettings</c>, or an id or
+    /// name that is not exactly once in the list (fail closed). <c>"Networks": null</c> is a container without
     /// networks.
     /// </summary>
     public static IReadOnlyList<ComposeExposure>? LanNetworksOf(string service, JsonElement container,
@@ -631,8 +632,11 @@ public static class ComposeExposures
         var found = new List<ComposeExposure>();
         foreach (var entry in attached.EnumerateObject())
         {
-            if (Text(entry.Value, "NetworkID") is not { Length: > 0 } id) return null;
-            var matches = networks.Where(n => n.Id == id).ToList();
+            // A container that was created but never started has an empty NetworkID; its entry's key is the
+            // network's name then, looked up exactly and uniquely (contract 0021, amendment point 5).
+            var matches = Text(entry.Value, "NetworkID") is { Length: > 0 } id
+                ? networks.Where(n => n.Id == id).ToList()
+                : networks.Where(n => string.Equals(n.Name, entry.Name, StringComparison.Ordinal)).ToList();
             if (matches.Count != 1) return null;
             var network = matches[0];
             if (LanDrivers.IsLan(network.Driver))

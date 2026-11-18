@@ -349,6 +349,8 @@ public sealed class ComposeRunner : IComposeRunner
         }
         catch (ComposePlanException ex)
         {
+            // A cancelled run is not an unreadable network list: the cancellation goes on as it is.
+            ct.ThrowIfCancellationRequested();
             if (run.Agent && run.Confirm.Contains(ExposureClasses.Host))
                 return ex.Message + " Nothing was started.";
             run.ChangeNotes.Add("the networks could not be read before up, so a LAN network cannot be ruled out");

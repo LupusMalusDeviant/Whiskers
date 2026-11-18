@@ -125,7 +125,9 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
         page.Render();
         dialog.WaitForAssertion(() => Assert.Contains("Driver", dialog.Markup));
         Assert.Empty(dialog.FindAll("[data-testid=lan-driver-hint]"));
-        SetField(page, "_newNetworkDriver", "macvlan");
+        // Typed with spaces and without a server: Docker gets the trimmed driver, the notice the decided (default) server.
+        SetField(page, "_newNetworkDriver", " macvlan ");
+        SetField(page, "_newNetworkServerId", "");
         page.Render();
         dialog.WaitForAssertion(() => Assert.Single(dialog.FindAll("[data-testid=lan-driver-hint]")));
 
@@ -137,6 +139,7 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
         var sent = Assert.Single(_notifications.Sent);
         Assert.Equal(Whiskers.Services.Notifications.NotificationEventTypes.ExposureChange, sent.EventType);
         Assert.Equal("lan", sent.ContainerName);
+        Assert.Equal("local", sent.ServerId);
         Assert.Contains("LanNetwork (driver macvlan)", sent.ImageInfo);
     }
 

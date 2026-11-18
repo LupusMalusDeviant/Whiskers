@@ -98,8 +98,7 @@ public sealed class ComposePlanner : IComposePlanner
         var projectSource = ComposeModel.ProjectNameSource(deployment.ProjectName, env, envTemplates, declared, declaredSource);
         // Contract 0021: the project name makes the real name of a project network (<project>_<key>); one from a variable
         // withholds it.
-        var (modelExposures, modelShared) = ComposeModel.ExposuresOf(files, env, prefixes, project, projectSource is not null);
-        var modelNetworks = ComposeModel.NetworksOf(files, env, project, projectSource is not null);
+        var (modelExposures, modelShared, modelNetworks) = ComposeModel.PlanModelOf(files, env, prefixes, project, projectSource is not null);
         // COMPOSE_REMOVE_ORPHANS in the .env makes a plain `up` remove orphans: planned (and passed explicitly) too.
         var removeOrphans = deployment.RemoveOrphans || ComposeModel.RemovesOrphans(env);
 
@@ -132,8 +131,9 @@ public sealed class ComposePlanner : IComposePlanner
 
     /// <summary>
     /// Contract 0021: the host's networks (<c>IDockerService.ListNetworksAsync</c>, Docker API <c>GET /networks</c>), read
-    /// for the LAN detection. Anything that keeps them from being read — an exception, a cancellation, a timeout — refuses
-    /// with <see cref="ComposeLiveNetworks.Unreadable"/> (fail closed).
+    /// for the LAN detection. Anything that keeps them from being read — an exception, the read's own 15-second timeout —
+    /// refuses with <see cref="ComposeLiveNetworks.Unreadable"/> (fail closed). A cancellation of
+    /// <paramref name="ct"/> itself is the caller's and is rethrown as it is.
     /// </summary>
     internal static async Task<IReadOnlyList<NetworkInfo>> LiveNetworksAsync(IDockerService docker, string serverId,
         CancellationToken ct)
@@ -147,6 +147,7 @@ public sealed class ComposePlanner : IComposePlanner
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            ct.ThrowIfCancellationRequested();
             throw new ComposePlanException(ComposeLiveNetworks.Unreadable(serverId));
         }
     }

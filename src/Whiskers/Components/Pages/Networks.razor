@@ -180,18 +180,22 @@ else
         try
         {
             var name = _newNetworkName;
-            var driver = _newNetworkDriver;
+            var driver = LanDrivers.Normalize(_newNetworkDriver);
+            string? decidedServer = null;
             var id = await Mutations.RunAsync("network.create", new { name, driver, serverId = sid },
                 async (ResolvedNew n, CancellationToken _) =>
                 {
+                    decidedServer = n.ServerId;
                     var created = await DockerService.CreateNetworkAsync(name, driver, n.ServerId);
                     // The created network is part of the gateway's event (R1-21).
                     MutationScope.Note($"Network {created}");
                     return created;
                 });
-            // Contract 0021 (§ 1.7): a person's LAN network is announced once, after it was created.
+            // Contract 0021 (§ 1.7): a person's LAN network is announced once, after it was created, for the server
+            // the gateway decided (its canonical id).
             await LanDrivers.NotifyAsync(PageServices.GetService<Whiskers.Services.Notifications.INotificationService>(),
-                sid, name, driver);
+                decidedServer ?? sid, name, driver,
+                logger: PageServices.GetService<ILoggerFactory>()?.CreateLogger("Whiskers.Components.Pages.Networks"));
             Snackbar.Add(L["Networks_Snackbar_Created", _newNetworkName].Value, Severity.Success);
             _showCreateDialog = false;
             await LoadNetworks();

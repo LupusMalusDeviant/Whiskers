@@ -143,9 +143,9 @@ public sealed class NetworkToolsGatewayTests : IDisposable
         Assert.Contains("network lan gets its own address on the LAN through network 'lan' (driver macvlan)", text);
         Assert.Empty(_docker.NetworkCalls);
 
-        // Control: a bridge network runs under the same policy.
+        // Control: a bridge network runs under the same policy; Docker gets the driver trimmed, as IsLan judged it.
         NewRequest();
-        var (_, bridge) = await CreateAsync("back", "bridge");
+        var (_, bridge) = await CreateAsync("back", " bridge ");
         Assert.Equal(McpCallResult.Executed, bridge.Result);
         Assert.Equal([("create", "back", "bridge", "local")], _docker.NetworkCalls.Select(c => (c.Op, c.Network, c.Arg, c.ServerId)));
     }
@@ -177,7 +177,10 @@ public sealed class NetworkToolsGatewayTests : IDisposable
             (await Assert.ThrowsAsync<InvalidOperationException>(() => docker.CreateNetworkAsync("lan", "macvlan", "local"))).Message);
         Assert.Equal("docker reached",
             (await Assert.ThrowsAsync<InvalidOperationException>(() => docker.CreateNetworkAsync("lan", "bridge", "local"))).Message);
-        Assert.Equal(2, connections);
+        // The decided driver with spaces around it is the same driver, trimmed (as IsLan judges it).
+        Assert.Equal("docker reached",
+            (await Assert.ThrowsAsync<InvalidOperationException>(() => docker.CreateNetworkAsync("lan", " macvlan ", "local"))).Message);
+        Assert.Equal(3, connections);
     }
 
     // ---------------------------------------------------------------- MCP connect_container_to_network
@@ -190,7 +193,44 @@ public sealed class NetworkToolsGatewayTests : IDisposable
         var (_, outcome) = await ConnectAsync("back");
 
         Assert.Equal(McpCallResult.Executed, outcome.Result);
-        Assert.Equal([("connect", "n-back-001", "web")], _docker.NetworkCalls.Select(c => (c.Op, c.Network, c.Arg)));
+        Assert.Equal([("connect", "n-back-001", "c0ffee000001")], _docker.NetworkCalls.Select(c => (c.Op, c.Network, c.Arg)));
+    }
+
+    [Fact]
+    public async Task A_container_recreated_under_the_same_name_is_not_connected_under_the_old_approval()
+    {
+        Network("n-lan-0001", "lan", "ipvlan");
+
+        var (_, first) = await ConnectAsync("lan");
+        Assert.Equal(McpCallResult.PendingApproval, first.Result);
+        var pending = _mcp.Approvals.GetPending().Last();
+        await _mcp.Approvals.DecideAsync(pending.Id, true, ApprovalResolver.User(Approver, AppRole.Admin));
+
+        // The container is removed and re-created under the same name: another id, so the approval does not cover it.
+        _docker.Remove("c0ffee000001");
+        _docker.Add(new ContainerInfo { Id = "c0ffee000002", Name = "web", ServerId = "local", State = "running" });
+        NewRequest();
+        var (_, retry) = await ConnectAsync("lan");
+
+        Assert.Equal(McpCallResult.PendingApproval, retry.Result);
+        Assert.Empty(_docker.NetworkCalls);
+        Assert.NotEqual(pending.Id, _mcp.Approvals.GetPending().Last().Id);
+    }
+
+    [Fact]
+    public async Task A_container_recreated_after_the_decision_is_not_the_one_connected()
+    {
+        Network("n-back-001", "back", "bridge");
+
+        // Re-created under the same name between the decision and the run: the tool connects the decided id only.
+        var (_, outcome) = await ConnectAsync("back", beforeTheTool: () =>
+        {
+            _docker.Remove("c0ffee000001");
+            _docker.Add(new ContainerInfo { Id = "c0ffee000002", Name = "web", ServerId = "local", State = "running" });
+        });
+
+        Assert.Equal(McpCallResult.Executed, outcome.Result);
+        Assert.Equal([("connect", "c0ffee000001")], _docker.NetworkCalls.Select(c => (c.Op, c.Arg)));
     }
 
     [Fact]
@@ -221,9 +261,9 @@ public sealed class NetworkToolsGatewayTests : IDisposable
         var pending = _mcp.Approvals.GetPending().Last();
         await _mcp.Approvals.DecideAsync(pending.Id, true, ApprovalResolver.User(Approver, AppRole.Admin));
 
-        // The network is removed and re-created as macvlan under the same name: another id, decided again.
+        // The network is removed and re-created under the same name and driver: only the id differs, decided again.
         _docker.Networks.Remove(old);
-        Network("n-lan-0002", "lan", "macvlan");
+        Network("n-lan-0002", "lan", "ipvlan");
         NewRequest();
         var (_, retry) = await ConnectAsync("lan");
 

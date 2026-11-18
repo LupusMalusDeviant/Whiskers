@@ -57,6 +57,8 @@ public class NetworkTools
         if (string.IsNullOrWhiteSpace(name))
             return MutationScope.Fail("Network name is required.");
 
+        // Contract 0021: Docker gets the driver as IsLan judged it, trimmed.
+        driver = LanDrivers.Normalize(driver);
         var (actor, actorType) = IAuditLogService.GetActorFromHttpContext(httpContextAccessor.HttpContext, permissionService);
         // Contract 0021: the network is created on the server the gateway decided (the scope guard binds the call to it).
         var decided = MutationScope.Current?.DecidedTarget?.ServerId ?? serverId;
@@ -122,11 +124,15 @@ public class NetworkTools
 
         // Contract 0021: connect by the network id the gateway resolved and decided (part of the approval binding), never
         // the caller's name: a network removed and re-created under the same name has another id, and the connect fails.
+        // The same holds for the container: the resolved id, so a container re-created under the same name after the
+        // decision is not connected under it.
         if (MutationScope.Current is not { CapabilityId: "network.connect", DecidedTarget: { Kind: "network", Resolved: true } target }
             || string.IsNullOrEmpty(target.Id))
             return MutationScope.Fail("The network to connect to was not resolved by the Mutation Gateway.");
+        if (string.IsNullOrEmpty(target.RelatedContainerId))
+            return MutationScope.Fail("The container to connect was not resolved by the Mutation Gateway.");
         var agent = LanDrivers.DecidedForAgent;
-        await docker.ConnectContainerToNetworkAsync(target.Id, containerId, target.ServerId ?? serverId);
+        await docker.ConnectContainerToNetworkAsync(target.Id, target.RelatedContainerId, target.ServerId ?? serverId);
         if (!agent && target.ServerId is { } server
             && target.Exposures.Select(ComposeExposures.Parse).FirstOrDefault(e => e?.Kind == ExposureKind.LanNetwork) is { } lan)
             await LanDrivers.NotifyAsync(services.GetService<INotificationService>(), server, lan.Key, lan.Value, lan.Service,

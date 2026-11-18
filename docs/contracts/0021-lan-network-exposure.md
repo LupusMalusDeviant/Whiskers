@@ -478,8 +478,10 @@ had to be read one way; nothing here weakens a rule of §§ 1–3.
 2. **Where the § 4 tests live.** There is no `ComposePlannerTests` and no `MutationTargetResolverTests` class. The
    planner tests are in `ComposeImpactExposureTests` (it holds the planner and runner harness, `ComposeImpactExposureTests.Lan.cs`),
    the resolver tests in the new `NetworkToolsGatewayTests`, the page test in `UiCreatedResourceAuditTests` (bUnit, the
-   page's real handler and gateway). The names are those of § 4; `An_unknown_or_plugin_qualified_driver_counts_as_lan`
-   also covers `transparent`, `LanDrivers_is_ordinal_and_exact` 12 cases.
+   page's real handler and gateway). The names are those of § 4 with one exception: § 4's `Not_part_of_CreateForHumans`
+   is the existing `ExposureChangeRuleTests.It_is_part_of_the_agent_rule_set_and_not_of_the_one_for_persons`, extended
+   by the new kind. `An_unknown_or_plugin_qualified_driver_counts_as_lan` also covers `transparent`;
+   `LanDrivers_is_ordinal_and_exact` has 12 cases.
 3. **`EnsureLanDecided`** is `LanDrivers.EnsureLanDecided(string? serverId, string networkName, string driver)` and
    throws `MutationScopeViolationException`. It passes only when a scope of the flow that decided `network.create` (or
    composes it) holds the identity of that name and driver; servers compare case-insensitively (the scope guard already
@@ -490,16 +492,19 @@ had to be read one way; nothing here weakens a rule of §§ 1–3.
    (compose would refuse `up` the same way). Networks that cannot be read: Deny under the agent rule set; for a person
    the run goes on, recorded as a failed note in the gateway's event and named in the run's `exposure_change`
    notification ("the networks could not be read before up").
-5. **Re-check (§ 1.5).** The host's networks are read fresh once per re-check, not once per container. A created
-   container whose inspect has no `NetworkSettings`, an entry without `NetworkID`, or an id that is not in the list
-   counts as "its networks could not be checked" (undecided `host`); `"Networks": null` is a container without networks,
-   as `"Mounts": null` is (contract 0017).
+5. **Re-check (§ 1.5).** The host's networks are read fresh once per re-check, not once per container. An entry of
+   `NetworkSettings.Networks` is looked up by its `NetworkID`; an empty `NetworkID` — a container that was created but
+   never started, for example when a `depends_on` dependency failed or `up` stopped halfway — is looked up by the
+   entry's key, the network's name (ordinal, exactly one network of that name in the fresh list). A created container
+   whose inspect has no `NetworkSettings`, or an id or name that is not exactly once in the list, counts as "its
+   networks could not be checked" (undecided `host`); `"Networks": null` is a container without networks, as
+   `"Mounts": null` is (contract 0017).
 6. **`container:x` at planning (§ 1.4).** A container x whose `NetworkSettings` cannot be read, or that is attached to
    a network id the list does not hold, refuses the plan (fail closed; the contract did not say).
 7. **Plan model (§ 1.3).** `ComposeModel.ExposuresOf` gained the optional parameters `project` and
    `projectFromVariable` (the planner passes the effective project name; a project name from a variable withholds the
-   entry, since `<project>_<key>` contains it), and `ComposeModel.NetworksOf` returns the networks each service joins
-   for the live lookup. A `driver: ""` counts as no driver (compose's default, `bridge`). `network_mode: default` joins
+   entry, since `<project>_<key>` contains it), and `ComposeModel.PlanModelOf` returns, from that same read with the
+   policy's exposure-label prefixes, the networks each service joins for the live lookup. A `driver: ""` counts as no driver (compose's default, `bridge`). `network_mode: default` joins
    no project network, like `none` and `bridge`. Declared and live entries are united by identity; an entry only compose
    read is withheld, the model's literal reading is shown.
 8. **Notifications (§ 1.7).** The Networks page sends the person's `exposure_change` after a successful create; the
@@ -508,7 +513,9 @@ had to be read one way; nothing here weakens a rule of §§ 1–3.
    added. The text: "Network '<name>': LanNetwork (driver <driver>); containers on it get their own address on the LAN,
    past the host's firewall." (`ContainerName` = the network name).
 9. **`connect_container_to_network`** answers with a failure (`MutationScope.Fail`) when no resolved `network.connect`
-   target is open on its flow, instead of connecting by the caller's name (fail closed).
+   target is open on its flow, instead of connecting by the caller's name (fail closed). It connects the resolved
+   network id and the resolved container id (`RelatedContainerId`, part of the approval binding), never the caller's
+   names: a container re-created under the same name after the decision is not the one connected, and asks again.
 10. **Resolver.** A `driver` argument that is not a string (and not null) is taken as its raw JSON text, so it counts
     as LAN (D2). The `network.create` exposure's service part is `network <name>` as § 1.6 says; the rule's reason then
     reads "network lan gets its own address on the LAN through network 'lan' (driver macvlan), past the host's firewall."
@@ -522,3 +529,16 @@ had to be read one way; nothing here weakens a rule of §§ 1–3.
     `fcfa43cf`, so only D4's bridge options were added. That README item is marked `claim-free:limit`, so
     `docs/v1/CLAIMS.md` gained its register row (`8beb86d9f1a2`). `ComposePinIntegrationTests` (Docker category) now
     hands the host's network list to the inventory fake after `up`, since the re-check looks up every NetworkID.
+13. **Recreate and rollback (not changed).** `ContainerLifecycleOperations` (container recreate and the C12 update
+    rollback) reconnects the new container to the old container's further networks by their names. A network removed
+    and re-created under the same name in between — with a LAN driver, say — is joined without a LAN decision. This
+    contract does not change that code; it is named in README "remaining risks" (claim register row `6af52c1a39c8`).
+14. **Details recorded.** The shown `" internal"` comes only from Docker's `Internal` flag of the network
+    (`NetworkInfo.Internal`); a macvlan without a `parent` is not marked internal in the detail (it still counts, D3,
+    and the detail is never compared). The host's network list is read with a timeout of 15 seconds; a timeout counts
+    as "cannot be read", while a cancellation of the run itself is passed on as a cancellation, not reported as
+    unreadable networks.
+15. **The driver is trimmed.** `LanDrivers.Normalize` trims the driver; the resolver's identity, the scope check and
+    the call to Docker all use the trimmed driver (the MCP tool, the Networks page and `DockerService.CreateNetworkAsync`
+    trim it), so Docker creates exactly the driver `IsLan` judged. The Networks page sends its notification for the
+    server the gateway decided (its canonical id), with a logger.

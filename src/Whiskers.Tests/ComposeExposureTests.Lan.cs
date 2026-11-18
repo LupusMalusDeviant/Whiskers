@@ -124,8 +124,8 @@ public sealed partial class ComposeExposureTests
     [Fact]
     public void Network_mode_naming_a_network_is_decided_by_its_live_driver()
     {
-        var refs = ComposeModel.NetworksOf([("/srv/app/compose.yaml", "services:\n  web:\n    image: nginx\n    network_mode: lan\n")],
-            new Dictionary<string, string?>(), "shop");
+        var refs = ComposeModel.PlanModelOf([("/srv/app/compose.yaml", "services:\n  web:\n    image: nginx\n    network_mode: lan\n")],
+            new Dictionary<string, string?>(), Prefixes, "shop").Networks;
 
         var named = Assert.Single(refs);
         Assert.Equal(new ComposeNetworkRef("web", "lan", External: true, Withheld: false), named);
@@ -179,4 +179,55 @@ public sealed partial class ComposeExposureTests
     [InlineData("", true)]
     public void LanDrivers_is_ordinal_and_exact(string driver, bool lan) =>
         Assert.Equal(lan, LanDrivers.IsLan(driver));
+
+    [Fact]
+    public void The_plan_model_reads_networks_with_the_policys_exposure_prefixes()
+    {
+        // One read gives exposures and networks: a label under the policy's own prefix that cannot be interpolated
+        // refuses it, also where only the networks are wanted (no second read with the default prefixes).
+        const string yaml = "services:\n  web:\n    image: nginx\n    labels:\n      acme.expose.port: ${UNSET_VALUE}\n    networks: [lan]\nnetworks:\n  lan:\n    driver: macvlan\n";
+        var files = new List<(string, string)> { ("/srv/app/compose.yaml", yaml) };
+        var env = new Dictionary<string, string?>();
+
+        var withDefaults = ComposeModel.PlanModelOf(files, env, Prefixes, "shop");
+        Assert.Equal([new ComposeNetworkRef("web", "shop_lan", External: false, Withheld: false)], withDefaults.Networks);
+        Assert.Single(withDefaults.Exposures["web"], e => e.Kind == ExposureKind.LanNetwork);
+        Assert.Throws<ComposePlanException>(() => ComposeModel.PlanModelOf(files, env, ["acme.expose."], "shop"));
+    }
+
+    [Fact]
+    public void A_created_but_never_started_container_is_read_by_the_network_name()
+    {
+        // Docker leaves NetworkID empty until the container starts; the entry's key is the network's name then.
+        var container = JsonDocument.Parse("""
+            {"NetworkSettings":{"Networks":{"shop_lan":{"NetworkID":""},"shop_default":{"NetworkID":""}}}}
+            """).RootElement;
+        NetworkInfo[] networks =
+        [
+            new() { Id = "n-lan", Name = "shop_lan", Driver = "macvlan" },
+            new() { Id = "n-def", Name = "shop_default", Driver = "bridge" },
+        ];
+
+        var found = ComposeExposures.LanNetworksOf("web", container, networks);
+
+        var lan = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<ComposeExposure>>(found));
+        Assert.Equal(("shop_lan", "macvlan"), (lan.Key, lan.Value));
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("twice")]
+    [InlineData("case")]
+    public void An_empty_network_id_whose_name_is_not_exactly_once_in_the_list_is_unchecked(string variant)
+    {
+        var container = JsonDocument.Parse("""{"NetworkSettings":{"Networks":{"shop_lan":{"NetworkID":""}}}}""").RootElement;
+        NetworkInfo[] networks = variant switch
+        {
+            "missing" => [new() { Id = "n-other", Name = "other", Driver = "bridge" }],
+            "twice" => [new() { Id = "n-a", Name = "shop_lan", Driver = "bridge" }, new() { Id = "n-b", Name = "shop_lan", Driver = "macvlan" }],
+            _ => [new() { Id = "n-lan", Name = "Shop_Lan", Driver = "bridge" }],
+        };
+
+        Assert.Null(ComposeExposures.LanNetworksOf("web", container, networks));
+    }
 }

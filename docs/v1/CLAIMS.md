@@ -140,6 +140,7 @@ edit to a marked block fails `ClaimRegisterTests` until its row here is re-confi
 | `README.md` | `7d874a4c037c` | limit | - **Tailscale serve state** is read from |
 | `README.md` | `ce0710612c8e` | limit | - **A Traefik on the host** outside the |
 | `README.md` | `8beb86d9f1a2` | limit | - **Bridge networks that reach the LAN b |
+| `README.md` | `6af52c1a39c8` | limit | - **Recreate and rollback reconnect netw |
 | `README.md` | `6d29e54a90ac` | limit | - **The tag race**: putting a tag back a |
 | `README.md` | `a7343775105d` | limit | - **`container.update` and `autopatch.ru |
 | `README.md` | `4fa80a44962e` | limit | - **Pinned containers show an image id** |
