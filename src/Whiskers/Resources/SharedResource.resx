@@ -6731,4 +6731,79 @@ This REPLACES ALL current data (database, configuration, keys), automatically cr
   <data name="Servers_O18_PinReplaced" xml:space="preserve">
     <value>Host key pin of {0} replaced: {1}</value>
   </data>
+  <data name="InlineApproval_Title" xml:space="preserve">
+    <value>Approval needed</value>
+  </data>
+  <data name="InlineApproval_NotFound" xml:space="preserve">
+    <value>Approval {0} could not be found. It stays on the Approvals page if it exists; nothing runs.</value>
+  </data>
+  <data name="InlineApproval_ChangedSinceApproval" xml:space="preserve">
+    <value>Changed since you approved: the target, its connection, the credential or the policy is no longer what was approved. This is a new approval.</value>
+  </data>
+  <data name="InlineApproval_Intro" xml:space="preserve">
+    <value>This action changes Whiskers' own control plane and needs an Admin's approval. Approving is a separate step and is recorded.</value>
+  </data>
+  <data name="InlineApproval_Capability" xml:space="preserve">
+    <value>Action</value>
+  </data>
+  <data name="InlineApproval_Target" xml:space="preserve">
+    <value>Target (server / workload)</value>
+  </data>
+  <data name="InlineApproval_Reason" xml:space="preserve">
+    <value>Why</value>
+  </data>
+  <data name="InlineApproval_Level" xml:space="preserve">
+    <value>Level and rule</value>
+  </data>
+  <data name="InlineApproval_Id" xml:space="preserve">
+    <value>Approval</value>
+  </data>
+  <data name="InlineApproval_TimeLeft" xml:space="preserve">
+    <value>Time left</value>
+  </data>
+  <data name="InlineApproval_Arguments" xml:space="preserve">
+    <value>Arguments as recorded (payloads withheld)</value>
+  </data>
+  <data name="InlineApproval_YourInput" xml:space="preserve">
+    <value>Your input (not stored with the approval)</value>
+  </data>
+  <data name="InlineApproval_SelfDecision" xml:space="preserve">
+    <value>You are approving your own request. This is recorded.</value>
+  </data>
+  <data name="InlineApproval_ApprovedBy" xml:space="preserve">
+    <value>Approved by {0}. Click "Run now" to run it.</value>
+  </data>
+  <data name="InlineApproval_RejectedBy" xml:space="preserve">
+    <value>Rejected by {0}. Nothing runs.</value>
+  </data>
+  <data name="InlineApproval_Close" xml:space="preserve">
+    <value>Close (leave pending)</value>
+  </data>
+  <data name="InlineApproval_RunNow" xml:space="preserve">
+    <value>Run now</value>
+  </data>
+  <data name="InlineApproval_Reject" xml:space="preserve">
+    <value>Reject</value>
+  </data>
+  <data name="InlineApproval_Approve" xml:space="preserve">
+    <value>Approve and run</value>
+  </data>
+  <data name="InlineApproval_AlreadyUsed" xml:space="preserve">
+    <value>Your approval was already used at {0} (operation {1}); nothing ran here. The new approval {2} is pending on the Approvals page.</value>
+  </data>
+  <data name="InlineApproval_Refused_Rejected" xml:space="preserve">
+    <value>Approval {0} was rejected by {1}; nothing ran.</value>
+  </data>
+  <data name="InlineApproval_Refused_Expired" xml:space="preserve">
+    <value>Approval {0} expired; nothing ran.</value>
+  </data>
+  <data name="InlineApproval_Refused_LeftPending" xml:space="preserve">
+    <value>Approval {0} was left on the Approvals page; nothing ran. Once it is approved there, run the action again.</value>
+  </data>
+  <data name="InlineApproval_Refused_ApprovedAfterClose" xml:space="preserve">
+    <value>Approval {0} was approved by {1}, but its dialog had closed; nothing ran. Repeat the action within {2} minutes to run it once.</value>
+  </data>
+  <data name="ApprovalsView_InDialog" xml:space="preserve">
+    <value>in the dialog</value>
+  </data>
 </root>

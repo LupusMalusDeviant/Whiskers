@@ -334,7 +334,7 @@
         var resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
         var result = resolver is null
             ? ApprovalDecisionResult.InsufficientLevel
-            : await ApprovalStore.DecideAsync(id, approved, resolver);
+            : await ApprovalStore.DecideAsync(id, approved, resolver, ApprovalChannel.Chat);
         // Only this decision's own card ends: while it was being recorded the chat may have moved on to a newer one.
         if (ApprovalDecisionMessages.EndsTheCard(result) && _pendingApprovalId == id)
         {

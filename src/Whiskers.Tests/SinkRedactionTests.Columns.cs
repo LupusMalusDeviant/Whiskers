@@ -71,6 +71,8 @@ public sealed partial class SinkRedactionTests
         ["ApprovalRecordEntity.Status"] = VocabularyReason,
         ["ApprovalRecordEntity.ResolvedBy"] = ActorReason,
         ["ApprovalRecordEntity.ConsumedBy"] = ActorReason,
+        // Contract 0019 (D6): "page", "dialog" or "chat" — written only from ApprovalChannel, never from input.
+        ["ApprovalRecordEntity.DecidedVia"] = VocabularyReason,
 
         ["AuditChainEntry.RowHash"] = HashReason,
         ["AuditChainEntry.PrevHash"] = HashReason,

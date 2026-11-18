@@ -248,7 +248,7 @@ public sealed class ApprovalPersistenceTests : IDisposable
 
         public Task<bool> ResolveAsync(string approvalId, ApprovalStatus status, DateTime at, string? by,
             DateTime? grantExpiresAt, bool selfApproved = false, Func<bool>? stillDecidable = null,
-            CancellationToken ct = default) =>
+            CancellationToken ct = default, string? decidedVia = null) =>
             throw new InvalidOperationException("database unavailable");
 
         public Task<bool> ConsumeAsync(string approvalId, string operationId, DateTime now, Func<bool>? stillUsable = null,

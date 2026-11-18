@@ -132,6 +132,11 @@ else
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">@L["ApprovalsView_SelfApproved"]</MudChip>
                         }
+                        @* Contract 0019 (D6): where it was decided, next to the self-approval mark. *@
+                        @if (a.DecidedVia == ApprovalChannels.Dialog)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" data-testid="approval-in-dialog">@L["ApprovalsView_InDialog"]</MudChip>
+                        }
                     </td>
                     <td>@(a.ResolvedBy ?? "—")</td>
                 </tr>
@@ -200,7 +205,7 @@ else
             var resolver = await ApprovalResolver.CurrentAsync(CurrentUser);
             var result = resolver is null
                 ? ApprovalDecisionResult.InsufficientLevel
-                : await ApprovalStore.DecideAsync(approvalId, approved, resolver);
+                : await ApprovalStore.DecideAsync(approvalId, approved, resolver, ApprovalChannel.Page);
             if (result == ApprovalDecisionResult.NotPending && ApprovalStore.Get(approvalId) is { } current)
                 Snackbar.Add(L["ApprovalsView_AlreadyResolved_Snackbar", StatusLabel(current.Status)].Value, Severity.Warning);
             else if (result != ApprovalDecisionResult.Decided)

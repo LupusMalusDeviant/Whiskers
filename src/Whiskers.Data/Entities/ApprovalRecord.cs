@@ -48,6 +48,11 @@ public class ApprovalRecordEntity
     /// <summary>Decided by one of its requesters (an interactive request, R1-15): a self-approval on record.</summary>
     public bool SelfApproved { get; set; }
 
+    /// <summary>Contract 0019 (D6): where a human decided it: <c>page</c>, <c>dialog</c> or <c>chat</c>. <c>null</c> for an
+    /// expiry or cancellation by the system and for rows from before contract 0019. Not a secret.</summary>
+    [System.ComponentModel.DataAnnotations.MaxLength(16)]
+    public string? DecidedVia { get; set; }
+
     /// <summary>Pending, Approved, Rejected, Expired or Cancelled.</summary>
     public string Status { get; set; } = string.Empty;
 

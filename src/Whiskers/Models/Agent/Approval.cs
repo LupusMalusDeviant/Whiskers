@@ -107,6 +107,10 @@ public sealed class Approval
     /// self-approval is visible as such.</summary>
     public bool SelfApproved { get; set; }
 
+    /// <summary>Contract 0019 (D6): where a human decided it (<c>page</c>, <c>dialog</c>, <c>chat</c>); <c>null</c> for an
+    /// expiry or cancellation by the system and for approvals decided before contract 0019.</summary>
+    public string? DecidedVia { get; set; }
+
     public ApprovalStatus Status { get; set; } = ApprovalStatus.Pending;
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; init; } = DateTime.UtcNow.AddMinutes(15);

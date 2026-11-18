@@ -6731,4 +6731,79 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Servers_O18_PinReplaced" xml:space="preserve">
     <value>Host-Key-Pin von {0} ersetzt: {1}</value>
   </data>
+  <data name="InlineApproval_Title" xml:space="preserve">
+    <value>Freigabe nötig</value>
+  </data>
+  <data name="InlineApproval_NotFound" xml:space="preserve">
+    <value>Freigabe {0} wurde nicht gefunden. Falls es sie gibt, bleibt sie auf der Seite „Freigaben“; nichts wird ausgeführt.</value>
+  </data>
+  <data name="InlineApproval_ChangedSinceApproval" xml:space="preserve">
+    <value>Seit deiner Freigabe geändert: Ziel, Verbindung, Anmeldung oder Richtlinie sind nicht mehr, was freigegeben wurde. Dies ist eine neue Freigabe.</value>
+  </data>
+  <data name="InlineApproval_Intro" xml:space="preserve">
+    <value>Diese Aktion ändert die Steuerebene von Whiskers selbst und braucht die Freigabe eines Admins. Die Freigabe ist ein eigener Schritt und wird aufgezeichnet.</value>
+  </data>
+  <data name="InlineApproval_Capability" xml:space="preserve">
+    <value>Aktion</value>
+  </data>
+  <data name="InlineApproval_Target" xml:space="preserve">
+    <value>Ziel (Server / Workload)</value>
+  </data>
+  <data name="InlineApproval_Reason" xml:space="preserve">
+    <value>Grund</value>
+  </data>
+  <data name="InlineApproval_Level" xml:space="preserve">
+    <value>Stufe und Regel</value>
+  </data>
+  <data name="InlineApproval_Id" xml:space="preserve">
+    <value>Freigabe</value>
+  </data>
+  <data name="InlineApproval_TimeLeft" xml:space="preserve">
+    <value>Verbleibende Zeit</value>
+  </data>
+  <data name="InlineApproval_Arguments" xml:space="preserve">
+    <value>Argumente wie aufgezeichnet (Inhalte zurückgehalten)</value>
+  </data>
+  <data name="InlineApproval_YourInput" xml:space="preserve">
+    <value>Deine Eingabe (nicht mit der Freigabe gespeichert)</value>
+  </data>
+  <data name="InlineApproval_SelfDecision" xml:space="preserve">
+    <value>Du gibst deine eigene Anfrage frei. Das wird aufgezeichnet.</value>
+  </data>
+  <data name="InlineApproval_ApprovedBy" xml:space="preserve">
+    <value>Freigegeben von {0}. Mit „Jetzt ausführen“ startest du die Aktion.</value>
+  </data>
+  <data name="InlineApproval_RejectedBy" xml:space="preserve">
+    <value>Abgelehnt von {0}. Nichts wird ausgeführt.</value>
+  </data>
+  <data name="InlineApproval_Close" xml:space="preserve">
+    <value>Schließen (offen lassen)</value>
+  </data>
+  <data name="InlineApproval_RunNow" xml:space="preserve">
+    <value>Jetzt ausführen</value>
+  </data>
+  <data name="InlineApproval_Reject" xml:space="preserve">
+    <value>Ablehnen</value>
+  </data>
+  <data name="InlineApproval_Approve" xml:space="preserve">
+    <value>Freigeben und ausführen</value>
+  </data>
+  <data name="InlineApproval_AlreadyUsed" xml:space="preserve">
+    <value>Deine Freigabe wurde bereits um {0} verwendet (Vorgang {1}); hier lief nichts. Die neue Freigabe {2} wartet auf der Seite „Freigaben“.</value>
+  </data>
+  <data name="InlineApproval_Refused_Rejected" xml:space="preserve">
+    <value>Freigabe {0} wurde von {1} abgelehnt; nichts lief.</value>
+  </data>
+  <data name="InlineApproval_Refused_Expired" xml:space="preserve">
+    <value>Freigabe {0} ist abgelaufen; nichts lief.</value>
+  </data>
+  <data name="InlineApproval_Refused_LeftPending" xml:space="preserve">
+    <value>Freigabe {0} bleibt auf der Seite „Freigaben“ offen; nichts lief. Sobald sie dort freigegeben ist, starte die Aktion erneut.</value>
+  </data>
+  <data name="InlineApproval_Refused_ApprovedAfterClose" xml:space="preserve">
+    <value>Freigabe {0} wurde von {1} erteilt, aber ihr Dialog war schon geschlossen; nichts lief. Wiederhole die Aktion innerhalb von {2} Minuten, dann läuft sie einmal.</value>
+  </data>
+  <data name="ApprovalsView_InDialog" xml:space="preserve">
+    <value>im Dialog</value>
+  </data>
 </root>
