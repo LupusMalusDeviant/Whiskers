@@ -104,6 +104,10 @@ namespace Whiskers.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DecidedVia")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("DecisionId")
                         .HasColumnType("TEXT");
 

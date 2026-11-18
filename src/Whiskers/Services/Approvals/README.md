@@ -82,6 +82,34 @@ page and the bell all go through it. `ApprovalEligibility` holds approving and r
   an approval counts against everyone in its requester chain (an agent session and the user it acts for), so more
   chats do not raise the bound. Beyond it `CreateAsync` throws `ApprovalLimitException` and the gate refuses the call.
 
+## In the dialog of the action (contract 0019, INV-65)
+
+An Admin whose own web-UI action raised an INV-59 approval can decide it in that action's dialog instead of opening
+the Approvals page. Nothing about who may decide changes: the dialog (`Components/Shared/InlineApprovalDialog.razor`)
+decides through `DecideAsync(…, ApprovalChannel.Dialog)` under `ApprovalEligibility`, so `RequireSecondApprover` binds
+it as it binds the page.
+
+- **Where.** `IInlineApprovalPrompt` (implemented by `MudInlineApprovalPrompt`, scoped, per Blazor circuit) is asked
+  by `UiMutationRunner` only for a `PendingApproval` with `protected-resource` among the matched rules, a capability of
+  `InlineApproval.Capabilities` (D7 waves 1 and 2) and an approval that is pending, raised for this operation
+  (`CorrelationId`), by `web`, with the person as first requester. Wave 3 (`container.remove`, `selfbackup.restore`,
+  `mtls.shared_client_retire`, `volume.backup_delete`) and `server.hostkey_replace` keep today's refusal, which now
+  carries `MutationRefusedException.ApprovalId`.
+- **The explicit act (D2).** No default button, Enter triggers nothing, "Approve and run" is armed after 1.5 s, the
+  summary is read back from the store (payloads withheld; the requester's own payload input comes only from the
+  runner's memory and is never stored or logged). "Run now" after an approval given elsewhere is a click too.
+- **Continuation (D4).** After the decision the runner rebuilds the request and calls the gateway once more; the
+  approve-then-retry path continues the same operation and uses the grant once. A drifted binding raises a new
+  approval, shown once as "changed since you approved"; a second drift is refused; a grant another call used first is
+  reported as already used.
+- **Closing (D5).** Close, Escape, a dropped circuit or an expiry leave the approval pending (or expired). Nothing runs
+  after the runner call has ended; an approved grant left unused lapses after `GrantLifetime` unless the same person
+  repeats the identical action.
+- **Channel (D6).** `Approval.DecidedVia` / column `Approvals.DecidedVia` records `page`, `dialog` or `chat`
+  (`ApprovalChannels`); `null` for system expiries and cancellations and for rows from before contract 0019. The
+  original three-argument `DecideAsync` means the page. A used grant's `ApprovalGateResult` carries `DecidedVia` and
+  `SelfApproved` into the execution's audit details (`approval.via`, `approval.selfApproved`).
+
 A raised approval is announced with its id, its risk and its target as `ApprovalDisplay.NotifiedTarget` names it
 (`ApprovalSubject.NotifiedTarget` / the agent decision's `NotifiedTarget`): the kind (`container`, `dns-zone`, …),
 and — only for a target the resolver found, of a kind whose id it takes from the inventory (container, network, pod,
@@ -105,6 +133,8 @@ address (`WhiskersPublicUrl`, `Whiskers:PublicUrl`; never a request's host) — 
 | `ApprovalGate.cs` | `IApprovalGate` + `ApprovalGate`, `ApprovalSubject` (with its `Requesters`; `WithholdPayloads` keeps a UI call's SQL, command or compose file off the stored card, showing only its length, R1-16), `ApprovalGateResult`: decides whether a `Confirm` may run now (`CheckAsync`), uses the approval (`TryConsumeAsync`) and names the operation an open approval was raised for (`OpenOperationOf`, R1-18). Single use, bound to the call's binding and arguments hash, valid ten minutes after the decision. |
 | `ApprovalFingerprint.cs` | The hashes that bind an approval: arguments (keys sorted, raw JSON values) and caller + tool + arguments. |
 | `ApprovalDisplay.cs` | Display-only card context: risk band from the level, best-effort target from the arguments. `NotificationText`: the notification of a raised approval (id, risk, target, link; no arguments). |
+| `ApprovalChannel.cs` | `ApprovalChannel` (`Page`, `Dialog`, `Chat`) and `ApprovalChannels` (the persisted names `page`, `dialog`, `chat`), contract 0019. |
+| `InlineApproval.cs` | Contract 0019: `IInlineApprovalPrompt`, `InlineApprovalRequest`, `InlineApprovalOutcome`, `InlineApprovalResult` and the rollout list `InlineApproval.Capabilities` / `Applies`. |
 
 The agent-specific bridge, [`ApprovalCoordinator`](../Agent/Approvals/), stays in the Agent module.
 

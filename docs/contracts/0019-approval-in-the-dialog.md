@@ -571,3 +571,42 @@ Docker):
 - Giving UI approvals a session (`Interactive`, INV-36). Today they are stored under `"mcp-direct"` and outlive the
   page. That stays, and it is why "nothing continues after the dialog" is enforced by the runner, not by the store.
 - Revoking an approved but unused grant before its 10 minutes end.
+
+## Amendment (implementation, 2026-11-18)
+
+Status: awaiting maintainer acceptance
+
+The implementation follows the contract. Where the code forced a choice the contract does not state, or a point
+differs, it is listed here:
+
+1. **One change for both waves (D7 says "one PR per wave").** Waves 1 and 2 were built together: the rollout list
+   `InlineApproval.Capabilities` holds both, and the §7 notes cover both. Splitting them would have shipped the same
+   code twice with a shorter list. Wave 3 and `server.hostkey_replace` are not in the list.
+2. **The app-store path in wave 2.** "The deploy / compose / app-store paths" is read as the capabilities
+   `compose.deploy` and `app.deploy` (U-10, U-11, U-12). Both are listed; `Applies` still requires the INV-59 hit
+   (`protected-resource`), so only a plan that touches a protected container is prompted.
+3. **Additive members the contract does not name.**
+   - `InlineApprovalRequest.ChangedSinceApproval` (init-only): marks the second prompt "changed since you approved"
+     (D4).
+   - `ApprovalChannels` (`Page`/`Dialog`/`Chat` as the persisted strings, `Wire()`).
+   - `IApprovalPersistence.ResolveAsync(…, string? decidedVia = null)`: the store writes the channel with the
+     decision in the same conditional update.
+   - `InlineApprovalCircuit` (a scoped `CircuitHandler`): the prompt shows nothing unless the scope is a live circuit,
+     and a dropped connection ends the wait as `LeftPending`.
+   - `InlineApprovalDialog.Time` (a `TimeProvider` parameter, for the arming delay and the countdown in tests).
+4. **The prompt's wait is bounded by the approval's own expiry.** The dialog has no timeout of its own (D5); it
+   closes as expired at the approval's end. As a fail-closed backstop, `MudInlineApprovalPrompt` also stops waiting
+   5 s after `ExpiresAt` and reads the outcome from the store.
+5. **Tests.**
+   - `InlineApprovalRunnerTests` run on the **real** `MutationGateway` and `ApprovalGate` (in-memory audit sink, a
+     target resolver over a fake server list) instead of a fake gateway: the continuation, the drift and the single use
+     are then the gateway's own. One case (`An_approval_of_another_operation_or_requester_is_never_prompted`) uses a
+     stub gateway to hand the runner another operation's approval.
+   - `ApprovalChannelTests.DecidedVia_is_persisted_on_both_providers` checks, for both providers, that the shipped
+     migration `ApprovalDecidedVia` adds exactly the nullable column, and does the round trip on a migrated SQLite
+     database. A round trip on a real PostgreSQL is not part of the in-process run.
+   - One test beyond the plan: `InlineApprovalDialogTests.Closing_leaves_the_approval_pending_and_outside_a_circuit_nothing_is_shown`.
+   - `The_page_records_page_and_the_chat_records_chat` drives the Approvals page's real handler; for the two chats
+     (`AgentView`, `AiChat`) it checks their source passes `ApprovalChannel.Chat` to every `DecideAsync`.
+6. **Refusal statuses.** "Rejected" and "Expired" are refused as `Denied`, "left pending" and the "already used"
+   case as `PendingApproval`, each with `ApprovalId`.

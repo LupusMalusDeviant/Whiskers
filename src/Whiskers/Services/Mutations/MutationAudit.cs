@@ -324,7 +324,11 @@ public sealed class AuditLogMutationSink : IMutationAuditSink
         // A rule's reason can quote the argument it matched (e.g. a protected name inside SQL text).
         reason = Field(Redact(WithoutPayloadValues(reason, request.Arguments)), budget),
         durationMs,
-        approval = approval is null ? null : new { id = approval.ApprovalId, approvedBy = approval.ApprovedBy },
+        // Contract 0019 (D6): a used grant also names where it was decided and whether its requester decided it.
+        approval = approval is null ? null
+            : approval.Approved
+                ? new { id = approval.ApprovalId, approvedBy = approval.ApprovedBy, via = approval.DecidedVia, selfApproved = approval.SelfApproved }
+                : (object)new { id = approval.ApprovalId, approvedBy = approval.ApprovedBy },
         principal = new
         {
             kind = request.Principal.Kind.ToString(),

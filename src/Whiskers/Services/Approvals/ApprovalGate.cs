@@ -53,7 +53,16 @@ public sealed record ApprovalSubject(
     public string? NotifiedTarget { get; init; }
 }
 
-public sealed record ApprovalGateResult(bool Approved, string Message, string? ApprovalId = null, string? ApprovedBy = null);
+/// <summary>What the gate answered. For a usable grant it also carries where the approval was decided and whether its
+/// requester decided it (contract 0019, D6), read from the approval row, for the execution's audit details.</summary>
+public sealed record ApprovalGateResult(bool Approved, string Message, string? ApprovalId = null, string? ApprovedBy = null)
+{
+    /// <summary>Where the approval was decided (<c>page</c>, <c>dialog</c>, <c>chat</c>), from the approval row.</summary>
+    public string? DecidedVia { get; init; }
+
+    /// <summary>One of its requesters decided it, from the approval row.</summary>
+    public bool SelfApproved { get; init; }
+}
 
 /// <summary>
 /// Turns a <c>Confirm</c> verdict into "go" only when a human approved exactly this call. Used by the Mutation
@@ -224,6 +233,10 @@ public sealed class ApprovalGate : IApprovalGate
         approval.Status == ApprovalStatus.Approved && approval.ConsumedAt is null
         && approval.GrantExpiresAt is { } until && until > _time.GetUtcNow().UtcDateTime
             ? new ApprovalGateResult(true, "Approved.", approval.Id, approval.ResolvedBy)
+            {
+                DecidedVia = approval.DecidedVia,
+                SelfApproved = approval.SelfApproved,
+            }
             : null;
 
     private Task<Approval> RaiseAsync(ApprovalSubject subject, string reason, IReadOnlyList<string> matchedRules,

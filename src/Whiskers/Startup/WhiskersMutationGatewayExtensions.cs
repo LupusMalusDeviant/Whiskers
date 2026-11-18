@@ -96,6 +96,12 @@ public static class WhiskersMutationGatewayExtensions
         services.AddSingleton<IMutationGateway, MutationGateway>();
         // Per circuit: it reads the signed-in user.
         services.AddScoped<IUiMutationRunner, UiMutationRunner>();
+        // Contract 0019 (INV-65): the dialog that shows an INV-59 approval raised by a UI call. Scoped, per circuit: it
+        // shows nothing outside a live circuit, and no singleton, hosted service, MCP handler or automation takes it.
+        services.AddScoped<Whiskers.Components.Shared.InlineApprovalCircuit>();
+        services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler>(sp =>
+            sp.GetRequiredService<Whiskers.Components.Shared.InlineApprovalCircuit>());
+        services.AddScoped<IInlineApprovalPrompt, Whiskers.Components.Shared.MudInlineApprovalPrompt>();
         // Unattended runs on their owner's authority (PC-D6).
         services.AddOptions<AutomationOptions>().BindConfiguration(AutomationOptions.Section);
         services.AddSingleton<IOwnerAccounts, OwnerAccounts>();

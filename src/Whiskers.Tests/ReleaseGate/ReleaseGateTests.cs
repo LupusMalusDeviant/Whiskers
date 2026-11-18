@@ -212,14 +212,14 @@ public class ReleaseGateTests
     {
         var deleted = Bare with
         {
-            Invariants = Mutate(ShiftHolds(RemoveLine(Bare.Invariants, "| INV-61 |"), -1), "| **Total** | **64** |", "| **Total** | **63** |"),
+            Invariants = Mutate(ShiftHolds(RemoveLine(Bare.Invariants, "| INV-61 |"), -1), "| **Total** | **65** |", "| **Total** | **64** |"),
         };
         var findings = Evaluate(deleted, GateMode.Development, Dev);
         Assert.DoesNotContain(findings, f => f.Message.Contains("§11") || f.Subject.Contains("§11"));
         Assert.Contains(findings, f => f.Rule == "R3" && f.Subject == "INV-61" && f.Message.Contains("neither a row of the table nor retired"));
 
-        var abovePin = Bare with { ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-64", "Highest invariant ID: INV-63") };
-        Assert.Contains(Evaluate(abovePin, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-64" && f.Message.Contains("above the pinned"));
+        var abovePin = Bare with { ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-65", "Highest invariant ID: INV-64") };
+        Assert.Contains(Evaluate(abovePin, GateMode.Development, Dev), f => f.Rule == "R3" && f.Subject == "INV-65" && f.Message.Contains("above the pinned"));
 
         // Retired properly: a 'Retired invariants' row with an accepted retirement decision.
         var retired = deleted with
@@ -241,8 +241,8 @@ public class ReleaseGateTests
 
         var pinBelowRetired = Bare with
         {
-            ReleaseGate = Mutate(Bare.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-65 | RG-1 | 2026-01-01 |\n"),
-            Contract = WithDecision(Bare.Contract, "RG-1", "retirement", "INV-65"),
+            ReleaseGate = Mutate(Bare.ReleaseGate, RetiredHeader, RetiredHeader + "| INV-66 | RG-1 | 2026-01-01 |\n"),
+            Contract = WithDecision(Bare.Contract, "RG-1", "retirement", "INV-66"),
         };
         Assert.Contains(Evaluate(pinBelowRetired, GateMode.Development, Dev), f => f.Rule == "R3" && f.Message.Contains("below the highest retired ID"));
     }
@@ -505,11 +505,11 @@ public class ReleaseGateTests
         // An invariant ID that disappears, and a pin that goes down.
         var deleted = Snapshot(Bare with
         {
-            Invariants = RemoveLine(Bare.Invariants, "| INV-64 |"),
-            ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-64", "Highest invariant ID: INV-63"),
+            Invariants = RemoveLine(Bare.Invariants, "| INV-65 |"),
+            ReleaseGate = Mutate(Bare.ReleaseGate, "Highest invariant ID: INV-65", "Highest invariant ID: INV-64"),
         });
         var lost = BaseComparison.Compare(deleted, Snapshot(Bare), "the base");
-        Assert.Contains(lost, f => f.Rule == "D16" && f.Subject == "INV-64");
+        Assert.Contains(lost, f => f.Rule == "D16" && f.Subject == "INV-65");
         Assert.Contains(lost, f => f.Rule == "D16" && f.Message.Contains("went down"));
 
         // The previous release tag: the highest vX.Y.Z strictly below the version, by the three numbers.

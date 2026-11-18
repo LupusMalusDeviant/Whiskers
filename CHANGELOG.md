@@ -2324,6 +2324,20 @@ accepted before the work started (#209). They come from the full review of the w
   notification per step and is bound to the 30-minute gateway deadline, not to the request. A rescue bootstrap over
   MCP always waits for a human Admin's approval. A host that already holds mTLS state is re-onboarded or abandoned
   only in the UI; the MCP refusal says so. Only `add_server` is offered to the in-app agent.
+- **Approval in the dialog (contract 0019, INV-65).** When an Admin's own UI action on Whiskers' control plane waits for
+  an INV-59 approval, the action's window now opens *Approval needed* instead of only pointing to the Approvals page.
+  It shows the recorded approval (target, reason, level and rule, arguments with payloads withheld, time left) and,
+  for the requester only, their own input such as the SQL of `db.query`, which is never stored. *Approve and run* is
+  never the default button, ignores Enter and is armed after 1.5 s; it decides under the Approvals page's rules, so
+  *Require a second approver* still makes a second Admin approve (then *Run now*). The action then continues as the
+  same operation, uses the approval once and reports in the same window. *Close* leaves the approval pending, and
+  nothing runs after the window is gone. Covered now: re-onboarding, container start/stop/restart/update/rollback,
+  the mTLS actions on *Servers* (migrate, renew, issue), volume backup and restore, `db.query`, compose and app
+  deployments. Remove, self-backup restore, shared-credential retirement, backup deletion and host-key replacement
+  are still approved on the Approvals page. The approval records where it was decided (`page`, `dialog`, `chat`; new
+  nullable column `Approvals.DecidedVia`), the audit of the run names it next to the self-approval mark, and the
+  Approvals history marks "in the dialog". MCP keys, the agent over MCP, AI triggers, the scheduler and webhooks are
+  unchanged (§7.1–§7.4 of the product contract, A-01 included).
 - **Mutation Gateway, step 2.3 (ADR-0005).** `IAutomationMutationRunner` runs scheduled tasks, AutoUpdate and
   AutoPatch through the gateway on their owner's authority. Owners are shown and taken over in Scheduled Tasks and
   in Settings → Automation owners (`automation-owners.json` in the data directory). The bypass baseline shrinks from

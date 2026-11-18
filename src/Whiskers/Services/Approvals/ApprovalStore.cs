@@ -43,7 +43,13 @@ public interface IApprovalStore
     /// (<see cref="ApprovalEligibility"/>): the resolver holds at least the approval's level, and a requester never
     /// decides a non-interactive request — nor an interactive one while the policy requires a second approver. An
     /// approval past its expiry is expired instead. Invokes its resolver once it is on record.</summary>
+    /// <remarks>Recorded as decided on the Approvals page (<see cref="ApprovalChannel.Page"/>, contract 0019).</remarks>
     Task<ApprovalDecisionResult> DecideAsync(string approvalId, bool approved, ApprovalResolver resolver);
+
+    /// <summary>As <see cref="DecideAsync(string, bool, ApprovalResolver)"/>, recording where the decision was made
+    /// (contract 0019, D6). Same eligibility, expiry and single-decision rules.</summary>
+    Task<ApprovalDecisionResult> DecideAsync(string approvalId, bool approved, ApprovalResolver resolver,
+        ApprovalChannel via);
 
     /// <summary><see cref="DecideAsync"/> for the web user <paramref name="resolvedBy"/> (an email) holding
     /// <paramref name="resolverLevel"/>; <c>true</c> when it was decided. Without both, nothing is decided.</summary>
@@ -276,8 +282,13 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         return ApprovalEligibility.Check(entry.Approval, resolver, RequireSecondApprover);
     }
 
-    public async Task<ApprovalDecisionResult> DecideAsync(string approvalId, bool approved, ApprovalResolver resolver)
+    public Task<ApprovalDecisionResult> DecideAsync(string approvalId, bool approved, ApprovalResolver resolver) =>
+        DecideAsync(approvalId, approved, resolver, ApprovalChannel.Page);
+
+    public async Task<ApprovalDecisionResult> DecideAsync(string approvalId, bool approved, ApprovalResolver resolver,
+        ApprovalChannel via)
     {
+        var channel = via.Wire();
         ArgumentNullException.ThrowIfNull(resolver);
         if (!_entries.TryGetValue(approvalId, out var entry)) return ApprovalDecisionResult.NotFound;
         var approval = entry.Approval;
@@ -293,9 +304,9 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         // INV-33/34/37: approving and rejecting are held to the same rules.
         if (ApprovalEligibility.Check(approval, resolver, RequireSecondApprover) is { } refused)
         {
-            _logger?.LogWarning("Approval {Id} ({Tool}, level={Level}) not {Decision} by {Resolver} (level {ResolverLevel}): {Reason}",
+            _logger?.LogWarning("Approval {Id} ({Tool}, level={Level}) not {Decision} by {Resolver} (level {ResolverLevel}) via {Via}: {Reason}",
                 approvalId, approval.ToolName, approval.Level, approved ? "approved" : "rejected", Whiskers.Utils.LogSafe.Value(resolver.PrincipalId),
-                resolver.Level, refused);
+                resolver.Level, channel, refused);
             return refused;
         }
         var selfApproved = ApprovalEligibility.IsRequester(approval, resolver);
@@ -305,7 +316,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
             return ApprovalDecisionResult.NotPending;
 
         var status = approved ? ApprovalStatus.Approved : ApprovalStatus.Rejected;
-        if (!await PersistAsync(entry, status, resolver.Display, mustStore: true, selfApproved: selfApproved))
+        if (!await PersistAsync(entry, status, resolver.Display, mustStore: true, selfApproved: selfApproved, decidedVia: channel))
         {
             // Not on record (decided elsewhere first, expired meanwhile, or the write failed), not decided here: the
             // approval stays pending in this store and nothing waiting on it is released.
@@ -318,8 +329,8 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
             return ApprovalDecisionResult.NotRecorded;
         }
         if (selfApproved)
-            _logger?.LogInformation("Approval {Id} ({Tool}) was {Decision} by its own requester {Resolver}",
-                approvalId, approval.ToolName, approved ? "approved" : "rejected", Whiskers.Utils.LogSafe.Value(resolver.PrincipalId));
+            _logger?.LogInformation("Approval {Id} ({Tool}) was {Decision} by its own requester {Resolver} via {Via}",
+                approvalId, approval.ToolName, approved ? "approved" : "rejected", Whiskers.Utils.LogSafe.Value(resolver.PrincipalId), channel);
         await SafeResolve(entry, approved);
         Changed?.Invoke();
         return ApprovalDecisionResult.Decided;
@@ -408,7 +419,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
     /// (<paramref name="mustStore"/>); a failed write of a system expiry or cancellation still ends it here (that only
     /// makes things safer: the record stays pending until it expires, and nothing can use a pending approval).</summary>
     private async Task<bool> PersistAsync(Entry entry, ApprovalStatus status, string? by, CancellationToken ct = default,
-        bool mustStore = false, bool selfApproved = false)
+        bool mustStore = false, bool selfApproved = false, string? decidedVia = null)
     {
         var at = Now;
         DateTime? grantUntil = status == ApprovalStatus.Approved ? at + GrantLifetime : null;
@@ -417,7 +428,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         {
             // INV-32: a human decision is committed only if the approval has not expired by the time its row is held.
             stored = await _persistence.ResolveAsync(entry.Approval.Id, status, at, by, grantUntil, selfApproved,
-                () => !entry.Approval.IsExpiredAt(Now), ct);
+                () => !entry.Approval.IsExpiredAt(Now), ct, decidedVia);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -430,6 +441,7 @@ public sealed class ApprovalStore : IApprovalStore, IDisposable
         entry.Approval.ResolvedBy = by;
         entry.Approval.GrantExpiresAt = grantUntil;
         entry.Approval.SelfApproved = selfApproved;
+        entry.Approval.DecidedVia = decidedVia;
         return true;
     }
 
