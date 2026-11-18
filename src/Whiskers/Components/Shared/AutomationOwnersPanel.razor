@@ -209,7 +209,9 @@ else if (_unusable.Count == 0)
         var featureId = feature.Id;
         var owner = ownerId;
         var args = new { feature = featureId, owner, resume = true };
-        if (_role < CapabilityCatalog.RoleOf("automation.owner_set"))
+        // The role comes from the capability catalog (INV-13); a refused attempt is the gateway's Denied event (R1-22).
+        var allowed = _role >= CapabilityCatalog.RoleOf("automation.owner_set");
+        if (!allowed)
         {
             await Mutations.RefuseAsync("automation.owner_set", args,
                 $"Requires the {CapabilityCatalog.RoleOf("automation.owner_set")} role.");
