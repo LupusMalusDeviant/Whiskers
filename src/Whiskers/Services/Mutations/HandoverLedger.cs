@@ -282,8 +282,12 @@ public sealed class HandoverLedger : IHandoverLedger
         lock (_gate)
         {
             var rows = Read();
+            // A scheduled task's unresumed entry does not age out: it is what keeps "Run now" of the task refused until
+            // someone switches it on (amendment point 15). It goes when the task is switched on and runs, taken over
+            // or deleted.
             gone = rows.Where(r => IsStalePending(r, nowUtc)
-                                   || (r.Entry.ResumedBy is null && nowUtc - r.Entry.HandedOverAtUtc > maxAge))
+                                   || (r.Entry.ResumedBy is null && r.Kind != AutomationKind.ScheduledTask
+                                       && nowUtc - r.Entry.HandedOverAtUtc > maxAge))
                 .ToList();
             if (gone.Count == 0) return 0;
             Write(rows.Except(gone).ToList());

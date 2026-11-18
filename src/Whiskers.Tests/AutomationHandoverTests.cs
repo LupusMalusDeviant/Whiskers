@@ -570,17 +570,17 @@ public sealed class AutomationHandoverTests : IDisposable
     public async Task Deleting_a_handed_over_item_forgets_its_entry_and_unresumed_entries_age_out_after_30_days()
     {
         await _w.SeedTaskAsync("t1", GoneId);
-        await _w.SeedTaskAsync("t2", GoneId);
-        await HandOverAsync(GoneId, NewId, TaskItem("t1"), TaskItem("t2"));
+        await _w.SeedWebhookAsync("h1", GoneId);
+        await HandOverAsync(GoneId, NewId, TaskItem("t1"), Hook("h1"));
 
         await _w.Scheduler.DeleteTaskAsync("t1");
         Assert.Null(_w.Ledger.PeekFirstRun(TaskItem("t1")));
 
-        var handedOverAt = _w.Ledger.PeekFirstRun(TaskItem("t2"))!.HandedOverAtUtc;
+        var handedOverAt = _w.Ledger.PeekFirstRun(Hook("h1"))!.HandedOverAtUtc;
         Assert.Equal(0, _w.Ledger.Prune(HandoverNotes.MaxAge, handedOverAt.AddDays(29)));
-        Assert.NotNull(_w.Ledger.PeekFirstRun(TaskItem("t2")));
+        Assert.NotNull(_w.Ledger.PeekFirstRun(Hook("h1")));
         Assert.Equal(1, _w.Ledger.Prune(HandoverNotes.MaxAge, handedOverAt.AddDays(31)));
-        Assert.Null(_w.Ledger.PeekFirstRun(TaskItem("t2")));
+        Assert.Null(_w.Ledger.PeekFirstRun(Hook("h1")));
         Assert.Equal(TimeSpan.FromDays(30), HandoverNotes.MaxAge);
     }
 
@@ -849,6 +849,28 @@ public sealed class AutomationHandoverTests : IDisposable
         }
         using (Decision("scheduler.run")) Assert.True((await scheduler.RunNowAsync("t1")).Success);
         Assert.Equal(2, executor.Runs);
+    }
+
+    [Fact]
+    public async Task Run_now_of_a_handed_over_task_stays_refused_after_the_30_day_ageing()
+    {
+        await _w.SeedTaskAsync("t1", GoneId);
+        await HandOverAsync(GoneId, NewId, TaskItem("t1"));
+        var handedOverAt = _w.Ledger.PeekFirstRun(TaskItem("t1"))!.HandedOverAtUtc;
+
+        // Amendment point 15: a scheduled task's unresumed entry does not age out.
+        Assert.Equal(0, _w.Ledger.Prune(HandoverNotes.MaxAge, handedOverAt.AddDays(90)));
+        Assert.True(_w.Ledger.AwaitsResume(TaskItem("t1")));
+
+        var executor = new CountingExecutor();
+        var scheduler = _w.SchedulerRunning(executor);
+        using (var scope = Decision("scheduler.run"))
+        {
+            var (success, output) = await scheduler.RunNowAsync("t1");
+            Assert.False(success);
+            Assert.StartsWith(MutationReasonCodes.AutomationHeld, output);
+        }
+        Assert.Equal(0, executor.Runs);
     }
 
     [Fact]

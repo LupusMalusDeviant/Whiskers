@@ -931,7 +931,7 @@ Contract 0020 uses **one** new INV row (INV-66). Contract 0021 starts at INV-67.
 
 ## Amendment (implementation, 18 November 2026)
 
-Status: awaiting maintainer acceptance.
+Status: accepted by the maintainer on 18 November 2026 (points 1-14, with point 15 added at acceptance).
 
 The implementation follows the accepted contract, D11 option (c) included. It differs in these points:
 
@@ -969,13 +969,17 @@ The implementation follows the accepted contract, D11 option (c) included. It di
    implementation clears it only when the caller says so (`releaseHold: true`), which only the *Git deploy* page's save
    does, as the contract accepts there; that save also records the resume. An MCP save (`create_git_deploy_app`) and
    an MCP token change (`set_git_deploy_token`) leave a held app held, whatever the caller's copy says. Both still make
-   the saver the owner as today (R1-08), which forgets the ledger entry like a takeover.
+   the saver the owner as today (R1-08), which forgets the ledger entry like a takeover. So an MCP save of a held app
+   is an ownership change to the key's person while the app stays held; its first deployment after the page's resume
+   does not name the handover.
 9. **"Run now" of a held task is refused.** `SchedulerService.RunNowAsync` (the page's *Run now* and the MCP tool
    `run_scheduled_task`) refuses a task that is off **and** has a ledger entry nobody resumed (also a `Pending` one
    younger than an hour). The reason starts with `AutomationHeld`; nothing runs and no run is recorded. The
    `scheduler.run` decision is recorded as failed with that reason. A task that is switched on counts as resumed, even if
    its resume could not be recorded; a task that is off for another reason has no entry and runs by hand as today. While
-   the ledger cannot be read, *Run now* of a task that is off is refused (fail closed).
+   the ledger cannot be read, *Run now* of a task that is off is refused (fail closed). The refusal lasts as long as
+   the ledger entry, which for a scheduled task does not age out (point 15). Only a `Pending` row older than an hour
+   is dropped; after that, *Run now* of that task runs it on its recorded owner, as for any task that is off.
 10. **AI trigger runs.** An AI trigger run is an agent session, not one gateway decision. Its first-run note goes on the
     run's `agent.run` audit line, and the entry is consumed after every agent run of the trigger that started. This also
     covers a run that timed out or whose mutations were all denied. The contract's "consumed only by an executed run"
@@ -990,6 +994,10 @@ The implementation follows the accepted contract, D11 option (c) included. It di
     the decision.
 14. **No hold, no account.** `LocalAccountService` refuses `account.create` when no `IAutomationHold` is registered.
     This is fail closed; the running app registers it.
+15. **A scheduled task's entry does not age out (exception to D14, maintainer, 18 November 2026).** The 30-day ageing
+    skips an unresumed entry of a scheduled task, because that entry is what keeps *Run now* of the handed-over or held
+    task refused (point 9). The entry goes when the task is switched on and its first run executes, when it is taken
+    over, or when it is deleted. The other kinds age out after 30 days as D14 says.
 
 The other points are as specified: the capabilities, levels, compositions, persisted fields and the invariant text.
 PRODUCT_CONTRACT §7 carries the notes listed under "Invariant and §7 impact", plus the additions of points 8 to 10:

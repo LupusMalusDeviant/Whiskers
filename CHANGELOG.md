@@ -2359,7 +2359,7 @@ accepted before the work started (#209). They come from the full review of the w
   or token change of a held Git deploy app leaves it held (only the *Git deploy* page's save or *Resume* releases it).
   *Resume* on an endpoint check applies only to a check a handover or hold switched off. An address that signs in again
   never gets its items back. New files in the
-  data directory: `automation-handovers.json` (entries age out after 30 days) and `automation-handover-notices.json`;
+  data directory: `automation-handovers.json` (entries age out after 30 days, a scheduled task's only once it is switched on and runs) and `automation-handover-notices.json`;
   both are in the self-backup. New optional field `HeldReason` on Git deploy apps.
 - **Mutation Gateway, step 2.3 (ADR-0005).** `IAutomationMutationRunner` runs scheduled tasks, AutoUpdate and
   AutoPatch through the gateway on their owner's authority. Owners are shown and taken over in Scheduled Tasks and

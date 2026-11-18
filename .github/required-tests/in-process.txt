@@ -107,7 +107,7 @@
 
 # Owner handover (contract 0020, INV-66): an Admin hands the automation of an owner who can no longer act to a person
 # who can; every item is off until resumed, a resume never re-owns, account.create holds before the account exists.
-49 Whiskers.Tests.AutomationHandoverTests
+50 Whiskers.Tests.AutomationHandoverTests
 6 Whiskers.Tests.ComponentTests.AutomationHandoverDialogTests
 5 Whiskers.Tests.AutomationHandoverArchitectureTests
 5 Whiskers.Tests.AutomationHandoverWireTests
@@ -748,6 +748,7 @@
 1 Whiskers.Tests.AutomationHandoverTests.Resume_never_re_owns_for_each_kind
 1 Whiskers.Tests.AutomationHandoverTests.Resume_switches_on_only_a_check_that_a_handover_or_hold_switched_off
 1 Whiskers.Tests.AutomationHandoverTests.Run_now_of_a_handed_over_or_held_task_is_refused_as_AutomationHeld_until_it_is_switched_on
+1 Whiskers.Tests.AutomationHandoverTests.Run_now_of_a_handed_over_task_stays_refused_after_the_30_day_ageing
 1 Whiskers.Tests.AutomationHandoverTests.Run_now_of_an_off_task_is_refused_while_the_ledger_cannot_be_read
 1 Whiskers.Tests.AutomationHandoverTests.Scheduled_task_provenance_is_unchanged_and_an_agent_created_task_keeps_the_agent_rule_set
 1 Whiskers.Tests.AutomationHandoverTests.The_acknowledge_capability_is_read_level_reversible_on_handover_notice
