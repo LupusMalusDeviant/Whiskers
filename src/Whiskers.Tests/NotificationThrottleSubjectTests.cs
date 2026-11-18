@@ -10,7 +10,9 @@ namespace Whiskers.Tests;
 /// Contract 0017, amendment 4 (G2): events without a container name their subject (<see cref="NotificationEvent.ThrottleSubject"/>),
 /// and the subject is part of the per-channel throttle key. Distinct subjects of one type are delivered once each, the same
 /// subject stays throttled; approvals and state transitions stay exempt, <c>DeliveryId</c> stays out of the key, and an event
-/// without a subject keeps the key it had.
+/// without a subject keeps the key it had. The subject is never shown, delivered or logged; it is persisted with the event in
+/// the notification outbox (<c>notification-outbox.json</c>), which serializes the whole event so that a redelivery stays
+/// identical — harmless, because it holds ids, GUIDs or a hash only and a redelivery skips the throttle.
 /// </summary>
 public sealed class NotificationThrottleSubjectTests
 {
@@ -163,30 +165,58 @@ public sealed class NotificationThrottleSubjectTests
             .ToList();
         Assert.True(files.Count > 100, $"Only {files.Count} source files found — the check would pass vacuously.");
 
-        var readers = new List<string>();
-        var assignments = new List<string>();
-        foreach (var file in files)
-        {
-            var name = Path.GetFileName(file);
-            foreach (var line in File.ReadLines(file))
-            {
-                if (!line.Contains("ThrottleSubject", StringComparison.Ordinal) || line.TrimStart().StartsWith("//", StringComparison.Ordinal)
-                    || line.TrimStart().StartsWith("///", StringComparison.Ordinal)) continue;
-                var assignment = Regex.Match(line, @"ThrottleSubject\s*=\s*(?<value>[^,;]+)");
-                if (assignment.Success)
-                {
-                    var value = assignment.Groups["value"].Value.Trim();
-                    // ComposeRunner and WebhookService pass a parameter through that is itself built by the builder.
-                    if (!value.StartsWith("NotificationThrottleSubjects.", StringComparison.Ordinal)
-                        && value is not ("throttleSubject" or "throttleSubject ?? NotificationThrottleSubjects.Webhook(webhook.Id)"))
-                        assignments.Add($"{name}: {line.Trim()}");
-                }
-                else if (Regex.IsMatch(line, @"\.ThrottleSubject\b") && name != "NotificationThrottler.cs")
-                    readers.Add($"{name}: {line.Trim()}");
-            }
-        }
+        var (readers, assignments) = Scan(files.Select(f => (Path.GetFileName(f), File.ReadAllText(f))));
+
         Assert.True(readers.Count == 0, "ThrottleSubject is a key only; read outside the throttler: " + string.Join("; ", readers));
         Assert.True(assignments.Count == 0, "ThrottleSubject not built by NotificationThrottleSubjects: " + string.Join("; ", assignments));
+    }
+
+    [Fact]
+    public void The_source_scan_sees_a_multi_line_initializer_a_compound_assignment_and_a_reader()
+    {
+        // Review r1: a value on the line after the '=' was invisible to a line-based scan.
+        Assert.NotEmpty(Scan([("a.cs", "var e = new NotificationEvent\n{\n    ThrottleSubject =\n        evt.ImageInfo,\n};")]).Assignments);
+        Assert.NotEmpty(Scan([("a.cs", "var e = new NotificationEvent { ThrottleSubject = $\"x:{name}\" };")]).Assignments);
+        Assert.NotEmpty(Scan([("a.cs", "evt.ThrottleSubject ??= evt.ContainerName;")]).Assignments);
+        Assert.NotEmpty(Scan([("a.cs", "evt.ThrottleSubject += \"x\";")]).Assignments);
+        Assert.NotEmpty(Scan([("Formatter.cs", "var text = evt.ThrottleSubject;")]).Readers);
+        Assert.NotEmpty(Scan([("Formatter.cs", "if (evt.ThrottleSubject == \"x\") { }")]).Readers);
+        // Built by the builder, also across lines, and the throttler's own read pass.
+        var clean = Scan([("a.cs", "var e = new NotificationEvent\r\n{\r\n    ThrottleSubject =\r\n        NotificationThrottleSubjects.Loop(loop.Loop),\r\n};"),
+            ("NotificationThrottler.cs", "var k = evt.ThrottleSubject;"), ("b.cs", "// evt.ThrottleSubject = x;")]);
+        Assert.Empty(clean.Readers);
+        Assert.Empty(clean.Assignments);
+    }
+
+    /// <summary>Reads the sources whole, so an initializer whose value stands on the next line is seen. An assignment
+    /// (<c>=</c>, <c>??=</c>, <c>+=</c>) must take its value from <see cref="NotificationThrottleSubjects"/> (or the two
+    /// parameters that carry one through); any other mention outside the throttler is a reader. Not covered here, and
+    /// harmless: the outbox serializes the whole event, subject included, to <c>notification-outbox.json</c> (contract
+    /// 0017, amendment 4) — ids, GUIDs or a hash, and a redelivery skips the throttle.</summary>
+    private static (List<string> Readers, List<string> Assignments) Scan(IEnumerable<(string Name, string Text)> files)
+    {
+        var readers = new List<string>();
+        var assignments = new List<string>();
+        foreach (var (name, raw) in files)
+        {
+            // Comment lines (XML docs included) are not code.
+            var text = string.Join('\n', raw.Split('\n').Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+            foreach (Match m in Regex.Matches(text, @"\bThrottleSubject\b(?<op>\s*(?:\?\?|\+)?=(?!=))?(?<value>\s*[^,;}]*)"))
+            {
+                var value = Regex.Replace(m.Groups["value"].Value, @"\s+", " ").Trim();
+                if (m.Groups["op"].Success)
+                {
+                    var op = m.Groups["op"].Value.Trim();
+                    // ComposeRunner and WebhookService pass a parameter through that is itself built by the builder.
+                    if (op != "=" || !(value.StartsWith("NotificationThrottleSubjects.", StringComparison.Ordinal)
+                                       || value is "throttleSubject" or "throttleSubject ?? NotificationThrottleSubjects.Webhook(webhook.Id)"))
+                        assignments.Add($"{name}: ThrottleSubject {op} {value}");
+                }
+                else if (name != "NotificationThrottler.cs" && m.Index > 0 && text[m.Index - 1] == '.')
+                    readers.Add($"{name}: .ThrottleSubject{(value.Length > 40 ? value[..40] : value)}");
+            }
+        }
+        return (readers, assignments);
     }
 
     private static string SourceRoot()

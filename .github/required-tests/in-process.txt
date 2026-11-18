@@ -321,7 +321,7 @@
 7 Whiskers.Tests.NotificationRenderingTests
 5 Whiskers.Tests.NotificationRetryTests
 19 Whiskers.Tests.NotificationThrottlerTests
-16 Whiskers.Tests.NotificationThrottleSubjectTests
+17 Whiskers.Tests.NotificationThrottleSubjectTests
 4 Whiskers.Tests.NotificationsModuleTests
 7 Whiskers.Tests.OldImageCleanupPolicyTests
 3 Whiskers.Tests.OpenAiRequestMapperTests

@@ -589,7 +589,21 @@ These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv 
 
 ## Amendment 4 — the throttle subject (16 November 2026)
 
-Status: accepted by the maintainer on 16 November 2026 (decision recorded in the release plan, T1).
+Status:
+- **Original decision**, accepted by the maintainer on 16 November 2026 (recorded in the release plan, T1): a new
+  optional field `ThrottleSubject` on `NotificationEvent`; the four emitters set it to the webhook id, the task or
+  automation id, stack plus rule, and the loop name; when set, it is part of the throttle key; the same subject stays
+  throttled, distinct subjects are delivered once each; `ApprovalId` events, state transitions, `DeliveryId` and
+  events without a subject are unchanged.
+- **Deviations found while building, accepted by the maintainer on 18 November 2026:**
+  - a. `exposure_violation`: "stack plus rule" is a hash of the stack, the rule set and the violations — project
+    names and violation lines come from compose files, and a violation found after the first report (a failed
+    restore) must not be swallowed by it.
+  - b. `monitoring_resumed` carries the loop subject too — it is built by the same call as `monitoring_stalled` and
+    is not a state transition, so the second loop's resumption would be swallowed while its stall was delivered.
+  - c. `webhooks:<ids>` for a notice that names several webhooks (the startup migration, the reconcile of unsettled
+    deliveries) — one notice, one subject over the distinct, sorted ids.
+  - d. The webhook's database id, not its `WebhookId` — the `WebhookId` is part of the webhook's URL.
 
 Where it differs from part G of Amendment 1, this amendment wins.
 
@@ -624,9 +638,10 @@ Where it differs from part G of Amendment 1, this amendment wins.
 - **What a subject may hold.** Ids and fixed names only — never free text, a secret or a URL token. The exposure subject
   is a hash because project names and violation lines come from compose files. The subject is a key only: no channel,
   formatter, payload, feed or log shows it. It is not redacted, like `ServerId`, because it holds no text.
-- **Deviation noted.** `monitoring_resumed` is not one of the four types, but it is built by the same call as
-  `monitoring_stalled` and is not a state transition: without the subject, the second loop's resumption would be
-  swallowed while its stall was delivered. It carries the same subject.
+- **Persisted in the outbox.** The outbox stores the whole event (`NotificationOutbox`, `notification-outbox.json`
+  and its `.bak`), so the subject is persisted with it. Harmless: it holds ids, GUIDs or a hash only; `Copy()` and
+  the composite's `Redacted()` keep it; and a redelivery skips the throttle. It is deliberately not `[JsonIgnore]`:
+  a redelivery from the outbox stays identical to the event first sent.
 - **Tests** (`NotificationThrottleSubjectTests`, and one assertion per emitter in its own test class):
   - two distinct subjects inside the window give two deliveries, for each of the four types (theory);
   - the same subject twice gives one delivery, for each of the four types (theory);
