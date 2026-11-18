@@ -2228,6 +2228,12 @@ accepted before the work started (#209). They come from the full review of the w
 - **Approval notifications are never throttled.** A second approval request inside the throttle window used to reach
   no external channel. An event that carries an approval id now always goes out, and pruning uses the live window
   after an operator changes it (part G, #210).
+- **A second webhook, task or loop inside the throttle window is no longer swallowed.** `webhook_disabled`,
+  `automation_refused`/`automation_suspended`, `exposure_violation` and `monitoring_stalled` carry no container, so
+  every channel throttled all of them of one server on one key: a second disabled webhook, refused task or stalled
+  loop within 5 minutes never arrived. Each now names its subject (the webhook, task or automation id, the compose
+  stack and the rules it broke, the loop), which is part of the throttle key. The same subject is still throttled;
+  approvals and state transitions stay exempt (contract 0017, amendment 4).
 - **mTLS CSRs are re-encoded.** The host's answer to the key-and-CSR step no longer reaches the CA host as text:
   Whiskers checks it, re-encodes it from DER and writes the PEM itself. The SAN count of the CSR and the issued
   certificate must match exactly, so extra URI or e-mail SANs are refused (part E, #212).

@@ -586,3 +586,55 @@ These stay allowed: `rsync -av ./a host:/b`, `tar -czvf ./a.tgz ./dir`, `cp -rv 
   prefixes (`sudo -u`, `env -u`, `exec -a`, `flock`, `chroot`, `timeout -s`), functions and aliases defined in the
   same text, redirections between words, and nested shells beyond four levels. Round 4 does not rely on reading
   them right: no decision of part B depends on which word is the command word any more, except the glob rule.
+
+## Amendment 4 — the throttle subject (16 November 2026)
+
+Status: accepted by the maintainer on 16 November 2026 (decision recorded in the release plan, T1).
+
+Where it differs from part G of Amendment 1, this amendment wins.
+
+### G2 — events without a container name their subject
+
+- **The gap.** The throttle key is `ServerId/ContainerId` plus type. Four event types carry no container, so all their
+  events of one server shared one slot, and a second distinct subject inside the window (default 5 minutes) was
+  silently swallowed — a second webhook disabled, a second task refused, a second loop stalled.
+- **The field.** `NotificationEvent` gets a new optional field `ThrottleSubject` (`string?`). Additive: every other
+  producer leaves it unset.
+- **The key.** When the subject is set, it is part of the key: `ServerId/ContainerId` + subject + type. Distinct subjects
+  are delivered once each; the same subject stays throttled (flood protection: `automation_refused` fires once per
+  refused call).
+- **Unchanged.**
+  - An event that carries an `ApprovalId` is never throttled.
+  - State transitions (`NotificationEventTypes.IsStateTransition`) are exempt.
+  - `DeliveryId` is never part of the key.
+  - An event without a subject (null or empty) keeps exactly today's key.
+- **The emitters and their subjects.** Built only by `NotificationThrottleSubjects`:
+
+  | Event type | Emitter | Subject |
+  |---|---|---|
+  | `webhook_disabled` | `WebhooksModule` (startup migration of secret-less webhooks, one notice for all) | `webhooks:<ids>` — the database ids, distinct and sorted |
+  | `automation_refused`, `automation_suspended` | `WebhookService` | `webhook:<id>` (database id, not the `WebhookId` of the URL); the reconcile notice that names several: `webhooks:<ids>` |
+  | `automation_refused`, `automation_suspended` | `TaskExecutor` | `task:<id>` |
+  | `automation_suspended` | `AiTriggerAuthority` | `ai-trigger:<id>` |
+  | `automation_suspended` | `EndpointCheckMonitor` | `endpoint-check:<id>` |
+  | `automation_suspended` | `AutoPatchService`, `AutoUpdateService` | `automation:autopatch`, `automation:autoupdate` |
+  | `exposure_violation` | `ComposeRunner` | `exposure:<hash>` — SHA-256 (first 16 bytes, hex) of the stack (project name), the rule set (agent or person) and the distinct, sorted violations; a violation found after the first report (a restore that failed) is a new subject |
+  | `monitoring_stalled` (and its `monitoring_resumed`) | `ScanSupervisor` | `loop:<loop name>` |
+
+- **What a subject may hold.** Ids and fixed names only — never free text, a secret or a URL token. The exposure subject
+  is a hash because project names and violation lines come from compose files. The subject is a key only: no channel,
+  formatter, payload, feed or log shows it. It is not redacted, like `ServerId`, because it holds no text.
+- **Deviation noted.** `monitoring_resumed` is not one of the four types, but it is built by the same call as
+  `monitoring_stalled` and is not a state transition: without the subject, the second loop's resumption would be
+  swallowed while its stall was delivered. It carries the same subject.
+- **Tests** (`NotificationThrottleSubjectTests`, and one assertion per emitter in its own test class):
+  - two distinct subjects inside the window give two deliveries, for each of the four types (theory);
+  - the same subject twice gives one delivery, for each of the four types (theory);
+  - an event without a subject keeps the key `ServerId/ContainerId`;
+  - approvals and state transitions stay exempt whatever the subject;
+  - `DeliveryId` is still not part of the key;
+  - subjects are ids or a hash, never the project name;
+  - no channel payload or formatter shows the subject; only the throttler reads it and only
+    `NotificationThrottleSubjects` builds it (source scan);
+  - two loops stalled on one server carry their loop as subject and both pass one channel's throttle
+    (`MonitoringAlarmLogicTests`).

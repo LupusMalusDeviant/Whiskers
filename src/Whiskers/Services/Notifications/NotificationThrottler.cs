@@ -69,5 +69,11 @@ public class NotificationThrottler
 
     // Deliberately without DeliveryId: CompositeNotificationService gives every event a fresh one, so it would make every
     // event its own slot and switch throttling off.
-    private static string KeyFor(NotificationEvent evt) => $"{evt.ServerId}/{evt.ContainerId}";
+    // Contract 0017, amendment 4 (G2): an event without a container names its subject (a webhook, a task, a compose
+    // project's violations, a loop) — distinct subjects get their own slot, the same subject stays throttled. Without a
+    // subject the key is exactly the one before. The unit separator cannot occur in an id, so no subject collides with
+    // another event's server or container.
+    internal static string KeyFor(NotificationEvent evt) => string.IsNullOrEmpty(evt.ThrottleSubject)
+        ? $"{evt.ServerId}/{evt.ContainerId}"
+        : $"{evt.ServerId}/{evt.ContainerId}\u001F{evt.ThrottleSubject}";
 }

@@ -320,6 +320,9 @@ public sealed partial class ComposeImpactExposureTests
         Assert.Contains(result.Violations, v => v.Contains("host network", StringComparison.Ordinal));
         Assert.Equal([("disable_restart", "new-web"), ("stop", "new-web")], _docker.Actions.Select(a => (a.Op, a.ContainerId)));
         Assert.Contains(_notifications.Sent, n => n.EventType == NotificationEventTypes.ExposureViolation);
+        // Contract 0017, G2: the stack plus the rules it broke is the throttle subject.
+        Assert.Equal(NotificationThrottleSubjects.Exposure(plan.ProjectNameForAudit, true, result.Violations),
+            _notifications.Sent.Single(n => n.EventType == NotificationEventTypes.ExposureViolation).ThrottleSubject);
     }
 
     [Fact]

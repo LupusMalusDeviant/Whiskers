@@ -387,6 +387,7 @@ public class AutoUpdateService : Whiskers.Services.FleetBackgroundService, IAuto
             await _notifications.SendAsync(new NotificationEvent
             {
                 EventType = NotificationEventTypes.AutomationSuspended,
+                ThrottleSubject = NotificationThrottleSubjects.Automation(IAutomationOwnerStore.AutoUpdate),
                 ContainerName = "AutoUpdate",
                 ImageInfo = $"AutoUpdate was suspended: {lost}. It stays off until an admin takes it over in Settings → Automation owners."
                             + (saved ? "" : Whiskers.Services.AutoPatch.AutoPatchService.SuspensionNotSaved),

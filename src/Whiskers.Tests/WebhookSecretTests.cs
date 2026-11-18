@@ -241,6 +241,8 @@ public sealed class WebhookSecretTests : IDisposable
         Assert.True(db.Webhooks.Single(w => w.WebhookId == healthy.WebhookId).Enabled); // untouched
         var evt = Assert.Single(notify.Sent);
         Assert.Equal("webhook_disabled", evt.EventType);
+        // Contract 0017, G2: the disabled webhooks' database ids are the throttle subject.
+        Assert.Equal(NotificationThrottleSubjects.Webhooks([legacy.Id]), evt.ThrottleSubject);
         Assert.Contains(legacy.Name, evt.ImageInfo);
     }
 

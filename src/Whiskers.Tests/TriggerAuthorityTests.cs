@@ -83,6 +83,7 @@ public sealed class TriggerAuthorityTests : IDisposable
         Assert.Contains("no owner", start.Refusal);
         Assert.False(trigger.Enabled);
         Assert.Equal("automation_suspended", Assert.Single(notify.Events).EventType);
+        Assert.Equal(NotificationThrottleSubjects.AiTrigger("t1"), notify.Events[0].ThrottleSubject);   // contract 0017, G2
     }
 
     [Fact]

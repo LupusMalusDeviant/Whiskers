@@ -330,6 +330,7 @@ public sealed class AutoPatchService : FleetBackgroundService, IAutoPatchService
             await _notifications.SendAsync(new NotificationEvent
             {
                 EventType = NotificationEventTypes.AutomationSuspended,
+                ThrottleSubject = NotificationThrottleSubjects.Automation(IAutomationOwnerStore.AutoPatch),
                 ContainerName = "AutoPatch",
                 ImageInfo = $"AutoPatch was suspended: {lost}. It stays off until an admin takes it over in Settings."
                             + (saved ? "" : SuspensionNotSaved),

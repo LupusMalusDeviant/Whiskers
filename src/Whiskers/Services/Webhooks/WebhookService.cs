@@ -1001,7 +1001,8 @@ public class WebhookService : IWebhookService
                 var names = string.Join(", ", told.Select(w => $"\"{w.Name}\"").Distinct(StringComparer.Ordinal));
                 await NotifyAsync(scope, NotificationEventTypes.AutomationRefused, told[0],
                     $"{told.Count} webhook deliveries accepted before Whiskers stopped did not run ({names}). " +
-                    "Each needs a new delivery (a new delivery id, or for GitHub a new push).");
+                    "Each needs a new delivery (a new delivery id, or for GitHub a new push).",
+                    NotificationThrottleSubjects.Webhooks(told.Select(w => w.Id)));
             }
             return (recorded, complete);
         }
@@ -1552,7 +1553,10 @@ public class WebhookService : IWebhookService
     /// <summary>The audit action of an automatic switch-off (the owner lost the authority, or there is none).</summary>
     public const string SuspendAction = "webhook.suspended";
 
-    private async Task NotifyAsync(IServiceScope scope, string eventType, WebhookEntity webhook, string message)
+    /// <param name="throttleSubject">Contract 0017, amendment 4 (G2): the throttle subject; the webhook's own by
+    /// default, the set of webhooks for a notice that names several.</param>
+    private async Task NotifyAsync(IServiceScope scope, string eventType, WebhookEntity webhook, string message,
+        string? throttleSubject = null)
     {
         _logger.LogWarning("Webhook {Name}: {Message}", webhook.Name, message);
         if (scope.ServiceProvider.GetService<INotificationService>() is not { } notify) return;
@@ -1561,6 +1565,7 @@ public class WebhookService : IWebhookService
             await notify.SendAsync(new NotificationEvent
             {
                 EventType = eventType,
+                ThrottleSubject = throttleSubject ?? NotificationThrottleSubjects.Webhook(webhook.Id),
                 ContainerName = webhook.Name,
                 ImageInfo = message,
             });
