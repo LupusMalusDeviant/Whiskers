@@ -608,7 +608,21 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         var (server, error) = ResolveServer(target.ServerId);
         if (server is null) return Refuse(error!, target.ServerId);
         if (Creates.Contains(capability.Id))
-            return Pass(target with { ServerId = server.Id });
+        {
+            // Contract 0021: a LAN driver (the call's own argument; absent is the method's default, bridge) carries a
+            // LanNetwork exposure, so ExposureChangeRule decides it like a compose exposure. Nothing is withheld: name
+            // and driver are typed by the caller and audited.
+            var name = MutationTargets.String(request.Arguments, "name") ?? target.Name ?? target.Id;
+            var driver = !request.Arguments.TryGetValue("driver", out var d)
+                         || d.ValueKind is System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined
+                ? "bridge"
+                // Anything but a string is no driver Whiskers knows: it counts as LAN (D2, fail closed).
+                : d.ValueKind == System.Text.Json.JsonValueKind.String ? d.GetString() ?? "bridge" : d.GetRawText();
+            var created = target with { ServerId = server.Id };
+            return Pass(capability.Id == "network.create" && LanDrivers.CreateIdentity(name ?? "", driver) is { } lan
+                ? created with { Exposures = created.Exposures.Append(lan).Distinct(StringComparer.Ordinal).ToList() }
+                : created);
+        }
         if (string.IsNullOrWhiteSpace(target.Id))
             return Refuse("Network ID or name is required.");
         var docker = _services.GetService<IDockerService>();
@@ -629,6 +643,7 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
         // else (removal) every attached container, which the removal cuts off.
         var related = new List<string>();
         var resources = new List<IReadOnlyList<string>>();
+        var exposures = new List<string>();
         string? relatedContainerId = null;
         if (!ContainerScoped.Contains(capability.Id))
         {
@@ -646,6 +661,10 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             related.Add(container.Name);
             resources.Add(Aliases(container.Id, container.Name));
             relatedContainerId = container.Id;
+            // Contract 0021: connecting a container to a LAN network gives it its own address on the LAN.
+            if (capability.Id == "network.connect" && LanDrivers.IsLan(network.Driver))
+                exposures.Add(ComposeExposures.Identity(container.Name.TrimStart('/'), ExposureKind.LanNetwork,
+                    network.Name, network.Driver));
         }
         return Done(target with
         {
@@ -653,6 +672,7 @@ public sealed partial class MutationTargetResolver : IMutationTargetResolver
             Related = related.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList(),
             RelatedResources = resources.Where(g => g.Count > 0).ToList(),
             RelatedContainerId = relatedContainerId,
+            Exposures = target.Exposures.Concat(exposures).Distinct(StringComparer.Ordinal).ToList(),
         });
     }
 

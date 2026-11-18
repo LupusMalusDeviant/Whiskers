@@ -32,6 +32,14 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
     private readonly ApprovalDatabase _db = new();
     private readonly Stub<IDockerService> _docker = new();
     private readonly Stub<IGitDeployService> _gitDeploy = new();
+    private readonly SentNotifications _notifications = new();
+
+    private sealed class SentNotifications : Whiskers.Services.Notifications.INotificationService
+    {
+        public List<Whiskers.Models.NotificationEvent> Sent { get; } = [];
+        public Task SendAsync(Whiskers.Models.NotificationEvent evt) { lock (Sent) Sent.Add(evt); return Task.CompletedTask; }
+        public Task SendTestAsync() => Task.CompletedTask;
+    }
 
     public UiCreatedResourceAuditTests()
     {
@@ -66,6 +74,7 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
         Services.AddSingleton(new Stub<Whiskers.Services.Vault.IVaultService>().Object);
         Services.AddSingleton(new Stub<IAutomationOwnerResolver>().Object);
         Services.AddSingleton(new Stub<Whiskers.Modules.IModuleRegistry>().On("IsEnabled", _ => true).Object);
+        Services.AddSingleton<Whiskers.Services.Notifications.INotificationService>(_notifications);
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 
@@ -98,6 +107,37 @@ public sealed class UiCreatedResourceAuditTests : BunitContext, IAsyncLifetime
         await Invoke(page, "CreateNetwork");
 
         Assert.Contains("net-9f8e7d", (await TheEventAsync("network.create")).Details);
+    }
+
+    /// <summary>Contract 0021 (§ 1.6, PC-D1): a person who picks macvlan sees the LAN hint, the click creates the network
+    /// without a confirmation, and one exposure_change names the network and the driver.</summary>
+    [Fact]
+    public async Task The_networks_page_creates_macvlan_without_confirmation_and_notifies()
+    {
+        string? driver = null;
+        _docker.On(nameof(IDockerService.CreateNetworkAsync), args => { driver = (string)args[1]!; return Task.FromResult("net-lan-1234"); });
+        Render<MudPopoverProvider>();
+        var dialog = Render<MudDialogProvider>();
+        var page = Render<Networks>();
+        SetField(page, "_showCreateDialog", true);
+        SetField(page, "_newNetworkName", "lan");
+        SetField(page, "_newNetworkDriver", "bridge");
+        page.Render();
+        dialog.WaitForAssertion(() => Assert.Contains("Driver", dialog.Markup));
+        Assert.Empty(dialog.FindAll("[data-testid=lan-driver-hint]"));
+        SetField(page, "_newNetworkDriver", "macvlan");
+        page.Render();
+        dialog.WaitForAssertion(() => Assert.Single(dialog.FindAll("[data-testid=lan-driver-hint]")));
+
+        await Invoke(page, "CreateNetwork");
+
+        Assert.Equal("macvlan", driver);
+        var row = await TheEventAsync("network.create");          // Executed: no approval was asked of the person
+        Assert.Contains("net-lan-1234", row.Details);
+        var sent = Assert.Single(_notifications.Sent);
+        Assert.Equal(Whiskers.Services.Notifications.NotificationEventTypes.ExposureChange, sent.EventType);
+        Assert.Equal("lan", sent.ContainerName);
+        Assert.Contains("LanNetwork (driver macvlan)", sent.ImageInfo);
     }
 
     [Fact]

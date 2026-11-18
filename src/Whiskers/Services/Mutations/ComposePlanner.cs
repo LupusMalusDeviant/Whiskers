@@ -94,8 +94,12 @@ public sealed class ComposePlanner : IComposePlanner
         // Contract 0006: what the files themselves expose, read before compose runs (a value the plan cannot interpolate
         // and a relative label_file refuse the plan here).
         var prefixes = ExposurePrefixes();
-        var (modelExposures, modelShared) = ComposeModel.ExposuresOf(files, env, prefixes);
         var project = ComposeModel.EffectiveProjectName(deployment.ProjectName, env, declared, directory);
+        var projectSource = ComposeModel.ProjectNameSource(deployment.ProjectName, env, envTemplates, declared, declaredSource);
+        // Contract 0021: the project name makes the real name of a project network (<project>_<key>); one from a variable
+        // withholds it.
+        var (modelExposures, modelShared) = ComposeModel.ExposuresOf(files, env, prefixes, project, projectSource is not null);
+        var modelNetworks = ComposeModel.NetworksOf(files, env, project, projectSource is not null);
         // COMPOSE_REMOVE_ORPHANS in the .env makes a plain `up` remove orphans: planned (and passed explicitly) too.
         var removeOrphans = deployment.RemoveOrphans || ComposeModel.RemovesOrphans(env);
 
@@ -103,13 +107,14 @@ public sealed class ComposePlanner : IComposePlanner
             inputs.Where(f => f.Content is not null).ToList(), deployment.EnvFileContent,
             HasEnvFile: envContent is not null, removeOrphans, services, [])
         {
-            ProjectNameSource = ComposeModel.ProjectNameSource(deployment.ProjectName, env, envTemplates, declared,
-                declaredSource),
+            ProjectNameSource = projectSource,
         };
         // What the deployment mounts as compose itself resolves it on the server, besides the model's own reading.
         var config = await ConfigAsync(plan, ct);
         services = ComposeModel.WithEffects(services, ComposeConfigEffects.Parse(config, plan.ProjectName));
         var active = ComposeConfigEffects.ActiveServices(config, plan.ProjectName, prefixes);
+        // Contract 0021 (§ 1.4): the host's networks, read once per plan (Docker API, no shell); unreadable refuses.
+        var live = await LiveNetworksAsync(_docker, serverId, ct);
 
         var existing = await _docker.ListContainersAsync(all: true, serverId: serverId, ct);
         // A container volumes_from takes over brings its own mounts along.
@@ -119,9 +124,43 @@ public sealed class ComposePlanner : IComposePlanner
         services = ComposeModel.ResolveContainers(services, existing, inherited);
         var impact = ComposeModel.Impact(project, services, removeOrphans, existing);
         var exposed = await ExposuresAsync(plan with { Services = services }, active, modelExposures, modelShared,
-            existing, prefixes, ct);
+            existing, prefixes, modelNetworks, live, ct);
         return exposed with { Impact = impact };
     }
+
+    private static readonly TimeSpan NetworkReadTimeout = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// Contract 0021: the host's networks (<c>IDockerService.ListNetworksAsync</c>, Docker API <c>GET /networks</c>), read
+    /// for the LAN detection. Anything that keeps them from being read — an exception, a cancellation, a timeout — refuses
+    /// with <see cref="ComposeLiveNetworks.Unreadable"/> (fail closed).
+    /// </summary>
+    internal static async Task<IReadOnlyList<NetworkInfo>> LiveNetworksAsync(IDockerService docker, string serverId,
+        CancellationToken ct)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(NetworkReadTimeout);
+            var networks = await docker.ListNetworksAsync(serverId, cts.Token);
+            return networks?.ToList() ?? throw new InvalidOperationException("no network list");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            throw new ComposePlanException(ComposeLiveNetworks.Unreadable(serverId));
+        }
+    }
+
+    /// <summary>Contract 0021: the networks each active service joins — the plan model's reading (shown when it read the
+    /// name literally) united with compose's (withheld) by service and name; an external one stays external.</summary>
+    internal static IReadOnlyList<ComposeNetworkRef> MergeNetworks(IEnumerable<ComposeNetworkRef> model,
+        IEnumerable<ComposeNetworkRef> config) =>
+        model.Concat(config)
+            .GroupBy(r => (r.Service, r.Name))
+            .Select(g => new ComposeNetworkRef(g.Key.Service, g.Key.Name, g.Any(r => r.External),
+                // Shown only when the model read it, and read it literally.
+                !model.Any(m => m.Service == g.Key.Service && m.Name == g.Key.Name && !m.Withheld)))
+            .ToList();
 
     /// <summary>
     /// Contract 0006: the exposures of every service compose will start — the model's reading and compose's, united (an
@@ -131,20 +170,28 @@ public sealed class ComposePlanner : IComposePlanner
     /// </summary>
     private async Task<ComposePlan> ExposuresAsync(ComposePlan plan, IReadOnlyList<ComposeConfigEffects.ActiveService> active,
         IReadOnlyDictionary<string, IReadOnlyList<ComposeExposure>> model, IReadOnlyList<ComposeSharedNamespace> modelShared,
-        IList<ContainerInfo> existing, IReadOnlyList<string> prefixes, CancellationToken ct)
+        IList<ContainerInfo> existing, IReadOnlyList<string> prefixes, IReadOnlyList<ComposeNetworkRef> modelNetworks,
+        IReadOnlyList<NetworkInfo> live, CancellationToken ct)
     {
         var known = plan.Services.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
         if (active.Any(a => !known.Contains(a.Name)))
             throw new ComposePlanException("docker compose resolves a service the deployment's files do not show.");
         var byName = active.ToDictionary(a => a.Name, StringComparer.Ordinal);
 
-        // Own exposures: the model's entry where it read one, compose's (withheld) otherwise.
+        // Own exposures: the model's entry where it read one, compose's (withheld) otherwise; contract 0021: then the LAN
+        // networks the host's live networks show (external and pre-existing networks, decided by their live driver).
         var own = new Dictionary<string, IReadOnlyList<ComposeExposure>>(StringComparer.Ordinal);
+        var networks = new List<ComposeNetworkRef>();
         foreach (var service in active)
         {
             var read = model.GetValueOrDefault(service.Name) ?? [];
             var ids = read.Select(e => e.Identity).ToHashSet(StringComparer.Ordinal);
-            own[service.Name] = ComposeModel.Distinct(read.Concat(service.Exposures.Where(e => !ids.Contains(e.Identity))));
+            var refs = MergeNetworks(modelNetworks.Where(n => n.Service == service.Name), service.Networks);
+            networks.AddRange(refs);
+            var declared = read.Concat(service.Exposures.Where(e => !ids.Contains(e.Identity))).ToList();
+            var declaredIds = declared.Select(e => e.Identity).ToHashSet(StringComparer.Ordinal);
+            own[service.Name] = ComposeModel.Distinct(declared.Concat(
+                ComposeLiveNetworks.Decide(refs, live, plan.ServerId).Where(e => !declaredIds.Contains(e.Identity))));
         }
 
         // The images as they are on the host now: their labels count as the services' own (contract 0006, Amendment 4).
@@ -207,7 +254,7 @@ public sealed class ComposePlanner : IComposePlanner
             var container = ComposeModel.FindShared(named, existing);
             shared.Add(new ComposeSharedContainer(container.Id, container.Name.TrimStart('/'), fromVariable));
             if (!inspectedContainers.TryGetValue(container.Id, out var read))
-                inspectedContainers[container.Id] = read = await InspectContainerAsync(plan.ServerId, container.Id, prefixes, ct);
+                inspectedContainers[container.Id] = read = await InspectContainerAsync(plan.ServerId, container.Id, prefixes, live, ct);
             var (exposures, nested) = read;
             var result = new List<ComposeExposure>(exposures);
             foreach (var (_, id) in nested)
@@ -233,6 +280,7 @@ public sealed class ComposePlanner : IComposePlanner
             SharesNamespaces = active.Any(a => a.Shared.Count > 0),
             PlannedImages = inspected.ToDictionary(i => i.Key, i => i.Value?.Id, StringComparer.Ordinal),
             ThirdPartyFiles = thirdPartyFiles,
+            Networks = networks.Distinct().ToList(),
         };
     }
 
@@ -293,7 +341,7 @@ public sealed class ComposePlanner : IComposePlanner
 
     /// <summary>A container another service shares a namespace with: its exposures and its own shared namespaces.</summary>
     private async Task<(IReadOnlyList<ComposeExposure>, IReadOnlyList<(string, string)>)> InspectContainerAsync(string serverId,
-        string id, IReadOnlyList<string> prefixes, CancellationToken ct)
+        string id, IReadOnlyList<string> prefixes, IReadOnlyList<NetworkInfo> live, CancellationToken ct)
     {
         var result = await _executor.ExecuteAsync(serverId, ComposeExposures.InspectContainersCommand([id]), ReadTimeout, ct, MaxFileChars);
         if (!result.Success || result.OutputTruncated)
@@ -301,7 +349,7 @@ public sealed class ComposePlanner : IComposePlanner
         var documents = ComposeExposures.ParseInspect(result.Output);
         if (documents.Count != 1) throw new ComposePlanException("A container whose namespace is shared cannot be read.");
         // Its exposures are attributed to the service that shares it; the key of a label is shown, never its value.
-        return ComposeExposures.FromInspect("shared", documents[0], prefixes);
+        return ComposeExposures.FromInspect("shared", documents[0], prefixes, live);
     }
 
     /// <summary>The deployment's mounts per service from <c>docker compose config</c> on the server (fail closed: a

@@ -390,7 +390,7 @@
     },
     {
       "name": "connect_container_to_network",
-      "description": "Connect a container to a Docker network.",
+      "description": "Connect a container to a Docker network. Connecting to a macvlan/ipvlan network needs a confirmation for the agent.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1520,7 +1520,7 @@
             "type": "string"
           },
           "driver": {
-            "description": "Network driver: bridge, overlay, macvlan (default: bridge)",
+            "description": "Network driver: bridge (default), overlay, macvlan, ipvlan. macvlan, ipvlan and any other driver put containers on the host's LAN and need a confirmation for the agent.",
             "type": "string",
             "default": "bridge"
           },

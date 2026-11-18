@@ -145,6 +145,25 @@ public sealed class MutationScope : IDisposable
         return false;
     }
 
+    /// <summary>Contract 0021: whether a scope of this flow that authorizes <paramref name="capabilityId"/> (it decided
+    /// it, or a capability that composes it) decided the exposure <paramref name="identity"/> on the server the call acts
+    /// on. Servers compare case-insensitively (the scope guard already bound the call to the decided server and handed
+    /// it the canonical id); a call that names no server matches only a decision taken without one (fail closed).</summary>
+    public bool CoversExposureFor(string capabilityId, string? serverId, string identity)
+    {
+        for (var scope = this; scope is not null; scope = scope._parent)
+        {
+            if (!string.Equals(scope.CapabilityId, capabilityId, StringComparison.Ordinal)
+                && !MutationCompositions.Allows(scope.CapabilityId, capabilityId))
+                continue;
+            if (!scope._exposures.Contains(identity)) continue;
+            if (string.IsNullOrEmpty(scope._serverId)
+                || (!string.IsNullOrEmpty(serverId) && string.Equals(scope._serverId, serverId, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>Contract 0006: every exposure this scope and the enclosing ones decided on <paramref name="serverId"/>.</summary>
     public IReadOnlySet<string> DecidedExposures(string serverId)
     {

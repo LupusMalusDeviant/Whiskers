@@ -2317,6 +2317,18 @@ accepted before the work started (#209). They come from the full review of the w
 - **The Trivy image is pinned by digest in the code default too** (TA-14). An operator-configured image without
   a digest now logs a warning.
 
+- **LAN networks are an exposure change (contract 0021, INV-62).** A container on a `macvlan` or `ipvlan` network
+  gets its own address on the host's LAN, past the host's firewall. An agent's or API key's deployment that puts a
+  container on such a network (declared in the files, the implicit `default` network included, an external network,
+  or a network of any driver other than `bridge`, `overlay`, `host`, `none` and `null`), and MCP `create_network` /
+  `connect_container_to_network` with such a network, now wait for confirmation even under an Admin-autonomous
+  policy; a key-owned webhook or Git deploy doing so is refused. A person in the UI is not asked: the decision is
+  audited and an `exposure_change` notification names the network and the driver; the Networks page shows a warning
+  when macvlan is chosen. **Behaviour change:** a compose plan whose external network does not exist, whose network
+  name is not unique on the host, or whose host networks cannot be read is refused; the networks are read again
+  before `up` and in the re-check after it. `connect_container_to_network` now connects by the network id the
+  gateway resolved, so a network re-created under the same name after the decision is not used.
+
 ### Added
 - **One-step server onboarding (contract 0018, PR 2).** *Servers → Add* registers a server from name and IP and binds
   the cloud VM that holds exactly this IP in one stored credential (`server.create`). The onboarding dialog shows the

@@ -459,3 +459,66 @@ As of `ccd5137e`: `ComposeExposure.cs:7-29`, `:83-89`, `:419-497`, `:518-577`; `
 > in the re-check (`NetworkSettings.Networks` by network id; unreadable → undecided `host`). `network.create` with
 > such a driver and `network.connect` to such a network carry the same exposure in the resolved target, and
 > `network.connect` runs on the resolved network id.
+
+## Amendment (implementation, 18 November 2026)
+
+Status: **awaiting maintainer acceptance.** What the implementation does where this contract is silent, or where it
+had to be read one way; nothing here weakens a rule of §§ 1–3.
+
+1. **Line references and totals, re-verified at `fcfa43cf`** (main after contracts 0017–0020). Unchanged: `ComposeExposure.cs:7-29`,
+   `:83-89`, `:419-497`, `:518-577` (`FromInspect` ends at `:573`); `ComposeModelExposures.cs:20-54`, `:70-80`;
+   `ComposeConfigEffects.cs:141-150`; `ComposePlanner.cs:97`, `:304`; `ComposeRunner.cs:448`; `ExposureChangeRule.cs:31-55`;
+   `GuardrailPolicy.cs:93`; `NetworkTools.cs:41-71`, `:100-115`; `NetworkOperations.cs:68-77`; `Networks.razor:106-110`;
+   `IDockerService.cs:137-142`. Moved: `MutationTargets.cs` `Creates` `:152-155` (was `:146-149`) and `NetworkAsync`
+   `:605-657` (was `:530-582`); `MutationPolicy.cs` `WithResolvedTarget` `:127-166` (was `:127-155`);
+   `CapabilityCatalog.cs:247-249` (was `:246-248`); `Networks.razor` `CreateNetwork` `:170-198` (was `:172-189`). The
+   § 7 total is **117** (contract 0020 added U-42 after this contract was written; § 3 said 116); this contract adds no
+   row, so it stays 117. Rows M-19, M-21 and U-13 were edited as in § 3; U-13 keeps its note "MCP admin since R1-05"
+   after the new text.
+2. **Where the § 4 tests live.** There is no `ComposePlannerTests` and no `MutationTargetResolverTests` class. The
+   planner tests are in `ComposeImpactExposureTests` (it holds the planner and runner harness, `ComposeImpactExposureTests.Lan.cs`),
+   the resolver tests in the new `NetworkToolsGatewayTests`, the page test in `UiCreatedResourceAuditTests` (bUnit, the
+   page's real handler and gateway). The names are those of § 4; `An_unknown_or_plugin_qualified_driver_counts_as_lan`
+   also covers `transparent`, `LanDrivers_is_ordinal_and_exact` 12 cases.
+3. **`EnsureLanDecided`** is `LanDrivers.EnsureLanDecided(string? serverId, string networkName, string driver)` and
+   throws `MutationScopeViolationException`. It passes only when a scope of the flow that decided `network.create` (or
+   composes it) holds the identity of that name and driver; servers compare case-insensitively (the scope guard already
+   bound the call to the decided server); a call that names no server matches only a decision taken without one (fail
+   closed). The MCP tool creates on the server the gateway decided (`DecidedTarget.ServerId`), as the page does.
+4. **Step 4 (§ 1.5).** The plan keeps the networks each active service joins (`ComposePlan.Networks`) and step 4 looks
+   them up again. An external network that is gone or not unique by then refuses for every principal, as at planning
+   (compose would refuse `up` the same way). Networks that cannot be read: Deny under the agent rule set; for a person
+   the run goes on, recorded as a failed note in the gateway's event and named in the run's `exposure_change`
+   notification ("the networks could not be read before up").
+5. **Re-check (§ 1.5).** The host's networks are read fresh once per re-check, not once per container. A created
+   container whose inspect has no `NetworkSettings`, an entry without `NetworkID`, or an id that is not in the list
+   counts as "its networks could not be checked" (undecided `host`); `"Networks": null` is a container without networks,
+   as `"Mounts": null` is (contract 0017).
+6. **`container:x` at planning (§ 1.4).** A container x whose `NetworkSettings` cannot be read, or that is attached to
+   a network id the list does not hold, refuses the plan (fail closed; the contract did not say).
+7. **Plan model (§ 1.3).** `ComposeModel.ExposuresOf` gained the optional parameters `project` and
+   `projectFromVariable` (the planner passes the effective project name; a project name from a variable withholds the
+   entry, since `<project>_<key>` contains it), and `ComposeModel.NetworksOf` returns the networks each service joins
+   for the live lookup. A `driver: ""` counts as no driver (compose's default, `bridge`). `network_mode: default` joins
+   no project network, like `none` and `bridge`. Declared and live entries are united by identity; an entry only compose
+   read is withheld, the model's literal reading is shown.
+8. **Notifications (§ 1.7).** The Networks page sends the person's `exposure_change` after a successful create; the
+   MCP tools send it only when the scope was not decided by the agent rule set (in practice never). To reach the
+   notification service the two tools take `IServiceProvider` from DI — not a tool argument, so no MCP parameter is
+   added. The text: "Network '<name>': LanNetwork (driver <driver>); containers on it get their own address on the LAN,
+   past the host's firewall." (`ContainerName` = the network name).
+9. **`connect_container_to_network`** answers with a failure (`MutationScope.Fail`) when no resolved `network.connect`
+   target is open on its flow, instead of connecting by the caller's name (fail closed).
+10. **Resolver.** A `driver` argument that is not a string (and not null) is taken as its raw JSON text, so it counts
+    as LAN (D2). The `network.create` exposure's service part is `network <name>` as § 1.6 says; the rule's reason then
+    reads "network lan gets its own address on the LAN through network 'lan' (driver macvlan), past the host's firewall."
+    A value-only withheld `LanNetwork` (not produced today) would be named "(driver withheld)".
+11. **Test fixtures.** Existing test inspect documents gained `"NetworkSettings":{"Networks":{}}` (Docker always lists
+    them; without it the new fail-closed rule counts the container as unchecked), the network fixture of
+    `TargetResolutionTests` gained `Driver = "bridge"` (an empty driver counts as LAN), and `FakeDocker` records network
+    create/connect calls.
+12. **Generated and descriptive files.** `docs/mcp-tool-catalog.md` and `lhm.plugin.json` carry the new tool and
+    parameter descriptions of § 1.6. README "remaining risks": the macvlan/ipvlan line D6 asked for was not there at
+    `fcfa43cf`, so only D4's bridge options were added. That README item is marked `claim-free:limit`, so
+    `docs/v1/CLAIMS.md` gained its register row (`8beb86d9f1a2`). `ComposePinIntegrationTests` (Docker category) now
+    hands the host's network list to the inventory fake after `up`, since the re-check looks up every NetworkID.

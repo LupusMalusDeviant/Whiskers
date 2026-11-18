@@ -17,14 +17,52 @@ public static partial class ComposeModel
     /// privilege field, any label key, and a label value under a key with an exposure prefix (a value under any other key
     /// is ignored). A relative <c>label_file</c> is refused (Amendments 10 and 11), decided after interpolation.
     /// </summary>
+    /// <remarks>Contract 0021: a service on a non-external network whose declared <c>driver:</c> is LAN
+    /// (<see cref="LanDrivers.IsLan"/>) gets a <see cref="ExposureKind.LanNetwork"/> keyed by the network's real name
+    /// (<c>name:</c>, else <c>&lt;project&gt;_&lt;key&gt;</c>) — a service with neither <c>networks:</c> nor
+    /// <c>network_mode</c> joins <c>default</c>. Withheld when the driver, the name or the project name came from a
+    /// variable. External networks and <c>network_mode: &lt;name&gt;</c> are decided by the live driver
+    /// (<see cref="NetworksOf"/>, the planner).</remarks>
     public static (IReadOnlyDictionary<string, IReadOnlyList<ComposeExposure>> Exposures,
         IReadOnlyList<ComposeSharedNamespace> Shared) ExposuresOf(IReadOnlyList<(string Path, string Content)> files,
-        IReadOnlyDictionary<string, string?> env, IReadOnlyList<string> prefixes)
+        IReadOnlyDictionary<string, string?> env, IReadOnlyList<string> prefixes, string? project = null,
+        bool projectFromVariable = false)
+    {
+        var read = Read(files, env, prefixes, project, projectFromVariable);
+        return (read.Exposures, read.Shared);
+    }
+
+    /// <summary>
+    /// Contract 0021 (§ 1.4): every network a service joins as the plan model reads it — its name on the host, whether it
+    /// must already exist (an external network, or a <c>network_mode: &lt;name&gt;</c>), and whether its name came from
+    /// a variable — for the planner's live lookup. <paramref name="project"/> is the effective project name.
+    /// </summary>
+    public static IReadOnlyList<ComposeNetworkRef> NetworksOf(IReadOnlyList<(string Path, string Content)> files,
+        IReadOnlyDictionary<string, string?> env, string project, bool projectFromVariable = false) =>
+        Read(files, env, Whiskers.Configuration.GuardrailPolicy.DefaultExposureLabelPrefixes, project, projectFromVariable).Networks;
+
+    /// <summary>A top-level network as the files declare it (interpolated).</summary>
+    private sealed record TopNet(string? Name, bool External, string? Driver, bool Withheld);
+
+    /// <summary>What a service's network settings say: it declares <c>networks:</c>, a <c>network_mode</c>, and the
+    /// network names a <c>network_mode</c> gives.</summary>
+    private sealed class Networking
+    {
+        public HashSet<string> Declares { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> Mode { get; } = new(StringComparer.Ordinal);
+        public List<(string Service, string Name, bool FromVariable)> ModeNames { get; } = [];
+    }
+
+    private static (IReadOnlyDictionary<string, IReadOnlyList<ComposeExposure>> Exposures,
+        IReadOnlyList<ComposeSharedNamespace> Shared, IReadOnlyList<ComposeNetworkRef> Networks) Read(
+        IReadOnlyList<(string Path, string Content)> files, IReadOnlyDictionary<string, string?> env,
+        IReadOnlyList<string> prefixes, string? project, bool projectFromVariable)
     {
         var exposures = new Dictionary<string, List<ComposeExposure>>(StringComparer.Ordinal);
         var shared = new List<ComposeSharedNamespace>();
         var serviceNetworks = new List<(string Service, string Key)>();
-        var topNetworks = new Dictionary<string, (string Name, bool External)>(StringComparer.Ordinal);
+        var networking = new Networking();
+        var topNetworks = new Dictionary<string, TopNet>(StringComparer.Ordinal);
         foreach (var (path, content) in files)
         {
             var root = Root(path, content);
@@ -40,17 +78,41 @@ public static partial class ComposeModel
                 if ((key as YamlScalarNode)?.Value is not { } service || value is not YamlMappingNode definition) continue;
                 if (!exposures.TryGetValue(service, out var list)) exposures[service] = list = [];
                 foreach (var source in Sources(definition, serviceMap, 0))
-                    Detect(service, source, env, prefixes, list, shared, serviceNetworks);
+                    Detect(service, source, env, prefixes, list, shared, serviceNetworks, networking);
             }
         }
         foreach (var (service, key) in serviceNetworks)
-            if (topNetworks.TryGetValue(key, out var top) && top.External && top.Name == "host")
+            if (topNetworks.TryGetValue(key, out var top) && top.External && (top.Name ?? key) == "host")
                 exposures[service].Add(new ComposeExposure(service, ExposureKind.HostNetwork, "networks: host")
                 {
                     Key = "networks", Value = "host",
                 });
+
+        // Contract 0021: the networks each service joins — the keys of its networks:, else `default` unless a
+        // network_mode takes it out of the project's networks.
+        var refs = new List<ComposeNetworkRef>();
+        foreach (var service in exposures.Keys)
+        {
+            var keys = serviceNetworks.Where(s => s.Service == service).Select(s => s.Key).Distinct(StringComparer.Ordinal).ToList();
+            if (keys.Count == 0 && !networking.Mode.Contains(service)) keys.Add("default");
+            foreach (var key in keys)
+            {
+                var top = topNetworks.GetValueOrDefault(key) ?? new TopNet(null, false, null, false);
+                // An external network's name is its key unless it names another; a project network's is <project>_<key>.
+                var (name, nameWithheld) = top.Name is { } declared ? (declared, top.Withheld)
+                    : top.External ? (key, false)
+                    : project is null ? (key, false)
+                    : ($"{project}_{key}", projectFromVariable);
+                var withheld = nameWithheld || top.Withheld;
+                refs.Add(new ComposeNetworkRef(service, name, top.External, withheld));
+                if (!top.External && top.Driver is { } driver && LanDrivers.IsLan(driver))
+                    exposures[service].Add(LanDrivers.Exposure(service, name, driver, withheld: withheld));
+            }
+        }
+        foreach (var (service, name, fromVariable) in networking.ModeNames)
+            refs.Add(new ComposeNetworkRef(service, name, External: true, fromVariable));
         return (exposures.ToDictionary(e => e.Key, e => (IReadOnlyList<ComposeExposure>)Distinct(e.Value), StringComparer.Ordinal),
-            shared.Distinct().ToList());
+            shared.Distinct().ToList(), refs.Distinct().ToList());
     }
 
     /// <summary>One entry per identity; an entry withheld in one place is withheld everywhere.</summary>
@@ -67,16 +129,18 @@ public static partial class ComposeModel
 
     private static string WithheldDetail(ExposureKind kind) => $"{ExposureClasses.Noun(kind)} (withheld)";
 
-    private static (string Name, bool External) TopNetwork(string key, YamlMappingNode? definition,
-        IReadOnlyDictionary<string, string?> env)
+    private static TopNet TopNetwork(string key, YamlMappingNode? definition, IReadOnlyDictionary<string, string?> env)
     {
-        if (definition is null) return (key, false);
+        if (definition is null) return new TopNet(null, false, null, false);
         var external = definition.Children.TryGetValue(new YamlScalarNode("external"), out var ext)
                        && (ext is YamlMappingNode || (ext is YamlScalarNode s && Truthy(Interpolate(s.Value ?? "", env, $"The network '{key}'"))));
-        var name = Scalar(definition, "name") is { } n ? Interpolate(n, env, $"The name of network '{key}'")
-            : ext is YamlMappingNode extMap && Scalar(extMap, "name") is { } en ? Interpolate(en, env, $"The name of network '{key}'")
-            : key;
-        return (name, external);
+        var rawName = Scalar(definition, "name") ?? (ext is YamlMappingNode extMap ? Scalar(extMap, "name") : null);
+        var name = rawName is null ? null : Interpolate(rawName, env, $"The name of network '{key}'");
+        // Contract 0021: the declared driver, interpolated (an unset variable refuses the plan like any network field).
+        var rawDriver = Scalar(definition, "driver");
+        var driver = rawDriver is null ? null : Interpolate(rawDriver, env, $"The driver of network '{key}'");
+        return new TopNet(name, external, string.IsNullOrEmpty(driver) ? null : driver,
+            ComposeExposures.HasVariable(rawName) || ComposeExposures.HasVariable(rawDriver));
     }
 
     private static bool Truthy(string value) => value.Equals("true", StringComparison.OrdinalIgnoreCase);
@@ -96,7 +160,7 @@ public static partial class ComposeModel
 
     private static void Detect(string service, YamlMappingNode source, IReadOnlyDictionary<string, string?> env,
         IReadOnlyList<string> prefixes, List<ComposeExposure> found, List<ComposeSharedNamespace> shared,
-        List<(string, string)> serviceNetworks)
+        List<(string, string)> serviceNetworks, Networking networking)
     {
         string Value(string raw, string what) => Interpolate(raw, env, $"{what} of '{service}'");
         void Add(ExposureKind kind, string key, string value, string detail, bool fromVariable) =>
@@ -114,11 +178,16 @@ public static partial class ComposeModel
         if (Scalar(source, "network_mode") is { } rawMode)
         {
             var mode = Value(rawMode, "The network_mode");
+            networking.Mode.Add(service);
             if (mode == "host") Add(ExposureKind.HostNetwork, "network_mode", "host", "network_mode: host", ComposeExposures.HasVariable(rawMode));
             else if (IsShared(mode)) shared.Add(new(service, "network_mode", mode, ComposeExposures.HasVariable(rawMode)));
+            // Contract 0021: any other value but none / bridge / default names a network, decided by its live driver.
+            else if (mode is not ("none" or "bridge" or "default" or ""))
+                networking.ModeNames.Add((service, mode, ComposeExposures.HasVariable(rawMode)));
         }
         if (source.Children.TryGetValue(new YamlScalarNode("networks"), out var networks))
         {
+            networking.Declares.Add(service);
             var keys = networks switch
             {
                 YamlSequenceNode seq => seq.Children.OfType<YamlScalarNode>().Select(s => s.Value),

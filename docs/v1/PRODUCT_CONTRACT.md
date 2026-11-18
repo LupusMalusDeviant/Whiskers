@@ -212,9 +212,9 @@ Audit column, `GW ✅` = the gateway event; `+ details` = the tool also reports 
 | M-16 | `backup_database` | admin (R1-05) | ✅ dump file on the host, not empty (R1-37) | GW ✅ + details | INV-43 |
 | M-17 | `set_dns_record` | write | ✅ provider lists the record with the value, an A/AAAA/CNAME once (R1-37) | GW ✅ + details | INV-43, 52 (DNS token) |
 | M-18 | `delete_dns_record` | write | ✅ provider no longer lists the record, or the one with the given value (R1-37) | GW ✅ + details | INV-43, 52 |
-| M-19 | `create_network` | **admin** (R1-05; was write) | ✅ listed with its driver (R1-37) | GW ✅ + details | — |
+| M-19 | `create_network` | **admin** (R1-05; was write) | ✅ listed with its driver (R1-37) | GW ✅ + details | 62 (a LAN driver is a LanNetwork exposure; Confirm for the agent, contract 0021) |
 | M-20 | `remove_network` | **admin** (R1-05; was write) | ✅ no longer listed (R1-37) | GW ✅ + details | — |
-| M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ✅ container attached (R1-37) | GW ✅ | — |
+| M-21 | `connect_container_to_network` | **admin** (R1-05; was write) | ✅ container attached (R1-37) | GW ✅ | 62 (connecting to a LAN network is a LanNetwork exposure; connects by the resolved network id, contract 0021) |
 | M-22 | `disconnect_container_from_network` | **admin** (R1-05; was write) | ✅ container no longer attached (R1-37) | GW ✅ | — |
 | M-23 | `create_scheduled_task` | write; **effective admin** for CustomCommand, SelfBackup, every DB backup, and volume backups with retention (`maxBackups` > 0, default 7) — resolved before the caller check and the approval (R1-05) | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ + details | INV-04 |
 | M-24 | `delete_scheduled_task` | write | `NotVerifiable` + reason (Whiskers' own record, R1-37) | GW ✅ + details | — |
@@ -331,7 +331,7 @@ mTLS carries the server's diff.
 | U-10 | Deploy form / compose tab · INV-59 approval in the dialog (0019) | **Admin** (WP1) | ✅ every container of the compose project read back (contract 0013, D7) | GW ✅ (R1-21) | INV-43, 62 (contract 0013: both tabs run a planned compose project through the compose runner) |
 | U-11 | App store template / registry image · INV-59 approval in the dialog (0019) | **Admin** (WP1) | ✅ every container of the compose project read back (contract 0013, D7) | GW ✅ (R1-21) | INV-43, 62 (contract 0006) |
 | U-12 | Compose editor · INV-59 approval in the dialog (0019) | **Admin** (WP1) | ✅ every container of the project the plan resolved read back (R1-37); an interpolated project name `NotVerifiable` + reason | GW ✅ (R1-21) | INV-43, 62 (contract 0006) |
-| U-13 | Networks create/remove | Admin | ✅ listed with its driver / no longer listed (R1-37) | GW ✅ (R1-21) | — (MCP admin since R1-05) |
+| U-13 | Networks create/remove | Admin | ✅ listed with its driver / no longer listed (R1-37) | GW ✅ (R1-21) | 62 (a LAN driver is audited and notified as exposure_change, PC-D1, contract 0021); MCP admin since R1-05 |
 | U-14 | Firewall enable/disable UFW | Admin | ✅ `ufw status` read back (R1-37) | GW ✅ (R1-21) | — |
 | U-15 | Firewall rule add/remove (the dialog's submit has no page role check of its own: it runs `firewall.rule_add` through `IUiMutationRunner`, `AddFirewallRuleDialog.razor:55`, and the gateway refuses a caller below Admin at the click; `FirewallService.AddRuleAsync` runs only inside that decision — `MutationGatewayCoverageTests`) | Admin (gateway, catalog level) | ✅ add: `ufw show added` read back; remove: `NotVerifiable` + reason (R1-37) | GW ✅ (R1-21) | INV-17 (pinned on the real handlers: `FirewallRuleRoleTests` — the dialog's submit below Admin, also after a demotion, and the page's rule removal below Admin are refused and recorded as Denied, `IFirewallService` is never called; an Admin's submit runs after its audit intent) |
 | U-16 | Nginx save/enable/disable site | Admin | ✅ `nginx -t`; the site file and the sites-enabled link read back (R1-37) | GW ✅ (R1-21) | INV-41 (E-03; site names validated since R1-42) |

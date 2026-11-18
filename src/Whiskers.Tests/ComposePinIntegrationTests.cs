@@ -144,6 +144,15 @@ public sealed class ComposePinIntegrationTests
                             Labels = new() { [ComposeModel.ProjectLabel] = project, [ComposeModel.ServiceLabel] = parts[2] },
                         });
                     }
+                    // Contract 0021: the host's networks as the inventory lists them (the re-check looks up each attached
+                    // network's id there).
+                    var networks = Bash("docker network ls --no-trunc --format '{{.ID}}\t{{.Name}}\t{{.Driver}}'").Out;
+                    foreach (var line in networks.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        var parts = line.Split('\t');
+                        if (parts.Length == 3 && docker.Networks.All(n => n.Id != parts[0]))
+                            docker.Networks.Add(new NetworkInfo { Id = parts[0], Name = parts[1], Driver = parts[2], ServerId = "local" });
+                    }
                 }
                 return done;
             }, new ComposeRunOptions(Pull: true, TimeSpan.FromMinutes(5)));
