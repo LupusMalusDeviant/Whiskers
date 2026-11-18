@@ -24,7 +24,7 @@ reach the tool's level, and the in-process agent is additionally capped by its t
 | `add_firewall_rule` | admin | Add a firewall rule (UFW) to allow or deny traffic on a port. |
 | `add_server` | admin | Add a server from its name and public IP (contract 0018). The record is SSH to root@<ip>:22 without a credential; Whiskers moves it to TCP + mTLS when it is onboarded (onboard_server). With cloudProvider hetzner or hostinger, the VM is found by its exact public IP across the stored credentials of that provider (never by name) and the credential is shared by reference; cloudCredentialFrom names the server whose stored credential to use instead. No API key is ever passed here. Answers JSON. Admin only. |
 | `backup_database` | admin | Create a database backup (dump) for a database container. |
-| `connect_container_to_network` | admin | Connect a container to a Docker network. |
+| `connect_container_to_network` | admin | Connect a container to a Docker network. Connecting to a macvlan/ipvlan network needs a confirmation for the agent. |
 | `create_network` | admin | Create a new Docker network. |
 | `deploy_app` | admin | Deploy a single-image application on a Docker server. Whiskers writes it as a compose project in /opt/deployments/<name> (service and container named after the app), plans it, decides its exposures and runs it through the compose runner with every image pinned to the inspected image id. A redeploy with the same name updates the project. A malformed port or environment entry refuses the call. |
 | `deploy_compose` | admin | Deploy an application using a docker-compose.yml content string. Creates and starts all services defined in the compose file. |

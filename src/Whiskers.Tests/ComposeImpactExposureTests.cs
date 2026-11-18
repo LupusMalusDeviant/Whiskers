@@ -61,7 +61,9 @@ public sealed partial class ComposeImpactExposureTests
                         "\"Config\":{\"Labels\":{\"com.docker.compose.project\":\"shop\",\"com.docker.compose.service\":\"" +
                         service + "\"" + labels + "}},\"HostConfig\":" + hostConfig +
                         // docker inspect always lists Mounts (contract 0017: unreadable counts as undecided).
-                        (hostConfig.Contains("\"Mounts\"", StringComparison.Ordinal) ? "" : ",\"Mounts\":[]") + "}";
+                        (hostConfig.Contains("\"Mounts\"", StringComparison.Ordinal) ? "" : ",\"Mounts\":[]") +
+                        // ... and its networks (contract 0021: unreadable counts as an undecided LAN network).
+                        (hostConfig.Contains("\"NetworkSettings\"", StringComparison.Ordinal) ? "" : ",\"NetworkSettings\":{\"Networks\":{}}") + "}";
                 }
             return null;
         };
@@ -531,7 +533,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task A_shared_namespace_with_whiskers_needs_a_decision_and_the_target_names_it()
     {
         _docker.Add(new ContainerInfo { Id = "whiskers-id", Name = "whiskers", ServerId = "local" });
-        _host.Inspect["whiskers-id"] = """{"Id":"whiskers-id","Name":"/whiskers","Config":{"Labels":{}},"HostConfig":{"NetworkMode":"bridge"}}""";
+        _host.Inspect["whiskers-id"] = """{"Id":"whiskers-id","Name":"/whiskers","Config":{"Labels":{}},"HostConfig":{"NetworkMode":"bridge"},"NetworkSettings":{"Networks":{}}}""";
         _host.ComposeConfig = """{"services":{"web":{"image":"nginx","network_mode":"container:whiskers"}}}""";
 
         var (outcome, seen) = await McpAsync(new
@@ -550,7 +552,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task A_shared_namespace_with_whiskers_is_confirmed_by_an_interactive_admin_not_refused()
     {
         _docker.Add(new ContainerInfo { Id = "whiskers-id", Name = "whiskers", ServerId = "local" });
-        _host.Inspect["whiskers-id"] = """{"Id":"whiskers-id","Name":"/whiskers","Config":{"Labels":{}},"HostConfig":{"NetworkMode":"bridge"}}""";
+        _host.Inspect["whiskers-id"] = """{"Id":"whiskers-id","Name":"/whiskers","Config":{"Labels":{}},"HostConfig":{"NetworkMode":"bridge"},"NetworkSettings":{"Networks":{}}}""";
         var plan = await PlanAsync("name: shop\nservices:\n  web:\n    image: nginx\n    network_mode: \"container:whiskers\"\n",
             """{"services":{"web":{"image":"nginx","network_mode":"container:whiskers"}}}""");
 
@@ -733,7 +735,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task A_plan_that_only_shares_a_namespace_decides_that_container_and_deploys()
     {
         _docker.Add(new ContainerInfo { Id = "helper-id", Name = "helper", ServerId = "local" });
-        _host.Inspect["helper-id"] = """{"Id":"helper-id","Name":"/helper","Config":{"Labels":{}},"HostConfig":{"NetworkMode":"bridge"}}""";
+        _host.Inspect["helper-id"] = """{"Id":"helper-id","Name":"/helper","Config":{"Labels":{}},"HostConfig":{"NetworkMode":"bridge"},"NetworkSettings":{"Networks":{}}}""";
         var plan = await PlanAsync("name: shop\nservices:\n  web:\n    image: nginx\n    network_mode: \"container:helper\"\n",
             """{"services":{"web":{"image":"nginx","network_mode":"container:helper"}}}""");
 
@@ -753,7 +755,7 @@ public sealed partial class ComposeImpactExposureTests
     public async Task A_shared_container_named_by_a_variable_is_bound_but_never_written()
     {
         _docker.Add(new ContainerInfo { Id = "helper-id", Name = "helper", ServerId = "local" });
-        _host.Inspect["helper-id"] = """{"Id":"helper-id","Name":"/helper","Config":{"Labels":{}},"HostConfig":{"NetworkMode":"bridge"}}""";
+        _host.Inspect["helper-id"] = """{"Id":"helper-id","Name":"/helper","Config":{"Labels":{}},"HostConfig":{"NetworkMode":"bridge"},"NetworkSettings":{"Networks":{}}}""";
         var plan = await PlanAsync("name: shop\nservices:\n  web:\n    image: nginx\n    pid: \"container:${X}\"\n",
             """{"services":{"web":{"image":"nginx","pid":"container:helper"}}}""", env: "X=helper\n");
 
@@ -769,7 +771,7 @@ public sealed partial class ComposeImpactExposureTests
     {
         // container:x inherits x's exposures: node-exporter runs with pid: host.
         _docker.Add(new ContainerInfo { Id = "ne-id", Name = "node-exporter", ServerId = "local" });
-        _host.Inspect["ne-id"] = """{"Id":"ne-id","Name":"/node-exporter","Config":{"Labels":{}},"HostConfig":{"PidMode":"host"}}""";
+        _host.Inspect["ne-id"] = """{"Id":"ne-id","Name":"/node-exporter","Config":{"Labels":{}},"HostConfig":{"PidMode":"host"},"NetworkSettings":{"Networks":{}}}""";
         var plan = await PlanAsync("name: shop\nservices:\n  web:\n    image: nginx\n    pid: \"container:node-exporter\"\n",
             """{"services":{"web":{"image":"nginx","pid":"container:node-exporter"}}}""");
 

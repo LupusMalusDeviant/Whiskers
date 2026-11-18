@@ -287,6 +287,10 @@ public sealed record ComposePlan(
     /// <c>absent</c>); step 4 reads them again and refuses when one changed.</summary>
     public IReadOnlyDictionary<string, string> ThirdPartyFiles { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
+    /// <summary>Contract 0021: the networks the plan's active services join, as the planner looked them up among the
+    /// host's live networks; step 4 looks them up again (<see cref="ComposeLiveNetworks"/>).</summary>
+    public IReadOnlyList<ComposeNetworkRef> Networks { get; init; } = [];
+
     /// <summary>Every exposure of the services compose will start, in a stable order (contract 0006).</summary>
     public IReadOnlyList<ComposeExposure> Exposures() => Services.SelectMany(s => s.Exposures).ToList();
 

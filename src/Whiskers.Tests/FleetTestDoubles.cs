@@ -350,7 +350,12 @@ internal sealed class FakeDocker : IDockerService
     public List<NetworkInfo> Networks { get; } = new();
 
     public Task<IList<NetworkInfo>> ListNetworksAsync(string? serverId = null) =>
-        Task.FromResult<IList<NetworkInfo>>(Networks.Where(n => n.ServerId == (serverId ?? DefaultServerId)).ToList());
+        NetworksFail
+            ? throw new InvalidOperationException("the network list cannot be read")
+            : Task.FromResult<IList<NetworkInfo>>(Networks.Where(n => n.ServerId == (serverId ?? DefaultServerId)).ToList());
+
+    /// <summary>Contract 0021: the network list cannot be read.</summary>
+    public bool NetworksFail { get; set; }
 
     /// <summary>When true, restart / recreate succeed and are recorded in <see cref="Actions"/>; otherwise they
     /// throw, so a test that must never reach them fails loudly.</summary>
@@ -365,9 +370,25 @@ internal sealed class FakeDocker : IDockerService
         Actions.Add((op, containerId, serverId));
         return result;
     }
-    public Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null) => throw new NotSupportedException();
+    /// <summary>Contract 0021: every network create / connect, as called (only with <see cref="AllowMutations"/>).</summary>
+    public List<(string Op, string Network, string Arg, string? ServerId)> NetworkCalls { get; } = new();
+
+    public Task<string> CreateNetworkAsync(string name, string driver = "bridge", string? serverId = null)
+    {
+        if (!AllowMutations) throw new NotSupportedException();
+        NetworkCalls.Add(("create", name, driver, serverId));
+        return Task.FromResult("net-created-" + name);
+    }
     public Task RemoveNetworkAsync(string networkId, string? serverId = null) => throw new NotSupportedException();
-    public Task ConnectContainerToNetworkAsync(string networkId, string containerId, string? serverId = null) => throw new NotSupportedException();
+    /// <summary>Connects only to a network id that is listed (as Docker: a removed network's id is gone).</summary>
+    public Task ConnectContainerToNetworkAsync(string networkId, string containerId, string? serverId = null)
+    {
+        if (!AllowMutations) throw new NotSupportedException();
+        NetworkCalls.Add(("connect", networkId, containerId, serverId));
+        return Networks.Any(n => n.Id == networkId)
+            ? Task.CompletedTask
+            : throw new InvalidOperationException($"network {networkId} not found");
+    }
     public Task DisconnectContainerFromNetworkAsync(string networkId, string containerId, string? serverId = null) => throw new NotSupportedException();
     /// <summary>What <see cref="RunHostShellAsync"/> does; unset, it is not supported.</summary>
     public Func<string, string?, TimeSpan?, CancellationToken, Task<(string Output, string Error, int ExitCode)>>? HostShell { get; set; }

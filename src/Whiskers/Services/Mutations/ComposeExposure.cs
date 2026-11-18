@@ -26,6 +26,11 @@ public enum ExposureKind
     /// <c>use_api_socket</c> (which may also hand the container the registry credentials of the Docker client compose runs
     /// as); the re-check for every socket bind in a created container's <c>Mounts</c>.</summary>
     SocketMount,
+
+    /// <summary>Contract 0021: the container gets its own address on the host's physical LAN (a macvlan / ipvlan
+    /// network, or a driver Whiskers does not know). Key = the network's name as Docker knows it on the host, value = the
+    /// driver. Class <c>host</c>.</summary>
+    LanNetwork,
 }
 
 /// <summary>
@@ -113,6 +118,7 @@ public static class ExposureClasses
         ExposureKind.DeviceCgroupRule => "device cgroup rule",
         ExposureKind.ExternalRoute => "external route",
         ExposureKind.SocketMount => "socket mount",
+        ExposureKind.LanNetwork => "LAN network",
         _ => "exposure",
     };
 }
@@ -166,6 +172,7 @@ public static class ComposeExposures
             ExposureKind.DeviceCgroupRule => $"{p.Service}: device_cgroup_rules {p.Key}",
             ExposureKind.ExternalRoute => $"{p.Service}: external route {p.Key}",
             ExposureKind.SocketMount => $"{p.Service}: socket mount {p.Key}",
+            ExposureKind.LanNetwork => $"{p.Service}: LAN network {p.Key} ({p.Value})",
             _ => $"{p.Service}: {p.Kind}",
         };
     }
@@ -445,8 +452,13 @@ public static class ComposeExposures
             Add(ExposureKind.HostNetwork, "network_mode", "host", "network_mode: host");
         if (Property(definition, "networks") is { ValueKind: JsonValueKind.Object } networks)
             foreach (var network in networks.EnumerateObject())
+            {
                 if (IsExternalHostNetwork(network.Name, topNetworks))
                     Add(ExposureKind.HostNetwork, "networks", "host", "networks: host");
+                // Contract 0021: a network whose resolved driver is LAN (compose fills `default` itself).
+                if (ConfigNetwork(network.Name, topNetworks) is { Driver: { } driver } top && LanDrivers.IsLan(driver))
+                    Add(ExposureKind.LanNetwork, top.Name, driver, "LAN network (withheld)");
+            }
         if (Property(definition, "privileged") is { ValueKind: JsonValueKind.True })
             Add(ExposureKind.Privileged, "privileged", "true", "privileged: true");
         // Contract 0017, A1: use_api_socket binds the engine's socket (and may hand over the client's registry credentials).
@@ -496,6 +508,28 @@ public static class ComposeExposures
         return external && name == "host";
     }
 
+    /// <summary>Contract 0021: a top-level network of compose's resolved model as the name it has on the host
+    /// (<c>name</c>, which compose fills), whether it is external, and its declared <c>driver</c> (<c>null</c> when none
+    /// is declared: compose then uses the engine's default, <c>bridge</c>). <c>null</c> when the key is not defined.</summary>
+    public static (string Name, bool External, string? Driver)? ConfigNetwork(string key,
+        IReadOnlyDictionary<string, JsonElement> topNetworks)
+    {
+        if (!topNetworks.TryGetValue(key, out var def)) return null;
+        if (def.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return (key, false, null);
+        if (def.ValueKind != JsonValueKind.Object) throw new ComposePlanException("docker compose resolves a network that cannot be read.");
+        var external = Property(def, "external") is { } ext
+                       && (ext.ValueKind == JsonValueKind.True || ext.ValueKind == JsonValueKind.Object);
+        var name = Text(def, "name")
+                   ?? (Property(def, "external") is { ValueKind: JsonValueKind.Object } e ? Text(e, "name") : null)
+                   ?? key;
+        var driver = Property(def, "driver") is { } d
+            ? d.ValueKind == JsonValueKind.String ? d.GetString()
+            : d.ValueKind is JsonValueKind.Null ? null
+            : throw new ComposePlanException("docker compose resolves a network driver that cannot be read.")
+            : null;
+        return (name, external, string.IsNullOrEmpty(driver) ? null : driver);
+    }
+
     /// <summary>The <c>network_mode</c> / <c>pid</c> / <c>ipc</c> of a service that shares another one's namespace
     /// (<c>service:x</c> or <c>container:x</c>), from compose's resolved model.</summary>
     public static IEnumerable<(string Field, string Reference)> SharedNamespaces(JsonElement definition)
@@ -516,7 +550,8 @@ public static class ComposeExposures
     /// the container's namespace references (<c>container:&lt;id&gt;</c>) are returned on their own.
     /// </summary>
     public static (IReadOnlyList<ComposeExposure> Exposures, IReadOnlyList<(string Field, string ContainerId)> Shared)
-        FromInspect(string service, JsonElement container, IReadOnlyList<string> prefixes)
+        FromInspect(string service, JsonElement container, IReadOnlyList<string> prefixes,
+            IReadOnlyList<Whiskers.Models.NetworkInfo>? networks = null)
     {
         var found = new List<ComposeExposure>();
         var shared = new List<(string, string)>();
@@ -569,7 +604,45 @@ public static class ComposeExposures
                     Add(ExposureKind.PublishedPort, key, value, $"{value}->{key}");
                 }
             }
+        // Contract 0021: with the host's networks given, every attached network whose live driver is LAN (by network id);
+        // networks that cannot be read refuse (fail closed).
+        if (networks is not null)
+            found.AddRange(LanNetworksOf(service, container, networks)
+                           ?? throw new ComposePlanException("The networks of a container cannot be read, so a LAN network cannot be ruled out."));
         return (found, shared);
+    }
+
+    /// <summary>
+    /// Contract 0021: the <see cref="ExposureKind.LanNetwork"/> exposures of a container (<c>docker inspect</c>): each
+    /// entry of <c>NetworkSettings.Networks</c>, its <c>NetworkID</c> looked up in <paramref name="networks"/> (the
+    /// host's networks, read fresh); a LAN driver (<see cref="LanDrivers.IsLan"/>) gives key = the network's name,
+    /// value = the driver. An entry with an empty <c>NetworkID</c> (a container created but never started) is looked
+    /// up by its key, the network's name. <c>null</c> when they cannot be read: no <c>NetworkSettings</c>, or an id or
+    /// name that is not exactly once in the list (fail closed). <c>"Networks": null</c> is a container without
+    /// networks.
+    /// </summary>
+    public static IReadOnlyList<ComposeExposure>? LanNetworksOf(string service, JsonElement container,
+        IReadOnlyList<Whiskers.Models.NetworkInfo> networks)
+    {
+        if (Property(container, "NetworkSettings") is not { ValueKind: JsonValueKind.Object } settings
+            || Property(settings, "Networks") is not { } attached)
+            return null;
+        if (attached.ValueKind == JsonValueKind.Null) return [];
+        if (attached.ValueKind != JsonValueKind.Object) return null;
+        var found = new List<ComposeExposure>();
+        foreach (var entry in attached.EnumerateObject())
+        {
+            // A container that was created but never started has an empty NetworkID; its entry's key is the
+            // network's name then, looked up exactly and uniquely (contract 0021, amendment point 5).
+            var matches = Text(entry.Value, "NetworkID") is { Length: > 0 } id
+                ? networks.Where(n => n.Id == id).ToList()
+                : networks.Where(n => string.Equals(n.Name, entry.Name, StringComparison.Ordinal)).ToList();
+            if (matches.Count != 1) return null;
+            var network = matches[0];
+            if (LanDrivers.IsLan(network.Driver))
+                found.Add(LanDrivers.Exposure(service, network.Name, network.Driver, network.Internal));
+        }
+        return found;
     }
 
     // The mount types docker inspect reports (compared case-insensitively).

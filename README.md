@@ -158,6 +158,12 @@ or caught only after `up`: <!-- claim-free:limit -->
   sidecar with persistent state and no serve configuration counts as public and is decided. <!-- claim-free:limit -->
 - **A Traefik on the host** outside the project is recognised by its image name (`traefik`) only (contract 0013,
   Amendment 2). <!-- claim-free:limit -->
+- **Bridge networks that reach the LAN by their options**: macvlan, ipvlan and unknown network drivers are decided as
+  a LAN exposure (contract 0021); a `bridge` network whose `driver_opts` make it reachable from the LAN
+  (`gateway_mode_ipv4/6` `nat-unprotected` or `routed`, or a named bridge that holds a physical NIC) is not. <!-- claim-free:limit -->
+- **Recreate and rollback reconnect networks by name**: recreating a container and the update rollback put the new
+  container back on the old container's networks by their names. A network removed and re-created under the same name
+  in between, for example with a LAN driver, is joined without a LAN decision (contract 0021). <!-- claim-free:limit -->
 - **The tag race**: putting a tag back after a refused run checks that it still points where this run left it; a tag
   moved by another run in between is left alone (and so not restored). <!-- claim-free:limit -->
 - **`container.update` and `autopatch.run`** recreate containers from new images without this check — except a

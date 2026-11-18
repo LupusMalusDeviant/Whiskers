@@ -59,7 +59,7 @@ public sealed class DeployAppComposeTests
                 });
                 _host.Inspect["web-new-0123456789ab"] = "{\"Id\":\"web-new-0123456789ab\",\"Name\":\"/web\",\"Image\":\"" + pinned +
                     "\",\"Config\":{\"Labels\":{\"com.docker.compose.project\":\"web\",\"com.docker.compose.service\":\"web\"}}," +
-                    "\"HostConfig\":{\"NetworkMode\":\"bridge\"},\"Mounts\":[]}";
+                    "\"HostConfig\":{\"NetworkMode\":\"bridge\"},\"Mounts\":[],\"NetworkSettings\":{\"Networks\":{}}}";
             }
             return null;
         };

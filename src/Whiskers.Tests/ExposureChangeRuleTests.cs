@@ -86,6 +86,38 @@ public sealed class ExposureChangeRuleTests
         Assert.Contains("label (withheld)", reason);
     }
 
+    /// <summary>Contract 0021: a LAN network is of class host; its reason names the network and the driver.</summary>
+    [Fact]
+    public void A_lan_network_needs_a_confirmation_and_names_network_and_driver()
+    {
+        var verdict = Verdict(Admin(), Resolved(ExposureKind.LanNetwork, "lan", "macvlan"), out var reason);
+
+        Assert.Equal(GuardrailVerdict.Confirm, verdict);
+        Assert.Equal("web gets its own address on the LAN through network 'lan' (driver macvlan), past the host's firewall.", reason);
+        // The same for a network operation (network.create's identity).
+        Verdict(Admin(), LanDrivers.CreateIdentity("lan", "ipvlan")!, out var created);
+        Assert.Equal("network lan gets its own address on the LAN through network 'lan' (driver ipvlan), past the host's firewall.", created);
+    }
+
+    [Fact]
+    public void A_withheld_lan_network_names_kind_and_class_only()
+    {
+        var verdict = Verdict(Admin(), Resolved(ExposureKind.LanNetwork, "secret-net", "secret-driver"), out var reason, withheld: true);
+
+        Assert.Equal(GuardrailVerdict.Confirm, verdict);
+        Assert.Equal("web gets a LAN network (withheld) of class 'host'; it needs a confirmation.", reason);
+        Assert.DoesNotContain("secret", reason);
+    }
+
+    [Fact]
+    public void Without_host_in_the_confirm_classes_a_lan_network_is_allowed()
+    {
+        var policy = Admin();
+        policy.ExposureConfirmClasses = [ExposureClasses.Public, ExposureClasses.Published];
+
+        Assert.Equal(GuardrailVerdict.Allow, Verdict(policy, Resolved(ExposureKind.LanNetwork, "lan", "macvlan"), out _));
+    }
+
     /// <summary>Contract 0017, A1: a socket mount is of class host; its reason names the registry credentials, never the key.</summary>
     [Theory]
     [InlineData(false)]
@@ -148,6 +180,11 @@ public sealed class ExposureChangeRuleTests
         Assert.Equal(GuardrailVerdict.Confirm, agent.Verdict);
         Assert.Contains(ExposureChangeRule.RuleId, agent.MatchedRuleIds);
         Assert.Equal(GuardrailVerdict.Allow, person.Verdict);
+
+        // Contract 0021: the same for a LAN network — confirmed for the agent, never asked of a person (PC-D1).
+        var lan = Request(Admin(), (ExposureChangeRule.ResolvedPrefix + "0", Resolved(ExposureKind.LanNetwork, "lan", "macvlan")));
+        Assert.Equal(GuardrailVerdict.Confirm, GuardrailEngine.CreateDefault().Evaluate(lan).Verdict);
+        Assert.Equal(GuardrailVerdict.Allow, GuardrailEngine.CreateForHumans().Evaluate(lan).Verdict);
     }
 
     [Fact]

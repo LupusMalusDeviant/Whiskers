@@ -541,7 +541,7 @@ public sealed partial class TargetResolutionTests : IDisposable
     private static NetworkInfo Network(string id, string name, string serverId, params (string Id, string Name)[] attached) =>
         new()
         {
-            Id = id, Name = name, ServerId = serverId,
+            Id = id, Name = name, ServerId = serverId, Driver = "bridge",   // contract 0021: an unknown (empty) driver counts as LAN
             Containers = attached.Select(c => new NetworkContainer { ContainerId = c.Id, Name = c.Name }).ToList(),
         };
 

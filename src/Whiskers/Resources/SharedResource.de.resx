@@ -3599,6 +3599,9 @@ Dies ERSETZT ALLE aktuellen Daten (Datenbank, Konfiguration, Schlüssel), erstel
   <data name="Networks_Header_Title" xml:space="preserve">
     <value>Docker-Netzwerke</value>
   </data>
+  <data name="Networks_Hint_LanDriver" xml:space="preserve">
+    <value>Container in einem macvlan-Netzwerk bekommen eine eigene Adresse im LAN; die Firewall des Hosts schützt sie nicht.</value>
+  </data>
   <data name="Networks_PageTitle" xml:space="preserve">
     <value>Netzwerke - Whiskers</value>
   </data>

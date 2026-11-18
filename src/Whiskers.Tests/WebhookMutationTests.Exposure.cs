@@ -36,7 +36,9 @@ public sealed partial class WebhookMutationTests
             _host.Inspect[id] = "{\"Id\":\"" + id + "\",\"Name\":\"/" + project + "-" + service + "-2\"," +
                 (_host.PinnedImageId(service) is { } image ? "\"Image\":\"" + image + "\"," : "") +
                 "\"Config\":{\"Labels\":{\"com.docker.compose.project\":\"" + project + "\",\"com.docker.compose.service\":\"" +
-                service + "\"" + labels + "}},\"HostConfig\":" + hostConfig + ",\"Mounts\":[]}";
+                service + "\"" + labels + "}},\"HostConfig\":" + hostConfig + ",\"Mounts\":[]" +
+                // Contract 0021: docker inspect always lists the networks (a hostConfig may bring its own).
+                (hostConfig.Contains("\"NetworkSettings\"", StringComparison.Ordinal) ? "" : ",\"NetworkSettings\":{\"Networks\":{}}") + "}";
             return null;
         };
     }
@@ -61,6 +63,50 @@ public sealed partial class WebhookMutationTests
         Assert.Equal("compose.deploy", decided.CapabilityId);
         Assert.Contains("docktail.funnel.enable", decided.Arguments["exposure"].GetString());
         Assert.Contains(_notify.Events, e => e.EventType == NotificationEventTypes.ExposureChange);
+        Assert.Empty(_docker.Actions);
+    }
+
+    // Contract 0021: a compose project on a macvlan network.
+    private const string MacvlanShop =
+        "name: shop\nservices:\n  web:\n    image: nginx\n    networks: [lan]\nnetworks:\n  lan:\n    driver: macvlan\n";
+    private const string MacvlanConfig =
+        """{"name":"shop","networks":{"lan":{"name":"shop_lan","driver":"macvlan"}},"services":{"web":{"image":"nginx","networks":{"lan":null}}}}""";
+
+    [Fact]
+    public async Task A_key_owned_compose_webhook_with_macvlan_is_refused()
+    {
+        KeyK1();
+        _host.Files["/opt/shop/docker-compose.yml"] = MacvlanShop;
+        _host.ComposeConfig = MacvlanConfig;
+        _host.Images["nginx"] = ("sha256:1111111111111111111111111111111111111111111111111111111111111111", "{}");
+        var webhook = Seed("deploy", "/opt/shop", owner: KeyId);
+
+        var (success, _) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.False(success);
+        Assert.DoesNotContain(_host.Executed, c => c.Contains(" up -d", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_human_owned_webhook_with_macvlan_runs_is_audited_and_notifies()
+    {
+        _composeRunner = new ComposeRunner(_host, _docker, _notify);
+        _host.Files["/opt/shop/docker-compose.yml"] = MacvlanShop;
+        _host.ComposeConfig = MacvlanConfig;
+        _host.Images["nginx"] = ("sha256:1111111111111111111111111111111111111111111111111111111111111111", "{}");
+        _docker.Networks.Add(new NetworkInfo { Id = "n-shop-lan", Name = "shop_lan", Driver = "macvlan", ServerId = "local" });
+        UpCreates("shop", "shop-web-new", "web",
+            """{"NetworkMode":"shop_lan"},"NetworkSettings":{"Networks":{"shop_lan":{"NetworkID":"n-shop-lan"}}}""");
+        var webhook = Seed("deploy", "/opt/shop");
+
+        var (success, output) = await Service().TriggerSignedTestAsync(webhook.WebhookId);
+
+        Assert.True(success, output);
+        var decided = Assert.Single(_audit.Requests, r => r.Arguments.ContainsKey("exposureShown"));
+        Assert.Equal("compose.deploy", decided.CapabilityId);
+        Assert.Contains("web: LanNetwork shop_lan=macvlan", decided.Arguments["exposure"].GetString());
+        Assert.Contains(_notify.Events, e => e.EventType == NotificationEventTypes.ExposureChange
+                                             && e.ImageInfo!.Contains("LAN network shop_lan", StringComparison.Ordinal));
         Assert.Empty(_docker.Actions);
     }
 
